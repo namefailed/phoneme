@@ -1,7 +1,5 @@
 use chrono::{Local, TimeZone};
-use phoneme_core::{
-    Catalog, ListFilter, Recording, RecordingId, RecordingStatus,
-};
+use phoneme_core::{Catalog, ListFilter, Recording, RecordingId, RecordingStatus};
 use tempfile::TempDir;
 
 fn sample_recording(id: RecordingId) -> Recording {
@@ -60,7 +58,10 @@ async fn update_status_advances_through_states() {
     let (_dir, catalog) = fresh_catalog().await;
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
-    catalog.update_status(&rec.id, RecordingStatus::Transcribing).await.unwrap();
+    catalog
+        .update_status(&rec.id, RecordingStatus::Transcribing)
+        .await
+        .unwrap();
     let got = catalog.get(&rec.id).await.unwrap().unwrap();
     assert_eq!(got.status, RecordingStatus::Transcribing);
 }
@@ -106,7 +107,10 @@ async fn list_respects_limit() {
         catalog.insert(&rec).await.unwrap();
     }
     let list = catalog
-        .list(&ListFilter { limit: Some(2), ..Default::default() })
+        .list(&ListFilter {
+            limit: Some(2),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(list.len(), 2);
@@ -119,7 +123,10 @@ async fn list_filters_by_status() {
     let r2 = sample_recording(RecordingId::new());
     catalog.insert(&r1).await.unwrap();
     catalog.insert(&r2).await.unwrap();
-    catalog.update_status(&r2.id, RecordingStatus::Done).await.unwrap();
+    catalog
+        .update_status(&r2.id, RecordingStatus::Done)
+        .await
+        .unwrap();
     let list = catalog
         .list(&ListFilter {
             status: Some(RecordingStatus::Done),
@@ -152,7 +159,10 @@ async fn delete_removes_recording_and_fts_row() {
     let (_dir, catalog) = fresh_catalog().await;
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
-    catalog.update_transcript(&rec.id, "deletable", "m").await.unwrap();
+    catalog
+        .update_transcript(&rec.id, "deletable", "m")
+        .await
+        .unwrap();
     catalog.delete(&rec.id).await.unwrap();
     assert!(catalog.get(&rec.id).await.unwrap().is_none());
     assert!(catalog.search("deletable").await.unwrap().is_empty());
@@ -168,7 +178,10 @@ async fn update_hook_result_persists_exit_code() {
         .await
         .unwrap();
     let got = catalog.get(&rec.id).await.unwrap().unwrap();
-    assert_eq!(got.hook_command.as_deref(), Some("powershell -file foo.ps1"));
+    assert_eq!(
+        got.hook_command.as_deref(),
+        Some("powershell -file foo.ps1")
+    );
     assert_eq!(got.hook_exit_code, Some(0));
     assert_eq!(got.hook_duration_ms, Some(142));
 }

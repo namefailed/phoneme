@@ -18,8 +18,7 @@ async fn returns_transcript_text_on_200() {
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"text": "hello world"})),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "hello world"})),
         )
         .mount(&server)
         .await;
@@ -100,6 +99,9 @@ async fn errors_on_missing_audio_file() {
         "http://127.0.0.1:9999".to_string(),
         std::time::Duration::from_secs(2),
     );
-    let err = client.transcribe(Path::new("/no/such/file.wav")).await.unwrap_err();
+    let err = client
+        .transcribe(Path::new("/no/such/file.wav"))
+        .await
+        .unwrap_err();
     assert!(matches!(err, Error::Io(_)));
 }

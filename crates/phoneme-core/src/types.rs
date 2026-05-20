@@ -146,9 +146,7 @@ mod tests {
     #[test]
     fn hook_payload_round_trips() {
         let payload = HookPayload {
-            id: RecordingId::from_datetime(
-                Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap(),
-            ),
+            id: RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap()),
             timestamp: Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap(),
             transcript: "hello world".into(),
             audio_path: "C:/tmp/x.wav".into(),

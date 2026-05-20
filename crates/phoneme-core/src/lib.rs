@@ -16,4 +16,4 @@ pub use hook::{HookResult, HookRunner};
 pub use id::RecordingId;
 pub use queue::{InboxCounts, InboxQueue, InboxState};
 pub use transcription::TranscriptionClient;
-pub use types::{HookMetadata, HookPayload, ListFilter, Recording, RecordMode, RecordingStatus};
+pub use types::{HookMetadata, HookPayload, ListFilter, RecordMode, Recording, RecordingStatus};

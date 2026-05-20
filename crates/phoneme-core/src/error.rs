@@ -74,15 +74,17 @@ mod tests {
 
     #[test]
     fn io_error_converts_automatically() {
-        let io: std::io::Error =
-            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "nope");
+        let io: std::io::Error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "nope");
         let err: Error = io.into();
         assert!(matches!(err, Error::Io(_)));
     }
 
     #[test]
     fn hook_failed_carries_exit_code() {
-        let err = Error::HookFailed { code: 2, stderr_tail: "boom".into() };
+        let err = Error::HookFailed {
+            code: 2,
+            stderr_tail: "boom".into(),
+        };
         let s = format!("{err}");
         assert!(s.contains("exit 2"));
         assert!(s.contains("boom"));

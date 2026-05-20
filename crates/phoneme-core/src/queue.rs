@@ -65,7 +65,9 @@ impl InboxQueue {
         ] {
             fs::create_dir_all(root.join(state.subdir())).await?;
         }
-        Ok(Self { root: root.to_path_buf() })
+        Ok(Self {
+            root: root.to_path_buf(),
+        })
     }
 
     /// Atomically write a new pending payload.
@@ -90,9 +92,10 @@ impl InboxQueue {
         let Some(file) = entries.first().cloned() else {
             return Ok(None);
         };
-        let id_str = file.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-            Error::Internal(format!("bad inbox filename: {}", file.display()))
-        })?;
+        let id_str = file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| Error::Internal(format!("bad inbox filename: {}", file.display())))?;
         let payload = read_payload(&file).await?;
         let processing = self.root.join("processing").join(format!("{id_str}.json"));
         fs::rename(&file, &processing).await?;

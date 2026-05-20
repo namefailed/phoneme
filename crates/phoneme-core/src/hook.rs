@@ -52,7 +52,9 @@ impl HookRunner {
         let output = match timeout(self.timeout, child.wait_with_output()).await {
             Ok(r) => r?,
             Err(_) => {
-                return Err(Error::HookTimeout { secs: self.timeout.as_secs() });
+                return Err(Error::HookTimeout {
+                    secs: self.timeout.as_secs(),
+                });
             }
         };
 
@@ -62,7 +64,11 @@ impl HookRunner {
 
         let code = output.status.code().unwrap_or(-1);
         if code == 0 {
-            Ok(HookResult { exit_code: 0, stderr_tail, duration_ms })
+            Ok(HookResult {
+                exit_code: 0,
+                stderr_tail,
+                duration_ms,
+            })
         } else {
             Err(Error::HookFailed { code, stderr_tail })
         }
@@ -76,8 +82,8 @@ impl HookRunner {
 /// Falls back to whitespace splitting if shlex returns `None` (malformed input
 /// like an unterminated quote) — better than crashing.
 fn split_command(s: &str) -> (String, Vec<String>) {
-    let parts: Vec<String> = shlex::split(s)
-        .unwrap_or_else(|| s.split_whitespace().map(String::from).collect());
+    let parts: Vec<String> =
+        shlex::split(s).unwrap_or_else(|| s.split_whitespace().map(String::from).collect());
     let mut iter = parts.into_iter();
     let program = iter.next().unwrap_or_default();
     let args: Vec<String> = iter.collect();
@@ -90,7 +96,11 @@ fn tail_chars(s: &str, max_bytes: usize) -> String {
     } else {
         // Take the trailing max_bytes, snap to char boundary
         let start = s.len() - max_bytes;
-        let start = s.char_indices().find(|(i, _)| *i >= start).map(|(i, _)| i).unwrap_or(start);
+        let start = s
+            .char_indices()
+            .find(|(i, _)| *i >= start)
+            .map(|(i, _)| i)
+            .unwrap_or(start);
         s[start..].to_string()
     }
 }

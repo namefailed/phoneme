@@ -82,10 +82,7 @@ async fn slow_hook_times_out() {
 
 #[tokio::test]
 async fn missing_command_returns_io_error() {
-    let runner = HookRunner::new(
-        "no_such_executable_anywhere".into(),
-        Duration::from_secs(2),
-    );
+    let runner = HookRunner::new("no_such_executable_anywhere".into(), Duration::from_secs(2));
     let err = runner.run(&make_payload()).await.unwrap_err();
     assert!(matches!(err, Error::Io(_)));
 }

@@ -87,8 +87,8 @@ impl Default for Config {
                 bundled_server_port: 5809,
                 bundled_server_args: vec![],
                 timeout_secs: 60,
-                system_prompt:
-                    "Transcribe the user's speech and clean it into a single line.".into(),
+                system_prompt: "Transcribe the user's speech and clean it into a single line."
+                    .into(),
             },
             recording: RecordingConfig {
                 audio_dir: "%USERPROFILE%/Documents/phoneme/audio".into(),
@@ -184,8 +184,7 @@ fn expand(s: &str) -> Result<String> {
 
 /// Helper for tests/wizard: resolve the default config file path.
 pub fn default_config_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "phoneme")
-        .map(|p| p.config_dir().join("config.toml"))
+    directories::ProjectDirs::from("", "", "phoneme").map(|p| p.config_dir().join("config.toml"))
 }
 
 #[cfg(test)]
@@ -261,7 +260,9 @@ mod tests {
         cfg.recording.audio_dir = "~/test".into();
         let expanded = cfg.expanded().unwrap();
         assert!(!expanded.recording.audio_dir.starts_with('~'));
-        assert!(expanded.recording.audio_dir.ends_with("/test")
-            || expanded.recording.audio_dir.ends_with("\\test"));
+        assert!(
+            expanded.recording.audio_dir.ends_with("/test")
+                || expanded.recording.audio_dir.ends_with("\\test")
+        );
     }
 }

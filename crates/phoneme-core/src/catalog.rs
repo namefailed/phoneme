@@ -73,13 +73,11 @@ impl Catalog {
     }
 
     pub async fn update_status(&self, id: &RecordingId, status: RecordingStatus) -> Result<()> {
-        sqlx::query(
-            "UPDATE recordings SET status = ?, updated_at = datetime('now') WHERE id = ?",
-        )
-        .bind(status.as_str())
-        .bind(id.as_str())
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("UPDATE recordings SET status = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(status.as_str())
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -228,11 +226,8 @@ fn parse_dt(s: &str) -> Result<DateTime<Local>> {
         .map(|d| d.with_timezone(&Local))
         .or_else(|_| {
             // SQLite's datetime('now') returns "YYYY-MM-DD HH:MM:SS" UTC.
-            let naive =
-                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                    .map_err(|e| {
-                        crate::error::Error::Internal(format!("bad datetime {s}: {e}"))
-                    })?;
+            let naive = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .map_err(|e| crate::error::Error::Internal(format!("bad datetime {s}: {e}")))?;
             Ok(chrono::TimeZone::from_utc_datetime(&chrono::Utc, &naive).with_timezone(&Local))
         })
 }

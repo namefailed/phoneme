@@ -29,12 +29,8 @@ async fn enqueue_creates_pending_file() {
 async fn claim_next_returns_oldest_pending_and_moves_to_processing() {
     let dir = TempDir::new().unwrap();
     let q = InboxQueue::new(dir.path()).await.unwrap();
-    let id_a = RecordingId::from_datetime(
-        Local.with_ymd_and_hms(2026, 5, 19, 9, 0, 0).unwrap(),
-    );
-    let id_b = RecordingId::from_datetime(
-        Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap(),
-    );
+    let id_a = RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 9, 0, 0).unwrap());
+    let id_b = RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap());
     q.enqueue(&make_payload(id_b.clone())).await.unwrap();
     q.enqueue(&make_payload(id_a.clone())).await.unwrap();
 
@@ -71,7 +67,11 @@ async fn finish_done_moves_processing_to_done() {
     payload.transcript = "hello".into();
     q.finish_done(&claimed.id, &payload).await.unwrap();
 
-    assert!(!dir.path().join("processing").join(format!("{id}.json")).exists());
+    assert!(!dir
+        .path()
+        .join("processing")
+        .join(format!("{id}.json"))
+        .exists());
     let done = dir.path().join("done").join(format!("{id}.json"));
     assert!(done.exists());
     let text = std::fs::read_to_string(done).unwrap();
@@ -89,7 +89,11 @@ async fn finish_failed_moves_processing_to_failed() {
     q.finish_failed(&claimed.id, "llm_unreachable", "connection refused")
         .await
         .unwrap();
-    assert!(dir.path().join("failed").join(format!("{id}.json")).exists());
+    assert!(dir
+        .path()
+        .join("failed")
+        .join(format!("{id}.json"))
+        .exists());
 }
 
 #[tokio::test]
@@ -117,7 +121,11 @@ async fn requeue_moves_processing_back_to_pending() {
     q.enqueue(&make_payload(id.clone())).await.unwrap();
     let _claimed = q.claim_next().await.unwrap().unwrap();
     q.requeue(&id).await.unwrap();
-    assert!(dir.path().join("pending").join(format!("{id}.json")).exists());
+    assert!(dir
+        .path()
+        .join("pending")
+        .join(format!("{id}.json"))
+        .exists());
     assert!(!dir
         .path()
         .join("processing")
@@ -138,7 +146,11 @@ async fn recover_orphans_moves_processing_to_pending() {
     let q2 = InboxQueue::new(dir.path()).await.unwrap();
     let recovered = q2.recover_orphans().await.unwrap();
     assert_eq!(recovered, vec![id.clone()]);
-    assert!(dir.path().join("pending").join(format!("{id}.json")).exists());
+    assert!(dir
+        .path()
+        .join("pending")
+        .join(format!("{id}.json"))
+        .exists());
 }
 
 #[tokio::test]
