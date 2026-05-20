@@ -1,0 +1,166 @@
+use chrono::{Local, TimeZone};
+use phoneme_core::queue::{InboxQueue, InboxState};
+use phoneme_core::{HookMetadata, HookPayload, RecordingId};
+use tempfile::TempDir;
+
+fn make_payload(id: RecordingId) -> HookPayload {
+    HookPayload {
+        id,
+        timestamp: Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap(),
+        transcript: String::new(),
+        audio_path: "C:/tmp/x.wav".into(),
+        duration_ms: 8470,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    }
+}
+
+#[tokio::test]
+async fn enqueue_creates_pending_file() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    q.enqueue(&make_payload(id.clone())).await.unwrap();
+    let path = dir.path().join("pending").join(format!("{id}.json"));
+    assert!(path.exists());
+}
+
+#[tokio::test]
+async fn claim_next_returns_oldest_pending_and_moves_to_processing() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id_a = RecordingId::from_datetime(
+        Local.with_ymd_and_hms(2026, 5, 19, 9, 0, 0).unwrap(),
+    );
+    let id_b = RecordingId::from_datetime(
+        Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap(),
+    );
+    q.enqueue(&make_payload(id_b.clone())).await.unwrap();
+    q.enqueue(&make_payload(id_a.clone())).await.unwrap();
+
+    let claimed = q.claim_next().await.unwrap().expect("has pending");
+    assert_eq!(claimed.id, id_a);
+
+    assert!(!dir
+        .path()
+        .join("pending")
+        .join(format!("{id_a}.json"))
+        .exists());
+    assert!(dir
+        .path()
+        .join("processing")
+        .join(format!("{id_a}.json"))
+        .exists());
+}
+
+#[tokio::test]
+async fn claim_next_returns_none_when_empty() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    assert!(q.claim_next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn finish_done_moves_processing_to_done() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    let mut payload = make_payload(id.clone());
+    q.enqueue(&payload).await.unwrap();
+    let claimed = q.claim_next().await.unwrap().unwrap();
+    payload.transcript = "hello".into();
+    q.finish_done(&claimed.id, &payload).await.unwrap();
+
+    assert!(!dir.path().join("processing").join(format!("{id}.json")).exists());
+    let done = dir.path().join("done").join(format!("{id}.json"));
+    assert!(done.exists());
+    let text = std::fs::read_to_string(done).unwrap();
+    let parsed: HookPayload = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed.transcript, "hello");
+}
+
+#[tokio::test]
+async fn finish_failed_moves_processing_to_failed() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    q.enqueue(&make_payload(id.clone())).await.unwrap();
+    let claimed = q.claim_next().await.unwrap().unwrap();
+    q.finish_failed(&claimed.id, "llm_unreachable", "connection refused")
+        .await
+        .unwrap();
+    assert!(dir.path().join("failed").join(format!("{id}.json")).exists());
+}
+
+#[tokio::test]
+async fn states_counts_reflect_inbox() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id1 = RecordingId::new();
+    let id2 = RecordingId::new();
+    q.enqueue(&make_payload(id1)).await.unwrap();
+    q.enqueue(&make_payload(id2.clone())).await.unwrap();
+    let claimed = q.claim_next().await.unwrap().unwrap();
+    let _ = claimed;
+    let counts = q.counts().await.unwrap();
+    assert_eq!(counts.pending, 1);
+    assert_eq!(counts.processing, 1);
+    assert_eq!(counts.done, 0);
+    assert_eq!(counts.failed, 0);
+}
+
+#[tokio::test]
+async fn requeue_moves_processing_back_to_pending() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    q.enqueue(&make_payload(id.clone())).await.unwrap();
+    let _claimed = q.claim_next().await.unwrap().unwrap();
+    q.requeue(&id).await.unwrap();
+    assert!(dir.path().join("pending").join(format!("{id}.json")).exists());
+    assert!(!dir
+        .path()
+        .join("processing")
+        .join(format!("{id}.json"))
+        .exists());
+}
+
+#[tokio::test]
+async fn recover_orphans_moves_processing_to_pending() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    q.enqueue(&make_payload(id.clone())).await.unwrap();
+    let _claimed = q.claim_next().await.unwrap().unwrap();
+    drop(q);
+
+    // New InboxQueue (simulating daemon restart) discovers the orphan.
+    let q2 = InboxQueue::new(dir.path()).await.unwrap();
+    let recovered = q2.recover_orphans().await.unwrap();
+    assert_eq!(recovered, vec![id.clone()]);
+    assert!(dir.path().join("pending").join(format!("{id}.json")).exists());
+}
+
+#[tokio::test]
+async fn enqueue_is_atomic_under_observation() {
+    // The pending file must appear with its complete contents, not as a
+    // partially-written file. We test this by enqueuing then verifying the
+    // file parses as JSON immediately.
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    let payload = make_payload(id.clone());
+    q.enqueue(&payload).await.unwrap();
+    let path = dir.path().join("pending").join(format!("{id}.json"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let parsed: HookPayload = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed.id, id);
+}
+
+#[test]
+fn inbox_state_subdir_names_are_stable() {
+    assert_eq!(InboxState::Pending.subdir(), "pending");
+    assert_eq!(InboxState::Processing.subdir(), "processing");
+    assert_eq!(InboxState::Done.subdir(), "done");
+    assert_eq!(InboxState::Failed.subdir(), "failed");
+}
