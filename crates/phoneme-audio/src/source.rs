@@ -3,7 +3,10 @@
 //! Production code uses [`CpalSource`] which wraps a CPAL input stream;
 //! tests use [`SyntheticSource`] which is hand-fed sample buffers.
 
-use crate::format::AudioConfig;
+use crate::convert::{downmix_to_mono_f32, f32_to_i16, i16_to_f32, resample_mono};
+use crate::format::{AudioConfig, SampleRate};
+use cpal::traits::{DeviceTrait, StreamTrait};
+use cpal::{SampleFormat as CpalSampleFormat, StreamConfig};
 use phoneme_core::error::{Error, Result};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -84,6 +87,187 @@ impl Source for SyntheticSource {
 /// Cancellation handle held by callers; dropping it tells the CPAL source to
 /// stop the underlying stream.
 pub type StopHandle = Arc<tokio::sync::Notify>;
+
+/// A CPAL-backed source that converts the device's native format to
+/// 16-bit mono 16 kHz before yielding sample blocks.
+///
+/// Architecture:
+///
+/// 1. The CPAL callback (real-time OS thread) does the minimum possible work —
+///    pushes a fresh `Vec<f32>` of raw samples into a bounded mpsc channel via
+///    `try_send`. If the channel is full (consumer fell behind), the block is
+///    dropped — preferable to blocking the audio thread.
+/// 2. A background tokio worker task drains the channel, performs downmix +
+///    resample + format conversion off the real-time thread, and forwards
+///    canonical `Vec<i16>` blocks downstream.
+/// 3. The `cpal::Stream` itself is `!Send` on Windows (WASAPI's COM apartment
+///    requires the stream to live on the thread that built it), so we own it
+///    inside a dedicated `std::thread`. The stream-thread blocks until a stop
+///    signal arrives, then drops the stream — which stops capture cleanly.
+pub struct CpalSource {
+    cfg: AudioConfig,
+    out_rx: mpsc::Receiver<SampleBlock>,
+    stop_tx: Option<std::sync::mpsc::Sender<()>>,
+    _stream_thread: Option<std::thread::JoinHandle<()>>,
+    _worker: tokio::task::JoinHandle<()>,
+}
+
+impl CpalSource {
+    pub fn open(device: cpal::Device) -> Result<Self> {
+        let supported = device
+            .default_input_config()
+            .map_err(|e| Error::Internal(format!("cpal default_input_config: {e}")))?;
+
+        let device_sample_rate = supported.sample_rate().0;
+        let device_channels = supported.channels() as usize;
+        let device_format = supported.sample_format();
+        let stream_cfg: StreamConfig = supported.into();
+
+        // Raw samples (f32, interleaved at device format) → worker.
+        let (raw_tx, mut raw_rx) = mpsc::channel::<Vec<f32>>(64);
+        // Canonical samples (i16 mono 16 kHz) → downstream consumer.
+        let (out_tx, out_rx) = mpsc::channel::<SampleBlock>(64);
+        // Stop signal to the stream-owning thread.
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        // One-shot ready signal: the stream thread reports build/play success
+        // or failure before we return Self.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<()>>();
+
+        // The cpal::Stream is `!Send` on Windows (COM thread affinity), so
+        // it lives entirely on a dedicated OS thread.
+        let stream_thread = std::thread::Builder::new()
+            .name("phoneme-cpal-stream".into())
+            .spawn(move || {
+                // CPAL callback: minimal real-time-safe work — copy + try_send.
+                let stream_result = match device_format {
+                    CpalSampleFormat::F32 => {
+                        let raw_tx = raw_tx.clone();
+                        device.build_input_stream(
+                            &stream_cfg,
+                            move |data: &[f32], _| {
+                                // Allocate-and-copy is the only "work" on the
+                                // audio thread. No downmix, no resample, no
+                                // synchronous send.
+                                let _ = raw_tx.try_send(data.to_vec());
+                            },
+                            |err| tracing::warn!("cpal stream error: {err}"),
+                            None,
+                        )
+                    }
+                    CpalSampleFormat::I16 => {
+                        let raw_tx = raw_tx.clone();
+                        device.build_input_stream(
+                            &stream_cfg,
+                            move |data: &[i16], _| {
+                                // Cheap i16→f32 normalize is fine on the audio
+                                // thread (one float multiply per sample).
+                                let f32s = i16_to_f32(data);
+                                let _ = raw_tx.try_send(f32s);
+                            },
+                            |err| tracing::warn!("cpal stream error: {err}"),
+                            None,
+                        )
+                    }
+                    other => {
+                        let _ = ready_tx.send(Err(Error::Internal(format!(
+                            "unsupported CPAL sample format: {other:?}"
+                        ))));
+                        return;
+                    }
+                };
+
+                let stream = match stream_result {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = ready_tx
+                            .send(Err(Error::Internal(format!("cpal build_input_stream: {e}"))));
+                        return;
+                    }
+                };
+
+                if let Err(e) = stream.play() {
+                    let _ = ready_tx.send(Err(Error::Internal(format!("cpal play: {e}"))));
+                    return;
+                }
+
+                // Drop the original `raw_tx` clone — only the callback's owned
+                // copy keeps the sender side alive. Once the stream is dropped,
+                // the callback goes with it and `raw_rx` closes.
+                drop(raw_tx);
+
+                let _ = ready_tx.send(Ok(()));
+
+                // Block until stop is requested, then drop the stream.
+                let _ = stop_rx.recv();
+                drop(stream);
+            })
+            .map_err(|e| Error::Internal(format!("spawn cpal stream thread: {e}")))?;
+
+        // Wait for the stream thread to either start successfully or fail.
+        ready_rx
+            .recv()
+            .map_err(|_| Error::Internal("cpal stream thread died before reporting".into()))??;
+
+        // Background worker — does all the heavy lifting off the audio thread.
+        let target_rate = SampleRate::HZ_16K.as_u32();
+        let worker = tokio::spawn(async move {
+            while let Some(raw) = raw_rx.recv().await {
+                let mono = downmix_to_mono_f32(&raw, device_channels);
+                let resampled = match resample_mono(&mono, device_sample_rate, target_rate) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "resample failed; dropping block");
+                        continue;
+                    }
+                };
+                let i16s = f32_to_i16(&resampled);
+                if out_tx.send(i16s).await.is_err() {
+                    // Consumer dropped; exit the worker.
+                    break;
+                }
+            }
+        });
+
+        Ok(Self {
+            cfg: AudioConfig::phoneme_default(),
+            out_rx,
+            stop_tx: Some(stop_tx),
+            _stream_thread: Some(stream_thread),
+            _worker: worker,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl Source for CpalSource {
+    fn config(&self) -> AudioConfig {
+        self.cfg
+    }
+
+    async fn next_block(&mut self) -> Result<Option<SampleBlock>> {
+        Ok(self.out_rx.recv().await)
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        // Tell the stream thread to drop its cpal::Stream, which stops capture.
+        // Closing out_rx is redundant once the stream stops, but does no harm.
+        if let Some(tx) = self.stop_tx.take() {
+            let _ = tx.send(());
+        }
+        self.out_rx.close();
+        Ok(())
+    }
+}
+
+impl Drop for CpalSource {
+    fn drop(&mut self) {
+        // Signal stop on drop so the stream thread exits even if `stop()` was
+        // never called explicitly.
+        if let Some(tx) = self.stop_tx.take() {
+            let _ = tx.send(());
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
