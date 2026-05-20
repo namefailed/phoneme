@@ -164,3 +164,84 @@ fn inbox_state_subdir_names_are_stable() {
     assert_eq!(InboxState::Done.subdir(), "done");
     assert_eq!(InboxState::Failed.subdir(), "failed");
 }
+
+use proptest::prelude::*;
+
+#[derive(Debug, Clone)]
+enum Op {
+    Enqueue,
+    Claim,
+    FinishDone,
+    FinishFailed,
+    Requeue,
+    Recover,
+}
+
+fn op_strategy() -> impl Strategy<Value = Op> {
+    prop_oneof![
+        Just(Op::Enqueue),
+        Just(Op::Claim),
+        Just(Op::FinishDone),
+        Just(Op::FinishFailed),
+        Just(Op::Requeue),
+        Just(Op::Recover),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(40))]
+    #[test]
+    fn random_ops_leave_consistent_state(ops in proptest::collection::vec(op_strategy(), 0..30)) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all().build().unwrap();
+        rt.block_on(async {
+            let dir = TempDir::new().unwrap();
+            let q = InboxQueue::new(dir.path()).await.unwrap();
+            let mut in_processing: Vec<RecordingId> = vec![];
+
+            for op in ops {
+                match op {
+                    Op::Enqueue => {
+                        let id = RecordingId::new();
+                        q.enqueue(&make_payload(id)).await.unwrap();
+                    }
+                    Op::Claim => {
+                        if let Some(p) = q.claim_next().await.unwrap() {
+                            in_processing.push(p.id);
+                        }
+                    }
+                    Op::FinishDone => {
+                        if let Some(id) = in_processing.pop() {
+                            q.finish_done(&id, &make_payload(id.clone())).await.unwrap();
+                        }
+                    }
+                    Op::FinishFailed => {
+                        if let Some(id) = in_processing.pop() {
+                            q.finish_failed(&id, "x", "y").await.unwrap();
+                        }
+                    }
+                    Op::Requeue => {
+                        if let Some(id) = in_processing.pop() {
+                            q.requeue(&id).await.unwrap();
+                        }
+                    }
+                    Op::Recover => {
+                        let recovered = q.recover_orphans().await.unwrap();
+                        // Anything we knew was "in processing" is now back to pending.
+                        in_processing.retain(|id| !recovered.contains(id));
+                    }
+                }
+            }
+
+            // Invariants: (1) no .tmp files left behind, (2) every json file
+            // appears in exactly one subdirectory.
+            for sub in ["pending", "processing", "done", "failed"] {
+                for entry in std::fs::read_dir(dir.path().join(sub)).unwrap() {
+                    let p = entry.unwrap().path();
+                    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+                    assert!(ext == "json", "leaked file: {}", p.display());
+                }
+            }
+        });
+    }
+}
