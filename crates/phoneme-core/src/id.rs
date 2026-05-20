@@ -66,18 +66,29 @@ impl Default for RecordingId {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use std::sync::Mutex;
+
+    /// `from_datetime` mutates the module-global `LAST_TS_MS`. Cargo runs
+    /// tests in this module in parallel by default, which races on that
+    /// state and can make `ids_are_unique_within_same_millisecond` flake.
+    /// Every test in this module acquires this lock to serialize against
+    /// each other. Tests in other modules don't touch `LAST_TS_MS`, so this
+    /// is sufficient.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn id_has_expected_shape() {
+        let _g = TEST_LOCK.lock().unwrap();
         let dt = Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap();
         let id = RecordingId::from_datetime(dt);
-        // 18 chars: YYYYMMDDTHHmmssMMM (3 digit milliseconds)
+        // 18 chars: YYYYMMDDTHHmmssMMM (3-digit milliseconds)
         assert_eq!(id.as_str().len(), 18);
         assert!(id.as_str().starts_with("20260519T143500"));
     }
 
     #[test]
     fn file_stem_drops_date_prefix() {
+        let _g = TEST_LOCK.lock().unwrap();
         let dt = Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap();
         let id = RecordingId::from_datetime(dt);
         assert_eq!(id.file_stem().len(), 9);
@@ -86,6 +97,7 @@ mod tests {
 
     #[test]
     fn day_folder_format() {
+        let _g = TEST_LOCK.lock().unwrap();
         let dt = Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap();
         let id = RecordingId::from_datetime(dt);
         assert_eq!(id.day_folder(), "2026-05-19");
@@ -93,6 +105,9 @@ mod tests {
 
     #[test]
     fn ids_are_unique_within_same_millisecond() {
+        let _g = TEST_LOCK.lock().unwrap();
+        // Reset so the assertion only depends on this test's two calls.
+        LAST_TS_MS.store(0, Ordering::SeqCst);
         let dt = Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap();
         let a = RecordingId::from_datetime(dt);
         let b = RecordingId::from_datetime(dt);
@@ -101,6 +116,7 @@ mod tests {
 
     #[test]
     fn ids_sort_chronologically() {
+        let _g = TEST_LOCK.lock().unwrap();
         let mut ids = [
             RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap()),
             RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 9, 0, 0).unwrap()),
