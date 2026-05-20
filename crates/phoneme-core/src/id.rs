@@ -50,6 +50,13 @@ impl RecordingId {
     }
 }
 
+impl RecordingId {
+    /// Construct from a known-valid id string (e.g., from DB rows). Does not validate.
+    pub(crate) fn from_str_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
 impl fmt::Display for RecordingId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)

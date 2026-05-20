@@ -36,10 +36,13 @@ CREATE TRIGGER recordings_ai AFTER INSERT ON recordings BEGIN
 END;
 
 CREATE TRIGGER recordings_au AFTER UPDATE ON recordings BEGIN
-    UPDATE recordings_fts SET transcript = new.transcript
-        WHERE rowid = new.rowid;
+    INSERT INTO recordings_fts(recordings_fts, rowid, id, transcript)
+        VALUES('delete', old.rowid, old.id, old.transcript);
+    INSERT INTO recordings_fts(rowid, id, transcript)
+        VALUES (new.rowid, new.id, new.transcript);
 END;
 
 CREATE TRIGGER recordings_ad AFTER DELETE ON recordings BEGIN
-    DELETE FROM recordings_fts WHERE rowid = old.rowid;
+    INSERT INTO recordings_fts(recordings_fts, rowid, id, transcript)
+        VALUES('delete', old.rowid, old.id, old.transcript);
 END;
