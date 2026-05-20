@@ -3,57 +3,41 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Mutex;
 
-/// A recording identifier: `YYYYMMDDTHHmmssMMM` (18 chars: 8 date + 1 `T` +
-/// 6 time + 3 milliseconds). Sortable as a plain string; uniqueness within
-/// a process is guaranteed by a global state that bumps the millisecond field
-/// on collisions.
+/// A recording identifier: `YYYYMMDDTHHmmssNNN` (18 chars: 8 date + 1 `T` +
+/// 6 time + 3-digit per-process monotonic counter, mod 1000).
 ///
-/// Example: `20260519T143500823`.
+/// The trailing 3 digits are NOT the actual subsecond field — they're a
+/// monotonic counter that disambiguates IDs generated within the same
+/// wall-clock second. The wall-clock prefix gives chronological ordering;
+/// the counter suffix guarantees process-wide uniqueness.
+///
+/// Why not bump-on-collision with real ms? An earlier version tracked
+/// `(last_second_key, last_used_ms)` and bumped only on same-second hits.
+/// That raced: if another thread's call between our two calls had a different
+/// `second_key`, the RESET branch in that thread replaced `last_second_key`,
+/// then our next call ALSO went through RESET and reused `dt.subsec_millis`
+/// — producing a duplicate of the first ID. A pure monotonic counter
+/// sidesteps the entire race.
+///
+/// Example: `20260519T143500042`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RecordingId(String);
 
-/// Tracks the last-seen second + the last millisecond value we emitted in
-/// that second. Wrapped in a Mutex so concurrent `from_datetime` calls are
-/// serialized — the previous AtomicU16-based algorithm raced when multiple
-/// threads interleaved their swap/store operations, occasionally producing
-/// duplicate IDs (caught by Task 7's catalog tests under parallel load).
-struct IdState {
-    last_second_key: i64,
-    last_used_ms: u16,
-}
-
-static STATE: Mutex<IdState> = Mutex::new(IdState {
-    last_second_key: 0,
-    last_used_ms: 0,
-});
+static COUNTER: Mutex<u64> = Mutex::new(0);
 
 impl RecordingId {
     /// Generate a new id from the current local time.
-    ///
-    /// If called more than once within the same wall-clock second, subsequent
-    /// calls bump the millisecond field by one from the previous emission to
-    /// guarantee process-wide uniqueness without blocking on the wall clock.
     pub fn new() -> Self {
         Self::from_datetime(Local::now())
     }
 
     /// Generate an id from a specific datetime.
     pub fn from_datetime(dt: DateTime<Local>) -> Self {
-        let second_key = dt.timestamp();
-        let mut state = STATE.lock().expect("RecordingId state mutex poisoned");
-        let ms = if state.last_second_key == second_key {
-            // Same second as a prior call — bump from the previous emitted ms
-            // so this id is strictly greater than the last one in this second.
-            state.last_used_ms.wrapping_add(1)
-        } else {
-            // Different second (or first call ever) — start fresh from the
-            // datetime's actual subsecond field.
-            state.last_second_key = second_key;
-            dt.timestamp_subsec_millis() as u16
-        };
-        state.last_used_ms = ms;
-        drop(state);
-        let s = format!("{}{:03}", dt.format("%Y%m%dT%H%M%S"), ms);
+        let mut counter = COUNTER.lock().expect("RecordingId counter mutex poisoned");
+        *counter = counter.wrapping_add(1);
+        let suffix = (*counter % 1000) as u16;
+        drop(counter);
+        let s = format!("{}{:03}", dt.format("%Y%m%dT%H%M%S"), suffix);
         Self(s)
     }
 
