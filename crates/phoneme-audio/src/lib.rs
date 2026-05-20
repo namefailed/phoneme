@@ -1,5 +1,6 @@
 //! phoneme-audio — audio capture and WAV encoding for Phoneme.
 
+pub mod convert;
 pub mod device;
 pub mod format;
 pub mod wav;
