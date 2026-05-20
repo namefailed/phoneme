@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::atomic::{AtomicU16, Ordering};
 
-/// A recording identifier: `YYYYMMDDTHHmmssMMM` (17 chars). Sortable as a
-/// plain string; uniqueness within a process is guaranteed by an atomic
-/// per-millisecond sequence bump.
+/// A recording identifier: `YYYYMMDDTHHmmssMMM` (18 chars: 8 date + 1 `T` +
+/// 6 time + 3 milliseconds). Sortable as a plain string; uniqueness within
+/// a process is guaranteed by an atomic per-millisecond sequence bump.
 ///
 /// Example: `20260519T143500823`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
