@@ -5,6 +5,7 @@ members = [
     "crates/phoneme-audio",
     "crates/phoneme-ipc",
     "bin/phoneme-daemon",
+    "bin/phoneme",
 ]
 
 [workspace.package]
@@ -39,3 +40,6 @@ bytes = "1"
 notify = "6"
 clap = { version = "4", features = ["derive"] }
 tracing-appender = "0.2"
+comfy-table = "7"
+colored = "2"
+insta = "1"
