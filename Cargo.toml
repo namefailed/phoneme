@@ -4,6 +4,7 @@ members = [
     "crates/phoneme-core",
     "crates/phoneme-audio",
     "crates/phoneme-ipc",
+    "bin/phoneme-daemon",
 ]
 
 [workspace.package]
@@ -35,3 +36,6 @@ hound = "3.5"
 rubato = "0.15"
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
+notify = "6"
+clap = { version = "4", features = ["derive"] }
+tracing-appender = "0.2"
