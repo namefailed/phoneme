@@ -7,3 +7,6 @@ dist/
 .env.local
 **/*.rs.bk
 Cargo.lock.bak
+
+# Tauri auto-generated files
+src-tauri/gen/

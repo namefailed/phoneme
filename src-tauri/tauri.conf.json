@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Phoneme",
+  "version": "1.0.0-dev",
+  "identifier": "com.namefailed.phoneme",
+  "build": {
+    "frontendDist": "../frontend/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm --dir ../frontend dev",
+    "beforeBuildCommand": "pnpm --dir ../frontend build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Phoneme",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 500,
+        "visible": false,
+        "decorations": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "iconPath": "icons/tray-idle.png",
+      "iconAsTemplate": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.ico"],
+    "category": "Productivity",
+    "shortDescription": "Local-first voice notes",
+    "longDescription": "Phoneme — local-first voice notes for Windows. Press a hotkey, speak, get a transcript via your locally-running LLM.",
+    "targets": ["msi"]
+  }
+}
