@@ -4,6 +4,8 @@ use anyhow::Result;
 use clap::Parser;
 
 mod app_state;
+mod ipc_handler;
+mod ipc_server;
 mod logging;
 
 use app_state::AppState;
@@ -22,10 +24,14 @@ async fn main() -> Result<()> {
     let cfg = phoneme_core::Config::default();
     let state = AppState::new(cfg).await?;
     let _guard = logging::init(&state.config, &state.paths.log_dir, args.foreground)?;
+
     tracing::info!(
         audio_dir = %state.paths.audio_dir.display(),
-        catalog_db = %state.paths.catalog_db.display(),
-        "phoneme-daemon started"
+        "phoneme-daemon ready"
     );
+
+    // Singleton enforcement happens inside ipc_server::serve via the
+    // NamedPipeListener::bind call (see Task 4).
+    ipc_server::serve(state).await?;
     Ok(())
 }
