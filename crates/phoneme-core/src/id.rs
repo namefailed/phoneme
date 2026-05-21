@@ -54,6 +54,13 @@ impl RecordingId {
     pub fn day_folder(&self) -> String {
         format!("{}-{}-{}", &self.0[0..4], &self.0[4..6], &self.0[6..8])
     }
+
+    /// Reconstruct an id from its canonical string form (e.g. when the user
+    /// pastes it on the CLI). The format isn't re-validated — RecordingIds
+    /// flow through the catalog and IPC layer as opaque strings already.
+    pub fn from_string(s: String) -> Self {
+        Self(s)
+    }
 }
 
 impl RecordingId {
