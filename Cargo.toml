@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/phoneme-core",
     "crates/phoneme-audio",
+    "crates/phoneme-ipc",
 ]
 
 [workspace.package]
