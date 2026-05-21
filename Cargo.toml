@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "crates/phoneme-core",
+    "crates/phoneme-audio",
+    "crates/phoneme-ipc",
 ]
 
 [workspace.package]
@@ -28,3 +30,8 @@ chrono = { version = "0.4", features = ["serde"] }
 proptest = "1"
 wiremock = "0.6"
 tempfile = "3"
+cpal = "0.15"
+hound = "3.5"
+rubato = "0.15"
+tokio-util = { version = "0.7", features = ["codec"] }
+bytes = "1"
