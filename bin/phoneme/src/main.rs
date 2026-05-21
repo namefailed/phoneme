@@ -7,6 +7,7 @@ use std::process::ExitCode;
 mod args;
 mod auto_spawn;
 mod client;
+mod commands;
 mod exit;
 mod output;
 
@@ -27,12 +28,13 @@ async fn main() -> Result<ExitCode> {
     Ok(exit_code)
 }
 
-async fn dispatch(cli: Cli, _cfg: &phoneme_core::Config) -> ExitCode {
+async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
     match cli.command {
         Command::Version => {
             println!("phoneme {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Command::Record(args) => commands::record::run(args, cfg, cli.json).await,
         // Other commands wired in subsequent tasks.
         _ => {
             eprintln!("phoneme: command not yet implemented");
