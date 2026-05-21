@@ -2,6 +2,7 @@
 
 mod bridge;
 mod commands;
+mod tray;
 
 use bridge::Bridge;
 
@@ -25,6 +26,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(bridge)
+        .setup(|app| {
+            let _tray = tray::install(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::list_recordings,
             commands::get_recording,
