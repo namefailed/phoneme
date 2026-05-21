@@ -8,6 +8,8 @@ mod event_bus;
 mod ipc_handler;
 mod ipc_server;
 mod logging;
+mod pipeline;
+mod queue_worker;
 mod recorder;
 
 use app_state::AppState;
@@ -32,8 +34,21 @@ async fn main() -> Result<()> {
         "phoneme-daemon ready"
     );
 
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let worker_state = state.clone();
+    let worker_shutdown = shutdown_rx.clone();
+    let worker_handle = tokio::spawn(async move {
+        if let Err(e) = queue_worker::run(worker_state, worker_shutdown).await {
+            tracing::error!(error = %e, "queue worker terminated");
+        }
+    });
+
     // Singleton enforcement happens inside ipc_server::serve via the
-    // NamedPipeListener::bind call (see Task 4).
+    // NamedPipeListener::bind call (see Task 4). The serve loop runs until
+    // SIGINT/Ctrl+C; clean-shutdown wiring is formalised in Task 11.
     ipc_server::serve(state).await?;
+
+    let _ = shutdown_tx.send(true);
+    let _ = worker_handle.await;
     Ok(())
 }
