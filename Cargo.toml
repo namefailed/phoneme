@@ -6,6 +6,7 @@ members = [
     "crates/phoneme-ipc",
     "bin/phoneme-daemon",
     "bin/phoneme",
+    "src-tauri",
 ]
 
 [workspace.package]
@@ -43,3 +44,6 @@ tracing-appender = "0.2"
 comfy-table = "7"
 colored = "2"
 insta = "1"
+tauri = { version = "2", features = [] }
+tauri-build = "2"
+tauri-plugin-shell = "2"
