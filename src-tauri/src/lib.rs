@@ -1,6 +1,7 @@
 //! Phoneme tray app — Tauri 2 desktop shell.
 
 mod bridge;
+mod commands;
 
 use bridge::Bridge;
 
@@ -24,6 +25,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(bridge)
+        .invoke_handler(tauri::generate_handler![
+            commands::list_recordings,
+            commands::get_recording,
+            commands::delete_recording,
+            commands::record_start,
+            commands::record_stop,
+            commands::record_cancel,
+            commands::replay_recording,
+            commands::refire_hook,
+            commands::update_transcript,
+            commands::daemon_status,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
