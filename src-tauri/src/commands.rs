@@ -123,11 +123,7 @@ pub async fn refire_hook(bridge: Br<'_>, id: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub async fn update_transcript(
-    bridge: Br<'_>,
-    id: String,
-    text: String,
-) -> Result<Value, String> {
+pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Result<Value, String> {
     forward(
         &bridge,
         Request::UpdateTranscript {
