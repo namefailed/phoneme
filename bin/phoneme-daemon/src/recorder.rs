@@ -125,12 +125,7 @@ impl DaemonRecorder {
     pub async fn stop(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
         let active = active_lock.take().ok_or(Error::NotRecording)?;
-        let recorder = self
-            .handle
-            .lock()
-            .await
-            .take()
-            .ok_or(Error::NotRecording)?;
+        let recorder = self.handle.lock().await.take().ok_or(Error::NotRecording)?;
         let result = recorder.stop_and_finalize(&active.audio_path).await?;
 
         state

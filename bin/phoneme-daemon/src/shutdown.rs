@@ -59,6 +59,16 @@ impl ShutdownCoordinator {
         let _ = self.tx.send(true);
     }
 
+    /// Hand out a clone of the underlying sender so spawned tasks can
+    /// trigger shutdown when they fail (e.g. the IPC server task on bind
+    /// failure). Without this, a critical-component failure leaves the
+    /// daemon process alive but unresponsive (no IPC) — which is much
+    /// worse than exiting and letting the supervisor / user notice.
+    #[allow(dead_code)]
+    pub fn sender(&self) -> watch::Sender<bool> {
+        self.tx.clone()
+    }
+
     /// Install Ctrl+C handler. Returns immediately after starting the
     /// background listener.
     pub fn install_signals(&self) {

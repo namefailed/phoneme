@@ -54,34 +54,35 @@ async fn main() -> Result<()> {
         }
     });
 
-    let server_state = state.clone();
-    let mut server_signal = shutdown_coord.signal.clone();
-    let server_handle = tokio::spawn(async move {
-        tokio::select! {
-            r = ipc_server::serve(server_state) => {
-                if let Err(e) = r {
-                    tracing::error!(error = %e, "ipc server failed");
-                }
-            }
-            _ = server_signal.wait() => {
-                tracing::info!("ipc server shutdown signaled");
-            }
-        }
-    });
-
     tracing::info!(
         audio_dir = %state.paths.audio_dir.display(),
         "phoneme-daemon ready"
     );
 
-    let mut wait = shutdown_coord.signal.clone();
-    wait.wait().await;
+    // Run the IPC server inline against the shutdown signal so a critical
+    // failure (e.g. another phoneme-daemon already owns the pipe) propagates
+    // as a non-zero process exit code. Previously the server lived in a
+    // spawned task that only logged its error — the daemon process kept
+    // running idle with no IPC surface, which was strictly worse than
+    // exiting.
+    let server_state = state.clone();
+    let mut server_signal = shutdown_coord.signal.clone();
+    let server_result: Result<()> = tokio::select! {
+        r = ipc_server::serve(server_state) => r,
+        _ = server_signal.wait() => {
+            tracing::info!("ipc server shutdown signaled");
+            Ok(())
+        }
+    };
 
     tracing::info!("shutting down");
+    // Make sure background tasks see the shutdown even if we got here via
+    // a server failure rather than the Ctrl+C handler.
+    shutdown_coord.trigger();
     let _ = worker_handle.await;
     let _ = supervisor_handle.await;
-    let _ = server_handle.await;
-    Ok(())
+
+    server_result
 }
 
 /// Load the daemon's config from `PHONEME_CONFIG` (used by tests and by

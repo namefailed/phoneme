@@ -145,7 +145,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::UpdateTranscript { id, text } => {
-            match state.catalog.update_transcript(&id, &text, "user-edit").await {
+            match state
+                .catalog
+                .update_transcript(&id, &text, "user-edit")
+                .await
+            {
                 Ok(()) => {
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
                     Response::Ok(serde_json::Value::Null)
@@ -292,7 +296,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }),
         Request::SubscribeEvents => Response::Err(IpcError {
             kind: IpcErrorKind::Internal,
-            message: "subscribe_events is handled by the streaming path in handle_connection (Task 10)".into(),
+            message:
+                "subscribe_events is handled by the streaming path in handle_connection (Task 10)"
+                    .into(),
         }),
     }
 }

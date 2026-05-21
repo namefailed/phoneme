@@ -11,11 +11,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Initialize tracing for the daemon. Returns a guard that must be held for
 /// the lifetime of the process to keep the background writer alive.
-pub fn init(
-    cfg: &Config,
-    log_dir: &Path,
-    foreground: bool,
-) -> anyhow::Result<Option<WorkerGuard>> {
+pub fn init(cfg: &Config, log_dir: &Path, foreground: bool) -> anyhow::Result<Option<WorkerGuard>> {
     let level = match cfg.daemon.log_level.as_str() {
         "error" => "error",
         "warn" => "warn",
