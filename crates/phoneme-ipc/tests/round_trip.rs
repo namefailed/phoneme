@@ -33,7 +33,10 @@ async fn client_sends_request_server_responds_ok() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let mut client = NamedPipeTransport::connect(&name).await.expect("connect");
-    let resp = client.request(Request::DaemonStatus).await.expect("request");
+    let resp = client
+        .request(Request::DaemonStatus)
+        .await
+        .expect("request");
     match resp {
         Response::Ok(val) => {
             assert_eq!(val["running"], true);
@@ -99,7 +102,10 @@ async fn server_handles_sequential_clients() {
 
     for _ in 0..3 {
         let mut client = NamedPipeTransport::connect(&name).await.expect("connect");
-        let _ = client.request(Request::DaemonStatus).await.expect("request");
+        let _ = client
+            .request(Request::DaemonStatus)
+            .await
+            .expect("request");
     }
 
     server_handle.await.expect("server task");

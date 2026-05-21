@@ -179,8 +179,9 @@ impl CpalSource {
                 let stream = match stream_result {
                     Ok(s) => s,
                     Err(e) => {
-                        let _ = ready_tx
-                            .send(Err(Error::Internal(format!("cpal build_input_stream: {e}"))));
+                        let _ = ready_tx.send(Err(Error::Internal(format!(
+                            "cpal build_input_stream: {e}"
+                        ))));
                         return;
                     }
                 };

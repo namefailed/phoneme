@@ -11,7 +11,9 @@ use crate::schema::{DaemonEvent, Request, Response};
 use crate::transport::Transport;
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions};
+use tokio::net::windows::named_pipe::{
+    ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
+};
 use tokio_util::codec::Framed;
 
 /// The full Windows pipe name for a given short name.
@@ -37,8 +39,8 @@ impl NamedPipeConnection {
 
     /// Send a Response back to the client.
     pub async fn send_response(&mut self, res: Response) -> TransportResult<()> {
-        let json = serde_json::to_vec(&res)
-            .map_err(|e| IpcTransportError::Internal(e.to_string()))?;
+        let json =
+            serde_json::to_vec(&res).map_err(|e| IpcTransportError::Internal(e.to_string()))?;
         let io = self.framed_in.get_mut();
         use tokio::io::AsyncWriteExt;
         io.write_all(&json).await?;
@@ -49,8 +51,8 @@ impl NamedPipeConnection {
 
     /// Send a DaemonEvent (for streaming subscriptions).
     pub async fn send_event(&mut self, event: DaemonEvent) -> TransportResult<()> {
-        let json = serde_json::to_vec(&event)
-            .map_err(|e| IpcTransportError::Internal(e.to_string()))?;
+        let json =
+            serde_json::to_vec(&event).map_err(|e| IpcTransportError::Internal(e.to_string()))?;
         let io = self.framed_in.get_mut();
         use tokio::io::AsyncWriteExt;
         io.write_all(&json).await?;
@@ -137,8 +139,8 @@ impl Transport for NamedPipeTransport {
     async fn request(&mut self, req: Request) -> TransportResult<Response> {
         let framed = self.framed.as_mut().ok_or(IpcTransportError::Closed)?;
         // Encode + send the request.
-        let json = serde_json::to_vec(&req)
-            .map_err(|e| IpcTransportError::Internal(e.to_string()))?;
+        let json =
+            serde_json::to_vec(&req).map_err(|e| IpcTransportError::Internal(e.to_string()))?;
         let io = framed.get_mut();
         use tokio::io::AsyncWriteExt;
         io.write_all(&json).await?;

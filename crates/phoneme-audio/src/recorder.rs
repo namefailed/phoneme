@@ -75,8 +75,7 @@ impl Recorder {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<RecorderCommand>(4);
 
         let task = tokio::spawn(async move {
-            let mut samples: Vec<i16> =
-                Vec::with_capacity(audio_cfg.sample_rate.as_u32() as usize);
+            let mut samples: Vec<i16> = Vec::with_capacity(audio_cfg.sample_rate.as_u32() as usize);
             let mut detector = SilenceDetector::new(
                 cfg.silence_threshold_dbfs,
                 cfg.silence_window_ms,

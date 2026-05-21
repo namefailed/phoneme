@@ -64,6 +64,8 @@ fn read_nonexistent_file_is_error() {
         format!("{err}").to_lowercase().contains("no such")
             || format!("{err}").to_lowercase().contains("not found")
             || format!("{err}").to_lowercase().contains("cannot")
-            || format!("{err}").to_lowercase().contains("system cannot find")
+            || format!("{err}")
+                .to_lowercase()
+                .contains("system cannot find")
     );
 }

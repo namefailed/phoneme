@@ -55,8 +55,8 @@ pub fn read_wav(path: &Path) -> Result<(Vec<i16>, AudioConfig)> {
 
 /// Read just the duration of a WAV file in milliseconds (cheap — no sample data).
 pub fn duration_ms(path: &Path) -> Result<i64> {
-    let reader = hound::WavReader::open(path)
-        .map_err(|e| Error::Internal(format!("hound open: {e}")))?;
+    let reader =
+        hound::WavReader::open(path).map_err(|e| Error::Internal(format!("hound open: {e}")))?;
     let spec = reader.spec();
     let frames = reader.len() as u64 / spec.channels.max(1) as u64;
     let ms = (frames * 1000) / spec.sample_rate.max(1) as u64;
