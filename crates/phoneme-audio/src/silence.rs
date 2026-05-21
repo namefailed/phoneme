@@ -48,7 +48,13 @@ impl SilenceDetector {
         if self.history.len() < self.window_samples {
             return false;
         }
-        let mean_sq = self.sum_sq / self.history.len() as f64;
+        // Clamp the running sum at zero: f64 non-associativity means that
+        // after many adds followed by subtractions in a different order
+        // (which is exactly what a loud → silent transition produces),
+        // `sum_sq` can drift to a tiny negative value like -1e-13. Dividing
+        // and `sqrt`ing a negative would yield `NaN`, and `NaN < threshold`
+        // is always false — silently masking the silence.
+        let mean_sq = self.sum_sq.max(0.0) / self.history.len() as f64;
         let rms = mean_sq.sqrt() as f32;
         rms < self.threshold_linear
     }
