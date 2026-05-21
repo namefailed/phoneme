@@ -1,0 +1,5 @@
+---
+source: bin/phoneme/tests/snapshots.rs
+expression: stdout
+---
+phoneme 1.0.0-dev
