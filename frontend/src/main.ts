@@ -1,4 +1,8 @@
-const app = document.getElementById("app");
-if (app) {
-  app.innerHTML = "<p>Phoneme — stub. UI to come.</p>";
+import "./styles/theme.css";
+import "./styles/reset.css";
+import { App } from "./App";
+
+const root = document.getElementById("app");
+if (root) {
+  new App(root);
 }
