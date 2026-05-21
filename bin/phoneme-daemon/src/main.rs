@@ -8,6 +8,7 @@ mod event_bus;
 mod ipc_handler;
 mod ipc_server;
 mod logging;
+mod recorder;
 
 use app_state::AppState;
 

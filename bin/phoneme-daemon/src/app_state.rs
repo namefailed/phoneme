@@ -1,6 +1,7 @@
 //! AppState — central holder for all long-lived daemon components.
 
 use crate::event_bus::EventBus;
+use crate::recorder::DaemonRecorder;
 use phoneme_core::{Catalog, Config, InboxQueue};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,6 +48,7 @@ pub struct AppState {
     pub catalog: Catalog,
     pub inbox: InboxQueue,
     pub events: EventBus,
+    pub recorder: DaemonRecorder,
 }
 
 impl AppState {
@@ -68,6 +70,7 @@ impl AppState {
             catalog,
             inbox,
             events: EventBus::new(),
+            recorder: DaemonRecorder::default(),
         })
     }
 }
