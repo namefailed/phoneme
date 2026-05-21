@@ -29,7 +29,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let cfg = phoneme_core::Config::default();
+    let cfg = load_config()?;
     let state = AppState::new(cfg).await?;
     let _guard = logging::init(&state.config, &state.paths.log_dir, args.foreground)?;
 
@@ -82,4 +82,14 @@ async fn main() -> Result<()> {
     let _ = supervisor_handle.await;
     let _ = server_handle.await;
     Ok(())
+}
+
+/// Load the daemon's config from `PHONEME_CONFIG` (used by tests and by
+/// CLI invocations that want to point at a specific file) or fall back to
+/// the built-in defaults.
+fn load_config() -> anyhow::Result<phoneme_core::Config> {
+    if let Ok(p) = std::env::var("PHONEME_CONFIG") {
+        return Ok(phoneme_core::Config::load(std::path::Path::new(&p))?);
+    }
+    Ok(phoneme_core::Config::default())
 }

@@ -17,9 +17,16 @@ pub struct ResolvedPaths {
 
 impl ResolvedPaths {
     pub fn from_config(cfg: &Config) -> anyhow::Result<Self> {
-        let dirs = directories::ProjectDirs::from("", "", "phoneme")
-            .ok_or_else(|| anyhow::anyhow!("could not resolve project directories"))?;
-        let data_local = dirs.data_local_dir();
+        // PHONEME_DATA_LOCAL lets integration tests redirect inbox/catalog/log
+        // away from the real per-user `AppData\Local\phoneme` so concurrent
+        // test daemons don't stomp on each other (or on a real install).
+        let data_local: PathBuf = if let Ok(p) = std::env::var("PHONEME_DATA_LOCAL") {
+            p.into()
+        } else {
+            let dirs = directories::ProjectDirs::from("", "", "phoneme")
+                .ok_or_else(|| anyhow::anyhow!("could not resolve project directories"))?;
+            dirs.data_local_dir().to_path_buf()
+        };
 
         // Expand user-config paths.
         let expanded = cfg.expanded()?;
