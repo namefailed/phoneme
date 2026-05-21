@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 
 mod app_state;
+mod event_bus;
 mod ipc_handler;
 mod ipc_server;
 mod logging;

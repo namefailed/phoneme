@@ -1,5 +1,6 @@
 //! AppState — central holder for all long-lived daemon components.
 
+use crate::event_bus::EventBus;
 use phoneme_core::{Catalog, Config, InboxQueue};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -45,7 +46,7 @@ pub struct AppState {
     pub paths: Arc<ResolvedPaths>,
     pub catalog: Catalog,
     pub inbox: InboxQueue,
-    // event_bus and others added in later tasks
+    pub events: EventBus,
 }
 
 impl AppState {
@@ -66,6 +67,7 @@ impl AppState {
             paths: Arc::new(paths),
             catalog,
             inbox,
+            events: EventBus::new(),
         })
     }
 }
