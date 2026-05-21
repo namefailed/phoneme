@@ -1,6 +1,10 @@
+pub mod config_cmd;
+pub mod daemon_cmd;
 pub mod delete;
 pub mod doctor;
+pub mod hook_cmd;
 pub mod list;
 pub mod record;
 pub mod replay;
 pub mod show;
+pub mod watch;

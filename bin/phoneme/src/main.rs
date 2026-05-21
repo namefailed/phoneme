@@ -40,11 +40,10 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::Replay(args) => commands::replay::run(args, cfg).await,
         Command::Delete(args) => commands::delete::run(args, cfg).await,
         Command::Doctor(args) => commands::doctor::run(args, cfg, cli.json).await,
-        // Other commands wired in subsequent tasks.
-        _ => {
-            eprintln!("phoneme: command not yet implemented");
-            ExitCode::from(exit::GENERIC_FAIL)
-        }
+        Command::Config(args) => commands::config_cmd::run(args, cfg).await,
+        Command::Daemon(args) => commands::daemon_cmd::run(args, cfg, cli.json).await,
+        Command::Watch => commands::watch::run(cfg).await,
+        Command::Hook(args) => commands::hook_cmd::run(args, cfg, cli.json).await,
     }
 }
 
