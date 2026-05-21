@@ -1,0 +1,129 @@
+//! IPC schema — wire format for daemon ↔ client communication.
+//!
+//! Designed to be transport-agnostic. The same Request/Response/Event JSON
+//! travels over named pipes today; a future HTTP transport (mobile, v2.0)
+//! will use the same schema unchanged.
+
+use chrono::{DateTime, Local};
+use phoneme_core::{ListFilter, RecordMode, RecordingId};
+use serde::{Deserialize, Serialize};
+
+/// All operations a client can ask the daemon to perform.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Request {
+    // Recording control
+    RecordStart { mode: RecordMode },
+    RecordStop,
+    RecordCancel,
+    RecordStatus,
+
+    // Catalog queries
+    ListRecordings { filter: ListFilter },
+    GetRecording { id: RecordingId },
+    DeleteRecording { id: RecordingId, keep_audio: bool },
+
+    // Queue operations
+    ReplayRecording { id: RecordingId },
+    RefireHook { id: RecordingId },
+    UpdateTranscript { id: RecordingId, text: String },
+
+    // Daemon control
+    DaemonStatus,
+    Shutdown,
+    ReloadConfig,
+    HookTest,
+
+    // Streaming
+    SubscribeEvents,
+}
+
+/// Daemon response. For most requests, a single Response is returned.
+/// `SubscribeEvents` instead streams `DaemonEvent`s (one JSON per line)
+/// until the client closes the connection.
+///
+/// Adjacent tagging (`status` + `value`) is required rather than internal
+/// tagging because `Ok(Value::Null)` has no object to embed a `status` key
+/// into — internal tagging would silently produce `{"status":"ok"}` that
+/// roundtrips back as `Ok(Object({}))` instead of `Ok(Null)`. The README
+/// also documents this wire shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "value", rename_all = "snake_case")]
+pub enum Response {
+    Ok(serde_json::Value),
+    Err(IpcError),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IpcError {
+    pub kind: IpcErrorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpcErrorKind {
+    AlreadyRecording,
+    NotRecording,
+    NotFound,
+    InvalidConfig,
+    LlmUnreachable,
+    LlmTimeout,
+    HookFailed,
+    DaemonNotRunning,
+    PipeInUse,
+    ShuttingDown,
+    Io,
+    Internal,
+}
+
+/// Events broadcast by the daemon on `SubscribeEvents`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum DaemonEvent {
+    RecordingStarted {
+        id: RecordingId,
+        started_at: DateTime<Local>,
+    },
+    RecordingStopped {
+        id: RecordingId,
+        duration_ms: i64,
+        audio_path: String,
+    },
+    TranscriptionStarted {
+        id: RecordingId,
+    },
+    TranscriptionDone {
+        id: RecordingId,
+        transcript: String,
+    },
+    TranscriptionFailed {
+        id: RecordingId,
+        error: String,
+    },
+    HookStarted {
+        id: RecordingId,
+    },
+    HookDone {
+        id: RecordingId,
+        exit_code: i32,
+    },
+    HookFailed {
+        id: RecordingId,
+        error: String,
+    },
+    QueueDepthChanged {
+        pending: usize,
+        processing: usize,
+        failed: usize,
+    },
+    LlmStatusChanged {
+        reachable: bool,
+    },
+    RecordingDeleted {
+        id: RecordingId,
+    },
+    TranscriptUpdated {
+        id: RecordingId,
+    },
+}

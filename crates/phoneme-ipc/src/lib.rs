@@ -1,3 +1,5 @@
 //! phoneme-ipc — IPC schema and transport for Phoneme.
-//!
-//! Modules will be added in subsequent tasks.
+
+pub mod schema;
+
+pub use schema::{DaemonEvent, IpcError, IpcErrorKind, Request, Response};

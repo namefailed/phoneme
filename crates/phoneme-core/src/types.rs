@@ -63,7 +63,7 @@ pub struct Recording {
 }
 
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListFilter {
     pub limit: Option<u32>,
     pub since: Option<DateTime<Local>>,
