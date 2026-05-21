@@ -16,20 +16,59 @@ use phoneme_ipc::{DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, Requ
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
         match conn.recv().await {
+            Ok(Some(Request::SubscribeEvents)) => {
+                // Acknowledge the subscription.
+                if let Err(e) = conn
+                    .send_response(Response::Ok(serde_json::json!({"subscribed": true})))
+                    .await
+                {
+                    tracing::warn!(error = %e, "subscribe ack failed");
+                    return;
+                }
+                // Stream events.
+                //
+                // Backpressure contract: this connection uses a broadcast
+                // receiver, which drops old events under lag rather than
+                // blocking the producer. On `Lagged(n)`, we tear down the
+                // subscription — the client sees the connection close and is
+                // expected to reconnect (which freshly re-subscribes) and
+                // re-fetch state via `ListRecordings`. Subscribers MUST treat
+                // a subscription close as "the world may have moved on; refetch."
+                //
+                // Closing on lag is preferable to silently dropping events,
+                // which would leave the client's incremental UI state diverged
+                // from the catalog with no signal that anything's wrong.
+                let mut rx = state.events.subscribe();
+                loop {
+                    match rx.recv().await {
+                        Ok(event) => {
+                            if let Err(e) = conn.send_event(event).await {
+                                tracing::debug!(error = %e, "event send failed; subscriber gone");
+                                return;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(
+                                lag = n,
+                                "event subscriber lagged; closing subscription so client re-syncs"
+                            );
+                            return; // client reconnects, re-fetches ListRecordings
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    }
+                }
+            }
             Ok(Some(req)) => {
                 let response = handle_request(req, &state).await;
                 if let Err(e) = conn.send_response(response).await {
-                    tracing::warn!(error = %e, "send_response failed; closing connection");
-                    break;
+                    tracing::warn!(error = %e, "send_response failed");
+                    return;
                 }
             }
-            Ok(None) => {
-                tracing::debug!("client disconnected");
-                break;
-            }
+            Ok(None) => return,
             Err(e) => {
-                tracing::warn!(error = %e, "recv failed; closing connection");
-                break;
+                tracing::warn!(error = %e, "recv failed");
+                return;
             }
         }
     }
