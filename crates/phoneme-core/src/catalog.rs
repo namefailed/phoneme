@@ -81,6 +81,19 @@ impl Catalog {
         Ok(())
     }
 
+    /// Update just the duration column. Used when the recorder finalizes a
+    /// WAV and we know the captured length.
+    pub async fn update_duration(&self, id: &RecordingId, duration_ms: i64) -> Result<()> {
+        sqlx::query(
+            "UPDATE recordings SET duration_ms = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(duration_ms)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn update_transcript(
         &self,
         id: &RecordingId,
