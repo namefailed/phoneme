@@ -20,7 +20,9 @@ async fn main() -> Result<ExitCode> {
         colored::control::set_override(false);
     }
     if cli.verbose {
-        tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .init();
     }
 
     let cfg = load_config()?;

@@ -57,8 +57,7 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     let hook_first_word = cfg.hook.command.split_whitespace().next().unwrap_or("");
     checks.push(Check {
         name: "hook_executable",
-        ok: which::which(hook_first_word).is_ok()
-            || std::path::Path::new(hook_first_word).exists(),
+        ok: which::which(hook_first_word).is_ok() || std::path::Path::new(hook_first_word).exists(),
         detail: hook_first_word.into(),
     });
 

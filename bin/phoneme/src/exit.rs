@@ -41,10 +41,7 @@ mod tests {
             from_ipc_kind(IpcErrorKind::DaemonNotRunning),
             DAEMON_NOT_REACHABLE
         );
-        assert_eq!(
-            from_ipc_kind(IpcErrorKind::LlmUnreachable),
-            LLM_UNREACHABLE
-        );
+        assert_eq!(from_ipc_kind(IpcErrorKind::LlmUnreachable), LLM_UNREACHABLE);
         assert_eq!(from_ipc_kind(IpcErrorKind::HookFailed), HOOK_FAILED);
         assert_eq!(from_ipc_kind(IpcErrorKind::InvalidConfig), INVALID_CONFIG);
         assert_eq!(from_ipc_kind(IpcErrorKind::NotFound), NOT_FOUND);

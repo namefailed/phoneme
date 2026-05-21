@@ -68,10 +68,7 @@ impl Client {
     pub async fn subscribe(
         &mut self,
     ) -> Result<
-        futures::stream::BoxStream<
-            'static,
-            phoneme_ipc::TransportResult<phoneme_ipc::DaemonEvent>,
-        >,
+        futures::stream::BoxStream<'static, phoneme_ipc::TransportResult<phoneme_ipc::DaemonEvent>>,
         ExitCode,
     > {
         self.transport.subscribe().await.map_err(|e| {

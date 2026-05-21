@@ -42,9 +42,7 @@ fn unknown_subcommand_returns_usage_error() {
         .failure();
     let stderr = String::from_utf8_lossy(output.get_output().stderr.as_slice()).to_string();
     assert!(
-        stderr.contains("unrecognized")
-            || stderr.contains("not found")
-            || stderr.contains("error")
+        stderr.contains("unrecognized") || stderr.contains("not found") || stderr.contains("error")
     );
 }
 

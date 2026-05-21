@@ -12,7 +12,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// pipe for `POLL_TOTAL` before giving up.
 #[allow(dead_code)] // wired up by Client::connect in Task 5+
 pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
-    if NamedPipeTransport::connect(&cfg.daemon.pipe_name).await.is_ok() {
+    if NamedPipeTransport::connect(&cfg.daemon.pipe_name)
+        .await
+        .is_ok()
+    {
         return Ok(());
     }
 
@@ -52,7 +55,10 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
     // Poll for readiness.
     let start = std::time::Instant::now();
     while start.elapsed() < POLL_TOTAL {
-        if NamedPipeTransport::connect(&cfg.daemon.pipe_name).await.is_ok() {
+        if NamedPipeTransport::connect(&cfg.daemon.pipe_name)
+            .await
+            .is_ok()
+        {
             return Ok(());
         }
         tokio::time::sleep(POLL_INTERVAL).await;
