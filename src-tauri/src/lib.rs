@@ -2,6 +2,7 @@
 
 mod bridge;
 mod commands;
+mod events;
 mod tray;
 
 use bridge::Bridge;
@@ -25,9 +26,12 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(bridge)
-        .setup(|app| {
+        .manage(bridge.clone())
+        .setup(move |app| {
             let _tray = tray::install(app.handle())?;
+            if let Some(bridge) = bridge.clone() {
+                events::spawn(app.handle().clone(), bridge);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
