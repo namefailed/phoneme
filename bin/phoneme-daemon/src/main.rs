@@ -7,6 +7,7 @@ mod app_state;
 mod event_bus;
 mod ipc_handler;
 mod ipc_server;
+mod llm_supervisor;
 mod logging;
 mod pipeline;
 mod queue_worker;
@@ -45,6 +46,14 @@ async fn main() -> Result<()> {
         }
     });
 
+    let supervisor_state = state.clone();
+    let supervisor_signal = shutdown_coord.signal.clone();
+    let supervisor_handle = tokio::spawn(async move {
+        if let Err(e) = llm_supervisor::run(supervisor_state, supervisor_signal).await {
+            tracing::error!(error = %e, "llm supervisor terminated");
+        }
+    });
+
     let server_state = state.clone();
     let mut server_signal = shutdown_coord.signal.clone();
     let server_handle = tokio::spawn(async move {
@@ -70,6 +79,7 @@ async fn main() -> Result<()> {
 
     tracing::info!("shutting down");
     let _ = worker_handle.await;
+    let _ = supervisor_handle.await;
     let _ = server_handle.await;
     Ok(())
 }

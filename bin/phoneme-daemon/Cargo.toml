@@ -27,6 +27,7 @@ directories.workspace = true
 chrono.workspace = true
 futures = "0.3"
 async-trait = "0.1"
+which = "6"
 
 [dev-dependencies]
 tempfile.workspace = true
