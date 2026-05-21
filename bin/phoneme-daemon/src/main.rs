@@ -10,9 +10,12 @@ mod ipc_server;
 mod logging;
 mod pipeline;
 mod queue_worker;
+mod reconcile;
 mod recorder;
+mod shutdown;
 
 use app_state::AppState;
+use shutdown::ShutdownCoordinator;
 
 #[derive(Debug, Parser)]
 #[command(name = "phoneme-daemon", version)]
@@ -29,26 +32,44 @@ async fn main() -> Result<()> {
     let state = AppState::new(cfg).await?;
     let _guard = logging::init(&state.config, &state.paths.log_dir, args.foreground)?;
 
-    tracing::info!(
-        audio_dir = %state.paths.audio_dir.display(),
-        "phoneme-daemon ready"
-    );
+    reconcile::run(&state).await?;
 
-    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let shutdown_coord = ShutdownCoordinator::new();
+    shutdown_coord.install_signals();
+
     let worker_state = state.clone();
-    let worker_shutdown = shutdown_rx.clone();
+    let worker_shutdown = shutdown_coord.signal.clone_receiver();
     let worker_handle = tokio::spawn(async move {
         if let Err(e) = queue_worker::run(worker_state, worker_shutdown).await {
             tracing::error!(error = %e, "queue worker terminated");
         }
     });
 
-    // Singleton enforcement happens inside ipc_server::serve via the
-    // NamedPipeListener::bind call (see Task 4). The serve loop runs until
-    // SIGINT/Ctrl+C; clean-shutdown wiring is formalised in Task 11.
-    ipc_server::serve(state).await?;
+    let server_state = state.clone();
+    let mut server_signal = shutdown_coord.signal.clone();
+    let server_handle = tokio::spawn(async move {
+        tokio::select! {
+            r = ipc_server::serve(server_state) => {
+                if let Err(e) = r {
+                    tracing::error!(error = %e, "ipc server failed");
+                }
+            }
+            _ = server_signal.wait() => {
+                tracing::info!("ipc server shutdown signaled");
+            }
+        }
+    });
 
-    let _ = shutdown_tx.send(true);
+    tracing::info!(
+        audio_dir = %state.paths.audio_dir.display(),
+        "phoneme-daemon ready"
+    );
+
+    let mut wait = shutdown_coord.signal.clone();
+    wait.wait().await;
+
+    tracing::info!("shutting down");
     let _ = worker_handle.await;
+    let _ = server_handle.await;
     Ok(())
 }
