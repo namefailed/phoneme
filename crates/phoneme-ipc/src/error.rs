@@ -7,6 +7,9 @@ pub enum IpcTransportError {
     #[error("connection failed: {0}")]
     Connect(#[source] std::io::Error),
 
+    #[error("pipe is already owned by another phoneme-daemon")]
+    AlreadyInUse,
+
     #[error("connection closed by peer")]
     Closed,
 

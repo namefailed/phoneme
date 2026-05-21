@@ -78,7 +78,15 @@ impl NamedPipeListener {
         let server = ServerOptions::new()
             .first_pipe_instance(true)
             .create(&path)
-            .map_err(IpcTransportError::Connect)?;
+            .map_err(|e| {
+                // ERROR_ACCESS_DENIED (5) or ERROR_PIPE_BUSY (231)
+                // → another instance owns this pipe name.
+                if matches!(e.raw_os_error(), Some(5) | Some(231)) {
+                    IpcTransportError::AlreadyInUse
+                } else {
+                    IpcTransportError::Connect(e)
+                }
+            })?;
         Ok(Self {
             name: name.to_string(),
             current: Some(server),
