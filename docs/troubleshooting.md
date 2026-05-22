@@ -38,10 +38,10 @@ Windows sometimes hides tray icons by default. Right-click the taskbar →
 Taskbar settings → "Select which icons appear on the taskbar" and enable
 Phoneme.
 
-## "LLM unreachable" — recordings pile up
+## "Whisper unreachable" — recordings pile up
 
-The configured `llm.external_url` is not responding. Either the server is
-down, the URL is wrong, or your `llm.timeout_secs` is too low.
+The configured `whisper.external_url` is not responding. Either the server is
+down, the URL is wrong, or your `whisper.timeout_secs` is too low.
 
 **Fix:**
 ```bash
@@ -49,7 +49,7 @@ phoneme doctor    # confirms the diagnosis
 ```
 
 The recordings stay in `%LOCALAPPDATA%\phoneme\inbox\pending\`. Once
-llama-server is reachable, the daemon retries automatically (exponential
+whisper-server is reachable, the daemon retries automatically (exponential
 backoff, capped at 5 minutes between attempts).
 
 ## Hook fails or times out

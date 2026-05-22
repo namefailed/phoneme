@@ -13,7 +13,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 pub struct DaemonHarness {
     pub temp: TempDir,
     pub pipe_name: String,
-    pub llm: MockServer,
+    pub whisper: MockServer,
     pub client: NamedPipeTransport,
     pub daemon: Child,
 }
@@ -24,19 +24,19 @@ impl DaemonHarness {
         let temp = TempDir::new().unwrap();
         let pipe_name = format!("phoneme-test-{}", uuid_like());
 
-        // Stub llama-server.
-        let llm = MockServer::start().await;
+        // Stub whisper-server.
+        let whisper = MockServer::start().await;
         Mock::given(method("POST"))
             .and(wm_path("/v1/audio/transcriptions"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "hello"})),
             )
-            .mount(&llm)
+            .mount(&whisper)
             .await;
 
         // Generate a config that points at our stub.
         let mut cfg = phoneme_core::Config::default();
-        cfg.llm.external_url = llm.uri();
+        cfg.whisper.external_url = whisper.uri();
         cfg.recording.audio_dir = temp.path().join("audio").to_string_lossy().into_owned();
         cfg.daemon.pipe_name = pipe_name.clone();
         let cfg_path = temp.path().join("config.toml");
@@ -59,7 +59,7 @@ impl DaemonHarness {
         Self {
             temp,
             pipe_name,
-            llm,
+            whisper,
             client,
             daemon,
         }

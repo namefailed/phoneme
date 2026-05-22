@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { SectionLlm } from "./SectionLlm";
+import { SectionWhisper } from "./SectionWhisper";
 import { SectionRecording } from "./SectionRecording";
 import { SectionHotkey } from "./SectionHotkey";
 import { SectionHook } from "./SectionHook";
@@ -35,7 +35,7 @@ export class SettingsView {
     // Each section owns its own child div: a Section's render() does
     // `container.innerHTML = …`, so writing them all into `body` directly
     // would have each section clobber the previous one.
-    new SectionLlm(this.sectionHost(body), config);
+    new SectionWhisper(this.sectionHost(body), config);
     new SectionRecording(this.sectionHost(body), config);
     new SectionHotkey(this.sectionHost(body), config);
     new SectionHook(this.sectionHost(body), config);

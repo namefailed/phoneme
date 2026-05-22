@@ -10,7 +10,7 @@ export type DaemonEvent =
   | { event: "hook_done"; id: string; exit_code: number }
   | { event: "hook_failed"; id: string; error: string }
   | { event: "queue_depth_changed"; pending: number; processing: number; failed: number }
-  | { event: "llm_status_changed"; reachable: boolean }
+  | { event: "whisper_status_changed"; reachable: boolean }
   | { event: "recording_deleted"; id: string }
   | { event: "transcript_updated"; id: string };
 

@@ -8,7 +8,7 @@ mod event_bus;
 mod first_run;
 mod ipc_handler;
 mod ipc_server;
-mod llm_supervisor;
+mod whisper_supervisor;
 mod logging;
 mod pipeline;
 mod queue_worker;
@@ -50,8 +50,8 @@ async fn main() -> Result<()> {
     let supervisor_state = state.clone();
     let supervisor_signal = state.shutdown.signal.clone();
     let supervisor_handle = tokio::spawn(async move {
-        if let Err(e) = llm_supervisor::run(supervisor_state, supervisor_signal).await {
-            tracing::error!(error = %e, "llm supervisor terminated");
+        if let Err(e) = whisper_supervisor::run(supervisor_state, supervisor_signal).await {
+            tracing::error!(error = %e, "whisper supervisor terminated");
         }
     });
 

@@ -18,7 +18,7 @@ labels: bug
 **Environment**
 - Phoneme version: <!-- run `phoneme version` -->
 - Windows version:
-- llama-server version (if external mode):
+- whisper-server version (if external mode):
 - Model file (if bundled mode):
 
 **Logs**

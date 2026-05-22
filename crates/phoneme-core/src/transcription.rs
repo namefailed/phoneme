@@ -45,17 +45,17 @@ impl TranscriptionClient {
         let response = match self.http.post(&url).timeout(timeout).multipart(form).send().await {
             Ok(r) => r,
             Err(e) if e.is_timeout() => {
-                return Err(Error::LlmTimeout {
+                return Err(Error::WhisperTimeout {
                     secs: timeout.as_secs(),
                 })
             }
-            Err(e) => return Err(Error::LlmUnreachable { url, source: e }),
+            Err(e) => return Err(Error::WhisperUnreachable { url, source: e }),
         };
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(Error::LlmError {
+            return Err(Error::WhisperError {
                 status: status.as_u16(),
                 body,
             });

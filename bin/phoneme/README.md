@@ -25,7 +25,7 @@ See `phoneme <command> --help` for per-command flags.
 | 1 | Generic failure |
 | 2 | Usage error |
 | 3 | Daemon not reachable |
-| 4 | LLM unreachable / timeout |
+| 4 | Whisper unreachable / timeout |
 | 5 | Hook failed |
 | 6 | Invalid config |
 | 7 | Not found |

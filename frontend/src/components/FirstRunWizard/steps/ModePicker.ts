@@ -10,18 +10,18 @@ export class ModePicker {
   ) {
     body.innerHTML = `
       <h2 class="wizard-title">How do you want to run transcription?</h2>
-      <p class="wizard-subtitle">Phoneme needs a llama-server endpoint. Pick the setup that fits — you can change this later in Settings.</p>
+      <p class="wizard-subtitle">Phoneme needs a whisper-server endpoint. Pick the setup that fits — you can change this later in Settings.</p>
       <div class="mode-cards">
         <div class="mode-card" data-mode="external">
           <div class="mode-icon">🔗</div>
           <div class="mode-name">Use my own server</div>
-          <div class="mode-desc">I already run llama-server. Just point Phoneme at it.</div>
+          <div class="mode-desc">I already run whisper-server. Just point Phoneme at it.</div>
         </div>
         <div class="mode-card recommended" data-mode="bundled_model">
           <div class="mode-badge">RECOMMENDED</div>
           <div class="mode-icon">📦</div>
           <div class="mode-name">Bundled server + my model</div>
-          <div class="mode-desc">Phoneme runs llama-server for you. You provide a GGUF model.</div>
+          <div class="mode-desc">Phoneme runs whisper-server for you. You provide a GGUF model.</div>
         </div>
         <div class="mode-card" data-mode="bundled_download">
           <div class="mode-icon">⬇</div>
@@ -39,7 +39,7 @@ export class ModePicker {
 
     // Pre-select whatever the config already has.
     const preselect = body.querySelector<HTMLElement>(
-      `.mode-card[data-mode="${config.llm.mode}"]:not(.disabled)`,
+      `.mode-card[data-mode="${config.whisper.mode}"]:not(.disabled)`,
     );
     if (preselect) {
       preselect.classList.add("selected");
@@ -54,7 +54,7 @@ export class ModePicker {
             .querySelectorAll(".mode-card")
             .forEach((c) => c.classList.remove("selected"));
           card.classList.add("selected");
-          config.llm.mode = card.dataset.mode;
+          config.whisper.mode = card.dataset.mode;
           footer.querySelector<HTMLButtonElement>("#next")!.disabled = false;
         });
       });

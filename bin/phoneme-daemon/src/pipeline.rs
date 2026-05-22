@@ -18,10 +18,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .emit(DaemonEvent::TranscriptionStarted { id: id.clone() });
 
     // Transcribe — reuse the process-wide client (AppState) so the HTTP
-    // connection pool to the local llama-server stays warm across items.
+    // connection pool to the local whisper-server stays warm across items.
     let cfg = state.config.load();
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
-    let transcript = match state.transcription.transcribe(&cfg.llm.external_url, Duration::from_secs(cfg.llm.timeout_secs), &audio_path).await {
+    let transcript = match state.transcription.transcribe(&cfg.whisper.external_url, Duration::from_secs(cfg.whisper.timeout_secs), &audio_path).await {
         Ok(t) => t,
         Err(e) => {
             state
@@ -30,7 +30,7 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
                 .await?;
             state
                 .inbox
-                .finish_failed(&id, "llm_error", &e.to_string())
+                .finish_failed(&id, "whisper_error", &e.to_string())
                 .await?;
             state.events.emit(DaemonEvent::TranscriptionFailed {
                 id: id.clone(),
@@ -41,10 +41,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     };
 
     payload.transcript = transcript.clone();
-    // The llama-server supervisor (Task 12) will publish the actually-loaded
+    // The whisper-server supervisor (Task 12) will publish the actually-loaded
     // model name; until then, fall back to the configured model_path's file
     // stem or "unknown".
-    payload.model = std::path::Path::new(&cfg.llm.model_path)
+    payload.model = std::path::Path::new(&cfg.whisper.model_path)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown")

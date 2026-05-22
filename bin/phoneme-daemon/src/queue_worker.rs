@@ -1,7 +1,7 @@
 //! Queue worker — drains inbox/pending serially.
 //!
 //! Loop: claim_next → pipeline::run → emit QueueDepthChanged. On
-//! transient failure (LlmUnreachable, LlmTimeout) sleep with exponential
+//! transient failure (WhisperUnreachable, WhisperTimeout) sleep with exponential
 //! backoff and retry.
 
 use crate::app_state::AppState;
@@ -22,7 +22,7 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
         }
 
         // A transient I/O error (antivirus lock, NTFS journal flush) must not
-        // permanently kill the worker — retry with the same backoff the LLM
+        // permanently kill the worker — retry with the same backoff the Whisper
         // path uses. `?` here would silently stop all transcription.
         let claimed = match state.inbox.claim_next().await {
             Ok(c) => c,
@@ -48,11 +48,11 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                     Ok(()) => {
                         backoff = Duration::from_secs(30); // reset on success
                     }
-                    Err(Error::LlmUnreachable { .. }) | Err(Error::LlmTimeout { .. }) => {
+                    Err(Error::WhisperUnreachable { .. }) | Err(Error::WhisperTimeout { .. }) => {
                         state
                             .events
-                            .emit(DaemonEvent::LlmStatusChanged { reachable: false });
-                        tracing::warn!(?backoff, "LLM unreachable; sleeping before retry");
+                            .emit(DaemonEvent::WhisperStatusChanged { reachable: false });
+                        tracing::warn!(?backoff, "Whisper unreachable; sleeping before retry");
                         tokio::select! {
                             _ = tokio::time::sleep(backoff) => {}
                             _ = shutdown.changed() => return Ok(()),

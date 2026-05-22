@@ -2,7 +2,7 @@
 
 use crate::app_state::AppState;
 use crate::shutdown::ShutdownSignal;
-use phoneme_core::config::LlmMode;
+use phoneme_core::config::WhisperMode;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -14,8 +14,8 @@ const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// Test-injection-friendly configuration. `binary_override` lets integration
 /// tests substitute a stub for the real `whisper-server.exe`.
 #[allow(dead_code)]
-pub struct LlmSupervisorConfig {
-    pub mode: LlmMode,
+pub struct WhisperSupervisorConfig {
+    pub mode: WhisperMode,
     pub model_path: String,
     pub port: u16,
     pub bundled_server_args: Vec<String>,
@@ -41,7 +41,7 @@ pub async fn run_with(
 
         let cfg = state.config.load().expanded().unwrap_or_else(|_| (**state.config.load()).clone());
         
-        if cfg.llm.mode == LlmMode::External {
+        if cfg.whisper.mode == WhisperMode::External {
             // In external mode, we don't manage a bundled server. Just wait a bit and re-check.
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
@@ -63,8 +63,8 @@ pub async fn run_with(
             }
         };
 
-        if cfg.llm.model_path.is_empty() || !std::path::Path::new(&cfg.llm.model_path).exists() {
-            tracing::info!("llm.model_path is empty or missing, waiting for download...");
+        if cfg.whisper.model_path.is_empty() || !std::path::Path::new(&cfg.whisper.model_path).exists() {
+            tracing::info!("whisper.model_path is empty or missing, waiting for download...");
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
                 _ = shutdown.wait() => return Ok(()),
@@ -74,15 +74,15 @@ pub async fn run_with(
         let mut command = Command::new(&server_path);
         command
             .arg("-m")
-            .arg(&cfg.llm.model_path)
+            .arg(&cfg.whisper.model_path)
             .arg("--port")
-            .arg(cfg.llm.bundled_server_port.to_string())
+            .arg(cfg.whisper.bundled_server_port.to_string())
             .arg("--host")
             .arg("127.0.0.1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        for extra in &cfg.llm.bundled_server_args {
+        for extra in &cfg.whisper.bundled_server_args {
             command.arg(extra);
         }
 

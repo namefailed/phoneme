@@ -20,8 +20,8 @@ This crate is platform-agnostic and provides the building blocks consumed by
 
 ## Public API stability
 
-The crate is `1.0.0-dev` and does not yet commit to a stable API. Once Phoneme
-ships v1.0 the public surface here will be stabilised.
+The crate is `1.1.0-dev` and does not yet commit to a stable API. Once Phoneme
+ships v1.1 the public surface here will be stabilised.
 
 ## Hook contract
 

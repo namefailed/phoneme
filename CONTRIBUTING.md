@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Phoneme! This document outlines t
 
 Phoneme is designed as a local-first voice transcription suite for Windows. The project is split into three main components within a single Cargo workspace:
 
-1. **`phoneme-daemon`**: The headless backend. It manages the audio recording lifecycle (via CPAL), queueing, sqlite catalog storage, and the lifecycle of the local LLM (llama-server). It exposes a Windows Named Pipe (`\\.\pipe\phoneme-daemon`) for IPC.
+1. **`phoneme-daemon`**: The headless backend. It manages the audio recording lifecycle (via CPAL), queueing, sqlite catalog storage, and the lifecycle of the local Whisper (whisper-server). It exposes a Windows Named Pipe (`\\.\pipe\phoneme-daemon`) for IPC.
 2. **`phoneme-tray`** (in `src-tauri`): The Tauri 2 desktop shell and system tray icon. It provides the React/TypeScript frontend (in `frontend/`) and communicates with the daemon over IPC.
 3. **`phoneme`**: The command-line interface (CLI) client. It is a first-class citizen and can trigger the exact same actions as the GUI (e.g., `phoneme record --oneshot`).
 

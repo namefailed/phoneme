@@ -31,7 +31,7 @@ async fn returns_transcript_text_on_200() {
 }
 
 #[tokio::test]
-async fn returns_llm_error_on_500() {
+async fn returns_whisper_error_on_500() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
@@ -44,11 +44,11 @@ async fn returns_llm_error_on_500() {
     let client = TranscriptionClient::new();
     let err = client.transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav).await.unwrap_err();
     match err {
-        Error::LlmError { status, body } => {
+        Error::WhisperError { status, body } => {
             assert_eq!(status, 500);
             assert!(body.contains("model loading"));
         }
-        other => panic!("expected LlmError, got {other:?}"),
+        other => panic!("expected WhisperError, got {other:?}"),
     }
 }
 
@@ -69,7 +69,7 @@ async fn returns_timeout_when_server_slow() {
     let wav = fake_wav(&dir).await;
     let client = TranscriptionClient::new();
     let err = client.transcribe(&server.uri(), std::time::Duration::from_millis(100), &wav).await.unwrap_err();
-    assert!(matches!(err, Error::LlmTimeout { .. }));
+    assert!(matches!(err, Error::WhisperTimeout { .. }));
 }
 
 #[tokio::test]
@@ -77,16 +77,16 @@ async fn returns_unreachable_when_no_server() {
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
     // Use an unbound high port on localhost. On Linux this usually returns
-    // ECONNREFUSED immediately (→ LlmUnreachable). On Windows the privileged
+    // ECONNREFUSED immediately (→ WhisperUnreachable). On Windows the privileged
     // port :1 sometimes stalls until the configured client timeout (→
-    // LlmTimeout). Either error semantically means "couldn't reach the server",
+    // WhisperTimeout). Either error semantically means "couldn't reach the server",
     // so accept both — the spec's distinction matters more in the daemon's
     // retry/backoff logic than in this unit-level test.
     let client = TranscriptionClient::new();
     let err = client.transcribe("http://127.0.0.1:1", std::time::Duration::from_secs(2), &wav).await.unwrap_err();
     assert!(
-        matches!(err, Error::LlmUnreachable { .. } | Error::LlmTimeout { .. }),
-        "expected LlmUnreachable or LlmTimeout, got {err:?}"
+        matches!(err, Error::WhisperUnreachable { .. } | Error::WhisperTimeout { .. }),
+        "expected WhisperUnreachable or WhisperTimeout, got {err:?}"
     );
 }
 

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
-    pub llm: LlmConfig,
+    pub whisper: LlmConfig,
     pub recording: RecordingConfig,
     pub hook: HookConfig,
     pub hotkey: HotkeyConfig,
@@ -14,7 +14,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LlmMode {
+pub enum WhisperMode {
     External,
     BundledModel,
     BundledDownload,
@@ -22,7 +22,7 @@ pub enum LlmMode {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmConfig {
-    pub mode: LlmMode,
+    pub mode: WhisperMode,
     pub external_url: String,
     pub model_path: String,
     pub bundled_server_port: u16,
@@ -83,8 +83,8 @@ pub struct DaemonConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            llm: LlmConfig {
-                mode: LlmMode::External,
+            whisper: LlmConfig {
+                mode: WhisperMode::External,
                 external_url: "http://127.0.0.1:5809".into(),
                 model_path: String::new(),
                 bundled_server_port: 5809,
@@ -150,9 +150,9 @@ impl Config {
                 self.recording.channels
             )));
         }
-        if self.llm.mode == LlmMode::BundledModel && self.llm.model_path.is_empty() {
+        if self.whisper.mode == WhisperMode::BundledModel && self.whisper.model_path.is_empty() {
             return Err(Error::InvalidConfig(
-                "llm.model_path is required when llm.mode = bundled_model".into(),
+                "whisper.model_path is required when whisper.mode = bundled_model".into(),
             ));
         }
         match self.daemon.log_level.as_str() {
@@ -171,7 +171,7 @@ impl Config {
     pub fn expanded(&self) -> Result<Self> {
         let mut out = self.clone();
         out.recording.audio_dir = expand(&out.recording.audio_dir)?;
-        out.llm.model_path = expand(&out.llm.model_path)?;
+        out.whisper.model_path = expand(&out.whisper.model_path)?;
         let mut expanded_cmds = Vec::new();
         for c in &out.hook.commands {
             expanded_cmds.push(expand(c)?);
@@ -270,8 +270,8 @@ mod tests {
     #[test]
     fn bundled_model_requires_model_path() {
         let mut cfg = Config::default();
-        cfg.llm.mode = LlmMode::BundledModel;
-        cfg.llm.model_path = String::new();
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = String::new();
         let err = cfg.validate().unwrap_err();
         assert!(format!("{err}").contains("model_path"));
     }

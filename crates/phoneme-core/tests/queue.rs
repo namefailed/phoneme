@@ -123,7 +123,7 @@ async fn finish_failed_moves_processing_to_failed() {
     let id = RecordingId::new();
     q.enqueue(&make_payload(id.clone())).await.unwrap();
     let claimed = q.claim_next().await.unwrap().unwrap();
-    q.finish_failed(&claimed.id, "llm_unreachable", "connection refused")
+    q.finish_failed(&claimed.id, "whisper_unreachable", "connection refused")
         .await
         .unwrap();
     assert!(dir

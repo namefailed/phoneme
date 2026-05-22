@@ -15,7 +15,7 @@ pub enum TrayState {
     Recording,
     Transcribing,
     CatchupBacklog(u32),
-    LlmError,
+    WhisperError,
     HookFailed,
 }
 
@@ -25,7 +25,7 @@ impl TrayState {
             Self::Idle => "icons/tray-idle.png",
             Self::Recording => "icons/tray-recording.png",
             Self::Transcribing | Self::CatchupBacklog(_) => "icons/tray-transcribing.png",
-            Self::LlmError | Self::HookFailed => "icons/tray-error.png",
+            Self::WhisperError | Self::HookFailed => "icons/tray-error.png",
         }
     }
 
@@ -34,8 +34,8 @@ impl TrayState {
             Self::Idle => "Phoneme — ready".into(),
             Self::Recording => "Recording…".into(),
             Self::Transcribing => "Transcribing".into(),
-            Self::CatchupBacklog(n) => format!("{n} pending — LLM unreachable"),
-            Self::LlmError => "LLM unreachable — click to open Doctor".into(),
+            Self::CatchupBacklog(n) => format!("{n} pending — Whisper unreachable"),
+            Self::WhisperError => "Whisper unreachable — click to open Doctor".into(),
             Self::HookFailed => "Last hook failed — click to view".into(),
         }
     }

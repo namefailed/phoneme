@@ -54,13 +54,13 @@ fn derive_tray_state(event: &DaemonEvent) -> Option<TrayState> {
         DaemonEvent::TranscriptionDone { .. } | DaemonEvent::HookDone { .. } => {
             Some(TrayState::Idle)
         }
-        DaemonEvent::TranscriptionFailed { .. } => Some(TrayState::LlmError),
+        DaemonEvent::TranscriptionFailed { .. } => Some(TrayState::WhisperError),
         DaemonEvent::HookFailed { .. } => Some(TrayState::HookFailed),
         DaemonEvent::QueueDepthChanged { pending, .. } if *pending > 0 => {
             Some(TrayState::CatchupBacklog(*pending as u32))
         }
-        DaemonEvent::LlmStatusChanged { reachable: false } => Some(TrayState::LlmError),
-        DaemonEvent::LlmStatusChanged { reachable: true } => Some(TrayState::Idle),
+        DaemonEvent::WhisperStatusChanged { reachable: false } => Some(TrayState::WhisperError),
+        DaemonEvent::WhisperStatusChanged { reachable: true } => Some(TrayState::Idle),
         _ => None,
     }
 }

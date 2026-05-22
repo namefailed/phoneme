@@ -1,7 +1,7 @@
 # phoneme-daemon
 
 The headless brain of [Phoneme](../../README.md). Owns audio capture, the
-inbox queue, the SQLite catalog, and (in bundled modes) the llama-server
+inbox queue, the SQLite catalog, and (in bundled modes) the whisper-server
 process. Exposes all operations over a Windows named-pipe IPC surface.
 
 Clients: `phoneme` CLI (see `bin/phoneme/`, Plan 3b), the Tauri tray app
@@ -15,10 +15,10 @@ Clients: `phoneme` CLI (see `bin/phoneme/`, Plan 3b), the Tauri tray app
 | `event_bus` | `tokio::sync::broadcast` channel for `DaemonEvent`s |
 | `ipc_server` | Accept loop on `\\.\pipe\<name>` |
 | `ipc_handler` | `Request` → `Response` routing + `SubscribeEvents` streaming |
-| `llm_supervisor` | Spawns/monitors `llama-server.exe` in bundled modes |
+| `whisper_supervisor` | Spawns/monitors `whisper-server.exe` in bundled modes |
 | `logging` | tracing-subscriber: stderr (`--foreground`) / JSON file (default) |
 | `pipeline` | Per-payload pipeline: transcribe → hook → done |
-| `queue_worker` | Drains `inbox/pending/` serially; exponential backoff on LLM outage |
+| `queue_worker` | Drains `inbox/pending/` serially; exponential backoff on Whisper outage |
 | `reconcile` | Startup recovery (orphan inbox files, stale catalog rows) |
 | `recorder` | Daemon-side recorder wrapper; owns the single active recording |
 | `shutdown` | Ctrl+C handler + `watch::Sender<bool>` shutdown coordinator |
@@ -60,12 +60,12 @@ cargo test -p phoneme-daemon -- --test-threads=1
 ```
 
 Integration tests use the `DaemonHarness` in `tests/common/mod.rs`, which
-spins up a temp directory, a wiremock-backed stub llama-server, and the
+spins up a temp directory, a wiremock-backed stub whisper-server, and the
 real daemon binary. `--test-threads=1` keeps named-pipe bind races out of
 the picture during early development; revisit once we add pipe-name
 randomization to the harness.
 
-Recording-flow integration tests (basic_flow, llm_unreachable, hook_timeout,
+Recording-flow integration tests (basic_flow, whisper_unreachable, hook_timeout,
 crash_recovery, concurrent_record, replay, event_stream, rebuild_catalog)
 are deferred until the `test-mode` synthetic-audio plumbing lands — see
 Plan 2026-05-19 Task 14 deviation note.

@@ -61,7 +61,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         Err(code) => return code,
     };
 
-    let timeout = std::time::Duration::from_secs(cfg.llm.timeout_secs + 60);
+    let timeout = std::time::Duration::from_secs(cfg.whisper.timeout_secs + 60);
     let start = std::time::Instant::now();
 
     while start.elapsed() < timeout {
@@ -76,7 +76,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
             }
             Ok(Some(Ok(DaemonEvent::TranscriptionFailed { error, .. }))) => {
                 eprintln!("transcription failed: {error}");
-                return ExitCode::from(exit::LLM_UNREACHABLE);
+                return ExitCode::from(exit::Whisper_UNREACHABLE);
             }
             Ok(Some(Ok(_))) => continue, // other events
             Ok(Some(Err(e))) => {

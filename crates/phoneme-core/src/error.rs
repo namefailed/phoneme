@@ -16,14 +16,14 @@ pub enum Error {
     #[error("invalid config: {0}")]
     InvalidConfig(String),
 
-    #[error("LLM unreachable at {url}: {source}")]
-    LlmUnreachable { url: String, source: reqwest::Error },
+    #[error("Whisper unreachable at {url}: {source}")]
+    WhisperUnreachable { url: String, source: reqwest::Error },
 
-    #[error("LLM timed out after {secs}s")]
-    LlmTimeout { secs: u64 },
+    #[error("Whisper timed out after {secs}s")]
+    WhisperTimeout { secs: u64 },
 
-    #[error("LLM returned status {status}: {body}")]
-    LlmError { status: u16, body: String },
+    #[error("Whisper returned status {status}: {body}")]
+    WhisperError { status: u16, body: String },
 
     #[error("hook failed with exit {code}: {stderr_tail}")]
     HookFailed { code: i32, stderr_tail: String },

@@ -52,12 +52,12 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     });
 
     // Model file (only relevant in bundled modes).
-    if cfg.llm.mode == phoneme_core::config::LlmMode::BundledModel {
-        let model_ok = std::path::Path::new(&cfg.llm.model_path).exists();
+    if cfg.whisper.mode == phoneme_core::config::WhisperMode::BundledModel {
+        let model_ok = std::path::Path::new(&cfg.whisper.model_path).exists();
         out.push(CheckResult {
             name: "Model file".into(),
             ok: model_ok,
-            detail: cfg.llm.model_path.clone(),
+            detail: cfg.whisper.model_path.clone(),
             fix_action: None,
         });
     }

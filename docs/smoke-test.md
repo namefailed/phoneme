@@ -7,14 +7,14 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
 
 - [ ] Uninstall any existing Phoneme.
 - [ ] Delete `%APPDATA%\phoneme\` and `%LOCALAPPDATA%\phoneme\`.
-- [ ] Have a llama-server reachable at `http://127.0.0.1:5809` with a Gemma
+- [ ] Have a whisper-server reachable at `http://127.0.0.1:5809` with a Gemma
       model loaded (or use bundled-server mode 2 with a known-good GGUF).
 
 ## Install + wizard
 
 - [ ] Install the new MSI.
 - [ ] First launch: wizard appears.
-  - [ ] Step 2 (mode) — three cards visible, mode 3 disabled with "v1.1" badge.
+  - [ ] Step 2 (mode) — three cards visible, mode 3 selectable.
   - [ ] Step 3 (configure) — Test button reports success for working endpoint.
   - [ ] Step 4 (microphone) — device list populates.
   - [ ] Step 5 (hook) — default points at `to-stdout.ps1`.
@@ -51,10 +51,10 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
 
 ## Failure modes
 
-- [ ] Kill llama-server. Trigger a recording.
+- [ ] Kill whisper-server. Trigger a recording.
   - [ ] Tray turns amber with "N pending" tooltip.
   - [ ] Recording lands in inbox/pending and stays there.
-  - [ ] Restart llama-server. Within ~30 seconds the queue drains.
+  - [ ] Restart whisper-server. Within ~30 seconds the queue drains.
 - [ ] Disconnect microphone mid-recording. The daemon surfaces an error;
       tray shows red icon; Doctor view explains.
 - [ ] Edit `config.toml` with a bogus value (e.g., `recording.sample_rate = 7`)
@@ -64,7 +64,7 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
 ## Settings
 
 - [ ] Open Settings via tray or ⚙ button.
-- [ ] All eight sections render: LLM, Recording, Hotkey, Hook, Storage, Tray,
+- [ ] All eight sections render: Whisper, Recording, Hotkey, Hook, Storage, Tray,
       Advanced.
 - [ ] Change the silence threshold and Save. Verify `%APPDATA%\phoneme\config.toml`
       is updated atomically.

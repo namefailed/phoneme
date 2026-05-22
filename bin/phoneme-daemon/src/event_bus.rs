@@ -55,6 +55,6 @@ mod tests {
     #[tokio::test]
     async fn emit_with_no_subscribers_does_not_panic() {
         let bus = EventBus::new();
-        bus.emit(DaemonEvent::LlmStatusChanged { reachable: false });
+        bus.emit(DaemonEvent::WhisperStatusChanged { reachable: false });
     }
 }

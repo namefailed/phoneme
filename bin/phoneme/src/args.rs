@@ -120,7 +120,7 @@ pub struct ConfigArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigAction {
-    /// Set a config value: `phoneme config set llm.mode external`.
+    /// Set a config value: `phoneme config set whisper.mode external`.
     Set { key: String, value: String },
     /// Print the config file path.
     Path,

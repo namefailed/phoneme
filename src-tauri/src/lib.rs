@@ -99,7 +99,7 @@ pub fn run() {
             commands::config_exists,
             commands::config_path,
             commands::doctor_local_checks,
-            commands::wizard_test_llm,
+            commands::wizard_test_whisper,
             commands::wizard_test_hook,
             commands::list_input_devices,
             commands::list_tags,

@@ -11,7 +11,7 @@ transcript — your way.
 
 1. You press a hotkey (or run `phoneme record --oneshot`).
 2. Phoneme records audio from your microphone.
-3. A local LLM transcribes it (no cloud).
+3. A local Whisper transcribes it (no cloud).
 4. The transcript becomes JSON, piped to **your script** — append to a journal,
    create a Denote note, post to a webhook, whatever.
 
@@ -22,12 +22,12 @@ The app does not touch your journal. It transcribes. You decide where it goes.
 Download the latest `.msi` from the [releases page](../../releases) and run it.
 
 On first launch the wizard walks you through:
-- Pointing at your llama-server (or using the bundled one with your GGUF)
+- Pointing at your whisper-server (or using the bundled one with your GGUF)
 - Picking your microphone
 - Picking your hook script (default writes to stdout)
 - Optional global hotkey
 
-Requirements: Windows 10/11. A locally running [llama-server][llama-server]
+Requirements: Windows 10/11. A locally running [whisper-server][whisper-server]
 (installed alongside Phoneme in bundled mode, or run separately in external
 mode). For bundled mode you also bring your own GGUF model file (e.g.,
 [Gemma-4-E4B][gemma]).
@@ -35,7 +35,7 @@ mode). For bundled mode you also bring your own GGUF model file (e.g.,
 ## Why "local-first"
 
 No cloud. No telemetry. No update pings. The only network calls Phoneme makes
-are to your configured llama-server endpoint and, optionally and only when
+are to your configured whisper-server endpoint and, optionally and only when
 you click it, Hugging Face (during the v1.1 download-model wizard).
 
 ## CLI is a peer, not a fallback
@@ -78,7 +78,7 @@ See [docs/hooks.md](docs/hooks.md) for the full contract.
 Three binaries, three libraries, one workspace:
 
 ```
-phoneme-daemon      headless brain (audio + queue + catalog + LLM lifecycle)
+phoneme-daemon      headless brain (audio + queue + catalog + Whisper lifecycle)
   ▲    ▲    ▲
   │    │    │  named pipe \\.\pipe\phoneme-daemon
   │    │    └─ Kanata / AHK / external hotkey daemon
@@ -114,7 +114,7 @@ See [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Roadmap
 
-- **v1.0** — Windows MSI, single hook delivery, modes 1+2
+- **v1.1** — Windows MSI, single hook delivery, modes 1+2
 - **v1.1** *(this release)* — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
 - **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
 
@@ -131,5 +131,5 @@ MIT OR Apache-2.0.
 Phoneme is built by [@namefailed](https://github.com/namefailed). It is not a
 commercial product, has no telemetry, and never will.
 
-[llama-server]: https://github.com/ggerganov/llama.cpp
+[whisper-server]: https://github.com/ggerganov/whisper.cpp
 [gemma]: https://huggingface.co/google/gemma-4-E4B

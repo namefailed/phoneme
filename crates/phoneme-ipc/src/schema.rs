@@ -75,8 +75,8 @@ pub enum IpcErrorKind {
     NotRecording,
     NotFound,
     InvalidConfig,
-    LlmUnreachable,
-    LlmTimeout,
+    WhisperUnreachable,
+    WhisperTimeout,
     HookFailed,
     DaemonNotRunning,
     PipeInUse,
@@ -125,7 +125,7 @@ pub enum DaemonEvent {
         processing: usize,
         failed: usize,
     },
-    LlmStatusChanged {
+    WhisperStatusChanged {
         reachable: bool,
     },
     RecordingDeleted {

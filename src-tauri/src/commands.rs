@@ -37,8 +37,8 @@ fn json_kind(k: &phoneme_ipc::IpcErrorKind) -> &'static str {
         NotRecording => "not_recording",
         NotFound => "not_found",
         InvalidConfig => "invalid_config",
-        LlmUnreachable => "llm_unreachable",
-        LlmTimeout => "llm_timeout",
+        WhisperUnreachable => "whisper_unreachable",
+        WhisperTimeout => "whisper_timeout",
         HookFailed => "hook_failed",
         DaemonNotRunning => "daemon_not_running",
         PipeInUse => "pipe_in_use",
@@ -162,8 +162,8 @@ pub fn doctor_local_checks() -> Result<Vec<CheckResult>, String> {
 }
 
 #[tauri::command]
-pub async fn wizard_test_llm(url: String) -> Result<TestConnectResult, String> {
-    Ok(crate::wizard::test_llm_endpoint(&url).await)
+pub async fn wizard_test_whisper(url: String) -> Result<TestConnectResult, String> {
+    Ok(crate::wizard::test_whisper_endpoint(&url).await)
 }
 
 #[tauri::command]

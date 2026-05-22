@@ -11,7 +11,7 @@ export class ConfigureMode {
     private config: any,
     cbs: StepCallbacks,
   ) {
-    const mode = this.config.llm.mode;
+    const mode = this.config.whisper.mode;
     if (mode === "external") {
       this.renderExternal(body, footer, cbs);
     } else if (mode === "bundled_model") {
@@ -29,18 +29,18 @@ export class ConfigureMode {
       <p class="wizard-subtitle">Enter the URL of your running whisper-server with an OpenAI-compatible API.</p>
       <div class="wizard-field">
         <label>Endpoint URL</label>
-        <input type="text" id="url" value="${this.config.llm.external_url}" />
+        <input type="text" id="url" value="${this.config.whisper.external_url}" />
       </div>
       <button class="wizard-btn" id="test">Test connection</button>
       <div class="test-result" id="result" style="display:none"></div>
     `;
     this.renderFooter(footer, cbs);
     body.querySelector<HTMLInputElement>("#url")!.addEventListener("input", (e) => {
-      this.config.llm.external_url = (e.target as HTMLInputElement).value;
+      this.config.whisper.external_url = (e.target as HTMLInputElement).value;
     });
     body.querySelector("#test")?.addEventListener("click", async () => {
-      const r = await invoke<{ ok: boolean; message: string }>("wizard_test_llm", {
-        url: this.config.llm.external_url,
+      const r = await invoke<{ ok: boolean; message: string }>("wizard_test_whisper", {
+        url: this.config.whisper.external_url,
       });
       const el = body.querySelector<HTMLElement>("#result")!;
       el.style.display = "block";
@@ -59,7 +59,7 @@ export class ConfigureMode {
       <p class="wizard-subtitle">A GGUF model file (e.g., Gemma-4-E4B Q5_K_M).</p>
       <div class="wizard-field">
         <label>Model path</label>
-        <input type="text" id="path" value="${this.config.llm.model_path}" />
+        <input type="text" id="path" value="${this.config.whisper.model_path}" />
         <button class="wizard-btn small" id="browse">Browse…</button>
       </div>
     `;
@@ -71,12 +71,12 @@ export class ConfigureMode {
         filters: [{ name: "GGUF model", extensions: ["gguf"] }],
       });
       if (typeof path === "string") {
-        this.config.llm.model_path = path;
+        this.config.whisper.model_path = path;
         body.querySelector<HTMLInputElement>("#path")!.value = path;
       }
     });
     body.querySelector<HTMLInputElement>("#path")!.addEventListener("input", (e) => {
-      this.config.llm.model_path = (e.target as HTMLInputElement).value;
+      this.config.whisper.model_path = (e.target as HTMLInputElement).value;
     });
   }
 
@@ -123,8 +123,8 @@ export class ConfigureMode {
     invoke<string>("wizard_download_model", { url, filename })
       .then(async (path) => {
         if (unlisten) unlisten();
-        this.config.llm.mode = "bundled_model";
-        this.config.llm.model_path = path;
+        this.config.whisper.mode = "bundled_model";
+        this.config.whisper.model_path = path;
         
         // Start server download
         body.querySelector<HTMLElement>("#download-title")!.textContent = "Downloading server";

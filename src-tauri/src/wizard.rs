@@ -10,8 +10,8 @@ pub struct TestConnectResult {
     pub message: String,
 }
 
-/// Test that `cfg.llm.external_url` responds. Best-effort GET probe.
-pub async fn test_llm_endpoint(url: &str) -> TestConnectResult {
+/// Test that `cfg.whisper.external_url` responds. Best-effort GET probe.
+pub async fn test_whisper_endpoint(url: &str) -> TestConnectResult {
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()

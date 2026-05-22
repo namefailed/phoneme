@@ -3,7 +3,7 @@
 export type FieldKind = "text" | "number" | "checkbox" | "select" | "textarea";
 
 export type Field = {
-  key: string; // dotted path e.g. "llm.timeout_secs"
+  key: string; // dotted path e.g. "whisper.timeout_secs"
   label: string;
   kind: FieldKind;
   help?: string;

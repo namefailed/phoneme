@@ -41,7 +41,7 @@ The frontend lives in `../frontend/` (Vite + vanilla TS). Tauri's
 
 Left-click on the tray icon toggles the window. Icon + tooltip update from
 `events.rs` as `DaemonEvent`s arrive (idle → recording → transcribing →
-back to idle, or → error on llama/hook failures).
+back to idle, or → error on whisper/hook failures).
 
 ## Frontend bridge
 

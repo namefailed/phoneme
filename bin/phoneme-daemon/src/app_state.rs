@@ -64,7 +64,7 @@ pub struct AppState {
     /// stops the daemon.
     pub shutdown: Arc<ShutdownCoordinator>,
     /// One transcription HTTP client for the whole process. Reused across
-    /// every queued item so the connection pool to the local llama-server
+    /// every queued item so the connection pool to the local whisper-server
     /// is kept warm instead of rebuilt per recording.
     pub transcription: TranscriptionClient,
     pub webhook: WebhookClient,

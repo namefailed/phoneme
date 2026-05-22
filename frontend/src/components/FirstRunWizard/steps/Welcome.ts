@@ -18,7 +18,7 @@ export class Welcome {
       <p class="wizard-subtitle">Local-first voice notes. Press a hotkey, speak, get a transcript — all on your machine.</p>
       <ul class="wizard-bullets">
         <li>Records audio via your microphone</li>
-        <li>Transcribes locally with llama-server (no cloud)</li>
+        <li>Transcribes locally with whisper-server (no cloud)</li>
         <li>Emits the transcript as JSON to your hook script</li>
       </ul>
       <p class="wizard-subtitle">Let's get it set up.</p>
