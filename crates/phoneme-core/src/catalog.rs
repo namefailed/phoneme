@@ -145,6 +145,14 @@ impl Catalog {
     }
 
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
+        // A non-empty text search delegates to the FTS5 path. This currently
+        // ignores the status/since filters when search is set — acceptable
+        // until a combined FTS+filter query is actually requested.
+        if let Some(q) = filter.search.as_deref() {
+            if !q.trim().is_empty() {
+                return self.search(q).await;
+            }
+        }
         let mut sql = String::from("SELECT * FROM recordings WHERE 1=1");
         if filter.status.is_some() {
             sql.push_str(" AND status = ?");

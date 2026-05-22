@@ -57,6 +57,50 @@ async fn claim_next_returns_none_when_empty() {
 }
 
 #[tokio::test]
+async fn claim_next_quarantines_corrupt_payload() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    // Drop an unparseable file straight into pending/ (18-char id stem).
+    let bad = dir
+        .path()
+        .join("pending")
+        .join("20260519T143500000.json");
+    std::fs::write(&bad, b"this is not json").unwrap();
+
+    // claim_next consumes it and reports "nothing valid to claim".
+    assert!(q.claim_next().await.unwrap().is_none());
+    // It must be out of pending/ and quarantined in failed/.
+    assert!(!bad.exists());
+    assert!(dir
+        .path()
+        .join("failed")
+        .join("20260519T143500000.json")
+        .exists());
+}
+
+#[tokio::test]
+async fn claim_next_skips_corrupt_then_serves_valid() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    // Corrupt file with an early-sorting id.
+    let bad = dir
+        .path()
+        .join("pending")
+        .join("20260519T090000000.json");
+    std::fs::write(&bad, b"{ broken").unwrap();
+    // Valid file with a later id — must not be starved by the corrupt one.
+    let good =
+        RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap());
+    q.enqueue(&make_payload(good.clone())).await.unwrap();
+
+    // First claim quarantines the corrupt file → None.
+    assert!(q.claim_next().await.unwrap().is_none());
+    // Second claim serves the valid payload.
+    let claimed = q.claim_next().await.unwrap().expect("valid payload");
+    assert_eq!(claimed.id, good);
+}
+
+#[tokio::test]
 async fn finish_done_moves_processing_to_done() {
     let dir = TempDir::new().unwrap();
     let q = InboxQueue::new(dir.path()).await.unwrap();

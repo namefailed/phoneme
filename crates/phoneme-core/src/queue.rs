@@ -86,20 +86,35 @@ impl InboxQueue {
 
     /// Claim the oldest pending payload (moving it to `processing/`).
     /// Returns `None` if there's nothing pending.
+    ///
+    /// A corrupt (unparseable) payload is claimed exactly once, quarantined to
+    /// `failed/`, and reported as `Ok(None)` so the caller simply tries the
+    /// next file. The rename-before-parse ordering is what makes this work: if
+    /// we parsed first, a single corrupt file at the head of the queue would
+    /// fail every `claim_next()` call forever and starve every file behind it.
     pub async fn claim_next(&self) -> Result<Option<HookPayload>> {
         let pending = self.root.join("pending");
-        let mut entries = read_json_entries_sorted(&pending).await?;
-        let Some(file) = entries.first().cloned() else {
+        let entries = read_json_entries_sorted(&pending).await?;
+        let Some(file) = entries.first() else {
             return Ok(None);
         };
         let id_str = file
             .file_stem()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| Error::Internal(format!("bad inbox filename: {}", file.display())))?;
-        let payload = read_payload(&file).await?;
+            .ok_or_else(|| Error::Internal(format!("bad inbox filename: {}", file.display())))?
+            .to_string();
         let processing = self.root.join("processing").join(format!("{id_str}.json"));
-        fs::rename(&file, &processing).await?;
-        entries.remove(0);
+        fs::rename(file, &processing).await?;
+        let payload = match read_payload(&processing).await {
+            Ok(p) => p,
+            Err(e) => {
+                // Quarantine the unparseable file so it stops blocking the queue.
+                let id = RecordingId::from_str_unchecked(&id_str);
+                self.finish_failed(&id, "corrupt_payload", &e.to_string())
+                    .await?;
+                return Ok(None);
+            }
+        };
         Ok(Some(payload))
     }
 

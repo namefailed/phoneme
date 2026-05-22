@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::types::HookPayload;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::time::timeout;
 
@@ -49,9 +49,39 @@ impl HookRunner {
             drop(stdin);
         }
 
-        let output = match timeout(self.timeout, child.wait_with_output()).await {
+        // Drain stdout/stderr concurrently with the wait. A hook that writes
+        // more than the OS pipe buffer (~64 KB) would otherwise deadlock. The
+        // `child` handle is deliberately kept out of the drain future (only
+        // its pipe handles go in) so it survives for an explicit kill if the
+        // timeout fires — `wait_with_output` would consume it and leave no
+        // way to terminate a runaway process.
+        let mut stdout = child.stdout.take();
+        let mut stderr = child.stderr.take();
+        let mut stderr_buf = Vec::new();
+        let wait_and_drain = async {
+            let drain_out = async {
+                if let Some(so) = stdout.as_mut() {
+                    let mut sink = Vec::new();
+                    let _ = so.read_to_end(&mut sink).await;
+                }
+            };
+            let drain_err = async {
+                if let Some(se) = stderr.as_mut() {
+                    let _ = se.read_to_end(&mut stderr_buf).await;
+                }
+            };
+            let (status, _, _) = tokio::join!(child.wait(), drain_out, drain_err);
+            status
+        };
+
+        let status = match timeout(self.timeout, wait_and_drain).await {
             Ok(r) => r?,
             Err(_) => {
+                // Tokio's `Drop` for `Child` does NOT terminate the process on
+                // Windows — without an explicit kill every hook timeout leaks
+                // a `powershell.exe`.
+                let _ = child.start_kill();
+                let _ = child.wait().await;
                 return Err(Error::HookTimeout {
                     secs: self.timeout.as_secs(),
                 });
@@ -59,10 +89,10 @@ impl HookRunner {
         };
 
         let duration_ms = started.elapsed().as_millis() as i64;
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr_tail = tail_chars(&stderr, 4096);
+        let stderr_text = String::from_utf8_lossy(&stderr_buf);
+        let stderr_tail = tail_chars(&stderr_text, 4096);
 
-        let code = output.status.code().unwrap_or(-1);
+        let code = status.code().unwrap_or(-1);
         if code == 0 {
             Ok(HookResult {
                 exit_code: 0,
