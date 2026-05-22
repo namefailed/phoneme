@@ -43,12 +43,14 @@ you click it, Hugging Face (during the v1.1 download-model wizard).
 Every action available in the GUI is available from the command line:
 
 ```bash
-phoneme record --oneshot                       # record + transcribe + print
+phoneme record --oneshot                        # record + transcribe + print
 phoneme record --start                          # non-blocking start
 phoneme record --stop                           # non-blocking stop
 phoneme list --since 2026-05-19                 # query the catalog
 phoneme show 20260519T143500823                 # one recording's details
+phoneme export backup.zip                       # bulk export audio and metadata
 phoneme doctor                                  # health check
+phoneme config reload                           # hot reload config from disk
 phoneme watch                                   # subscribe to events as JSON
 ```
 
@@ -66,6 +68,8 @@ stdin. Ship your own or use one of the four reference hooks:
 | `to-org-journal.ps1` | Appends to `~/Documents/org/journal.org`. |
 | `to-markdown-daily.ps1` | Appends to `~/Documents/notes/YYYY-MM-DD.md`. |
 | `to-denote.ps1` | Creates a Denote-flavored note file. |
+
+You can chain multiple hooks in `config.toml` under `[hook] commands = ["script1.ps1", "script2.bat"]`, and optionally post the JSON payload to a `webhook_url` at the end of the pipeline.
 
 See [docs/hooks.md](docs/hooks.md) for the full contract.
 
@@ -112,8 +116,8 @@ See [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Roadmap
 
-- **v1.0** *(this release)* — Windows MSI, hooks-only delivery, modes 1+2
-- **v1.1** — Mode 3 (model download wizard), webhook target, multiple hooks
+- **v1.0** — Windows MSI, single hook delivery, modes 1+2
+- **v1.1** *(this release)* — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
 - **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
 
 See the design doc for the full decision log.
