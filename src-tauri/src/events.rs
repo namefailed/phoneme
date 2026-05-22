@@ -7,7 +7,7 @@ use phoneme_ipc::{DaemonEvent, NamedPipeTransport, Transport};
 use tauri::{AppHandle, Emitter};
 
 pub fn spawn(app: AppHandle, bridge: Bridge) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             match run_once(app.clone(), bridge.clone()).await {
                 Ok(()) => break,

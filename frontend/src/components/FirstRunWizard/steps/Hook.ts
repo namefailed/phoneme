@@ -14,7 +14,7 @@ export class Hook {
       <p class="wizard-subtitle">Phoneme runs this script with the transcript as JSON on stdin. Default writes to stdout.</p>
       <div class="wizard-field">
         <label>Hook command</label>
-        <input type="text" id="cmd" value="${this.config.hook.command}" />
+        <input type="text" id="cmd" value="${this.config.hook.commands?.[0] || ""}" />
       </div>
       <div class="wizard-field">
         <label>Timeout (seconds)</label>
@@ -28,7 +28,7 @@ export class Hook {
       <button class="wizard-btn primary" id="next">Continue →</button>
     `;
     body.querySelector<HTMLInputElement>("#cmd")!.addEventListener("input", (e) => {
-      this.config.hook.command = (e.target as HTMLInputElement).value;
+      this.config.hook.commands = [(e.target as HTMLInputElement).value];
     });
     body.querySelector<HTMLInputElement>("#to")!.addEventListener("input", (e) => {
       this.config.hook.timeout_secs = Number((e.target as HTMLInputElement).value);

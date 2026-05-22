@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg = load_config()?;
     let state = AppState::new(cfg).await?;
-    let _guard = logging::init(&state.config, &state.paths.log_dir, args.foreground)?;
+    let _guard = logging::init(&state.config.load(), &state.paths.log_dir, args.foreground)?;
 
     reconcile::run(&state).await?;
 
@@ -86,12 +86,14 @@ async fn main() -> Result<()> {
     server_result
 }
 
-/// Load the daemon's config from `PHONEME_CONFIG` (used by tests and by
-/// CLI invocations that want to point at a specific file) or fall back to
-/// the built-in defaults.
 pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
     if let Ok(p) = std::env::var("PHONEME_CONFIG") {
         return Ok(phoneme_core::Config::load(std::path::Path::new(&p))?);
+    }
+    if let Some(default_path) = phoneme_core::config::default_config_path() {
+        if default_path.exists() {
+            return Ok(phoneme_core::Config::load(&default_path)?);
+        }
     }
     Ok(phoneme_core::Config::default())
 }

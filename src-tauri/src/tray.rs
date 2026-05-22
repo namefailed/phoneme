@@ -63,7 +63,7 @@ pub fn install(app: &AppHandle) -> Result<TrayIcon> {
         ],
     )?;
 
-    let tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::with_id("main")
         .menu(&menu)
         .icon(Image::from_path(TrayState::Idle.icon_path())?)
         .tooltip(TrayState::Idle.tooltip())

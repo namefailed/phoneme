@@ -13,8 +13,10 @@ JSON on stdin**.
 | `stderr` | hook → daemon | Captured to `hook.log`; last 4 KB stored in catalog on non-zero exit |
 | exit code | hook → daemon | `0` = success; non-zero = failure |
 | timeout | daemon enforces | `hook.timeout_secs` (default 30) |
-| working dir | daemon sets | `%USERPROFILE%` |
 | env vars | daemon sets | `PHONEME_ID`, `PHONEME_AUDIO_PATH`, `PHONEME_TRANSCRIPT` |
+
+> [!WARNING]
+> Security Risk: The `PHONEME_TRANSCRIPT` environment variable contains raw, unsanitized user voice-to-text. While environment variables are generally safe, using `$env:PHONEME_TRANSCRIPT` inside `Invoke-Expression` or similar shell eval wrappers exposes your hook to command injection. **Always prefer parsing the JSON payload via stdin (`$payload.transcript`) instead of relying on the environment variable.**
 
 ## The JSON payload
 

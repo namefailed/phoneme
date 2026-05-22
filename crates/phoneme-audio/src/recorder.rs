@@ -70,7 +70,7 @@ struct TaskOutput {
 impl Recorder {
     /// Begin recording with the given source. The task starts pulling
     /// immediately.
-    pub async fn start(mut source: Box<dyn Source>, cfg: RecorderConfig) -> Result<Self> {
+    pub async fn start(mut source: Box<dyn Source>, cfg: RecorderConfig, on_done: Option<tokio::sync::oneshot::Sender<()>>) -> Result<Self> {
         let audio_cfg = source.config();
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<RecorderCommand>(4);
 
@@ -128,6 +128,11 @@ impl Recorder {
 
             let duration_ms =
                 (samples.len() as u64 * 1000 / audio_cfg.sample_rate.as_u32() as u64) as i64;
+            
+            if let Some(tx) = on_done {
+                let _ = tx.send(());
+            }
+
             Ok(TaskOutput {
                 samples,
                 duration_ms,

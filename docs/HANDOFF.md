@@ -27,8 +27,9 @@ and merged; a full code review has been completed and all findings fixed.**
 | 4 | `phoneme-tray` Tauri shell + frontend (recordings view) | ✅ merged |
 | — | Code review 2026-05-21 — 16 findings, all fixed | ✅ merged |
 | 5 | Settings + Doctor view + first-run wizard | ✅ merged |
-| 6 | Hooks library / CI / MSI distribution | ⏳ next |
-| 7 | v1.1 features (webhook hook type, etc.) | ⏳ planned |
+| 6 | Hooks library / CI / MSI distribution | ✅ merged |
+| 7 | v1.1 features (webhook hook type, etc.) | ✅ merged |
+| — | Product Audit 2026-05-21 — Pre-launch full codebase review | ✅ completed |
 | 8 | Cross-platform (macOS, Linux) | ⏳ planned |
 | 9 | Mobile v2 | ⏳ outline only |
 

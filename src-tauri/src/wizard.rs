@@ -38,14 +38,14 @@ pub async fn test_llm_endpoint(url: &str) -> TestConnectResult {
 }
 
 /// Run the configured hook with a sample payload via the daemon.
-pub async fn test_hook(bridge: Option<&Bridge>) -> TestConnectResult {
+pub async fn test_hook(bridge: Option<&Bridge>, custom_command: Option<String>) -> TestConnectResult {
     let Some(bridge) = bridge else {
         return TestConnectResult {
             ok: false,
             message: "daemon not reachable".into(),
         };
     };
-    match bridge.request(Request::HookTest).await {
+    match bridge.request(Request::HookTest { custom_command }).await {
         Ok(Response::Ok(v)) => TestConnectResult {
             ok: v["exit_code"].as_i64() == Some(0),
             message: format!("exit {} in {}ms", v["exit_code"], v["duration_ms"]),

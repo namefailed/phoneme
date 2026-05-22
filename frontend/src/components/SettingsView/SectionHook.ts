@@ -7,6 +7,14 @@ export class SectionHook {
     container: HTMLElement,
     private config: any,
   ) {
+    if (Array.isArray(config.hook.commands)) {
+      config.hook.command = config.hook.commands.length > 0 ? config.hook.commands[0] : "";
+      delete config.hook.commands;
+    } else if (config.hook.commands) {
+      config.hook.command = config.hook.commands;
+      delete config.hook.commands;
+    }
+    
     this.render(container);
   }
 
@@ -57,8 +65,11 @@ export class SectionHook {
       el.style.display = "block";
       el.className = "test-result";
       el.textContent = "Running hook…";
+      const input = container.querySelector<HTMLInputElement>(`[data-key="hook.command"]`)!;
+      const custom_command = input ? input.value : undefined;
       const result = await invoke<{ ok: boolean; message: string }>(
         "wizard_test_hook",
+        { customCommand: custom_command }
       ).catch((e) => ({ ok: false, message: String(e) }));
       el.className = `test-result ${result.ok ? "ok" : "err"}`;
       el.textContent = result.message;

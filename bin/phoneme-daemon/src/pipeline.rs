@@ -73,8 +73,14 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     let mut total_duration = 0;
     let mut last_cmd = String::new();
 
-    for cmd in &cfg.hook.commands {
-        let runner = HookRunner::new(cmd.clone(), Duration::from_secs(cfg.hook.timeout_secs));
+    let expanded_cfg = cfg.expanded().unwrap_or_else(|_| (**cfg).clone());
+
+    for cmd in &expanded_cfg.hook.commands {
+        let trimmed = cmd.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let runner = HookRunner::new(trimmed.to_string(), Duration::from_secs(cfg.hook.timeout_secs));
         match runner.run(&payload).await {
             Ok(result) => {
                 final_exit_code = result.exit_code;

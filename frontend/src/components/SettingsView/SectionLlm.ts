@@ -47,13 +47,15 @@ export class SectionLlm {
           </div>
         </div>
         <div class="settings-field">
-          <label>Model file (.gguf)</label>
+          <label>Model file</label>
           <div>
             ${renderField(
               { key: "llm.model_path", label: "", kind: "text" },
               this.config.llm.model_path,
             )}
             <button class="inline-button" id="pick-model">Browse…</button>
+            <button class="inline-button" id="download-model">Download Default</button>
+            <div id="download-status" style="display:none; font-size: 11px; margin-top: 4px;"></div>
           </div>
         </div>
         <div class="settings-field">
@@ -88,7 +90,7 @@ export class SectionLlm {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const path = await open({
         multiple: false,
-        filters: [{ name: "GGUF model", extensions: ["gguf"] }],
+        filters: [{ name: "Whisper model", extensions: ["bin"] }],
       });
       if (typeof path === "string") {
         const input = container.querySelector<HTMLInputElement>(
@@ -96,6 +98,45 @@ export class SectionLlm {
         )!;
         input.value = path;
         this.config.llm.model_path = path;
+      }
+    });
+
+    container.querySelector("#download-model")?.addEventListener("click", async () => {
+      const statusEl = container.querySelector<HTMLElement>("#download-status")!;
+      statusEl.style.display = "block";
+      statusEl.style.color = "var(--fg-muted)";
+      statusEl.textContent = "Downloading ggml-base.en.bin...";
+      
+      const { listen } = await import("@tauri-apps/api/event");
+      let unlisten: (() => void) | undefined;
+      
+      listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
+        if (e.payload.total) {
+          statusEl.textContent = `Downloading: ${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+        } else {
+          statusEl.textContent = `Downloaded: ${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB`;
+        }
+      }).then((f) => {
+        unlisten = f;
+      });
+
+      try {
+        const path = await invoke<string>("wizard_download_model", {
+          url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+          filename: "ggml-base.en.bin"
+        });
+        
+        if (unlisten) unlisten();
+        const input = container.querySelector<HTMLInputElement>(`[data-key="llm.model_path"]`)!;
+        input.value = path;
+        this.config.llm.model_path = path;
+        
+        statusEl.style.color = "var(--ok)";
+        statusEl.textContent = "Download complete!";
+      } catch (err) {
+        if (unlisten) unlisten();
+        statusEl.style.color = "var(--err)";
+        statusEl.textContent = `Error: ${err}`;
       }
     });
   }

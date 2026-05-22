@@ -3,6 +3,11 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 export class WaveformPlayer {
   private wavesurfer: WaveSurfer | null = null;
+  private onPlayStateChange?: (playing: boolean) => void;
+
+  setOnPlayStateChange(cb: (playing: boolean) => void) {
+    this.onPlayStateChange = cb;
+  }
 
   mount(container: HTMLElement, audioPath: string) {
     if (this.wavesurfer) {
@@ -18,6 +23,9 @@ export class WaveformPlayer {
       height: 60,
       url: convertFileSrc(audioPath),
     });
+
+    this.wavesurfer.on("play", () => this.onPlayStateChange?.(true));
+    this.wavesurfer.on("pause", () => this.onPlayStateChange?.(false));
   }
 
   togglePlay() {

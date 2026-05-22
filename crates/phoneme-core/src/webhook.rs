@@ -2,28 +2,28 @@ use crate::error::{Error, Result};
 use crate::types::HookPayload;
 use std::time::Duration;
 
+#[derive(Clone)]
 pub struct WebhookClient {
-    url: String,
-    timeout: Duration,
     http: reqwest::Client,
 }
 
 impl WebhookClient {
-    pub fn new(url: String, timeout: Duration) -> Self {
-        let http = reqwest::Client::builder().timeout(timeout).build().unwrap();
-        Self { url, timeout, http }
+    pub fn new() -> Self {
+        let http = reqwest::Client::builder().build().unwrap();
+        Self { http }
     }
 
-    pub async fn post(&self, payload: &HookPayload) -> Result<()> {
+    pub async fn post(&self, url: &str, timeout: Duration, payload: &HookPayload) -> Result<()> {
         let response = self
             .http
-            .post(&self.url)
+            .post(url)
+            .timeout(timeout)
             .json(payload)
             .send()
             .await
             .map_err(|e| {
                 if e.is_timeout() {
-                    Error::HookTimeout { secs: self.timeout.as_secs() }
+                    Error::HookTimeout { secs: timeout.as_secs() }
                 } else {
                     Error::Internal(format!("webhook send failed: {e}"))
                 }

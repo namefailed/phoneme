@@ -102,7 +102,8 @@ impl DaemonRecorder {
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,
         };
-        let recorder = Recorder::start(Box::new(source), recorder_cfg).await?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let recorder = Recorder::start(Box::new(source), recorder_cfg, Some(tx)).await?;
         *self.handle.lock().await = Some(recorder);
 
         *active = Some(ActiveRecording {
@@ -111,6 +112,17 @@ impl DaemonRecorder {
             audio_path,
             started_at,
         });
+
+        // If it's a self-terminating mode, spawn a task to auto-stop when the recorder task finishes natively.
+        if !matches!(mode, RecordMode::Hold) {
+            let daemon_recorder = self.clone();
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                if rx.await.is_ok() {
+                    let _ = daemon_recorder.stop(&state_clone).await;
+                }
+            });
+        }
 
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),

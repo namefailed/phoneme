@@ -31,7 +31,7 @@ async fn hold_mode_writes_wav_with_pushed_samples() {
         silence_threshold_dbfs: -45.0,
         silence_window_ms: 1000,
     };
-    let recorder = Recorder::start(Box::new(source), cfg).await.unwrap();
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
 
     sink.push(loud_block(8000)).await.unwrap(); // 0.5s
     sink.push(loud_block(8000)).await.unwrap(); // 1.0s total
@@ -64,7 +64,7 @@ async fn cancel_does_not_write_wav() {
         silence_threshold_dbfs: -45.0,
         silence_window_ms: 1000,
     };
-    let recorder = Recorder::start(Box::new(source), cfg).await.unwrap();
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
 
     sink.push(loud_block(8000)).await.unwrap();
     recorder.cancel().await.unwrap();
@@ -84,7 +84,7 @@ async fn oneshot_mode_stops_on_silence() {
         silence_threshold_dbfs: -45.0,
         silence_window_ms: 500, // 0.5s silence to trigger
     };
-    let recorder = Recorder::start(Box::new(source), cfg).await.unwrap();
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
 
     // 1s of loud audio, then 1s of silence
     sink.push(loud_block(16_000)).await.unwrap();
@@ -109,7 +109,7 @@ async fn duration_mode_stops_after_n_seconds() {
         silence_threshold_dbfs: -45.0,
         silence_window_ms: 5000,
     };
-    let recorder = Recorder::start(Box::new(source), cfg).await.unwrap();
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
 
     // Feed plenty of loud samples; recorder should auto-stop at 1s.
     let pump = tokio::spawn({
@@ -142,7 +142,7 @@ async fn max_duration_truncates_a_runaway_recording() {
         silence_threshold_dbfs: -45.0,
         silence_window_ms: 5000,
     };
-    let recorder = Recorder::start(Box::new(source), cfg).await.unwrap();
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
 
     let pump = tokio::spawn({
         let sink = sink.clone();
@@ -167,7 +167,7 @@ async fn max_duration_truncates_a_runaway_recording() {
 async fn config_is_canonical_format() {
     let (source, _sink) = make_synthetic();
     let cfg = RecorderConfig::default();
-    let recorder = Recorder::start(Box::new(source), cfg).await.unwrap();
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
     assert_eq!(recorder.audio_config().sample_rate, SampleRate::HZ_16K);
     let _ = recorder.cancel().await;
 }

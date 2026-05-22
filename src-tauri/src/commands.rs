@@ -8,7 +8,6 @@ use phoneme_core::{Config, ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::{Request, Response};
 use serde_json::Value;
 use tauri::{Emitter, State};
-use std::path::PathBuf;
 use futures::StreamExt;
 
 type Br<'r> = State<'r, Option<Bridge>>;
@@ -50,7 +49,8 @@ fn json_kind(k: &phoneme_ipc::IpcErrorKind) -> &'static str {
 }
 
 #[tauri::command]
-pub async fn list_recordings(bridge: Br<'_>, filter: ListFilter) -> Result<Value, String> {
+pub async fn list_recordings(bridge: Br<'_>, filter: Option<ListFilter>) -> Result<Value, String> {
+    let filter = filter.unwrap_or_default();
     forward(&bridge, Request::ListRecordings { filter }).await
 }
 
@@ -126,8 +126,21 @@ pub fn read_config() -> Result<Config, String> {
 }
 
 #[tauri::command]
-pub fn write_config(config: Config) -> Result<(), String> {
-    config_io::write(&config).map_err(|e| e.to_string())
+pub async fn write_config(app: tauri::AppHandle, bridge: Br<'_>, config: Config) -> Result<(), String> {
+    config_io::write(&config).map_err(|e| e.to_string())?;
+    // Tell daemon to reload
+    let _ = forward(&bridge, Request::ReloadConfig).await;
+    
+    // Dynamically reload hotkey in the frontend
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    use std::str::FromStr;
+    let _ = app.global_shortcut().unregister_all();
+    if config.hotkey.enabled {
+        if let Ok(shortcut) = Shortcut::from_str(&config.hotkey.combo) {
+            let _ = app.global_shortcut().register(shortcut);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -154,8 +167,8 @@ pub async fn wizard_test_llm(url: String) -> Result<TestConnectResult, String> {
 }
 
 #[tauri::command]
-pub async fn wizard_test_hook(bridge: Br<'_>) -> Result<TestConnectResult, String> {
-    Ok(crate::wizard::test_hook(bridge.as_ref()).await)
+pub async fn wizard_test_hook(bridge: Br<'_>, custom_command: Option<String>) -> Result<TestConnectResult, String> {
+    Ok(crate::wizard::test_hook(bridge.as_ref(), custom_command).await)
 }
 
 #[tauri::command]
@@ -212,6 +225,15 @@ pub async fn wizard_download_model(
         .map_err(|e| format!("failed to create models dir: {}", e))?;
 
     let dest_path = models_dir.join(&filename);
+    if tokio::fs::metadata(&dest_path).await.is_ok() {
+        // Emit a fake progress event so the UI knows it's 100%
+        let _ = window.emit(
+            "download_progress",
+            DownloadProgress { downloaded: 1, total: Some(1) },
+        );
+        return Ok(dest_path.to_string_lossy().into_owned());
+    }
+
     let mut file = tokio::fs::File::create(&dest_path)
         .await
         .map_err(|e| format!("failed to create file: {}", e))?;
@@ -229,10 +251,17 @@ pub async fn wizard_download_model(
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("stream error: {}", e))?;
-        tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
-            .await
-            .map_err(|e| format!("write error: {}", e))?;
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&dest_path).await;
+                return Err(format!("stream error: {}", e));
+            }
+        };
+        if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+            let _ = tokio::fs::remove_file(&dest_path).await;
+            return Err(format!("write error: {}", e));
+        }
         downloaded += chunk.len() as u64;
 
         let _ = window.emit(
@@ -242,4 +271,125 @@ pub async fn wizard_download_model(
     }
 
     Ok(dest_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn reveal_file(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let path = path.replace("/", "\\");
+        std::process::Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn()
+            .map_err(|e| format!("failed to open explorer: {}", e))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Fallback for macOS/Linux if ever needed
+        let _ = path;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn wizard_download_server(
+    window: tauri::Window,
+) -> Result<String, String> {
+    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| "could not resolve project directories".to_string())?;
+    let bin_dir = dirs.data_local_dir().join("bin");
+    tokio::fs::create_dir_all(&bin_dir)
+        .await
+        .map_err(|e| format!("failed to create bin dir: {}", e))?;
+
+    let exe_path = bin_dir.join("whisper-server.exe");
+    if tokio::fs::metadata(&exe_path).await.is_ok() {
+        let _ = window.emit(
+            "server_download_progress",
+            DownloadProgress { downloaded: 1, total: Some(1) },
+        );
+        return Ok(exe_path.to_string_lossy().into_owned());
+    }
+
+    let url = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip";
+    
+    // Download into a temp file
+    let temp_zip = bin_dir.join("whisper-temp.zip");
+    let mut file = tokio::fs::File::create(&temp_zip)
+        .await
+        .map_err(|e| format!("failed to create temp zip file: {}", e))?;
+
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("download failed with status: {}", response.status()));
+    }
+
+    let total = response.content_length();
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&temp_zip).await;
+                return Err(format!("stream error: {}", e));
+            }
+        };
+        if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+            let _ = tokio::fs::remove_file(&temp_zip).await;
+            return Err(format!("write error: {}", e));
+        }
+        downloaded += chunk.len() as u64;
+
+        let _ = window.emit(
+            "server_download_progress",
+            DownloadProgress { downloaded, total },
+        );
+    }
+    
+    // Explicitly sync and drop to ensure file is completely written before unzip
+    if let Err(e) = file.sync_all().await {
+        let _ = tokio::fs::remove_file(&temp_zip).await;
+        return Err(format!("failed to flush zip file: {}", e));
+    }
+    drop(file);
+
+    // Extract zip
+    let zip_file = std::fs::File::open(&temp_zip)
+        .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
+    
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .map_err(|e| format!("failed to read zip archive: {}", e))?;
+    
+    for i in 0..archive.len() {
+        let mut file = match archive.by_index(i) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        
+        let outpath = match file.enclosed_name() {
+            Some(path) => path.to_owned(),
+            None => continue,
+        };
+        
+        // We only care about the binaries in the 'whisper-bin-x64' root or nested, just grab exe and dlls.
+        if outpath.is_file() {
+            let file_name = outpath.file_name().unwrap().to_string_lossy().to_string();
+            if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
+                let extract_to = bin_dir.join(&file_name);
+                let mut outfile = std::fs::File::create(&extract_to)
+                    .map_err(|e| format!("failed to create output file {}: {}", file_name, e))?;
+                std::io::copy(&mut file, &mut outfile)
+                    .map_err(|e| format!("failed to extract {}: {}", file_name, e))?;
+            }
+        }
+    }
+    
+    let _ = tokio::fs::remove_file(&temp_zip).await;
+
+    Ok(exe_path.to_string_lossy().into_owned())
 }

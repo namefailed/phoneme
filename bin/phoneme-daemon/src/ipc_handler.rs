@@ -218,7 +218,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     metadata: HookMetadata::current(),
                 };
                 let runner = HookRunner::new(
-                    state.config.load().hook.command.clone(),
+                    state.config.load().hook.commands.first().cloned().unwrap_or_default(),
                     std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
                 );
                 // Run the hook OFF the IPC connection. A hook can take up to
@@ -232,7 +232,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // overwrite a user's manual transcript edit. RefireHook must
                 // re-run only the hook against the stored transcript.
                 let task_state = state.clone();
-                let command = state.config.load().hook.command.clone();
+                let command = state.config.load().hook.commands.first().cloned().unwrap_or_default();
                 tokio::spawn(async move {
                     let hook_id = payload.id.clone();
                     task_state.events.emit(DaemonEvent::HookStarted {
@@ -285,9 +285,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
-        Request::HookTest => {
+        Request::HookTest { custom_command } => {
+            let command = custom_command.unwrap_or_else(|| state.config.load().hook.commands.first().cloned().unwrap_or_default());
             let runner = HookRunner::new(
-                state.config.load().hook.command.clone(),
+                command,
                 std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
             );
             let sample = HookPayload {
@@ -344,7 +345,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         },
         Request::ReloadConfig => {
             tracing::info!("reloading config via IPC");
-            match crate::main::load_config() {
+            match crate::load_config() {
                 Ok(cfg) => {
                     state.config.store(std::sync::Arc::new(cfg));
                     Response::Ok(serde_json::Value::Null)

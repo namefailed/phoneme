@@ -69,6 +69,16 @@ Common causes:
 - Script needs `-ExecutionPolicy Bypass` (we set this for `.ps1` automatically)
 - Script does network I/O exceeding `hook.timeout_secs` — bump the timeout
 
+## Model Download Wizard Fails Mid-Stream
+
+If you were downloading the default model inside the First Run Wizard and the application crashed or the network dropped, you might be left with a corrupted, partially downloaded `.gguf` file.
+
+**Fix:** Delete the corrupted file manually.
+```powershell
+Remove-Item -Path "$env:LOCALAPPDATA\phoneme\models\*.gguf"
+```
+Then restart Phoneme to try the download again.
+
 ## Catalog corruption
 
 If the recordings list is empty or wrong but you have audio files on disk:

@@ -41,5 +41,44 @@ export class SectionHotkey {
       </div>
     `;
     bindFieldEvents(container, config);
+
+    // Interactive Keybind Selector
+    const comboInput = container.querySelector<HTMLInputElement>("[data-key='hotkey.combo']");
+    if (comboInput) {
+      comboInput.readOnly = true;
+      comboInput.placeholder = "Click to set keybind";
+      comboInput.style.cursor = "pointer";
+      
+      comboInput.addEventListener("keydown", (e) => {
+        e.preventDefault();
+        
+        const keys = [];
+        // tauri-plugin-global-shortcut prefers CommandOrControl or Ctrl
+        if (e.ctrlKey) keys.push("Ctrl");
+        if (e.altKey) keys.push("Alt");
+        if (e.shiftKey) keys.push("Shift");
+        if (e.metaKey) keys.push("Super");
+        
+        const isModifierOnly = ["Control", "Alt", "Shift", "Meta"].includes(e.key);
+        
+        if (!isModifierOnly) {
+          let key = e.key;
+          if (key === " ") key = "Space";
+          else if (key.length === 1) key = key.toUpperCase();
+          
+          keys.push(key);
+          comboInput.value = keys.join("+");
+          // Trigger change event for bindFieldEvents
+          comboInput.dispatchEvent(new Event("change"));
+          comboInput.blur();
+        } else {
+          comboInput.value = keys.join("+") + "+...";
+        }
+      });
+      
+      comboInput.addEventListener("focus", () => {
+        comboInput.value = "Press combination...";
+      });
+    }
   }
 }

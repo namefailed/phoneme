@@ -6,34 +6,24 @@ use std::process::ExitCode;
 use zip::write::SimpleFileOptions;
 
 pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
-    let mut conn = match crate::client::IpcClient::connect().await {
+    let mut conn = match crate::client::Client::connect(cfg).await {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: failed to connect to daemon: {e}");
-            return ExitCode::from(crate::exit::DAEMON_NOT_RUNNING);
-        }
+        Err(e) => return e,
     };
 
     let recordings = match conn
-        .send_request(phoneme_ipc::Request::ListRecordings {
+        .send(phoneme_ipc::Request::ListRecordings {
             filter: ListFilter::default(),
         })
         .await
     {
-        Ok(phoneme_ipc::Response::Ok(val)) => val,
-        Ok(phoneme_ipc::Response::Err(e)) => {
-            eprintln!("daemon error: {}", e.message);
-            return ExitCode::from(crate::exit::GENERIC_FAIL);
-        }
-        Err(e) => {
-            eprintln!("ipc error: {e}");
-            return ExitCode::from(crate::exit::IPC_FAIL);
-        }
+        Ok(val) => val,
+        Err(e) => return e,
     };
 
-    let tags = match conn.send_request(phoneme_ipc::Request::ListTags).await {
-        Ok(phoneme_ipc::Response::Ok(val)) => val,
-        _ => serde_json::json!([]),
+    let tags = match conn.send(phoneme_ipc::Request::ListTags).await {
+        Ok(val) => val,
+        Err(_) => serde_json::json!([]),
     };
 
     let export_data = serde_json::json!({

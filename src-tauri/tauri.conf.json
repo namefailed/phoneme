@@ -5,9 +5,7 @@
   "identifier": "com.namefailed.phoneme",
   "build": {
     "frontendDist": "../frontend/dist",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm --dir ../frontend dev",
-    "beforeBuildCommand": "pnpm --dir ../frontend build"
+    "devUrl": "http://localhost:5173"
   },
   "app": {
     "windows": [
@@ -24,11 +22,11 @@
       }
     ],
     "security": {
-      "csp": null
-    },
-    "trayIcon": {
-      "iconPath": "icons/tray-idle.png",
-      "iconAsTemplate": false
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$DOCUMENT/**", "$HOME/**"]
+      }
     }
   },
   "bundle": {

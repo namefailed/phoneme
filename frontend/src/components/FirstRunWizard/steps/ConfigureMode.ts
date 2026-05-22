@@ -25,8 +25,8 @@ export class ConfigureMode {
 
   private renderExternal(body: HTMLElement, footer: HTMLElement, cbs: StepCallbacks) {
     body.innerHTML = `
-      <h2 class="wizard-title">Point at your llama-server</h2>
-      <p class="wizard-subtitle">Enter the URL of your running llama-server with an OpenAI-compatible API.</p>
+      <h2 class="wizard-title">Point at your whisper-server</h2>
+      <p class="wizard-subtitle">Enter the URL of your running whisper-server with an OpenAI-compatible API.</p>
       <div class="wizard-field">
         <label>Endpoint URL</label>
         <input type="text" id="url" value="${this.config.llm.external_url}" />
@@ -86,8 +86,8 @@ export class ConfigureMode {
     cbs: StepCallbacks,
   ) {
     body.innerHTML = `
-      <h2 class="wizard-title">Downloading model</h2>
-      <p class="wizard-subtitle">Fetching a default model (e.g. Qwen2.5-0.5B) for transcription...</p>
+      <h2 class="wizard-title" id="download-title">Downloading model</h2>
+      <p class="wizard-subtitle" id="download-subtitle">Fetching the default Whisper model (ggml-base.en.bin) for transcription...</p>
       <div class="download-progress-container" style="margin-top:2rem;">
         <progress id="progress" max="100" value="0" style="width:100%;"></progress>
         <div id="status" style="text-align:center; font-size:12px; margin-top:8px;">Starting download...</div>
@@ -101,8 +101,8 @@ export class ConfigureMode {
     `;
 
     // Download URL - hardcoded or from a list
-    const url = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
-    const filename = "qwen2.5-0.5b-instruct-q4_k_m.gguf";
+    const url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
+    const filename = "ggml-base.en.bin";
 
     let unlisten: (() => void) | undefined;
     listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
@@ -111,28 +111,57 @@ export class ConfigureMode {
       if (e.payload.total) {
         p.max = e.payload.total;
         p.value = e.payload.downloaded;
-        s.textContent = \`\${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / \${(e.payload.total / 1024 / 1024).toFixed(1)} MB\`;
+        s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
       } else {
         p.removeAttribute("value");
-        s.textContent = \`\${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB downloaded\`;
+        s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB downloaded`;
       }
     }).then((f) => {
       unlisten = f;
     });
 
     invoke<string>("wizard_download_model", { url, filename })
-      .then((path) => {
+      .then(async (path) => {
         if (unlisten) unlisten();
         this.config.llm.mode = "bundled_model";
         this.config.llm.model_path = path;
-        body.querySelector<HTMLElement>("#status")!.textContent = "Download complete!";
+        
+        // Start server download
+        body.querySelector<HTMLElement>("#download-title")!.textContent = "Downloading server";
+        body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Fetching the Whisper server engine (approx 15MB)...";
+        body.querySelector<HTMLProgressElement>("#progress")!.value = 0;
+        body.querySelector<HTMLElement>("#status")!.textContent = "Starting server download...";
+
+        let serverUnlisten: (() => void) | undefined;
+        serverUnlisten = await listen<{ downloaded: number; total: number | null }>("server_download_progress", (e) => {
+          const p = body.querySelector<HTMLProgressElement>("#progress")!;
+          const s = body.querySelector<HTMLElement>("#status")!;
+          if (e.payload.total) {
+            p.max = e.payload.total;
+            p.value = e.payload.downloaded;
+            s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+          } else {
+            p.removeAttribute("value");
+            s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB downloaded`;
+          }
+        });
+
+        return invoke<string>("wizard_download_server").then(() => {
+          if (serverUnlisten) serverUnlisten();
+        }).catch((err) => {
+          if (serverUnlisten) serverUnlisten();
+          throw err;
+        });
+      })
+      .then(() => {
+        body.querySelector<HTMLElement>("#status")!.textContent = "All downloads complete!";
         footer.querySelector<HTMLButtonElement>("#next")!.disabled = false;
         footer.querySelector<HTMLButtonElement>("#back")!.disabled = false;
         footer.querySelector("#next")?.addEventListener("click", () => cbs.onNext());
       })
       .catch((err) => {
         if (unlisten) unlisten();
-        body.querySelector<HTMLElement>("#status")!.textContent = \`Error: \${err}\`;
+        body.querySelector<HTMLElement>("#status")!.textContent = `Error: ${err}`;
         body.querySelector<HTMLElement>("#status")!.style.color = "red";
         footer.querySelector<HTMLButtonElement>("#back")!.disabled = false;
         footer.querySelector("#back")?.addEventListener("click", () => cbs.onBack());

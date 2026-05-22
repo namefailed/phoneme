@@ -3,7 +3,7 @@
 //! Production code uses [`CpalSource`] which wraps a CPAL input stream;
 //! tests use [`SyntheticSource`] which is hand-fed sample buffers.
 
-use crate::convert::{downmix_to_mono_f32, f32_to_i16, i16_to_f32, resample_mono};
+use crate::convert::{downmix_to_mono_f32, f32_to_i16, i16_to_f32};
 use crate::format::{AudioConfig, SampleRate};
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{SampleFormat as CpalSampleFormat, StreamConfig};
@@ -212,19 +212,48 @@ impl CpalSource {
         // Background worker — does all the heavy lifting off the audio thread.
         let target_rate = SampleRate::HZ_16K.as_u32();
         let worker = tokio::spawn(async move {
-            while let Some(raw) = raw_rx.recv().await {
-                let mono = downmix_to_mono_f32(&raw, device_channels);
-                let resampled = match resample_mono(&mono, device_sample_rate, target_rate) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!(error = %e, "resample failed; dropping block");
-                        continue;
-                    }
+            use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+            let chunk_frames = 4096;
+            
+            let mut resampler = if device_sample_rate != target_rate {
+                let params = SincInterpolationParameters {
+                    sinc_len: 128,
+                    f_cutoff: 0.95,
+                    interpolation: SincInterpolationType::Linear,
+                    oversampling_factor: 128,
+                    window: WindowFunction::BlackmanHarris2,
                 };
-                let i16s = f32_to_i16(&resampled);
-                if out_tx.send(i16s).await.is_err() {
-                    // Consumer dropped; exit the worker.
-                    break;
+                let ratio = target_rate as f64 / device_sample_rate as f64;
+                SincFixedIn::<f32>::new(ratio, 1.0, params, chunk_frames, 1).ok()
+            } else {
+                None
+            };
+
+            let mut accumulator = Vec::new();
+
+            while let Some(raw) = raw_rx.recv().await {
+                accumulator.extend_from_slice(&raw);
+                
+                while accumulator.len() >= chunk_frames * device_channels {
+                    let chunk: Vec<f32> = accumulator.drain(..chunk_frames * device_channels).collect();
+                    let mono = downmix_to_mono_f32(&chunk, device_channels);
+                    
+                    let processed = if let Some(r) = resampler.as_mut() {
+                        match r.process(&[mono], None) {
+                            Ok(out) => out.into_iter().next().unwrap_or_default(),
+                            Err(e) => {
+                                tracing::warn!("resample failed: {e}");
+                                continue;
+                            }
+                        }
+                    } else {
+                        mono
+                    };
+
+                    let i16s = f32_to_i16(&processed);
+                    if out_tx.send(i16s).await.is_err() {
+                        return;
+                    }
                 }
             }
         });

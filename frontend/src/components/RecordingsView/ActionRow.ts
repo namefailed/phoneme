@@ -3,7 +3,11 @@ import { deleteRecording, refireHook, replayRecording } from "../../services/ipc
 export type ActionRowCallbacks = {
   onTogglePlay: () => void;
   onRefresh: () => void;
+  getTranscript: () => string;
+  getAudioPath: () => string;
 };
+
+import { invoke } from "@tauri-apps/api/core";
 
 export class ActionRow {
   private container: HTMLElement;
@@ -20,10 +24,10 @@ export class ActionRow {
   private render() {
     this.container.innerHTML = `
       <div class="action-row">
-        <button class="primary" data-act="play">▶ Play</button>
+        <button class="primary" data-act="play" id="btn-play">▶ Play</button>
         <button data-act="replay">↻ Re-transcribe</button>
         <button data-act="refire">⚡ Re-fire hook</button>
-        <button data-act="copy">📋 Copy</button>
+        <button data-act="copy">📋 Copy Transcript</button>
         <button data-act="reveal">📂 Reveal</button>
         <button class="danger" data-act="delete">🗑 Delete</button>
       </div>
@@ -36,6 +40,13 @@ export class ActionRow {
     });
   }
 
+  setPlayState(playing: boolean) {
+    const btn = this.container.querySelector<HTMLButtonElement>("#btn-play");
+    if (btn) {
+      btn.textContent = playing ? "⏸ Pause" : "▶ Play";
+    }
+  }
+
   private async handle(act: string) {
     if (act === "play") {
       this.cbs.onTogglePlay();
@@ -45,8 +56,23 @@ export class ActionRow {
     } else if (act === "refire") {
       await refireHook(this.id);
       this.cbs.onRefresh();
+    } else if (act === "copy") {
+      try {
+        await navigator.clipboard.writeText(this.cbs.getTranscript());
+        const btn = this.container.querySelector(`button[data-act="copy"]`) as HTMLButtonElement;
+        if (btn) {
+          const original = btn.innerHTML;
+          btn.innerHTML = "✅ Copied!";
+          setTimeout(() => { btn.innerHTML = original; }, 2000);
+        }
+      } catch (e) {
+        alert("Failed to copy: " + e);
+      }
+    } else if (act === "reveal") {
+      await invoke("reveal_file", { path: this.cbs.getAudioPath() });
     } else if (act === "delete") {
-      if (confirm("Delete this recording?")) {
+      const { confirmDelete } = await import("../ConfirmDelete");
+      if (await confirmDelete()) {
         await deleteRecording(this.id, false);
         this.cbs.onRefresh();
       }

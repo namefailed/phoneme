@@ -3,6 +3,8 @@
 import "./shared/styles.css";
 import { filterStore } from "../state/filter";
 import { listTags, type Tag } from "../services/ipc";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
@@ -20,8 +22,42 @@ export class HeaderBar {
   }
 
   private async loadTags() {
-    this.tags = await listTags();
+    try {
+      this.tags = await listTags();
+    } catch (e) {
+      console.error("Failed to load tags:", e);
+      this.tags = [];
+    }
     this.render();
+
+    await listen<any>("daemon-event", (e) => {
+      const eventName = e.payload.event;
+      if (eventName === "recording_started") {
+        this.setRecordingState(true);
+      } else if (eventName === "recording_stopped" || eventName === "recording_cancel") {
+        this.setRecordingState(false);
+      }
+    });
+  }
+
+  private isRecording = false;
+
+  private setRecordingState(recording: boolean) {
+    this.isRecording = recording;
+    const btn = this.container.querySelector<HTMLButtonElement>("#hb-record");
+    if (btn) {
+      if (recording) {
+        btn.innerHTML = "⏹ Stop";
+        btn.classList.add("recording-active");
+        btn.style.color = "var(--err)";
+        btn.style.borderColor = "var(--err)";
+      } else {
+        btn.innerHTML = "🔴 Record";
+        btn.classList.remove("recording-active");
+        btn.style.color = "var(--accent)";
+        btn.style.borderColor = "rgba(203,166,247,0.3)";
+      }
+    }
   }
 
   render() {
@@ -44,6 +80,7 @@ export class HeaderBar {
           <option value="">All tags</option>
           ${tagOptions}
         </select>
+        <button class="filter-pill" id="hb-record" style="font-weight: bold; margin-left: auto;">🔴 Record</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings">⚙</button>
       </div>
     `;
@@ -86,6 +123,16 @@ export class HeaderBar {
     const settings = this.container.querySelector("#hb-settings");
     if (settings) {
       settings.addEventListener("click", () => this.callbacks.onOpenSettings());
+    }
+    const recordBtn = this.container.querySelector("#hb-record");
+    if (recordBtn) {
+      recordBtn.addEventListener("click", async () => {
+        if (this.isRecording) {
+          await invoke("record_stop");
+        } else {
+          await invoke("record_start", { mode: "oneshot" });
+        }
+      });
     }
   }
 }

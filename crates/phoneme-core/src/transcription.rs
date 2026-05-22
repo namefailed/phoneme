@@ -8,8 +8,6 @@ use tokio::fs;
 /// HTTP client for an OpenAI-compatible `/v1/audio/transcriptions` endpoint.
 #[derive(Debug, Clone)]
 pub struct TranscriptionClient {
-    base_url: String,
-    timeout: Duration,
     http: reqwest::Client,
 }
 
@@ -19,20 +17,14 @@ struct OpenAiResponse {
 }
 
 impl TranscriptionClient {
-    pub fn new(base_url: String, timeout: Duration) -> Self {
+    pub fn new() -> Self {
         let http = reqwest::Client::builder()
-            .timeout(timeout)
             .build()
             .expect("reqwest client builds");
-        Self {
-            base_url,
-            timeout,
-            http,
-        }
+        Self { http }
     }
 
-    /// POST the audio file as `multipart/form-data` and return the transcript.
-    pub async fn transcribe(&self, audio_path: &Path) -> Result<String> {
+    pub async fn transcribe(&self, base_url: &str, timeout: Duration, audio_path: &Path) -> Result<String> {
         let bytes = fs::read(audio_path).await?;
         let part = multipart::Part::bytes(bytes)
             .file_name(
@@ -47,14 +39,14 @@ impl TranscriptionClient {
         let form = multipart::Form::new().part("file", part);
 
         let url = format!(
-            "{}/v1/audio/transcriptions",
-            self.base_url.trim_end_matches('/')
+            "{}/inference",
+            base_url.trim_end_matches('/')
         );
-        let response = match self.http.post(&url).multipart(form).send().await {
+        let response = match self.http.post(&url).timeout(timeout).multipart(form).send().await {
             Ok(r) => r,
             Err(e) if e.is_timeout() => {
                 return Err(Error::LlmTimeout {
-                    secs: self.timeout.as_secs(),
+                    secs: timeout.as_secs(),
                 })
             }
             Err(e) => return Err(Error::LlmUnreachable { url, source: e }),

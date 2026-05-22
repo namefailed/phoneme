@@ -50,6 +50,11 @@ export class SettingsView {
       .querySelector("#settings-save")
       ?.addEventListener("click", async () => {
         try {
+          // The backend serialization uses `commands`
+          if (config.hook && config.hook.command !== undefined) {
+            config.hook.commands = config.hook.command;
+            delete config.hook.command;
+          }
           await invoke("write_config", { config });
           this.onClose();
         } catch (e) {

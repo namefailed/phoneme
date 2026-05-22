@@ -27,6 +27,13 @@ export class RecordingDetail {
     }
   }
 
+  clear() {
+    this.recording = null;
+    this.editor = null;
+    this.player.destroy();
+    this.renderEmpty();
+  }
+
   private renderEmpty() {
     this.container.innerHTML = `
       <div class="empty">
@@ -63,10 +70,13 @@ export class RecordingDetail {
 
     const actions = this.container.querySelector<HTMLElement>("#actions");
     if (actions) {
-      new ActionRow(actions, r.id, {
+      const row = new ActionRow(actions, r.id, {
         onTogglePlay: () => this.player.togglePlay(),
         onRefresh: () => this.onRefresh(),
+        getTranscript: () => this.recording?.transcript ?? "",
+        getAudioPath: () => this.recording?.audio_path ?? "",
       });
+      this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
     }
 
     const tagsRoot = this.container.querySelector<HTMLElement>("#tags");

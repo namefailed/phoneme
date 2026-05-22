@@ -19,10 +19,12 @@ tauri-build = { workspace = true }
 phoneme-core = { path = "../crates/phoneme-core" }
 phoneme-ipc = { path = "../crates/phoneme-ipc" }
 phoneme-audio = { path = "../crates/phoneme-audio" }
-tauri = { workspace = true, features = ["tray-icon", "image-png"] }
+directories.workspace = true
+tauri = { workspace = true, features = ["tray-icon", "image-png", "protocol-asset"] }
 tauri-plugin-shell.workspace = true
 tauri-plugin-dialog.workspace = true
 tauri-plugin-fs.workspace = true
+tauri-plugin-global-shortcut.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -33,6 +35,7 @@ toml.workspace = true
 reqwest.workspace = true
 which = "6"
 futures = "0.3"
+zip = "0.6"
 
 [features]
 default = ["custom-protocol"]

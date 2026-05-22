@@ -17,6 +17,8 @@ Commands:
   daemon   Daemon control
   watch    Subscribe to the daemon's event stream
   hook     Test the configured hook
+  tag      Manage recording tags
+  export   Export all recordings and metadata to a zip file
   version  Print version + commit info
   help     Print this message or the help of the given subcommand(s)
 

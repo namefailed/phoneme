@@ -54,6 +54,11 @@ export class RecordingsView {
 
   async refresh() {
     await this.list.refresh();
+    const s = this.state.get();
+    if (s.selectedId && !s.recordings.some(r => r.id === s.selectedId)) {
+      this.state.set({ ...s, selectedId: null });
+      this.detail.clear();
+    }
   }
 
   toggleDetail() {
@@ -101,10 +106,25 @@ export class RecordingsView {
   }
 
   private installShortcuts() {
-    document.addEventListener("keydown", (e) => {
+    document.addEventListener("keydown", async (e) => {
+      // Ignore keydown if we are inside an input/textarea
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+
       if (e.ctrlKey && e.key === "\\") {
         e.preventDefault();
         this.toggleDetail();
+      } else if (e.key === "Delete") {
+        const id = this.state.get().selectedId;
+        if (id) {
+          e.preventDefault();
+          const { confirmDelete } = await import("../ConfirmDelete");
+          if (await confirmDelete()) {
+            const { deleteRecording } = await import("../../services/ipc");
+            await deleteRecording(id, false);
+            this.refresh();
+          }
+        }
       }
     });
   }

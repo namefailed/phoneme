@@ -51,5 +51,6 @@ fn build_filter(args: ListArgs) -> ListFilter {
         since,
         status,
         search: args.search,
+        tag_id: None,
     }
 }

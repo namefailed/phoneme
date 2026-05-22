@@ -32,7 +32,7 @@ pub enum Request {
     DaemonStatus,
     Shutdown,
     ReloadConfig,
-    HookTest,
+    HookTest { custom_command: Option<String> },
 
     // Streaming
     SubscribeEvents,

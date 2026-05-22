@@ -30,6 +30,7 @@ fn list_recordings_request_roundtrips() {
         since: None,
         status: Some(RecordingStatus::Done),
         search: Some("sarah".into()),
+        tag_id: None,
     };
     roundtrip(&Request::ListRecordings { filter });
 }

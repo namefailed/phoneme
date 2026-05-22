@@ -18,7 +18,8 @@ pub fn run() {
         .expect("build tokio runtime");
 
     let bridge = runtime.block_on(async {
-        match Bridge::connect(phoneme_core::Config::default()).await {
+        let config = config_io::read().unwrap_or_default();
+        match Bridge::connect(config).await {
             Ok(b) => Some(b),
             Err(e) => {
                 tracing::warn!(error = %e, "could not connect to daemon at startup; will retry on first action");
@@ -31,11 +32,50 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    use tauri::Manager;
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    use phoneme_core::RecordMode;
+                    
+                    let bridge = app.state::<Option<Bridge>>().inner().clone();
+                    if let Some(bridge) = bridge {
+                        let config = bridge.config.clone();
+                        let hotkey_enabled = config.hotkey.enabled;
+                        let hotkey_combo = config.hotkey.combo.clone();
+                        
+                        // We only care if they match the configured shortcut
+                        // Since we register exactly one shortcut below, it should match.
+                        match event.state() {
+                            ShortcutState::Pressed => {
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = bridge.request(phoneme_ipc::Request::RecordStart { mode: RecordMode::Hold }).await;
+                                });
+                            }
+                            ShortcutState::Released => {
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = bridge.request(phoneme_ipc::Request::RecordStop).await;
+                                });
+                            }
+                        }
+                    }
+                })
+                .build(),
+        )
         .manage(bridge.clone())
         .setup(move |app| {
             let _tray = tray::install(app.handle())?;
             if let Some(bridge) = bridge.clone() {
-                events::spawn(app.handle().clone(), bridge);
+                events::spawn(app.handle().clone(), bridge.clone());
+                
+                if bridge.config.hotkey.enabled {
+                    use std::str::FromStr;
+                    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+                    if let Ok(shortcut) = Shortcut::from_str(&bridge.config.hotkey.combo) {
+                        let _ = app.handle().global_shortcut().register(shortcut);
+                    }
+                }
             }
             Ok(())
         })
@@ -64,6 +104,8 @@ pub fn run() {
             commands::detach_tag,
             commands::tags_for,
             commands::wizard_download_model,
+            commands::wizard_download_server,
+            commands::reveal_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
