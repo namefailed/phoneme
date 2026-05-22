@@ -27,6 +27,12 @@ the recordings list and detail pane. Plans 5–9 are written but unimplemented.
 | 8 | Cross-platform (macOS, Linux) | ⏳ planned |
 | 9 | Mobile v2 | ⏳ outline only |
 
+A full code review was conducted against this snapshot and lives at
+[`docs/reviews/2026-05-21-code-review.md`](reviews/2026-05-21-code-review.md).
+It documents 5 critical bugs, 6 important issues, and 5 nitpicks with exact
+fixes for each. Read it before starting Plan 5 work — several criticals are
+small fixes that should land first.
+
 Workspace gate state at master tip:
 
 ```
