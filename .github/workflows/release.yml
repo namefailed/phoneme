@@ -1,0 +1,47 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2.0" --locked
+
+      - name: Build release MSI
+        run: cargo tauri build
+
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/msi/*.msi
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}
