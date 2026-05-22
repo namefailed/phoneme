@@ -23,11 +23,10 @@ export class ModePicker {
           <div class="mode-name">Bundled server + my model</div>
           <div class="mode-desc">Phoneme runs llama-server for you. You provide a GGUF model.</div>
         </div>
-        <div class="mode-card disabled" data-mode="bundled_download">
-          <div class="mode-badge soon">v1.1</div>
+        <div class="mode-card" data-mode="bundled_download">
           <div class="mode-icon">⬇</div>
           <div class="mode-name">Download for me</div>
-          <div class="mode-desc">Coming in the next release.</div>
+          <div class="mode-desc">Phoneme downloads a fast default model for you automatically.</div>
         </div>
       </div>
     `;

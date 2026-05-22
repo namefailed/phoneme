@@ -27,7 +27,7 @@ export class SectionLlm {
                   { value: "bundled_model", label: "Bundled server + my model" },
                   {
                     value: "bundled_download",
-                    label: "Bundled server + downloaded model (v1.1)",
+                    label: "Bundled server + downloaded model",
                   },
                 ],
               },

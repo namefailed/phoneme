@@ -63,6 +63,7 @@ pub fn run() {
             commands::attach_tag,
             commands::detach_tag,
             commands::tags_for,
+            commands::wizard_download_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

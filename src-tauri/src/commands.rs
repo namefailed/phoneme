@@ -7,7 +7,9 @@ use crate::wizard::TestConnectResult;
 use phoneme_core::{Config, ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::{Request, Response};
 use serde_json::Value;
-use tauri::State;
+use tauri::{Emitter, State};
+use std::path::PathBuf;
+use futures::StreamExt;
 
 type Br<'r> = State<'r, Option<Bridge>>;
 
@@ -188,4 +190,56 @@ pub async fn detach_tag(bridge: Br<'_>, recording_id: String, tag_id: i64) -> Re
 pub async fn tags_for(bridge: Br<'_>, recording_id: String) -> Result<Value, String> {
     let recording_id = parse_id(&recording_id)?;
     forward(&bridge, Request::TagsFor { recording_id }).await
+}
+
+#[derive(serde::Serialize, Clone)]
+struct DownloadProgress {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn wizard_download_model(
+    window: tauri::Window,
+    url: String,
+    filename: String,
+) -> Result<String, String> {
+    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| "could not resolve project directories".to_string())?;
+    let models_dir = dirs.data_local_dir().join("models");
+    tokio::fs::create_dir_all(&models_dir)
+        .await
+        .map_err(|e| format!("failed to create models dir: {}", e))?;
+
+    let dest_path = models_dir.join(&filename);
+    let mut file = tokio::fs::File::create(&dest_path)
+        .await
+        .map_err(|e| format!("failed to create file: {}", e))?;
+
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("download failed with status: {}", response.status()));
+    }
+
+    let total = response.content_length();
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("stream error: {}", e))?;
+        tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
+            .await
+            .map_err(|e| format!("write error: {}", e))?;
+        downloaded += chunk.len() as u64;
+
+        let _ = window.emit(
+            "download_progress",
+            DownloadProgress { downloaded, total },
+        );
+    }
+
+    Ok(dest_path.to_string_lossy().into_owned())
 }
