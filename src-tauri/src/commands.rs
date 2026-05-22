@@ -2,6 +2,8 @@
 
 use crate::bridge::Bridge;
 use crate::config_io;
+use crate::doctor::CheckResult;
+use crate::wizard::TestConnectResult;
 use phoneme_core::{Config, ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::{Request, Response};
 use serde_json::Value;
@@ -140,4 +142,26 @@ pub fn config_path() -> Result<String, String> {
     config_io::config_path()
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn doctor_local_checks() -> Result<Vec<CheckResult>, String> {
+    let cfg = config_io::read().map_err(|e| e.to_string())?;
+    Ok(crate::doctor::run_local_checks(&cfg))
+}
+
+#[tauri::command]
+pub async fn wizard_test_llm(url: String) -> Result<TestConnectResult, String> {
+    Ok(crate::wizard::test_llm_endpoint(&url).await)
+}
+
+#[tauri::command]
+pub async fn wizard_test_hook(bridge: Br<'_>) -> Result<TestConnectResult, String> {
+    Ok(crate::wizard::test_hook(bridge.as_ref()).await)
+}
+
+#[tauri::command]
+pub fn list_input_devices() -> Result<Vec<String>, String> {
+    let devices = phoneme_audio::list_input_devices().map_err(|e| e.to_string())?;
+    Ok(devices.into_iter().map(|d| d.name).collect())
 }

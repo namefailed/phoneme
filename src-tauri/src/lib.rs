@@ -3,8 +3,10 @@
 mod bridge;
 mod commands;
 mod config_io;
+mod doctor;
 mod events;
 mod tray;
+mod wizard;
 
 use bridge::Bridge;
 
@@ -52,6 +54,10 @@ pub fn run() {
             commands::write_config,
             commands::config_exists,
             commands::config_path,
+            commands::doctor_local_checks,
+            commands::wizard_test_llm,
+            commands::wizard_test_hook,
+            commands::list_input_devices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
