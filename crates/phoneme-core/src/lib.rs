@@ -9,6 +9,7 @@ pub mod queue;
 pub mod transcription;
 pub mod types;
 pub mod tags;
+pub mod webhook;
 
 pub use catalog::Catalog;
 pub use config::Config;

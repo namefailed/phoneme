@@ -3,7 +3,7 @@
 use crate::event_bus::EventBus;
 use crate::recorder::DaemonRecorder;
 use crate::shutdown::ShutdownCoordinator;
-use phoneme_core::{Catalog, Config, InboxQueue, TranscriptionClient};
+use phoneme_core::{Catalog, Config, InboxQueue, TranscriptionClient, webhook::WebhookClient};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,6 +66,7 @@ pub struct AppState {
     /// every queued item so the connection pool to the local llama-server
     /// is kept warm instead of rebuilt per recording.
     pub transcription: TranscriptionClient,
+    pub webhook: Option<WebhookClient>,
 }
 
 impl AppState {
@@ -84,6 +85,9 @@ impl AppState {
             config.llm.external_url.clone(),
             Duration::from_secs(config.llm.timeout_secs),
         );
+        let webhook = config.hook.webhook_url.clone().map(|url| {
+            WebhookClient::new(url, Duration::from_secs(config.hook.timeout_secs))
+        });
 
         Ok(Self {
             config: Arc::new(config),
@@ -94,6 +98,7 @@ impl AppState {
             recorder: DaemonRecorder::default(),
             shutdown: Arc::new(ShutdownCoordinator::new()),
             transcription,
+            webhook,
         })
     }
 }

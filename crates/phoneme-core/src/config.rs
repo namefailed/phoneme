@@ -46,6 +46,8 @@ pub struct RecordingConfig {
 pub struct HookConfig {
     pub command: String,
     pub timeout_secs: u64,
+    #[serde(default)]
+    pub webhook_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,6 +104,7 @@ impl Default for Config {
             hook: HookConfig {
                 command: "powershell -File %APPDATA%/phoneme/hooks/to-stdout.ps1".into(),
                 timeout_secs: 30,
+                webhook_url: None,
             },
             hotkey: HotkeyConfig {
                 enabled: false,

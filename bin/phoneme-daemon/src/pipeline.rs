@@ -87,6 +87,13 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
                 id,
                 exit_code: result.exit_code,
             });
+
+            if let Some(wh) = &state.webhook {
+                if let Err(e) = wh.post(&payload).await {
+                    tracing::warn!(error = %e, "webhook failed");
+                }
+            }
+
             Ok(())
         }
         Err(e) => {
