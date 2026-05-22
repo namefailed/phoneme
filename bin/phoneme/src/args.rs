@@ -45,6 +45,8 @@ pub enum Command {
     Hook(HookArgs),
     /// Manage recording tags.
     Tag(TagArgs),
+    /// Export all recordings and metadata to a zip file.
+    Export(ExportArgs),
     /// Print version + commit info.
     Version,
 }
@@ -179,4 +181,10 @@ pub enum TagAction {
         recording_id: String,
         tag: String,
     },
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ExportArgs {
+    /// Path to the output zip file.
+    pub output: String,
 }

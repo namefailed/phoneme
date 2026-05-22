@@ -44,6 +44,7 @@ tracing-appender = "0.2"
 comfy-table = "7"
 colored = "2"
 insta = "1"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 tauri = { version = "2", features = [] }
 tauri-build = "2"
 tauri-plugin-shell = "2"

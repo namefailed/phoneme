@@ -9,3 +9,4 @@ pub mod replay;
 pub mod show;
 pub mod watch;
 pub mod tag;
+pub mod export;
