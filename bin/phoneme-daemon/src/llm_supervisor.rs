@@ -5,7 +5,7 @@ use crate::shutdown::ShutdownSignal;
 use phoneme_core::config::LlmMode;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::process::{Child, Command};
 
 const RESTART_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
@@ -88,12 +88,19 @@ pub async fn run_with(
             }
         };
         tracing::info!(pid = child.id().unwrap_or(0), "llama-server spawned");
+        let spawned_at = Instant::now();
 
         tokio::select! {
             wait = child.wait() => {
                 match wait {
                     Ok(status) => tracing::warn!(?status, "llama-server exited"),
                     Err(e) => tracing::warn!(error = %e, "wait on llama-server failed"),
+                }
+                // A crash after a long healthy run is a fresh incident, not a
+                // continuation of a crash loop — reset the backoff so we don't
+                // wait the full 60s max before the first restart attempt.
+                if spawned_at.elapsed() >= Duration::from_secs(60) {
+                    backoff = RESTART_BACKOFF_INITIAL;
                 }
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);

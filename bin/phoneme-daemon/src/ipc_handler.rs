@@ -17,15 +17,12 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
         match conn.recv().await {
             Ok(Some(Request::SubscribeEvents)) => {
-                // Acknowledge the subscription.
-                if let Err(e) = conn
-                    .send_response(Response::Ok(serde_json::json!({"subscribed": true})))
-                    .await
-                {
-                    tracing::warn!(error = %e, "subscribe ack failed");
-                    return;
-                }
-                // Stream events.
+                // No ACK Response is sent. The client reframes its connection
+                // as a DaemonEvent stream the instant it writes
+                // SubscribeEvents — an ACK `Response` would be decoded by that
+                // reframed codec as a malformed `DaemonEvent`, abort the
+                // stream, and make every blocking `phoneme record` fail. Go
+                // straight into event streaming.
                 //
                 // Backpressure contract: this connection uses a broadcast
                 // receiver, which drops old events under lag rather than
@@ -128,9 +125,24 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         },
         Request::DeleteRecording { id, keep_audio } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
-                let _ = state.catalog.delete(&id).await;
+                // Delete the catalog row first. If it fails, report the error
+                // and DON'T touch the audio — otherwise the client sees `Ok`,
+                // the WAV is gone, and the row lingers pointing at nothing.
+                if let Err(e) = state.catalog.delete(&id).await {
+                    return Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: format!("catalog delete failed: {e}"),
+                    });
+                }
                 if !keep_audio {
-                    let _ = tokio::fs::remove_file(&r.audio_path).await;
+                    // Best-effort — the file may already be gone. Log, don't fail.
+                    if let Err(e) = tokio::fs::remove_file(&r.audio_path).await {
+                        tracing::warn!(
+                            path = %r.audio_path,
+                            error = %e,
+                            "audio file removal failed"
+                        );
+                    }
                 }
                 state.events.emit(DaemonEvent::RecordingDeleted { id });
                 Response::Ok(serde_json::Value::Null)
@@ -209,42 +221,56 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     state.config.hook.command.clone(),
                     std::time::Duration::from_secs(state.config.hook.timeout_secs),
                 );
-                match runner.run(&payload).await {
-                    Ok(result) => {
-                        let _ = state
-                            .catalog
-                            .update_hook_result(
-                                &id,
-                                &state.config.hook.command,
-                                result.exit_code,
-                                result.duration_ms,
-                            )
-                            .await;
-                        let _ = state
-                            .catalog
-                            .update_status(&id, RecordingStatus::Done)
-                            .await;
-                        state.events.emit(DaemonEvent::HookDone {
-                            id,
-                            exit_code: result.exit_code,
-                        });
-                        Response::Ok(serde_json::Value::Null)
+                // Run the hook OFF the IPC connection. A hook can take up to
+                // its full timeout (30s default); running it inline froze the
+                // connection — and with it the single-connection Tauri bridge,
+                // stalling every other UI request. The outcome is reported via
+                // DaemonEvents, exactly like the queue pipeline.
+                //
+                // We deliberately do NOT re-enqueue (as ReplayRecording does):
+                // the queue pipeline always re-transcribes first, which would
+                // overwrite a user's manual transcript edit. RefireHook must
+                // re-run only the hook against the stored transcript.
+                let task_state = state.clone();
+                let command = state.config.hook.command.clone();
+                tokio::spawn(async move {
+                    let hook_id = payload.id.clone();
+                    task_state.events.emit(DaemonEvent::HookStarted {
+                        id: hook_id.clone(),
+                    });
+                    match runner.run(&payload).await {
+                        Ok(result) => {
+                            let _ = task_state
+                                .catalog
+                                .update_hook_result(
+                                    &hook_id,
+                                    &command,
+                                    result.exit_code,
+                                    result.duration_ms,
+                                )
+                                .await;
+                            let _ = task_state
+                                .catalog
+                                .update_status(&hook_id, RecordingStatus::Done)
+                                .await;
+                            task_state.events.emit(DaemonEvent::HookDone {
+                                id: hook_id,
+                                exit_code: result.exit_code,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = task_state
+                                .catalog
+                                .update_status(&hook_id, RecordingStatus::HookFailed)
+                                .await;
+                            task_state.events.emit(DaemonEvent::HookFailed {
+                                id: hook_id,
+                                error: e.to_string(),
+                            });
+                        }
                     }
-                    Err(e) => {
-                        let _ = state
-                            .catalog
-                            .update_status(&id, RecordingStatus::HookFailed)
-                            .await;
-                        state.events.emit(DaemonEvent::HookFailed {
-                            id,
-                            error: e.to_string(),
-                        });
-                        Response::Err(IpcError {
-                            kind: error_to_kind(&e),
-                            message: e.to_string(),
-                        })
-                    }
-                }
+                });
+                Response::Ok(serde_json::Value::Null)
             }
             Ok(Some(_)) => Response::Err(IpcError {
                 kind: IpcErrorKind::Internal,
@@ -287,8 +313,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::Shutdown => {
             tracing::info!("shutdown requested via IPC");
+            // Trigger the shared coordinator `main` waits on, so
+            // `phoneme daemon stop` actually stops the daemon.
+            state.shutdown.trigger();
             Response::Ok(serde_json::Value::Null)
-            // Actual shutdown coordination wired in Task 11.
         }
         Request::ReloadConfig => Response::Err(IpcError {
             kind: IpcErrorKind::Internal,

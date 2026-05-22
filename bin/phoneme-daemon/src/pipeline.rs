@@ -4,7 +4,7 @@
 
 use crate::app_state::AppState;
 use phoneme_core::error::Result;
-use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus, TranscriptionClient};
+use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus};
 use phoneme_ipc::DaemonEvent;
 use std::time::Duration;
 
@@ -17,14 +17,11 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .events
         .emit(DaemonEvent::TranscriptionStarted { id: id.clone() });
 
-    // Transcribe.
+    // Transcribe — reuse the process-wide client (AppState) so the HTTP
+    // connection pool to the local llama-server stays warm across items.
     let cfg = &state.config;
-    let client = TranscriptionClient::new(
-        cfg.llm.external_url.clone(),
-        Duration::from_secs(cfg.llm.timeout_secs),
-    );
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
-    let transcript = match client.transcribe(&audio_path).await {
+    let transcript = match state.transcription.transcribe(&audio_path).await {
         Ok(t) => t,
         Err(e) => {
             state
