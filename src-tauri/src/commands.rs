@@ -19,6 +19,13 @@ async fn forward(bridge: &Option<Bridge>, req: Request) -> Result<Value, String>
     }
 }
 
+/// Validate a frontend-supplied recording id. A malformed id reaching the
+/// daemon would risk a panic in `RecordingId`'s fixed-offset slicing
+/// accessors; reject it here with a clean error instead.
+fn parse_id(id: &str) -> Result<RecordingId, String> {
+    RecordingId::parse(id).ok_or_else(|| format!("invalid recording id: {id:?}"))
+}
+
 fn json_kind(k: &phoneme_ipc::IpcErrorKind) -> &'static str {
     use phoneme_ipc::IpcErrorKind::*;
     match k {
@@ -48,13 +55,8 @@ pub async fn list_recordings(bridge: Br<'_>, limit: Option<u32>) -> Result<Value
 
 #[tauri::command]
 pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
-    forward(
-        &bridge,
-        Request::GetRecording {
-            id: RecordingId::from_string(id),
-        },
-    )
-    .await
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetRecording { id }).await
 }
 
 #[tauri::command]
@@ -63,14 +65,8 @@ pub async fn delete_recording(
     id: String,
     keep_audio: bool,
 ) -> Result<Value, String> {
-    forward(
-        &bridge,
-        Request::DeleteRecording {
-            id: RecordingId::from_string(id),
-            keep_audio,
-        },
-    )
-    .await
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::DeleteRecording { id, keep_audio }).await
 }
 
 #[tauri::command]
@@ -102,36 +98,20 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn replay_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
-    forward(
-        &bridge,
-        Request::ReplayRecording {
-            id: RecordingId::from_string(id),
-        },
-    )
-    .await
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::ReplayRecording { id }).await
 }
 
 #[tauri::command]
 pub async fn refire_hook(bridge: Br<'_>, id: String) -> Result<Value, String> {
-    forward(
-        &bridge,
-        Request::RefireHook {
-            id: RecordingId::from_string(id),
-        },
-    )
-    .await
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::RefireHook { id }).await
 }
 
 #[tauri::command]
 pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Result<Value, String> {
-    forward(
-        &bridge,
-        Request::UpdateTranscript {
-            id: RecordingId::from_string(id),
-            text,
-        },
-    )
-    .await
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::UpdateTranscript { id, text }).await
 }
 
 #[tauri::command]
