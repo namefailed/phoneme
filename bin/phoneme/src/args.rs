@@ -43,6 +43,8 @@ pub enum Command {
     Watch,
     /// Test the configured hook.
     Hook(HookArgs),
+    /// Manage recording tags.
+    Tag(TagArgs),
     /// Print version + commit info.
     Version,
 }
@@ -148,4 +150,31 @@ pub struct HookArgs {
 pub enum HookAction {
     /// Run the configured hook with a sample payload.
     Test,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct TagArgs {
+    #[command(subcommand)]
+    pub action: TagAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TagAction {
+    List,
+    Add {
+        name: String,
+        #[arg(long)]
+        color: Option<String>,
+    },
+    Delete {
+        id: i64,
+    },
+    Attach {
+        recording_id: String,
+        tag: String,
+    },
+    Detach {
+        recording_id: String,
+        tag: String,
+    },
 }
