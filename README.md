@@ -118,6 +118,10 @@ See [docs/troubleshooting.md](docs/troubleshooting.md).
 - **v1.1** *(this release)* — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
 - **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
 
+## Contributing
+
+We welcome contributions! If you're interested in helping improve Phoneme, please check out our [Contributing Guide](CONTRIBUTING.md) to learn how to set up the development environment, build the app, and submit pull requests.
+
 ## License
 
 MIT OR Apache-2.0.
