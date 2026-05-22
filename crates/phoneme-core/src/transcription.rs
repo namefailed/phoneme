@@ -16,6 +16,12 @@ struct OpenAiResponse {
     text: String,
 }
 
+impl Default for TranscriptionClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TranscriptionClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()

@@ -7,6 +7,12 @@ pub struct WebhookClient {
     http: reqwest::Client,
 }
 
+impl Default for WebhookClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebhookClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder().build().unwrap();
