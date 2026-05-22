@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { SectionLlm } from "./SectionLlm";
 import { SectionRecording } from "./SectionRecording";
+import { SectionHotkey } from "./SectionHotkey";
+import { SectionHook } from "./SectionHook";
+import { SectionStorage } from "./SectionStorage";
+import { SectionTray } from "./SectionTray";
+import { SectionAdvanced } from "./SectionAdvanced";
 import "./styles.css";
 
 export class SettingsView {
@@ -32,6 +37,11 @@ export class SettingsView {
     // would have each section clobber the previous one.
     new SectionLlm(this.sectionHost(body), config);
     new SectionRecording(this.sectionHost(body), config);
+    new SectionHotkey(this.sectionHost(body), config);
+    new SectionHook(this.sectionHost(body), config);
+    new SectionStorage(this.sectionHost(body), config);
+    new SectionTray(this.sectionHost(body), config);
+    new SectionAdvanced(this.sectionHost(body), config);
 
     this.container
       .querySelector("#settings-close")
