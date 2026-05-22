@@ -86,6 +86,9 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace binaries
+        run: cargo build --workspace --release
+
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2.0" --locked
 

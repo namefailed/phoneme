@@ -42,7 +42,7 @@
     "windows": {
       "wix": {
         "fragmentPaths": ["../installer/wix-fragment.wxs"],
-        "componentRefs": ["PhonemeHooksTemplates"]
+        "componentRefs": ["PhonemeHooksTemplates", "PhonemeBinaries", "PhonemePathEntry"]
       }
     }
   }

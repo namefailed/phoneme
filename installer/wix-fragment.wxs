@@ -1,8 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
-    <!-- Component that materialises the hooks-templates directory. -->
+    <!-- Add to PATH property, default enabled -->
+    <Property Id="ADDTOPATH" Value="1" />
+
     <DirectoryRef Id="INSTALLDIR">
+      <!-- Bundle phoneme-daemon and phoneme CLI -->
+      <Component Id="PhonemeBinaries" Guid="*">
+        <File Id="PhonemeDaemonExe" Name="phoneme-daemon.exe" Source="..\target\release\phoneme-daemon.exe" KeyPath="yes" />
+        <File Id="PhonemeCliExe" Name="phoneme.exe" Source="..\target\release\phoneme.exe" />
+      </Component>
+
+      <!-- PATH integration -->
+      <Component Id="PhonemePathEntry" Guid="*">
+        <Condition>ADDTOPATH="1"</Condition>
+        <Environment Id="PhonemePath"
+                     Name="PATH"
+                     Value="[INSTALLDIR]"
+                     Permanent="no"
+                     Part="last"
+                     Action="set"
+                     System="yes" />
+      </Component>
+
+      <!-- Component that materialises the hooks-templates directory. -->
       <Directory Id="HooksTemplatesDir" Name="hooks-templates">
         <Component Id="PhonemeHooksTemplates" Guid="*">
           <File Id="HookStdout"   Name="to-stdout.ps1"        Source="..\hooks\to-stdout.ps1" />

@@ -86,8 +86,6 @@ phoneme-daemon      headless brain (audio + queue + catalog + LLM lifecycle)
   └────── phoneme (CLI)
 ```
 
-Full spec: [docs/superpowers/specs/2026-05-19-phoneme-design.md](docs/superpowers/specs/2026-05-19-phoneme-design.md).
-
 ## Building from source
 
 ```bash
@@ -119,8 +117,6 @@ See [docs/troubleshooting.md](docs/troubleshooting.md).
 - **v1.0** — Windows MSI, single hook delivery, modes 1+2
 - **v1.1** *(this release)* — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
 - **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
-
-See the design doc for the full decision log.
 
 ## License
 

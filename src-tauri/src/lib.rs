@@ -1,5 +1,6 @@
 //! Phoneme tray app — Tauri 2 desktop shell.
 
+mod auto_spawn;
 mod bridge;
 mod commands;
 mod config_io;
@@ -19,6 +20,9 @@ pub fn run() {
 
     let bridge = runtime.block_on(async {
         let config = config_io::read().unwrap_or_default();
+        if let Err(e) = auto_spawn::ensure_running(&config).await {
+            tracing::warn!(error = %e, "could not auto-spawn daemon");
+        }
         match Bridge::connect(config).await {
             Ok(b) => Some(b),
             Err(e) => {
