@@ -69,6 +69,7 @@ pub struct ListFilter {
     pub since: Option<DateTime<Local>>,
     pub status: Option<RecordingStatus>,
     pub search: Option<String>,
+    pub tag_id: Option<i64>,
 }
 
 /// The payload sent to hook scripts on stdin (and stored verbatim in inbox JSON).

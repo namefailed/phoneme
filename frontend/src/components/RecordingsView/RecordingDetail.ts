@@ -1,5 +1,6 @@
 import { getRecording, type Recording } from "../../services/ipc";
 import { ActionRow } from "./ActionRow";
+import { TagChips } from "./TagChips";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
 
@@ -47,6 +48,7 @@ export class RecordingDetail {
         </div>
         <div class="waveform" id="wf-${r.id}"></div>
         <div id="actions"></div>
+        <div id="tags"></div>
         <div class="transcript-block">
           <div id="editor"></div>
         </div>
@@ -66,6 +68,9 @@ export class RecordingDetail {
         onRefresh: () => this.onRefresh(),
       });
     }
+
+    const tagsRoot = this.container.querySelector<HTMLElement>("#tags");
+    if (tagsRoot) new TagChips(tagsRoot, r.id);
 
     const editorRoot = this.container.querySelector<HTMLElement>("#editor");
     if (editorRoot) {

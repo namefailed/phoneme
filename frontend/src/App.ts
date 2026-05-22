@@ -41,7 +41,6 @@ export class App {
     this.mainEl = this.container.querySelector("#main") as HTMLElement;
 
     new HeaderBar(this.headerEl, {
-      onSearchChange: () => {},
       onOpenSettings: () => this.router.go("settings"),
     });
 

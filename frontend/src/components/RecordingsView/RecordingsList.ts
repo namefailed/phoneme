@@ -1,5 +1,6 @@
 import { listRecordings, type Recording } from "../../services/ipc";
 import { Store } from "../../state/store";
+import { filterStore } from "../../state/filter";
 
 import "./styles.css";
 
@@ -24,13 +25,14 @@ export class RecordingsList {
     this.state = state;
     this.onSelect = onSelect;
     state.subscribe(() => this.render());
-    this.render();
+    filterStore.subscribe(() => { void this.refresh(); });
   }
 
   async refresh() {
     this.state.set({ ...this.state.get(), loading: true, error: null });
     try {
-      const rows = await listRecordings(200);
+      const f = filterStore.get();
+      const rows = await listRecordings({ ...f, limit: 200 });
       this.state.set({ ...this.state.get(), recordings: rows, loading: false });
     } catch (e) {
       this.state.set({ ...this.state.get(), error: String(e), loading: false });

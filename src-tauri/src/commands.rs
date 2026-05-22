@@ -48,11 +48,7 @@ fn json_kind(k: &phoneme_ipc::IpcErrorKind) -> &'static str {
 }
 
 #[tauri::command]
-pub async fn list_recordings(bridge: Br<'_>, limit: Option<u32>) -> Result<Value, String> {
-    let filter = ListFilter {
-        limit,
-        ..Default::default()
-    };
+pub async fn list_recordings(bridge: Br<'_>, filter: ListFilter) -> Result<Value, String> {
     forward(&bridge, Request::ListRecordings { filter }).await
 }
 
@@ -164,4 +160,32 @@ pub async fn wizard_test_hook(bridge: Br<'_>) -> Result<TestConnectResult, Strin
 pub fn list_input_devices() -> Result<Vec<String>, String> {
     let devices = phoneme_audio::list_input_devices().map_err(|e| e.to_string())?;
     Ok(devices.into_iter().map(|d| d.name).collect())
+}
+
+#[tauri::command]
+pub async fn list_tags(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::ListTags).await
+}
+
+#[tauri::command]
+pub async fn add_tag(bridge: Br<'_>, name: String, color: Option<String>) -> Result<Value, String> {
+    forward(&bridge, Request::AddTag { name, color }).await
+}
+
+#[tauri::command]
+pub async fn attach_tag(bridge: Br<'_>, recording_id: String, tag_id: i64) -> Result<Value, String> {
+    let recording_id = parse_id(&recording_id)?;
+    forward(&bridge, Request::AttachTag { recording_id, tag_id }).await
+}
+
+#[tauri::command]
+pub async fn detach_tag(bridge: Br<'_>, recording_id: String, tag_id: i64) -> Result<Value, String> {
+    let recording_id = parse_id(&recording_id)?;
+    forward(&bridge, Request::DetachTag { recording_id, tag_id }).await
+}
+
+#[tauri::command]
+pub async fn tags_for(bridge: Br<'_>, recording_id: String) -> Result<Value, String> {
+    let recording_id = parse_id(&recording_id)?;
+    forward(&bridge, Request::TagsFor { recording_id }).await
 }

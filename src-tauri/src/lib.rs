@@ -58,6 +58,11 @@ pub fn run() {
             commands::wizard_test_llm,
             commands::wizard_test_hook,
             commands::list_input_devices,
+            commands::list_tags,
+            commands::add_tag,
+            commands::attach_tag,
+            commands::detach_tag,
+            commands::tags_for,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

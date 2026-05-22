@@ -154,14 +154,21 @@ impl Catalog {
                 return self.search(q).await;
             }
         }
-        let mut sql = String::from("SELECT * FROM recordings WHERE 1=1");
+        let mut sql = String::from("SELECT recordings.* FROM recordings");
+        if filter.tag_id.is_some() {
+            sql.push_str(" JOIN recording_tags rt ON rt.recording_id = recordings.id");
+        }
+        sql.push_str(" WHERE 1=1");
+        if let Some(tag_id) = filter.tag_id {
+            sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
+        }
         if filter.status.is_some() {
-            sql.push_str(" AND status = ?");
+            sql.push_str(" AND recordings.status = ?");
         }
         if filter.since.is_some() {
-            sql.push_str(" AND started_at >= ?");
+            sql.push_str(" AND recordings.started_at >= ?");
         }
-        sql.push_str(" ORDER BY started_at DESC, id DESC");
+        sql.push_str(" ORDER BY recordings.started_at DESC, recordings.id DESC");
         if let Some(n) = filter.limit {
             sql.push_str(&format!(" LIMIT {n}"));
         }
