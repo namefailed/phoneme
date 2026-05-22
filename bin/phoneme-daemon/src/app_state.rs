@@ -8,7 +8,6 @@ use phoneme_core::{webhook::WebhookClient, Catalog, Config, InboxQueue, Transcri
 use std::path::PathBuf;
 use std::sync::Arc;
 
-
 /// Resolved paths derived from `Config`. Created once at startup.
 #[derive(Debug, Clone)]
 pub struct ResolvedPaths {

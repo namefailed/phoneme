@@ -10,7 +10,12 @@ pub async fn run(args: HookArgs, cfg: &Config, json: bool) -> ExitCode {
         Err(code) => return code,
     };
     match args.action {
-        HookAction::Test => match client.send(Request::HookTest { custom_command: None }).await {
+        HookAction::Test => match client
+            .send(Request::HookTest {
+                custom_command: None,
+            })
+            .await
+        {
             Ok(value) => {
                 if json {
                     crate::output::print_json(&value);
