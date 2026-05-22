@@ -185,3 +185,34 @@ async fn update_hook_result_persists_exit_code() {
     assert_eq!(got.hook_exit_code, Some(0));
     assert_eq!(got.hook_duration_ms, Some(142));
 }
+
+#[tokio::test]
+async fn tags_round_trip() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("work", Some("#f38ba8")).await.unwrap();
+    assert_eq!(tag.name, "work");
+
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog.attach_tag(&rec.id, tag.id).await.unwrap();
+
+    let attached = catalog.tags_for(&rec.id).await.unwrap();
+    assert_eq!(attached.len(), 1);
+    assert_eq!(attached[0].name, "work");
+
+    catalog.detach_tag(&rec.id, tag.id).await.unwrap();
+    let after = catalog.tags_for(&rec.id).await.unwrap();
+    assert!(after.is_empty());
+}
+
+#[tokio::test]
+async fn deleting_recording_cascades_to_recording_tags() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("foo", None).await.unwrap();
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog.attach_tag(&rec.id, tag.id).await.unwrap();
+    catalog.delete(&rec.id).await.unwrap();
+    let still_tagged = catalog.tags_for(&rec.id).await.unwrap();
+    assert!(still_tagged.is_empty());
+}

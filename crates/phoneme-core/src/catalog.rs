@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::id::RecordingId;
+use crate::tags::Tag;
 use crate::types::{ListFilter, Recording, RecordingStatus};
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -211,6 +212,86 @@ impl Catalog {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    pub async fn list_tags(&self) -> Result<Vec<Tag>> {
+        let rows = sqlx::query("SELECT id, name, color FROM tags ORDER BY name")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|r| Ok(Tag {
+                id: r.try_get("id")?,
+                name: r.try_get("name")?,
+                color: r.try_get("color")?,
+            }))
+            .collect()
+    }
+
+    pub async fn add_tag(&self, name: &str, color: Option<&str>) -> Result<Tag> {
+        sqlx::query("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)")
+            .bind(name)
+            .bind(color)
+            .execute(&self.pool)
+            .await?;
+        let row = sqlx::query("SELECT id, name, color FROM tags WHERE name = ?")
+            .bind(name)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(Tag {
+            id: row.try_get("id")?,
+            name: row.try_get("name")?,
+            color: row.try_get("color")?,
+        })
+    }
+
+    pub async fn delete_tag(&self, id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM tags WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn attach_tag(&self, recording_id: &RecordingId, tag_id: i64) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO recording_tags (recording_id, tag_id) VALUES (?, ?)",
+        )
+        .bind(recording_id.as_str())
+        .bind(tag_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn detach_tag(&self, recording_id: &RecordingId, tag_id: i64) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM recording_tags WHERE recording_id = ? AND tag_id = ?",
+        )
+        .bind(recording_id.as_str())
+        .bind(tag_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn tags_for(&self, recording_id: &RecordingId) -> Result<Vec<Tag>> {
+        let rows = sqlx::query(
+            r#"SELECT t.id, t.name, t.color
+               FROM tags t
+               JOIN recording_tags rt ON rt.tag_id = t.id
+               WHERE rt.recording_id = ?
+               ORDER BY t.name"#,
+        )
+        .bind(recording_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| Ok(Tag {
+                id: r.try_get("id")?,
+                name: r.try_get("name")?,
+                color: r.try_get("color")?,
+            }))
+            .collect()
     }
 }
 
