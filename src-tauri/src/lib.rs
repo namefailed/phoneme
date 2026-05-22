@@ -38,7 +38,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, shortcut, event| {
+                .with_handler(|app, _shortcut, event| {
                     use phoneme_core::RecordMode;
                     use tauri::Manager;
                     use tauri_plugin_global_shortcut::ShortcutState;
@@ -46,8 +46,8 @@ pub fn run() {
                     let bridge = app.state::<Option<Bridge>>().inner().clone();
                     if let Some(bridge) = bridge {
                         let config = bridge.config.clone();
-                        let hotkey_enabled = config.hotkey.enabled;
-                        let hotkey_combo = config.hotkey.combo.clone();
+                        let _hotkey_enabled = config.hotkey.enabled;
+                        let _hotkey_combo = config.hotkey.combo.clone();
 
                         // We only care if they match the configured shortcut
                         // Since we register exactly one shortcut below, it should match.
