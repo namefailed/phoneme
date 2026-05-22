@@ -30,8 +30,16 @@ export class HeaderBar {
     this.container.innerHTML = `
       <div class="headerbar">
         <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" />
-        <span class="filter-pill">All time ▾</span>
-        <span class="filter-pill">All status ▾</span>
+        <select class="filter-pill hb-time-select">
+          <option value="">All time</option>
+          <option value="today" ${f.since ? "selected" : ""}>Today</option>
+        </select>
+        <select class="filter-pill hb-status-select">
+          <option value="">All status</option>
+          <option value="ready" ${f.status === "ready" ? "selected" : ""}>Ready</option>
+          <option value="transcribing" ${f.status === "transcribing" ? "selected" : ""}>Transcribing</option>
+          <option value="error" ${f.status === "error" ? "selected" : ""}>Error</option>
+        </select>
         <select class="filter-pill hb-tag-select">
           <option value="">All tags</option>
           ${tagOptions}
@@ -46,11 +54,33 @@ export class HeaderBar {
         filterStore.set({ ...filterStore.get(), search: q || null });
       });
     }
+    const timeSelect = this.container.querySelector<HTMLSelectElement>(".hb-time-select");
+    if (timeSelect) {
+      timeSelect.addEventListener("change", (e) => {
+        const val = (e.target as HTMLSelectElement).value;
+        if (val === "today") {
+          const today = new Date();
+          // Adjust for local timezone offset to get correct YYYY-MM-DD
+          const offset = today.getTimezoneOffset();
+          const localToday = new Date(today.getTime() - offset * 60 * 1000);
+          filterStore.set({ ...filterStore.get(), since: localToday.toISOString().split("T")[0] });
+        } else {
+          filterStore.set({ ...filterStore.get(), since: null });
+        }
+      });
+    }
     const tagSelect = this.container.querySelector<HTMLSelectElement>(".hb-tag-select");
     if (tagSelect) {
       tagSelect.addEventListener("change", (e) => {
         const val = (e.target as HTMLSelectElement).value;
         filterStore.set({ ...filterStore.get(), tag_id: val ? Number(val) : null });
+      });
+    }
+    const statusSelect = this.container.querySelector<HTMLSelectElement>(".hb-status-select");
+    if (statusSelect) {
+      statusSelect.addEventListener("change", (e) => {
+        const val = (e.target as HTMLSelectElement).value;
+        filterStore.set({ ...filterStore.get(), status: val || null });
       });
     }
     const settings = this.container.querySelector("#hb-settings");
