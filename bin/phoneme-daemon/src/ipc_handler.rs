@@ -318,6 +318,30 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             state.shutdown.trigger();
             Response::Ok(serde_json::Value::Null)
         }
+        Request::ListTags => match state.catalog.list_tags().await {
+            Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
+            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+        },
+        Request::AddTag { name, color } => match state.catalog.add_tag(&name, color.as_deref()).await {
+            Ok(tag) => Response::Ok(serde_json::to_value(tag).unwrap_or_default()),
+            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+        },
+        Request::DeleteTag { id } => match state.catalog.delete_tag(id).await {
+            Ok(()) => Response::Ok(serde_json::Value::Null),
+            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+        },
+        Request::AttachTag { recording_id, tag_id } => match state.catalog.attach_tag(&recording_id, tag_id).await {
+            Ok(()) => Response::Ok(serde_json::Value::Null),
+            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+        },
+        Request::DetachTag { recording_id, tag_id } => match state.catalog.detach_tag(&recording_id, tag_id).await {
+            Ok(()) => Response::Ok(serde_json::Value::Null),
+            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+        },
+        Request::TagsFor { recording_id } => match state.catalog.tags_for(&recording_id).await {
+            Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
+            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+        },
         Request::ReloadConfig => Response::Err(IpcError {
             kind: IpcErrorKind::Internal,
             message: "reload_config not implemented in v1".into(),

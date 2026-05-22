@@ -36,6 +36,14 @@ pub enum Request {
 
     // Streaming
     SubscribeEvents,
+
+    // Tags
+    ListTags,
+    AddTag { name: String, color: Option<String> },
+    DeleteTag { id: i64 },
+    AttachTag { recording_id: RecordingId, tag_id: i64 },
+    DetachTag { recording_id: RecordingId, tag_id: i64 },
+    TagsFor { recording_id: RecordingId },
 }
 
 /// Daemon response. For most requests, a single Response is returned.
