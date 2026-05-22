@@ -1,7 +1,8 @@
 //! Tauri commands — frontend invokes these via `invoke("…")`.
 
 use crate::bridge::Bridge;
-use phoneme_core::{ListFilter, RecordMode, RecordingId};
+use crate::config_io;
+use phoneme_core::{Config, ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::{Request, Response};
 use serde_json::Value;
 use tauri::State;
@@ -117,4 +118,26 @@ pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Resu
 #[tauri::command]
 pub async fn daemon_status(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::DaemonStatus).await
+}
+
+#[tauri::command]
+pub fn read_config() -> Result<Config, String> {
+    config_io::read().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn write_config(config: Config) -> Result<(), String> {
+    config_io::write(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn config_exists() -> bool {
+    config_io::exists()
+}
+
+#[tauri::command]
+pub fn config_path() -> Result<String, String> {
+    config_io::config_path()
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
 }

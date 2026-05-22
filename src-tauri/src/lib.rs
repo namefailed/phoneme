@@ -2,6 +2,7 @@
 
 mod bridge;
 mod commands;
+mod config_io;
 mod events;
 mod tray;
 
@@ -26,6 +27,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(bridge.clone())
         .setup(move |app| {
             let _tray = tray::install(app.handle())?;
@@ -45,6 +48,10 @@ pub fn run() {
             commands::refire_hook,
             commands::update_transcript,
             commands::daemon_status,
+            commands::read_config,
+            commands::write_config,
+            commands::config_exists,
+            commands::config_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
