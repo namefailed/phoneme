@@ -16,7 +16,6 @@ mod recorder;
 mod shutdown;
 
 use app_state::AppState;
-use shutdown::ShutdownCoordinator;
 
 #[derive(Debug, Parser)]
 #[command(name = "phoneme-daemon", version)]
@@ -35,11 +34,12 @@ async fn main() -> Result<()> {
 
     reconcile::run(&state).await?;
 
-    let shutdown_coord = ShutdownCoordinator::new();
-    shutdown_coord.install_signals();
+    // Single shutdown coordinator, owned by AppState so the IPC `Shutdown`
+    // handler triggers the same channel `main` waits on.
+    state.shutdown.install_signals();
 
     let worker_state = state.clone();
-    let worker_shutdown = shutdown_coord.signal.clone_receiver();
+    let worker_shutdown = state.shutdown.signal.clone_receiver();
     let worker_handle = tokio::spawn(async move {
         if let Err(e) = queue_worker::run(worker_state, worker_shutdown).await {
             tracing::error!(error = %e, "queue worker terminated");
@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
     });
 
     let supervisor_state = state.clone();
-    let supervisor_signal = shutdown_coord.signal.clone();
+    let supervisor_signal = state.shutdown.signal.clone();
     let supervisor_handle = tokio::spawn(async move {
         if let Err(e) = llm_supervisor::run(supervisor_state, supervisor_signal).await {
             tracing::error!(error = %e, "llm supervisor terminated");
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     // running idle with no IPC surface, which was strictly worse than
     // exiting.
     let server_state = state.clone();
-    let mut server_signal = shutdown_coord.signal.clone();
+    let mut server_signal = state.shutdown.signal.clone();
     let server_result: Result<()> = tokio::select! {
         r = ipc_server::serve(server_state) => r,
         _ = server_signal.wait() => {
@@ -77,8 +77,8 @@ async fn main() -> Result<()> {
 
     tracing::info!("shutting down");
     // Make sure background tasks see the shutdown even if we got here via
-    // a server failure rather than the Ctrl+C handler.
-    shutdown_coord.trigger();
+    // a server failure rather than the Ctrl+C handler or an IPC Shutdown.
+    state.shutdown.trigger();
     let _ = worker_handle.await;
     let _ = supervisor_handle.await;
 

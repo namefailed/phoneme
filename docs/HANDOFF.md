@@ -27,6 +27,14 @@ the recordings list and detail pane. Plans 5–9 are written but unimplemented.
 | 8 | Cross-platform (macOS, Linux) | ⏳ planned |
 | 9 | Mobile v2 | ⏳ outline only |
 
+A full code review was conducted against snapshot `8f944ff` and lives at
+[`docs/reviews/2026-05-21-code-review.md`](reviews/2026-05-21-code-review.md).
+It documented 5 critical bugs, 6 important issues, and 5 nitpicks. **All 16
+findings are now fixed** (branch `fix/code-review-2026-05-21`, merged) — see
+the review's Resolution note for the two intentional divergences from the
+suggested fixes (#9 RefireHook, #14 exit-code sentinel) and the one
+deferred nitpick (#16 log rotation, lands with Plan 5/6).
+
 Workspace gate state at master tip:
 
 ```

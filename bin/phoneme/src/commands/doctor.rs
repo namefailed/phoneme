@@ -45,8 +45,15 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         }
     }
 
-    // Filesystem checks.
-    let audio_dir = std::path::Path::new(&cfg.recording.audio_dir);
+    // Filesystem checks. Expand %VAR%/~ first — the raw config value is
+    // e.g. "%USERPROFILE%/Documents/phoneme/audio", which Path::exists()
+    // would always report as missing.
+    let expanded = cfg.expanded();
+    let audio_dir_raw = match &expanded {
+        Ok(c) => c.recording.audio_dir.clone(),
+        Err(_) => cfg.recording.audio_dir.clone(),
+    };
+    let audio_dir = std::path::Path::new(&audio_dir_raw);
     checks.push(Check {
         name: "audio_dir",
         ok: audio_dir.exists() || std::fs::create_dir_all(audio_dir).is_ok(),

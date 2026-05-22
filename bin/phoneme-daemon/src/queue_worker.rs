@@ -21,7 +21,21 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
             return Ok(());
         }
 
-        let claimed = state.inbox.claim_next().await?;
+        // A transient I/O error (antivirus lock, NTFS journal flush) must not
+        // permanently kill the worker — retry with the same backoff the LLM
+        // path uses. `?` here would silently stop all transcription.
+        let claimed = match state.inbox.claim_next().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, ?backoff, "inbox claim failed; retrying");
+                tokio::select! {
+                    _ = tokio::time::sleep(backoff) => {}
+                    _ = shutdown.changed() => return Ok(()),
+                }
+                backoff = (backoff * 2).min(max_backoff);
+                continue;
+            }
+        };
         match claimed {
             Some(payload) => {
                 let counts = state.inbox.counts().await.unwrap_or_default();
