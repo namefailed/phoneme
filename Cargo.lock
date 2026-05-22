@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "1.1.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d"
 dependencies = [
@@ -116,7 +116,7 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anstyle-parse"
-version = "1.1.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52ce7f38b242319f7cabaa6813055467063ecdc9d355bbb4ce0c68908cd8130e"
 dependencies = [
@@ -1249,7 +1249,7 @@ checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 
 [[package]]
 name = "encode_unicode"
-version = "1.1.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
@@ -2651,7 +2651,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "litrs"
-version = "1.1.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
@@ -3435,7 +3435,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme"
-version = "1.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3462,7 +3462,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-audio"
-version = "1.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3480,7 +3480,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-core"
-version = "1.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3502,7 +3502,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-daemon"
-version = "1.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3531,7 +3531,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-ipc"
-version = "1.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3550,7 +3550,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-tray"
-version = "1.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "directories",
