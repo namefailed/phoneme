@@ -150,7 +150,7 @@ impl Config {
                 self.recording.channels
             )));
         }
-        if self.whisper.mode == WhisperMode::BundledModel && self.whisper.model_path.is_empty() {
+        if self.whisper.mode != WhisperMode::External && self.whisper.model_path.is_empty() {
             return Err(Error::InvalidConfig(
                 "whisper.model_path is required when whisper.mode = bundled_model".into(),
             ));

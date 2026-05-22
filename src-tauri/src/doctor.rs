@@ -52,7 +52,7 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     });
 
     // Model file (only relevant in bundled modes).
-    if cfg.whisper.mode == phoneme_core::config::WhisperMode::BundledModel {
+    if cfg.whisper.mode != phoneme_core::config::WhisperMode::External {
         let model_ok = std::path::Path::new(&cfg.whisper.model_path).exists();
         out.push(CheckResult {
             name: "Model file".into(),
