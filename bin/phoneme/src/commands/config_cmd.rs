@@ -14,6 +14,29 @@ pub async fn run(args: ConfigArgs, cfg: &Config) -> ExitCode {
                 ExitCode::from(exit::GENERIC_FAIL)
             }
         }
+        Some(ConfigAction::Reload) => {
+            let mut conn = match crate::client::IpcClient::connect().await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error: failed to connect to daemon: {e}");
+                    return ExitCode::from(exit::DAEMON_NOT_RUNNING);
+                }
+            };
+            match conn.send_request(phoneme_ipc::Request::ReloadConfig).await {
+                Ok(phoneme_ipc::Response::Ok(_)) => {
+                    println!("daemon reloaded configuration");
+                    ExitCode::SUCCESS
+                }
+                Ok(phoneme_ipc::Response::Err(e)) => {
+                    eprintln!("daemon error: {}", e.message);
+                    ExitCode::from(exit::GENERIC_FAIL)
+                }
+                Err(e) => {
+                    eprintln!("ipc error: {e}");
+                    ExitCode::from(exit::IPC_FAIL)
+                }
+            }
+        }
         Some(ConfigAction::Set { key, value }) => match set_value(cfg, &key, &value) {
             Ok(()) => {
                 println!("set {key} = {value}");

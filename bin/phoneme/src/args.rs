@@ -122,6 +122,8 @@ pub enum ConfigAction {
     Set { key: String, value: String },
     /// Print the config file path.
     Path,
+    /// Instruct the daemon to reload its configuration from disk.
+    Reload,
 }
 
 #[derive(Debug, clap::Args)]

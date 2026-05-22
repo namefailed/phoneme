@@ -19,9 +19,9 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
 
     // Transcribe — reuse the process-wide client (AppState) so the HTTP
     // connection pool to the local llama-server stays warm across items.
-    let cfg = &state.config;
+    let cfg = state.config.load();
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
-    let transcript = match state.transcription.transcribe(&audio_path).await {
+    let transcript = match state.transcription.transcribe(&cfg.llm.external_url, Duration::from_secs(cfg.llm.timeout_secs), &audio_path).await {
         Ok(t) => t,
         Err(e) => {
             state
@@ -116,8 +116,8 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         exit_code: final_exit_code,
     });
 
-    if let Some(wh) = &state.webhook {
-        if let Err(e) = wh.post(&payload).await {
+    if let Some(url) = &cfg.hook.webhook_url {
+        if let Err(e) = state.webhook.post(url, Duration::from_secs(cfg.hook.timeout_secs), &payload).await {
             tracing::warn!(error = %e, "webhook failed");
         }
     }

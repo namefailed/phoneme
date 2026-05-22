@@ -218,8 +218,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     metadata: HookMetadata::current(),
                 };
                 let runner = HookRunner::new(
-                    state.config.hook.command.clone(),
-                    std::time::Duration::from_secs(state.config.hook.timeout_secs),
+                    state.config.load().hook.command.clone(),
+                    std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
                 );
                 // Run the hook OFF the IPC connection. A hook can take up to
                 // its full timeout (30s default); running it inline froze the
@@ -232,7 +232,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // overwrite a user's manual transcript edit. RefireHook must
                 // re-run only the hook against the stored transcript.
                 let task_state = state.clone();
-                let command = state.config.hook.command.clone();
+                let command = state.config.load().hook.command.clone();
                 tokio::spawn(async move {
                     let hook_id = payload.id.clone();
                     task_state.events.emit(DaemonEvent::HookStarted {
@@ -287,8 +287,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         },
         Request::HookTest => {
             let runner = HookRunner::new(
-                state.config.hook.command.clone(),
-                std::time::Duration::from_secs(state.config.hook.timeout_secs),
+                state.config.load().hook.command.clone(),
+                std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
             );
             let sample = HookPayload {
                 id: phoneme_core::RecordingId::new(),
@@ -342,10 +342,19 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
             Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
         },
-        Request::ReloadConfig => Response::Err(IpcError {
-            kind: IpcErrorKind::Internal,
-            message: "reload_config not implemented in v1".into(),
-        }),
+        Request::ReloadConfig => {
+            tracing::info!("reloading config via IPC");
+            match crate::main::load_config() {
+                Ok(cfg) => {
+                    state.config.store(std::sync::Arc::new(cfg));
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: IpcErrorKind::InvalidConfig,
+                    message: format!("failed to load config: {e}"),
+                }),
+            }
+        }
         Request::SubscribeEvents => Response::Err(IpcError {
             kind: IpcErrorKind::Internal,
             message:

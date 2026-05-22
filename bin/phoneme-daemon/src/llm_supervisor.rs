@@ -25,10 +25,10 @@ pub struct LlmSupervisorConfig {
 #[allow(dead_code)]
 pub async fn run(state: AppState, shutdown: ShutdownSignal) -> anyhow::Result<()> {
     let cfg = LlmSupervisorConfig {
-        mode: state.config.llm.mode.clone(),
-        model_path: state.config.llm.model_path.clone(),
-        port: state.config.llm.bundled_server_port,
-        bundled_server_args: state.config.llm.bundled_server_args.clone(),
+        mode: state.config.load().llm.mode.clone(),
+        model_path: state.config.load().llm.model_path.clone(),
+        port: state.config.load().llm.bundled_server_port,
+        bundled_server_args: state.config.load().llm.bundled_server_args.clone(),
         binary_override: None,
     };
     run_with(state, cfg, shutdown).await

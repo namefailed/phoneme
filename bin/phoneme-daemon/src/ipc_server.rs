@@ -5,7 +5,7 @@ use crate::ipc_handler::handle_connection;
 use phoneme_ipc::NamedPipeListener;
 
 pub async fn serve(state: AppState) -> anyhow::Result<()> {
-    let pipe_name = state.config.daemon.pipe_name.clone();
+    let pipe_name = state.config.load().daemon.pipe_name.clone();
     let mut listener = NamedPipeListener::bind(&pipe_name).map_err(|e| match e {
         phoneme_ipc::IpcTransportError::AlreadyInUse => anyhow::anyhow!(
             "another phoneme-daemon is already running. Stop it with `phoneme daemon --stop`."

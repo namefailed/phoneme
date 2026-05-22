@@ -89,7 +89,7 @@ impl DaemonRecorder {
         state.catalog.insert(&row).await?;
 
         // Open the CPAL device and the audio Recorder.
-        let device = resolve_input_device(&state.config.recording.input_device)?;
+        let device = resolve_input_device(&state.config.load().recording.input_device)?;
         let source = CpalSource::open(device)?;
         let audio_mode = match mode {
             RecordMode::Hold => AudioMode::Hold,
@@ -98,9 +98,9 @@ impl DaemonRecorder {
         };
         let recorder_cfg = RecorderConfig {
             mode: audio_mode,
-            max_duration_ms: state.config.recording.max_duration_secs as u64 * 1000,
-            silence_threshold_dbfs: state.config.recording.silence_threshold_dbfs,
-            silence_window_ms: state.config.recording.silence_window_ms,
+            max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
+            silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
+            silence_window_ms: state.config.load().recording.silence_window_ms,
         };
         let recorder = Recorder::start(Box::new(source), recorder_cfg).await?;
         *self.handle.lock().await = Some(recorder);

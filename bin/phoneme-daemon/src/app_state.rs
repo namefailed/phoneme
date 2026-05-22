@@ -6,6 +6,7 @@ use crate::shutdown::ShutdownCoordinator;
 use phoneme_core::{Catalog, Config, InboxQueue, TranscriptionClient, webhook::WebhookClient};
 use std::path::PathBuf;
 use std::sync::Arc;
+use arc_swap::ArcSwap;
 use std::time::Duration;
 
 /// Resolved paths derived from `Config`. Created once at startup.
@@ -52,7 +53,7 @@ impl ResolvedPaths {
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<Config>,
+    pub config: Arc<ArcSwap<Config>>,
     pub paths: Arc<ResolvedPaths>,
     pub catalog: Catalog,
     pub inbox: InboxQueue,
@@ -66,7 +67,7 @@ pub struct AppState {
     /// every queued item so the connection pool to the local llama-server
     /// is kept warm instead of rebuilt per recording.
     pub transcription: TranscriptionClient,
-    pub webhook: Option<WebhookClient>,
+    pub webhook: WebhookClient,
 }
 
 impl AppState {
@@ -81,16 +82,11 @@ impl AppState {
 
         let catalog = Catalog::open(&paths.catalog_db).await?;
         let inbox = InboxQueue::new(&paths.inbox_dir).await?;
-        let transcription = TranscriptionClient::new(
-            config.llm.external_url.clone(),
-            Duration::from_secs(config.llm.timeout_secs),
-        );
-        let webhook = config.hook.webhook_url.clone().map(|url| {
-            WebhookClient::new(url, Duration::from_secs(config.hook.timeout_secs))
-        });
+        let transcription = TranscriptionClient::new();
+        let webhook = WebhookClient::new();
 
         Ok(Self {
-            config: Arc::new(config),
+            config: Arc::new(ArcSwap::from_pointee(config)),
             paths: Arc::new(paths),
             catalog,
             inbox,
