@@ -10,6 +10,22 @@ hardening for a scale this app will never reach.
 Items appear below only if real evidence was found in the code. Severity was
 re-evaluated against actual user impact, not theoretical worst-case.
 
+**Resolution:** All 16 findings were addressed on branch
+`fix/code-review-2026-05-21` and merged to master. Two intentional
+divergences from the suggested fixes:
+- **#9 (RefireHook):** the suggested fix re-enqueued into the pipeline
+  queue. That queue always re-transcribes, which would clobber a user's
+  manual transcript edit — so RefireHook instead runs the hook in a
+  detached task, fixing the IPC-blocking problem while keeping the
+  "re-run only the hook" semantic.
+- **#14 (exit-code sentinel):** left as-is. On Windows every process has
+  an exit code, so `status.code()` is always `Some` and the `-1`
+  `unwrap_or` branch is unreachable; making `exit_code` an `Option`
+  would ripple through HookResult → pipeline → catalog → DaemonEvent for
+  no real-world gain on the target platform.
+- **#16 (dead log-rotation config):** deferred to Plan 5/6 as the review
+  itself recommended.
+
 ---
 
 ## Summary
