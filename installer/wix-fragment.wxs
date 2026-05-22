@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- Component that materialises the hooks-templates directory. -->
+    <DirectoryRef Id="INSTALLDIR">
+      <Directory Id="HooksTemplatesDir" Name="hooks-templates">
+        <Component Id="PhonemeHooksTemplates" Guid="*">
+          <File Id="HookStdout"   Name="to-stdout.ps1"        Source="..\hooks\to-stdout.ps1" />
+          <File Id="HookOrg"      Name="to-org-journal.ps1"   Source="..\hooks\to-org-journal.ps1" />
+          <File Id="HookMarkdown" Name="to-markdown-daily.ps1" Source="..\hooks\to-markdown-daily.ps1" />
+          <File Id="HookDenote"   Name="to-denote.ps1"        Source="..\hooks\to-denote.ps1" />
+        </Component>
+      </Directory>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

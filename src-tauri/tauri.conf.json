@@ -37,6 +37,15 @@
     "category": "Productivity",
     "shortDescription": "Local-first voice notes",
     "longDescription": "Phoneme — local-first voice notes for Windows. Press a hotkey, speak, get a transcript via your locally-running LLM.",
-    "targets": ["msi"]
+    "targets": ["msi"],
+    "resources": [
+      "../hooks/*.ps1"
+    ],
+    "windows": {
+      "wix": {
+        "fragmentPaths": ["../installer/wix-fragment.wxs"],
+        "componentRefs": ["PhonemeHooksTemplates"]
+      }
+    }
   }
 }
