@@ -63,53 +63,64 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         transcript: transcript.clone(),
     });
 
-    // Hook.
+    // Hooks.
     state
         .events
         .emit(DaemonEvent::HookStarted { id: id.clone() });
-    let runner = HookRunner::new(
-        cfg.hook.command.clone(),
-        Duration::from_secs(cfg.hook.timeout_secs),
-    );
     payload.metadata = HookMetadata::current();
-    match runner.run(&payload).await {
-        Ok(result) => {
-            state
-                .catalog
-                .update_hook_result(&id, &cfg.hook.command, result.exit_code, result.duration_ms)
-                .await?;
-            state
-                .catalog
-                .update_status(&id, RecordingStatus::Done)
-                .await?;
-            state.inbox.finish_done(&id, &payload).await?;
-            state.events.emit(DaemonEvent::HookDone {
-                id,
-                exit_code: result.exit_code,
-            });
 
-            if let Some(wh) = &state.webhook {
-                if let Err(e) = wh.post(&payload).await {
-                    tracing::warn!(error = %e, "webhook failed");
+    let mut final_exit_code = 0;
+    let mut total_duration = 0;
+    let mut last_cmd = String::new();
+
+    for cmd in &cfg.hook.commands {
+        let runner = HookRunner::new(cmd.clone(), Duration::from_secs(cfg.hook.timeout_secs));
+        match runner.run(&payload).await {
+            Ok(result) => {
+                final_exit_code = result.exit_code;
+                total_duration += result.duration_ms;
+                last_cmd = cmd.clone();
+                if result.exit_code != 0 {
+                    break;
                 }
             }
-
-            Ok(())
-        }
-        Err(e) => {
-            state
-                .catalog
-                .update_status(&id, RecordingStatus::HookFailed)
-                .await?;
-            state
-                .inbox
-                .finish_failed(&id, "hook_failed", &e.to_string())
-                .await?;
-            state.events.emit(DaemonEvent::HookFailed {
-                id,
-                error: e.to_string(),
-            });
-            Err(e)
+            Err(e) => {
+                state
+                    .catalog
+                    .update_status(&id, RecordingStatus::HookFailed)
+                    .await?;
+                state
+                    .inbox
+                    .finish_failed(&id, "hook_failed", &e.to_string())
+                    .await?;
+                state.events.emit(DaemonEvent::HookFailed {
+                    id,
+                    error: e.to_string(),
+                });
+                return Err(e);
+            }
         }
     }
+
+    state
+        .catalog
+        .update_hook_result(&id, &last_cmd, final_exit_code, total_duration)
+        .await?;
+    state
+        .catalog
+        .update_status(&id, RecordingStatus::Done)
+        .await?;
+    state.inbox.finish_done(&id, &payload).await?;
+    state.events.emit(DaemonEvent::HookDone {
+        id,
+        exit_code: final_exit_code,
+    });
+
+    if let Some(wh) = &state.webhook {
+        if let Err(e) = wh.post(&payload).await {
+            tracing::warn!(error = %e, "webhook failed");
+        }
+    }
+
+    Ok(())
 }

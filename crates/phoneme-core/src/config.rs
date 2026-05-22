@@ -44,7 +44,8 @@ pub struct RecordingConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookConfig {
-    pub command: String,
+    #[serde(alias = "command", deserialize_with = "deserialize_string_or_vec")]
+    pub commands: Vec<String>,
     pub timeout_secs: u64,
     #[serde(default)]
     pub webhook_url: Option<String>,
@@ -102,7 +103,7 @@ impl Default for Config {
                 input_device: "default".into(),
             },
             hook: HookConfig {
-                command: "powershell -File %APPDATA%/phoneme/hooks/to-stdout.ps1".into(),
+                commands: vec!["powershell -File %APPDATA%/phoneme/hooks/to-stdout.ps1".into()],
                 timeout_secs: 30,
                 webhook_url: None,
             },
@@ -171,7 +172,11 @@ impl Config {
         let mut out = self.clone();
         out.recording.audio_dir = expand(&out.recording.audio_dir)?;
         out.llm.model_path = expand(&out.llm.model_path)?;
-        out.hook.command = expand(&out.hook.command)?;
+        let mut expanded_cmds = Vec::new();
+        for c in &out.hook.commands {
+            expanded_cmds.push(expand(c)?);
+        }
+        out.hook.commands = expanded_cmds;
         Ok(out)
     }
 }
@@ -183,6 +188,23 @@ fn expand(s: &str) -> Result<String> {
     let expanded = shellexpand::full(s)
         .map_err(|e| Error::InvalidConfig(format!("path expansion failed for {s}: {e}")))?;
     Ok(expanded.into_owned())
+}
+
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        String(String),
+        Vec(Vec<String>),
+    }
+
+    match StringOrVec::deserialize(deserializer)? {
+        StringOrVec::String(s) => Ok(vec![s]),
+        StringOrVec::Vec(v) => Ok(v),
+    }
 }
 
 /// Helper for tests/wizard: resolve the default config file path.
