@@ -7,7 +7,7 @@ pub const GENERIC_FAIL: u8 = 1;
 #[allow(dead_code)]
 pub const USAGE_ERROR: u8 = 2;
 pub const DAEMON_NOT_REACHABLE: u8 = 3;
-pub const Whisper_UNREACHABLE: u8 = 4;
+pub const WHISPER_UNREACHABLE: u8 = 4;
 pub const HOOK_FAILED: u8 = 5;
 pub const INVALID_CONFIG: u8 = 6;
 pub const NOT_FOUND: u8 = 7;
@@ -17,7 +17,7 @@ pub fn from_ipc_kind(kind: IpcErrorKind) -> u8 {
         IpcErrorKind::DaemonNotRunning | IpcErrorKind::PipeInUse | IpcErrorKind::ShuttingDown => {
             DAEMON_NOT_REACHABLE
         }
-        IpcErrorKind::WhisperUnreachable | IpcErrorKind::WhisperTimeout => Whisper_UNREACHABLE,
+        IpcErrorKind::WhisperUnreachable | IpcErrorKind::WhisperTimeout => WHISPER_UNREACHABLE,
         IpcErrorKind::HookFailed => HOOK_FAILED,
         IpcErrorKind::InvalidConfig => INVALID_CONFIG,
         IpcErrorKind::NotFound => NOT_FOUND,
@@ -41,7 +41,7 @@ mod tests {
             from_ipc_kind(IpcErrorKind::DaemonNotRunning),
             DAEMON_NOT_REACHABLE
         );
-        assert_eq!(from_ipc_kind(IpcErrorKind::WhisperUnreachable), Whisper_UNREACHABLE);
+        assert_eq!(from_ipc_kind(IpcErrorKind::WhisperUnreachable), WHISPER_UNREACHABLE);
         assert_eq!(from_ipc_kind(IpcErrorKind::HookFailed), HOOK_FAILED);
         assert_eq!(from_ipc_kind(IpcErrorKind::InvalidConfig), INVALID_CONFIG);
         assert_eq!(from_ipc_kind(IpcErrorKind::NotFound), NOT_FOUND);

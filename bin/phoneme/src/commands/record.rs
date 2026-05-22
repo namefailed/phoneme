@@ -76,7 +76,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
             }
             Ok(Some(Ok(DaemonEvent::TranscriptionFailed { error, .. }))) => {
                 eprintln!("transcription failed: {error}");
-                return ExitCode::from(exit::Whisper_UNREACHABLE);
+                return ExitCode::from(exit::WHISPER_UNREACHABLE);
             }
             Ok(Some(Ok(_))) => continue, // other events
             Ok(Some(Err(e))) => {
