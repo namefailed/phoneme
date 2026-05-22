@@ -1,0 +1,131 @@
+# Phoneme
+
+Local-first voice notes for Windows. Press a hotkey, speak, release. Get a
+transcript — your way.
+
+<p align="center">
+  <img src="docs/screenshots/main.png" width="720" alt="Phoneme main window">
+</p>
+
+## What it does
+
+1. You press a hotkey (or run `phoneme record --oneshot`).
+2. Phoneme records audio from your microphone.
+3. A local LLM transcribes it (no cloud).
+4. The transcript becomes JSON, piped to **your script** — append to a journal,
+   create a Denote note, post to a webhook, whatever.
+
+The app does not touch your journal. It transcribes. You decide where it goes.
+
+## Install
+
+Download the latest `.msi` from the [releases page](../../releases) and run it.
+
+On first launch the wizard walks you through:
+- Pointing at your llama-server (or using the bundled one with your GGUF)
+- Picking your microphone
+- Picking your hook script (default writes to stdout)
+- Optional global hotkey
+
+Requirements: Windows 10/11. A locally running [llama-server][llama-server]
+(installed alongside Phoneme in bundled mode, or run separately in external
+mode). For bundled mode you also bring your own GGUF model file (e.g.,
+[Gemma-4-E4B][gemma]).
+
+## Why "local-first"
+
+No cloud. No telemetry. No update pings. The only network calls Phoneme makes
+are to your configured llama-server endpoint and, optionally and only when
+you click it, Hugging Face (during the v1.1 download-model wizard).
+
+## CLI is a peer, not a fallback
+
+Every action available in the GUI is available from the command line:
+
+```bash
+phoneme record --oneshot                       # record + transcribe + print
+phoneme record --start                          # non-blocking start
+phoneme record --stop                           # non-blocking stop
+phoneme list --since 2026-05-19                 # query the catalog
+phoneme show 20260519T143500823                 # one recording's details
+phoneme doctor                                  # health check
+phoneme watch                                   # subscribe to events as JSON
+```
+
+This is what makes external hotkey daemons work — Kanata, AHK, WHKD all just
+shell out to `phoneme record --start/--stop`.
+
+## Hooks
+
+A hook is your script. Phoneme invokes it with the transcript as JSON on
+stdin. Ship your own or use one of the four reference hooks:
+
+| Hook | What it does |
+|---|---|
+| `to-stdout.ps1` | Default. Echoes the transcript. |
+| `to-org-journal.ps1` | Appends to `~/Documents/org/journal.org`. |
+| `to-markdown-daily.ps1` | Appends to `~/Documents/notes/YYYY-MM-DD.md`. |
+| `to-denote.ps1` | Creates a Denote-flavored note file. |
+
+See [docs/hooks.md](docs/hooks.md) for the full contract.
+
+## Architecture
+
+Three binaries, three libraries, one workspace:
+
+```
+phoneme-daemon      headless brain (audio + queue + catalog + LLM lifecycle)
+  ▲    ▲    ▲
+  │    │    │  named pipe \\.\pipe\phoneme-daemon
+  │    │    └─ Kanata / AHK / external hotkey daemon
+  │    └─── phoneme-tray (Tauri GUI + tray)
+  └────── phoneme (CLI)
+```
+
+Full spec: [docs/superpowers/specs/2026-05-19-phoneme-design.md](docs/superpowers/specs/2026-05-19-phoneme-design.md).
+
+## Building from source
+
+```bash
+# Requirements: Rust 1.75+, Node 20+, pnpm 9+, tauri-cli 2
+
+cd frontend && pnpm install && cd ..
+cargo install tauri-cli --version "^2.0" --locked
+cargo tauri build
+```
+
+The MSI lands at `src-tauri/target/release/bundle/msi/`.
+
+For development (with hot reload):
+
+```bash
+# Terminal A
+cargo run -p phoneme-daemon -- --foreground
+
+# Terminal B
+cargo tauri dev
+```
+
+## Troubleshooting
+
+See [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Roadmap
+
+- **v1.0** *(this release)* — Windows MSI, hooks-only delivery, modes 1+2
+- **v1.1** — Mode 3 (model download wizard), webhook target, multiple hooks
+- **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
+
+See the design doc for the full decision log.
+
+## License
+
+MIT OR Apache-2.0.
+
+---
+
+Phoneme is built by [@namefailed](https://github.com/namefailed). It is not a
+commercial product, has no telemetry, and never will.
+
+[llama-server]: https://github.com/ggerganov/llama.cpp
+[gemma]: https://huggingface.co/google/gemma-4-E4B

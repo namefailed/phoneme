@@ -1,0 +1,104 @@
+# Troubleshooting
+
+## "Daemon not reachable" from the CLI
+
+```
+$ phoneme list
+error: daemon not reachable
+```
+
+The CLI auto-spawns the daemon if it's missing, but with a 3-second timeout.
+If your machine is slow on cold start, the spawn may not complete in time.
+
+**Fix:** Start the daemon explicitly: `phoneme daemon --start`. Then try again.
+
+## "Pipe in use" when starting the daemon
+
+```
+$ phoneme daemon --start
+error: another phoneme-daemon is running (pid 4521)
+```
+
+Another instance is already running.
+
+**Fix:**
+```powershell
+phoneme daemon --stop
+phoneme daemon --start
+```
+
+Or kill the process:
+```powershell
+Stop-Process -Name phoneme-daemon
+```
+
+## Tray icon doesn't appear
+
+Windows sometimes hides tray icons by default. Right-click the taskbar →
+Taskbar settings → "Select which icons appear on the taskbar" and enable
+Phoneme.
+
+## "LLM unreachable" — recordings pile up
+
+The configured `llm.external_url` is not responding. Either the server is
+down, the URL is wrong, or your `llm.timeout_secs` is too low.
+
+**Fix:**
+```bash
+phoneme doctor    # confirms the diagnosis
+```
+
+The recordings stay in `%LOCALAPPDATA%\phoneme\inbox\pending\`. Once
+llama-server is reachable, the daemon retries automatically (exponential
+backoff, capped at 5 minutes between attempts).
+
+## Hook fails or times out
+
+Check the hook log:
+```
+%LOCALAPPDATA%\phoneme\logs\hook.log
+```
+
+Test the hook directly:
+```bash
+phoneme hook test
+```
+
+Common causes:
+- Script not found (check `hook.command` in `%APPDATA%\phoneme\config.toml`)
+- Script needs `-ExecutionPolicy Bypass` (we set this for `.ps1` automatically)
+- Script does network I/O exceeding `hook.timeout_secs` — bump the timeout
+
+## Catalog corruption
+
+If the recordings list is empty or wrong but you have audio files on disk:
+
+```bash
+phoneme doctor --rebuild-catalog
+```
+
+This walks `audio_dir/` and `inbox/done/` and reconstructs the catalog
+database from disk.
+
+## Where is everything?
+
+| What | Where |
+|---|---|
+| Config | `%APPDATA%\phoneme\config.toml` |
+| Hooks (your edits) | `%APPDATA%\phoneme\hooks\` |
+| Hooks (installer source) | `Program Files\Phoneme\hooks-templates\` |
+| Catalog DB | `%LOCALAPPDATA%\phoneme\catalog.db` |
+| Inbox queue | `%LOCALAPPDATA%\phoneme\inbox\` |
+| Logs | `%LOCALAPPDATA%\phoneme\logs\` |
+| Audio files | (configurable) — default `%USERPROFILE%\Documents\phoneme\audio\` |
+
+## Reset to factory defaults
+
+```powershell
+Stop-Process -Name phoneme-daemon -ErrorAction SilentlyContinue
+Remove-Item -Recurse "$env:APPDATA\phoneme"
+Remove-Item -Recurse "$env:LOCALAPPDATA\phoneme"
+```
+
+Then relaunch Phoneme — the wizard runs again from scratch. Audio files in
+your `audio_dir` are preserved.
