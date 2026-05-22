@@ -6,9 +6,9 @@ pub mod error;
 pub mod hook;
 pub mod id;
 pub mod queue;
+pub mod tags;
 pub mod transcription;
 pub mod types;
-pub mod tags;
 pub mod webhook;
 
 pub use catalog::Catalog;

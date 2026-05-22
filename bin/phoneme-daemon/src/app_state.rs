@@ -3,10 +3,10 @@
 use crate::event_bus::EventBus;
 use crate::recorder::DaemonRecorder;
 use crate::shutdown::ShutdownCoordinator;
-use phoneme_core::{Catalog, Config, InboxQueue, TranscriptionClient, webhook::WebhookClient};
+use arc_swap::ArcSwap;
+use phoneme_core::{webhook::WebhookClient, Catalog, Config, InboxQueue, TranscriptionClient};
 use std::path::PathBuf;
 use std::sync::Arc;
-use arc_swap::ArcSwap;
 use std::time::Duration;
 
 /// Resolved paths derived from `Config`. Created once at startup.

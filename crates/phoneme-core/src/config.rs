@@ -103,7 +103,9 @@ impl Default for Config {
                 input_device: "default".into(),
             },
             hook: HookConfig {
-                commands: vec!["powershell -File ~/AppData/Roaming/phoneme/hooks/to-stdout.ps1".into()],
+                commands: vec![
+                    "powershell -File ~/AppData/Roaming/phoneme/hooks/to-stdout.ps1".into(),
+                ],
                 timeout_secs: 30,
                 webhook_url: None,
             },
@@ -185,8 +187,12 @@ fn expand(s: &str) -> Result<String> {
     if s.is_empty() {
         return Ok(s.into());
     }
-    let mut s = s.replace("%USERPROFILE%", "~").replace("%APPDATA%", "~/AppData/Roaming");
-    if let Some(home_dir) = directories::UserDirs::new().map(|u| u.home_dir().to_string_lossy().to_string()) {
+    let mut s = s
+        .replace("%USERPROFILE%", "~")
+        .replace("%APPDATA%", "~/AppData/Roaming");
+    if let Some(home_dir) =
+        directories::UserDirs::new().map(|u| u.home_dir().to_string_lossy().to_string())
+    {
         // Replace `~/` with the absolute home directory path, even in the middle of strings (like hook commands)
         s = s.replace("~/", &format!("{}/", home_dir.replace('\\', "/")));
     }

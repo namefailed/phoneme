@@ -8,13 +8,13 @@ mod event_bus;
 mod first_run;
 mod ipc_handler;
 mod ipc_server;
-mod whisper_supervisor;
 mod logging;
 mod pipeline;
 mod queue_worker;
 mod reconcile;
 mod recorder;
 mod shutdown;
+mod whisper_supervisor;
 
 use app_state::AppState;
 

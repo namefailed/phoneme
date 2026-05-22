@@ -212,9 +212,12 @@ impl CpalSource {
         // Background worker — does all the heavy lifting off the audio thread.
         let target_rate = SampleRate::HZ_16K.as_u32();
         let worker = tokio::spawn(async move {
-            use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+            use rubato::{
+                Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
+                WindowFunction,
+            };
             let chunk_frames = 4096;
-            
+
             let mut resampler = if device_sample_rate != target_rate {
                 let params = SincInterpolationParameters {
                     sinc_len: 128,
@@ -233,11 +236,13 @@ impl CpalSource {
 
             while let Some(raw) = raw_rx.recv().await {
                 accumulator.extend_from_slice(&raw);
-                
+
                 while accumulator.len() >= chunk_frames * device_channels {
-                    let chunk: Vec<f32> = accumulator.drain(..chunk_frames * device_channels).collect();
+                    let chunk: Vec<f32> = accumulator
+                        .drain(..chunk_frames * device_channels)
+                        .collect();
                     let mono = downmix_to_mono_f32(&chunk, device_channels);
-                    
+
                     let processed = if let Some(r) = resampler.as_mut() {
                         match r.process(&[mono], None) {
                             Ok(out) => out.into_iter().next().unwrap_or_default(),

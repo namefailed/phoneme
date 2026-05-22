@@ -26,7 +26,10 @@ async fn returns_transcript_text_on_200() {
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
     let client = TranscriptionClient::new();
-    let result = client.transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav).await.unwrap();
+    let result = client
+        .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav)
+        .await
+        .unwrap();
     assert_eq!(result, "hello world");
 }
 
@@ -42,7 +45,10 @@ async fn returns_whisper_error_on_500() {
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
     let client = TranscriptionClient::new();
-    let err = client.transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav).await.unwrap_err();
+    let err = client
+        .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav)
+        .await
+        .unwrap_err();
     match err {
         Error::WhisperError { status, body } => {
             assert_eq!(status, 500);
@@ -68,7 +74,10 @@ async fn returns_timeout_when_server_slow() {
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
     let client = TranscriptionClient::new();
-    let err = client.transcribe(&server.uri(), std::time::Duration::from_millis(100), &wav).await.unwrap_err();
+    let err = client
+        .transcribe(&server.uri(), std::time::Duration::from_millis(100), &wav)
+        .await
+        .unwrap_err();
     assert!(matches!(err, Error::WhisperTimeout { .. }));
 }
 
@@ -83,9 +92,19 @@ async fn returns_unreachable_when_no_server() {
     // so accept both — the spec's distinction matters more in the daemon's
     // retry/backoff logic than in this unit-level test.
     let client = TranscriptionClient::new();
-    let err = client.transcribe("http://127.0.0.1:1", std::time::Duration::from_secs(2), &wav).await.unwrap_err();
+    let err = client
+        .transcribe(
+            "http://127.0.0.1:1",
+            std::time::Duration::from_secs(2),
+            &wav,
+        )
+        .await
+        .unwrap_err();
     assert!(
-        matches!(err, Error::WhisperUnreachable { .. } | Error::WhisperTimeout { .. }),
+        matches!(
+            err,
+            Error::WhisperUnreachable { .. } | Error::WhisperTimeout { .. }
+        ),
         "expected WhisperUnreachable or WhisperTimeout, got {err:?}"
     );
 }
@@ -94,7 +113,11 @@ async fn returns_unreachable_when_no_server() {
 async fn errors_on_missing_audio_file() {
     let client = TranscriptionClient::new();
     let err = client
-        .transcribe("http://127.0.0.1:9999", std::time::Duration::from_secs(2), Path::new("/no/such/file.wav"))
+        .transcribe(
+            "http://127.0.0.1:9999",
+            std::time::Duration::from_secs(2),
+            Path::new("/no/such/file.wav"),
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, Error::Io(_)));

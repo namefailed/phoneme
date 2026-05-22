@@ -23,7 +23,9 @@ impl WebhookClient {
             .await
             .map_err(|e| {
                 if e.is_timeout() {
-                    Error::HookTimeout { secs: timeout.as_secs() }
+                    Error::HookTimeout {
+                        secs: timeout.as_secs(),
+                    }
                 } else {
                     Error::Internal(format!("webhook send failed: {e}"))
                 }

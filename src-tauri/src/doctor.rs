@@ -42,7 +42,12 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     });
 
     // Hook executable resolvable.
-    let hook_first = cfg.hook.commands.first().map(|c| c.split_whitespace().next().unwrap_or("")).unwrap_or("");
+    let hook_first = cfg
+        .hook
+        .commands
+        .first()
+        .map(|c| c.split_whitespace().next().unwrap_or(""))
+        .unwrap_or("");
     let hook_ok = which::which(hook_first).is_ok() || std::path::Path::new(hook_first).exists();
     out.push(CheckResult {
         name: "Hook command".into(),

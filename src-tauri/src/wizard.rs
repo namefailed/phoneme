@@ -38,7 +38,10 @@ pub async fn test_whisper_endpoint(url: &str) -> TestConnectResult {
 }
 
 /// Run the configured hook with a sample payload via the daemon.
-pub async fn test_hook(bridge: Option<&Bridge>, custom_command: Option<String>) -> TestConnectResult {
+pub async fn test_hook(
+    bridge: Option<&Bridge>,
+    custom_command: Option<String>,
+) -> TestConnectResult {
     let Some(bridge) = bridge else {
         return TestConnectResult {
             ok: false,

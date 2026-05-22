@@ -13,37 +13,68 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     // Recording control
-    RecordStart { mode: RecordMode },
+    RecordStart {
+        mode: RecordMode,
+    },
     RecordStop,
     RecordCancel,
     RecordStatus,
 
     // Catalog queries
-    ListRecordings { filter: ListFilter },
-    GetRecording { id: RecordingId },
-    DeleteRecording { id: RecordingId, keep_audio: bool },
+    ListRecordings {
+        filter: ListFilter,
+    },
+    GetRecording {
+        id: RecordingId,
+    },
+    DeleteRecording {
+        id: RecordingId,
+        keep_audio: bool,
+    },
 
     // Queue operations
-    ReplayRecording { id: RecordingId },
-    RefireHook { id: RecordingId },
-    UpdateTranscript { id: RecordingId, text: String },
+    ReplayRecording {
+        id: RecordingId,
+    },
+    RefireHook {
+        id: RecordingId,
+    },
+    UpdateTranscript {
+        id: RecordingId,
+        text: String,
+    },
 
     // Daemon control
     DaemonStatus,
     Shutdown,
     ReloadConfig,
-    HookTest { custom_command: Option<String> },
+    HookTest {
+        custom_command: Option<String>,
+    },
 
     // Streaming
     SubscribeEvents,
 
     // Tags
     ListTags,
-    AddTag { name: String, color: Option<String> },
-    DeleteTag { id: i64 },
-    AttachTag { recording_id: RecordingId, tag_id: i64 },
-    DetachTag { recording_id: RecordingId, tag_id: i64 },
-    TagsFor { recording_id: RecordingId },
+    AddTag {
+        name: String,
+        color: Option<String>,
+    },
+    DeleteTag {
+        id: i64,
+    },
+    AttachTag {
+        recording_id: RecordingId,
+        tag_id: i64,
+    },
+    DetachTag {
+        recording_id: RecordingId,
+        tag_id: i64,
+    },
+    TagsFor {
+        recording_id: RecordingId,
+    },
 }
 
 /// Daemon response. For most requests, a single Response is returned.

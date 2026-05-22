@@ -4,11 +4,11 @@ use crate::bridge::Bridge;
 use crate::config_io;
 use crate::doctor::CheckResult;
 use crate::wizard::TestConnectResult;
+use futures::StreamExt;
 use phoneme_core::{Config, ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::{Request, Response};
 use serde_json::Value;
 use tauri::{Emitter, State};
-use futures::StreamExt;
 
 type Br<'r> = State<'r, Option<Bridge>>;
 
@@ -126,14 +126,18 @@ pub fn read_config() -> Result<Config, String> {
 }
 
 #[tauri::command]
-pub async fn write_config(app: tauri::AppHandle, bridge: Br<'_>, config: Config) -> Result<(), String> {
+pub async fn write_config(
+    app: tauri::AppHandle,
+    bridge: Br<'_>,
+    config: Config,
+) -> Result<(), String> {
     config_io::write(&config).map_err(|e| e.to_string())?;
     // Tell daemon to reload
     let _ = forward(&bridge, Request::ReloadConfig).await;
-    
+
     // Dynamically reload hotkey in the frontend
-    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
     use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
     let _ = app.global_shortcut().unregister_all();
     if config.hotkey.enabled {
         if let Ok(shortcut) = Shortcut::from_str(&config.hotkey.combo) {
@@ -167,7 +171,10 @@ pub async fn wizard_test_whisper(url: String) -> Result<TestConnectResult, Strin
 }
 
 #[tauri::command]
-pub async fn wizard_test_hook(bridge: Br<'_>, custom_command: Option<String>) -> Result<TestConnectResult, String> {
+pub async fn wizard_test_hook(
+    bridge: Br<'_>,
+    custom_command: Option<String>,
+) -> Result<TestConnectResult, String> {
     Ok(crate::wizard::test_hook(bridge.as_ref(), custom_command).await)
 }
 
@@ -188,15 +195,37 @@ pub async fn add_tag(bridge: Br<'_>, name: String, color: Option<String>) -> Res
 }
 
 #[tauri::command]
-pub async fn attach_tag(bridge: Br<'_>, recording_id: String, tag_id: i64) -> Result<Value, String> {
+pub async fn attach_tag(
+    bridge: Br<'_>,
+    recording_id: String,
+    tag_id: i64,
+) -> Result<Value, String> {
     let recording_id = parse_id(&recording_id)?;
-    forward(&bridge, Request::AttachTag { recording_id, tag_id }).await
+    forward(
+        &bridge,
+        Request::AttachTag {
+            recording_id,
+            tag_id,
+        },
+    )
+    .await
 }
 
 #[tauri::command]
-pub async fn detach_tag(bridge: Br<'_>, recording_id: String, tag_id: i64) -> Result<Value, String> {
+pub async fn detach_tag(
+    bridge: Br<'_>,
+    recording_id: String,
+    tag_id: i64,
+) -> Result<Value, String> {
     let recording_id = parse_id(&recording_id)?;
-    forward(&bridge, Request::DetachTag { recording_id, tag_id }).await
+    forward(
+        &bridge,
+        Request::DetachTag {
+            recording_id,
+            tag_id,
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -229,7 +258,10 @@ pub async fn wizard_download_model(
         // Emit a fake progress event so the UI knows it's 100%
         let _ = window.emit(
             "download_progress",
-            DownloadProgress { downloaded: 1, total: Some(1) },
+            DownloadProgress {
+                downloaded: 1,
+                total: Some(1),
+            },
         );
         return Ok(dest_path.to_string_lossy().into_owned());
     }
@@ -243,7 +275,10 @@ pub async fn wizard_download_model(
         .map_err(|e| format!("request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("download failed with status: {}", response.status()));
+        return Err(format!(
+            "download failed with status: {}",
+            response.status()
+        ));
     }
 
     let total = response.content_length();
@@ -264,10 +299,7 @@ pub async fn wizard_download_model(
         }
         downloaded += chunk.len() as u64;
 
-        let _ = window.emit(
-            "download_progress",
-            DownloadProgress { downloaded, total },
-        );
+        let _ = window.emit("download_progress", DownloadProgress { downloaded, total });
     }
 
     Ok(dest_path.to_string_lossy().into_owned())
@@ -292,9 +324,7 @@ pub fn reveal_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn wizard_download_server(
-    window: tauri::Window,
-) -> Result<String, String> {
+pub async fn wizard_download_server(window: tauri::Window) -> Result<String, String> {
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| "could not resolve project directories".to_string())?;
     let bin_dir = dirs.data_local_dir().join("bin");
@@ -306,13 +336,17 @@ pub async fn wizard_download_server(
     if tokio::fs::metadata(&exe_path).await.is_ok() {
         let _ = window.emit(
             "server_download_progress",
-            DownloadProgress { downloaded: 1, total: Some(1) },
+            DownloadProgress {
+                downloaded: 1,
+                total: Some(1),
+            },
         );
         return Ok(exe_path.to_string_lossy().into_owned());
     }
 
-    let url = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip";
-    
+    let url =
+        "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip";
+
     // Download into a temp file
     let temp_zip = bin_dir.join("whisper-temp.zip");
     let mut file = tokio::fs::File::create(&temp_zip)
@@ -324,7 +358,10 @@ pub async fn wizard_download_server(
         .map_err(|e| format!("request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("download failed with status: {}", response.status()));
+        return Err(format!(
+            "download failed with status: {}",
+            response.status()
+        ));
     }
 
     let total = response.content_length();
@@ -350,7 +387,7 @@ pub async fn wizard_download_server(
             DownloadProgress { downloaded, total },
         );
     }
-    
+
     // Explicitly sync and drop to ensure file is completely written before unzip
     if let Err(e) = file.sync_all().await {
         let _ = tokio::fs::remove_file(&temp_zip).await;
@@ -361,21 +398,21 @@ pub async fn wizard_download_server(
     // Extract zip
     let zip_file = std::fs::File::open(&temp_zip)
         .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
-    
-    let mut archive = zip::ZipArchive::new(zip_file)
-        .map_err(|e| format!("failed to read zip archive: {}", e))?;
-    
+
+    let mut archive =
+        zip::ZipArchive::new(zip_file).map_err(|e| format!("failed to read zip archive: {}", e))?;
+
     for i in 0..archive.len() {
         let mut file = match archive.by_index(i) {
             Ok(f) => f,
             Err(_) => continue,
         };
-        
+
         let outpath = match file.enclosed_name() {
             Some(path) => path.to_owned(),
             None => continue,
         };
-        
+
         // We only care about the binaries in the 'whisper-bin-x64' root or nested, just grab exe and dlls.
         if outpath.is_file() {
             let file_name = outpath.file_name().unwrap().to_string_lossy().to_string();
@@ -388,7 +425,7 @@ pub async fn wizard_download_server(
             }
         }
     }
-    
+
     let _ = tokio::fs::remove_file(&temp_zip).await;
 
     Ok(exe_path.to_string_lossy().into_owned())

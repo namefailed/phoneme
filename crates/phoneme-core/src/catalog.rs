@@ -226,11 +226,13 @@ impl Catalog {
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter()
-            .map(|r| Ok(Tag {
-                id: r.try_get("id")?,
-                name: r.try_get("name")?,
-                color: r.try_get("color")?,
-            }))
+            .map(|r| {
+                Ok(Tag {
+                    id: r.try_get("id")?,
+                    name: r.try_get("name")?,
+                    color: r.try_get("color")?,
+                })
+            })
             .collect()
     }
 
@@ -260,24 +262,20 @@ impl Catalog {
     }
 
     pub async fn attach_tag(&self, recording_id: &RecordingId, tag_id: i64) -> Result<()> {
-        sqlx::query(
-            "INSERT OR IGNORE INTO recording_tags (recording_id, tag_id) VALUES (?, ?)",
-        )
-        .bind(recording_id.as_str())
-        .bind(tag_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("INSERT OR IGNORE INTO recording_tags (recording_id, tag_id) VALUES (?, ?)")
+            .bind(recording_id.as_str())
+            .bind(tag_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     pub async fn detach_tag(&self, recording_id: &RecordingId, tag_id: i64) -> Result<()> {
-        sqlx::query(
-            "DELETE FROM recording_tags WHERE recording_id = ? AND tag_id = ?",
-        )
-        .bind(recording_id.as_str())
-        .bind(tag_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("DELETE FROM recording_tags WHERE recording_id = ? AND tag_id = ?")
+            .bind(recording_id.as_str())
+            .bind(tag_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -293,11 +291,13 @@ impl Catalog {
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter()
-            .map(|r| Ok(Tag {
-                id: r.try_get("id")?,
-                name: r.try_get("name")?,
-                color: r.try_get("color")?,
-            }))
+            .map(|r| {
+                Ok(Tag {
+                    id: r.try_get("id")?,
+                    name: r.try_get("name")?,
+                    color: r.try_get("color")?,
+                })
+            })
             .collect()
     }
 }

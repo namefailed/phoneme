@@ -218,7 +218,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     metadata: HookMetadata::current(),
                 };
                 let runner = HookRunner::new(
-                    state.config.load().hook.commands.first().cloned().unwrap_or_default(),
+                    state
+                        .config
+                        .load()
+                        .hook
+                        .commands
+                        .first()
+                        .cloned()
+                        .unwrap_or_default(),
                     std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
                 );
                 // Run the hook OFF the IPC connection. A hook can take up to
@@ -232,7 +239,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // overwrite a user's manual transcript edit. RefireHook must
                 // re-run only the hook against the stored transcript.
                 let task_state = state.clone();
-                let command = state.config.load().hook.commands.first().cloned().unwrap_or_default();
+                let command = state
+                    .config
+                    .load()
+                    .hook
+                    .commands
+                    .first()
+                    .cloned()
+                    .unwrap_or_default();
                 tokio::spawn(async move {
                     let hook_id = payload.id.clone();
                     task_state.events.emit(DaemonEvent::HookStarted {
@@ -286,7 +300,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::HookTest { custom_command } => {
-            let command = custom_command.unwrap_or_else(|| state.config.load().hook.commands.first().cloned().unwrap_or_default());
+            let command = custom_command.unwrap_or_else(|| {
+                state
+                    .config
+                    .load()
+                    .hook
+                    .commands
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
+            });
             let runner = HookRunner::new(
                 command,
                 std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
@@ -321,27 +344,53 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::ListTags => match state.catalog.list_tags().await {
             Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
         },
-        Request::AddTag { name, color } => match state.catalog.add_tag(&name, color.as_deref()).await {
-            Ok(tag) => Response::Ok(serde_json::to_value(tag).unwrap_or_default()),
-            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
-        },
+        Request::AddTag { name, color } => {
+            match state.catalog.add_tag(&name, color.as_deref()).await {
+                Ok(tag) => Response::Ok(serde_json::to_value(tag).unwrap_or_default()),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::DeleteTag { id } => match state.catalog.delete_tag(id).await {
             Ok(()) => Response::Ok(serde_json::Value::Null),
-            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
         },
-        Request::AttachTag { recording_id, tag_id } => match state.catalog.attach_tag(&recording_id, tag_id).await {
+        Request::AttachTag {
+            recording_id,
+            tag_id,
+        } => match state.catalog.attach_tag(&recording_id, tag_id).await {
             Ok(()) => Response::Ok(serde_json::Value::Null),
-            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
         },
-        Request::DetachTag { recording_id, tag_id } => match state.catalog.detach_tag(&recording_id, tag_id).await {
+        Request::DetachTag {
+            recording_id,
+            tag_id,
+        } => match state.catalog.detach_tag(&recording_id, tag_id).await {
             Ok(()) => Response::Ok(serde_json::Value::Null),
-            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
         },
         Request::TagsFor { recording_id } => match state.catalog.tags_for(&recording_id).await {
             Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => Response::Err(IpcError { kind: error_to_kind(&e), message: e.to_string() }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
         },
         Request::ReloadConfig => {
             tracing::info!("reloading config via IPC");

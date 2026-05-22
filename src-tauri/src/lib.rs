@@ -39,22 +39,26 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
+                    use phoneme_core::RecordMode;
                     use tauri::Manager;
                     use tauri_plugin_global_shortcut::ShortcutState;
-                    use phoneme_core::RecordMode;
-                    
+
                     let bridge = app.state::<Option<Bridge>>().inner().clone();
                     if let Some(bridge) = bridge {
                         let config = bridge.config.clone();
                         let hotkey_enabled = config.hotkey.enabled;
                         let hotkey_combo = config.hotkey.combo.clone();
-                        
+
                         // We only care if they match the configured shortcut
                         // Since we register exactly one shortcut below, it should match.
                         match event.state() {
                             ShortcutState::Pressed => {
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = bridge.request(phoneme_ipc::Request::RecordStart { mode: RecordMode::Hold }).await;
+                                    let _ = bridge
+                                        .request(phoneme_ipc::Request::RecordStart {
+                                            mode: RecordMode::Hold,
+                                        })
+                                        .await;
                                 });
                             }
                             ShortcutState::Released => {
@@ -72,7 +76,7 @@ pub fn run() {
             let _tray = tray::install(app.handle())?;
             if let Some(bridge) = bridge.clone() {
                 events::spawn(app.handle().clone(), bridge.clone());
-                
+
                 if bridge.config.hotkey.enabled {
                     use std::str::FromStr;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};

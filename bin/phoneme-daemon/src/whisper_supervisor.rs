@@ -39,8 +39,12 @@ pub async fn run_with(
             return Ok(());
         }
 
-        let cfg = state.config.load().expanded().unwrap_or_else(|_| (**state.config.load()).clone());
-        
+        let cfg = state
+            .config
+            .load()
+            .expanded()
+            .unwrap_or_else(|_| (**state.config.load()).clone());
+
         if cfg.whisper.mode == WhisperMode::External {
             // In external mode, we don't manage a bundled server. Just wait a bit and re-check.
             tokio::select! {
@@ -60,10 +64,12 @@ pub async fn run_with(
                         _ = shutdown.wait() => return Ok(()),
                     }
                 }
-            }
+            },
         };
 
-        if cfg.whisper.model_path.is_empty() || !std::path::Path::new(&cfg.whisper.model_path).exists() {
+        if cfg.whisper.model_path.is_empty()
+            || !std::path::Path::new(&cfg.whisper.model_path).exists()
+        {
             tracing::info!("whisper.model_path is empty or missing, waiting for download...");
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
@@ -133,7 +139,12 @@ async fn kill_gracefully(child: &mut Child) -> std::io::Result<()> {
 /// It also checks the AppData/Local/phoneme/data/bin directory where the
 /// First Run Wizard downloads it if requested.
 fn locate_bundled_server() -> anyhow::Result<PathBuf> {
-    let candidates = ["whisper-server.exe", "whisper-server", "server.exe", "server"];
+    let candidates = [
+        "whisper-server.exe",
+        "whisper-server",
+        "server.exe",
+        "server",
+    ];
     // Try alongside our own executable.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -145,7 +156,7 @@ fn locate_bundled_server() -> anyhow::Result<PathBuf> {
             }
         }
     }
-    
+
     // Try downloaded AppData location
     if let Some(dirs) = directories::ProjectDirs::from("", "", "phoneme") {
         let bin_dir = dirs.data_local_dir().join("bin");
@@ -156,7 +167,7 @@ fn locate_bundled_server() -> anyhow::Result<PathBuf> {
             }
         }
     }
-    
+
     // Fall back to PATH.
     for name in candidates {
         if let Ok(path) = which::which(name) {

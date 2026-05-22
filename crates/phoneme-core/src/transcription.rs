@@ -24,7 +24,12 @@ impl TranscriptionClient {
         Self { http }
     }
 
-    pub async fn transcribe(&self, base_url: &str, timeout: Duration, audio_path: &Path) -> Result<String> {
+    pub async fn transcribe(
+        &self,
+        base_url: &str,
+        timeout: Duration,
+        audio_path: &Path,
+    ) -> Result<String> {
         let bytes = fs::read(audio_path).await?;
         let part = multipart::Part::bytes(bytes)
             .file_name(
@@ -38,11 +43,15 @@ impl TranscriptionClient {
             .map_err(|e| Error::Internal(format!("multipart mime: {e}")))?;
         let form = multipart::Form::new().part("file", part);
 
-        let url = format!(
-            "{}/inference",
-            base_url.trim_end_matches('/')
-        );
-        let response = match self.http.post(&url).timeout(timeout).multipart(form).send().await {
+        let url = format!("{}/inference", base_url.trim_end_matches('/'));
+        let response = match self
+            .http
+            .post(&url)
+            .timeout(timeout)
+            .multipart(form)
+            .send()
+            .await
+        {
             Ok(r) => r,
             Err(e) if e.is_timeout() => {
                 return Err(Error::WhisperTimeout {
