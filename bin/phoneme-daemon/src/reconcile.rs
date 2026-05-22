@@ -6,8 +6,14 @@
 //! 3. Log warnings for orphan WAVs (no catalog row).
 
 use crate::app_state::AppState;
+use crate::first_run;
 
 pub async fn run(state: &AppState) -> anyhow::Result<()> {
+    // First-run: copy reference hooks into user's config dir.
+    if let Err(e) = first_run::ensure_hooks_copied(state).await {
+        tracing::warn!(error = %e, "first-run hook copy failed");
+    }
+
     // Step 1: requeue inbox orphans.
     let orphans = state.inbox.recover_orphans().await?;
     if !orphans.is_empty() {

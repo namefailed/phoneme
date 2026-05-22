@@ -5,6 +5,7 @@ use clap::Parser;
 
 mod app_state;
 mod event_bus;
+mod first_run;
 mod ipc_handler;
 mod ipc_server;
 mod llm_supervisor;
