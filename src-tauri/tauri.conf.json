@@ -36,9 +36,7 @@
     "shortDescription": "Local-first voice notes",
     "longDescription": "Phoneme — local-first voice notes for Windows. Press a hotkey, speak, get a transcript via your locally-running Whisper.",
     "targets": ["msi"],
-    "resources": [
-      "../hooks/*.ps1"
-    ],
+    "resources": [],
     "windows": {
       "wix": {
         "fragmentPaths": ["../installer/wix-fragment.wxs"],
