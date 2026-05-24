@@ -14,6 +14,8 @@ pub struct TranscriptionClient {
 #[derive(Debug, Deserialize)]
 struct OpenAiResponse {
     text: String,
+}
+
 impl TranscriptionClient {
     /// Creates a new `TranscriptionClient` equipped with an internal HTTP client.
     pub fn new() -> Result<Self> {

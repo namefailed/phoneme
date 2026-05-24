@@ -66,7 +66,9 @@ pub fn run() {
                             }
                             ShortcutState::Released => {
                                 tauri::async_runtime::spawn(async move {
-                                    if let Err(e) = bridge.request(phoneme_ipc::Request::RecordStop).await {
+                                    if let Err(e) =
+                                        bridge.request(phoneme_ipc::Request::RecordStop).await
+                                    {
                                         tracing::error!("failed to stop record from hotkey: {e}");
                                     }
                                 });
