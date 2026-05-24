@@ -20,12 +20,12 @@ pub enum TrayState {
 }
 
 impl TrayState {
-    pub fn icon_path(&self) -> &'static str {
+    pub fn icon_bytes(&self) -> &'static [u8] {
         match self {
-            Self::Idle => "icons/tray-idle.png",
-            Self::Recording => "icons/tray-recording.png",
-            Self::Transcribing | Self::CatchupBacklog(_) => "icons/tray-transcribing.png",
-            Self::WhisperError | Self::HookFailed => "icons/tray-error.png",
+            Self::Idle => include_bytes!("../icons/tray-idle.png"),
+            Self::Recording => include_bytes!("../icons/tray-recording.png"),
+            Self::Transcribing | Self::CatchupBacklog(_) => include_bytes!("../icons/tray-transcribing.png"),
+            Self::WhisperError | Self::HookFailed => include_bytes!("../icons/tray-error.png"),
         }
     }
 
@@ -65,7 +65,7 @@ pub fn install(app: &AppHandle) -> Result<TrayIcon> {
 
     let tray = TrayIconBuilder::with_id("main")
         .menu(&menu)
-        .icon(Image::from_path(TrayState::Idle.icon_path())?)
+        .icon(Image::from_bytes(TrayState::Idle.icon_bytes())?)
         .tooltip(TrayState::Idle.tooltip())
         .on_menu_event(handle_menu_event)
         .on_tray_icon_event(handle_tray_event)
@@ -132,7 +132,7 @@ fn handle_tray_event(tray: &TrayIcon, event: TrayIconEvent) {
 /// Switch the tray icon and tooltip to reflect a new state.
 #[allow(dead_code)] // wired up by the event-bridge in Task 5
 pub fn update_state(tray: &TrayIcon, state: TrayState) -> Result<()> {
-    tray.set_icon(Some(Image::from_path(state.icon_path())?))?;
+    tray.set_icon(Some(Image::from_bytes(state.icon_bytes())?))?;
     tray.set_tooltip(Some(state.tooltip()))?;
     Ok(())
 }
