@@ -167,7 +167,7 @@ impl Transport for NamedPipeTransport {
         &mut self,
     ) -> TransportResult<BoxStream<'static, TransportResult<DaemonEvent>>> {
         let framed = self.framed.as_mut().ok_or(IpcTransportError::Closed)?;
-        
+
         let json = serde_json::to_vec(&Request::SubscribeEvents)
             .map_err(|e| IpcTransportError::Internal(e.to_string()))?;
         let io = framed.get_mut();
