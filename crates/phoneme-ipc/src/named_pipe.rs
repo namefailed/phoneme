@@ -166,23 +166,21 @@ impl Transport for NamedPipeTransport {
     async fn subscribe(
         &mut self,
     ) -> TransportResult<BoxStream<'static, TransportResult<DaemonEvent>>> {
-        // Send SubscribeEvents while we still own the Response-typed framed IO.
-        {
-            let framed = self.framed.as_mut().ok_or(IpcTransportError::Closed)?;
-            let json = serde_json::to_vec(&Request::SubscribeEvents)
-                .map_err(|e| IpcTransportError::Internal(e.to_string()))?;
-            let io = framed.get_mut();
-            use tokio::io::AsyncWriteExt;
-            io.write_all(&json).await?;
-            io.write_all(b"\n").await?;
-            io.flush().await?;
+        let res = self.request(Request::SubscribeEvents).await?;
+        if let Response::Err(e) = res {
+            return Err(IpcTransportError::Internal(e.message));
         }
 
         // Take ownership of the framed IO and reframe with DaemonEvent codec.
         // After this point, self.framed is None — further request() calls return Closed.
         let old = self.framed.take().ok_or(IpcTransportError::Closed)?;
         let parts = old.into_parts();
-        let event_framed = Framed::new(parts.io, JsonLineCodec::<DaemonEvent>::new());
+        
+        let mut new_parts = tokio_util::codec::FramedParts::new(parts.io, JsonLineCodec::<DaemonEvent>::new());
+        new_parts.read_buf = parts.read_buf;
+        new_parts.write_buf = parts.write_buf;
+        
+        let event_framed = Framed::from_parts(new_parts);
         let stream = event_framed.map(|r| r.map_err(IpcTransportError::Io));
         Ok(stream.boxed())
     }
