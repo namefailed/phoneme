@@ -14,16 +14,12 @@ pub struct TranscriptionClient {
 #[derive(Debug, Deserialize)]
 struct OpenAiResponse {
     text: String,
-}
-
-
-
 impl TranscriptionClient {
     /// Creates a new `TranscriptionClient` equipped with an internal HTTP client.
     pub fn new() -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .build()
-            .map_err(|e| crate::error::Error::Internal(format!("Failed to build reqwest client: {e}")))?;
+        let http = reqwest::Client::builder().build().map_err(|e| {
+            crate::error::Error::Internal(format!("Failed to build reqwest client: {e}"))
+        })?;
         Ok(Self { http })
     }
 

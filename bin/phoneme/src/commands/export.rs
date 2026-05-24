@@ -76,7 +76,8 @@ pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
                 if path.is_file() {
                     if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                         if file_name.ends_with(".wav") {
-                            if let Err(e) = zip.start_file(format!("audio/{}", file_name), options) {
+                            if let Err(e) = zip.start_file(format!("audio/{}", file_name), options)
+                            {
                                 eprintln!("failed to write {file_name} to zip: {e}");
                                 continue;
                             }

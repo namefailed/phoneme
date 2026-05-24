@@ -5,15 +5,11 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct WebhookClient {
     http: reqwest::Client,
-}
-
-
-
 impl WebhookClient {
     pub fn new() -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .build()
-            .map_err(|e| crate::error::Error::Internal(format!("Failed to build reqwest client: {e}")))?;
+        let http = reqwest::Client::builder().build().map_err(|e| {
+            crate::error::Error::Internal(format!("Failed to build reqwest client: {e}"))
+        })?;
         Ok(Self { http })
     }
 

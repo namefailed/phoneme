@@ -428,6 +428,7 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
                     .map_err(|e| format!("failed to create output file {}: {}", file_name, e))?;
                 std::io::copy(&mut file, &mut outfile)
                     .map_err(|e| format!("failed to extract {}: {}", file_name, e))?;
+                }
             }
         }
     }
