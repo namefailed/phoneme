@@ -29,7 +29,11 @@ impl Catalog {
     ///   the daemon on idle to keep WAL growth bounded.
     /// - `journal_size_limit=67108864` caps the WAL at 64 MB regardless.
     pub async fn open(path: &Path) -> Result<Self> {
-        let opts = SqliteConnectOptions::from_str(path.to_str().expect("utf-8 path"))?
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| crate::error::Error::Internal("catalog path is not valid utf-8".into()))?;
+
+        let opts = SqliteConnectOptions::from_str(path_str)?
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)

@@ -32,7 +32,13 @@ pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
         "tags": tags,
     });
 
-    let json_bytes = serde_json::to_vec_pretty(&export_data).unwrap();
+    let json_bytes = match serde_json::to_vec_pretty(&export_data) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("failed to serialize export data: {e}");
+            return ExitCode::from(crate::exit::GENERIC_FAIL);
+        }
+    };
 
     let file = match File::create(&args.output) {
         Ok(f) => f,
@@ -49,7 +55,10 @@ pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
         eprintln!("failed to write catalog.json to zip: {e}");
         return ExitCode::from(crate::exit::GENERIC_FAIL);
     }
-    let _ = zip.write_all(&json_bytes);
+    if let Err(e) = zip.write_all(&json_bytes) {
+        eprintln!("failed to write catalog bytes to zip: {e}");
+        return ExitCode::from(crate::exit::GENERIC_FAIL);
+    }
 
     let expanded = match cfg.expanded() {
         Ok(c) => c,
@@ -65,16 +74,23 @@ pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() {
-                    let file_name = path.file_name().unwrap().to_string_lossy();
-                    if file_name.ends_with(".wav") {
-                        if let Err(e) = zip.start_file(format!("audio/{}", file_name), options) {
-                            eprintln!("failed to write {file_name} to zip: {e}");
-                            continue;
-                        }
-                        if let Ok(mut f) = File::open(&path) {
-                            let mut buf = Vec::new();
-                            let _ = f.read_to_end(&mut buf);
-                            let _ = zip.write_all(&buf);
+                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                        if file_name.ends_with(".wav") {
+                            if let Err(e) = zip.start_file(format!("audio/{}", file_name), options) {
+                                eprintln!("failed to write {file_name} to zip: {e}");
+                                continue;
+                            }
+                            if let Ok(mut f) = File::open(&path) {
+                                let mut buf = Vec::new();
+                                if let Err(e) = f.read_to_end(&mut buf) {
+                                    eprintln!("failed to read {file_name}: {e}");
+                                    continue;
+                                }
+                                if let Err(e) = zip.write_all(&buf) {
+                                    eprintln!("failed to write {file_name} bytes to zip: {e}");
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }

@@ -62,12 +62,16 @@ impl HookRunner {
             let drain_out = async {
                 if let Some(so) = stdout.as_mut() {
                     let mut sink = Vec::new();
-                    let _ = so.read_to_end(&mut sink).await;
+                    if let Err(e) = so.read_to_end(&mut sink).await {
+                        tracing::error!("failed to read hook stdout: {e}");
+                    }
                 }
             };
             let drain_err = async {
                 if let Some(se) = stderr.as_mut() {
-                    let _ = se.read_to_end(&mut stderr_buf).await;
+                    if let Err(e) = se.read_to_end(&mut stderr_buf).await {
+                        tracing::error!("failed to read hook stderr: {e}");
+                    }
                 }
             };
             let (status, _, _) = tokio::join!(child.wait(), drain_out, drain_err);
@@ -80,8 +84,12 @@ impl HookRunner {
                 // Tokio's `Drop` for `Child` does NOT terminate the process on
                 // Windows — without an explicit kill every hook timeout leaks
                 // a `powershell.exe`.
-                let _ = child.start_kill();
-                let _ = child.wait().await;
+                if let Err(e) = child.start_kill() {
+                    tracing::error!("failed to kill runaway hook process: {e}");
+                }
+                if let Err(e) = child.wait().await {
+                    tracing::error!("failed to wait on killed hook process: {e}");
+                }
                 return Err(Error::HookTimeout {
                     secs: self.timeout.as_secs(),
                 });

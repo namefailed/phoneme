@@ -25,7 +25,7 @@ async fn returns_transcript_text_on_200() {
 
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
-    let client = TranscriptionClient::new();
+    let client = TranscriptionClient::new().unwrap();
     let result = client
         .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav)
         .await
@@ -44,7 +44,7 @@ async fn returns_whisper_error_on_500() {
 
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
-    let client = TranscriptionClient::new();
+    let client = TranscriptionClient::new().unwrap();
     let err = client
         .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav)
         .await
@@ -73,7 +73,7 @@ async fn returns_timeout_when_server_slow() {
 
     let dir = TempDir::new().unwrap();
     let wav = fake_wav(&dir).await;
-    let client = TranscriptionClient::new();
+    let client = TranscriptionClient::new().unwrap();
     let err = client
         .transcribe(&server.uri(), std::time::Duration::from_millis(100), &wav)
         .await
@@ -91,7 +91,7 @@ async fn returns_unreachable_when_no_server() {
     // WhisperTimeout). Either error semantically means "couldn't reach the server",
     // so accept both — the spec's distinction matters more in the daemon's
     // retry/backoff logic than in this unit-level test.
-    let client = TranscriptionClient::new();
+    let client = TranscriptionClient::new().unwrap();
     let err = client
         .transcribe(
             "http://127.0.0.1:1",
@@ -111,7 +111,7 @@ async fn returns_unreachable_when_no_server() {
 
 #[tokio::test]
 async fn errors_on_missing_audio_file() {
-    let client = TranscriptionClient::new();
+    let client = TranscriptionClient::new().unwrap();
     let err = client
         .transcribe(
             "http://127.0.0.1:9999",

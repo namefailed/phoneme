@@ -81,8 +81,8 @@ impl AppState {
 
         let catalog = Catalog::open(&paths.catalog_db).await?;
         let inbox = InboxQueue::new(&paths.inbox_dir).await?;
-        let transcription = TranscriptionClient::new();
-        let webhook = WebhookClient::new();
+        let transcription = TranscriptionClient::new()?;
+        let webhook = WebhookClient::new()?;
 
         Ok(Self {
             config: Arc::new(ArcSwap::from_pointee(config)),

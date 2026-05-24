@@ -7,16 +7,14 @@ pub struct WebhookClient {
     http: reqwest::Client,
 }
 
-impl Default for WebhookClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
 
 impl WebhookClient {
-    pub fn new() -> Self {
-        let http = reqwest::Client::builder().build().unwrap();
-        Self { http }
+    pub fn new() -> Result<Self> {
+        let http = reqwest::Client::builder()
+            .build()
+            .map_err(|e| crate::error::Error::Internal(format!("Failed to build reqwest client: {e}")))?;
+        Ok(Self { http })
     }
 
     pub async fn post(&self, url: &str, timeout: Duration, payload: &HookPayload) -> Result<()> {

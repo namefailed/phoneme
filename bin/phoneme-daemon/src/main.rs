@@ -60,12 +60,9 @@ async fn main() -> Result<()> {
         "phoneme-daemon ready"
     );
 
-    // Run the IPC server inline against the shutdown signal so a critical
-    // failure (e.g. another phoneme-daemon already owns the pipe) propagates
-    // as a non-zero process exit code. Previously the server lived in a
-    // spawned task that only logged its error — the daemon process kept
-    // running idle with no IPC surface, which was strictly worse than
-    // exiting.
+    // Run the IPC server inline against the shutdown signal. Also select on the
+    // background worker handles so that if one panics or crashes, the entire
+    // daemon process crashes rather than continuing as a zombie.
     let server_state = state.clone();
     let mut server_signal = state.shutdown.signal.clone();
     let server_result: Result<()> = tokio::select! {
@@ -73,6 +70,14 @@ async fn main() -> Result<()> {
         _ = server_signal.wait() => {
             tracing::info!("ipc server shutdown signaled");
             Ok(())
+        }
+        res = &mut worker_handle => {
+            tracing::error!("queue worker handle unexpectedly exited: {:?}", res);
+            Err(anyhow::anyhow!("queue worker crashed"))
+        }
+        res = &mut supervisor_handle => {
+            tracing::error!("supervisor handle unexpectedly exited: {:?}", res);
+            Err(anyhow::anyhow!("whisper supervisor crashed"))
         }
     };
 

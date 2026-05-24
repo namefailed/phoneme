@@ -14,7 +14,13 @@ pub async fn run(args: TagArgs, cfg: &Config, is_json: bool) -> ExitCode {
         TagAction::List => match conn.send(Request::ListTags).await {
             Ok(val) => {
                 if is_json {
-                    println!("{}", serde_json::to_string_pretty(&val).unwrap());
+                    match serde_json::to_string_pretty(&val) {
+                        Ok(s) => println!("{}", s),
+                        Err(e) => {
+                            eprintln!("error formatting JSON: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
                 } else if let Some(arr) = val.as_array() {
                     for t in arr {
                         if let (Some(id), Some(name)) = (t.get("id"), t.get("name")) {
@@ -29,7 +35,13 @@ pub async fn run(args: TagArgs, cfg: &Config, is_json: bool) -> ExitCode {
         TagAction::Add { name, color } => match conn.send(Request::AddTag { name, color }).await {
             Ok(val) => {
                 if is_json {
-                    println!("{}", serde_json::to_string_pretty(&val).unwrap());
+                    match serde_json::to_string_pretty(&val) {
+                        Ok(s) => println!("{}", s),
+                        Err(e) => {
+                            eprintln!("error formatting JSON: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
                 } else {
                     println!("added tag");
                 }
@@ -45,8 +57,13 @@ pub async fn run(args: TagArgs, cfg: &Config, is_json: bool) -> ExitCode {
             if let Some(id) = phoneme_core::id::RecordingId::parse(&recording_id) {
                 match conn.send(Request::ListTags).await {
                     Ok(val) => {
-                        let tags: Vec<phoneme_core::tags::Tag> =
-                            serde_json::from_value(val).unwrap_or_default();
+                        let tags: Vec<phoneme_core::tags::Tag> = match serde_json::from_value(val) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                eprintln!("error parsing tags list: {e}");
+                                return ExitCode::FAILURE;
+                            }
+                        };
                         if let Some(t) = tags.into_iter().find(|t| t.name == tag) {
                             match conn
                                 .send(Request::AttachTag {
@@ -74,8 +91,13 @@ pub async fn run(args: TagArgs, cfg: &Config, is_json: bool) -> ExitCode {
             if let Some(id) = phoneme_core::id::RecordingId::parse(&recording_id) {
                 match conn.send(Request::ListTags).await {
                     Ok(val) => {
-                        let tags: Vec<phoneme_core::tags::Tag> =
-                            serde_json::from_value(val).unwrap_or_default();
+                        let tags: Vec<phoneme_core::tags::Tag> = match serde_json::from_value(val) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                eprintln!("error parsing tags list: {e}");
+                                return ExitCode::FAILURE;
+                            }
+                        };
                         if let Some(t) = tags.into_iter().find(|t| t.name == tag) {
                             match conn
                                 .send(Request::DetachTag {

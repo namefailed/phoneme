@@ -16,19 +16,15 @@ struct OpenAiResponse {
     text: String,
 }
 
-impl Default for TranscriptionClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
 
 impl TranscriptionClient {
     /// Creates a new `TranscriptionClient` equipped with an internal HTTP client.
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
             .build()
-            .expect("reqwest client builds");
-        Self { http }
+            .map_err(|e| crate::error::Error::Internal(format!("Failed to build reqwest client: {e}")))?;
+        Ok(Self { http })
     }
 
     /// Transcribes an audio file by submitting a `multipart/form-data` request
