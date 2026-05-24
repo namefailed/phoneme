@@ -133,15 +133,21 @@ pub async fn write_config(
 ) -> Result<(), String> {
     config_io::write(&config).map_err(|e| e.to_string())?;
     // Tell daemon to reload
-    let _ = forward(&bridge, Request::ReloadConfig).await;
+    if let Err(e) = forward(&bridge, Request::ReloadConfig).await {
+        tracing::warn!("failed to reload daemon config: {e}");
+    }
 
     // Dynamically reload hotkey in the frontend
     use std::str::FromStr;
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-    let _ = app.global_shortcut().unregister_all();
+    if let Err(e) = app.global_shortcut().unregister_all() {
+        tracing::warn!("failed to unregister shortcuts: {e}");
+    }
     if config.hotkey.enabled {
         if let Ok(shortcut) = Shortcut::from_str(&config.hotkey.combo) {
-            let _ = app.global_shortcut().register(shortcut);
+            if let Err(e) = app.global_shortcut().register(shortcut) {
+                tracing::warn!("failed to register shortcut: {e}");
+            }
         }
     }
     Ok(())
@@ -415,8 +421,8 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
 
         // We only care about the binaries in the 'whisper-bin-x64' root or nested, just grab exe and dlls.
         if outpath.is_file() {
-            let file_name = outpath.file_name().unwrap().to_string_lossy().to_string();
-            if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
+            if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
+                if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
                 let extract_to = bin_dir.join(&file_name);
                 let mut outfile = std::fs::File::create(&extract_to)
                     .map_err(|e| format!("failed to create output file {}: {}", file_name, e))?;

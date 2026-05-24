@@ -32,11 +32,15 @@ async fn run_once(app: AppHandle, bridge: Bridge) -> anyhow::Result<()> {
                 // Update tray state for relevant events.
                 if let Some(state) = derive_tray_state(&event) {
                     if let Some(tray) = app.tray_by_id("main") {
-                        let _ = tray::update_state(&tray, state);
+                        if let Err(e) = tray::update_state(&tray, state) {
+                            tracing::warn!("failed to update tray state: {e}");
+                        }
                     }
                 }
                 // Re-emit to the frontend.
-                let _ = app.emit("daemon-event", &event);
+                if let Err(e) = app.emit("daemon-event", &event) {
+                    tracing::warn!("failed to emit daemon-event to frontend: {e}");
+                }
             }
             Err(e) => {
                 tracing::warn!(error = %e, "subscribe stream error");

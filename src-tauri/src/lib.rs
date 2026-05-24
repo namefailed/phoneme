@@ -54,16 +54,21 @@ pub fn run() {
                         match event.state() {
                             ShortcutState::Pressed => {
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = bridge
+                                    if let Err(e) = bridge
                                         .request(phoneme_ipc::Request::RecordStart {
                                             mode: RecordMode::Hold,
                                         })
-                                        .await;
+                                        .await
+                                    {
+                                        tracing::error!("failed to start record from hotkey: {e}");
+                                    }
                                 });
                             }
                             ShortcutState::Released => {
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = bridge.request(phoneme_ipc::Request::RecordStop).await;
+                                    if let Err(e) = bridge.request(phoneme_ipc::Request::RecordStop).await {
+                                        tracing::error!("failed to stop record from hotkey: {e}");
+                                    }
                                 });
                             }
                         }
@@ -81,7 +86,9 @@ pub fn run() {
                     use std::str::FromStr;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
                     if let Ok(shortcut) = Shortcut::from_str(&bridge.config.hotkey.combo) {
-                        let _ = app.handle().global_shortcut().register(shortcut);
+                        if let Err(e) = app.handle().global_shortcut().register(shortcut) {
+                            tracing::error!("failed to register global hotkey: {e}");
+                        }
                     }
                 }
             }

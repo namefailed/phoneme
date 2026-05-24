@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A recording identifier: `YYYYMMDDTHHmmssNNN` (18 chars: 8 date + 1 `T` +
 /// 6 time + 3-digit per-process monotonic counter, mod 1000).
@@ -23,7 +23,7 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RecordingId(String);
 
-static COUNTER: Mutex<u64> = Mutex::new(0);
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl RecordingId {
     /// Generate a new id from the current local time.
@@ -33,13 +33,8 @@ impl RecordingId {
 
     /// Generate an id from a specific datetime.
     pub fn from_datetime(dt: DateTime<Local>) -> Self {
-        let mut counter = COUNTER.lock().expect("RecordingId counter mutex poisoned");
-        // Read the suffix from the current counter value, then advance. This
-        // ordering means the first id of a process gets suffix `000` rather
-        // than `001` — purely cosmetic, but it makes the sequence start clean.
-        let suffix = (*counter % 1000) as u16;
-        *counter = counter.wrapping_add(1);
-        drop(counter);
+        let current = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let suffix = (current % 1000) as u16;
         let s = format!("{}{:03}", dt.format("%Y%m%dT%H%M%S"), suffix);
         Self(s)
     }

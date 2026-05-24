@@ -185,10 +185,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 };
                 match state.inbox.enqueue(&payload).await {
                     Ok(()) => {
-                        let _ = state
+                        if let Err(e) = state
                             .catalog
                             .update_status(&id, RecordingStatus::Transcribing)
-                            .await;
+                            .await
+                        {
+                            tracing::error!("failed to update status to transcribing: {e}");
+                        }
                         Response::Ok(serde_json::Value::Null)
                     }
                     Err(e) => Response::Err(IpcError {
@@ -254,7 +257,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     });
                     match runner.run(&payload).await {
                         Ok(result) => {
-                            let _ = task_state
+                            if let Err(e) = task_state
                                 .catalog
                                 .update_hook_result(
                                     &hook_id,
@@ -262,21 +265,30 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                     result.exit_code,
                                     result.duration_ms,
                                 )
-                                .await;
-                            let _ = task_state
+                                .await
+                            {
+                                tracing::error!("failed to update hook result: {e}");
+                            }
+                            if let Err(e) = task_state
                                 .catalog
                                 .update_status(&hook_id, RecordingStatus::Done)
-                                .await;
+                                .await
+                            {
+                                tracing::error!("failed to update status to done: {e}");
+                            }
                             task_state.events.emit(DaemonEvent::HookDone {
                                 id: hook_id,
                                 exit_code: result.exit_code,
                             });
                         }
                         Err(e) => {
-                            let _ = task_state
+                            if let Err(err) = task_state
                                 .catalog
                                 .update_status(&hook_id, RecordingStatus::HookFailed)
-                                .await;
+                                .await
+                            {
+                                tracing::error!("failed to update status to hook_failed: {err}");
+                            }
                             task_state.events.emit(DaemonEvent::HookFailed {
                                 id: hook_id,
                                 error: e.to_string(),
