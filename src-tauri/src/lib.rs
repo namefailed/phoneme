@@ -84,6 +84,14 @@ pub fn run() {
             if let Some(bridge) = bridge.clone() {
                 events::spawn(app.handle().clone(), bridge.clone());
 
+                if bridge.config.tray.show_on_startup {
+                    use tauri::Manager;
+                    if let Some(window) = app.handle().get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+
                 if bridge.config.hotkey.enabled {
                     use std::str::FromStr;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -123,6 +131,7 @@ pub fn run() {
             commands::wizard_download_model,
             commands::wizard_download_server,
             commands::reveal_file,
+            commands::open_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

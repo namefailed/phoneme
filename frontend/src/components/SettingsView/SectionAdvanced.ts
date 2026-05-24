@@ -43,10 +43,9 @@ export class SectionAdvanced {
     container.querySelector("#open-config")?.addEventListener("click", async () => {
       try {
         const path = await invoke<string>("config_path");
-        const { open } = await import("@tauri-apps/plugin-shell");
-        await open(path);
-      } catch {
-        // best-effort
+        await invoke("open_file", { path });
+      } catch (e) {
+        console.error("Failed to open config file:", e);
       }
     });
   }

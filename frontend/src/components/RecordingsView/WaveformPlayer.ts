@@ -1,4 +1,5 @@
 import WaveSurfer from "wavesurfer.js";
+import Timeline from "wavesurfer.js/dist/plugins/timeline.js";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 export class WaveformPlayer {
@@ -13,15 +14,31 @@ export class WaveformPlayer {
     if (this.wavesurfer) {
       this.wavesurfer.destroy();
     }
+
+    const computed = getComputedStyle(document.documentElement);
+    const accent = computed.getPropertyValue("--accent").trim() || "#cba6f7";
+    const border = computed.getPropertyValue("--border-subtle").trim() || "#313244";
+    const fg = computed.getPropertyValue("--fg-muted").trim() || "#9399b2";
+
     this.wavesurfer = WaveSurfer.create({
       container,
-      waveColor: "#585b70",
-      progressColor: "#cba6f7",
-      cursorColor: "#cdd6f4",
+      waveColor: border,
+      progressColor: accent,
+      cursorColor: accent,
       barWidth: 2,
-      barGap: 1,
+      barGap: 2,
       height: 60,
       url: convertFileSrc(audioPath),
+      plugins: [
+        Timeline.create({
+          height: 18,
+          style: {
+            fontSize: "9px",
+            color: fg,
+            fontFamily: "monospace",
+          },
+        }),
+      ],
     });
 
     this.wavesurfer.on("play", () => this.onPlayStateChange?.(true));

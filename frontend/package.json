@@ -10,10 +10,16 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.43.0",
+    "@replit/codemirror-vim": "^6.3.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
+    "codemirror": "^6.0.2",
     "wavesurfer.js": "^7.7.0"
   },
   "devDependencies": {

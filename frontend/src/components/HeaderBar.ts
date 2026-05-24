@@ -72,9 +72,12 @@ export class HeaderBar {
         </select>
         <select class="filter-pill hb-status-select">
           <option value="">All status</option>
-          <option value="ready" ${f.status === "ready" ? "selected" : ""}>Ready</option>
+          <option value="recording" ${f.status === "recording" ? "selected" : ""}>Recording</option>
           <option value="transcribing" ${f.status === "transcribing" ? "selected" : ""}>Transcribing</option>
-          <option value="error" ${f.status === "error" ? "selected" : ""}>Error</option>
+          <option value="hook_running" ${f.status === "hook_running" ? "selected" : ""}>Hook Running</option>
+          <option value="done" ${f.status === "done" ? "selected" : ""}>Done</option>
+          <option value="transcribe_failed" ${f.status === "transcribe_failed" ? "selected" : ""}>Transcribe Failed</option>
+          <option value="hook_failed" ${f.status === "hook_failed" ? "selected" : ""}>Hook Failed</option>
         </select>
         <select class="filter-pill hb-tag-select">
           <option value="">All tags</option>
@@ -97,10 +100,13 @@ export class HeaderBar {
         const val = (e.target as HTMLSelectElement).value;
         if (val === "today") {
           const today = new Date();
-          // Adjust for local timezone offset to get correct YYYY-MM-DD
+          today.setHours(0, 0, 0, 0);
           const offset = today.getTimezoneOffset();
-          const localToday = new Date(today.getTime() - offset * 60 * 1000);
-          filterStore.set({ ...filterStore.get(), since: localToday.toISOString().split("T")[0] });
+          const absOffset = Math.abs(offset);
+          const sign = offset <= 0 ? "+" : "-";
+          const pad = (n: number) => String(n).padStart(2, "0");
+          const formatted = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}T00:00:00${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+          filterStore.set({ ...filterStore.get(), since: formatted });
         } else {
           filterStore.set({ ...filterStore.get(), since: null });
         }

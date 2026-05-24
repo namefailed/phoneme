@@ -21,7 +21,7 @@
                      Permanent="no"
                      Part="last"
                      Action="set"
-                     System="yes" />
+                     System="no" />
       </Component>
 
       <!-- Component that materialises the hooks-templates directory. -->

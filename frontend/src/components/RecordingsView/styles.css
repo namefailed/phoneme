@@ -1,50 +1,78 @@
-﻿.rec-table {
+.rec-table {
   height: 100%;
-  overflow: auto;
-  background: var(--bg-elevated);
+  overflow-y: auto;
+  background: var(--bg-deep);
+}
+.rec-table::-webkit-scrollbar {
+  width: 6px;
+}
+.rec-table::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rec-table::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.rec-table::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 .rec-table-head {
   position: sticky;
   top: 0;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-subtle);
-  padding: 8px 14px;
+  padding: 10px 16px;
   display: grid;
-  grid-template-columns: 80px 60px 40px 1fr;
-  gap: 10px;
-  font-size: 11px;
+  gap: 12px;
+  font-size: 10px;
   text-transform: uppercase;
   color: var(--fg-faded);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
+  font-weight: bold;
+  z-index: 5;
 }
 .rec-row {
-  transition: background 0.15s ease-out, border-color 0.15s ease-out;
-  padding: 8px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
   display: grid;
-  grid-template-columns: 80px 60px 40px 1fr;
-  gap: 10px;
+  gap: 12px;
   font-size: 13px;
   color: var(--fg-default);
   cursor: pointer;
+  border-left: 3px solid transparent;
 }
 .rec-row:hover {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255, 255, 255, 0.02);
+  transform: translateX(2px);
+  color: var(--accent);
 }
 .rec-row.active {
-  background: rgba(203,166,247,0.12);
-  border-left: 3px solid var(--accent);
-  padding-left: 11px;
+  background: rgba(203, 166, 247, 0.08);
+  background-image: linear-gradient(to right, rgba(203, 166, 247, 0.04), transparent);
+  border-left-color: var(--accent);
+  padding-left: 13px;
 }
 .rec-time,
 .rec-dur {
   color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
+  transition: color 0.2s ease;
+}
+.rec-row:hover .rec-time,
+.rec-row:hover .rec-dur {
+  color: var(--fg-default);
 }
 .rec-preview {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 13px;
+  transition: color 0.2s ease;
+}
+.rec-row:hover .rec-preview {
+  color: var(--fg-default);
 }
 .empty {
   padding: 40px;

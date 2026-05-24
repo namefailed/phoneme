@@ -132,6 +132,42 @@ pub async fn write_config(
     config: Config,
 ) -> Result<(), String> {
     config_io::write(&config).map_err(|e| e.to_string())?;
+    
+    // Update start at login registry key dynamically
+    #[cfg(target_os = "windows")]
+    {
+        let exe_path = std::env::current_exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !exe_path.is_empty() {
+            if config.tray.start_at_login {
+                let _ = std::process::Command::new("reg")
+                    .args([
+                        "add",
+                        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                        "/v",
+                        "Phoneme",
+                        "/t",
+                        "REG_SZ",
+                        "/d",
+                        &format!("\"{}\"", exe_path),
+                        "/f",
+                    ])
+                    .spawn();
+            } else {
+                let _ = std::process::Command::new("reg")
+                    .args([
+                        "delete",
+                        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                        "/v",
+                        "Phoneme",
+                        "/f",
+                    ])
+                    .spawn();
+            }
+        }
+    }
+
     // Tell daemon to reload
     if let Err(e) = forward(&bridge, Request::ReloadConfig).await {
         tracing::warn!("failed to reload daemon config: {e}");
@@ -437,4 +473,16 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
     let _ = tokio::fs::remove_file(&temp_zip).await;
 
     Ok(exe_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn open_file(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "", &path])
+            .spawn()
+            .map_err(|e| format!("failed to open file: {}", e))?;
+    }
+    Ok(())
 }

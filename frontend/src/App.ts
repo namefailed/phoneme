@@ -52,6 +52,18 @@ export class App {
 
     // Auto-launch the first-run wizard if no config exists yet.
     void this.maybeAutoWizard();
+    void this.loadAndApplyTheme();
+  }
+
+  private async loadAndApplyTheme() {
+    try {
+      const cfg = await invoke<any>("read_config");
+      if (cfg?.tray?.theme) {
+        document.documentElement.setAttribute("data-theme", cfg.tray.theme);
+      }
+    } catch {
+      // stay on default
+    }
   }
 
   private async maybeAutoWizard() {

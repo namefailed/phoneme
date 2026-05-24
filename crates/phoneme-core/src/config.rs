@@ -10,6 +10,27 @@ pub struct Config {
     pub hotkey: HotkeyConfig,
     pub tray: TrayConfig,
     pub daemon: DaemonConfig,
+    #[serde(default = "default_llm_post_process")]
+    pub llm_post_process: LlmPostProcessConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LlmPostProcessConfig {
+    pub enabled: bool,
+    pub provider: String,
+    pub api_key: String,
+    pub model: String,
+    pub prompt: String,
+}
+
+fn default_llm_post_process() -> LlmPostProcessConfig {
+    LlmPostProcessConfig {
+        enabled: false,
+        provider: "none".into(),
+        api_key: "".into(),
+        model: "llama3".into(),
+        prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,6 +91,25 @@ pub struct TrayConfig {
     pub show_on_startup: bool,
     pub minimize_to_tray: bool,
     pub start_at_login: bool,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default = "default_visible_columns")]
+    pub visible_columns: Vec<String>,
+    #[serde(default)]
+    pub vim_mode: bool,
+}
+
+fn default_theme() -> String {
+    "catppuccin-mocha".into()
+}
+
+fn default_visible_columns() -> Vec<String> {
+    vec![
+        "time".into(),
+        "duration".into(),
+        "status".into(),
+        "transcript".into(),
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,12 +158,27 @@ impl Default for Config {
                 show_on_startup: true,
                 minimize_to_tray: true,
                 start_at_login: false,
+                theme: "catppuccin-mocha".into(),
+                visible_columns: vec![
+                    "time".into(),
+                    "duration".into(),
+                    "status".into(),
+                    "transcript".into(),
+                ],
+                vim_mode: false,
             },
             daemon: DaemonConfig {
                 log_level: "info".into(),
                 log_max_size_mb: 10,
                 log_max_files: 5,
                 pipe_name: "phoneme-daemon".into(),
+            },
+            llm_post_process: LlmPostProcessConfig {
+                enabled: false,
+                provider: "none".into(),
+                api_key: "".into(),
+                model: "llama3".into(),
+                prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
             },
         }
     }

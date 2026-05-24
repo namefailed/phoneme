@@ -1,6 +1,7 @@
 import { listRecordings, type Recording } from "../../services/ipc";
 import { Store } from "../../state/store";
 import { filterStore } from "../../state/filter";
+import { invoke } from "@tauri-apps/api/core";
 
 import "./styles.css";
 
@@ -15,6 +16,7 @@ export class RecordingsList {
   private container: HTMLElement;
   private state: Store<RecordingsListState>;
   private onSelect: (id: string) => void;
+  private config: any = null;
 
   constructor(
     container: HTMLElement,
@@ -32,7 +34,11 @@ export class RecordingsList {
     this.state.set({ ...this.state.get(), loading: true, error: null });
     try {
       const f = filterStore.get();
-      const rows = await listRecordings({ ...f, limit: 200 });
+      const [rows, cfg] = await Promise.all([
+        listRecordings({ ...f, limit: 200 }),
+        invoke<any>("read_config")
+      ]);
+      this.config = cfg;
       this.state.set({ ...this.state.get(), recordings: rows, loading: false });
     } catch (e) {
       this.state.set({ ...this.state.get(), error: String(e), loading: false });
@@ -57,15 +63,34 @@ export class RecordingsList {
       return;
     }
 
+    const visibleCols: string[] = this.config?.tray?.visible_columns || [
+      "time", "duration", "status", "transcript"
+    ];
+
+    const colLabels: Record<string, string> = {
+      time: "Time",
+      duration: "Dur",
+      status: "Status",
+      transcript: "Transcript"
+    };
+
+    const colWidths: Record<string, string> = {
+      time: "100px",
+      duration: "60px",
+      status: "40px",
+      transcript: "1fr"
+    };
+
+    const gridTemplate = visibleCols.map(c => colWidths[c] || "auto").join(" ");
+
+    const headSpans = visibleCols.map(c => `<span>${colLabels[c] || c}</span>`).join("");
     const head = `
-      <div class="rec-table-head">
-        <span>Time</span>
-        <span>Dur</span>
-        <span>Status</span>
-        <span>Transcript</span>
+      <div class="rec-table-head" style="grid-template-columns: ${gridTemplate}">
+        ${headSpans}
       </div>
     `;
-    const rows = s.recordings.map((r) => this.renderRow(r, r.id === s.selectedId)).join("");
+
+    const rows = s.recordings.map((r) => this.renderRow(r, r.id === s.selectedId, visibleCols, gridTemplate)).join("");
     this.container.innerHTML = `<div class="rec-table">${head}${rows}</div>`;
 
     this.container.querySelectorAll<HTMLElement>(".rec-row").forEach((el) => {
@@ -76,17 +101,24 @@ export class RecordingsList {
     });
   }
 
-  private renderRow(r: Recording, active: boolean): string {
+  private renderRow(r: Recording, active: boolean, visibleCols: string[], gridTemplate: string): string {
     const time = formatTime(r.started_at);
     const dur = formatDuration(r.duration_ms);
     const statusClass = statusToClass(r.status);
     const preview = (r.transcript ?? truncatedError(r)).slice(0, 80);
+
+    const cellMap: Record<string, string> = {
+      time: `<span class="rec-time">${time}</span>`,
+      duration: `<span class="rec-dur">${dur}</span>`,
+      status: `<span class="rec-status"><span class="status-dot ${statusClass}"></span></span>`,
+      transcript: `<span class="rec-preview">${escapeHtml(preview)}</span>`
+    };
+
+    const cells = visibleCols.map(c => cellMap[c] || "").join("");
+
     return `
-      <div class="rec-row ${active ? "active" : ""}" data-id="${r.id}">
-        <span class="rec-time">${time}</span>
-        <span class="rec-dur">${dur}</span>
-        <span class="rec-status"><span class="status-dot ${statusClass}"></span></span>
-        <span class="rec-preview">${escapeHtml(preview)}</span>
+      <div class="rec-row ${active ? "active" : ""}" data-id="${r.id}" style="grid-template-columns: ${gridTemplate}">
+        ${cells}
       </div>
     `;
   }

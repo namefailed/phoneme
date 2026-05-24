@@ -5,6 +5,7 @@ import { SectionHotkey } from "./SectionHotkey";
 import { SectionHook } from "./SectionHook";
 import { SectionStorage } from "./SectionStorage";
 import { SectionTray } from "./SectionTray";
+import { SectionAccessibility } from "./SectionAccessibility";
 import { SectionAdvanced } from "./SectionAdvanced";
 import "./styles.css";
 
@@ -41,6 +42,7 @@ export class SettingsView {
     new SectionHook(this.sectionHost(body), config);
     new SectionStorage(this.sectionHost(body), config);
     new SectionTray(this.sectionHost(body), config);
+    new SectionAccessibility(this.sectionHost(body), config);
     new SectionAdvanced(this.sectionHost(body), config);
 
     this.container

@@ -58,6 +58,8 @@ export class RecordingsView {
     if (s.selectedId && !s.recordings.some(r => r.id === s.selectedId)) {
       this.state.set({ ...s, selectedId: null });
       this.detail.clear();
+    } else if (s.selectedId) {
+      void this.detail.show(s.selectedId);
     }
   }
 
