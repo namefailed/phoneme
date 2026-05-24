@@ -83,6 +83,9 @@ mod tests {
 
     #[test]
     fn list_input_devices_does_not_panic() {
+        if !has_audio() {
+            return;
+        }
         // We don't assert a particular count; just that the call succeeds.
         let _ = list_input_devices();
     }
