@@ -6,13 +6,13 @@
 
     <DirectoryRef Id="INSTALLDIR">
       <!-- Bundle phoneme-daemon and phoneme CLI -->
-      <Component Id="PhonemeBinaries" Guid="*">
+      <Component Id="PhonemeBinaries" Guid="4793155E-FEE7-4808-8D72-786050B871B5">
         <File Id="PhonemeDaemonExe" Name="phoneme-daemon.exe" Source="..\..\phoneme-daemon.exe" KeyPath="yes" />
         <File Id="PhonemeCliExe" Name="phoneme-cli.exe" Source="..\..\phoneme.exe" />
       </Component>
 
       <!-- PATH integration -->
-      <Component Id="PhonemePathEntry" Guid="*">
+      <Component Id="PhonemePathEntry" Guid="663CFD47-41A6-44A9-8F37-DC6F13F61198">
         <Condition>ADDTOPATH="1"</Condition>
         <Environment Id="PhonemePath"
                      Name="PATH"
@@ -25,7 +25,7 @@
 
       <!-- Component that materialises the hooks-templates directory. -->
       <Directory Id="HooksTemplatesDir" Name="hooks-templates">
-        <Component Id="PhonemeHooksTemplates" Guid="*">
+        <Component Id="PhonemeHooksTemplates" Guid="2143BBDE-8E3F-403F-8D78-C006E1CED394">
           <File Id="HookStdout"   Name="to-stdout.ps1"        Source="..\..\..\..\hooks\to-stdout.ps1" />
           <File Id="HookOrg"      Name="to-org-journal.ps1"   Source="..\..\..\..\hooks\to-org-journal.ps1" />
           <File Id="HookMarkdown" Name="to-markdown-daily.ps1" Source="..\..\..\..\hooks\to-markdown-daily.ps1" />
