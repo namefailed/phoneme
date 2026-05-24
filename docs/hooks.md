@@ -48,6 +48,15 @@ Set the hook in `%APPDATA%\phoneme\config.toml`:
 commands = ["powershell -File %APPDATA%/phoneme/hooks/to-org-journal.ps1"]
 timeout_secs = 30
 webhook_url = "https://your-webhook.app/api/ingest"
+
+[llm_post_process]
+enabled = true
+provider = "openai" # "openai" or "ollama"
+endpoint = "http://localhost:11434/v1/chat/completions" # Defaults to OpenAI API if not provided
+model = "llama3" # Example: gpt-4o for OpenAI or llama3 for Ollama
+api_key = "sk-..." # Required for OpenAI, optional for Ollama
+prompt = "Clean up this voice transcript, removing stutters and filler words."
+
 ```
 
 Path expansion (`%VAR%`, `~`) is performed at config load.

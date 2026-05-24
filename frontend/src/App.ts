@@ -11,6 +11,11 @@ import { invoke } from "@tauri-apps/api/core";
 /// (RecordingsView unsubscribes its event listeners there).
 type MountedView = { dispose?: () => void };
 
+/**
+ * The root Application controller.
+ * Responsible for initializing the main shell, the routing layer, and bootstrapping
+ * initial states like theming and first-run wizard checks.
+ */
 export class App {
   private container: HTMLElement;
   private router = new Router();
@@ -61,8 +66,9 @@ export class App {
       if (cfg?.tray?.theme) {
         document.documentElement.setAttribute("data-theme", cfg.tray.theme);
       }
-    } catch {
-      // stay on default
+    } catch (e) {
+      console.warn("Failed to load or apply theme:", e);
+      // fallback to default theme defined in CSS
     }
   }
 
@@ -72,7 +78,8 @@ export class App {
       if (!exists) {
         this.router.go("wizard");
       }
-    } catch {
+    } catch (e) {
+      console.error("Failed to check if config exists. Backend may be unreachable:", e);
       // If the backend isn't reachable, stay on the default view.
     }
   }

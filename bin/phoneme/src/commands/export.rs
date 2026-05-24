@@ -70,26 +70,32 @@ pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
 
     let audio_dir = std::path::Path::new(&expanded.recording.audio_dir);
     if audio_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(audio_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                        if file_name.ends_with(".wav") {
-                            if let Err(e) = zip.start_file(format!("audio/{}", file_name), options)
-                            {
-                                eprintln!("failed to write {file_name} to zip: {e}");
-                                continue;
-                            }
-                            if let Ok(mut f) = File::open(&path) {
-                                let mut buf = Vec::new();
-                                if let Err(e) = f.read_to_end(&mut buf) {
-                                    eprintln!("failed to read {file_name}: {e}");
+        let mut stack = vec![audio_dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.is_file() {
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            if file_name.ends_with(".wav") {
+                                if let Err(e) =
+                                    zip.start_file(format!("audio/{}", file_name), options)
+                                {
+                                    eprintln!("failed to write {file_name} to zip: {e}");
                                     continue;
                                 }
-                                if let Err(e) = zip.write_all(&buf) {
-                                    eprintln!("failed to write {file_name} bytes to zip: {e}");
-                                    continue;
+                                if let Ok(mut f) = File::open(&path) {
+                                    let mut buf = Vec::new();
+                                    if let Err(e) = f.read_to_end(&mut buf) {
+                                        eprintln!("failed to read {file_name}: {e}");
+                                        continue;
+                                    }
+                                    if let Err(e) = zip.write_all(&buf) {
+                                        eprintln!("failed to write {file_name} bytes to zip: {e}");
+                                        continue;
+                                    }
                                 }
                             }
                         }

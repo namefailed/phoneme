@@ -15,6 +15,7 @@ export class RecordingsView {
   private splitPercent = 50;
   private detailVisible = true;
   private unsub: (() => void) | null = null;
+  private keydownHandler: (e: KeyboardEvent) => void;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -49,7 +50,8 @@ export class RecordingsView {
     this.applyLayout();
     void this.refresh();
     void this.subscribeToEvents();
-    this.installShortcuts();
+    this.keydownHandler = this.handleKeydown.bind(this);
+    document.addEventListener("keydown", this.keydownHandler);
   }
 
   async refresh() {
@@ -73,6 +75,7 @@ export class RecordingsView {
       this.unsub();
       this.unsub = null;
     }
+    document.removeEventListener("keydown", this.keydownHandler);
   }
 
   private applyLayout() {
@@ -107,27 +110,30 @@ export class RecordingsView {
     });
   }
 
-  private installShortcuts() {
-    document.addEventListener("keydown", async (e) => {
-      // Ignore keydown if we are inside an input/textarea
-      const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+  private async handleKeydown(e: KeyboardEvent) {
+    // Ignore keydown if we are inside an input/textarea
+    const target = e.target as HTMLElement;
+    if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
-      if (e.ctrlKey && e.key === "\\") {
+    if (e.ctrlKey && e.key === "\\") {
+      e.preventDefault();
+      this.toggleDetail();
+    } else if (e.key === "Delete") {
+      const id = this.state.get().selectedId;
+      if (id) {
         e.preventDefault();
-        this.toggleDetail();
-      } else if (e.key === "Delete") {
-        const id = this.state.get().selectedId;
-        if (id) {
-          e.preventDefault();
-          const { confirmDelete } = await import("../ConfirmDelete");
-          if (await confirmDelete()) {
+        const { confirmDelete } = await import("../ConfirmDelete");
+        if (await confirmDelete()) {
+          try {
             const { deleteRecording } = await import("../../services/ipc");
             await deleteRecording(id, false);
             this.refresh();
+          } catch (err) {
+            console.error("Failed to delete recording:", err);
+            // Optionally could show a toast here
           }
         }
       }
-    });
+    }
   }
 }

@@ -67,10 +67,20 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         .first()
         .map(|c| c.split_whitespace().next().unwrap_or(""))
         .unwrap_or("");
+
+    let (ok, detail) = if hook_first_word.is_empty() {
+        (true, "none configured".into())
+    } else {
+        (
+            which::which(hook_first_word).is_ok() || std::path::Path::new(hook_first_word).exists(),
+            hook_first_word.into(),
+        )
+    };
+
     checks.push(Check {
         name: "hook_executable",
-        ok: which::which(hook_first_word).is_ok() || std::path::Path::new(hook_first_word).exists(),
-        detail: hook_first_word.into(),
+        ok,
+        detail,
     });
 
     let any_failed = checks.iter().any(|c| !c.ok);

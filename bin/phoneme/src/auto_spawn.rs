@@ -23,9 +23,18 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
     let exe = which::which("phoneme-daemon").or_else(|_| {
         std::env::current_exe()
             .ok()
-            .and_then(|p| p.parent().map(|d| d.join("phoneme-daemon.exe")))
+            .and_then(|p| {
+                p.parent().map(|d| {
+                    let mut name = String::from("phoneme-daemon");
+                    if !std::env::consts::EXE_EXTENSION.is_empty() {
+                        name.push('.');
+                        name.push_str(std::env::consts::EXE_EXTENSION);
+                    }
+                    d.join(name)
+                })
+            })
             .ok_or_else(|| {
-                anyhow::anyhow!("phoneme-daemon not found on PATH or next to phoneme.exe")
+                anyhow::anyhow!("phoneme-daemon not found on PATH or next to phoneme executable")
             })
     })?;
 

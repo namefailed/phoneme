@@ -9,6 +9,11 @@ import { SectionAccessibility } from "./SectionAccessibility";
 import { SectionAdvanced } from "./SectionAdvanced";
 import "./styles.css";
 
+/**
+ * Renders the primary settings window.
+ * It fetches the current configuration from the backend, injects sub-sections for each category,
+ * and handles saving the mutated config back to disk.
+ */
 export class SettingsView {
   constructor(
     private container: HTMLElement,
@@ -18,8 +23,15 @@ export class SettingsView {
   }
 
   private async render() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const config: any = await invoke("read_config");
+    let config: any;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      config = await invoke("read_config");
+    } catch (e) {
+      this.container.innerHTML = `<div class="error">Failed to load settings: ${e}</div>`;
+      return;
+    }
+    
     this.container.innerHTML = `
       <div class="settings-view">
         <div class="settings-toolbar">

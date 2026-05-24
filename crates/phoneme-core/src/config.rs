@@ -2,24 +2,43 @@ use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// The root configuration object for Phoneme.
+/// This configuration encapsulates the entire system state, including settings for
+/// transcription (Whisper), audio recording parameters, post-processing hooks,
+/// keyboard hotkeys, frontend UI theming, and daemon logging.
+///
+/// It maps directly to the user's `config.toml` file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
+    /// Configuration for the Whisper transcription engine.
     pub whisper: LlmConfig,
+    /// Hardware and threshold settings for the audio recording stream.
     pub recording: RecordingConfig,
+    /// Settings governing external script execution (hooks) upon transcription success.
     pub hook: HookConfig,
+    /// Global keyboard shortcut bindings for triggering push-to-talk.
     pub hotkey: HotkeyConfig,
+    /// Frontend UI state, including active theme and visibility settings.
     pub tray: TrayConfig,
+    /// Background daemon runtime settings (e.g., logging verbosity).
     pub daemon: DaemonConfig,
+    /// Settings for the optional LLM-powered transcript cleanup/post-processing pipeline.
     #[serde(default = "default_llm_post_process")]
     pub llm_post_process: LlmPostProcessConfig,
 }
 
+/// Configures the optional accessibility layer for post-processing transcriptions using an LLM.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmPostProcessConfig {
+    /// Whether the LLM post-processing step is active.
     pub enabled: bool,
+    /// The provider type to use (e.g., `ollama`, `openai`, `none`).
     pub provider: String,
+    /// API key for authentication, if required by the chosen provider.
     pub api_key: String,
+    /// The specific model identifier to target (e.g., `llama3`, `gpt-4o`).
     pub model: String,
+    /// The system prompt used to instruct the LLM on how to clean the text.
     pub prompt: String,
 }
 
@@ -33,68 +52,106 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
     }
 }
 
+/// Defines the execution strategy for the Whisper transcription model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WhisperMode {
+    /// Connect to a standalone, externally managed OpenAI-compatible API endpoint.
     External,
+    /// Spin up a local `whisper-server` process using a specific model file on disk.
     BundledModel,
+    /// Download and run a bundled model seamlessly as part of the first-run experience.
     BundledDownload,
 }
 
+/// Configuration for the Whisper transcription engine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmConfig {
+    /// The execution mode determining how the transcription server is managed.
     pub mode: WhisperMode,
+    /// The URL of the OpenAI-compatible transcription endpoint (used in `External` mode).
     pub external_url: String,
+    /// The absolute path to the local GGML model file (used in `BundledModel` mode).
     pub model_path: String,
+    /// The network port the bundled local server will bind to.
     pub bundled_server_port: u16,
+    /// Additional command-line arguments passed to the bundled server on startup.
     pub bundled_server_args: Vec<String>,
+    /// The maximum time in seconds to wait for a transcription response before timing out.
     pub timeout_secs: u64,
+    /// The initial prompt passed to the Whisper model to guide vocabulary and context.
     pub system_prompt: String,
 }
 
+/// Hardware and threshold settings for the audio recording stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordingConfig {
+    /// The absolute path to the directory where `.wav` recordings are saved.
     pub audio_dir: String,
+    /// The sample rate for recording (e.g., 16000 or 44100).
     pub sample_rate: u32,
+    /// The number of audio channels (typically 1 for mono).
     pub channels: u8,
+    /// The silence threshold in dBFS (e.g., -45.0). Audio below this is considered silence.
     pub silence_threshold_dbfs: f32,
+    /// The duration of contiguous silence (in milliseconds) required to automatically stop recording.
     pub silence_window_ms: u32,
+    /// The absolute maximum duration (in seconds) a single recording can last before being forcefully stopped.
     pub max_duration_secs: u32,
+    /// The name of the specific input device to record from, or `"default"` to use the system default.
     pub input_device: String,
 }
 
+/// Settings governing external script execution (hooks) upon transcription success.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookConfig {
+    /// A list of shell commands or script paths to execute sequentially.
     #[serde(alias = "command", deserialize_with = "deserialize_string_or_vec")]
     pub commands: Vec<String>,
+    /// The maximum execution time allowed for a hook before it is forcefully killed.
     pub timeout_secs: u64,
+    /// An optional HTTP URL where the transcription payload will be POSTed concurrently.
     #[serde(default)]
     pub webhook_url: Option<String>,
 }
 
+/// Global keyboard shortcut bindings for triggering push-to-talk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HotkeyConfig {
+    /// Whether the global hotkey listener is active.
     pub enabled: bool,
+    /// The key combination to bind (e.g., `"Ctrl+Alt+Space"`).
     pub combo: String,
+    /// The behavioral mode of the hotkey (Hold vs Toggle).
     pub mode: HotkeyMode,
 }
 
+/// The behavioral mode of the global recording hotkey.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HotkeyMode {
+    /// Recording only happens while the key combination is physically held down.
     Hold,
+    /// Pressing the combination toggles recording on; pressing it again toggles it off.
     Toggle,
 }
 
+/// Frontend UI state, including active theme and visibility settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrayConfig {
+    /// If true, the main window will automatically open when the app starts.
     pub show_on_startup: bool,
+    /// If true, closing the main window simply minimizes the app to the system tray.
     pub minimize_to_tray: bool,
+    /// If true, the application registers a Windows run key to start automatically on system login.
     pub start_at_login: bool,
+    /// The active CSS theme identifier (e.g., `"catppuccin-mocha"`, `"tokyo-night"`).
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// A list of column identifiers that are currently visible in the main list view.
     #[serde(default = "default_visible_columns")]
     pub visible_columns: Vec<String>,
+    /// Whether the CodeMirror editor uses Vim keybindings.
     #[serde(default)]
     pub vim_mode: bool,
 }
@@ -112,11 +169,16 @@ fn default_visible_columns() -> Vec<String> {
     ]
 }
 
+/// Background daemon runtime settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonConfig {
+    /// The verbosity of the daemon's internal log (e.g., `info`, `debug`, `trace`).
     pub log_level: String,
+    /// The maximum size in megabytes before the log file is rotated.
     pub log_max_size_mb: u32,
+    /// The maximum number of rotated log files to retain before old ones are deleted.
     pub log_max_files: u32,
+    /// The Named Pipe (Windows) or Unix Socket path used for IPC communication.
     pub pipe_name: String,
 }
 

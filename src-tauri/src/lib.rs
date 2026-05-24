@@ -13,10 +13,16 @@ use bridge::Bridge;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("build tokio runtime");
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("Fatal error: failed to build tokio runtime: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let bridge = runtime.block_on(async {
         let config = config_io::read().unwrap_or_default();
@@ -32,7 +38,7 @@ pub fn run() {
         }
     });
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -45,10 +51,6 @@ pub fn run() {
 
                     let bridge = app.state::<Option<Bridge>>().inner().clone();
                     if let Some(bridge) = bridge {
-                        let config = bridge.config.clone();
-                        let _hotkey_enabled = config.hotkey.enabled;
-                        let _hotkey_combo = config.hotkey.combo.clone();
-
                         // We only care if they match the configured shortcut
                         // Since we register exactly one shortcut below, it should match.
                         match event.state() {
@@ -132,7 +134,10 @@ pub fn run() {
             commands::wizard_download_server,
             commands::reveal_file,
             commands::open_file,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        ]);
+
+    if let Err(e) = builder.run(tauri::generate_context!()) {
+        eprintln!("Fatal error while running tauri application: {e}");
+        std::process::exit(1);
+    }
 }

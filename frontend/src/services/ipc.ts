@@ -1,3 +1,7 @@
+/**
+ * This module provides the frontend TypeScript boundary to the Tauri Rust backend.
+ * It encapsulates the `invoke` calls into strictly typed async functions.
+ */
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
 export type Recording = {
@@ -27,6 +31,10 @@ export type ListFilter = {
   tag_id?: number | null;
 };
 
+/**
+ * Fetches a list of recordings matching the given filter.
+ * The results are paginated or limited by the backend (default limit 50).
+ */
 export async function listRecordings(filter: ListFilter = {}): Promise<Recording[]> {
   return await tauriInvoke<Recording[]>("list_recordings", { filter });
 }
@@ -35,10 +43,17 @@ export async function getRecording(id: string): Promise<Recording> {
   return await tauriInvoke<Recording>("get_recording", { id });
 }
 
+/**
+ * Deletes a recording by ID. If keepAudio is true, the catalog entry is removed
+ * but the raw `.wav` file is preserved on disk.
+ */
 export async function deleteRecording(id: string, keepAudio = false): Promise<void> {
   await tauriInvoke("delete_recording", { id, keepAudio });
 }
 
+/**
+ * Initiates a new recording session. Returns the generated recording ID.
+ */
 export async function recordStart(mode: RecordMode): Promise<{ id: string }> {
   return await tauriInvoke<{ id: string }>("record_start", { mode });
 }
@@ -59,6 +74,9 @@ export async function refireHook(id: string): Promise<void> {
   await tauriInvoke("refire_hook", { id });
 }
 
+/**
+ * Manually update the text transcript of a specific recording.
+ */
 export async function updateTranscript(id: string, text: string): Promise<void> {
   await tauriInvoke("update_transcript", { id, text });
 }

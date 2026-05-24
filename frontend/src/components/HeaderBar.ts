@@ -14,6 +14,7 @@ export class HeaderBar {
   private container: HTMLElement;
   private callbacks: HeaderBarCallbacks;
   private tags: Tag[] = [];
+  private unsubEvent: (() => void) | null = null;
 
   constructor(container: HTMLElement, callbacks: HeaderBarCallbacks) {
     this.container = container;
@@ -30,14 +31,29 @@ export class HeaderBar {
     }
     this.render();
 
-    await listen<any>("daemon-event", (e) => {
+    this.unsubEvent = await listen<any>("daemon-event", async (e) => {
       const eventName = e.payload.event;
       if (eventName === "recording_started") {
         this.setRecordingState(true);
-      } else if (eventName === "recording_stopped" || eventName === "recording_cancel") {
+      } else if (eventName === "recording_stopped" || eventName === "recording_deleted") {
         this.setRecordingState(false);
       }
+      // Stale UI Fix: reload tags if something might have changed them.
+      // E.g. we just do a silent background reload on any event, or we can just reload occasionally.
+      if (eventName === "tag_created" || eventName === "tag_deleted") {
+          try {
+              this.tags = await listTags();
+              this.render();
+          } catch {}
+      }
     });
+  }
+
+  dispose() {
+      if (this.unsubEvent) {
+          this.unsubEvent();
+          this.unsubEvent = null;
+      }
   }
 
   private isRecording = false;

@@ -26,6 +26,7 @@ On first launch the wizard walks you through:
 - Picking your microphone
 - Picking your hook script (default writes to stdout)
 - Optional global hotkey
+- Premium themes and CodeMirror 6 Vim mode (can also be configured later)
 
 Requirements: Windows 10/11. A locally running [whisper-server][whisper-server]
 (installed alongside Phoneme in bundled mode, or run separately in external
@@ -114,8 +115,8 @@ See [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Roadmap
 
-- **v1.1** — Windows MSI, single hook delivery, modes 1+2
-- **v1.1** *(this release)* — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
+- **v1.1** — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
+- **v1.2** *(this release)* — Premium themes, CodeMirror 6 w/ Vim mode, LLM post-processing hooks, User PATH MSI (No UAC), and Vitest suite
 - **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
 
 ## Contributing

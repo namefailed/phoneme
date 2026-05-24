@@ -10,9 +10,8 @@ pub fn spawn(app: AppHandle, bridge: Bridge) {
     tauri::async_runtime::spawn(async move {
         loop {
             match run_once(app.clone(), bridge.clone()).await {
-                Ok(()) => break,
-                Err(e) => {
-                    tracing::warn!(error = %e, "event stream ended; reconnecting in 2s");
+                Ok(()) | Err(_) => {
+                    tracing::warn!("event stream ended; reconnecting in 2s");
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
             }

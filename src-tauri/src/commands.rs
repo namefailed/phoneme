@@ -48,18 +48,23 @@ fn json_kind(k: &phoneme_ipc::IpcErrorKind) -> &'static str {
     }
 }
 
+/// Fetch a filtered list of all audio recordings.
+/// Forwards a `ListRecordings` request to the background daemon.
 #[tauri::command]
 pub async fn list_recordings(bridge: Br<'_>, filter: Option<ListFilter>) -> Result<Value, String> {
     let filter = filter.unwrap_or_default();
     forward(&bridge, Request::ListRecordings { filter }).await
 }
 
+/// Fetch the details, tags, and transcript for a specific recording by its ID.
 #[tauri::command]
 pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::GetRecording { id }).await
 }
 
+/// Delete a recording from the catalog.
+/// If `keep_audio` is false, the `.wav` file on disk will also be permanently deleted.
 #[tauri::command]
 pub async fn delete_recording(
     bridge: Br<'_>,
@@ -70,6 +75,9 @@ pub async fn delete_recording(
     forward(&bridge, Request::DeleteRecording { id, keep_audio }).await
 }
 
+/// Signal the daemon to start recording audio from the active input device.
+/// The `mode` dictates whether this is a continuous push-to-talk (`hold`), a `oneshot`,
+/// or a fixed duration recording (`duration:X`).
 #[tauri::command]
 pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, String> {
     let mode = match mode.as_str() {
@@ -87,44 +95,59 @@ pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, String>
     forward(&bridge, Request::RecordStart { mode }).await
 }
 
+/// Signal the daemon to cleanly stop the current recording and begin transcription.
 #[tauri::command]
 pub async fn record_stop(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::RecordStop).await
 }
 
+/// Signal the daemon to immediately abort the current recording and discard the audio buffer.
 #[tauri::command]
 pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::RecordCancel).await
 }
 
+/// Request the daemon to re-transcribe an existing recording by its ID.
+/// This will push the recording back into the background queue.
 #[tauri::command]
 pub async fn replay_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::ReplayRecording { id }).await
 }
 
+/// Force the daemon to re-execute the post-processing hook for a given recording ID.
 #[tauri::command]
 pub async fn refire_hook(bridge: Br<'_>, id: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::RefireHook { id }).await
 }
 
+/// Manually update the transcript text for a specific recording.
 #[tauri::command]
 pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::UpdateTranscript { id, text }).await
 }
 
+/// Check the background daemon's current runtime status.
+/// Returns whether the daemon is actively running and its process ID.
 #[tauri::command]
 pub async fn daemon_status(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::DaemonStatus).await
 }
 
+/// Read the application configuration directly from the local `config.toml` file.
 #[tauri::command]
 pub fn read_config() -> Result<Config, String> {
     config_io::read().map_err(|e| e.to_string())
 }
 
+/// Write a new configuration state to `config.toml`.
+///
+/// This command also applies several side effects:
+/// 1. Updates the Windows Registry Run Key for "Start at login".
+/// 2. Reloads the daemon to adopt new settings.
+/// 3. Dynamically re-registers global keyboard shortcuts in the frontend window.
 #[tauri::command]
 pub async fn write_config(
     app: tauri::AppHandle,
@@ -132,7 +155,7 @@ pub async fn write_config(
     config: Config,
 ) -> Result<(), String> {
     config_io::write(&config).map_err(|e| e.to_string())?;
-    
+
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
     {
@@ -141,7 +164,7 @@ pub async fn write_config(
             .unwrap_or_default();
         if !exe_path.is_empty() {
             if config.tray.start_at_login {
-                let _ = std::process::Command::new("reg")
+                if let Err(e) = std::process::Command::new("reg")
                     .args([
                         "add",
                         "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -153,9 +176,12 @@ pub async fn write_config(
                         &format!("\"{}\"", exe_path),
                         "/f",
                     ])
-                    .spawn();
+                    .spawn()
+                {
+                    tracing::warn!("Failed to add registry run key: {e}");
+                }
             } else {
-                let _ = std::process::Command::new("reg")
+                if let Err(e) = std::process::Command::new("reg")
                     .args([
                         "delete",
                         "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -163,7 +189,10 @@ pub async fn write_config(
                         "Phoneme",
                         "/f",
                     ])
-                    .spawn();
+                    .spawn()
+                {
+                    tracing::warn!("Failed to delete registry run key: {e}");
+                }
             }
         }
     }
@@ -189,11 +218,13 @@ pub async fn write_config(
     Ok(())
 }
 
+/// Check if a `config.toml` file already exists on disk.
 #[tauri::command]
 pub fn config_exists() -> bool {
     config_io::exists()
 }
 
+/// Resolve the absolute path to the user's `config.toml` file.
 #[tauri::command]
 pub fn config_path() -> Result<String, String> {
     config_io::config_path()
@@ -201,6 +232,7 @@ pub fn config_path() -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Execute local system checks for the Doctor utility (e.g. assessing audio devices).
 #[tauri::command]
 pub fn doctor_local_checks() -> Result<Vec<CheckResult>, String> {
     let cfg = config_io::read().map_err(|e| e.to_string())?;
@@ -331,11 +363,13 @@ pub async fn wizard_download_model(
         let chunk = match chunk {
             Ok(c) => c,
             Err(e) => {
+                drop(file);
                 let _ = tokio::fs::remove_file(&dest_path).await;
                 return Err(format!("stream error: {}", e));
             }
         };
         if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+            drop(file);
             let _ = tokio::fs::remove_file(&dest_path).await;
             return Err(format!("write error: {}", e));
         }
@@ -414,11 +448,13 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
         let chunk = match chunk {
             Ok(c) => c,
             Err(e) => {
+                drop(file);
                 let _ = tokio::fs::remove_file(&temp_zip).await;
                 return Err(format!("stream error: {}", e));
             }
         };
         if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+            drop(file);
             let _ = tokio::fs::remove_file(&temp_zip).await;
             return Err(format!("write error: {}", e));
         }
@@ -470,6 +506,7 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
         }
     }
 
+    drop(archive);
     let _ = tokio::fs::remove_file(&temp_zip).await;
 
     Ok(exe_path.to_string_lossy().into_owned())
