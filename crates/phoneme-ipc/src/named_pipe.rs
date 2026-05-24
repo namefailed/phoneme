@@ -166,16 +166,15 @@ impl Transport for NamedPipeTransport {
     async fn subscribe(
         &mut self,
     ) -> TransportResult<BoxStream<'static, TransportResult<DaemonEvent>>> {
-        use futures::SinkExt;
-
-        if let Some(framed) = self.framed.as_mut() {
-            framed
-                .send(Request::SubscribeEvents)
-                .await
-                .map_err(IpcTransportError::Io)?;
-        } else {
-            return Err(IpcTransportError::Closed);
-        }
+        let framed = self.framed.as_mut().ok_or(IpcTransportError::Closed)?;
+        
+        let json = serde_json::to_vec(&Request::SubscribeEvents)
+            .map_err(|e| IpcTransportError::Internal(e.to_string()))?;
+        let io = framed.get_mut();
+        use tokio::io::AsyncWriteExt;
+        io.write_all(&json).await?;
+        io.write_all(b"\n").await?;
+        io.flush().await?;
 
         // Take ownership of the framed IO and reframe with DaemonEvent codec.
         // After this point, self.framed is None — further request() calls return Closed.
