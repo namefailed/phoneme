@@ -94,7 +94,7 @@ jobs:
         run: pnpm build
 
       - name: Build workspace binaries
-        run: cargo build --workspace --release
+        run: cargo build --workspace
 
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2.0" --locked
