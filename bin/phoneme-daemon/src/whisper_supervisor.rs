@@ -85,8 +85,16 @@ pub async fn run_with(
             .arg(cfg.whisper.bundled_server_port.to_string())
             .arg("--host")
             .arg("127.0.0.1")
+            .arg("--inference-path")
+            .arg("/v1/audio/transcriptions")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
 
         for extra in &cfg.whisper.bundled_server_args {
             command.arg(extra);
