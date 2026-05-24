@@ -42,7 +42,7 @@ jobs:
         run: cargo install tauri-cli --version "^2.0" --locked
 
       - name: Build release MSI
-        run: cargo tauri build
+        run: cargo tauri build -v
 
       - name: Upload artifacts
         uses: softprops/action-gh-release@v2

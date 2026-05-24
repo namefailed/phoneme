@@ -49,7 +49,7 @@ impl TranscriptionClient {
             .map_err(|e| Error::Internal(format!("multipart mime: {e}")))?;
         let form = multipart::Form::new().part("file", part);
 
-        let url = format!("{}/inference", base_url.trim_end_matches('/'));
+        let url = format!("{}/v1/audio/transcriptions", base_url.trim_end_matches('/'));
         let response = match self
             .http
             .post(&url)
