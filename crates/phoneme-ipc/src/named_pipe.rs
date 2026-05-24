@@ -166,14 +166,17 @@ impl Transport for NamedPipeTransport {
     async fn subscribe(
         &mut self,
     ) -> TransportResult<BoxStream<'static, TransportResult<DaemonEvent>>> {
-        let res = self.request(Request::SubscribeEvents).await?;
-        if let Response::Err(e) = res {
-            return Err(IpcTransportError::Internal(e.message));
+        use futures::SinkExt;
+        
+        if let Some(framed) = self.framed.as_mut() {
+            framed.send(Request::SubscribeEvents).await.map_err(IpcTransportError::Io)?;
+        } else {
+            return Err(IpcTransportError::Closed);
         }
 
         // Take ownership of the framed IO and reframe with DaemonEvent codec.
         // After this point, self.framed is None — further request() calls return Closed.
-        let old = self.framed.take().ok_or(IpcTransportError::Closed)?;
+        let old = self.framed.take().unwrap();
         let parts = old.into_parts();
 
         let mut new_parts =

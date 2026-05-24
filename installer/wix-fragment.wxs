@@ -8,7 +8,7 @@
       <!-- Bundle phoneme-daemon and phoneme CLI -->
       <Component Id="PhonemeBinaries" Guid="4793155E-FEE7-4808-8D72-786050B871B5">
         <File Id="PhonemeDaemonExe" Name="phoneme-daemon.exe" Source="..\..\phoneme-daemon.exe" KeyPath="yes" />
-        <File Id="PhonemeCliExe" Name="phoneme-cli.exe" Source="..\..\phoneme.exe" />
+        <File Id="PhonemeCliExe" Name="phoneme.exe" Source="..\..\phoneme.exe" />
       </Component>
 
       <!-- PATH integration -->
