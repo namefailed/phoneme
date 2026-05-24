@@ -167,9 +167,12 @@ impl Transport for NamedPipeTransport {
         &mut self,
     ) -> TransportResult<BoxStream<'static, TransportResult<DaemonEvent>>> {
         use futures::SinkExt;
-        
+
         if let Some(framed) = self.framed.as_mut() {
-            framed.send(Request::SubscribeEvents).await.map_err(IpcTransportError::Io)?;
+            framed
+                .send(Request::SubscribeEvents)
+                .await
+                .map_err(IpcTransportError::Io)?;
         } else {
             return Err(IpcTransportError::Closed);
         }
