@@ -30,7 +30,7 @@ On first launch the wizard walks you through:
 Requirements: Windows 10/11. A locally running [whisper-server][whisper-server]
 (installed alongside Phoneme in bundled mode, or run separately in external
 mode). For bundled mode you also bring your own GGUF model file (e.g.,
-[Gemma-4-E4B][gemma]).
+[ggml-base.en.bin][whisper-models]).
 
 ## Why "local-first"
 
@@ -96,7 +96,7 @@ cargo install tauri-cli --version "^2.0" --locked
 cargo tauri build
 ```
 
-The MSI lands at `src-tauri/target/release/bundle/msi/`.
+The MSI lands at `target/release/bundle/msi/`.
 
 For development (with hot reload):
 
@@ -132,4 +132,4 @@ Phoneme is built by [@namefailed](https://github.com/namefailed). It is not a
 commercial product, has no telemetry, and never will.
 
 [whisper-server]: https://github.com/ggerganov/whisper.cpp
-[gemma]: https://huggingface.co/google/gemma-4-E4B
+[whisper-models]: https://huggingface.co/ggerganov/whisper.cpp/tree/main

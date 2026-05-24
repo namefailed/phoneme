@@ -55,10 +55,3 @@ Insta snapshot tests verify stable command output. Update snapshots with:
 cargo insta review
 ```
 
-## Known limitations
-
-- `phoneme config set` is stubbed for v1 — the wizard handles config writes;
-  editing config.toml directly works in the meantime.
-- `phoneme doctor --rebuild-catalog` flag is recognized but currently prints a
-  "use daemon command" message. Daemon-side catalog rebuild lands in a later
-  plan.

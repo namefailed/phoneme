@@ -1,8 +1,7 @@
-//! CLI output snapshots via `insta`.
+//! Snapshot tests for the CLI commands.
 //!
-//! Each test spawns the `phoneme` binary against a tempdir-backed daemon
-//! (Plan 3a's harness) with a deterministic seeded catalog. Output is
-//! captured to stdout and snapshotted.
+//! We instantiate the integration test harness with a deterministic seeded catalog. Output is
+//! checked against Insta snapshots to ensure formatting remains stable.
 
 use assert_cmd::Command;
 use predicates::prelude::*;

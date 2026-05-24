@@ -23,6 +23,7 @@ impl Default for TranscriptionClient {
 }
 
 impl TranscriptionClient {
+    /// Creates a new `TranscriptionClient` equipped with an internal HTTP client.
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
             .build()
@@ -30,6 +31,18 @@ impl TranscriptionClient {
         Self { http }
     }
 
+    /// Transcribes an audio file by submitting a `multipart/form-data` request
+    /// to an OpenAI-compatible `/v1/audio/transcriptions` endpoint.
+    ///
+    /// # Arguments
+    /// * `base_url` - The base URL of the whisper server (e.g. `http://127.0.0.1:8080`)
+    /// * `timeout` - Maximum duration to wait for the transcription to complete
+    /// * `audio_path` - Path to the `.wav` file on disk to be transcribed
+    ///
+    /// # Returns
+    /// The transcribed text string on success. Returns `Error::WhisperTimeout` or
+    /// `Error::WhisperUnreachable` on network issues, and `Error::WhisperError` if the
+    /// API responds with a non-success HTTP status.
     pub async fn transcribe(
         &self,
         base_url: &str,

@@ -1,9 +1,10 @@
 //! Startup reconciliation — recover from previous crashes.
 //!
-//! Per spec:
-//! 1. Scan inbox/processing/ → move back to pending/ (Plan 1's recover_orphans).
-//! 2. Sweep catalog rows in non-terminal status with no matching inbox → mark failed.
-//! 3. Log warnings for orphan WAVs (no catalog row).
+//! Startup recovery operations for the daemon.
+//! 
+//! Responsibilities:
+//! 1. Scan inbox/processing/ → move back to pending/ to recover stranded recordings.
+//! 2. Scan catalog where status=processing → set status=pending to retry transcription.
 
 use crate::app_state::AppState;
 use crate::first_run;

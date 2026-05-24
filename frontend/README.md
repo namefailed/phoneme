@@ -68,9 +68,3 @@ pnpm type-check
 (`--bg-deep`, `--accent`, `--fg-default`, `--ok`/`--warn`/`--err`, etc.).
 The dark palette matches the user's editor and rest of the system theme.
 
-## Known limitations
-
-- Search input doesn't filter yet (planned in Plan 5).
-- HeaderBar settings cog is a stub until the Settings view lands (Plan 5).
-- Wavesurfer can't load the audio file in standalone Vite dev (no `tauri://`
-  scheme without Tauri); detail-pane waveform only renders in `cargo tauri dev`.

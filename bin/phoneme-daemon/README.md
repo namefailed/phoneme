@@ -4,10 +4,9 @@ The headless brain of [Phoneme](../../README.md). Owns audio capture, the
 inbox queue, the SQLite catalog, and (in bundled modes) the whisper-server
 process. Exposes all operations over a Windows named-pipe IPC surface.
 
-Clients: `phoneme` CLI (see `bin/phoneme/`, Plan 3b), the Tauri tray app
-(Plan 4), and external scripts using the `phoneme-ipc` crate.
+Clients: `phoneme` CLI, the Tauri GUI shell (`phoneme-tray`), and external scripts using the `phoneme-ipc` crate.
 
-## Modules
+## Architecture & Modules
 
 | Module | Responsibility |
 |---|---|
@@ -39,7 +38,7 @@ another phoneme-daemon is already running. Stop it with `phoneme daemon --stop`.
 Both honored at startup and used by the integration test harness:
 
 - `PHONEME_CONFIG=<path>` — load config from this TOML file instead of the
-  user's `~/.config/phoneme/config.toml`.
+  user's `%APPDATA%\phoneme\config.toml` (Windows).
 - `PHONEME_DATA_LOCAL=<dir>` — redirect inbox / catalog / log files away
   from `%LOCALAPPDATA%\phoneme\` so tests don't clobber a real install.
 
@@ -67,5 +66,4 @@ randomization to the harness.
 
 Recording-flow integration tests (basic_flow, whisper_unreachable, hook_timeout,
 crash_recovery, concurrent_record, replay, event_stream, rebuild_catalog)
-are deferred until the `test-mode` synthetic-audio plumbing lands — see
-Plan 2026-05-19 Task 14 deviation note.
+rely on synthetic-audio plumbing via `--test-mode` flags to assert deterministic transcriptions without requiring physical microphone access.

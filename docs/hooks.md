@@ -45,8 +45,9 @@ Set the hook in `%APPDATA%\phoneme\config.toml`:
 
 ```toml
 [hook]
-command = "powershell -File %APPDATA%/phoneme/hooks/to-org-journal.ps1"
+commands = ["powershell -File %APPDATA%/phoneme/hooks/to-org-journal.ps1"]
 timeout_secs = 30
+webhook_url = "https://your-webhook.app/api/ingest"
 ```
 
 Path expansion (`%VAR%`, `~`) is performed at config load.
@@ -144,14 +145,9 @@ duration, stdout, stderr.
 - **Timeouts**: If your hook does network I/O, bump `hook.timeout_secs`.
 - **Working directory**: hooks run with cwd set to `%USERPROFILE%`. Use
   absolute paths or `~` if you depend on a specific location.
-- **Multi-destination delivery**: write one hook that calls multiple targets.
-  Phoneme runs exactly one hook per recording.
+- **Multi-destination delivery**: Add multiple hook commands to the `commands = [...]` array. They will be executed serially.
+- **Webhooks**: Provide a `webhook_url` in your `config.toml` to instantly POST the JSON payload to a web service. Phoneme executes both subprocess hooks and webhooks concurrently.
 - **Encoding**: PowerShell defaults to UTF-16 for `Out-File`. Use
   `Set-Content -Encoding UTF8` (or `[System.IO.File]::WriteAllText`) when
   writing files that other tools will read.
 
-## Roadmap (v1.1)
-
-- `[hook] webhook_url = "..."` — POST JSON to a URL in addition to the
-  subprocess hook
-- `[hook] hooks = ["a.ps1", "b.ps1"]` — chain multiple hooks serially
