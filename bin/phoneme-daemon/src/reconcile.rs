@@ -1,7 +1,7 @@
 //! Startup reconciliation — recover from previous crashes.
 //!
 //! Startup recovery operations for the daemon.
-//! 
+//!
 //! Responsibilities:
 //! 1. Scan inbox/processing/ → move back to pending/ to recover stranded recordings.
 //! 2. Scan catalog where status=processing → set status=pending to retry transcription.

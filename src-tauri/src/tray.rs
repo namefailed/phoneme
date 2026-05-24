@@ -24,7 +24,9 @@ impl TrayState {
         match self {
             Self::Idle => include_bytes!("../icons/tray-idle.png"),
             Self::Recording => include_bytes!("../icons/tray-recording.png"),
-            Self::Transcribing | Self::CatchupBacklog(_) => include_bytes!("../icons/tray-transcribing.png"),
+            Self::Transcribing | Self::CatchupBacklog(_) => {
+                include_bytes!("../icons/tray-transcribing.png")
+            }
             Self::WhisperError | Self::HookFailed => include_bytes!("../icons/tray-error.png"),
         }
     }
