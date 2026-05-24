@@ -27,6 +27,9 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+      - name: Create dummy frontendDist for Tauri macro
+        run: mkdir -p frontend/dist
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
