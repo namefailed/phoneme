@@ -176,7 +176,8 @@ impl Transport for NamedPipeTransport {
         let old = self.framed.take().ok_or(IpcTransportError::Closed)?;
         let parts = old.into_parts();
         
-        let mut new_parts = tokio_util::codec::FramedParts::new(parts.io, JsonLineCodec::<DaemonEvent>::new());
+        let mut new_parts =
+            tokio_util::codec::FramedParts::new(parts.io, JsonLineCodec::<DaemonEvent>::new());
         new_parts.read_buf = parts.read_buf;
         new_parts.write_buf = parts.write_buf;
         
