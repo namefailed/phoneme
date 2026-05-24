@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
 
     let worker_state = state.clone();
     let worker_shutdown = state.shutdown.signal.clone_receiver();
-    let worker_handle = tokio::spawn(async move {
+    let mut worker_handle = tokio::spawn(async move {
         if let Err(e) = queue_worker::run(worker_state, worker_shutdown).await {
             tracing::error!(error = %e, "queue worker terminated");
         }
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
 
     let supervisor_state = state.clone();
     let supervisor_signal = state.shutdown.signal.clone();
-    let supervisor_handle = tokio::spawn(async move {
+    let mut supervisor_handle = tokio::spawn(async move {
         if let Err(e) = whisper_supervisor::run(supervisor_state, supervisor_signal).await {
             tracing::error!(error = %e, "whisper supervisor terminated");
         }
