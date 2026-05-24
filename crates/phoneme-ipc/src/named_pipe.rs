@@ -175,12 +175,12 @@ impl Transport for NamedPipeTransport {
         // After this point, self.framed is None — further request() calls return Closed.
         let old = self.framed.take().ok_or(IpcTransportError::Closed)?;
         let parts = old.into_parts();
-        
+
         let mut new_parts =
             tokio_util::codec::FramedParts::new(parts.io, JsonLineCodec::<DaemonEvent>::new());
         new_parts.read_buf = parts.read_buf;
         new_parts.write_buf = parts.write_buf;
-        
+
         let event_framed = Framed::from_parts(new_parts);
         let stream = event_framed.map(|r| r.map_err(IpcTransportError::Io));
         Ok(stream.boxed())
