@@ -78,6 +78,9 @@ mod tests {
     // These tests need a real audio device on the system. Skip if none is
     // present — CI runners (especially Linux containers) often lack one.
     fn has_audio() -> bool {
+        if std::env::var("CI").is_ok() {
+            return false;
+        }
         default_input_device().is_some()
     }
 
