@@ -423,7 +423,7 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
         if outpath.is_file() {
             if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
                 if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
-                    let extract_to = bin_dir.join(&file_name);
+                    let extract_to = bin_dir.join(file_name);
                     let mut outfile = std::fs::File::create(&extract_to).map_err(|e| {
                         format!("failed to create output file {}: {}", file_name, e)
                     })?;
