@@ -420,7 +420,7 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
         };
 
         // We only care about the binaries in the 'whisper-bin-x64' root or nested, just grab exe and dlls.
-        if outpath.is_file() {
+        if file.is_file() {
             if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
                 if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
                     let extract_to = bin_dir.join(file_name);
