@@ -50,7 +50,7 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
 
     let mut transcript = transcript;
     if cfg.llm_post_process.enabled {
-        match post_process_transcript(&cfg.llm_post_process, &transcript).await {
+        match post_process_transcript(&cfg.llm_post_process, &transcript, None).await {
             Ok(processed) => {
                 tracing::info!("LLM post-processing succeeded!");
                 transcript = processed;
@@ -162,13 +162,14 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
 async fn post_process_transcript(
     cfg: &phoneme_core::config::LlmPostProcessConfig,
     text: &str,
+    base_url_override: Option<&str>,
 ) -> anyhow::Result<String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()?;
 
     if cfg.provider == "ollama" {
-        let url = "http://127.0.0.1:11434/api/generate";
+        let url = base_url_override.unwrap_or("http://127.0.0.1:11434/api/generate");
         let body = serde_json::json!({
             "model": cfg.model,
             "prompt": format!("Instruction: {}\nText: {}", cfg.prompt, text),
@@ -185,7 +186,7 @@ async fn post_process_transcript(
             .ok_or_else(|| anyhow::anyhow!("Missing response field in Ollama output"))?;
         return Ok(output.trim().to_string());
     } else if cfg.provider == "openai" {
-        let url = "https://api.openai.com/v1/chat/completions";
+        let url = base_url_override.unwrap_or("https://api.openai.com/v1/chat/completions");
         let body = serde_json::json!({
             "model": cfg.model,
             "messages": [
@@ -217,4 +218,63 @@ async fn post_process_transcript(
     }
 
     Ok(text.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use phoneme_core::config::LlmPostProcessConfig;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_post_process_openai_success() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": "Fixed Transcript"
+                    }
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cfg = LlmPostProcessConfig {
+            enabled: true,
+            provider: "openai".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            api_key: "test-key".to_string(),
+            prompt: "Fix it".to_string(),
+        };
+
+        let url = format!("{}/v1/chat/completions", mock_server.uri());
+        let result = post_process_transcript(&cfg, "Raw Transcript", Some(&url)).await.unwrap();
+        assert_eq!(result, "Fixed Transcript");
+    }
+
+    #[tokio::test]
+    async fn test_post_process_ollama_failure() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/generate"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let cfg = LlmPostProcessConfig {
+            enabled: true,
+            provider: "ollama".to_string(),
+            model: "llama3".to_string(),
+            api_key: "".to_string(),
+            prompt: "Fix it".to_string(),
+        };
+
+        let url = format!("{}/api/generate", mock_server.uri());
+        let result = post_process_transcript(&cfg, "Raw Transcript", Some(&url)).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-success status"));
+    }
 }
