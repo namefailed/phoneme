@@ -45,7 +45,7 @@ impl TrayState {
 
 pub fn install(app: &AppHandle) -> Result<TrayIcon> {
     let record_item = MenuItem::with_id(app, "record", "● Record", true, None::<&str>)?;
-    let stop_item = MenuItem::with_id(app, "stop", "◼ Stop", false, None::<&str>)?;
+    let stop_item = MenuItem::with_id(app, "stop", "◼ Stop", true, None::<&str>)?;
     let show_item = MenuItem::with_id(app, "show_window", "Show window", true, None::<&str>)?;
     let doctor_item = MenuItem::with_id(app, "doctor", "Doctor", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
