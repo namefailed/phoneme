@@ -77,13 +77,6 @@ export class SettingsView {
     `;
     const body = this.container.querySelector<HTMLElement>("#settings-body")!;
     
-    const updateDirtyState = () => {
-      const btn = this.container.querySelector<HTMLButtonElement>("#settings-save")!;
-      const isDirty = JSON.stringify(this.config) !== this.originalConfigStr;
-      btn.disabled = !isDirty;
-      btn.innerText = isDirty ? "Save *" : "Save";
-    };
-
     // Each section owns its own child div: a Section's render() does
     // `container.innerHTML = …`, so writing them all into `body` directly
     // would have each section clobber the previous one.

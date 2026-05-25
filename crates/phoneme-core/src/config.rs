@@ -502,11 +502,13 @@ mod tests {
     fn parses_theme_configuration() {
         let dir = TempDir::new().unwrap();
         let mut cfg = Config::default();
-        cfg.tray.theme = "tokyo-night".to_string();
-        let cfg_text = toml::to_string(&cfg).unwrap();
+        cfg.interface.theme = "tokyo-night".to_string();
+        
+        let path = dir.path().join("config.toml");
+        let toml_str = toml::to_string(&cfg).unwrap();
+        std::fs::write(&path, toml_str).unwrap();
 
-        let path = write_config(&dir, &cfg_text);
-        let parsed = Config::load(&path).expect("loads config with theme");
-        assert_eq!(parsed.tray.theme, "tokyo-night");
+        let parsed = Config::load(&path).unwrap();
+        assert_eq!(parsed.interface.theme, "tokyo-night");
     }
 }
