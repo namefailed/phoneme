@@ -139,6 +139,8 @@ pub enum HotkeyMode {
 pub struct TrayConfig {
     /// If true, the main window will automatically open when the app starts.
     pub show_on_startup: bool,
+    /// Whether to strip the OS window decorations (title bar).
+    pub strip_titlebar: bool,
     /// If true, closing the main window simply minimizes the app to the system tray.
     pub minimize_to_tray: bool,
     /// If true, the application registers a Windows run key to start automatically on system login.
@@ -221,6 +223,7 @@ impl Default for Config {
             },
             tray: TrayConfig {
                 show_on_startup: true,
+                strip_titlebar: false,
                 minimize_to_tray: true,
                 start_at_login: false,
                 theme: "catppuccin-mocha".into(),

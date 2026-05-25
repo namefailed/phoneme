@@ -23,7 +23,7 @@
   border-bottom: 1px solid var(--border-subtle);
   padding: 10px 16px;
   display: grid;
-  gap: 12px;
+  gap: 0;
   font-size: 10px;
   text-transform: uppercase;
   color: var(--fg-faded);
@@ -36,7 +36,7 @@
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-subtle);
   display: grid;
-  gap: 12px;
+  gap: 0;
   font-size: 13px;
   color: var(--fg-default);
   cursor: pointer;
@@ -52,6 +52,22 @@
   background-image: linear-gradient(to right, rgba(203, 166, 247, 0.04), transparent);
   border-left-color: var(--accent);
   padding-left: 13px;
+}
+.rec-table-head > span,
+.rec-row > span {
+  padding: 0 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+}
+.rec-table-head > span:first-child,
+.rec-row > span:first-child {
+  padding-left: 0;
+}
+.rec-table-head > span:last-child,
+.rec-row > span:last-child {
+  border-right: none;
+  padding-right: 0;
 }
 .rec-time,
 .rec-dur {

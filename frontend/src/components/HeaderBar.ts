@@ -80,8 +80,8 @@ export class HeaderBar {
     const f = filterStore.get();
     const tagOptions = this.tags.map(t => `<option value="${t.id}" ${f.tag_id === t.id ? "selected" : ""}>${t.name}</option>`).join("");
     this.container.innerHTML = `
-      <div class="headerbar">
-        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" />
+      <div class="headerbar" data-tauri-drag-region>
+        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" data-tauri-drag-region />
         <select class="filter-pill hb-time-select" title="Filter recordings by date">
           <option value="">All time</option>
           <option value="today">Today</option>

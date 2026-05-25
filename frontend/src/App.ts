@@ -6,6 +6,7 @@ import { FirstRunWizard } from "./components/FirstRunWizard";
 import { Router, type ViewName } from "./router";
 import { onNav } from "./services/events";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /// A mounted view. Every view exposes an optional `dispose` for teardown
 /// (RecordingsView unsubscribes its event listeners there).
@@ -65,6 +66,11 @@ export class App {
       const cfg = await invoke<any>("read_config");
       if (cfg?.tray?.theme) {
         document.documentElement.setAttribute("data-theme", cfg.tray.theme);
+      }
+      if (cfg?.tray?.strip_titlebar) {
+        getCurrentWindow().setDecorations(false);
+      } else {
+        getCurrentWindow().setDecorations(true);
       }
     } catch (e) {
       console.warn("Failed to load or apply theme:", e);

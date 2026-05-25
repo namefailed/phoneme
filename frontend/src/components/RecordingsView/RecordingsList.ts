@@ -78,10 +78,10 @@ export class RecordingsList {
     };
 
     const colWidths: Record<string, string> = {
-      day: "75px",
-      time: "70px",
-      duration: "60px",
-      status: "65px",
+      day: "85px",
+      time: "94px",
+      duration: "84px",
+      status: "89px",
       transcript: "1fr"
     };
 

@@ -57,6 +57,17 @@ export class SectionTray {
             this.config.tray.show_on_startup,
           )}</div>
         </div>
+
+        <div class="settings-field">
+          <label>Strip system titlebar</label>
+          <div>${renderField(
+            { key: "tray.strip_titlebar", label: "", kind: "checkbox" },
+            this.config.tray.strip_titlebar,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Removes the default OS window decorations. The top header will become draggable. Requires app restart to fully apply.
+          </span>
+        </div>
         
         <div class="settings-field">
           <label>Minimize to tray</label>
