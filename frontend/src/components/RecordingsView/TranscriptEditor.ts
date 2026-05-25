@@ -134,14 +134,17 @@ export class TranscriptEditor {
         display: "none"
       },
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-        backgroundColor: "rgba(203, 166, 247, 0.4) !important"
+        backgroundColor: "var(--accent) !important",
+        opacity: "0.3 !important"
       },
       ".cm-selectionMatch, .cm-vimMode .cm-selectionBackground": {
-        backgroundColor: "rgba(203, 166, 247, 0.4) !important"
+        backgroundColor: "var(--accent) !important",
+        opacity: "0.3 !important"
       },
       ".cm-fat-cursor": {
         backgroundColor: "var(--accent) !important",
-        color: "var(--accent-fg) !important"
+        opacity: "0.5 !important",
+        color: "transparent !important" // Don't override text color, let the background tint it
       }
     });
 

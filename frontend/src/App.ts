@@ -76,6 +76,16 @@ export class App {
     // Auto-launch the first-run wizard if no config exists yet.
     void this.maybeAutoWizard();
     void this.loadAndApplyTheme();
+
+    window.addEventListener("config:saved", (e: any) => {
+      const cfg = e.detail;
+      if (cfg?.interface?.theme) {
+        document.documentElement.setAttribute("data-theme", cfg.interface.theme);
+      }
+      if (cfg?.interface?.strip_titlebar !== undefined) {
+        getCurrentWindow().setDecorations(!cfg.interface.strip_titlebar);
+      }
+    });
   }
 
   private async loadAndApplyTheme() {

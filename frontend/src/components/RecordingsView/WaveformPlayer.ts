@@ -21,23 +21,9 @@ export class WaveformPlayer {
     const fgFaded = computed.getPropertyValue("--fg-faded").trim() || "#6c7086";
     const fg = computed.getPropertyValue("--fg-muted").trim() || "#9399b2";
 
-    // Create a canvas gradient for the progress wave to make it look premium
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    let progressColor: string | CanvasGradient = accent;
-    let waveColor: string | CanvasGradient = fgFaded;
-    
-    if (ctx) {
-      const pGrad = ctx.createLinearGradient(0, 0, 0, 100);
-      pGrad.addColorStop(0, accent);
-      pGrad.addColorStop(1, "rgba(255, 255, 255, 0.1)");
-      progressColor = pGrad;
-
-      const wGrad = ctx.createLinearGradient(0, 0, 0, 100);
-      wGrad.addColorStop(0, fgFaded);
-      wGrad.addColorStop(1, "rgba(0, 0, 0, 0.1)");
-      waveColor = wGrad;
-    }
+    // Use solid colors instead of gradients which fade into dark backgrounds
+    const progressColor = accent;
+    const waveColor = fgFaded;
 
     this.wavesurfer = WaveSurfer.create({
       container,
@@ -45,9 +31,6 @@ export class WaveformPlayer {
       progressColor,
       cursorColor: accent,
       cursorWidth: 2,
-      barWidth: 3,
-      barGap: 3,
-      barRadius: 3,
       height: 80,
       normalize: true,
       url: convertFileSrc(audioPath),

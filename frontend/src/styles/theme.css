@@ -100,11 +100,3 @@ html[data-theme="dracula"] {
   --info: #8be9fd;
 }
 
-.cm-editor ::selection {
-  background-color: var(--accent) !important;
-  color: var(--accent-fg) !important;
-}
-.cm-selectionBackground {
-  background-color: var(--accent) !important;
-  opacity: 0.3;
-}

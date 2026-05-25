@@ -57,7 +57,7 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         provider: "none".into(),
         api_key: "".into(),
         api_url: "".into(),
-        model: "llama3".into(),
+        model: "llama3.2:3b".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
     }
 }

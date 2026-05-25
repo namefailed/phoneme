@@ -118,6 +118,7 @@ export class SettingsView {
             delete config.hook.command;
           }
           await invoke("write_config", { config });
+          window.dispatchEvent(new CustomEvent("config:saved", { detail: config }));
           this.onClose();
         } catch (e) {
           alert(`Save failed: ${e}`);
