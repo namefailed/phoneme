@@ -51,11 +51,13 @@ webhook_url = "https://your-webhook.app/api/ingest"
 
 [llm_post_process]
 enabled = true
-provider = "openai" # "openai" or "ollama"
-endpoint = "http://localhost:11434/v1/chat/completions" # Defaults to OpenAI API if not provided
-model = "llama3" # Example: gpt-4o for OpenAI or llama3 for Ollama
-api_key = "sk-..." # Required for OpenAI, optional for Ollama
-prompt = "Clean up this voice transcript, removing stutters and filler words."
+provider = "openai" # "openai", "ollama", or "none"
+api_url = ""        # Leave empty to use the provider default (OpenAI:
+                    # https://api.openai.com/v1/chat/completions,
+                    # Ollama: http://127.0.0.1:11434/api/generate)
+model = "gpt-4o"    # gpt-4o-mini / gpt-4o for OpenAI; llama3.2:3b for Ollama
+api_key = "sk-..."  # Required for OpenAI, ignored by Ollama
+prompt = "Clean up this voice transcript, removing stutters and filler words. Reply ONLY with the cleaned text."
 
 ```
 

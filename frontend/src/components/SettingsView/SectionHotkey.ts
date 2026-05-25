@@ -8,7 +8,7 @@ export class SectionHotkey {
         <h3>Global Hotkey</h3>
         <div class="settings-field">
           <label>Enable</label>
-          <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <div>${renderField(
               { key: "hotkey.enabled", label: "", kind: "checkbox" },
               config.hotkey.enabled,

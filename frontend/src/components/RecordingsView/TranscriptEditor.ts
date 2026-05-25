@@ -103,13 +103,24 @@ export class TranscriptEditor {
       ".cm-gutters": {
         display: "none"
       },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+      // CodeMirror 6 + @replit/codemirror-vim both render selections as
+      // `.cm-selectionBackground` divs (drawSelection extension). The browser's
+      // native ::selection is suppressed when drawSelection is active, but we
+      // style it too as a fallback for any state that bypasses drawSelection.
+      //
+      // `opacity: 0.3` was too faint to see against the editor's transparent
+      // background — bumped to 0.5 so the highlight is unmistakable while
+      // still letting the underlying text read clearly.
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
         backgroundColor: "var(--accent) !important",
-        opacity: "0.3 !important"
+        opacity: "0.5 !important"
       },
-      ".cm-selectionMatch, .cm-vimMode .cm-selectionBackground": {
+      ".cm-content ::selection": {
+        backgroundColor: "color-mix(in srgb, var(--accent) 50%, transparent) !important"
+      },
+      ".cm-selectionMatch": {
         backgroundColor: "var(--accent) !important",
-        opacity: "0.3 !important"
+        opacity: "0.35 !important"
       },
       ".cm-fat-cursor": {
         backgroundColor: "var(--accent) !important",

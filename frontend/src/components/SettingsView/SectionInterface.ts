@@ -70,7 +70,7 @@ export class SectionInterface {
 
         <div class="settings-field">
           <label>Strip system titlebar</label>
-          <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <div>${renderField(
               { key: "interface.strip_titlebar", label: "", kind: "checkbox" },
               config.interface.strip_titlebar,
@@ -83,7 +83,7 @@ export class SectionInterface {
 
         <div class="settings-field" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Visible Columns</label>
-          <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
             <div style="display: flex; flex-direction: column; gap: 6px;">
               ${colCheckboxes}
             </div>

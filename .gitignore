@@ -10,3 +10,13 @@ Cargo.lock.bak
 
 # Tauri auto-generated files
 src-tauri/gen/
+
+# Binary build artifacts and downloaded runtime dependencies.
+# `whisper-server.exe` and friends are fetched at first-run by
+# `wizard_download_server` into `%LOCALAPPDATA%\phoneme\bin\`; nothing
+# in the workspace should be checking them into git.
+*.exe
+*.dll
+*.zip
+*.wav
+whisper-bin/
