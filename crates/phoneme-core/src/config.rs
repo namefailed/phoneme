@@ -162,6 +162,7 @@ fn default_theme() -> String {
 
 fn default_visible_columns() -> Vec<String> {
     vec![
+        "day".into(),
         "time".into(),
         "duration".into(),
         "status".into(),
@@ -222,6 +223,7 @@ impl Default for Config {
                 start_at_login: false,
                 theme: "catppuccin-mocha".into(),
                 visible_columns: vec![
+                    "day".into(),
                     "time".into(),
                     "duration".into(),
                     "status".into(),

@@ -363,7 +363,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         },
         Request::AddTag { name, color } => {
             match state.catalog.add_tag(&name, color.as_deref()).await {
-                Ok(tag) => Response::Ok(serde_json::to_value(tag).unwrap_or_default()),
+                Ok(tag) => {
+                    state.events.emit(DaemonEvent::TagCreated { id: tag.id });
+                    Response::Ok(serde_json::to_value(tag).unwrap_or_default())
+                }
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
                     message: e.to_string(),
@@ -371,7 +374,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::DeleteTag { id } => match state.catalog.delete_tag(id).await {
-            Ok(()) => Response::Ok(serde_json::Value::Null),
+            Ok(()) => {
+                state.events.emit(DaemonEvent::TagDeleted { id });
+                Response::Ok(serde_json::Value::Null)
+            }
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
                 message: e.to_string(),

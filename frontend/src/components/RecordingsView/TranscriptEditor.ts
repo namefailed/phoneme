@@ -87,6 +87,13 @@ export class TranscriptEditor {
       },
       ".cm-gutters": {
         display: "none"
+      },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+        backgroundColor: "rgba(255, 255, 255, 0.15) !important"
+      },
+      ".cm-fat-cursor": {
+        backgroundColor: "var(--accent) !important",
+        color: "var(--accent-fg) !important"
       }
     });
 

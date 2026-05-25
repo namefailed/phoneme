@@ -165,4 +165,10 @@ pub enum DaemonEvent {
     TranscriptUpdated {
         id: RecordingId,
     },
+    TagCreated {
+        id: i64,
+    },
+    TagDeleted {
+        id: i64,
+    },
 }

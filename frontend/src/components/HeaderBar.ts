@@ -84,7 +84,10 @@ export class HeaderBar {
         <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" />
         <select class="filter-pill hb-time-select">
           <option value="">All time</option>
-          <option value="today" ${f.since ? "selected" : ""}>Today</option>
+          <option value="today">Today</option>
+          <option value="recently">Recently (3 Days)</option>
+          <option value="this_week">This Week</option>
+          <option value="this_month">This Month</option>
         </select>
         <select class="filter-pill hb-status-select">
           <option value="">All status</option>
@@ -112,19 +115,32 @@ export class HeaderBar {
     }
     const timeSelect = this.container.querySelector<HTMLSelectElement>(".hb-time-select");
     if (timeSelect) {
+      // Set the UI state based on some heuristic or simple matching since ListFilter just has 'since' datetime.
+      // But we just re-rendered with no selected state on these options!
+      // To fix that, we can just look at filterStore.get()._timePreset. (Which we should add to store)
+      const preset = (filterStore.get() as any)._timePreset || "";
+      timeSelect.value = preset;
+      
       timeSelect.addEventListener("change", (e) => {
         const val = (e.target as HTMLSelectElement).value;
-        if (val === "today") {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const offset = today.getTimezoneOffset();
+        if (val) {
+          const target = new Date();
+          target.setHours(0, 0, 0, 0);
+          if (val === "recently") {
+            target.setDate(target.getDate() - 3);
+          } else if (val === "this_week") {
+            target.setDate(target.getDate() - target.getDay());
+          } else if (val === "this_month") {
+            target.setDate(1);
+          }
+          const offset = target.getTimezoneOffset();
           const absOffset = Math.abs(offset);
           const sign = offset <= 0 ? "+" : "-";
           const pad = (n: number) => String(n).padStart(2, "0");
-          const formatted = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}T00:00:00${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
-          filterStore.set({ ...filterStore.get(), since: formatted });
+          const formatted = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T00:00:00${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+          filterStore.set({ ...filterStore.get(), since: formatted, _timePreset: val } as any);
         } else {
-          filterStore.set({ ...filterStore.get(), since: null });
+          filterStore.set({ ...filterStore.get(), since: null, _timePreset: null } as any);
         }
       });
     }

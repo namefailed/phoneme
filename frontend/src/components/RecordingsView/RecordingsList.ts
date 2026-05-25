@@ -69,6 +69,7 @@ export class RecordingsList {
     ];
 
     const colLabels: Record<string, string> = {
+      day: "Day",
       time: "Time",
       duration: "Dur",
       status: "Status",
@@ -76,7 +77,8 @@ export class RecordingsList {
     };
 
     const colWidths: Record<string, string> = {
-      time: "100px",
+      day: "75px",
+      time: "70px",
       duration: "60px",
       status: "40px",
       transcript: "1fr"
@@ -103,12 +105,14 @@ export class RecordingsList {
   }
 
   private renderRow(r: Recording, active: boolean, visibleCols: string[], gridTemplate: string): string {
+    const day = formatDay(r.started_at);
     const time = formatTime(r.started_at);
     const dur = formatDuration(r.duration_ms);
     const statusClass = statusToClass(r.status);
     const preview = (r.transcript ?? truncatedError(r));
 
     const cellMap: Record<string, string> = {
+      day: `<span class="rec-time">${day}</span>`,
       time: `<span class="rec-time">${time}</span>`,
       duration: `<span class="rec-dur">${dur}</span>`,
       status: `<span class="rec-status"><span class="status-dot ${statusClass}"></span></span>`,
@@ -125,22 +129,30 @@ export class RecordingsList {
   }
 }
 
-function formatTime(iso: string): string {
+function formatDay(iso: string): string {
   const d = new Date(iso);
   const today = new Date();
-  if (
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate()
-  ) {
-    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleString(undefined, {
+  const isToday = d.getFullYear() === today.getFullYear() &&
+                  d.getMonth() === today.getMonth() &&
+                  d.getDate() === today.getDate();
+  if (isToday) return "Today";
+  
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = d.getFullYear() === yesterday.getFullYear() &&
+                      d.getMonth() === yesterday.getMonth() &&
+                      d.getDate() === yesterday.getDate();
+  if (isYesterday) return "Yest.";
+
+  return d.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   });
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatDuration(ms: number): string {
