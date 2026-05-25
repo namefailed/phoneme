@@ -55,9 +55,9 @@ html[data-theme="nord"] {
   --bg-surface: #434c5e;
   --border: #4c566a;
   --border-subtle: #3b4252;
-  --fg-default: #d8dee9;
-  --fg-muted: #e5e9f0;
-  --fg-faded: #4c566a;
+  --fg-default: #eceff4;
+  --fg-muted: #d8dee9;
+  --fg-faded: #7b88a1;
   --accent: #88c0d0;
   --accent-fg: #2e3440;
   --ok: #a3be8c;
@@ -90,12 +90,21 @@ html[data-theme="dracula"] {
   --border: #6272a4;
   --border-subtle: #44475a;
   --fg-default: #f8f8f2;
-  --fg-muted: #6272a4;
-  --fg-faded: #44475a;
+  --fg-muted: #a8b2cc;
+  --fg-faded: #8b98b9;
   --accent: #ff79c6;
   --accent-fg: #282a36;
   --ok: #50fa7b;
   --warn: #f1fa8c;
   --err: #ff5555;
   --info: #8be9fd;
+}
+
+.cm-editor ::selection {
+  background-color: var(--accent) !important;
+  color: var(--accent-fg) !important;
+}
+.cm-selectionBackground {
+  background-color: var(--accent) !important;
+  opacity: 0.3;
 }

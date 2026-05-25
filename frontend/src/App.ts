@@ -48,7 +48,15 @@ export class App {
     this.mainEl = this.container.querySelector("#main") as HTMLElement;
 
     new HeaderBar(this.headerEl, {
-      onOpenSettings: () => this.router.go("settings"),
+      onOpenSettings: () => {
+        if (this.current instanceof SettingsView) {
+          if (this.current.canClose()) {
+            this.router.go("recordings");
+          }
+        } else {
+          this.router.go("settings");
+        }
+      },
     });
 
     this.router.state.subscribe((s) => this.mount(s.current));
@@ -73,10 +81,10 @@ export class App {
   private async loadAndApplyTheme() {
     try {
       const cfg = await invoke<any>("read_config");
-      if (cfg?.tray?.theme) {
-        document.documentElement.setAttribute("data-theme", cfg.tray.theme);
+      if (cfg?.interface?.theme) {
+        document.documentElement.setAttribute("data-theme", cfg.interface.theme);
       }
-      if (cfg?.tray?.strip_titlebar) {
+      if (cfg?.interface?.strip_titlebar) {
         getCurrentWindow().setDecorations(false);
       } else {
         getCurrentWindow().setDecorations(true);

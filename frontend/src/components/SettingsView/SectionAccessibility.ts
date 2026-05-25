@@ -133,5 +133,24 @@ export class SectionAccessibility {
         }
       });
     }
+
+    const providerSelect = container.querySelector<HTMLSelectElement>("[data-key='llm_post_process.provider']");
+    const providerSettings = container.querySelectorAll<HTMLElement>(".provider-settings");
+
+    const updateProviderVisibility = () => {
+      const provider = providerSelect?.value || "none";
+      providerSettings.forEach(el => {
+        if (el.dataset.provider === provider) {
+          el.style.display = "flex";
+        } else {
+          el.style.display = "none";
+        }
+      });
+    };
+
+    if (providerSelect) {
+      providerSelect.addEventListener("change", updateProviderVisibility);
+      updateProviderVisibility(); // Initial run
+    }
   }
 }

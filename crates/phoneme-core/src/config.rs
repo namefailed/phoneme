@@ -18,13 +18,16 @@ pub struct Config {
     pub hook: HookConfig,
     /// Global keyboard shortcut bindings for triggering push-to-talk.
     pub hotkey: HotkeyConfig,
-    /// Frontend UI state, including active theme and visibility settings.
+    /// Frontend OS-level tray behavior.
     pub tray: TrayConfig,
     /// Settings for the built-in transcript editor.
     #[serde(default)]
     pub editor: EditorConfig,
     /// Background daemon runtime settings (e.g., logging verbosity).
     pub daemon: DaemonConfig,
+    /// Frontend aesthetics and layout settings.
+    #[serde(default)]
+    pub interface: InterfaceConfig,
     /// Settings for the optional LLM-powered transcript cleanup/post-processing pipeline.
     #[serde(default = "default_llm_post_process")]
     pub llm_post_process: LlmPostProcessConfig,
@@ -141,18 +144,23 @@ pub enum HotkeyMode {
     Toggle,
 }
 
-/// Frontend UI state, including active theme and visibility settings.
+/// Frontend OS-level tray behavior.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrayConfig {
     /// If true, the main window will automatically open when the app starts.
     pub show_on_startup: bool,
-    /// Whether to strip the OS window decorations (title bar).
-    #[serde(default)]
-    pub strip_titlebar: bool,
     /// If true, closing the main window simply minimizes the app to the system tray.
     pub minimize_to_tray: bool,
     /// If true, the application registers a Windows run key to start automatically on system login.
     pub start_at_login: bool,
+}
+
+/// Frontend aesthetics and layout settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InterfaceConfig {
+    /// Whether to strip the OS window decorations (title bar).
+    #[serde(default)]
+    pub strip_titlebar: bool,
     /// If true, use 24-hour time format in the UI.
     #[serde(default)]
     pub format_24h: bool,
@@ -162,6 +170,19 @@ pub struct TrayConfig {
     /// A list of column identifiers that are currently visible in the main list view.
     #[serde(default = "default_visible_columns")]
     pub visible_columns: Vec<String>,
+    /// Column widths for the main list view.
+    #[serde(default = "default_column_widths")]
+    pub column_widths: Vec<String>,
+}
+
+fn default_column_widths() -> Vec<String> {
+    vec![
+        "100px".into(),
+        "60px".into(),
+        "60px".into(),
+        "100px".into(),
+        "1fr".into(),
+    ]
 }
 
 /// Settings specifically for the transcript editor.
@@ -205,6 +226,18 @@ pub struct DaemonConfig {
     pub pipe_name: String,
 }
 
+impl Default for InterfaceConfig {
+    fn default() -> Self {
+        Config::default().interface
+    }
+}
+
+impl Default for TrayConfig {
+    fn default() -> Self {
+        Config::default().tray
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -239,9 +272,11 @@ impl Default for Config {
             },
             tray: TrayConfig {
                 show_on_startup: true,
-                strip_titlebar: false,
                 minimize_to_tray: true,
                 start_at_login: false,
+            },
+            interface: InterfaceConfig {
+                strip_titlebar: false,
                 format_24h: false,
                 theme: "catppuccin-mocha".into(),
                 visible_columns: vec![
@@ -251,6 +286,7 @@ impl Default for Config {
                     "status".into(),
                     "transcript".into(),
                 ],
+                column_widths: default_column_widths(),
             },
             editor: EditorConfig {
                 vim_mode: false,

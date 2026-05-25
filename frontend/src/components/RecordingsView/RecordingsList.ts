@@ -66,8 +66,18 @@ export class RecordingsList {
       return;
     }
 
-    const visibleCols: string[] = this.config?.tray?.visible_columns || [
-      "time", "duration", "status", "transcript"
+    const visibleCols: string[] = this.config?.interface?.visible_columns || [
+      "time",
+      "duration",
+      "status",
+      "transcript",
+    ];
+    this.currentWidths = this.config?.interface?.column_widths || [
+      "100px",
+      "60px",
+      "60px",
+      "100px",
+      "1fr"
     ];
 
     const colLabels: Record<string, string> = {
@@ -141,6 +151,12 @@ export class RecordingsList {
         const onUp = () => {
           document.removeEventListener("mousemove", onMove);
           document.removeEventListener("mouseup", onUp);
+          
+          if (this.config && this.currentWidths) {
+            this.config.interface = this.config.interface || {};
+            this.config.interface.column_widths = this.currentWidths;
+            invoke("write_config", { config: this.config }).catch(console.error);
+          }
         };
 
         document.addEventListener("mousemove", onMove);
@@ -151,7 +167,7 @@ export class RecordingsList {
 
   private renderRow(r: Recording, active: boolean, visibleCols: string[], gridTemplate: string): string {
     const day = formatDay(r.started_at);
-    const use24h = this.config?.tray?.format_24h ?? false;
+    const use24h = this.config?.interface?.format_24h ?? false;
     const time = formatTime(r.started_at, use24h);
     const dur = formatDuration(r.duration_ms);
     const statusClass = statusToClass(r.status);
@@ -185,22 +201,15 @@ export class RecordingsList {
 function formatDay(iso: string): string {
   const d = new Date(iso);
   const today = new Date();
-  const isToday = d.getFullYear() === today.getFullYear() &&
-                  d.getMonth() === today.getMonth() &&
-                  d.getDate() === today.getDate();
-  if (isToday) return "Today";
-  
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday = d.getFullYear() === yesterday.getFullYear() &&
-                      d.getMonth() === yesterday.getMonth() &&
-                      d.getDate() === yesterday.getDate();
-  if (isYesterday) return "Yest.";
+  today.setHours(0, 0, 0, 0);
+  const diffTime = today.getTime() - d.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays <= 7) return "Last 7 Days";
+  if (diffDays <= 30) return "Last 30 Days";
+  return "Older";
 }
 
 function formatTime(iso: string, use24h: boolean): string {

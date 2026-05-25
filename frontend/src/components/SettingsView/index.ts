@@ -5,6 +5,7 @@ import { SectionHotkey } from "./SectionHotkey";
 import { SectionHook } from "./SectionHook";
 import { SectionStorage } from "./SectionStorage";
 import { SectionTray } from "./SectionTray";
+import { SectionInterface } from "./SectionInterface";
 import { SectionAccessibility } from "./SectionAccessibility";
 import { SectionEditor } from "./SectionEditor";
 import { SectionAdvanced } from "./SectionAdvanced";
@@ -17,23 +18,37 @@ import "./styles.css";
  */
 export class SettingsView {
   private activeTab: string = "whisper";
+  private config: any = null;
+  private originalConfigStr: string = "";
 
   constructor(
     private container: HTMLElement,
     private onClose: () => void,
   ) {
-    void this.render();
+    void this.init();
   }
 
-  private async render() {
-    let config: any;
+  private async init() {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      config = await invoke("read_config");
+      this.config = await invoke("read_config");
+      this.originalConfigStr = JSON.stringify(this.config);
+      this.render();
     } catch (e) {
       this.container.innerHTML = `<div class="error">Failed to load settings: ${e}</div>`;
       return;
     }
+  }
+
+  public canClose(): boolean {
+    if (this.config && JSON.stringify(this.config) !== this.originalConfigStr) {
+      return confirm("You have unsaved changes. Discard them?");
+    }
+    return true;
+  }
+
+  private render() {
+    const config = this.config;
+    if (!config) return;
     
     this.container.innerHTML = `
       <div class="settings-layout">
@@ -42,7 +57,8 @@ export class SettingsView {
           <div class="sv-tab ${this.activeTab === "whisper" ? "active" : ""}" data-tab="whisper">Whisper</div>
           <div class="sv-tab ${this.activeTab === "recording" ? "active" : ""}" data-tab="recording">Recording</div>
           <div class="sv-tab ${this.activeTab === "hotkey" ? "active" : ""}" data-tab="hotkey">Hotkey</div>
-          <div class="sv-tab ${this.activeTab === "tray" ? "active" : ""}" data-tab="tray">Tray & Interface</div>
+          <div class="sv-tab ${this.activeTab === "tray" ? "active" : ""}" data-tab="tray">System Tray</div>
+          <div class="sv-tab ${this.activeTab === "interface" ? "active" : ""}" data-tab="interface">Interface</div>
           <div class="sv-tab ${this.activeTab === "editor" ? "active" : ""}" data-tab="editor">Editor</div>
           <div class="sv-tab ${this.activeTab === "accessibility" ? "active" : ""}" data-tab="accessibility">Post-Processing</div>
           <div class="sv-tab ${this.activeTab === "hook" ? "active" : ""}" data-tab="hook">Action Hook</div>
@@ -60,6 +76,13 @@ export class SettingsView {
       </div>
     `;
     const body = this.container.querySelector<HTMLElement>("#settings-body")!;
+    
+    const updateDirtyState = () => {
+      const btn = this.container.querySelector<HTMLButtonElement>("#settings-save")!;
+      const isDirty = JSON.stringify(this.config) !== this.originalConfigStr;
+      btn.disabled = !isDirty;
+      btn.innerText = isDirty ? "Save *" : "Save";
+    };
 
     // Each section owns its own child div: a Section's render() does
     // `container.innerHTML = …`, so writing them all into `body` directly
@@ -71,6 +94,7 @@ export class SettingsView {
       case "hook": new SectionHook(this.sectionHost(body), config); break;
       case "storage": new SectionStorage(this.sectionHost(body), config); break;
       case "tray": new SectionTray(this.sectionHost(body), config); break;
+      case "interface": new SectionInterface(this.sectionHost(body), config); break;
       case "accessibility": new SectionAccessibility(this.sectionHost(body), config); break;
       case "editor": new SectionEditor(this.sectionHost(body), config); break;
       case "advanced": new SectionAdvanced(this.sectionHost(body), config); break;
@@ -88,7 +112,9 @@ export class SettingsView {
 
     this.container
       .querySelector("#settings-close")
-      ?.addEventListener("click", () => this.onClose());
+      ?.addEventListener("click", () => {
+        if (this.canClose()) this.onClose();
+      });
     this.container
       .querySelector("#settings-save")
       ?.addEventListener("click", async () => {

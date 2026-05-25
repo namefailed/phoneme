@@ -3,6 +3,13 @@
 **Local-first voice notes for Windows. Press a hotkey, speak, release. Get a transcript — your way.**
 
 <p align="center">
+  <a href="https://github.com/namefailed/phoneme/actions/workflows/ci.yml"><img src="https://github.com/namefailed/phoneme/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/namefailed/phoneme/releases/latest"><img src="https://img.shields.io/github/v/release/namefailed/phoneme" alt="Release"></a>
+  <a href="https://github.com/namefailed/phoneme/releases"><img src="https://img.shields.io/github/downloads/namefailed/phoneme/total" alt="Downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue" alt="License"></a>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/main.png" width="720" alt="Phoneme main window">
 </p>
 
@@ -25,7 +32,7 @@ The app does not force you into a specific ecosystem. It transcribes. You decide
 
 ## 📦 Install
 
-Download the latest `.msi` from the [releases page](../../releases) and run it.
+Download the latest `.msi` from the [releases page](/namefailed/phoneme/releases/latest) and run it.
 
 On first launch, the wizard walks you through:
 - Pointing at your whisper-server (or using the bundled one with your GGUF model)
@@ -145,6 +152,8 @@ cargo tauri dev
 ## 🤝 Contributing
 
 We welcome contributions! If you're interested in helping improve Phoneme, please check out our [Contributing Guide](CONTRIBUTING.md) to learn how to set up the development environment, build the app, and submit pull requests.
+
+Have a question or idea? [Start a discussion](https://github.com/namefailed/phoneme/discussions).
 
 ## 📄 License
 
