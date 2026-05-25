@@ -103,7 +103,7 @@ export class HeaderBar {
           <option value="">All tags</option>
           ${tagOptions}
         </select>
-        <button class="filter-pill" id="hb-record" style="font-weight: bold; margin-left: auto;" title="Start/Stop recording manually (or use your global hotkey)">🔴 Record</button>
+        <button class="record-btn" id="hb-record" style="margin-left: auto;" title="Start/Stop recording manually (or use your global hotkey)">🔴 Record</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
     `;

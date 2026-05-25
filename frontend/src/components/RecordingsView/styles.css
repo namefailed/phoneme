@@ -159,7 +159,7 @@
 }
 .action-row button {
   transition: all 0.15s ease-out;
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   border-radius: 6px;
@@ -169,7 +169,7 @@
   font-weight: 500;
 }
 .action-row button:hover {
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
   border-color: var(--accent);
   color: var(--accent);
   transform: translateY(-1px);

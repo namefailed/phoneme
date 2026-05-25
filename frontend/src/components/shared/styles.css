@@ -8,10 +8,13 @@
   flex-shrink: 0;
 }
 .headerbar .search {
-  background: var(--bg-deep);
+  background-color: var(--bg-deep);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236c7086' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 10px center;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  padding: 6px 12px;
+  padding: 6px 12px 6px 32px;
   color: var(--fg-default);
   flex: 1;
   font-size: 13px;
@@ -76,11 +79,16 @@
 .status-dot.pending { background: var(--warn); }
 
 select {
+  appearance: none;
+  -webkit-appearance: none;
   background-color: var(--bg-deep);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239399b2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
   color: var(--fg-default);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  padding: 6px 12px;
+  padding: 6px 28px 6px 12px;
   outline: none;
   font-size: 11px;
   cursor: pointer;
@@ -97,4 +105,36 @@ select:focus {
 option {
   background-color: var(--bg-surface);
   color: var(--fg-default);
+}
+
+.record-btn {
+  background: var(--bg-deep);
+  color: var(--err);
+  border: 1px solid rgba(243, 139, 168, 0.4);
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease-out;
+  box-shadow: 0 1px 4px rgba(243, 139, 168, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.record-btn:hover {
+  background: rgba(243, 139, 168, 0.15);
+  border-color: var(--err);
+  transform: translateY(-1px);
+}
+.record-btn.recording-active {
+  background: var(--err);
+  color: var(--bg-deep);
+  border-color: var(--err);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(243, 139, 168, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(243, 139, 168, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(243, 139, 168, 0); }
 }
