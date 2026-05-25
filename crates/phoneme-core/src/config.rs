@@ -503,7 +503,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let mut cfg = Config::default();
         cfg.interface.theme = "tokyo-night".to_string();
-        
+
         let path = dir.path().join("config.toml");
         let toml_str = toml::to_string(&cfg).unwrap();
         std::fs::write(&path, toml_str).unwrap();
