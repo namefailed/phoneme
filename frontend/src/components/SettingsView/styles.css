@@ -137,7 +137,7 @@
   width: 100%;
 }
 .settings-field input[type="number"] {
-  max-width: 120px;
+  max-width: 70px;
 }
 .settings-field select {
   max-width: 400px;
