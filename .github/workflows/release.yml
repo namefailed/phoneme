@@ -47,9 +47,32 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_PRIVATE_KEY_PASSWORD }}
 
-      - name: Prepare Updater JSON
+      - name: Build updater.json
+        shell: pwsh
         run: |
-          Copy-Item target/release/bundle/msi/*.json target/release/bundle/msi/updater.json
+          $msiDir = "target/release/bundle/msi"
+          $sigFile = Get-ChildItem "$msiDir/*.sig" | Select-Object -First 1
+          $zipFile = Get-ChildItem "$msiDir/*.zip" | Select-Object -First 1
+          if (-not $sigFile) { throw "No .sig file found — was TAURI_SIGNING_PRIVATE_KEY set?" }
+          if (-not $zipFile) { throw "No .zip file found — createUpdaterArtifacts may not be set" }
+          $signature = (Get-Content $sigFile.FullName -Raw).Trim()
+          $tag       = "${{ github.ref_name }}"
+          $version   = $tag.TrimStart('v')
+          $url       = "https://github.com/namefailed/phoneme/releases/download/$tag/$($zipFile.Name)"
+          $json = [ordered]@{
+            version  = $version
+            notes    = ""
+            pub_date = (Get-Date -AsUTC -Format "yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url       = $url
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+          $json | Set-Content "$msiDir/updater.json" -Encoding UTF8NoBOM
+          Write-Output "updater.json written:"
+          Write-Output $json
 
       - name: Upload artifacts
         uses: softprops/action-gh-release@v2
