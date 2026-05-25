@@ -65,7 +65,7 @@ export class SectionWhisper {
             <div id="download-status" style="display:none; font-size: 11px; margin-top: 4px;"></div>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            The absolute path to a GGML `.bin` model file. Used when running the <b>Bundled model</b>. Click <b>Download Default</b> to fetch the `ggml-base.en.bin` model automatically.
+            The absolute path to a GGML <code>.bin</code> model file. Used when running the <b>Bundled model</b>. Click <b>Download Default</b> to fetch the <code>ggml-base.en.bin</code> model automatically.
           </span>
         </div>
         <div class="settings-field">
