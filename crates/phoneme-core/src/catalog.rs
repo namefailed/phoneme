@@ -406,7 +406,7 @@ mod tests {
         let db = Catalog::open(Path::new("sqlite::memory:"))
             .await
             .expect("open db");
-        let mut r = Recording {
+        let r = Recording {
             id: RecordingId::new(),
             started_at: Local::now(),
             duration_ms: 5000,
