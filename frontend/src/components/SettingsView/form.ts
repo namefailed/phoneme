@@ -7,6 +7,7 @@ export type Field = {
   label: string;
   kind: FieldKind;
   help?: string;
+  type?: string;
   options?: { value: string; label: string }[]; // for "select"
 };
 
@@ -27,7 +28,7 @@ export function setByPath(obj: any, path: string, value: any): void {
 export function renderField(field: Field, value: any): string {
   switch (field.kind) {
     case "text":
-      return `<input type="text" data-key="${field.key}" value="${escapeAttr(
+      return `<input type="${field.type || "text"}" data-key="${field.key}" value="${escapeAttr(
         String(value ?? ""),
       )}" />`;
     case "number":

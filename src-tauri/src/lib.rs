@@ -59,8 +59,12 @@ pub fn run() {
                             ShortcutState::Pressed => {
                                 tauri::async_runtime::spawn(async move {
                                     if mode == phoneme_core::config::HotkeyMode::Toggle {
-                                        if let Err(e) = bridge.request(phoneme_ipc::Request::RecordToggle).await {
-                                            tracing::error!("failed to toggle record from hotkey: {e}");
+                                        if let Err(e) =
+                                            bridge.request(phoneme_ipc::Request::RecordToggle).await
+                                        {
+                                            tracing::error!(
+                                                "failed to toggle record from hotkey: {e}"
+                                            );
                                         }
                                     } else {
                                         if let Err(e) = bridge
@@ -69,7 +73,9 @@ pub fn run() {
                                             })
                                             .await
                                         {
-                                            tracing::error!("failed to start record from hotkey: {e}");
+                                            tracing::error!(
+                                                "failed to start record from hotkey: {e}"
+                                            );
                                         }
                                     }
                                 });
@@ -80,7 +86,9 @@ pub fn run() {
                                         if let Err(e) =
                                             bridge.request(phoneme_ipc::Request::RecordStop).await
                                         {
-                                            tracing::error!("failed to stop record from hotkey: {e}");
+                                            tracing::error!(
+                                                "failed to stop record from hotkey: {e}"
+                                            );
                                         }
                                     }
                                 });

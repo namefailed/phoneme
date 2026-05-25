@@ -170,9 +170,15 @@ async fn post_process_transcript(
 
     if cfg.provider == "ollama" {
         let default_url = "http://127.0.0.1:11434/api/generate";
-        let mut url = if cfg.api_url.is_empty() { default_url } else { &cfg.api_url };
-        if let Some(override_url) = base_url_override { url = override_url; }
-        
+        let mut url = if cfg.api_url.is_empty() {
+            default_url
+        } else {
+            &cfg.api_url
+        };
+        if let Some(override_url) = base_url_override {
+            url = override_url;
+        }
+
         let body = serde_json::json!({
             "model": cfg.model,
             "prompt": format!("{}:\n{}", cfg.prompt, text),
@@ -190,8 +196,14 @@ async fn post_process_transcript(
         return Ok(output.trim().to_string());
     } else if cfg.provider == "openai" {
         let default_url = "https://api.openai.com/v1/chat/completions";
-        let mut url = if cfg.api_url.is_empty() { default_url } else { &cfg.api_url };
-        if let Some(override_url) = base_url_override { url = override_url; }
+        let mut url = if cfg.api_url.is_empty() {
+            default_url
+        } else {
+            &cfg.api_url
+        };
+        if let Some(override_url) = base_url_override {
+            url = override_url;
+        }
 
         let body = serde_json::json!({
             "model": cfg.model,

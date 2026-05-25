@@ -1,14 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
 import { bindFieldEvents, renderField } from "./form";
 
 export class SectionEditor {
   private config: any;
 
-  constructor(config: any) {
+  constructor(container: HTMLElement, config: any) {
     this.config = config;
+    this.render(container);
   }
 
-  render(container: HTMLElement) {
+  private render(container: HTMLElement) {
     if (!this.config.editor) {
       this.config.editor = { vim_mode: false, vimrc: "", vimrc_path: "" };
     }
