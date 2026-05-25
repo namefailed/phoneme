@@ -105,7 +105,7 @@ export class RecordingsList {
     const time = formatTime(r.started_at);
     const dur = formatDuration(r.duration_ms);
     const statusClass = statusToClass(r.status);
-    const preview = (r.transcript ?? truncatedError(r)).slice(0, 80);
+    const preview = (r.transcript ?? truncatedError(r));
 
     const cellMap: Record<string, string> = {
       time: `<span class="rec-time">${time}</span>`,
