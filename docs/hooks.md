@@ -29,7 +29,7 @@ JSON on stdin**.
   "duration_ms": 8470,
   "model": "ggml-base.en",
   "metadata": {
-    "phoneme_version": "1.0.0",
+    "phoneme_version": "1.3.0",
     "hook_version": 1
   }
 }
