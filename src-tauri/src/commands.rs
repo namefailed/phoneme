@@ -159,6 +159,9 @@ pub async fn write_config(
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
         let exe_path = std::env::current_exe()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
@@ -176,6 +179,7 @@ pub async fn write_config(
                         &format!("\"{}\"", exe_path),
                         "/f",
                     ])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .spawn()
                 {
                     tracing::warn!("Failed to add registry run key: {e}");
@@ -189,6 +193,7 @@ pub async fn write_config(
                         "Phoneme",
                         "/f",
                     ])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .spawn()
                 {
                     tracing::warn!("Failed to delete registry run key: {e}");
