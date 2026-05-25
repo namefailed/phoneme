@@ -436,7 +436,7 @@ mod tests {
         let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
         toml_val.as_table_mut().unwrap().remove("llm_post_process");
         let cfg_text = toml::to_string(&toml_val).unwrap();
-        
+
         let path = write_config(&dir, &cfg_text);
         let parsed = Config::load(&path).expect("loads legacy config");
         assert_eq!(parsed.llm_post_process.enabled, false);
@@ -449,7 +449,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.tray.theme = "tokyo-night".to_string();
         let cfg_text = toml::to_string(&cfg).unwrap();
-        
+
         let path = write_config(&dir, &cfg_text);
         let parsed = Config::load(&path).expect("loads config with theme");
         assert_eq!(parsed.tray.theme, "tokyo-night");

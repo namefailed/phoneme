@@ -251,7 +251,9 @@ mod tests {
         };
 
         let url = format!("{}/v1/chat/completions", mock_server.uri());
-        let result = post_process_transcript(&cfg, "Raw Transcript", Some(&url)).await.unwrap();
+        let result = post_process_transcript(&cfg, "Raw Transcript", Some(&url))
+            .await
+            .unwrap();
         assert_eq!(result, "Fixed Transcript");
     }
 
@@ -275,6 +277,9 @@ mod tests {
         let url = format!("{}/api/generate", mock_server.uri());
         let result = post_process_transcript(&cfg, "Raw Transcript", Some(&url)).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("non-success status"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("non-success status"));
     }
 }
