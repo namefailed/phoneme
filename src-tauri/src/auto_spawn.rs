@@ -63,7 +63,9 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| anyhow::anyhow!("failed to spawn phoneme-daemon at {}: {e}", exe.display()))?;
+            .map_err(|e| {
+                anyhow::anyhow!("failed to spawn phoneme-daemon at {}: {e}", exe.display())
+            })?;
     }
 
     #[cfg(not(windows))]
@@ -73,7 +75,9 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| anyhow::anyhow!("failed to spawn phoneme-daemon at {}: {e}", exe.display()))?;
+            .map_err(|e| {
+                anyhow::anyhow!("failed to spawn phoneme-daemon at {}: {e}", exe.display())
+            })?;
     }
 
     // Give the process a moment to initialise before the first probe so we
@@ -135,7 +139,10 @@ mod tests {
         cfg.daemon.pipe_name = name;
 
         let result = ensure_running(&cfg).await;
-        assert!(result.is_ok(), "expected Ok when pipe is already up: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok when pipe is already up: {result:?}"
+        );
     }
 
     /// Timeout path: if the pipe never becomes reachable and the daemon binary
@@ -163,7 +170,10 @@ mod tests {
             }
             r
         };
-        assert!(result.is_err(), "expected Err when daemon can't be found or started");
+        assert!(
+            result.is_err(),
+            "expected Err when daemon can't be found or started"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("not found") || msg.contains("not become ready"),

@@ -610,8 +610,10 @@ mod tests {
         for variant in &all {
             let s = json_kind(variant);
             assert!(!s.is_empty(), "json_kind returned empty for {variant:?}");
-            assert!(s.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
-                "json_kind should be snake_case, got {s:?}");
+            assert!(
+                s.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "json_kind should be snake_case, got {s:?}"
+            );
         }
     }
 }

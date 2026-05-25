@@ -169,10 +169,18 @@ mod tests {
     #[test]
     fn hook_metadata_phoneme_version_is_semver() {
         let m = HookMetadata::current();
-        assert!(!m.phoneme_version.is_empty(), "phoneme_version must not be empty");
+        assert!(
+            !m.phoneme_version.is_empty(),
+            "phoneme_version must not be empty"
+        );
         // Must be X.Y.Z with all-numeric parts.
         let parts: Vec<&str> = m.phoneme_version.split('.').collect();
-        assert_eq!(parts.len(), 3, "expected X.Y.Z, got {:?}", m.phoneme_version);
+        assert_eq!(
+            parts.len(),
+            3,
+            "expected X.Y.Z, got {:?}",
+            m.phoneme_version
+        );
         for part in &parts {
             assert!(
                 part.chars().all(|c| c.is_ascii_digit()),
@@ -199,6 +207,11 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
         let path = json["audio_path"].as_str().unwrap();
         assert!(!path.is_empty());
-        assert!(path.ends_with(".wav") || path.ends_with(".mp3") || path.contains('/') || path.contains('\\'));
+        assert!(
+            path.ends_with(".wav")
+                || path.ends_with(".mp3")
+                || path.contains('/')
+                || path.contains('\\')
+        );
     }
 }

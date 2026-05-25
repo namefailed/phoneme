@@ -59,19 +59,13 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     });
 
     // Hook executable (best-effort; empty list is treated as ok).
-    let hook_cmd = cfg
-        .hook
-        .commands
-        .first()
-        .map(String::as_str)
-        .unwrap_or("");
+    let hook_cmd = cfg.hook.commands.first().map(String::as_str).unwrap_or("");
     let hook_first_word = hook_cmd.split_whitespace().next().unwrap_or("");
     let (hook_ok, hook_detail) = if hook_first_word.is_empty() {
         (true, "none configured".into())
     } else {
         (
-            which::which(hook_first_word).is_ok()
-                || std::path::Path::new(hook_first_word).exists(),
+            which::which(hook_first_word).is_ok() || std::path::Path::new(hook_first_word).exists(),
             hook_cmd.to_owned(),
         )
     };
@@ -103,17 +97,15 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     });
 
     // Ollama (optional) — probe default port.
-    let ollama_required =
-        cfg.llm_post_process.enabled && cfg.llm_post_process.provider == "ollama";
-    let (probe_ok, probe_detail) =
-        match http.get("http://127.0.0.1:11434/api/tags").send().await {
-            Ok(r) => (
-                r.status().is_success(),
-                format!("http://127.0.0.1:11434 — HTTP {}", r.status()),
-            ),
-            Err(e) if e.is_timeout() => (false, "http://127.0.0.1:11434 — timed out".into()),
-            Err(_) => (false, "http://127.0.0.1:11434 — not running".into()),
-        };
+    let ollama_required = cfg.llm_post_process.enabled && cfg.llm_post_process.provider == "ollama";
+    let (probe_ok, probe_detail) = match http.get("http://127.0.0.1:11434/api/tags").send().await {
+        Ok(r) => (
+            r.status().is_success(),
+            format!("http://127.0.0.1:11434 — HTTP {}", r.status()),
+        ),
+        Err(e) if e.is_timeout() => (false, "http://127.0.0.1:11434 — timed out".into()),
+        Err(_) => (false, "http://127.0.0.1:11434 — not running".into()),
+    };
     let (ollama_ok, ollama_detail) = if ollama_required {
         (probe_ok, probe_detail)
     } else if probe_ok {
@@ -155,7 +147,11 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         }
     }
 
-    if any_failed { ExitCode::from(exit::GENERIC_FAIL) } else { ExitCode::SUCCESS }
+    if any_failed {
+        ExitCode::from(exit::GENERIC_FAIL)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 struct Check {

@@ -114,22 +114,20 @@ pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
 
     // Ollama (check if LLM post-processing uses Ollama, or if Ollama default
     // port is open regardless, so users know it's available).
-    let ollama_url = if cfg.llm_post_process.provider == "ollama"
-        && !cfg.llm_post_process.api_url.is_empty()
-    {
-        cfg.llm_post_process.api_url.clone()
-    } else if cfg.llm_post_process.provider == "ollama" {
-        "http://127.0.0.1:11434/api/generate".into()
-    } else {
-        "http://127.0.0.1:11434".into()
-    };
+    let ollama_url =
+        if cfg.llm_post_process.provider == "ollama" && !cfg.llm_post_process.api_url.is_empty() {
+            cfg.llm_post_process.api_url.clone()
+        } else if cfg.llm_post_process.provider == "ollama" {
+            "http://127.0.0.1:11434/api/generate".into()
+        } else {
+            "http://127.0.0.1:11434".into()
+        };
     let ollama_base = ollama_url
         .split("/api/")
         .next()
         .unwrap_or("http://127.0.0.1:11434");
     let ollama_probe = format!("{ollama_base}/api/tags");
-    let ollama_required =
-        cfg.llm_post_process.enabled && cfg.llm_post_process.provider == "ollama";
+    let ollama_required = cfg.llm_post_process.enabled && cfg.llm_post_process.provider == "ollama";
     let (probe_ok, ollama_detail) = match client.get(&ollama_probe).send().await {
         Ok(resp) => (
             resp.status().is_success(),
@@ -212,7 +210,10 @@ mod tests {
         let mut cfg = Config::default();
         cfg.recording.audio_dir = new_dir.to_str().unwrap().to_owned();
         let results = run_local_checks(&cfg);
-        let audio = results.iter().find(|r| r.name == "Audio directory").unwrap();
+        let audio = results
+            .iter()
+            .find(|r| r.name == "Audio directory")
+            .unwrap();
         assert!(audio.ok);
         assert!(new_dir.exists());
     }
@@ -251,7 +252,11 @@ mod tests {
         let results = run_backend_checks(&cfg).await;
         let w = results.iter().find(|r| r.name == "Whisper server").unwrap();
         assert!(!w.ok);
-        assert!(w.detail.contains("not reachable"), "detail was: {}", w.detail);
+        assert!(
+            w.detail.contains("not reachable"),
+            "detail was: {}",
+            w.detail
+        );
     }
 
     #[tokio::test]
@@ -263,8 +268,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/api/tags"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({"models": []})),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"models": []})),
             )
             .mount(&server)
             .await;
