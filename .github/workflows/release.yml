@@ -51,14 +51,16 @@ jobs:
         shell: pwsh
         run: |
           $msiDir = "target/release/bundle/msi"
+          # createUpdaterArtifacts: true signs the .msi directly — no zip wrapper.
+          # The sig file is named <product>.msi.sig; the URL points to the .msi.
           $sigFile = Get-ChildItem "$msiDir/*.sig" | Select-Object -First 1
-          $zipFile = Get-ChildItem "$msiDir/*.zip" | Select-Object -First 1
+          $msiFile = Get-ChildItem "$msiDir/*.msi" | Select-Object -First 1
           if (-not $sigFile) { throw "No .sig file found — was TAURI_SIGNING_PRIVATE_KEY set?" }
-          if (-not $zipFile) { throw "No .zip file found — createUpdaterArtifacts may not be set" }
+          if (-not $msiFile) { throw "No .msi file found" }
           $signature = (Get-Content $sigFile.FullName -Raw).Trim()
           $tag       = "${{ github.ref_name }}"
           $version   = $tag.TrimStart('v')
-          $url       = "https://github.com/namefailed/phoneme/releases/download/$tag/$($zipFile.Name)"
+          $url       = "https://github.com/namefailed/phoneme/releases/download/$tag/$($msiFile.Name)"
           $json = [ordered]@{
             version  = $version
             notes    = ""
@@ -79,7 +81,6 @@ jobs:
         with:
           files: |
             target/release/bundle/msi/*.msi
-            target/release/bundle/msi/*.zip
             target/release/bundle/msi/*.sig
             target/release/bundle/msi/updater.json
           generate_release_notes: true
