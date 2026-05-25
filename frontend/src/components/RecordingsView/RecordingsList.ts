@@ -197,6 +197,8 @@ export class RecordingsList {
       </div>
     `;
   }
+}
+
 function formatTime(iso: string, use24h: boolean): string {
   const d = new Date(iso);
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: !use24h });

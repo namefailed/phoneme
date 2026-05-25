@@ -504,7 +504,9 @@ mod tests {
         let mut cfg = Config::default();
         cfg.interface.theme = "tokyo-night".to_string();
         cfg.interface.strip_titlebar = true;
-        cfg.interface.column_widths.insert("Duration".to_string(), 150);
+        cfg.interface
+            .column_widths
+            .insert("Duration".to_string(), 150);
 
         let path = dir.path().join("config.toml");
         let toml_str = toml::to_string(&cfg).unwrap();
