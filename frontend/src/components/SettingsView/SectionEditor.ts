@@ -27,10 +27,13 @@ export class SectionEditor {
 
         <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
           <label>External Vimrc Path (Optional)</label>
-          <div style="width: 100%;">${renderField(
-            { key: "editor.vimrc_path", label: "", kind: "text" },
-            this.config.editor.vimrc_path || "",
-          )}</div>
+          <div style="display: flex; gap: 8px; width: 100%;">
+            ${renderField(
+              { key: "editor.vimrc_path", label: "", kind: "text" },
+              this.config.editor.vimrc_path || "",
+            )}
+            <button class="inline-button" id="pick-vimrc" style="white-space: nowrap;">Browse…</button>
+          </div>
           <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
             Absolute path to a <code>.vimrc</code> file on your computer (e.g., <code>~/.vimrc</code> or <code>C:\\Users\\Namef\\.vimrc</code>). Phoneme will read and apply these mappings automatically.
           </span>
@@ -50,5 +53,19 @@ export class SectionEditor {
     `;
 
     bindFieldEvents(container, this.config);
+
+    container.querySelector("#pick-vimrc")?.addEventListener("click", async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const path = await open({
+        multiple: false,
+      });
+      if (typeof path === "string") {
+        const input = container.querySelector<HTMLInputElement>(
+          `[data-key="editor.vimrc_path"]`,
+        )!;
+        input.value = path;
+        this.config.editor.vimrc_path = path;
+      }
+    });
   }
 }

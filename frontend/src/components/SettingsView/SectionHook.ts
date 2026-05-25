@@ -25,28 +25,30 @@ export class SectionHook {
         <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Phoneme can automatically pass your voice notes to other applications or save them to disk by executing a local script. You can point this to a <code>.bat</code> or <code>.ps1</code> file to save notes to Obsidian, Word, or anything else.
         </p>
-        <div class="settings-field long-input">
-          <label>Integration Script</label>
-          <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
-            <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
-              <option value="" disabled selected>Load a preset hook...</option>
-              <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
-              <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Add-Content -Path '~/Documents/VoiceNotes.md' -Value &quot;&quot;&quot;$($d.transcript)&quot;&quot;&quot;&quot;">Append to VoiceNotes.md file</option>
-              <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; $msg=$d.transcript; Invoke-RestMethod -Uri 'YOUR_WEBHOOK_URL' -Method Post -Body (@{content=$msg}|ConvertTo-Json) -ContentType 'application/json'&quot;">Send to Discord/Slack Webhook</option>
-              <option value="python process_note.py">Run custom Python script</option>
-            </select>
-            <span style="font-size: 11px; color: var(--fg-faded);">← Try these!</span>
+        <div class="settings-field long-input" style="align-items: flex-start;">
+          <label style="margin-top: 8px;">Integration Script</label>
+          <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
+                <option value="" disabled selected>Load a preset hook...</option>
+                <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
+                <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Add-Content -Path '~/Documents/VoiceNotes.md' -Value &quot;&quot;&quot;$($d.transcript)&quot;&quot;&quot;&quot;">Append to VoiceNotes.md file</option>
+                <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; $msg=$d.transcript; Invoke-RestMethod -Uri 'YOUR_WEBHOOK_URL' -Method Post -Body (@{content=$msg}|ConvertTo-Json) -ContentType 'application/json'&quot;">Send to Discord/Slack Webhook</option>
+                <option value="python process_note.py">Run custom Python script</option>
+              </select>
+              <span style="font-size: 11px; color: var(--fg-faded);">← Try these!</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+              ${renderField(
+                { key: "hook.command", label: "", kind: "text" },
+                this.config.hook.command,
+              )}
+              <button class="inline-button" id="pick-hook" style="white-space: nowrap;">Browse…</button>
+              <button class="inline-button" id="test-hook" style="white-space: nowrap;">Test hook</button>
+            </div>
+            <div class="test-result" id="hook-result" style="display:none; margin-top: 0;"></div>
           </div>
-          <div>
-            ${renderField(
-              { key: "hook.command", label: "", kind: "text" },
-              this.config.hook.command,
-            )}
-            <button class="inline-button" id="pick-hook">Browse…</button>
-            <button class="inline-button" id="test-hook">Test hook</button>
-            <div class="test-result" id="hook-result" style="display:none"></div>
-          </div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 11px; color: var(--fg-faded); display: block;">
             A shell command to run automatically. Phoneme will append the absolute path to a JSON file containing the recording's data to the end of your command. <br/>
             Example: <code>python process.py</code> (will execute as <code>python process.py "C:\path\to\recording.json"</code>).
           </span>

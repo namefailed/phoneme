@@ -65,14 +65,15 @@ export class HeaderBar {
       if (recording) {
         btn.innerHTML = "⏹ Stop";
         btn.classList.add("recording-active");
-        btn.style.color = "var(--err)";
-        btn.style.borderColor = "var(--err)";
+        btn.style.color = "";
+        btn.style.borderColor = "";
+        btn.style.background = "";
       } else {
         btn.innerHTML = "🔴 Record";
         btn.classList.remove("recording-active");
-        btn.style.color = "var(--err)";
-        btn.style.borderColor = "var(--err)";
-        btn.style.background = "rgba(243, 139, 168, 0.1)";
+        btn.style.color = "";
+        btn.style.borderColor = "";
+        btn.style.background = "";
       }
     }
   }
@@ -82,7 +83,7 @@ export class HeaderBar {
     const tagOptions = this.tags.map(t => `<option value="${t.id}" ${f.tag_id === t.id ? "selected" : ""}>${t.name}</option>`).join("");
     this.container.innerHTML = `
       <div class="headerbar" data-tauri-drag-region>
-        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" data-tauri-drag-region />
+        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" />
         <select class="filter-pill hb-time-select" title="Filter recordings by date">
           <option value="">All time</option>
           <option value="today">Today</option>

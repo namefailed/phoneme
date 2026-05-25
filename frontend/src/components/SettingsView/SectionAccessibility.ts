@@ -57,15 +57,15 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
           <label>Model Name</label>
-          <div style="flex: 1;">${renderField(
+          <div>${renderField(
             { key: "llm_post_process.model", label: "", kind: "text" },
-            config.llm_post_process.model || "llama3",
+            config.llm_post_process.model || "llama3.2:3b",
           )}</div>
         </div>
 
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
           <label>Ollama API URL</label>
-          <div style="flex: 1;">${renderField(
+          <div>${renderField(
             { key: "llm_post_process.api_url", label: "", kind: "text" },
             config.llm_post_process.api_url || "http://127.0.0.1:11434/api/generate",
           )}</div>
@@ -73,7 +73,7 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
           <label>OpenAI Model</label>
-          <div style="flex: 1;">${renderField(
+          <div>${renderField(
             { key: "llm_post_process.model", label: "", kind: "text" },
             config.llm_post_process.model || "gpt-4o",
           )}</div>
@@ -81,7 +81,7 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
           <label>API Key</label>
-          <div style="flex: 1;">${renderField(
+          <div>${renderField(
             { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
             config.llm_post_process.api_key || "",
           )}</div>
@@ -89,7 +89,7 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
           <label>OpenAI API URL</label>
-          <div style="flex: 1;">${renderField(
+          <div>${renderField(
             { key: "llm_post_process.api_url", label: "", kind: "text" },
             config.llm_post_process.api_url || "https://api.openai.com/v1/chat/completions",
           )}</div>
