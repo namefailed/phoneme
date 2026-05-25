@@ -398,7 +398,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_and_get() {
-        let db = Catalog::open(Path::new("sqlite::memory:")).await.expect("open db");
+        let db = Catalog::open(Path::new("sqlite::memory:"))
+            .await
+            .expect("open db");
         let mut r = Recording {
             id: RecordingId::generate(),
             started_at: Local::now(),
@@ -417,8 +419,12 @@ mod tests {
             tags: vec![],
         };
         db.insert(&r).await.expect("insert");
-        
-        let fetched = db.get(&r.id).await.expect("get recording").expect("is some");
+
+        let fetched = db
+            .get(&r.id)
+            .await
+            .expect("get recording")
+            .expect("is some");
         assert_eq!(fetched.id.as_str(), r.id.as_str());
         assert_eq!(fetched.audio_path, r.audio_path);
         assert_eq!(fetched.transcript.as_deref(), Some("hello world"));
