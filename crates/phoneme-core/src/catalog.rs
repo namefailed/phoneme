@@ -177,11 +177,13 @@ impl Catalog {
         let mut sql = String::from("SELECT recordings.* FROM recordings");
 
         let mut fts_query = None;
+        let mut tag_search_query = None;
+
         if let Some(q) = filter.search.as_deref() {
             let sanitized = sanitize_fts5_query(q);
             if !sanitized.is_empty() {
-                sql.push_str(" JOIN recordings_fts ON recordings.rowid = recordings_fts.rowid");
                 fts_query = Some(sanitized);
+                tag_search_query = Some(format!("%{}%", q));
             }
         }
 
@@ -192,7 +194,7 @@ impl Catalog {
         sql.push_str(" WHERE 1=1");
 
         if fts_query.is_some() {
-            sql.push_str(" AND recordings_fts.transcript MATCH ?");
+            sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?))");
         }
         if let Some(tag_id) = filter.tag_id {
             sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
@@ -211,6 +213,9 @@ impl Catalog {
         let mut q = sqlx::query(&sql);
         if let Some(fq) = &fts_query {
             q = q.bind(fq);
+        }
+        if let Some(tq) = &tag_search_query {
+            q = q.bind(tq);
         }
         if let Some(s) = filter.status {
             q = q.bind(s.as_str().to_string());
