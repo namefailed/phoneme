@@ -57,7 +57,7 @@
 .rec-table-head > span,
 .rec-row > span {
   padding: 0 12px;
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border);
   display: flex;
   align-items: center;
   position: relative;
