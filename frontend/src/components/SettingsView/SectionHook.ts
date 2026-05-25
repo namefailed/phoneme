@@ -21,9 +21,12 @@ export class SectionHook {
   private render(container: HTMLElement) {
     container.innerHTML = `
       <div class="settings-section">
-        <h3>Hook</h3>
+        <h3>Destination & Integrations</h3>
+        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+          Phoneme can automatically pass your voice notes to other applications or save them to disk by executing a local script. You can point this to a <code>.bat</code> or <code>.ps1</code> file to save notes to Obsidian, Word, or anything else.
+        </p>
         <div class="settings-field">
-          <label>Command</label>
+          <label>Integration Script</label>
           <div>
             ${renderField(
               { key: "hook.command", label: "", kind: "text" },
@@ -32,7 +35,7 @@ export class SectionHook {
             <button class="inline-button" id="pick-hook">Browse…</button>
             <button class="inline-button" id="test-hook">Test hook</button>
             <div class="test-result" id="hook-result" style="display:none"></div>
-            <div class="help">Receives the recording JSON on stdin. Exit 0 = success.</div>
+            <div class="help">Receives the recording JSON on stdin. The default echoes it to the console.</div>
           </div>
         </div>
         <div class="settings-field">

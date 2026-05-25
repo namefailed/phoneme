@@ -16,13 +16,22 @@ export class SectionAccessibility {
 
     container.innerHTML = `
       <div class="settings-section">
-        <h3>Accessibility (LLM Post-Processing)</h3>
+        <h3>Smart Cleanup (AI)</h3>
         <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-          Correct stuttering, accents, lisps, or repetitive words. When enabled, a local or remote LLM processes the transcript immediately after transcription.
+          Automatically correct stuttering, accents, lisps, or repetitive words. When enabled, a local or remote AI processes your transcript immediately after transcription.
         </p>
 
+        <div style="background-color: var(--bg-inset); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 16px;">
+          <strong style="display: block; font-size: 13px; margin-bottom: 6px; color: var(--fg-default);">How to use this for free (Offline):</strong>
+          <ol style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--fg-muted); line-height: 1.5;">
+            <li>Download and install <a href="#" onclick="require('@tauri-apps/api/core').invoke('open_file', { path: 'https://ollama.com/download' })" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>
+            <li>Open your terminal and run <code>ollama run llama3.2:3b</code>.</li>
+            <li>Select <strong>Local Ollama</strong> below and use <code>llama3.2:3b</code> as your Model Name!</li>
+          </ol>
+        </div>
+
         <div class="settings-field">
-          <label>Enable LLM Post-Processing</label>
+          <label>Enable Smart Cleanup</label>
           <div>${renderField(
             { key: "llm_post_process.enabled", label: "", kind: "checkbox" },
             config.llm_post_process.enabled,
@@ -30,7 +39,7 @@ export class SectionAccessibility {
         </div>
 
         <div class="settings-field">
-          <label>LLM Provider</label>
+          <label>AI Provider</label>
           <div>${renderField(
             {
               key: "llm_post_process.provider",
@@ -69,13 +78,13 @@ export class SectionAccessibility {
         </div>
 
         <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-          <label>Cleanup Prompt</label>
+          <label>Instructions for the AI</label>
           <div style="width: 100%;">${renderField(
             { key: "llm_post_process.prompt", label: "", kind: "textarea" },
             config.llm_post_process.prompt || "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
           )}</div>
           <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
-            Instructions for the LLM to follow when editing the transcript.
+            Instructions for the AI to follow when editing the transcript.
           </span>
         </div>
       </div>

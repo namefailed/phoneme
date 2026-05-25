@@ -125,6 +125,7 @@ See [docs/troubleshooting.md](docs/troubleshooting.md).
 
 - **v1.1** — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
 - **v1.2** *(this release)* — Premium themes, CodeMirror 6 w/ Vim mode, LLM post-processing hooks, User PATH MSI (No UAC), and Vitest suite
+- **v1.3** — Bundled Ollama support for seamless offline AI post-processing out-of-the-box
 - **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
 
 ## Contributing

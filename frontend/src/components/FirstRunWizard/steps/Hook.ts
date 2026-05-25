@@ -10,10 +10,10 @@ export class Hook {
     cbs: StepCallbacks,
   ) {
     body.innerHTML = `
-      <h2 class="wizard-title">Hook (delivery)</h2>
-      <p class="wizard-subtitle">Phoneme runs this script with the transcript as JSON on stdin. Default writes to stdout.</p>
+      <h2 class="wizard-title">Destination (Apps & Scripts)</h2>
+      <p class="wizard-subtitle">Where should Phoneme send your text? We can automatically pass your transcripts to other apps, save them to files, or copy them. The default simply displays it here.</p>
       <div class="wizard-field">
-        <label>Hook command</label>
+        <label>Integration Script</label>
         <input type="text" id="cmd" value="${this.config.hook.commands?.[0] || ""}" />
       </div>
       <div class="wizard-field">
