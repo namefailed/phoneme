@@ -323,25 +323,6 @@ impl Catalog {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sanitize_fts5_query() {
-        assert_eq!(sanitize_fts5_query("hello"), "hello*");
-        assert_eq!(sanitize_fts5_query("hello world"), "hello* AND world*");
-        assert_eq!(sanitize_fts5_query("O'Connor"), "O* AND Connor*");
-        assert_eq!(
-            sanitize_fts5_query("some-bad*characters"),
-            "some* AND bad* AND characters*"
-        );
-        assert_eq!(sanitize_fts5_query("\"quotes\""), "quotes*");
-        assert_eq!(sanitize_fts5_query("   spaces   "), "spaces*");
-        assert_eq!(sanitize_fts5_query(""), "");
-    }
-}
-
 fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
     let id: String = row.try_get("id")?;
     let started_at: String = row.try_get("started_at")?;
@@ -395,4 +376,23 @@ fn parse_status(s: &str) -> Result<RecordingStatus> {
             )))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_fts5_query() {
+        assert_eq!(sanitize_fts5_query("hello"), "hello*");
+        assert_eq!(sanitize_fts5_query("hello world"), "hello* AND world*");
+        assert_eq!(sanitize_fts5_query("O'Connor"), "O* AND Connor*");
+        assert_eq!(
+            sanitize_fts5_query("some-bad*characters"),
+            "some* AND bad* AND characters*"
+        );
+        assert_eq!(sanitize_fts5_query("\"quotes\""), "quotes*");
+        assert_eq!(sanitize_fts5_query("   spaces   "), "spaces*");
+        assert_eq!(sanitize_fts5_query(""), "");
+    }
 }

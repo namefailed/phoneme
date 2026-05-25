@@ -39,15 +39,14 @@ pub fn run() {
     });
 
     let builder = tauri::Builder::default()
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                let config = phoneme_core::config_io::read_or_default();
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let config = phoneme_core::Config::read_or_default();
                 if config.tray.minimize_to_tray {
                     let _ = window.hide();
                     api.prevent_close();
                 }
             }
-            _ => {}
         })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -63,7 +62,7 @@ pub fn run() {
                     let bridge = app.state::<Option<Bridge>>().inner().clone();
                     if let Some(bridge) = bridge {
                         // Read live config to ensure toggle setting updates apply immediately
-                        let current_config = phoneme_core::config_io::read_or_default();
+                        let current_config = phoneme_core::Config::read_or_default();
                         let mode = current_config.hotkey.mode;
 
                         match event.state() {

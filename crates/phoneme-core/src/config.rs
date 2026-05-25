@@ -238,6 +238,14 @@ impl Default for TrayConfig {
     }
 }
 
+impl Config {
+    pub fn read_or_default() -> Self {
+        default_config_path()
+            .and_then(|p| Self::load(&p).ok())
+            .unwrap_or_default()
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {

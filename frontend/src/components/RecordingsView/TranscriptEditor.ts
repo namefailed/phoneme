@@ -3,7 +3,7 @@ import { applyVimrc } from "../../utils/vimrc";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
-import { vim } from "@replit/codemirror-vim";
+import { vim, Vim } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
 export class TranscriptEditor {
@@ -135,7 +135,7 @@ export class TranscriptEditor {
 
     if (vimMode) {
       extensions.push(vim());
-      applyVimrc(vimrc);
+      applyVimrc(vimrc, Vim);
     }
 
     this.view = new EditorView({

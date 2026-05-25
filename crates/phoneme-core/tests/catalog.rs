@@ -147,10 +147,22 @@ async fn search_finds_by_transcript_text() {
         .update_transcript(&rec.id, "remind me to email Sarah about the contract", "m")
         .await
         .unwrap();
-    let hits = catalog.search("sarah").await.unwrap();
+    let hits = catalog
+        .list(&ListFilter {
+            search: Some("sarah".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].id, rec.id);
-    let miss = catalog.search("nonexistent").await.unwrap();
+    let miss = catalog
+        .list(&ListFilter {
+            search: Some("nonexistent".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     assert!(miss.is_empty());
 }
 
@@ -165,7 +177,14 @@ async fn delete_removes_recording_and_fts_row() {
         .unwrap();
     catalog.delete(&rec.id).await.unwrap();
     assert!(catalog.get(&rec.id).await.unwrap().is_none());
-    assert!(catalog.search("deletable").await.unwrap().is_empty());
+    let search_res = catalog
+        .list(&ListFilter {
+            search: Some("deletable".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(search_res.is_empty());
 }
 
 #[tokio::test]
