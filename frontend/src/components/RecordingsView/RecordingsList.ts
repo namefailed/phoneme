@@ -3,6 +3,7 @@ import { Store } from "../../state/store";
 import { filterStore } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
 
+import "../shared/styles.css";
 import "./styles.css";
 
 export type RecordingsListState = {
