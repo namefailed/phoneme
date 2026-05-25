@@ -24,14 +24,10 @@ export class SectionWhisper {
                 kind: "select",
                 options: [
                   { value: "external", label: "External (BYO server)" },
-                  { value: "bundled_model", label: "Bundled server + my model" },
-                  {
-                    value: "bundled_download",
-                    label: "Bundled server + downloaded model",
-                  },
+                  { value: "bundled_model", label: "Bundled server + local model" },
                 ],
               },
-              this.config.whisper.mode,
+              this.config.whisper.mode === "bundled_download" ? "bundled_model" : this.config.whisper.mode,
             )}
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">

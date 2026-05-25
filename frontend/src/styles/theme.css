@@ -65,3 +65,37 @@ html[data-theme="nord"] {
   --err: #bf616a;
   --info: #81a1c1;
 }
+
+html[data-theme="gruvbox-dark"] {
+  --bg-deep: #282828;
+  --bg-elevated: #3c3836;
+  --bg-surface: #32302f;
+  --border: #504945;
+  --border-subtle: #3c3836;
+  --fg-default: #ebdbb2;
+  --fg-muted: #a89984;
+  --fg-faded: #928374;
+  --accent: #d3869b;
+  --accent-fg: #282828;
+  --ok: #b8bb26;
+  --warn: #fabd2f;
+  --err: #fb4934;
+  --info: #83a598;
+}
+
+html[data-theme="dracula"] {
+  --bg-deep: #282a36;
+  --bg-elevated: #44475a;
+  --bg-surface: #282a36;
+  --border: #6272a4;
+  --border-subtle: #44475a;
+  --fg-default: #f8f8f2;
+  --fg-muted: #6272a4;
+  --fg-faded: #44475a;
+  --accent: #ff79c6;
+  --accent-fg: #282a36;
+  --ok: #50fa7b;
+  --warn: #f1fa8c;
+  --err: #ff5555;
+  --info: #8be9fd;
+}

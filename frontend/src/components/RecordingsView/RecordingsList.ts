@@ -18,6 +18,7 @@ export class RecordingsList {
   private state: Store<RecordingsListState>;
   private onSelect: (id: string) => void;
   private config: any = null;
+  private currentWidths: string[] | null = null;
 
   constructor(
     container: HTMLElement,
@@ -85,9 +86,18 @@ export class RecordingsList {
       transcript: "1fr"
     };
 
-    const gridTemplate = visibleCols.map(c => colWidths[c] || "auto").join(" ");
+    if (!this.currentWidths || this.currentWidths.length !== visibleCols.length) {
+      this.currentWidths = visibleCols.map(c => colWidths[c] || "auto");
+    }
 
-    const headSpans = visibleCols.map(c => `<span>${colLabels[c] || c}</span>`).join("");
+    const gridTemplate = this.currentWidths.join(" ");
+
+    const headSpans = visibleCols.map((c, i) => `
+      <span class="col-head" data-col="${i}">
+        ${colLabels[c] || c}
+        ${i < visibleCols.length - 1 ? `<div class="resizer" data-col="${i}"></div>` : ""}
+      </span>
+    `).join("");
     const head = `
       <div class="rec-table-head" style="grid-template-columns: ${gridTemplate}">
         ${headSpans}
@@ -103,11 +113,46 @@ export class RecordingsList {
         if (id) this.onSelect(id);
       });
     });
+
+    this.container.querySelectorAll<HTMLElement>(".resizer").forEach((el) => {
+      el.addEventListener("mousedown", (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const colIdx = parseInt(el.getAttribute("data-col") || "0", 10);
+        const startX = e.clientX;
+        const headSpans = Array.from(this.container.querySelectorAll(".col-head"));
+        const startW = (headSpans[colIdx] as HTMLElement).offsetWidth;
+
+        const onMove = (moveEvent: MouseEvent) => {
+          if (!this.currentWidths) return;
+          const newW = Math.max(30, startW + moveEvent.clientX - startX);
+          this.currentWidths[colIdx] = `${newW}px`;
+          const template = this.currentWidths.join(" ");
+          
+          const headRow = this.container.querySelector<HTMLElement>(".rec-table-head");
+          if (headRow) headRow.style.gridTemplateColumns = template;
+          
+          this.container.querySelectorAll<HTMLElement>(".rec-row").forEach(row => {
+            row.style.gridTemplateColumns = template;
+          });
+        };
+
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+        };
+
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    });
   }
 
   private renderRow(r: Recording, active: boolean, visibleCols: string[], gridTemplate: string): string {
     const day = formatDay(r.started_at);
-    const time = formatTime(r.started_at);
+    const use24h = this.config?.tray?.format_24h ?? false;
+    const time = formatTime(r.started_at, use24h);
     const dur = formatDuration(r.duration_ms);
     const statusClass = statusToClass(r.status);
     const preview = (r.transcript ?? truncatedError(r));
@@ -158,9 +203,9 @@ function formatDay(iso: string): string {
   });
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, use24h: boolean): string {
   const d = new Date(iso);
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: !use24h });
 }
 
 function formatDuration(ms: number): string {

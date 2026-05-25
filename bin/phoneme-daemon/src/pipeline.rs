@@ -169,10 +169,13 @@ async fn post_process_transcript(
         .build()?;
 
     if cfg.provider == "ollama" {
-        let url = base_url_override.unwrap_or("http://127.0.0.1:11434/api/generate");
+        let default_url = "http://127.0.0.1:11434/api/generate";
+        let mut url = if cfg.api_url.is_empty() { default_url } else { &cfg.api_url };
+        if let Some(override_url) = base_url_override { url = override_url; }
+        
         let body = serde_json::json!({
             "model": cfg.model,
-            "prompt": format!("{}\n\nTranscript:\n{}", cfg.prompt, text),
+            "prompt": format!("{}:\n{}", cfg.prompt, text),
             "stream": false
         });
         let res = client.post(url).json(&body).send().await?;
@@ -186,12 +189,14 @@ async fn post_process_transcript(
             .ok_or_else(|| anyhow::anyhow!("Missing response field in Ollama output"))?;
         return Ok(output.trim().to_string());
     } else if cfg.provider == "openai" {
-        let url = base_url_override.unwrap_or("https://api.openai.com/v1/chat/completions");
+        let default_url = "https://api.openai.com/v1/chat/completions";
+        let mut url = if cfg.api_url.is_empty() { default_url } else { &cfg.api_url };
+        if let Some(override_url) = base_url_override { url = override_url; }
+
         let body = serde_json::json!({
             "model": cfg.model,
             "messages": [
-                { "role": "system", "content": &cfg.prompt },
-                { "role": "user", "content": text }
+                { "role": "user", "content": format!("{}:\n{}", cfg.prompt, text) }
             ],
             "temperature": 0.3
         });
@@ -247,6 +252,7 @@ mod tests {
             provider: "openai".to_string(),
             model: "gpt-4o-mini".to_string(),
             api_key: "test-key".to_string(),
+            api_url: "".to_string(),
             prompt: "Fix it".to_string(),
         };
 
@@ -271,6 +277,7 @@ mod tests {
             provider: "ollama".to_string(),
             model: "llama3".to_string(),
             api_key: "".to_string(),
+            api_url: "".to_string(),
             prompt: "Fix it".to_string(),
         };
 

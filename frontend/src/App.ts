@@ -7,6 +7,7 @@ import { Router, type ViewName } from "./router";
 import { onNav } from "./services/events";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 
 /// A mounted view. Every view exposes an optional `dispose` for teardown
 /// (RecordingsView unsubscribes its event listeners there).
@@ -55,6 +56,14 @@ export class App {
     // Tray menu navigation.
     void onNav("settings", () => this.router.go("settings"));
     void onNav("doctor", () => this.router.go("doctor"));
+
+    // Tray menu recording commands.
+    void listen("menu:record", async () => {
+      await invoke("record_start", { mode: "oneshot" });
+    });
+    void listen("menu:stop", async () => {
+      await invoke("record_stop");
+    });
 
     // Auto-launch the first-run wizard if no config exists yet.
     void this.maybeAutoWizard();

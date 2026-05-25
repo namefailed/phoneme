@@ -98,6 +98,25 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::RecordToggle => {
+            if state.recorder.current().await.is_some() {
+                match state.recorder.stop(state).await {
+                    Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+                    Err(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: e.to_string(),
+                    }),
+                }
+            } else {
+                match state.recorder.start(state, phoneme_core::RecordMode::Oneshot.into()).await {
+                    Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+                    Err(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: e.to_string(),
+                    }),
+                }
+            }
+        }
         Request::RecordCancel => match state.recorder.cancel(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
             Err(e) => Response::Err(IpcError {

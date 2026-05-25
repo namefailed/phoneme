@@ -17,6 +17,7 @@ pub enum Request {
         mode: RecordMode,
     },
     RecordStop,
+    RecordToggle,
     RecordCancel,
     RecordStatus,
 

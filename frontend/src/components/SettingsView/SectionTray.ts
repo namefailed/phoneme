@@ -13,7 +13,9 @@ export class SectionTray {
       { value: "catppuccin-mocha", label: "Catppuccin Mocha" },
       { value: "tokyo-night", label: "Tokyo Night" },
       { value: "one-dark", label: "One Dark" },
-      { value: "nord", label: "Nord" }
+      { value: "nord", label: "Nord" },
+      { value: "gruvbox-dark", label: "Gruvbox Dark" },
+      { value: "dracula", label: "Dracula" }
     ];
 
     const columns = [
@@ -86,6 +88,14 @@ export class SectionTray {
         </div>
 
         <div class="settings-field">
+          <label>Use 24-hour time</label>
+          <div>${renderField(
+            { key: "tray.format_24h", label: "", kind: "checkbox" },
+            this.config.tray.format_24h,
+          )}</div>
+        </div>
+
+        <div class="settings-field">
           <label>Visual Theme</label>
           <div>${renderField(
             { key: "tray.theme", label: "", kind: "select", options: themeOptions },
@@ -93,35 +103,6 @@ export class SectionTray {
           )}</div>
         </div>
 
-        <div class="settings-field">
-          <label>Vim keybindings in Editor</label>
-          <div>${renderField(
-            { key: "tray.vim_mode", label: "", kind: "checkbox" },
-            this.config.tray.vim_mode || false,
-          )}</div>
-        </div>
-
-        <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-          <label>External Vimrc Path (Optional)</label>
-          <div style="width: 100%;">${renderField(
-            { key: "tray.vimrc_path", label: "", kind: "text" },
-            this.config.tray.vimrc_path || "",
-          )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
-            Absolute path to a <code>.vimrc</code> file on your computer (e.g., <code>~/.vimrc</code> or <code>C:\Users\Namef\.vimrc</code>). Phoneme will read and apply these mappings automatically.
-          </span>
-        </div>
-
-        <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-          <label>Vimrc Configurations (Inline)</label>
-          <div style="width: 100%;">${renderField(
-            { key: "tray.vimrc", label: "", kind: "textarea" },
-            this.config.tray.vimrc || "",
-          )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
-            Map custom keybindings for Vim mode (e.g., <code>imap jj &lt;Esc&gt;</code>, <code>nnoremap &lt;C-c&gt; yy</code>). Note: CodeMirror Vim is an emulation layer, so advanced plugins won't work.
-          </span>
-        </div>
 
         <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
           <label>Left Pane Visible Columns</label>

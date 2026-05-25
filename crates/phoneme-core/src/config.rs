@@ -20,6 +20,9 @@ pub struct Config {
     pub hotkey: HotkeyConfig,
     /// Frontend UI state, including active theme and visibility settings.
     pub tray: TrayConfig,
+    /// Settings for the built-in transcript editor.
+    #[serde(default)]
+    pub editor: EditorConfig,
     /// Background daemon runtime settings (e.g., logging verbosity).
     pub daemon: DaemonConfig,
     /// Settings for the optional LLM-powered transcript cleanup/post-processing pipeline.
@@ -36,6 +39,9 @@ pub struct LlmPostProcessConfig {
     pub provider: String,
     /// API key for authentication, if required by the chosen provider.
     pub api_key: String,
+    /// Base URL for the API. If empty, the provider's default is used.
+    #[serde(default)]
+    pub api_url: String,
     /// The specific model identifier to target (e.g., `llama3`, `gpt-4o`).
     pub model: String,
     /// The system prompt used to instruct the LLM on how to clean the text.
@@ -47,6 +53,7 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         enabled: false,
         provider: "none".into(),
         api_key: "".into(),
+        api_url: "".into(),
         model: "llama3".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
     }
@@ -140,17 +147,26 @@ pub struct TrayConfig {
     /// If true, the main window will automatically open when the app starts.
     pub show_on_startup: bool,
     /// Whether to strip the OS window decorations (title bar).
+    #[serde(default)]
     pub strip_titlebar: bool,
     /// If true, closing the main window simply minimizes the app to the system tray.
     pub minimize_to_tray: bool,
     /// If true, the application registers a Windows run key to start automatically on system login.
     pub start_at_login: bool,
+    /// If true, use 24-hour time format in the UI.
+    #[serde(default)]
+    pub format_24h: bool,
     /// The active CSS theme identifier (e.g., `"catppuccin-mocha"`, `"tokyo-night"`).
     #[serde(default = "default_theme")]
     pub theme: String,
     /// A list of column identifiers that are currently visible in the main list view.
     #[serde(default = "default_visible_columns")]
     pub visible_columns: Vec<String>,
+}
+
+/// Settings specifically for the transcript editor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct EditorConfig {
     /// Whether the CodeMirror editor uses Vim keybindings.
     #[serde(default)]
     pub vim_mode: bool,
@@ -226,6 +242,7 @@ impl Default for Config {
                 strip_titlebar: false,
                 minimize_to_tray: true,
                 start_at_login: false,
+                format_24h: false,
                 theme: "catppuccin-mocha".into(),
                 visible_columns: vec![
                     "day".into(),
@@ -234,6 +251,8 @@ impl Default for Config {
                     "status".into(),
                     "transcript".into(),
                 ],
+            },
+            editor: EditorConfig {
                 vim_mode: false,
                 vimrc: String::new(),
                 vimrc_path: String::new(),
@@ -248,6 +267,7 @@ impl Default for Config {
                 enabled: false,
                 provider: "none".into(),
                 api_key: "".into(),
+                api_url: "".into(),
                 model: "llama3".into(),
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
             },

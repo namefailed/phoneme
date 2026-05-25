@@ -54,25 +54,34 @@ pub fn run() {
                     if let Some(bridge) = bridge {
                         // We only care if they match the configured shortcut
                         // Since we register exactly one shortcut below, it should match.
+                        let mode = bridge.config.hotkey.mode;
                         match event.state() {
                             ShortcutState::Pressed => {
                                 tauri::async_runtime::spawn(async move {
-                                    if let Err(e) = bridge
-                                        .request(phoneme_ipc::Request::RecordStart {
-                                            mode: RecordMode::Hold,
-                                        })
-                                        .await
-                                    {
-                                        tracing::error!("failed to start record from hotkey: {e}");
+                                    if mode == phoneme_core::config::HotkeyMode::Toggle {
+                                        if let Err(e) = bridge.request(phoneme_ipc::Request::RecordToggle).await {
+                                            tracing::error!("failed to toggle record from hotkey: {e}");
+                                        }
+                                    } else {
+                                        if let Err(e) = bridge
+                                            .request(phoneme_ipc::Request::RecordStart {
+                                                mode: RecordMode::Hold,
+                                            })
+                                            .await
+                                        {
+                                            tracing::error!("failed to start record from hotkey: {e}");
+                                        }
                                     }
                                 });
                             }
                             ShortcutState::Released => {
                                 tauri::async_runtime::spawn(async move {
-                                    if let Err(e) =
-                                        bridge.request(phoneme_ipc::Request::RecordStop).await
-                                    {
-                                        tracing::error!("failed to stop record from hotkey: {e}");
+                                    if mode == phoneme_core::config::HotkeyMode::Hold {
+                                        if let Err(e) =
+                                            bridge.request(phoneme_ipc::Request::RecordStop).await
+                                        {
+                                            tracing::error!("failed to stop record from hotkey: {e}");
+                                        }
                                     }
                                 });
                             }

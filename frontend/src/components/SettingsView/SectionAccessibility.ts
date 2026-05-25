@@ -55,26 +55,44 @@ export class SectionAccessibility {
           )}</div>
         </div>
 
-        <div class="settings-field">
+        <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
           <label>Model Name</label>
-          <div>${renderField(
+          <div style="flex: 1;">${renderField(
             { key: "llm_post_process.model", label: "", kind: "text" },
             config.llm_post_process.model || "llama3",
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            e.g., <code>llama3</code>, <code>gpt-4o-mini</code>, or <code>llama-3.2-3b-instruct</code>.
-          </span>
         </div>
 
-        <div class="settings-field">
-          <label>API Key / Bearer Token</label>
-          <div>${renderField(
-            { key: "llm_post_process.api_key", label: "", kind: "text" },
+        <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
+          <label>Ollama API URL</label>
+          <div style="flex: 1;">${renderField(
+            { key: "llm_post_process.api_url", label: "", kind: "text" },
+            config.llm_post_process.api_url || "http://127.0.0.1:11434/api/generate",
+          )}</div>
+        </div>
+
+        <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
+          <label>OpenAI Model</label>
+          <div style="flex: 1;">${renderField(
+            { key: "llm_post_process.model", label: "", kind: "text" },
+            config.llm_post_process.model || "gpt-4o",
+          )}</div>
+        </div>
+
+        <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
+          <label>API Key</label>
+          <div style="flex: 1;">${renderField(
+            { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
             config.llm_post_process.api_key || "",
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            Leave blank if using a local provider that doesn't require authentication (like Ollama).
-          </span>
+        </div>
+
+        <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
+          <label>OpenAI API URL</label>
+          <div style="flex: 1;">${renderField(
+            { key: "llm_post_process.api_url", label: "", kind: "text" },
+            config.llm_post_process.api_url || "https://api.openai.com/v1/chat/completions",
+          )}</div>
         </div>
 
         <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
@@ -86,7 +104,7 @@ export class SectionAccessibility {
               <option value="Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone. Reply ONLY with the finalized transcript text and absolutely no conversational filler.">Standard Cleanup</option>
               <option value="I have a speech impediment that causes me to stutter and repeat sounds. Carefully clean up the transcript so it flows perfectly, removing any dysfluency while preserving my intended meaning. Reply ONLY with the cleaned text.">Dysfluency & Stuttering Assist</option>
               <option value="Format this raw transcript into a clean, professional journal entry or meeting note. Use bullet points or headings if appropriate. Output ONLY the formatted notes and absolutely no conversational filler.">Professional Notes & Journal</option>
-              <option value="Translate this transcript into perfect English. Keep the meaning exact and natural. Output ONLY the English translation and absolutely nothing else.">Translate to English</option>
+
             </select>
             <span style="font-size: 11px; color: var(--fg-faded);">Select a preset to auto-fill</span>
           </div>

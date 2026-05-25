@@ -12,6 +12,7 @@
     "core:event:default",
     "shell:default",
     "dialog:default",
-    "fs:default"
+    "fs:default",
+    "updater:default"
   ]
 }

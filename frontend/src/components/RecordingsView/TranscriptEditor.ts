@@ -33,9 +33,9 @@ export class TranscriptEditor {
     let vimrcPath = "";
     try {
       const cfg = await invoke<any>("read_config");
-      vimMode = cfg?.tray?.vim_mode || false;
-      vimrc = cfg?.tray?.vimrc || "";
-      vimrcPath = cfg?.tray?.vimrc_path || "";
+      vimMode = cfg?.editor?.vim_mode || false;
+      vimrc = cfg?.editor?.vimrc || "";
+      vimrcPath = cfg?.editor?.vimrc_path || "";
     } catch (e) {
       console.error("Failed to load config for editor:", e);
     }
@@ -134,7 +134,10 @@ export class TranscriptEditor {
         display: "none"
       },
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-        backgroundColor: "rgba(255, 255, 255, 0.15) !important"
+        backgroundColor: "rgba(203, 166, 247, 0.4) !important"
+      },
+      ".cm-selectionMatch, .cm-vimMode .cm-selectionBackground": {
+        backgroundColor: "rgba(203, 166, 247, 0.4) !important"
       },
       ".cm-fat-cursor": {
         backgroundColor: "var(--accent) !important",

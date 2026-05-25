@@ -19,14 +19,16 @@ describe("form helpers", () => {
     const config = {
       tray: {
         theme: "nord",
+      },
+      editor: {
         vim_mode: false
       }
     };
     
     setByPath(config, "tray.theme", "tokyo-night");
-    setByPath(config, "tray.vim_mode", true);
+    setByPath(config, "editor.vim_mode", true);
     
     expect(config.tray.theme).toBe("tokyo-night");
-    expect(config.tray.vim_mode).toBe(true);
+    expect(config.editor.vim_mode).toBe(true);
   });
 });
