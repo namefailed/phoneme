@@ -504,6 +504,7 @@ mod tests {
         let parsed = Config::load(&path).expect("loads legacy config");
         assert!(!parsed.llm_post_process.enabled);
         assert_eq!(parsed.llm_post_process.provider, "none");
+        assert_eq!(parsed.llm_post_process.model, "llama3.2:3b");
     }
 
     #[test]

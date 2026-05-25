@@ -144,10 +144,7 @@ cargo tauri dev
 
 ## 🗺️ Roadmap
 
-- **v1.1** — Model download wizard, tags UI, webhook target, chainable hooks, hot reload, bulk export
-- **v1.2** — Premium themes, CodeMirror 6 w/ Vim mode, LLM post-processing hooks, Auto-updater, resizable columns
-- **v1.3** *(Next)* — Bundled Ollama support for seamless offline AI post-processing out-of-the-box, settings structural overhaul (separating UI/Tray)
-- **Future** — macOS + Linux ports, mobile thin-client, streaming transcription
+For a detailed look at our upcoming features—including macOS/Linux ports, Streaming Transcription, and Bundled Ollama—please see our [Roadmap](docs/ROADMAP.md).
 
 ## 🤝 Contributing
 

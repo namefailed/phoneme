@@ -395,4 +395,48 @@ mod tests {
         assert_eq!(sanitize_fts5_query("   spaces   "), "spaces*");
         assert_eq!(sanitize_fts5_query(""), "");
     }
+
+    #[tokio::test]
+    async fn test_insert_and_get() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.expect("open db");
+        let mut r = Recording {
+            id: RecordingId::generate(),
+            started_at: Local::now(),
+            duration_ms: Some(5000),
+            audio_path: "foo.wav".into(),
+            transcript: Some("hello world".into()),
+            model: Some("tiny".into()),
+            status: RecordingStatus::Done,
+            error_kind: None,
+            error_message: None,
+            hook_command: Some("to-stdout.ps1".into()),
+            hook_exit_code: Some(0),
+            hook_duration_ms: Some(100),
+            transcribed_at: Some(Local::now()),
+            hook_ran_at: Some(Local::now()),
+            tags: vec![],
+        };
+        db.insert(&r).await.expect("insert");
+        
+        let fetched = db.get(&r.id).await.expect("get recording").expect("is some");
+        assert_eq!(fetched.id.as_str(), r.id.as_str());
+        assert_eq!(fetched.audio_path, r.audio_path);
+        assert_eq!(fetched.transcript.as_deref(), Some("hello world"));
+        assert_eq!(fetched.status, RecordingStatus::Done);
+
+        // Test list
+        let filter = ListFilter {
+            since: None,
+            until: None,
+            status: None,
+            search: None,
+            tag: None,
+            limit: 10,
+            offset: 0,
+        };
+        let (list, total) = db.list_recordings(&filter).await.expect("list");
+        assert_eq!(total, 1);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id.as_str(), r.id.as_str());
+    }
 }
