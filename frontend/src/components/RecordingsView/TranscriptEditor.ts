@@ -2,9 +2,8 @@ import { updateTranscript } from "../../services/ipc";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
-import { vim } from "@replit/codemirror-vim";
+import { vim, Vim } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
-import { readTextFile } from "@tauri-apps/plugin-fs";
 
 export class TranscriptEditor {
   private container: HTMLElement;
@@ -72,15 +71,15 @@ export class TranscriptEditor {
       const isNormal = cmd.startsWith("n");
       const isNoRemap = cmd.includes("noremap");
       
-      let ctx: string | undefined = undefined;
+      let ctx = "normal";
       if (isInsert) ctx = "insert";
       else if (isNormal) ctx = "normal";
       else if (isVisual) ctx = "visual";
       
       if (isNoRemap) {
-         vim.Vim.noremap(keys, target, ctx);
+         Vim.noremap(keys, target, ctx);
       } else if (cmd.includes("map")) {
-         vim.Vim.map(keys, target, ctx);
+         Vim.map(keys, target, ctx);
       }
     }
   }

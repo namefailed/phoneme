@@ -1,7 +1,6 @@
 import { renderField, bindFieldEvents } from "./form";
 import { check } from "@tauri-apps/plugin-updater";
 import { message, confirm } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 
 export class SectionTray {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

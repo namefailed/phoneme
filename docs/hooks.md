@@ -29,7 +29,7 @@ JSON on stdin**.
   "duration_ms": 8470,
   "model": "gemma-4-E4B.Q5_K_M",
   "metadata": {
-    "phoneme_version": "1.2.1",
+    "phoneme_version": "1.2.2",
     "hook_version": 1
   }
 }

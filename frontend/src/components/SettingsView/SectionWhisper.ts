@@ -36,7 +36,7 @@ export class SectionWhisper {
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
             <b>External:</b> Use an external API endpoint (e.g., OpenAI or a remote Whisper.cpp server).<br/>
-            <b>Bundled model:</b> Run local inference using the bundled server and your own downloaded `.bin` model file.
+            <b>Bundled model:</b> Run local inference using the bundled server and your own downloaded <code>.bin</code> model file.
           </span>
         </div>
         <div class="settings-field">
