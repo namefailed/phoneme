@@ -177,10 +177,12 @@ pub fn run() {
             commands::read_file_string,
         ]);
 
-    let builder = builder.build(tauri::generate_context!()).unwrap_or_else(|e| {
-        eprintln!("Fatal error while building tauri application: {e}");
-        std::process::exit(1);
-    });
+    let builder = builder
+        .build(tauri::generate_context!())
+        .unwrap_or_else(|e| {
+            eprintln!("Fatal error while building tauri application: {e}");
+            std::process::exit(1);
+        });
 
     builder.run(move |_app, event| {
         if let tauri::RunEvent::Exit = event {

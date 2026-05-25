@@ -262,7 +262,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/tags"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"models":[]})))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"models": []})),
+            )
             .mount(&server)
             .await;
 
@@ -273,7 +276,10 @@ mod tests {
         cfg.llm_post_process.api_url = format!("{}/api/generate", server.uri());
 
         let results = run_backend_checks(&cfg).await;
-        let o = results.iter().find(|r| r.name == "Ollama (optional)").unwrap();
+        let o = results
+            .iter()
+            .find(|r| r.name == "Ollama (optional)")
+            .unwrap();
         assert!(o.ok, "expected ollama ok, got: {}", o.detail);
     }
 }
