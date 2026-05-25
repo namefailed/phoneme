@@ -58,7 +58,7 @@
 }
 .settings-toolbar button {
   background: var(--bg-deep);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 13px;
@@ -69,7 +69,7 @@
 }
 .settings-toolbar button:hover {
   background: var(--border-subtle);
-  border-color: var(--border);
+  border-color: var(--accent);
 }
 .settings-toolbar button.primary {
   background: var(--accent);
@@ -165,7 +165,7 @@
   padding: 6px 12px;
   border-radius: 6px;
   font-size: 12px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
   transition: all 0.15s ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
@@ -173,7 +173,7 @@
 }
 .settings-field .inline-button:hover {
   background: var(--border-subtle);
-  border-color: var(--border);
+  border-color: var(--accent);
 }
 .test-result {
   padding: 6px 10px;

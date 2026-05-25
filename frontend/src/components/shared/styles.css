@@ -48,7 +48,7 @@
   padding: 6px 10px;
   color: var(--fg-muted);
   font-size: 16px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
   transition: all 0.15s ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
@@ -56,7 +56,7 @@
 .headerbar .icon-btn:hover {
   background: var(--border-subtle);
   color: var(--fg-default);
-  border-color: var(--border);
+  border-color: var(--accent);
 }
 
 .status-pill {

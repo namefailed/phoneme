@@ -160,7 +160,7 @@
 .action-row button {
   transition: all 0.15s ease-out;
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   border-radius: 6px;
   padding: 6px 14px;
