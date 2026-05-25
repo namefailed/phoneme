@@ -81,7 +81,7 @@ export class RecordingsList {
       day: "75px",
       time: "70px",
       duration: "60px",
-      status: "40px",
+      status: "65px",
       transcript: "1fr"
     };
 
@@ -112,11 +112,18 @@ export class RecordingsList {
     const statusClass = statusToClass(r.status);
     const preview = (r.transcript ?? truncatedError(r));
 
+    const statusLabels: Record<string, string> = {
+      done: "Done",
+      failed: "Failed",
+      pending: "Pending"
+    };
+    const label = statusLabels[statusClass] || "Unknown";
+
     const cellMap: Record<string, string> = {
       day: `<span class="rec-time">${day}</span>`,
       time: `<span class="rec-time">${time}</span>`,
       duration: `<span class="rec-dur">${dur}</span>`,
-      status: `<span class="rec-status"><span class="status-dot ${statusClass}"></span></span>`,
+      status: `<span class="rec-status"><span class="status-pill ${statusClass}">${label}</span></span>`,
       transcript: `<span class="rec-preview">${escapeHtml(preview)}</span>`
     };
 
