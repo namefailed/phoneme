@@ -52,9 +52,10 @@ pub fn run() {
 
                     let bridge = app.state::<Option<Bridge>>().inner().clone();
                     if let Some(bridge) = bridge {
-                        // We only care if they match the configured shortcut
-                        // Since we register exactly one shortcut below, it should match.
-                        let mode = bridge.config.hotkey.mode;
+                        // Read live config to ensure toggle setting updates apply immediately
+                        let current_config = phoneme_core::config_io::read_or_default();
+                        let mode = current_config.hotkey.mode;
+                        
                         match event.state() {
                             ShortcutState::Pressed => {
                                 tauri::async_runtime::spawn(async move {
@@ -103,6 +104,13 @@ pub fn run() {
             let _tray = tray::install(app.handle())?;
             if let Some(bridge) = bridge.clone() {
                 events::spawn(app.handle().clone(), bridge.clone());
+
+                if bridge.config.interface.strip_titlebar {
+                    use tauri::Manager;
+                    if let Some(window) = app.handle().get_webview_window("main") {
+                        let _ = window.set_decorations(false);
+                    }
+                }
 
                 if bridge.config.tray.show_on_startup {
                     use tauri::Manager;
