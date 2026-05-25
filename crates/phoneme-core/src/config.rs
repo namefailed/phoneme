@@ -512,7 +512,7 @@ mod tests {
 
         let parsed = Config::load(&path).unwrap();
         assert_eq!(parsed.interface.theme, "tokyo-night");
-        assert_eq!(parsed.interface.strip_titlebar, true);
+        assert!(parsed.interface.strip_titlebar);
         assert_eq!(parsed.interface.column_widths.first().unwrap(), "150px");
     }
 }
