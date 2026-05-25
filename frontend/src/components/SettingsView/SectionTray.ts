@@ -45,7 +45,7 @@ export class SectionTray {
         <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);">
           <label>Software Updates</label>
           <div style="display: flex; align-items: center; gap: 12px;">
-            <button id="check-updates-btn" style="background: var(--accent); color: var(--bg-default); border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px;">Check for Updates</button>
+            <button class="inline-button" id="check-updates-btn">Check for Updates</button>
             <span id="update-status" style="font-size: 12px; color: var(--fg-muted);">You are on the latest version.</span>
           </div>
         </div>

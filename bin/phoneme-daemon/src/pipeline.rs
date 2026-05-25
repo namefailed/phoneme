@@ -172,7 +172,7 @@ async fn post_process_transcript(
         let url = base_url_override.unwrap_or("http://127.0.0.1:11434/api/generate");
         let body = serde_json::json!({
             "model": cfg.model,
-            "prompt": format!("Instruction: {}\nText: {}", cfg.prompt, text),
+            "prompt": format!("{}\n\nTranscript:\n{}", cfg.prompt, text),
             "stream": false
         });
         let res = client.post(url).json(&body).send().await?;

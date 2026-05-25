@@ -79,8 +79,6 @@ pub struct LlmConfig {
     pub bundled_server_args: Vec<String>,
     /// The maximum time in seconds to wait for a transcription response before timing out.
     pub timeout_secs: u64,
-    /// The initial prompt passed to the Whisper model to guide vocabulary and context.
-    pub system_prompt: String,
 }
 
 /// Hardware and threshold settings for the audio recording stream.
@@ -199,8 +197,6 @@ impl Default for Config {
                 bundled_server_port: 5809,
                 bundled_server_args: vec![],
                 timeout_secs: 60,
-                system_prompt: "Transcribe the user's speech and clean it into a single line."
-                    .into(),
             },
             recording: RecordingConfig {
                 audio_dir: "~/Documents/phoneme/audio".into(),

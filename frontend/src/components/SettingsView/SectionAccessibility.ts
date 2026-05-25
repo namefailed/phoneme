@@ -16,9 +16,9 @@ export class SectionAccessibility {
 
     container.innerHTML = `
       <div class="settings-section">
-        <h3>Smart Cleanup (AI)</h3>
+        <h3>AI Post-Processing</h3>
         <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-          Automatically correct stuttering, accents, lisps, or repetitive words. When enabled, a local or remote AI processes your transcript immediately after transcription.
+          Automatically edit, reformat, and clean up your transcript using a local or remote LLM.
         </p>
 
         <div style="background-color: var(--bg-inset); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 16px;">
@@ -31,7 +31,7 @@ export class SectionAccessibility {
         </div>
 
         <div class="settings-field">
-          <label>Enable Smart Cleanup</label>
+          <label>Enable AI Post-Processing</label>
           <div>${renderField(
             { key: "llm_post_process.enabled", label: "", kind: "checkbox" },
             config.llm_post_process.enabled,

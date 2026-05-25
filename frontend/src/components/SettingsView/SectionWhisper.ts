@@ -78,16 +78,6 @@ export class SectionWhisper {
             Maximum time (in seconds) to wait for the transcription to complete before giving up and labeling the recording as failed.
           </span>
         </div>
-        <div class="settings-field">
-          <label>System prompt</label>
-          <div>${renderField(
-            { key: "whisper.system_prompt", label: "", kind: "textarea" },
-            this.config.whisper.system_prompt,
-          )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            Provide a system prompt to guide Whisper's spelling, vocabulary, or formatting (e.g., "Always spell 'Tauri' with a capital T").
-          </span>
-        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
