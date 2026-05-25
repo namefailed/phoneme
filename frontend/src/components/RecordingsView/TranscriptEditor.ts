@@ -1,4 +1,5 @@
 import { updateTranscript } from "../../services/ipc";
+import { applyVimrc } from "../../utils/vimrc";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
@@ -52,37 +53,6 @@ export class TranscriptEditor {
     this.render(vimMode, vimrc);
   }
 
-  private applyVimrc(vimrc: string) {
-    if (!vimrc) return;
-    const lines = vimrc.split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('"')) continue;
-      
-      const parts = trimmed.split(/\s+/);
-      if (parts.length < 3) continue;
-      
-      const cmd = parts[0];
-      const keys = parts[1];
-      const target = parts.slice(2).join(" ");
-      
-      const isInsert = cmd.startsWith("i");
-      const isVisual = cmd.startsWith("v");
-      const isNormal = cmd.startsWith("n");
-      const isNoRemap = cmd.includes("noremap");
-      
-      let ctx = "normal";
-      if (isInsert) ctx = "insert";
-      else if (isNormal) ctx = "normal";
-      else if (isVisual) ctx = "visual";
-      
-      if (isNoRemap) {
-         Vim.noremap(keys, target, ctx);
-      } else if (cmd.includes("map")) {
-         Vim.map(keys, target, ctx);
-      }
-    }
-  }
 
   private render(vimMode: boolean, vimrc: string) {
     this.container.innerHTML = `

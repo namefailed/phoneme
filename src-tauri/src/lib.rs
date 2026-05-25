@@ -39,6 +39,16 @@ pub fn run() {
     });
 
     let builder = tauri::Builder::default()
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                let config = phoneme_core::config_io::read_or_default();
+                if config.tray.minimize_to_tray {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+            }
+            _ => {}
+        })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
