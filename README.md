@@ -13,46 +13,6 @@
   <img src="docs/screenshots/main.png" width="720" alt="Phoneme main window">
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/settings-whisper.png" width="720" alt="Phoneme settings — Whisper configuration">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-editor.png" width="720" alt="Phoneme settings — Editor">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-post-processing.png" width="720" alt="Phoneme settings — AI Post-Processing">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-action-hook.png" width="720" alt="Phoneme settings — Action Hook">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-hotkey.png" width="720" alt="Phoneme settings — Global Hotkey">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-interface.png" width="720" alt="Phoneme settings — Interface">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-storage.png" width="720" alt="Phoneme settings — Storage">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-advanced.png" width="720" alt="Phoneme settings — Advanced">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-recording.png" width="720" alt="Phoneme settings — Recording">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-system-tray.png" width="720" alt="Phoneme settings — System Tray">
-</p>
-
 ## ✨ What is Phoneme?
 
 Phoneme bridges the gap between quick voice dictation and your personal knowledge management systems. It is designed for power users who want the friction-free experience of hitting a hotkey to capture a thought, but without the privacy concerns, subscription fees, or cloud lock-in of modern AI tools.
