@@ -64,8 +64,7 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
 ## Settings
 
 - [ ] Open Settings via tray or ⚙ button.
-- [ ] All eight sections render: Whisper, Recording, Hotkey, Hook, Storage, Tray,
-      Advanced.
+- [ ] All nine sections render: Whisper, Recording, Hotkey, Hook, Storage, Tray, Accessibility, Editor, Advanced.
 - [ ] Change the silence threshold and Save. Verify `%APPDATA%\phoneme\config.toml`
       is updated atomically.
 
