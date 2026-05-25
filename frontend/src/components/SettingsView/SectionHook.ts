@@ -35,8 +35,11 @@ export class SectionHook {
             <button class="inline-button" id="pick-hook">Browse…</button>
             <button class="inline-button" id="test-hook">Test hook</button>
             <div class="test-result" id="hook-result" style="display:none"></div>
-            <div class="help">Receives the recording JSON on stdin. The default echoes it to the console.</div>
           </div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            A shell command to run automatically. Phoneme will append the absolute path to a JSON file containing the recording's data to the end of your command. <br/>
+            Example: <code>python process.py</code> (will execute as <code>python process.py "C:\path\to\recording.json"</code>).
+          </span>
         </div>
         <div class="settings-field">
           <label>Timeout (seconds)</label>
@@ -44,6 +47,9 @@ export class SectionHook {
             { key: "hook.timeout_secs", label: "", kind: "number" },
             this.config.hook.timeout_secs,
           )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Maximum time (in seconds) to wait for the Integration Script to finish before giving up and labeling the post-processing phase as failed.
+          </span>
         </div>
       </div>
     `;

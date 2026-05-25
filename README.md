@@ -7,6 +7,12 @@ transcript — your way.
   <img src="docs/screenshots/main.png" width="720" alt="Phoneme main window">
 </p>
 
+## ✨ New in v1.2
+- **Smart Cleanup (AI):** Pipe your transcripts through a local Ollama model (like `llama3`) or OpenAI to automatically clean up stutters, format as journal entries, or translate to English.
+- **Auto-Updater:** Seamlessly download and install new releases straight from GitHub without leaving the app.
+- **Premium Themes:** Gorgeous new color palettes (Catppuccin Mocha, Tokyo Night, One Dark, Nord).
+- **Vim Mode:** Fully functional Vim emulation in the transcript editor, powered by CodeMirror 6, complete with custom `.vimrc` support!
+
 ## What it does
 
 1. You press a hotkey (or run `phoneme record --oneshot`).
@@ -55,8 +61,11 @@ phoneme config reload                           # hot reload config from disk
 phoneme watch                                   # subscribe to events as JSON
 ```
 
-This is what makes external hotkey daemons work — Kanata, AHK, WHKD all just
-shell out to `phoneme record --start/--stop`.
+### Bring Your Own Hotkey Daemon (BYOHD)
+
+We deliberately built Phoneme with a CLI-first architecture to provide you with the exact flexibility that big tech products won't. You aren't locked into our built-in global hotkeys. Advanced users can bind `phoneme` CLI commands to any hotkey daemon, window manager, or macro pad they prefer—whether that's AutoHotkey, Kanata, WHKD, or a Stream Deck. 
+
+Because the CLI seamlessly controls the daemon, setting up a custom workflow is as simple as making your tool shell out to `phoneme record --start` and `phoneme record --stop`!
 
 ## Hooks
 
@@ -86,13 +95,13 @@ Three binaries, three libraries, one workspace:
                                             │
                       named pipe (\\.\pipe\phoneme-daemon)
                                             │
-             ┌──────────────────────────────┼──────────────────────────────┐
-             │                              │                              │
-             ▼                              ▼                              ▼
-    ┌─────────────────┐            ┌─────────────────┐            ┌─────────────────┐
-    │     phoneme     │            │  phoneme-tray   │            │ Kanata / AHK    │
-    │      (CLI)      │            │   (Tauri GUI)   │            │ (Hotkey Daemon) │
-    └─────────────────┘            └─────────────────┘            └─────────────────┘
+             ┌──────────────────────────────┴──────────────────────────────┐
+             │                                                             │
+             ▼                                                             ▼
+    ┌─────────────────┐                                           ┌─────────────────┐
+    │     phoneme     │                                           │  phoneme-tray   │
+    │      (CLI)      │                                           │   (Tauri GUI)   │
+    └─────────────────┘                                           └─────────────────┘
 ```
 
 ## Building from source

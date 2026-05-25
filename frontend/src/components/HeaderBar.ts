@@ -81,15 +81,15 @@ export class HeaderBar {
     const tagOptions = this.tags.map(t => `<option value="${t.id}" ${f.tag_id === t.id ? "selected" : ""}>${t.name}</option>`).join("");
     this.container.innerHTML = `
       <div class="headerbar">
-        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" />
-        <select class="filter-pill hb-time-select">
+        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" />
+        <select class="filter-pill hb-time-select" title="Filter recordings by date">
           <option value="">All time</option>
           <option value="today">Today</option>
           <option value="recently">Recently (3 Days)</option>
           <option value="this_week">This Week</option>
           <option value="this_month">This Month</option>
         </select>
-        <select class="filter-pill hb-status-select">
+        <select class="filter-pill hb-status-select" title="Filter recordings by processing status">
           <option value="">All status</option>
           <option value="recording" ${f.status === "recording" ? "selected" : ""}>Recording</option>
           <option value="transcribing" ${f.status === "transcribing" ? "selected" : ""}>Transcribing</option>
@@ -98,12 +98,12 @@ export class HeaderBar {
           <option value="transcribe_failed" ${f.status === "transcribe_failed" ? "selected" : ""}>Transcribe Failed</option>
           <option value="hook_failed" ${f.status === "hook_failed" ? "selected" : ""}>Hook Failed</option>
         </select>
-        <select class="filter-pill hb-tag-select">
+        <select class="filter-pill hb-tag-select" title="Filter recordings by tag">
           <option value="">All tags</option>
           ${tagOptions}
         </select>
-        <button class="filter-pill" id="hb-record" style="font-weight: bold; margin-left: auto;">🔴 Record</button>
-        <button class="icon-btn" id="hb-settings" aria-label="Settings">⚙</button>
+        <button class="filter-pill" id="hb-record" style="font-weight: bold; margin-left: auto;" title="Start/Stop recording manually (or use your global hotkey)">🔴 Record</button>
+        <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
     `;
     const search = this.container.querySelector<HTMLInputElement>("#hb-search");

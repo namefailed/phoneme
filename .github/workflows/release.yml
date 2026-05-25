@@ -43,12 +43,22 @@ jobs:
 
       - name: Build release MSI
         run: cargo tauri build -v
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_PRIVATE_KEY_PASSWORD }}
+
+      - name: Prepare Updater JSON
+        run: |
+          Copy-Item target/release/bundle/msi/*.json target/release/bundle/msi/updater.json
 
       - name: Upload artifacts
         uses: softprops/action-gh-release@v2
         with:
           files: |
             target/release/bundle/msi/*.msi
+            target/release/bundle/msi/*.zip
+            target/release/bundle/msi/*.sig
+            target/release/bundle/msi/updater.json
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}

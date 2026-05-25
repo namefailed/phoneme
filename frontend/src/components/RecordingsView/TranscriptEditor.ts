@@ -4,6 +4,7 @@ import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
 import { vim } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 
 export class TranscriptEditor {
   private container: HTMLElement;
@@ -29,17 +30,62 @@ export class TranscriptEditor {
 
   private async init() {
     let vimMode = false;
+    let vimrc = "";
+    let vimrcPath = "";
     try {
       const cfg = await invoke<any>("read_config");
       vimMode = cfg?.tray?.vim_mode || false;
+      vimrc = cfg?.tray?.vimrc || "";
+      vimrcPath = cfg?.tray?.vimrc_path || "";
     } catch (e) {
       console.error("Failed to load config for editor:", e);
     }
 
-    this.render(vimMode);
+    if (vimrcPath) {
+      try {
+        const externalVimrc = await invoke<string>("read_file_string", { path: vimrcPath });
+        vimrc = externalVimrc + "\n" + vimrc;
+      } catch (e) {
+        console.warn(`Failed to read external vimrc at ${vimrcPath}:`, e);
+      }
+    }
+
+    this.render(vimMode, vimrc);
   }
 
-  private render(vimMode: boolean) {
+  private applyVimrc(vimrc: string) {
+    if (!vimrc) return;
+    const lines = vimrc.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('"')) continue;
+      
+      const parts = trimmed.split(/\s+/);
+      if (parts.length < 3) continue;
+      
+      const cmd = parts[0];
+      const keys = parts[1];
+      const target = parts.slice(2).join(" ");
+      
+      const isInsert = cmd.startsWith("i");
+      const isVisual = cmd.startsWith("v");
+      const isNormal = cmd.startsWith("n");
+      const isNoRemap = cmd.includes("noremap");
+      
+      let ctx: string | undefined = undefined;
+      if (isInsert) ctx = "insert";
+      else if (isNormal) ctx = "normal";
+      else if (isVisual) ctx = "visual";
+      
+      if (isNoRemap) {
+         vim.Vim.noremap(keys, target, ctx);
+      } else if (cmd.includes("map")) {
+         vim.Vim.map(keys, target, ctx);
+      }
+    }
+  }
+
+  private render(vimMode: boolean, vimrc: string) {
     this.container.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <span style="font-size: 11px; font-weight: bold; text-transform: uppercase; color: var(--fg-muted);">
@@ -114,6 +160,7 @@ export class TranscriptEditor {
 
     if (vimMode) {
       extensions.push(vim());
+      this.applyVimrc(vimrc);
     }
 
     this.view = new EditorView({

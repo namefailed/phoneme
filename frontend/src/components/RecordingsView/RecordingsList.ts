@@ -58,8 +58,9 @@ export class RecordingsList {
     }
     if (s.recordings.length === 0) {
       this.container.innerHTML = `<div class="empty">
-        <p>No recordings yet.</p>
-        <p class="hint">Press your hotkey or run <code>phoneme record --oneshot</code>.</p>
+        <h3 style="margin-bottom: 8px; color: var(--fg-default);">No recordings found</h3>
+        <p style="color: var(--fg-muted); margin-bottom: 12px;">Press your global hotkey to start speaking, or click the Record button in the top right.</p>
+        <p class="hint" style="font-size: 11px;">You can also use the CLI: <code>phoneme record --oneshot</code></p>
       </div>`;
       return;
     }

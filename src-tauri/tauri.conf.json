@@ -29,6 +29,14 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/namefailed/phoneme/releases/latest/download/updater.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM0RTQxQTE1NUIyNkZEMzEKUldReC9TWmJGUnJreFBsQ1k3bWdUZEdqTDRYbDM5MEJ6YjhWVU15YlhzbkNpaS81dldURVlTbkwK"
+    }
+  },
   "bundle": {
     "active": true,
     "icon": ["icons/icon.ico"],

@@ -79,17 +79,41 @@ export class SectionAccessibility {
 
         <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
           <label>Instructions for the AI</label>
+          
+          <div style="width: 100%; display: flex; gap: 8px; margin-bottom: 4px; align-items: center;">
+            <select id="prompt-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
+              <option value="">-- Choose a Default Preset --</option>
+              <option value="Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone. Reply ONLY with the finalized transcript text and absolutely no conversational filler.">Standard Cleanup</option>
+              <option value="I have a speech impediment that causes me to stutter and repeat sounds. Carefully clean up the transcript so it flows perfectly, removing any dysfluency while preserving my intended meaning. Reply ONLY with the cleaned text.">Dysfluency & Stuttering Assist</option>
+              <option value="Format this raw transcript into a clean, professional journal entry or meeting note. Use bullet points or headings if appropriate. Output ONLY the formatted notes and absolutely no conversational filler.">Professional Notes & Journal</option>
+              <option value="Translate this transcript into perfect English. Keep the meaning exact and natural. Output ONLY the English translation and absolutely nothing else.">Translate to English</option>
+            </select>
+            <span style="font-size: 11px; color: var(--fg-faded);">Select a preset to auto-fill</span>
+          </div>
+
           <div style="width: 100%;">${renderField(
             { key: "llm_post_process.prompt", label: "", kind: "textarea" },
             config.llm_post_process.prompt || "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
           )}</div>
           <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
-            Instructions for the AI to follow when editing the transcript.
+            Instructions for the AI to follow when editing the transcript. Make sure to instruct the AI to only output the final text.
           </span>
         </div>
       </div>
     `;
 
     bindFieldEvents(container, config);
+
+    const presetSelect = container.querySelector<HTMLSelectElement>("#prompt-preset-select");
+    const promptArea = container.querySelector<HTMLTextAreaElement>("[data-key='llm_post_process.prompt']");
+    if (presetSelect && promptArea) {
+      presetSelect.addEventListener("change", () => {
+        if (presetSelect.value) {
+          promptArea.value = presetSelect.value;
+          promptArea.dispatchEvent(new Event("input"));
+          presetSelect.value = ""; // Reset dropdown to placeholder after applying
+        }
+      });
+    }
   }
 }

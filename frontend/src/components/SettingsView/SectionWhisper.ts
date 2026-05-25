@@ -34,6 +34,10 @@ export class SectionWhisper {
               this.config.whisper.mode,
             )}
           </div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            <b>External:</b> Use an external API endpoint (e.g., OpenAI or a remote Whisper.cpp server).<br/>
+            <b>Bundled model:</b> Run local inference using the bundled server and your own downloaded `.bin` model file.
+          </span>
         </div>
         <div class="settings-field">
           <label>External URL</label>
@@ -45,6 +49,9 @@ export class SectionWhisper {
             <button class="inline-button" id="test-whisper">Test</button>
             <div class="test-result" id="whisper-result" style="display:none"></div>
           </div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            The endpoint to send audio to when using <b>External</b> mode. Must be a Whisper-compatible API (e.g., <code>http://127.0.0.1:8080/inference</code>).
+          </span>
         </div>
         <div class="settings-field">
           <label>Model file</label>
@@ -57,6 +64,9 @@ export class SectionWhisper {
             <button class="inline-button" id="download-model">Download Default</button>
             <div id="download-status" style="display:none; font-size: 11px; margin-top: 4px;"></div>
           </div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            The absolute path to a GGML `.bin` model file. Used when running the <b>Bundled model</b>. Click <b>Download Default</b> to fetch the `ggml-base.en.bin` model automatically.
+          </span>
         </div>
         <div class="settings-field">
           <label>Timeout (seconds)</label>
@@ -64,6 +74,9 @@ export class SectionWhisper {
             { key: "whisper.timeout_secs", label: "", kind: "number" },
             this.config.whisper.timeout_secs,
           )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Maximum time (in seconds) to wait for the transcription to complete before giving up and labeling the recording as failed.
+          </span>
         </div>
         <div class="settings-field">
           <label>System prompt</label>
@@ -71,6 +84,9 @@ export class SectionWhisper {
             { key: "whisper.system_prompt", label: "", kind: "textarea" },
             this.config.whisper.system_prompt,
           )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Provide a system prompt to guide Whisper's spelling, vocabulary, or formatting (e.g., "Always spell 'Tauri' with a capital T").
+          </span>
         </div>
       </div>
     `;

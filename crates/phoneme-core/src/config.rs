@@ -154,6 +154,12 @@ pub struct TrayConfig {
     /// Whether the CodeMirror editor uses Vim keybindings.
     #[serde(default)]
     pub vim_mode: bool,
+    /// Custom Vimrc settings (like key remappings) applied when vim_mode is enabled.
+    #[serde(default)]
+    pub vimrc: String,
+    /// Absolute path to an external .vimrc file to load automatically.
+    #[serde(default)]
+    pub vimrc_path: String,
 }
 
 fn default_theme() -> String {
@@ -230,6 +236,8 @@ impl Default for Config {
                     "transcript".into(),
                 ],
                 vim_mode: false,
+                vimrc: String::new(),
+                vimrc_path: String::new(),
             },
             daemon: DaemonConfig {
                 log_level: "info".into(),

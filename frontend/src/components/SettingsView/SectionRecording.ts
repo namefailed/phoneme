@@ -51,6 +51,10 @@ export class SectionRecording {
             { key: "recording.silence_threshold_dbfs", label: "", kind: "number" },
             this.config.recording.silence_threshold_dbfs,
           )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            The volume level (in decibels) below which audio is considered "silence".<br/>
+            <b>-45 dBFS</b> is good for quiet rooms. Use <b>-30 dBFS</b> for noisy environments to prevent background noise from keeping the recording open.
+          </span>
         </div>
         <div class="settings-field">
           <label>Silence window (ms)</label>
@@ -58,6 +62,9 @@ export class SectionRecording {
             { key: "recording.silence_window_ms", label: "", kind: "number" },
             this.config.recording.silence_window_ms,
           )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            How long you must pause (in milliseconds) before Phoneme considers you finished speaking and automatically stops the recording. (e.g. 1500 = 1.5 seconds)
+          </span>
         </div>
       </div>
     `;

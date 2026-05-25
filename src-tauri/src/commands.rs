@@ -400,6 +400,11 @@ pub fn reveal_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn read_file_string(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {}", path, e))
+}
+
+#[tauri::command]
 pub async fn wizard_download_server(window: tauri::Window) -> Result<String, String> {
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| "could not resolve project directories".to_string())?;
