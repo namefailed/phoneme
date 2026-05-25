@@ -52,8 +52,9 @@ cargo test --workspace
 
 # Run the frontend unit tests and type checker
 cd frontend
-pnpm test --run
-pnpm type-check
+pnpm install          # ensure node_modules/.bin is populated
+pnpm test --run       # or: npx vitest run
+pnpm type-check       # or: npx tsc --noEmit
 cd ..
 
 # Run formatting and linting

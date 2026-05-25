@@ -2,7 +2,7 @@
 
 This document outlines the short-term, medium-term, and long-term vision for Phoneme.
 
-## 🌟 v1.0.0 (Stable Release)
+## 🌟 v1.3.0 (Stable Release)
 *Focus: Polish, full feature parity, public launch*
 - [x] **Smart Cleanup (AI):** LLM post-processing via local Ollama or OpenAI, with 9 prompt presets.
 - [x] **Auto-Updater:** Seamless in-app updates straight from GitHub.
@@ -13,7 +13,7 @@ This document outlines the short-term, medium-term, and long-term vision for Pho
 - [x] **Doctor:** Health checker with one-click daemon restart and Ollama/Whisper probes.
 - [x] **Clean Shutdown:** Daemon and whisper-server stop cleanly when the app closes.
 
-## 🚀 v1.1 (Short Term)
+## 🚀 v1.4 (Short Term)
 *Focus: Accessibility and Offline Capability*
 - [ ] **Bundled Ollama Support:** Seamless offline AI post-processing out-of-the-box without requiring manual Ollama setup.
 - [ ] **Extended Hook Presets:** More built-in integrations for popular tools (Notion, Obsidian, Discord webhooks).

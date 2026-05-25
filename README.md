@@ -23,7 +23,7 @@ When you press your global hotkey (e.g., `Ctrl+Alt+Space`), Phoneme records your
 
 The app does not force you into a specific ecosystem. It transcribes. You decide where it goes.
 
-## 🚀 What's in v1.0.0
+## 🚀 What's in v1.3.0
 
 This is the stable public release. Everything in this list is available today:
 
