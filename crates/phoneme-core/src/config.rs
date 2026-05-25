@@ -567,7 +567,9 @@ mod tests {
             r#"powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript""#.into(),
         ];
         // Must not return Err — $d is not an env var but should be left alone.
-        let expanded = cfg.expanded().expect("hook commands with $vars should not fail expansion");
+        let expanded = cfg
+            .expanded()
+            .expect("hook commands with $vars should not fail expansion");
         // The $-variables must be preserved verbatim (not expanded to empty or error).
         assert!(expanded.hook.commands[0].contains("$d"));
         assert!(expanded.hook.commands[0].contains("$input"));
