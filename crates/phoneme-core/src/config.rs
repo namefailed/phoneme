@@ -186,7 +186,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             whisper: LlmConfig {
-                mode: WhisperMode::External,
+                mode: WhisperMode::BundledDownload,
                 external_url: "http://127.0.0.1:5809".into(),
                 model_path: String::new(),
                 bundled_server_port: 5809,

@@ -17,13 +17,13 @@ export class ModePicker {
           <div class="mode-name">Use my own server</div>
           <div class="mode-desc">I already run whisper-server. Just point Phoneme at it.</div>
         </div>
-        <div class="mode-card recommended" data-mode="bundled_model">
-          <div class="mode-badge">RECOMMENDED</div>
+        <div class="mode-card" data-mode="bundled_model">
           <div class="mode-icon">📦</div>
           <div class="mode-name">Bundled server + my model</div>
           <div class="mode-desc">Phoneme runs whisper-server for you. You provide a GGUF model.</div>
         </div>
-        <div class="mode-card" data-mode="bundled_download">
+        <div class="mode-card recommended" data-mode="bundled_download">
+          <div class="mode-badge">RECOMMENDED</div>
           <div class="mode-icon">⬇</div>
           <div class="mode-name">Download for me</div>
           <div class="mode-desc">Phoneme downloads a fast default model for you automatically.</div>

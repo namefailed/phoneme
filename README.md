@@ -78,13 +78,21 @@ See [docs/hooks.md](docs/hooks.md) for the full contract.
 
 Three binaries, three libraries, one workspace:
 
-```
-phoneme-daemon      headless brain (audio + queue + catalog + Whisper lifecycle)
-  ▲    ▲    ▲
-  │    │    │  named pipe \\.\pipe\phoneme-daemon
-  │    │    └─ Kanata / AHK / external hotkey daemon
-  │    └─── phoneme-tray (Tauri GUI + tray)
-  └────── phoneme (CLI)
+```text
+                            ┌──────────────────────────────────┐
+                            │          phoneme-daemon          │
+                            │ (Headless: audio, queue, catalog)│
+                            └───────────────▲──────────────────┘
+                                            │
+                      named pipe (\\.\pipe\phoneme-daemon)
+                                            │
+             ┌──────────────────────────────┼──────────────────────────────┐
+             │                              │                              │
+             ▼                              ▼                              ▼
+    ┌─────────────────┐            ┌─────────────────┐            ┌─────────────────┐
+    │     phoneme     │            │  phoneme-tray   │            │ Kanata / AHK    │
+    │      (CLI)      │            │   (Tauri GUI)   │            │ (Hotkey Daemon) │
+    └─────────────────┘            └─────────────────┘            └─────────────────┘
 ```
 
 ## Building from source
