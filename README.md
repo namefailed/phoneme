@@ -17,6 +17,10 @@
   <img src="docs/screenshots/settings-whisper.png" width="720" alt="Phoneme settings — Whisper configuration">
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/settings-editor.png" width="720" alt="Phoneme settings — Editor">
+</p>
+
 ## ✨ What is Phoneme?
 
 Phoneme bridges the gap between quick voice dictation and your personal knowledge management systems. It is designed for power users who want the friction-free experience of hitting a hotkey to capture a thought, but without the privacy concerns, subscription fees, or cloud lock-in of modern AI tools.
