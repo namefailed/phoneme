@@ -147,6 +147,13 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 14px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.cm-editor-root, .cm-editor {
+  flex: 1;
+  height: 100%;
 }
 .transcript-textarea {
   width: 100%;
