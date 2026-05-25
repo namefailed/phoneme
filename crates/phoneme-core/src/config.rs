@@ -499,10 +499,12 @@ mod tests {
     }
 
     #[test]
-    fn parses_theme_configuration() {
+    fn parses_interface_configuration() {
         let dir = TempDir::new().unwrap();
         let mut cfg = Config::default();
         cfg.interface.theme = "tokyo-night".to_string();
+        cfg.interface.strip_titlebar = true;
+        cfg.interface.column_widths.insert("Duration".to_string(), 150);
 
         let path = dir.path().join("config.toml");
         let toml_str = toml::to_string(&cfg).unwrap();
@@ -510,5 +512,7 @@ mod tests {
 
         let parsed = Config::load(&path).unwrap();
         assert_eq!(parsed.interface.theme, "tokyo-night");
+        assert_eq!(parsed.interface.strip_titlebar, true);
+        assert_eq!(parsed.interface.column_widths.get("Duration"), Some(&150));
     }
 }

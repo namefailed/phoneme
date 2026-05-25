@@ -2,6 +2,7 @@ import { listRecordings, type Recording } from "../../services/ipc";
 import { Store } from "../../state/store";
 import { filterStore } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
+import { formatDay } from "../../utils/date";
 
 import "../shared/styles.css";
 import "./styles.css";
@@ -196,22 +197,6 @@ export class RecordingsList {
       </div>
     `;
   }
-}
-
-function formatDay(iso: string): string {
-  const d = new Date(iso);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diffTime = today.getTime() - d.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-  if (diffDays <= 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays <= 7) return "Last 7 Days";
-  if (diffDays <= 30) return "Last 30 Days";
-  return "Older";
-}
-
 function formatTime(iso: string, use24h: boolean): string {
   const d = new Date(iso);
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: !use24h });
