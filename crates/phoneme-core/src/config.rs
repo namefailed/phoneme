@@ -374,33 +374,51 @@ impl Config {
     /// Config; original is unchanged.
     pub fn expanded(&self) -> Result<Self> {
         let mut out = self.clone();
-        out.recording.audio_dir = expand(&out.recording.audio_dir)?;
-        out.whisper.model_path = expand(&out.whisper.model_path)?;
-        let mut expanded_cmds = Vec::new();
-        for c in &out.hook.commands {
-            expanded_cmds.push(expand(c)?);
-        }
-        out.hook.commands = expanded_cmds;
+        out.recording.audio_dir = expand_path(&out.recording.audio_dir)?;
+        out.whisper.model_path = expand_path(&out.whisper.model_path)?;
+        // Hook commands are arbitrary shell strings that may contain $variables
+        // used at runtime by the shell (e.g. `$payload`, `$input` in PowerShell).
+        // Only expand the known Phoneme path tokens (%APPDATA%, ~/) — do NOT
+        // run them through shellexpand::env, which would misinterpret those
+        // shell variables as OS environment variable references and error.
+        out.hook.commands = out.hook.commands.iter().map(|c| expand_cmd(c)).collect();
         Ok(out)
     }
 }
 
-fn expand(s: &str) -> Result<String> {
+/// Expand `~` and `%VAR%` path tokens in a file-path string, then resolve
+/// any remaining `$VAR`-style OS environment variable references via
+/// shellexpand. Use this for path-only fields like `audio_dir` and
+/// `model_path`.
+fn expand_path(s: &str) -> Result<String> {
     if s.is_empty() {
         return Ok(s.into());
     }
+    let s = expand_home_tokens(s);
+    let expanded = shellexpand::env(&s)
+        .map_err(|e| Error::InvalidConfig(format!("path expansion failed for {s}: {e}")))?;
+    Ok(expanded.into_owned())
+}
+
+/// Expand only the Phoneme-specific path tokens (`%APPDATA%`, `%USERPROFILE%`,
+/// `~/`) in a shell command string. Shell-variable references like `$payload`
+/// or `$input` are left untouched — they are runtime variables for the hook
+/// process, not OS environment variables for Phoneme to resolve.
+fn expand_cmd(s: &str) -> String {
+    expand_home_tokens(s)
+}
+
+/// Replace `%USERPROFILE%`, `%APPDATA%`, and leading `~/` with absolute paths.
+fn expand_home_tokens(s: &str) -> String {
     let mut s = s
         .replace("%USERPROFILE%", "~")
         .replace("%APPDATA%", "~/AppData/Roaming");
     if let Some(home_dir) =
         directories::UserDirs::new().map(|u| u.home_dir().to_string_lossy().to_string())
     {
-        // Replace `~/` with the absolute home directory path, even in the middle of strings (like hook commands)
         s = s.replace("~/", &format!("{}/", home_dir.replace('\\', "/")));
     }
-    let expanded = shellexpand::env(&s)
-        .map_err(|e| Error::InvalidConfig(format!("path expansion failed for {s}: {e}")))?;
-    Ok(expanded.into_owned())
+    s
 }
 
 fn deserialize_string_or_vec<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
@@ -535,5 +553,43 @@ mod tests {
         assert_eq!(parsed.interface.theme, "tokyo-night");
         assert!(parsed.interface.strip_titlebar);
         assert_eq!(parsed.interface.column_widths.first().unwrap(), "150px");
+    }
+
+    /// Regression: a hook command that contains PowerShell `$variables` (e.g.
+    /// `$payload`, `$input`) must not cause `expanded()` to fail with "env var
+    /// not found". Those are shell runtime variables, not OS env vars.
+    #[test]
+    fn expanded_does_not_shellexpand_hook_commands() {
+        let mut cfg = Config::default();
+        // Simulate the clipboard preset: contains $d and $input which are
+        // PowerShell variables, NOT environment variables.
+        cfg.hook.commands = vec![
+            r#"powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript""#.into(),
+        ];
+        // Must not return Err — $d is not an env var but should be left alone.
+        let expanded = cfg.expanded().expect("hook commands with $vars should not fail expansion");
+        // The $-variables must be preserved verbatim (not expanded to empty or error).
+        assert!(expanded.hook.commands[0].contains("$d"));
+        assert!(expanded.hook.commands[0].contains("$input"));
+    }
+
+    /// %APPDATA% in a hook command must still be expanded to an absolute path.
+    #[test]
+    fn expanded_hook_commands_expand_appdata_token() {
+        let mut cfg = Config::default();
+        cfg.hook.commands = vec![
+            "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-clipboard.ps1"
+                .into(),
+        ];
+        let expanded = cfg.expanded().expect("expands ok");
+        assert!(
+            !expanded.hook.commands[0].contains("%APPDATA%"),
+            "APPDATA token should be replaced, got: {}",
+            expanded.hook.commands[0]
+        );
+        assert!(
+            expanded.hook.commands[0].contains("phoneme/hooks/to-clipboard.ps1"),
+            "path suffix should be preserved"
+        );
     }
 }
