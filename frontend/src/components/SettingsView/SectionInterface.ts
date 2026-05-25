@@ -71,23 +71,27 @@ export class SectionInterface {
 
         <div class="settings-field">
           <label>Strip system titlebar</label>
-          <div>${renderField(
-            { key: "interface.strip_titlebar", label: "", kind: "checkbox" },
-            config.interface.strip_titlebar,
-          )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            Removes the default OS window decorations. The top header will become draggable. Requires app restart to fully apply.
-          </span>
+          <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "interface.strip_titlebar", label: "", kind: "checkbox" },
+              config.interface.strip_titlebar,
+            )}</div>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              Removes the default OS window decorations. The top header will become draggable. Requires app restart to fully apply.
+            </span>
+          </div>
         </div>
 
         <div class="settings-field" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Visible Columns</label>
           <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
-            ${colCheckboxes}
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${colCheckboxes}
+            </div>
+            <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+              Select which columns appear in the recordings list. The "Day" column is always visible.
+            </span>
           </div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            Select which columns appear in the recordings list. The "Day" column is always visible.
-          </span>
         </div>
 
       </div>
