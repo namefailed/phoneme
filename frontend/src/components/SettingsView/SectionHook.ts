@@ -27,6 +27,16 @@ export class SectionHook {
         </p>
         <div class="settings-field">
           <label>Integration Script</label>
+          <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+            <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
+              <option value="" disabled selected>Load a preset hook...</option>
+              <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
+              <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Add-Content -Path '~/Documents/VoiceNotes.md' -Value &quot;&quot;&quot;$($d.transcript)&quot;&quot;&quot;&quot;">Append to VoiceNotes.md file</option>
+              <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; $msg=$d.transcript; Invoke-RestMethod -Uri 'YOUR_WEBHOOK_URL' -Method Post -Body (@{content=$msg}|ConvertTo-Json) -ContentType 'application/json'&quot;">Send to Discord/Slack Webhook</option>
+              <option value="python process_note.py">Run custom Python script</option>
+            </select>
+            <span style="font-size: 11px; color: var(--fg-faded);">← Try these!</span>
+          </div>
           <div>
             ${renderField(
               { key: "hook.command", label: "", kind: "text" },
@@ -83,5 +93,17 @@ export class SectionHook {
       el.className = `test-result ${result.ok ? "ok" : "err"}`;
       el.textContent = result.message;
     });
+
+    const presetSelect = container.querySelector<HTMLSelectElement>("#hook-preset-select");
+    const cmdInput = container.querySelector<HTMLInputElement>(`[data-key="hook.command"]`);
+    if (presetSelect && cmdInput) {
+      presetSelect.addEventListener("change", () => {
+        if (presetSelect.value) {
+          cmdInput.value = presetSelect.value;
+          cmdInput.dispatchEvent(new Event("input"));
+          this.config.hook.command = presetSelect.value;
+        }
+      });
+    }
   }
 }
