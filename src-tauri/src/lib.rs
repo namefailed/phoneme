@@ -65,7 +65,7 @@ pub fn run() {
                         // Read live config to ensure toggle setting updates apply immediately
                         let current_config = phoneme_core::config_io::read_or_default();
                         let mode = current_config.hotkey.mode;
-                        
+
                         match event.state() {
                             ShortcutState::Pressed => {
                                 tauri::async_runtime::spawn(async move {

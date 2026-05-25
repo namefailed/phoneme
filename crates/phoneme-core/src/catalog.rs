@@ -175,7 +175,7 @@ impl Catalog {
 
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
         let mut sql = String::from("SELECT recordings.* FROM recordings");
-        
+
         let mut fts_query = None;
         if let Some(q) = filter.search.as_deref() {
             let sanitized = sanitize_fts5_query(q);
@@ -184,13 +184,13 @@ impl Catalog {
                 fts_query = Some(sanitized);
             }
         }
-        
+
         if filter.tag_id.is_some() {
             sql.push_str(" JOIN recording_tags rt ON rt.recording_id = recordings.id");
         }
-        
+
         sql.push_str(" WHERE 1=1");
-        
+
         if fts_query.is_some() {
             sql.push_str(" AND recordings_fts.transcript MATCH ?");
         }
@@ -332,7 +332,10 @@ mod tests {
         assert_eq!(sanitize_fts5_query("hello"), "hello*");
         assert_eq!(sanitize_fts5_query("hello world"), "hello* AND world*");
         assert_eq!(sanitize_fts5_query("O'Connor"), "O* AND Connor*");
-        assert_eq!(sanitize_fts5_query("some-bad*characters"), "some* AND bad* AND characters*");
+        assert_eq!(
+            sanitize_fts5_query("some-bad*characters"),
+            "some* AND bad* AND characters*"
+        );
         assert_eq!(sanitize_fts5_query("\"quotes\""), "quotes*");
         assert_eq!(sanitize_fts5_query("   spaces   "), "spaces*");
         assert_eq!(sanitize_fts5_query(""), "");
