@@ -25,7 +25,7 @@ export class SectionHook {
         <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Phoneme can automatically pass your voice notes to other applications or save them to disk by executing a local script. You can point this to a <code>.bat</code> or <code>.ps1</code> file to save notes to Obsidian, Word, or anything else.
         </p>
-        <div class="settings-field">
+        <div class="settings-field long-input">
           <label>Integration Script</label>
           <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
             <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">

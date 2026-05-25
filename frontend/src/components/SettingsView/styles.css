@@ -97,23 +97,32 @@
 }
 .settings-field {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 12px;
-  align-items: start;
-  padding: 8px 0;
+  grid-template-columns: 240px 1fr;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 16px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 .settings-field:last-child {
   border-bottom: none;
 }
-.settings-field label {
+.settings-field > label {
   color: var(--fg-default);
   font-size: 13px;
-  padding-top: 4px;
+  font-weight: 500;
+  padding-top: 0;
 }
-.settings-field .help {
+.settings-field > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.settings-field > span {
+  grid-column: 1 / -1;
   color: var(--fg-faded);
   font-size: 11px;
+  line-height: 1.5;
   margin-top: 2px;
 }
 .settings-field input,
@@ -126,7 +135,23 @@
   color: var(--fg-default);
   font-size: 13px;
   width: 100%;
+}
+.settings-field input[type="number"] {
+  max-width: 120px;
+}
+.settings-field select {
+  max-width: 250px;
+}
+.settings-field input[type="text"],
+.settings-field input[type="password"] {
   max-width: 380px;
+}
+.settings-field.long-input input[type="text"] {
+  max-width: 100%;
+  flex: 1;
+}
+.settings-field textarea {
+  max-width: 100%;
 }
 .settings-field input:focus,
 .settings-field select:focus,

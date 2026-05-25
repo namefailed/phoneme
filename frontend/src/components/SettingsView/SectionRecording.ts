@@ -31,7 +31,7 @@ export class SectionRecording {
             )}
           </div>
         </div>
-        <div class="settings-field">
+        <div class="settings-field long-input">
           <label>Audio directory</label>
           <div>${renderField(
             { key: "recording.audio_dir", label: "", kind: "text" },

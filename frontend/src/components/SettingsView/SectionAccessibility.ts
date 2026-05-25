@@ -95,11 +95,17 @@ export class SectionAccessibility {
           )}</div>
         </div>
 
-        <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-          <label>Instructions for the AI</label>
+        <div class="settings-field" style="display: flex; flex-direction: column; align-items: stretch; gap: 8px; border-bottom: none; padding-bottom: 0;">
+          <style>
+            textarea[data-key="llm_post_process.prompt"] {
+              max-width: 100% !important;
+              min-height: 250px !important;
+            }
+          </style>
+          <label style="margin-bottom: 0;">Instructions for the AI</label>
           
           <div style="width: 100%; display: flex; gap: 8px; margin-bottom: 4px; align-items: center;">
-            <select id="prompt-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
+            <select id="prompt-preset-select" style="flex: 1; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); outline: none; cursor: pointer;">
               <option value="">-- Choose a Default Preset --</option>
               <option value="Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.">Clean up audio (Default)</option>
               <option value="Fix grammar and punctuation only. Keep the exact words and meaning intact. Do not summarize.">Grammar & Punctuation only</option>
@@ -111,7 +117,7 @@ export class SectionAccessibility {
               <option value="I have a speech impediment that causes me to stutter and repeat sounds. Carefully clean up the transcript so it flows perfectly, removing any dysfluency while preserving my intended meaning. Reply ONLY with the cleaned text.">Dysfluency & Stuttering Assist</option>
               <option value="Format this raw transcript into a clean, professional journal entry or meeting note. Use bullet points or headings if appropriate. Output ONLY the formatted notes and absolutely no conversational filler.">Professional Notes & Journal</option>
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded);">Select a preset to auto-fill</span>
+            <span style="font-size: 11px; color: var(--fg-faded); white-space: nowrap;">Select a preset to auto-fill</span>
           </div>
 
           <div style="width: 100%;">${renderField(

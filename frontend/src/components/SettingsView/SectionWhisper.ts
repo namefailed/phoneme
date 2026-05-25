@@ -14,7 +14,7 @@ export class SectionWhisper {
     container.innerHTML = `
       <div class="settings-section">
         <h3>Whisper</h3>
-        <div class="settings-field">
+        <div class="settings-field long-input">
           <label>External URL</label>
           <div>
             ${renderField(
@@ -28,7 +28,7 @@ export class SectionWhisper {
             The endpoint to send audio to when using <b>External</b> mode. Must be a Whisper-compatible API (e.g., <code>http://127.0.0.1:8080/inference</code>).
           </span>
         </div>
-        <div class="settings-field">
+        <div class="settings-field long-input">
           <label>Model file</label>
           <div>
             ${renderField(
