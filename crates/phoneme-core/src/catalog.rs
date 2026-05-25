@@ -402,9 +402,9 @@ mod tests {
             .await
             .expect("open db");
         let mut r = Recording {
-            id: RecordingId::generate(),
+            id: RecordingId::new(),
             started_at: Local::now(),
-            duration_ms: Some(5000),
+            duration_ms: 5000,
             audio_path: "foo.wav".into(),
             transcript: Some("hello world".into()),
             model: Some("tiny".into()),
@@ -416,7 +416,6 @@ mod tests {
             hook_duration_ms: Some(100),
             transcribed_at: Some(Local::now()),
             hook_ran_at: Some(Local::now()),
-            tags: vec![],
         };
         db.insert(&r).await.expect("insert");
 
@@ -432,15 +431,13 @@ mod tests {
 
         // Test list
         let filter = ListFilter {
+            limit: Some(10),
             since: None,
-            until: None,
             status: None,
             search: None,
-            tag: None,
-            limit: 10,
-            offset: 0,
+            tag_id: None,
         };
-        let (list, total) = db.list_recordings(&filter).await.expect("list");
+        let (list, total) = db.list(&filter).await.expect("list");
         assert_eq!(total, 1);
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id.as_str(), r.id.as_str());
