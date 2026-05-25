@@ -31,6 +31,8 @@ export class WaveformPlayer {
       progressColor,
       cursorColor: accent,
       cursorWidth: 2,
+      barWidth: 2,
+      barGap: 1,
       height: 80,
       normalize: true,
       url: convertFileSrc(audioPath),
