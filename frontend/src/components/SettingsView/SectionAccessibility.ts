@@ -9,7 +9,7 @@ export class SectionAccessibility {
         enabled: false,
         provider: "none",
         api_key: "",
-        model: "llama3",
+        model: "llama3.2:3b",
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone."
       };
     }

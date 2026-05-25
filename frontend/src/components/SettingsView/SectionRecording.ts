@@ -15,7 +15,7 @@ export class SectionRecording {
     container.innerHTML = `
       <div class="settings-section">
         <h3>Recording</h3>
-        <div class="settings-field">
+        <div class="settings-field long-input">
           <label>Microphone</label>
           <div>
             ${renderField(

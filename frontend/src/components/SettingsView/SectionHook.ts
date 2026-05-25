@@ -28,7 +28,7 @@ export class SectionHook {
         <div class="settings-field long-input" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Integration Script</label>
           <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-            <div style="display: flex; gap: 8px; align-items: center;">
+            <div style="display: flex; gap: 8px; align-items: center; margin-right: auto;">
               <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
                 <option value="" disabled selected>Load a preset hook...</option>
                 <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>

@@ -8,12 +8,14 @@ export class SectionHotkey {
         <h3>Global Hotkey</h3>
         <div class="settings-field">
           <label>Enable</label>
-          <div>
-            ${renderField(
+          <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+            <div>${renderField(
               { key: "hotkey.enabled", label: "", kind: "checkbox" },
               config.hotkey.enabled,
-            )}
-            <div class="help">If you use Kanata/AHK/WHKD to bind a hotkey externally, leave this OFF.</div>
+            )}</div>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              If you use Kanata/AHK/WHKD to bind a hotkey externally, leave this OFF.
+            </span>
           </div>
         </div>
         <div class="settings-field">
