@@ -29,6 +29,10 @@
   <img src="docs/screenshots/settings-action-hook.png" width="720" alt="Phoneme settings — Action Hook">
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/settings-hotkey.png" width="720" alt="Phoneme settings — Global Hotkey">
+</p>
+
 ## ✨ What is Phoneme?
 
 Phoneme bridges the gap between quick voice dictation and your personal knowledge management systems. It is designed for power users who want the friction-free experience of hitting a hotkey to capture a thought, but without the privacy concerns, subscription fees, or cloud lock-in of modern AI tools.
