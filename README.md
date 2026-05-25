@@ -49,6 +49,10 @@
   <img src="docs/screenshots/settings-recording.png" width="720" alt="Phoneme settings — Recording">
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/settings-system-tray.png" width="720" alt="Phoneme settings — System Tray">
+</p>
+
 ## ✨ What is Phoneme?
 
 Phoneme bridges the gap between quick voice dictation and your personal knowledge management systems. It is designed for power users who want the friction-free experience of hitting a hotkey to capture a thought, but without the privacy concerns, subscription fees, or cloud lock-in of modern AI tools.
