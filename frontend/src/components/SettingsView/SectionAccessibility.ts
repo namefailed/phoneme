@@ -146,7 +146,7 @@ export class SectionAccessibility {
       const provider = providerSelect?.value || "none";
       providerSettings.forEach(el => {
         if (el.dataset.provider === provider) {
-          el.style.display = "flex";
+          el.style.display = "grid";
         } else {
           el.style.display = "none";
         }
