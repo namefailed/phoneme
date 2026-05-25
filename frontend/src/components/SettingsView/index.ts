@@ -65,13 +65,13 @@ export class SettingsView {
           <div class="sv-tab ${this.activeTab === "storage" ? "active" : ""}" data-tab="storage">Storage</div>
           <div class="sv-tab ${this.activeTab === "advanced" ? "active" : ""}" data-tab="advanced">Advanced</div>
         </div>
-        <div class="settings-main">
-          <div class="settings-toolbar">
+        <div class="settings-main" style="display: flex; flex-direction: column; height: 100%;">
+          <div class="settings-body" id="settings-body" style="flex: 1; overflow-y: auto;"></div>
+          <div class="settings-toolbar" style="padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px;">
             <span class="spacer"></span>
             <button id="settings-close">Close</button>
             <button class="primary" id="settings-save">Save</button>
           </div>
-          <div class="settings-body" id="settings-body"></div>
         </div>
       </div>
     `;

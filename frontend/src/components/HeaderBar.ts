@@ -70,8 +70,9 @@ export class HeaderBar {
       } else {
         btn.innerHTML = "🔴 Record";
         btn.classList.remove("recording-active");
-        btn.style.color = "var(--accent)";
-        btn.style.borderColor = "rgba(203,166,247,0.3)";
+        btn.style.color = "var(--err)";
+        btn.style.borderColor = "var(--err)";
+        btn.style.background = "rgba(243, 139, 168, 0.1)";
       }
     }
   }

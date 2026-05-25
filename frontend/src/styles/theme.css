@@ -15,6 +15,23 @@
   --info: #89b4fa;
 }
 
+html[data-theme="catppuccin-macchiato"] {
+  --bg-deep: #181926;
+  --bg-elevated: #24273a;
+  --bg-surface: #1e2030;
+  --border: #494d64;
+  --border-subtle: #363a4f;
+  --fg-default: #cad3f5;
+  --fg-muted: #939ab7;
+  --fg-faded: #6e738d;
+  --accent: #c6a0f6;
+  --accent-fg: #181926;
+  --ok: #a6da95;
+  --warn: #eed49f;
+  --err: #ed8796;
+  --info: #8aadf4;
+}
+
 html[data-theme="tokyo-night"] {
   --bg-deep: #1a1b26;
   --bg-elevated: #24283b;
@@ -66,7 +83,7 @@ html[data-theme="nord"] {
   --info: #81a1c1;
 }
 
-html[data-theme="gruvbox-dark"] {
+html[data-theme="gruvbox"] {
   --bg-deep: #282828;
   --bg-elevated: #3c3836;
   --bg-surface: #32302f;

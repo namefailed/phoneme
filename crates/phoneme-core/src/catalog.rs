@@ -17,6 +17,30 @@ pub struct Catalog {
     pool: SqlitePool,
 }
 
+/// Sanitizes a user-provided string for use in an FTS5 MATCH query.
+///
+/// Extracts alphanumeric terms and joins them with `* AND ` to perform a robust
+/// prefix search that won't crash SQLite on invalid syntax.
+fn sanitize_fts5_query(query: &str) -> String {
+    let mut terms = Vec::new();
+    let mut current_term = String::new();
+
+    for c in query.chars() {
+        if c.is_alphanumeric() {
+            current_term.push(c);
+        } else if !current_term.is_empty() {
+            terms.push(format!("{}*", current_term));
+            current_term.clear();
+        }
+    }
+
+    if !current_term.is_empty() {
+        terms.push(format!("{}*", current_term));
+    }
+
+    terms.join(" AND ")
+}
+
 impl Catalog {
     /// Open (or create) a catalog database at `path`. Runs pending migrations.
     ///
@@ -150,19 +174,26 @@ impl Catalog {
     }
 
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
-        // A non-empty text search delegates to the FTS5 path. This currently
-        // ignores the status/since filters when search is set — acceptable
-        // until a combined FTS+filter query is actually requested.
+        let mut sql = String::from("SELECT recordings.* FROM recordings");
+        
+        let mut fts_query = None;
         if let Some(q) = filter.search.as_deref() {
-            if !q.trim().is_empty() {
-                return self.search(q).await;
+            let sanitized = sanitize_fts5_query(q);
+            if !sanitized.is_empty() {
+                sql.push_str(" JOIN recordings_fts ON recordings.rowid = recordings_fts.rowid");
+                fts_query = Some(sanitized);
             }
         }
-        let mut sql = String::from("SELECT recordings.* FROM recordings");
+        
         if filter.tag_id.is_some() {
             sql.push_str(" JOIN recording_tags rt ON rt.recording_id = recordings.id");
         }
+        
         sql.push_str(" WHERE 1=1");
+        
+        if fts_query.is_some() {
+            sql.push_str(" AND recordings_fts.transcript MATCH ?");
+        }
         if let Some(tag_id) = filter.tag_id {
             sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
         }
@@ -178,6 +209,9 @@ impl Catalog {
         }
 
         let mut q = sqlx::query(&sql);
+        if let Some(fq) = &fts_query {
+            q = q.bind(fq);
+        }
         if let Some(s) = filter.status {
             q = q.bind(s.as_str().to_string());
         }
@@ -185,23 +219,6 @@ impl Catalog {
             q = q.bind(t.to_rfc3339());
         }
         let rows = q.fetch_all(&self.pool).await?;
-        rows.into_iter().map(row_to_recording).collect()
-    }
-
-    /// FTS5 search across transcripts. Empty query returns empty Vec.
-    pub async fn search(&self, query: &str) -> Result<Vec<Recording>> {
-        if query.trim().is_empty() {
-            return Ok(vec![]);
-        }
-        let rows = sqlx::query(
-            r#"SELECT recordings.* FROM recordings
-               JOIN recordings_fts ON recordings.rowid = recordings_fts.rowid
-               WHERE recordings_fts.transcript MATCH ?
-               ORDER BY recordings.started_at DESC, recordings.id DESC"#,
-        )
-        .bind(query)
-        .fetch_all(&self.pool)
-        .await?;
         rows.into_iter().map(row_to_recording).collect()
     }
 
@@ -303,6 +320,22 @@ impl Catalog {
                 })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_fts5_query() {
+        assert_eq!(sanitize_fts5_query("hello"), "hello*");
+        assert_eq!(sanitize_fts5_query("hello world"), "hello* AND world*");
+        assert_eq!(sanitize_fts5_query("O'Connor"), "O* AND Connor*");
+        assert_eq!(sanitize_fts5_query("some-bad*characters"), "some* AND bad* AND characters*");
+        assert_eq!(sanitize_fts5_query("\"quotes\""), "quotes*");
+        assert_eq!(sanitize_fts5_query("   spaces   "), "spaces*");
+        assert_eq!(sanitize_fts5_query(""), "");
     }
 }
 
