@@ -23,12 +23,21 @@ When you press your global hotkey (e.g., `Ctrl+Alt+Space`), Phoneme records your
 
 The app does not force you into a specific ecosystem. It transcribes. You decide where it goes.
 
-## 🚀 New in v1.2
-- **Smart Cleanup (AI):** Pipe your transcripts through a local Ollama model (like `llama3`) or OpenAI to automatically clean up stutters, format as journal entries, or translate to English.
-- **Auto-Updater:** Seamlessly download and install new releases straight from GitHub without leaving the app.
-- **Premium Themes:** Gorgeous new color palettes (Catppuccin Mocha, Tokyo Night, One Dark, Nord, Dracula, Gruvbox).
-- **Vim Mode:** Fully functional Vim emulation in the transcript editor, powered by CodeMirror 6, complete with custom `.vimrc` support!
-- **Dynamic Layouts:** Completely resizable, drag-and-drop column layouts in the recordings list.
+## 🚀 What's in v1.0.0
+
+This is the stable public release. Everything in this list is available today:
+
+- **Press-to-talk & toggle modes** — bind any global hotkey, choose Hold or Toggle behaviour.
+- **Local Whisper transcription** — uses your own [whisper-server][whisper-server] or the bundled one; your audio never leaves your machine.
+- **AI post-processing** — optionally clean up, format, or translate transcripts through a local [Ollama](https://ollama.ai) model or OpenAI. Includes 9 preset prompts.
+- **Hook pipeline** — every transcript is delivered to your script as JSON on stdin. Chain scripts, POST to webhooks, send to Obsidian, Org-mode, Notion, or anywhere. Five reference hooks included.
+- **Full CLI** — every GUI action is also available as `phoneme` commands. Works with AutoHotkey, Kanata, Stream Deck, or any hotkey daemon.
+- **Tags** — attach colour-coded tags to recordings; filter and search the catalog.
+- **Transcript editor** — edit transcripts in-app with optional full Vim mode (visual, linewise, mouse selection all work).
+- **Doctor** — built-in health checker that tests the daemon, audio dir, hooks, Whisper server, and Ollama, with one-click fixes.
+- **11 themes** — Catppuccin Mocha/Macchiato/Latte, Dracula, Everforest, Gruvbox, Nord, One Dark, Rosé Pine, Solarized Light, Tokyo Night.
+- **Auto-updater** — downloads and installs new releases directly from GitHub.
+- **Export** — bulk export all recordings and metadata as a zip archive.
 
 ## 📦 Install
 
@@ -90,12 +99,13 @@ A hook is your script. Phoneme invokes it with the transcript as JSON on stdin. 
 
 | Hook | What it does |
 |---|---|
-| `to-stdout.ps1` | Default. Echoes the transcript. |
-| `to-org-journal.ps1` | Appends to `~/Documents/org/journal.org`. |
-| `to-markdown-daily.ps1` | Appends to `~/Documents/notes/YYYY-MM-DD.md`. |
-| `to-denote.ps1` | Creates a Denote-flavored note file. |
+| `to-stdout.ps1` | Default. Echoes the transcript to stdout. |
+| `to-clipboard.ps1` | Copies the transcript to the Windows clipboard instantly. |
+| `to-org-journal.ps1` | Appends to `~/Documents/org/journal.org` (Doom Emacs / Denote). |
+| `to-markdown-daily.ps1` | Appends to `~/Documents/notes/YYYY-MM-DD.md` (Obsidian-style). |
+| `to-denote.ps1` | Creates a Denote-flavored note file under `~/Documents/org/notes/`. |
 
-You can chain multiple hooks in `config.toml` under `[hook] commands = ["script1.ps1", "script2.bat"]`, and optionally post the JSON payload to a `webhook_url` at the end of the pipeline.
+Chain multiple hooks under `[hook] commands = ["script1.ps1", "script2.bat"]`, and optionally POST the JSON payload to a `webhook_url` simultaneously.
 
 See [docs/hooks.md](docs/hooks.md) for the full contract.
 

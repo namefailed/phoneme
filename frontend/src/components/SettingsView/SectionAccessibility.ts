@@ -95,38 +95,32 @@ export class SectionAccessibility {
           )}</div>
         </div>
 
-        <div class="settings-field" style="display: flex; flex-direction: column; align-items: stretch; gap: 8px; border-bottom: none; padding-bottom: 0;">
-          <style>
-            textarea[data-key="llm_post_process.prompt"] {
-              max-width: 100% !important;
-              min-height: 250px !important;
-            }
-          </style>
-          <label style="margin-bottom: 0;">Instructions for the AI</label>
-          
-          <div style="width: 100%; display: flex; gap: 8px; margin-bottom: 4px; align-items: center;">
-            <select id="prompt-preset-select" style="flex: 1; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); outline: none; cursor: pointer;">
-              <option value="">-- Choose a Default Preset --</option>
-              <option value="Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.">Clean up audio (Default)</option>
-              <option value="Fix grammar and punctuation only. Keep the exact words and meaning intact. Do not summarize.">Grammar & Punctuation only</option>
-              <option value="Format the transcript as a bulleted list of key takeaways and action items.">Extract action items</option>
-              <option value="Summarize the core message of this transcript in 2-3 sentences.">Summarize</option>
-              <option value="Rewrite this transcript into a professional, polished email draft.">Write an email</option>
-              <option value="Translate this transcript into clear, fluent English.">Translate to English</option>
-              <option value="Format this transcript into a structured markdown document with clear headings, bullet points, and bolded key terms.">Structured Markdown Notes</option>
-              <option value="I have a speech impediment that causes me to stutter and repeat sounds. Carefully clean up the transcript so it flows perfectly, removing any dysfluency while preserving my intended meaning. Reply ONLY with the cleaned text.">Dysfluency & Stuttering Assist</option>
-              <option value="Format this raw transcript into a clean, professional journal entry or meeting note. Use bullet points or headings if appropriate. Output ONLY the formatted notes and absolutely no conversational filler.">Professional Notes & Journal</option>
-            </select>
-            <span style="font-size: 11px; color: var(--fg-faded); white-space: nowrap;">Select a preset to auto-fill</span>
+        <div class="settings-field ai-prompt-field">
+          <label>Instructions for the AI</label>
+          <div class="ai-prompt-controls">
+            <div class="ai-preset-row">
+              <select id="prompt-preset-select" class="ai-preset-select">
+                <option value="">— Choose a preset —</option>
+                <option value="Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.">Clean up audio (Default)</option>
+                <option value="Fix grammar and punctuation only. Keep the exact words and meaning intact. Do not summarize.">Grammar &amp; Punctuation only</option>
+                <option value="Format the transcript as a bulleted list of key takeaways and action items.">Extract action items</option>
+                <option value="Summarize the core message of this transcript in 2-3 sentences.">Summarize</option>
+                <option value="Rewrite this transcript into a professional, polished email draft.">Write an email</option>
+                <option value="Translate this transcript into clear, fluent English.">Translate to English</option>
+                <option value="Format this transcript into a structured markdown document with clear headings, bullet points, and bolded key terms.">Structured Markdown Notes</option>
+                <option value="I have a speech impediment that causes me to stutter and repeat sounds. Carefully clean up the transcript so it flows perfectly, removing any dysfluency while preserving my intended meaning. Reply ONLY with the cleaned text.">Dysfluency &amp; Stuttering Assist</option>
+                <option value="Format this raw transcript into a clean, professional journal entry or meeting note. Use bullet points or headings if appropriate. Output ONLY the formatted notes and absolutely no conversational filler.">Professional Notes &amp; Journal</option>
+              </select>
+              <span class="ai-preset-hint">Presets auto-fill the field below</span>
+            </div>
+            ${renderField(
+              { key: "llm_post_process.prompt", label: "", kind: "textarea" },
+              config.llm_post_process.prompt || "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
+            )}
+            <span class="settings-help-text">
+              Tell the AI how to edit your transcript. Finish with "Reply ONLY with the final text."
+            </span>
           </div>
-
-          <div style="width: 100%;">${renderField(
-            { key: "llm_post_process.prompt", label: "", kind: "textarea" },
-            config.llm_post_process.prompt || "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
-          )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
-            Instructions for the AI to follow when editing the transcript. Make sure to instruct the AI to only output the final text.
-          </span>
         </div>
       </div>
     `;

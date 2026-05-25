@@ -2,19 +2,22 @@
 
 This document outlines the short-term, medium-term, and long-term vision for Phoneme.
 
-## 🌟 v1.2 (Current Series)
-*Focus: Polish, Customization, and Smart Post-processing*
-- [x] **Smart Cleanup (AI):** LLM post-processing via local Ollama (`llama3.2:3b`) or OpenAI.
+## 🌟 v1.0.0 (Stable Release)
+*Focus: Polish, full feature parity, public launch*
+- [x] **Smart Cleanup (AI):** LLM post-processing via local Ollama or OpenAI, with 9 prompt presets.
 - [x] **Auto-Updater:** Seamless in-app updates straight from GitHub.
-- [x] **Premium Themes:** Gorgeous new color palettes (Catppuccin Mocha, Tokyo Night, One Dark, etc).
-- [x] **Vim Mode:** Fully functional Vim emulation in the transcript editor, with custom `.vimrc` file support!
+- [x] **11 Themes:** Catppuccin Mocha/Macchiato/Latte, Dracula, Everforest, Gruvbox, Nord, One Dark, Rosé Pine, Solarized Light, Tokyo Night.
+- [x] **Vim Mode:** Full Vim emulation in the transcript editor (visual, linewise, mouse selection).
 - [x] **Dynamic Layouts:** Resizable, configurable columns in the recordings list.
+- [x] **Clipboard Hook:** `to-clipboard.ps1` copies transcript to clipboard instantly.
+- [x] **Doctor:** Health checker with one-click daemon restart and Ollama/Whisper probes.
+- [x] **Clean Shutdown:** Daemon and whisper-server stop cleanly when the app closes.
 
-## 🚀 v1.3 (Short Term)
+## 🚀 v1.1 (Short Term)
 *Focus: Accessibility and Offline Capability*
 - [ ] **Bundled Ollama Support:** Seamless offline AI post-processing out-of-the-box without requiring manual Ollama setup.
-- [ ] **Settings Overhaul:** Structural overhaul separating the UI rendering from the Tray logic completely.
 - [ ] **Extended Hook Presets:** More built-in integrations for popular tools (Notion, Obsidian, Discord webhooks).
+- [ ] **macOS Beta:** Early macOS port for Apple Silicon.
 
 ## 🔮 v2.0 (Medium Term)
 *Focus: Platform Expansion and Real-time Processing*

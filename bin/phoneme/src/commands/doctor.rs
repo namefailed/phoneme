@@ -9,7 +9,8 @@ use std::process::ExitCode;
 pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     if args.rebuild_catalog {
         eprintln!(
-            "doctor --rebuild-catalog is not yet implemented as a CLI; run the daemon's catalog rebuild command"
+            "doctor --rebuild-catalog: use `phoneme daemon status` to confirm the daemon is \
+             running, then delete catalog.db from %LOCALAPPDATA%\\phoneme\\ and restart the daemon."
         );
         return ExitCode::from(exit::GENERIC_FAIL);
     }
@@ -18,36 +19,33 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
 
     // Daemon reachability.
     let mut client_result = Client::connect(cfg).await;
+    let daemon_ok = client_result.is_ok();
     checks.push(Check {
         name: "daemon",
-        ok: client_result.is_ok(),
+        ok: daemon_ok,
         detail: match &client_result {
             Ok(_) => "running".into(),
-            Err(_) => "not reachable".into(),
+            Err(_) => "not reachable — run: phoneme daemon start".into(),
         },
     });
 
-    // Daemon status detail.
+    // Daemon status detail (pid) — only if daemon is reachable.
     if let Ok(ref mut c) = client_result {
         match c.send(Request::DaemonStatus).await {
-            Ok(value) => {
-                checks.push(Check {
-                    name: "daemon_status",
-                    ok: true,
-                    detail: format!("pid {}", value["pid"]),
-                });
-            }
+            Ok(value) => checks.push(Check {
+                name: "daemon_pid",
+                ok: true,
+                detail: format!("pid {}", value["pid"]),
+            }),
             Err(_) => checks.push(Check {
-                name: "daemon_status",
+                name: "daemon_pid",
                 ok: false,
                 detail: "no status reply".into(),
             }),
         }
     }
 
-    // Filesystem checks. Expand %VAR%/~ first — the raw config value is
-    // e.g. "%USERPROFILE%/Documents/phoneme/audio", which Path::exists()
-    // would always report as missing.
+    // Filesystem checks. Expand %VAR%/~ so checks reflect real paths.
     let expanded = cfg.expanded();
     let audio_dir_raw = match &expanded {
         Ok(c) => c.recording.audio_dir.clone(),
@@ -60,30 +58,82 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         detail: audio_dir.display().to_string(),
     });
 
-    // Hook file (best-effort).
-    let hook_first_word = cfg
+    // Hook executable (best-effort; empty list is treated as ok).
+    let hook_cmd = cfg
         .hook
         .commands
         .first()
-        .map(|c| c.split_whitespace().next().unwrap_or(""))
+        .map(String::as_str)
         .unwrap_or("");
-
-    let (ok, detail) = if hook_first_word.is_empty() {
+    let hook_first_word = hook_cmd.split_whitespace().next().unwrap_or("");
+    let (hook_ok, hook_detail) = if hook_first_word.is_empty() {
         (true, "none configured".into())
     } else {
         (
-            which::which(hook_first_word).is_ok() || std::path::Path::new(hook_first_word).exists(),
-            hook_first_word.into(),
+            which::which(hook_first_word).is_ok()
+                || std::path::Path::new(hook_first_word).exists(),
+            hook_cmd.to_owned(),
         )
     };
-
     checks.push(Check {
         name: "hook_executable",
-        ok,
-        detail,
+        ok: hook_ok,
+        detail: hook_detail,
     });
 
-    let any_failed = checks.iter().any(|c| !c.ok);
+    // Whisper server reachability.
+    let whisper_url = cfg.whisper.server_base_url();
+    let whisper_probe = format!("{whisper_url}/health");
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or_default();
+    let (whisper_ok, whisper_detail) = match http.get(&whisper_probe).send().await {
+        Ok(r) => (
+            r.status().is_success() || r.status().as_u16() == 404,
+            format!("{whisper_url} — HTTP {}", r.status()),
+        ),
+        Err(e) if e.is_timeout() => (false, format!("{whisper_url} — timed out")),
+        Err(_) => (false, format!("{whisper_url} — not reachable")),
+    };
+    checks.push(Check {
+        name: "whisper_server",
+        ok: whisper_ok,
+        detail: whisper_detail,
+    });
+
+    // Ollama (optional) — probe default port.
+    let ollama_required =
+        cfg.llm_post_process.enabled && cfg.llm_post_process.provider == "ollama";
+    let (probe_ok, probe_detail) =
+        match http.get("http://127.0.0.1:11434/api/tags").send().await {
+            Ok(r) => (
+                r.status().is_success(),
+                format!("http://127.0.0.1:11434 — HTTP {}", r.status()),
+            ),
+            Err(e) if e.is_timeout() => (false, "http://127.0.0.1:11434 — timed out".into()),
+            Err(_) => (false, "http://127.0.0.1:11434 — not running".into()),
+        };
+    let (ollama_ok, ollama_detail) = if ollama_required {
+        (probe_ok, probe_detail)
+    } else if probe_ok {
+        (true, format!("{probe_detail} (optional)"))
+    } else {
+        (
+            true,
+            format!("{probe_detail} — optional; not required for your config"),
+        )
+    };
+    checks.push(Check {
+        name: "ollama (optional)",
+        ok: ollama_ok,
+        detail: ollama_detail,
+    });
+
+    // Print results.
+    let any_failed = checks
+        .iter()
+        .any(|c| !c.ok && c.name != "ollama (optional)");
 
     if json {
         let arr: Vec<_> = checks
@@ -98,15 +148,14 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
             } else {
                 "✗".red().to_string()
             };
-            println!("{mark} {:<20} {}", c.name, c.detail);
+            println!("{mark} {:<22} {}", c.name, c.detail);
+        }
+        if !daemon_ok {
+            println!("\n  Tip: run `phoneme daemon start` to launch the daemon.");
         }
     }
 
-    if any_failed {
-        ExitCode::from(exit::GENERIC_FAIL)
-    } else {
-        ExitCode::SUCCESS
-    }
+    if any_failed { ExitCode::from(exit::GENERIC_FAIL) } else { ExitCode::SUCCESS }
 }
 
 struct Check {

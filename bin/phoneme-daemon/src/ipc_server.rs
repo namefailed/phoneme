@@ -12,7 +12,11 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         ),
         other => anyhow::anyhow!("bind named pipe '{pipe_name}': {other}"),
     })?;
-    tracing::info!(pipe = %pipe_name, "IPC server listening");
+    tracing::info!(
+        pipe = %pipe_name,
+        pid = std::process::id(),
+        "IPC server listening — phoneme-daemon ready"
+    );
 
     loop {
         let conn = match listener.accept().await {

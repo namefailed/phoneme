@@ -1,6 +1,6 @@
 # Smart Cleanup (LLM Post-Processing)
 
-Phoneme v1.2 introduced a powerful new feature: **Smart Cleanup**. 
+Phoneme includes a built-in **Smart Cleanup** feature.
 
 Instead of just getting raw, sometimes imperfect Whisper transcriptions, Phoneme can pipe your transcript through a Large Language Model (LLM) before saving it. This allows you to automatically remove stutters, fix phonetic misunderstandings, translate languages on-the-fly, or format your spoken thoughts into clean bullet points.
 

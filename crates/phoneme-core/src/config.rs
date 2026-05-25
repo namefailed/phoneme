@@ -91,6 +91,18 @@ pub struct LlmConfig {
     pub timeout_secs: u64,
 }
 
+impl LlmConfig {
+    /// OpenAI-compatible Whisper server base URL (no trailing path).
+    pub fn server_base_url(&self) -> String {
+        match self.mode {
+            WhisperMode::External => self.external_url.trim_end_matches('/').to_string(),
+            WhisperMode::BundledModel | WhisperMode::BundledDownload => {
+                format!("http://127.0.0.1:{}", self.bundled_server_port)
+            }
+        }
+    }
+}
+
 /// Hardware and threshold settings for the audio recording stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordingConfig {

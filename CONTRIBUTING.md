@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Phoneme! This document outlines t
 Phoneme is designed as a local-first voice transcription suite for Windows. The project is split into three main components within a single Cargo workspace:
 
 1. **`phoneme-daemon`**: The headless backend. It manages the audio recording lifecycle (via CPAL), queueing, sqlite catalog storage, and the lifecycle of the local Whisper (whisper-server). It exposes a Windows Named Pipe (`\\.\pipe\phoneme-daemon`) for IPC.
-2. **`phoneme-tray`** (in `src-tauri`): The Tauri 2 desktop shell and system tray icon. It provides the React/TypeScript frontend (in `frontend/`) and communicates with the daemon over IPC.
+2. **`phoneme-tray`** (in `src-tauri`): The Tauri 2 desktop shell and system tray icon. It provides the vanilla TypeScript/Vite frontend (in `frontend/`) and communicates with the daemon over IPC.
 3. **`phoneme`**: The command-line interface (CLI) client. It is a first-class citizen and can trigger the exact same actions as the GUI (e.g., `phoneme record --oneshot`).
 
 ### The IPC Protocol
@@ -50,14 +50,31 @@ Before submitting a PR, ensure all tests pass and the code is formatted:
 # Run the Rust test suite
 cargo test --workspace
 
-# Run the frontend type checker
+# Run the frontend unit tests and type checker
 cd frontend
+pnpm test --run
 pnpm type-check
+cd ..
 
 # Run formatting and linting
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+## Pre-PR Checklist
+
+Before opening a pull request, run the following against a local build:
+
+```powershell
+# Build the full workspace
+cargo build --workspace
+
+# Verify daemon and tray start cleanly
+cargo run -p phoneme-daemon -- --foreground &
+phoneme doctor
+```
+
+Consult `docs/smoke-test.md` for a full end-to-end verification checklist.
 
 ## Submitting Changes
 

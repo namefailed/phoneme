@@ -231,3 +231,51 @@ select[data-key="daemon.log_level"] {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.15);
 }
+
+/* AI prompt field — overrides the two-column grid to let the textarea
+   span the full control column while keeping the label aligned left. */
+.settings-field.ai-prompt-field {
+  align-items: start;
+}
+.settings-field.ai-prompt-field > label {
+  padding-top: 10px;
+}
+.ai-prompt-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.ai-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ai-preset-select {
+  flex: 1;
+  max-width: 360px;
+  font-size: 12px;
+  padding: 5px 28px 5px 10px;
+}
+.ai-preset-hint {
+  font-size: 11px;
+  color: var(--fg-faded);
+  white-space: nowrap;
+}
+.ai-prompt-controls textarea {
+  width: 100%;
+  max-width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  font-size: 13px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+
+/* Generic helper text below a control (reusable across any section). */
+.settings-help-text {
+  font-size: 11px;
+  color: var(--fg-faded);
+  line-height: 1.5;
+  margin-top: 2px;
+}

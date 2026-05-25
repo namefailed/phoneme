@@ -244,6 +244,36 @@ pub fn doctor_local_checks() -> Result<Vec<CheckResult>, String> {
     Ok(crate::doctor::run_local_checks(&cfg))
 }
 
+/// Probe remote backends (Whisper, Ollama) for reachability.
+/// Uses 3-second timeouts per endpoint so the Doctor UI stays responsive.
+#[tauri::command]
+pub async fn doctor_backend_checks() -> Result<Vec<CheckResult>, String> {
+    let cfg = config_io::read().map_err(|e| e.to_string())?;
+    Ok(crate::doctor::run_backend_checks(&cfg).await)
+}
+
+/// Attempt to start the background daemon. Used by the Doctor "Fix" button
+/// when the daemon check fails. Follows the same auto-spawn logic as startup.
+///
+/// Note: if the tray app started without a bridge (daemon was down at launch),
+/// the bridge `State` holds `None` and cannot be swapped here — Tauri's managed
+/// state is immutable after `.manage()`. In that case `start_daemon` still
+/// spawns and waits for readiness; subsequent commands that call `forward()`
+/// will reconnect automatically on first use via `Bridge::request`'s retry path.
+#[tauri::command]
+pub async fn start_daemon(bridge: Br<'_>) -> Result<(), String> {
+    let cfg = config_io::read().map_err(|e| e.to_string())?;
+    crate::auto_spawn::ensure_running(&cfg)
+        .await
+        .map_err(|e| e.to_string())?;
+    // If a bridge connection already existed, force a reconnect so the
+    // existing transport is fresh after the daemon restart.
+    if let Some(b) = bridge.as_ref() {
+        let _ = b.reconnect().await;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn wizard_test_whisper(url: String) -> Result<TestConnectResult, String> {
     Ok(crate::wizard::test_whisper_endpoint(&url).await)
@@ -520,6 +550,70 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
     let _ = tokio::fs::remove_file(&temp_zip).await;
 
     Ok(exe_path.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── forward() with no bridge ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn forward_none_bridge_returns_descriptive_error() {
+        let result = forward(&None, Request::DaemonStatus).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("daemon not reachable"),
+            "expected daemon-not-reachable message, got: {msg}"
+        );
+    }
+
+    // ── parse_id ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_id_accepts_valid_id() {
+        assert!(parse_id("20260519T143500042").is_ok());
+    }
+
+    #[test]
+    fn parse_id_rejects_garbage() {
+        let err = parse_id("not-an-id").unwrap_err();
+        assert!(err.contains("invalid recording id"));
+    }
+
+    #[test]
+    fn parse_id_rejects_empty_string() {
+        assert!(parse_id("").is_err());
+    }
+
+    // ── json_kind exhaustive ──────────────────────────────────────────────
+
+    #[test]
+    fn json_kind_covers_all_variants() {
+        use phoneme_ipc::IpcErrorKind::*;
+        // Ensure every variant maps to a non-empty kebab-case string.
+        let all = [
+            AlreadyRecording,
+            NotRecording,
+            NotFound,
+            InvalidConfig,
+            WhisperUnreachable,
+            WhisperTimeout,
+            HookFailed,
+            DaemonNotRunning,
+            PipeInUse,
+            ShuttingDown,
+            Io,
+            Internal,
+        ];
+        for variant in &all {
+            let s = json_kind(variant);
+            assert!(!s.is_empty(), "json_kind returned empty for {variant:?}");
+            assert!(s.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "json_kind should be snake_case, got {s:?}");
+        }
+    }
 }
 
 #[tauri::command]

@@ -7,10 +7,10 @@ $ phoneme list
 error: daemon not reachable
 ```
 
-The CLI auto-spawns the daemon if it's missing, but with a 3-second timeout.
-If your machine is slow on cold start, the spawn may not complete in time.
+The CLI auto-spawns the daemon if it's missing, but with an 8-second timeout.
+On very slow machines the first cold start may exceed this.
 
-**Fix:** Start the daemon explicitly: `phoneme daemon --start`. Then try again.
+**Fix:** Start the daemon explicitly: `phoneme daemon start`. Then try again.
 
 ## "Pipe in use" when starting the daemon
 
@@ -101,6 +101,12 @@ database from disk.
 | Inbox queue | `%LOCALAPPDATA%\phoneme\inbox\` |
 | Logs | `%LOCALAPPDATA%\phoneme\logs\` |
 | Audio files | (configurable) — default `%USERPROFILE%\Documents\phoneme\audio\` |
+
+## Doctor "Fix" works but the UI still shows errors after restart
+
+If the tray app was launched while the daemon was already down (rare — usually happens if you quit the daemon manually), clicking **Fix** in the Doctor will successfully start the daemon. However, the GUI may still show stale error states until you close and reopen the main window.
+
+**Why:** The tray process keeps a single IPC connection established at launch. When no daemon was available at launch, the connection was never established, and Tauri's state is immutable once the app starts. The daemon *is* running after Fix — other commands will reconnect automatically. Close the main window (tray stays alive) and click the tray icon to reopen it.
 
 ## Reset to factory defaults
 

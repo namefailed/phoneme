@@ -117,3 +117,75 @@ html[data-theme="dracula"] {
   --info: #8be9fd;
 }
 
+/* ── Dark: Everforest ───────────────────────────────────────────────────── */
+html[data-theme="everforest"] {
+  --bg-deep: #272e33;
+  --bg-elevated: #2d353b;
+  --bg-surface: #343f44;
+  --border: #475258;
+  --border-subtle: #3a464c;
+  --fg-default: #d3c6aa;
+  --fg-muted: #9da9a0;
+  --fg-faded: #7a8478;
+  --accent: #a7c080;
+  --accent-fg: #272e33;
+  --ok: #a7c080;
+  --warn: #dbbc7f;
+  --err: #e67e80;
+  --info: #7fbbb3;
+}
+
+/* ── Dark: Rosé Pine ────────────────────────────────────────────────────── */
+html[data-theme="rose-pine"] {
+  --bg-deep: #191724;
+  --bg-elevated: #1f1d2e;
+  --bg-surface: #26233a;
+  --border: #44415a;
+  --border-subtle: #393552;
+  --fg-default: #e0def4;
+  --fg-muted: #908caa;
+  --fg-faded: #6e6a86;
+  --accent: #c4a7e7;
+  --accent-fg: #191724;
+  --ok: #9ccfd8;
+  --warn: #f6c177;
+  --err: #eb6f92;
+  --info: #31748f;
+}
+
+/* ── Light: Catppuccin Latte ────────────────────────────────────────────── */
+html[data-theme="catppuccin-latte"] {
+  --bg-deep: #e6e9ef;
+  --bg-elevated: #eff1f5;
+  --bg-surface: #e6e9ef;
+  --border: #bcc0cc;
+  --border-subtle: #ccd0da;
+  --fg-default: #4c4f69;
+  --fg-muted: #6c6f85;
+  --fg-faded: #9ca0b0;
+  --accent: #8839ef;
+  --accent-fg: #eff1f5;
+  --ok: #40a02b;
+  --warn: #df8e1d;
+  --err: #d20f39;
+  --info: #1e66f5;
+}
+
+/* ── Light: Solarized Light ─────────────────────────────────────────────── */
+html[data-theme="solarized-light"] {
+  --bg-deep: #eee8d5;
+  --bg-elevated: #fdf6e3;
+  --bg-surface: #eee8d5;
+  --border: #93a1a1;
+  --border-subtle: #dfd6c3;
+  --fg-default: #657b83;
+  --fg-muted: #839496;
+  --fg-faded: #93a1a1;
+  --accent: #268bd2;
+  --accent-fg: #fdf6e3;
+  --ok: #859900;
+  --warn: #b58900;
+  --err: #dc322f;
+  --info: #2aa198;
+}
+

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
-    <!-- Add to PATH property, default enabled -->
+    <!-- PATH integration: default enabled (ADDTOPATH=1).
+         To install without modifying PATH, run:
+           msiexec /i Phoneme-1.0.0-x64.msi /quiet ADDTOPATH=0 -->
     <Property Id="ADDTOPATH" Value="1" />
 
     <DirectoryRef Id="INSTALLDIR">
@@ -30,7 +32,8 @@
           <File Id="HookStdout"   Name="to-stdout.ps1"        Source="..\..\..\..\hooks\to-stdout.ps1" KeyPath="yes" />
           <File Id="HookOrg"      Name="to-org-journal.ps1"   Source="..\..\..\..\hooks\to-org-journal.ps1" />
           <File Id="HookMarkdown" Name="to-markdown-daily.ps1" Source="..\..\..\..\hooks\to-markdown-daily.ps1" />
-          <File Id="HookDenote"   Name="to-denote.ps1"        Source="..\..\..\..\hooks\to-denote.ps1" />
+          <File Id="HookDenote"     Name="to-denote.ps1"        Source="..\..\..\..\hooks\to-denote.ps1" />
+          <File Id="HookClipboard"  Name="to-clipboard.ps1"     Source="..\..\..\..\hooks\to-clipboard.ps1" />
         </Component>
       </Directory>
     </DirectoryRef>

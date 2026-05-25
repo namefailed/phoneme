@@ -349,12 +349,21 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 command,
                 std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
             );
+            // Build a representative test payload. Use a plausible-looking
+            // audio path so hooks that reference it (e.g. file-logging hooks)
+            // receive a non-empty string rather than silently writing nothing.
+            let placeholder_audio = {
+                let base = std::env::var("USERPROFILE")
+                    .or_else(|_| std::env::var("HOME"))
+                    .unwrap_or_else(|_| String::from("C:\\Users\\user"));
+                format!("{base}\\Documents\\phoneme\\audio\\test\\sample.wav")
+            };
             let sample = HookPayload {
                 id: phoneme_core::RecordingId::new(),
                 timestamp: chrono::Local::now(),
                 transcript: "This is a test transcript for the hook.".into(),
-                audio_path: String::new(),
-                duration_ms: 0,
+                audio_path: placeholder_audio,
+                duration_ms: 3500,
                 model: "test".into(),
                 metadata: HookMetadata::current(),
             };

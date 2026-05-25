@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Background circle -->
+  <circle cx="512" cy="512" r="512" fill="#1e1e2e"/>
+
+  <!-- Outer ring accent -->
+  <circle cx="512" cy="512" r="460" fill="none" stroke="#cba6f7" stroke-width="28"/>
+
+  <!-- Microphone body -->
+  <rect x="412" y="200" width="200" height="340" rx="100" ry="100" fill="#cba6f7"/>
+
+  <!-- Microphone stand arc -->
+  <path d="M 316 520 Q 316 700 512 700 Q 708 700 708 520" fill="none" stroke="#cba6f7" stroke-width="38" stroke-linecap="round"/>
+
+  <!-- Stand vertical line -->
+  <line x1="512" y1="700" x2="512" y2="800" stroke="#cba6f7" stroke-width="38" stroke-linecap="round"/>
+
+  <!-- Stand base -->
+  <line x1="380" y1="800" x2="644" y2="800" stroke="#cba6f7" stroke-width="38" stroke-linecap="round"/>
+
+  <!-- Sound wave left inner -->
+  <path d="M 288 420 Q 240 512 288 604" fill="none" stroke="#89b4fa" stroke-width="28" stroke-linecap="round"/>
+  <!-- Sound wave left outer -->
+  <path d="M 228 360 Q 152 512 228 664" fill="none" stroke="#89b4fa" stroke-width="22" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- Sound wave right inner -->
+  <path d="M 736 420 Q 784 512 736 604" fill="none" stroke="#89b4fa" stroke-width="28" stroke-linecap="round"/>
+  <!-- Sound wave right outer -->
+  <path d="M 796 360 Q 872 512 796 664" fill="none" stroke="#89b4fa" stroke-width="22" stroke-linecap="round" opacity="0.6"/>
+</svg>

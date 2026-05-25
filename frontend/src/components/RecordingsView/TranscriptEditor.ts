@@ -1,6 +1,6 @@
 import { updateTranscript } from "../../services/ipc";
 import { applyVimrc } from "../../utils/vimrc";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
 import { vim, Vim } from "@replit/codemirror-vim";
@@ -103,29 +103,26 @@ export class TranscriptEditor {
       ".cm-gutters": {
         display: "none"
       },
-      // CodeMirror 6 + @replit/codemirror-vim both render selections as
-      // `.cm-selectionBackground` divs (drawSelection extension). The browser's
-      // native ::selection is suppressed when drawSelection is active, but we
-      // style it too as a fallback for any state that bypasses drawSelection.
-      //
-      // `opacity: 0.3` was too faint to see against the editor's transparent
-      // background — bumped to 0.5 so the highlight is unmistakable while
-      // still letting the underlying text read clearly.
+      // Selection backgrounds: CM renders .cm-selectionBackground divs when
+      // drawSelection() is active. We must NOT use `opacity` on these divs
+      // because that makes the div itself translucent, not just the color —
+      // text inside the selected range becomes illegible. Use an rgba background
+      // instead so the text layer above stays at full opacity.
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-        backgroundColor: "var(--accent) !important",
-        opacity: "0.5 !important"
+        backgroundColor: "color-mix(in srgb, var(--accent) 35%, transparent) !important",
       },
+      // Browser ::selection is a fallback for cases drawSelection misses.
       ".cm-content ::selection": {
-        backgroundColor: "color-mix(in srgb, var(--accent) 50%, transparent) !important"
+        backgroundColor: "color-mix(in srgb, var(--accent) 35%, transparent) !important",
       },
+      // Highlight search-match occurrences in the buffer.
       ".cm-selectionMatch": {
-        backgroundColor: "var(--accent) !important",
-        opacity: "0.35 !important"
+        backgroundColor: "color-mix(in srgb, var(--accent) 25%, transparent) !important",
       },
+      // Vim block-cursor in normal mode.
       ".cm-fat-cursor": {
-        backgroundColor: "var(--accent) !important",
-        opacity: "0.5 !important",
-        color: "transparent !important" // Don't override text color, let the background tint it
+        backgroundColor: "color-mix(in srgb, var(--accent) 60%, transparent) !important",
+        outline: "none !important",
       }
     });
 
@@ -137,15 +134,21 @@ export class TranscriptEditor {
       }
     });
 
+    // drawSelection() must always be present — it replaces the browser's
+    // native ::selection with CM-managed highlight divs (.cm-selectionBackground).
+    // Without it, vim visual mode (v, V) and mouse selections produce no visible
+    // highlight because the browser suppresses ::selection inside a shadow DOM.
+    // It must be listed BEFORE vim() so the vim extension can see it.
     const extensions = [
       theme,
       EditorView.lineWrapping,
       updateListener,
+      drawSelection({ cursorBlinkRate: 1200 }),
       keymap.of(standardKeymap),
     ];
 
     if (vimMode) {
-      extensions.push(vim());
+      extensions.unshift(vim());
       applyVimrc(vimrc, Vim);
     }
 

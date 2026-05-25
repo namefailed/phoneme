@@ -7,8 +7,8 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
 
 - [ ] Uninstall any existing Phoneme.
 - [ ] Delete `%APPDATA%\phoneme\` and `%LOCALAPPDATA%\phoneme\`.
-- [ ] Have a whisper-server reachable at `http://127.0.0.1:5809` with a Gemma
-      model loaded (or use bundled-server mode 2 with a known-good GGUF).
+- [ ] Have a whisper-server reachable at `http://127.0.0.1:5809` (or use
+      bundled-server mode with a known-good GGUF, e.g. `ggml-base.en.bin`).
 
 ## Install + wizard
 
@@ -17,7 +17,7 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
   - [ ] Step 2 (mode) — three cards visible, mode 3 selectable.
   - [ ] Step 3 (configure) — Test button reports success for working endpoint.
   - [ ] Step 4 (microphone) — device list populates.
-  - [ ] Step 5 (hook) — default points at `to-stdout.ps1`.
+  - [ ] Step 5 (hook) — default points at `to-stdout.ps1`; `to-clipboard.ps1` listed as an alternative.
   - [ ] Step 6 (hotkey) — toggle off by default.
   - [ ] Step 7 (done) — big Record button visible.
 - [ ] Finish wizard. Recordings view appears empty.
@@ -32,7 +32,10 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
 - [ ] Click Play: audio plays back through the system's default output.
 - [ ] Edit the transcript, Ctrl+S: dirty indicator clears.
 - [ ] Reopen the recording: edit persists.
-- [ ] Click Delete: row disappears.
+- [ ] Click Delete: confirmation dialog appears with "Don't ask again" checkbox.
+      Confirm — row disappears.
+- [ ] Click Delete again on another row: if checkbox was checked, deletes
+      immediately without the dialog.
 
 ## External hotkey
 
@@ -64,15 +67,21 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
 ## Settings
 
 - [ ] Open Settings via tray or ⚙ button.
-- [ ] All nine sections render: Whisper, Recording, Hotkey, Hook, Storage, Tray, Accessibility, Editor, Advanced.
+- [ ] All ten sections render: Whisper, Recording, Hotkey, Hook, Storage, Tray, Interface, Accessibility, Editor, Advanced.
+- [ ] Interface section: switch theme — UI repaints immediately.
+- [ ] Smart Cleanup: enable with Ollama provider, enter model name, save.
+      Next recording should run the LLM cleanup step.
 - [ ] Change the silence threshold and Save. Verify `%APPDATA%\phoneme\config.toml`
       is updated atomically.
 
 ## Doctor
 
-- [ ] Open Doctor. All checks green.
-- [ ] Move the model file. Re-run checks. The "Model file" row goes red
-      with a Fix button.
+- [ ] Open Doctor. All checks green (Ollama shows green even if not running,
+      since it is optional when Smart Cleanup is disabled).
+- [ ] Move the model file. Re-run checks. The "Whisper model file" row goes red.
+- [ ] Kill the daemon (`phoneme daemon stop`). Reopen Doctor.
+      "Daemon" row shows ✗. Click Fix — daemon restarts.
+      Close and reopen the window; all checks green again.
 
 ## Uninstall
 

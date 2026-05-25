@@ -27,9 +27,9 @@ JSON on stdin**.
   "transcript": "The cleaned transcription text",
   "audio_path": "C:\\Users\\matt\\Documents\\phoneme\\audio\\2026-05-19\\143500823.wav",
   "duration_ms": 8470,
-  "model": "gemma-4-E4B.Q5_K_M",
+  "model": "ggml-base.en",
   "metadata": {
-    "phoneme_version": "1.2.3",
+    "phoneme_version": "1.0.0",
     "hook_version": 1
   }
 }

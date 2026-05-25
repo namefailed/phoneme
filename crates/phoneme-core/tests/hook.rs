@@ -22,7 +22,7 @@ fn cmd_for(script_kind: &str, dir: &TempDir) -> String {
     let body = match script_kind {
         "echo" => "@echo off\r\nmore\r\nexit 0\r\n",
         "fail" => "@echo off\r\necho oh no 1>&2\r\nexit 2\r\n",
-        "slow" => "@echo off\r\nping -n 5 127.0.0.1 > nul\r\nexit 0\r\n",
+        "slow" => "@echo off\r\n:loop\r\nset /a x=1+1 >nul\r\ngoto loop\r\n",
         _ => panic!("unknown kind"),
     };
     std::fs::write(&script_path, body).unwrap();

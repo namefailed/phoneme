@@ -31,9 +31,9 @@ export class SectionHook {
             <div style="display: flex; gap: 8px; align-items: center; margin-right: auto;">
               <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
                 <option value="" disabled selected>Load a preset hook...</option>
-                <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
-                <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; Add-Content -Path '~/Documents/VoiceNotes.md' -Value &quot;&quot;&quot;$($d.transcript)&quot;&quot;&quot;&quot;">Append to VoiceNotes.md file</option>
-                <option value="powershell -Command &quot;$d=Get-Content $args[0]|ConvertFrom-Json; $msg=$d.transcript; Invoke-RestMethod -Uri 'YOUR_WEBHOOK_URL' -Method Post -Body (@{content=$msg}|ConvertTo-Json) -ContentType 'application/json'&quot;">Send to Discord/Slack Webhook</option>
+                <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
+                <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path '~/Documents/VoiceNotes.md' -Value &quot;&quot;&quot;$($d.transcript)&quot;&quot;&quot;&quot;">Append to VoiceNotes.md file</option>
+                <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $msg=$d.transcript; Invoke-RestMethod -Uri 'YOUR_WEBHOOK_URL' -Method Post -Body (@{content=$msg}|ConvertTo-Json) -ContentType 'application/json'&quot;">Send to Discord/Slack Webhook</option>
                 <option value="python process_note.py">Run custom Python script</option>
               </select>
               <span style="font-size: 11px; color: var(--fg-faded);">← Try these!</span>
@@ -49,8 +49,8 @@ export class SectionHook {
             <div class="test-result" id="hook-result" style="display:none; margin-top: 0;"></div>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); display: block;">
-            A shell command to run automatically. Phoneme will append the absolute path to a JSON file containing the recording's data to the end of your command. <br/>
-            Example: <code>python process.py</code> (will execute as <code>python process.py "C:\path\to\recording.json"</code>).
+            A shell command to run automatically. Phoneme will pipe a JSON object containing the recording's data to your command's standard input (<code>stdin</code>). <br/>
+            Example: <code>python process.py</code> (will execute as <code>python process.py &lt; data.json</code>).
           </span>
         </div>
         <div class="settings-field">

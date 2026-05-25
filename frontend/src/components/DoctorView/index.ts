@@ -47,11 +47,14 @@ export class DoctorView {
     if (!body) return;
     body.textContent = "Running checks…";
 
-    const daemonChecks = await this.daemonChecks();
-    const localChecks = await invoke<CheckResult[]>("doctor_local_checks").catch(
-      () => [] as CheckResult[],
-    );
-    const all = [...daemonChecks, ...localChecks];
+    // Collect all checks concurrently: daemon status, local FS, and async
+    // backend probes (Whisper, Ollama) run in parallel for a fast result.
+    const [daemonChecks, localChecks, backendChecks] = await Promise.all([
+      this.daemonChecks(),
+      invoke<CheckResult[]>("doctor_local_checks").catch(() => [] as CheckResult[]),
+      invoke<CheckResult[]>("doctor_backend_checks").catch(() => [] as CheckResult[]),
+    ]);
+    const all = [...daemonChecks, ...localChecks, ...backendChecks];
 
     body.innerHTML = `
       <div class="doctor-list">
@@ -75,7 +78,7 @@ export class DoctorView {
     `;
 
     body.querySelectorAll<HTMLButtonElement>(".doctor-fix").forEach((btn) => {
-      btn.addEventListener("click", () => void this.handleFix(btn.dataset.action!));
+      btn.addEventListener("click", () => void this.handleFix(btn, btn.dataset.action!));
     });
   }
 
@@ -86,32 +89,62 @@ export class DoctorView {
         {
           name: "Daemon",
           ok: status.running,
-          detail: `pid ${status.pid}`,
-          fix_action: null,
+          detail: status.running ? `running (pid ${status.pid})` : "stopped",
+          fix_action: status.running ? null : "start_daemon",
         },
       ];
-    } catch (e) {
+    } catch {
       return [
         {
           name: "Daemon",
           ok: false,
-          detail: String(e),
+          detail: "not reachable — click Fix to launch",
           fix_action: "start_daemon",
         },
       ];
     }
   }
 
-  private async handleFix(action: string) {
-    const shell = await import("@tauri-apps/plugin-shell");
-    switch (action) {
-      case "open_config": {
-        const path = await invoke<string>("config_path");
-        await shell.open(path).catch(() => {});
-        break;
+  private async handleFix(btn: HTMLButtonElement, action: string) {
+    // Give the user immediate feedback that the fix is running.
+    const originalText = btn.textContent ?? "Fix";
+    btn.disabled = true;
+    btn.textContent = "Working…";
+
+    try {
+      const shell = await import("@tauri-apps/plugin-shell");
+      switch (action) {
+        case "start_daemon": {
+          await invoke("start_daemon");
+          break;
+        }
+        case "open_config": {
+          const path = await invoke<string>("config_path");
+          await shell.open(path).catch(() => {});
+          break;
+        }
+        case "open_audio_dir": {
+          const cfg = await invoke<{ recording: { audio_dir: string } }>("read_config");
+          await invoke("reveal_file", { path: cfg.recording.audio_dir }).catch(() => {});
+          break;
+        }
+        case "open_hooks_folder": {
+          // Open the hooks-templates directory next to the exe, falling back
+          // to the config path so the user can at least navigate from there.
+          await invoke("open_file", {
+            path: "%LOCALAPPDATA%\\phoneme\\hooks-templates",
+          }).catch(() => invoke("open_file", { path: "%APPDATA%\\phoneme\\hooks" }));
+          break;
+        }
       }
-      // Add more fix actions as the check set grows.
+    } catch (e) {
+      console.error("Doctor fix action failed:", action, e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
     }
+
+    // Re-run all checks to reflect the new state.
     await this.runChecks();
   }
 

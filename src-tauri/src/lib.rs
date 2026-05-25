@@ -38,6 +38,9 @@ pub fn run() {
         }
     });
 
+    // Clone before builder chain — setup closure takes ownership of `bridge`.
+    let exit_bridge = bridge.clone();
+
     let builder = tauri::Builder::default()
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -157,6 +160,8 @@ pub fn run() {
             commands::config_exists,
             commands::config_path,
             commands::doctor_local_checks,
+            commands::doctor_backend_checks,
+            commands::start_daemon,
             commands::wizard_test_whisper,
             commands::wizard_test_hook,
             commands::list_input_devices,
@@ -172,8 +177,28 @@ pub fn run() {
             commands::read_file_string,
         ]);
 
-    if let Err(e) = builder.run(tauri::generate_context!()) {
-        eprintln!("Fatal error while running tauri application: {e}");
+    let builder = builder.build(tauri::generate_context!()).unwrap_or_else(|e| {
+        eprintln!("Fatal error while building tauri application: {e}");
         std::process::exit(1);
-    }
+    });
+
+    builder.run(move |_app, event| {
+        if let tauri::RunEvent::Exit = event {
+            // Send a clean Shutdown to the daemon before the process exits.
+            // This tells the daemon to stop whisper-server and flush any
+            // in-flight queue work before it exits. We give it 3 seconds;
+            // if it doesn't respond in time we exit anyway.
+            if let Some(ref b) = exit_bridge {
+                let b = b.clone();
+                let _ = runtime.block_on(async move {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(3),
+                        b.request(phoneme_ipc::Request::Shutdown),
+                    )
+                    .await
+                    .ok()
+                });
+            }
+        }
+    });
 }

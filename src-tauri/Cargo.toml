@@ -38,6 +38,10 @@ which = "6"
 futures = "0.3"
 zip = "0.6"
 
+[dev-dependencies]
+wiremock.workspace = true
+tempfile.workspace = true
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
