@@ -431,7 +431,7 @@ mod tests {
     #[test]
     fn parses_legacy_config_without_llm() {
         let dir = TempDir::new().unwrap();
-        let mut cfg = Config::default();
+        let cfg = Config::default();
         // create a config string without llm
         let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
         toml_val.as_table_mut().unwrap().remove("llm_post_process");
@@ -439,7 +439,7 @@ mod tests {
 
         let path = write_config(&dir, &cfg_text);
         let parsed = Config::load(&path).expect("loads legacy config");
-        assert_eq!(parsed.llm_post_process.enabled, false);
+        assert!(!parsed.llm_post_process.enabled);
         assert_eq!(parsed.llm_post_process.provider, "none");
     }
 
