@@ -630,4 +630,63 @@ mod tests {
             "path suffix should be preserved"
         );
     }
+
+    #[test]
+    fn retention_config_defaults_are_no_ops() {
+        let cfg = RetentionConfig::default();
+        assert!(cfg.max_age_days.is_none());
+        assert!(cfg.max_count.is_none());
+        assert!(!cfg.delete_audio);
+    }
+
+    #[test]
+    fn retention_config_round_trips_through_toml() {
+        let mut cfg = Config::default();
+        cfg.retention.max_age_days = Some(30);
+        cfg.retention.max_count = Some(500);
+        cfg.retention.delete_audio = true;
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.retention.max_age_days, Some(30));
+        assert_eq!(parsed.retention.max_count, Some(500));
+        assert!(parsed.retention.delete_audio);
+    }
+
+    #[test]
+    fn retention_config_absent_in_legacy_toml_uses_defaults() {
+        // A config serialized before RetentionConfig existed must still parse.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        toml_val.as_table_mut().unwrap().remove("retention");
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without retention");
+        assert!(parsed.retention.max_age_days.is_none());
+        assert!(parsed.retention.max_count.is_none());
+    }
+
+    #[test]
+    fn whisper_language_absent_in_legacy_toml_uses_none() {
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        // Serialize, then manually remove the language key if present.
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(whisper) = toml_val.get_mut("whisper").and_then(|v| v.as_table_mut()) {
+            whisper.remove("language");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads config without language field");
+        assert!(parsed.whisper.language.is_none());
+    }
+
+    #[test]
+    fn whisper_language_round_trips() {
+        let mut cfg = Config::default();
+        cfg.whisper.language = Some("es".into());
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.whisper.language.as_deref(), Some("es"));
+    }
 }

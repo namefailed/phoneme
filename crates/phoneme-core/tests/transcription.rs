@@ -3,6 +3,7 @@ use phoneme_core::Error;
 use std::path::Path;
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
+use wiremock::matchers::body_string_contains;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn fake_wav(dir: &TempDir) -> std::path::PathBuf {
@@ -123,4 +124,63 @@ async fn errors_on_missing_audio_file() {
         .await
         .unwrap_err();
     assert!(matches!(err, Error::Io(_)));
+}
+
+#[tokio::test]
+async fn language_hint_is_included_in_multipart_form() {
+    let server = MockServer::start().await;
+    // Match on the language field appearing in the form body.
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .and(body_string_contains("en"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"text": "hello"})),
+        )
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let client = TranscriptionClient::new().unwrap();
+    // Should match the mock (which requires "en" in the body) and succeed.
+    let result = client
+        .transcribe(
+            &server.uri(),
+            std::time::Duration::from_secs(5),
+            &wav,
+            Some("en"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "hello");
+}
+
+#[tokio::test]
+async fn no_language_hint_still_succeeds() {
+    // With language = None the "language" field must be absent, but the
+    // request should still go through and the server still returns 200.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"text": "world"})),
+        )
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let client = TranscriptionClient::new().unwrap();
+    let result = client
+        .transcribe(
+            &server.uri(),
+            std::time::Duration::from_secs(5),
+            &wav,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "world");
 }
