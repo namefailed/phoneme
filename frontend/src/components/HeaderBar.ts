@@ -1,7 +1,7 @@
 // Always-visible top bar: search, filter pills, settings.
 
 import "./shared/styles.css";
-import { filterStore } from "../state/filter";
+import { filterStore, type UiFilter } from "../state/filter";
 import { listTags, type Tag } from "../services/ipc";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -125,7 +125,7 @@ export class HeaderBar {
       // Set the UI state based on some heuristic or simple matching since ListFilter just has 'since' datetime.
       // But we just re-rendered with no selected state on these options!
       // To fix that, we can just look at filterStore.get()._timePreset. (Which we should add to store)
-      const preset = (filterStore.get() as any)._timePreset || "";
+      const preset = filterStore.get()._timePreset || "";
       timeSelect.value = preset;
       
       timeSelect.addEventListener("change", (e) => {
@@ -145,9 +145,9 @@ export class HeaderBar {
           const sign = offset <= 0 ? "+" : "-";
           const pad = (n: number) => String(n).padStart(2, "0");
           const formatted = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T00:00:00${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
-          filterStore.set({ ...filterStore.get(), since: formatted, _timePreset: val } as any);
+          filterStore.set({ ...filterStore.get(), since: formatted, _timePreset: val } satisfies UiFilter);
         } else {
-          filterStore.set({ ...filterStore.get(), since: null, _timePreset: null } as any);
+          filterStore.set({ ...filterStore.get(), since: null, _timePreset: null } satisfies UiFilter);
         }
       });
     }

@@ -66,7 +66,13 @@ export class ActionRow {
           setTimeout(() => { btn.innerHTML = original; }, 2000);
         }
       } catch (e) {
-        alert("Failed to copy: " + e);
+        const btn = this.container.querySelector(`button[data-act="copy"]`) as HTMLButtonElement;
+        if (btn) {
+          const original = btn.innerHTML;
+          btn.innerHTML = "❌ Copy failed";
+          setTimeout(() => { btn.innerHTML = original; }, 2000);
+        }
+        console.error("Failed to copy transcript to clipboard:", e);
       }
     } else if (act === "reveal") {
       await invoke("reveal_file", { path: this.cbs.getAudioPath() });

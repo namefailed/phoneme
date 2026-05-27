@@ -1,4 +1,5 @@
 import { addTag, attachTag, detachTag, listTags, tagsFor, type Tag } from "../../services/ipc";
+import { escapeHtml } from "../../utils/format";
 
 export class TagChips {
   private container: HTMLElement;
@@ -23,7 +24,7 @@ export class TagChips {
       .map(
         (t) => `<span class="tag-chip" data-tag-id="${t.id}" style="${
           t.color ? `--tag-color: ${t.color}` : ""
-        }">${escape(t.name)} <button class="tag-x">×</button></span>`
+        }">${escapeHtml(t.name)} <button class="tag-x">×</button></span>`
       )
       .join("");
     this.container.innerHTML = `
@@ -59,8 +60,4 @@ export class TagChips {
     await attachTag(this.recordingId, tag.id);
     await this.load();
   }
-}
-
-function escape(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

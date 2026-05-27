@@ -243,17 +243,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     model: r.model.clone().unwrap_or_default(),
                     metadata: HookMetadata::current(),
                 };
-                let runner = HookRunner::new(
-                    state
-                        .config
-                        .load()
-                        .hook
-                        .commands
-                        .first()
-                        .cloned()
-                        .unwrap_or_default(),
-                    std::time::Duration::from_secs(state.config.load().hook.timeout_secs),
-                );
+                // Load config once and extract what we need before spawning
+                // the async task — avoids holding the Arc guard across await
+                // points and eliminates the previous triple load.
+                let cfg = state.config.load();
+                let command = cfg.hook.commands.first().cloned().unwrap_or_default();
+                let timeout = std::time::Duration::from_secs(cfg.hook.timeout_secs);
+                drop(cfg);
+                let runner = HookRunner::new(command.clone(), timeout);
                 // Run the hook OFF the IPC connection. A hook can take up to
                 // its full timeout (30s default); running it inline froze the
                 // connection — and with it the single-connection Tauri bridge,
@@ -265,14 +262,6 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // overwrite a user's manual transcript edit. RefireHook must
                 // re-run only the hook against the stored transcript.
                 let task_state = state.clone();
-                let command = state
-                    .config
-                    .load()
-                    .hook
-                    .commands
-                    .first()
-                    .cloned()
-                    .unwrap_or_default();
                 tokio::spawn(async move {
                     let hook_id = payload.id.clone();
                     task_state.events.emit(DaemonEvent::HookStarted {
