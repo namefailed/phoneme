@@ -8,7 +8,6 @@ import {
   formatTime,
   statusToClass,
   statusLabel,
-  escapeHtml,
   highlightMatch,
 } from "../../utils/format";
 import "../shared/styles.css";

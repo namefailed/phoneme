@@ -130,7 +130,6 @@ export class SectionTags {
     this.container.querySelectorAll<HTMLButtonElement>(".tag-mgr-delete").forEach(btn => {
       btn.addEventListener("click", async () => {
         const id = Number(btn.dataset.tagId);
-        const tag = this.tags.find(t => t.id === id);
         const { confirmDelete } = await import("../ConfirmDelete");
         if (!await confirmDelete()) return;
         try {
