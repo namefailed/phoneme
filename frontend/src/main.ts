@@ -1,5 +1,6 @@
 import "./styles/theme.css";
 import "./styles/reset.css";
+import "./styles/toast.css";
 import { App } from "./App";
 
 const root = document.getElementById("app");

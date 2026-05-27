@@ -1,0 +1,95 @@
+/* ── Toast / snackbar notification system ───────────────────────────────── */
+
+#toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column-reverse; /* newest toast appears at the bottom */
+  gap: 8px;
+  pointer-events: none; /* let clicks pass through the gap between toasts */
+  max-width: 360px;
+}
+
+.toast {
+  pointer-events: all;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--fg-default);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.22s cubic-bezier(0.34, 1.26, 0.64, 1) both;
+  max-width: 360px;
+}
+
+.toast-success { border-left: 3px solid var(--ok); }
+.toast-error   { border-left: 3px solid var(--err); }
+.toast-warning { border-left: 3px solid var(--warn); }
+.toast-info    { border-left: 3px solid var(--info); }
+
+.toast-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.toast-success .toast-icon { background: var(--ok);   color: var(--bg-deep); }
+.toast-error   .toast-icon { background: var(--err);  color: var(--bg-deep); }
+.toast-warning .toast-icon { background: var(--warn); color: var(--bg-deep); }
+.toast-info    .toast-icon { background: var(--info); color: var(--bg-deep); }
+
+.toast-msg {
+  flex: 1;
+  overflow-wrap: break-word;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.toast-close:hover { opacity: 1; }
+
+/* Slide in from the right */
+@keyframes toast-in {
+  from {
+    transform: translateX(calc(100% + 24px));
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Slide out to the right while collapsing height so stacked toasts close up */
+.toast-out {
+  animation: toast-out 0.2s ease-in both;
+  pointer-events: none;
+  overflow: hidden;
+}
+@keyframes toast-out {
+  0%   { transform: translateX(0);               opacity: 1; max-height: 80px;  margin-bottom: 0; }
+  60%  { transform: translateX(calc(100% + 24px)); opacity: 0; max-height: 80px;  margin-bottom: 0; }
+  100% { transform: translateX(calc(100% + 24px)); opacity: 0; max-height: 0;    margin-bottom: -8px; }
+}

@@ -1,4 +1,6 @@
 import { deleteRecording, refireHook, replayRecording } from "../../services/ipc";
+import { showToast } from "../../utils/toast";
+import { invoke } from "@tauri-apps/api/core";
 
 export type ActionRowCallbacks = {
   onTogglePlay: () => void;
@@ -6,8 +8,6 @@ export type ActionRowCallbacks = {
   getTranscript: () => string;
   getAudioPath: () => string;
 };
-
-import { invoke } from "@tauri-apps/api/core";
 
 export class ActionRow {
   private container: HTMLElement;
@@ -51,11 +51,21 @@ export class ActionRow {
     if (act === "play") {
       this.cbs.onTogglePlay();
     } else if (act === "replay") {
-      await replayRecording(this.id);
-      this.cbs.onRefresh();
+      try {
+        await replayRecording(this.id);
+        showToast("Queued for re-transcription", "info");
+        this.cbs.onRefresh();
+      } catch (e) {
+        showToast(`Re-transcribe failed: ${e}`, "error");
+      }
     } else if (act === "refire") {
-      await refireHook(this.id);
-      this.cbs.onRefresh();
+      try {
+        await refireHook(this.id);
+        showToast("Hook queued", "info");
+        this.cbs.onRefresh();
+      } catch (e) {
+        showToast(`Re-fire hook failed: ${e}`, "error");
+      }
     } else if (act === "copy") {
       try {
         await navigator.clipboard.writeText(this.cbs.getTranscript());
@@ -66,21 +76,20 @@ export class ActionRow {
           setTimeout(() => { btn.innerHTML = original; }, 2000);
         }
       } catch (e) {
-        const btn = this.container.querySelector(`button[data-act="copy"]`) as HTMLButtonElement;
-        if (btn) {
-          const original = btn.innerHTML;
-          btn.innerHTML = "❌ Copy failed";
-          setTimeout(() => { btn.innerHTML = original; }, 2000);
-        }
-        console.error("Failed to copy transcript to clipboard:", e);
+        showToast(`Clipboard copy failed: ${e}`, "error");
       }
     } else if (act === "reveal") {
       await invoke("reveal_file", { path: this.cbs.getAudioPath() });
     } else if (act === "delete") {
       const { confirmDelete } = await import("../ConfirmDelete");
       if (await confirmDelete()) {
-        await deleteRecording(this.id, false);
-        this.cbs.onRefresh();
+        try {
+          await deleteRecording(this.id, false);
+          showToast("Recording deleted", "success");
+          this.cbs.onRefresh();
+        } catch (e) {
+          showToast(`Delete failed: ${e}`, "error");
+        }
       }
     }
   }

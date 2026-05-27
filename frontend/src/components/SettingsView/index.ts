@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { showToast } from "../../utils/toast";
 import { SectionWhisper } from "./SectionWhisper";
 import { SectionRecording } from "./SectionRecording";
 import { SectionHotkey } from "./SectionHotkey";
@@ -119,9 +120,10 @@ export class SettingsView {
           }
           await invoke("write_config", { config });
           window.dispatchEvent(new CustomEvent("config:saved", { detail: config }));
+          showToast("Settings saved", "success");
           this.onClose();
         } catch (e) {
-          alert(`Save failed: ${e}`);
+          showToast(`Save failed: ${e}`, "error");
         }
       });
   }
