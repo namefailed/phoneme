@@ -1,5 +1,6 @@
 import { addTag, attachTag, detachTag, listTags, tagsFor, type Tag } from "../../services/ipc";
 import { escapeHtml } from "../../utils/format";
+import { showToast } from "../../utils/toast";
 
 export class TagChips {
   private container: HTMLElement;
@@ -14,9 +15,13 @@ export class TagChips {
   }
 
   private async load() {
-    this.allTags = await listTags();
-    this.attached = await tagsFor(this.recordingId);
-    this.render();
+    try {
+      this.allTags = await listTags();
+      this.attached = await tagsFor(this.recordingId);
+      this.render();
+    } catch (e) {
+      showToast(`Failed to load tags: ${e}`, "error");
+    }
   }
 
   private render() {
@@ -50,14 +55,24 @@ export class TagChips {
   }
 
   private async detach(tagId: number) {
-    await detachTag(this.recordingId, tagId);
-    await this.load();
+    try {
+      await detachTag(this.recordingId, tagId);
+      await this.load();
+    } catch (e) {
+      showToast(`Failed to remove tag: ${e}`, "error");
+    }
   }
 
   private async attachByName(name: string) {
-    let tag = this.allTags.find((t) => t.name === name);
-    if (!tag) tag = await addTag(name);
-    await attachTag(this.recordingId, tag.id);
-    await this.load();
+    try {
+      let tag = this.allTags.find((t) => t.name === name);
+      if (!tag) tag = await addTag(name);
+      await attachTag(this.recordingId, tag.id);
+      const input = this.container.querySelector<HTMLInputElement>(".tag-add");
+      if (input) input.value = "";
+      await this.load();
+    } catch (e) {
+      showToast(`Failed to add tag: ${e}`, "error");
+    }
   }
 }

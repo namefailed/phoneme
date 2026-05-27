@@ -1,4 +1,5 @@
 import { updateTranscript } from "../../services/ipc";
+import { showToast } from "../../utils/toast";
 import { applyVimrc } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
@@ -176,11 +177,16 @@ export class TranscriptEditor {
 
   async save() {
     if (this.current === this.initial) return;
-    await updateTranscript(this.id, this.current);
-    this.initial = this.current;
-    this.onDirtyChange(false);
-    const saveBtn = this.container.querySelector<HTMLButtonElement>("#btn-save-transcript");
-    if (saveBtn) saveBtn.style.display = "none";
+    try {
+      await updateTranscript(this.id, this.current);
+      this.initial = this.current;
+      this.onDirtyChange(false);
+      const saveBtn = this.container.querySelector<HTMLButtonElement>("#btn-save-transcript");
+      if (saveBtn) saveBtn.style.display = "none";
+      showToast("Transcript saved", "success");
+    } catch (e) {
+      showToast(`Failed to save transcript: ${e}`, "error");
+    }
   }
 
   getText(): string {
