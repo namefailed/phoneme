@@ -1,5 +1,7 @@
-use chrono::{Local, TimeZone};
-use phoneme_core::{Catalog, ListFilter, Recording, RecordingId, RecordingStatus};
+use chrono::{Duration, Local, TimeZone};
+use phoneme_core::{
+    config::RetentionConfig, Catalog, ListFilter, Recording, RecordingId, RecordingStatus,
+};
 use tempfile::TempDir;
 
 fn sample_recording(id: RecordingId) -> Recording {
@@ -223,6 +225,226 @@ async fn tags_round_trip() {
     let after = catalog.tags_for(&rec.id).await.unwrap();
     assert!(after.is_empty());
 }
+
+// ── Sort direction ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_sort_ascending_returns_oldest_first() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let a = sample_recording(RecordingId::from_datetime(
+        Local.with_ymd_and_hms(2026, 5, 19, 9, 0, 0).unwrap(),
+    ));
+    let b = sample_recording(RecordingId::from_datetime(
+        Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap(),
+    ));
+    catalog.insert(&a).await.unwrap();
+    catalog.insert(&b).await.unwrap();
+
+    let asc = catalog
+        .list(&ListFilter {
+            sort_desc: Some(false),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(asc.len(), 2);
+    assert_eq!(asc[0].id, a.id, "oldest should be first in ascending order");
+    assert_eq!(asc[1].id, b.id);
+}
+
+#[tokio::test]
+async fn list_sort_desc_none_defaults_to_newest_first() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let old = sample_recording(RecordingId::from_datetime(
+        Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+    ));
+    let new = sample_recording(RecordingId::from_datetime(
+        Local.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+    ));
+    catalog.insert(&old).await.unwrap();
+    catalog.insert(&new).await.unwrap();
+
+    let list = catalog
+        .list(&ListFilter {
+            sort_desc: None,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(list[0].id, new.id, "None should default to newest-first");
+}
+
+// ── Tag management ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn update_tag_persists_new_name_and_color() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("old name", Some("#ff0000")).await.unwrap();
+    let updated = catalog
+        .update_tag(tag.id, "new name", Some("#00ff00"))
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "new name");
+    assert_eq!(updated.color.as_deref(), Some("#00ff00"));
+}
+
+#[tokio::test]
+async fn update_tag_can_clear_color() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("colored", Some("#ff0000")).await.unwrap();
+    let updated = catalog.update_tag(tag.id, "colored", None).await.unwrap();
+    assert!(updated.color.is_none());
+}
+
+#[tokio::test]
+async fn list_all_tags_includes_unattached_tags() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let t1 = catalog.add_tag("attached", None).await.unwrap();
+    let _t2 = catalog.add_tag("orphan", None).await.unwrap();
+
+    // Attach t1 to a recording; leave t2 unattached.
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog.attach_tag(&rec.id, t1.id).await.unwrap();
+
+    let all = catalog.list_all_tags().await.unwrap();
+    let names: Vec<&str> = all.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"attached"), "attached tag must appear");
+    assert!(names.contains(&"orphan"), "orphan tag must appear in list_all_tags");
+
+    // Contrast: list_tags (filter-dropdown variant) must exclude the orphan.
+    let attached_only = catalog.list_tags().await.unwrap();
+    let attached_names: Vec<&str> = attached_only.iter().map(|t| t.name.as_str()).collect();
+    assert!(!attached_names.contains(&"orphan"), "list_tags must exclude unattached tags");
+}
+
+// ── Retention policy ──────────────────────────────────────────────────────────
+
+/// Build a done recording whose started_at is `days_ago` days in the past.
+async fn insert_done_recording_aged(catalog: &Catalog, days_ago: i64) -> Recording {
+    let started_at = Local::now() - Duration::try_days(days_ago).unwrap();
+    let id = RecordingId::from_datetime(started_at);
+    let mut rec = sample_recording(id);
+    rec.started_at = started_at;
+    rec.audio_path = format!("/tmp/{}.wav", rec.id);
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_status(&rec.id, RecordingStatus::Done)
+        .await
+        .unwrap();
+    rec
+}
+
+#[tokio::test]
+async fn apply_retention_age_deletes_old_removes_catalog_row() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let old = insert_done_recording_aged(&catalog, 31).await;
+    let recent = insert_done_recording_aged(&catalog, 1).await;
+
+    let deleted_paths = catalog
+        .apply_retention(&RetentionConfig {
+            max_age_days: Some(30),
+            max_count: None,
+            delete_audio: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(deleted_paths.len(), 1, "only the 31-day-old recording should be deleted");
+    assert_eq!(deleted_paths[0], old.audio_path);
+
+    // Old recording gone from catalog; recent one survives.
+    assert!(catalog.get(&old.id).await.unwrap().is_none());
+    assert!(catalog.get(&recent.id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn apply_retention_count_keeps_most_recent_n() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // Insert 5 recordings newest→oldest.
+    let recs: Vec<_> = (0..5)
+        .map(|i| {
+            let catalog = &catalog;
+            async move { insert_done_recording_aged(catalog, i).await }
+        })
+        .collect();
+    // Drive all futures sequentially (order matters for started_at).
+    let mut inserted = Vec::new();
+    for f in recs {
+        inserted.push(f.await);
+    }
+
+    let deleted_paths = catalog
+        .apply_retention(&RetentionConfig {
+            max_age_days: None,
+            max_count: Some(3),
+            delete_audio: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(deleted_paths.len(), 2, "2 of 5 should be pruned to keep newest 3");
+
+    // The 3 newest (days 0, 1, 2) must still be present.
+    for rec in &inserted[..3] {
+        assert!(
+            catalog.get(&rec.id).await.unwrap().is_some(),
+            "recent recording {} should survive",
+            rec.id
+        );
+    }
+}
+
+#[tokio::test]
+async fn apply_retention_ignores_in_progress_recordings() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // A recording that is still transcribing — must never be deleted.
+    let in_progress_id = RecordingId::from_datetime(
+        Local::now() - Duration::try_days(60).unwrap(),
+    );
+    let mut in_progress = sample_recording(in_progress_id);
+    in_progress.started_at = Local::now() - Duration::try_days(60).unwrap();
+    in_progress.audio_path = "/tmp/active.wav".into();
+    catalog.insert(&in_progress).await.unwrap();
+    catalog
+        .update_status(&in_progress.id, RecordingStatus::Transcribing)
+        .await
+        .unwrap();
+
+    let deleted = catalog
+        .apply_retention(&RetentionConfig {
+            max_age_days: Some(1),
+            max_count: None,
+            delete_audio: false,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        deleted.is_empty(),
+        "in-progress recording should never be deleted by retention"
+    );
+    assert!(catalog.get(&in_progress.id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn apply_retention_noop_when_both_limits_are_none() {
+    let (_dir, catalog) = fresh_catalog().await;
+    insert_done_recording_aged(&catalog, 999).await;
+
+    let deleted = catalog
+        .apply_retention(&RetentionConfig {
+            max_age_days: None,
+            max_count: None,
+            delete_audio: false,
+        })
+        .await
+        .unwrap();
+
+    assert!(deleted.is_empty(), "no-policy retention must never delete anything");
+}
+
+// ── Tag cascade ───────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn deleting_recording_cascades_to_recording_tags() {
