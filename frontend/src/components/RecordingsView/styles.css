@@ -54,6 +54,14 @@
   border-left-color: var(--accent);
   padding-left: 13px;
 }
+.rec-row.kbd-focused {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+  background: rgba(203, 166, 247, 0.05);
+}
+.rec-table:focus {
+  outline: none;
+}
 .rec-table-head > span,
 .rec-row > span {
   padding: 0 12px;
@@ -104,6 +112,13 @@
 }
 .rec-row:hover .rec-preview {
   color: var(--fg-default);
+}
+mark.search-hit {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--fg-default);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-style: normal;
 }
 .empty {
   padding: 40px;

@@ -29,6 +29,8 @@ export type ListFilter = {
   status?: string | null;
   search?: string | null;
   tag_id?: number | null;
+  /** `true` (default) = newest first; `false` = oldest first. */
+  sort_desc?: boolean | null;
 };
 
 /**
@@ -91,8 +93,21 @@ export async function listTags(): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("list_tags");
 }
 
+/** Returns ALL tags including orphaned ones — used by the Tag Manager. */
+export async function listAllTags(): Promise<Tag[]> {
+  return await tauriInvoke<Tag[]>("list_all_tags");
+}
+
 export async function addTag(name: string, color?: string): Promise<Tag> {
   return await tauriInvoke<Tag>("add_tag", { name, color: color ?? null });
+}
+
+export async function updateTag(id: number, name: string, color?: string | null): Promise<Tag> {
+  return await tauriInvoke<Tag>("update_tag", { id, name, color: color ?? null });
+}
+
+export async function deleteTag(id: number): Promise<void> {
+  await tauriInvoke("delete_tag", { id });
 }
 
 export async function attachTag(recordingId: string, tagId: number): Promise<void> {

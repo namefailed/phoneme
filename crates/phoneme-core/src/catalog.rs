@@ -205,7 +205,8 @@ impl Catalog {
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
-        sql.push_str(" ORDER BY recordings.started_at DESC, recordings.id DESC");
+        let dir = if filter.sort_desc.unwrap_or(true) { "DESC" } else { "ASC" };
+        sql.push_str(&format!(" ORDER BY recordings.started_at {dir}, recordings.id {dir}"));
         if let Some(n) = filter.limit {
             sql.push_str(&format!(" LIMIT {n}"));
         }
@@ -286,12 +287,47 @@ impl Catalog {
         })
     }
 
+    pub async fn update_tag(&self, id: i64, name: &str, color: Option<&str>) -> Result<Tag> {
+        sqlx::query("UPDATE tags SET name = ?, color = ? WHERE id = ?")
+            .bind(name)
+            .bind(color)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        let row = sqlx::query("SELECT id, name, color FROM tags WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(Tag {
+            id: row.try_get("id")?,
+            name: row.try_get("name")?,
+            color: row.try_get("color")?,
+        })
+    }
+
     pub async fn delete_tag(&self, id: i64) -> Result<()> {
         sqlx::query("DELETE FROM tags WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Returns ALL tags including ones not attached to any recording.
+    /// Used by the Tag Manager settings UI.
+    pub async fn list_all_tags(&self) -> Result<Vec<Tag>> {
+        let rows = sqlx::query("SELECT id, name, color FROM tags ORDER BY name")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(Tag {
+                    id: r.try_get("id")?,
+                    name: r.try_get("name")?,
+                    color: r.try_get("color")?,
+                })
+            })
+            .collect()
     }
 
     pub async fn attach_tag(&self, recording_id: &RecordingId, tag_id: i64) -> Result<()> {
@@ -310,6 +346,66 @@ impl Catalog {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Apply the configured retention policy, removing eligible recordings from
+    /// the catalog and returning their `audio_path` values so the caller can
+    /// delete the files from disk.
+    ///
+    /// Only terminal-state recordings (done / failed) are eligible — in-progress
+    /// recordings are always preserved regardless of age or count.
+    pub async fn apply_retention(
+        &self,
+        cfg: &crate::config::RetentionConfig,
+    ) -> Result<Vec<String>> {
+        let mut deleted_paths: Vec<String> = Vec::new();
+
+        // Age-based cleanup — delete everything older than max_age_days.
+        if let Some(max_age) = cfg.max_age_days {
+            let cutoff = chrono::Utc::now()
+                - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
+            let cutoff_str = cutoff.to_rfc3339();
+            let rows = sqlx::query(
+                "SELECT id, audio_path FROM recordings \
+                 WHERE started_at < ? AND status IN ('done','transcribe_failed','hook_failed')",
+            )
+            .bind(&cutoff_str)
+            .fetch_all(&self.pool)
+            .await?;
+            for row in rows {
+                let id: String = row.try_get("id")?;
+                let audio_path: String = row.try_get("audio_path")?;
+                sqlx::query("DELETE FROM recordings WHERE id = ?")
+                    .bind(&id)
+                    .execute(&self.pool)
+                    .await?;
+                deleted_paths.push(audio_path);
+            }
+        }
+
+        // Count-based cleanup — delete all but the most recent max_count.
+        if let Some(max_count) = cfg.max_count {
+            let rows = sqlx::query(
+                "SELECT id, audio_path FROM recordings \
+                 WHERE status IN ('done','transcribe_failed','hook_failed') \
+                 ORDER BY started_at DESC, id DESC \
+                 LIMIT -1 OFFSET ?",
+            )
+            .bind(max_count as i64)
+            .fetch_all(&self.pool)
+            .await?;
+            for row in rows {
+                let id: String = row.try_get("id")?;
+                let audio_path: String = row.try_get("audio_path")?;
+                sqlx::query("DELETE FROM recordings WHERE id = ?")
+                    .bind(&id)
+                    .execute(&self.pool)
+                    .await?;
+                deleted_paths.push(audio_path);
+            }
+        }
+
+        Ok(deleted_paths)
     }
 
     pub async fn tags_for(&self, recording_id: &RecordingId) -> Result<Vec<Tag>> {

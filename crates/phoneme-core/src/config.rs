@@ -31,6 +31,9 @@ pub struct Config {
     /// Settings for the optional LLM-powered transcript cleanup/post-processing pipeline.
     #[serde(default = "default_llm_post_process")]
     pub llm_post_process: LlmPostProcessConfig,
+    /// Automatic cleanup policy — delete old recordings by age or count.
+    #[serde(default)]
+    pub retention: RetentionConfig,
 }
 
 /// Configures the optional accessibility layer for post-processing transcriptions using an LLM.
@@ -89,6 +92,10 @@ pub struct LlmConfig {
     pub bundled_server_args: Vec<String>,
     /// The maximum time in seconds to wait for a transcription response before timing out.
     pub timeout_secs: u64,
+    /// BCP-47 language code hint passed to Whisper (e.g. "en", "es", "fr").
+    /// `None` means auto-detect (recommended unless you know the language).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 impl LlmConfig {
@@ -225,6 +232,33 @@ fn default_visible_columns() -> Vec<String> {
     ]
 }
 
+/// Automatic cleanup policy for recordings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetentionConfig {
+    /// Delete recordings older than this many days (audio + catalog row).
+    /// Set to `None` to disable age-based cleanup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_age_days: Option<u32>,
+    /// Keep only the most recent N recordings; older ones are deleted.
+    /// Set to `None` to disable count-based cleanup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_count: Option<usize>,
+    /// When true, delete the audio .wav file even when the catalog row is kept.
+    /// Keeps metadata searchable while freeing disk space.
+    #[serde(default)]
+    pub delete_audio: bool,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            max_age_days: None,
+            max_count: None,
+            delete_audio: false,
+        }
+    }
+}
+
 /// Background daemon runtime settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonConfig {
@@ -268,6 +302,7 @@ impl Default for Config {
                 bundled_server_port: 5809,
                 bundled_server_args: vec![],
                 timeout_secs: 60,
+                language: None,
             },
             recording: RecordingConfig {
                 audio_dir: "~/Documents/phoneme/audio".into(),
@@ -327,6 +362,7 @@ impl Default for Config {
                 model: "llama3.2:3b".into(),
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
             },
+            retention: RetentionConfig::default(),
         }
     }
 }

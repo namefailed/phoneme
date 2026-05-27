@@ -27,7 +27,8 @@ export class ActionRow {
         <button class="primary" data-act="play" id="btn-play">▶ Play</button>
         <button data-act="replay">↻ Re-transcribe</button>
         <button data-act="refire">⚡ Re-fire hook</button>
-        <button data-act="copy">📋 Copy Transcript</button>
+        <button data-act="copy">📋 Copy</button>
+        <button data-act="export">⬇ Export</button>
         <button data-act="reveal">📂 Reveal</button>
         <button class="danger" data-act="delete">🗑 Delete</button>
       </div>
@@ -77,6 +78,24 @@ export class ActionRow {
         }
       } catch (e) {
         showToast(`Clipboard copy failed: ${e}`, "error");
+      }
+    } else if (act === "export") {
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+        const dest = await save({
+          defaultPath: `transcript-${this.id}.txt`,
+          filters: [
+            { name: "Text", extensions: ["txt"] },
+            { name: "All files", extensions: ["*"] },
+          ],
+        });
+        if (dest) {
+          await writeTextFile(dest, this.cbs.getTranscript());
+          showToast("Transcript exported", "success");
+        }
+      } catch (e) {
+        showToast(`Export failed: ${e}`, "error");
       }
     } else if (act === "reveal") {
       await invoke("reveal_file", { path: this.cbs.getAudioPath() });

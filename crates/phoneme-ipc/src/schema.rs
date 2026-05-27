@@ -58,7 +58,13 @@ pub enum Request {
 
     // Tags
     ListTags,
+    ListAllTags,
     AddTag {
+        name: String,
+        color: Option<String>,
+    },
+    UpdateTag {
+        id: i64,
         name: String,
         color: Option<String>,
     },
@@ -167,6 +173,9 @@ pub enum DaemonEvent {
         id: RecordingId,
     },
     TagCreated {
+        id: i64,
+    },
+    TagUpdated {
         id: i64,
     },
     TagDeleted {

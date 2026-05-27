@@ -70,6 +70,9 @@ pub struct ListFilter {
     pub status: Option<RecordingStatus>,
     pub search: Option<String>,
     pub tag_id: Option<i64>,
+    /// `true` (default) = newest first; `false` = oldest first.
+    #[serde(default)]
+    pub sort_desc: Option<bool>,
 }
 
 /// The payload sent to hook scripts on stdin (and stored verbatim in inbox JSON).

@@ -53,6 +53,43 @@ export class SectionWhisper {
             Maximum time (in seconds) to wait for the transcription to complete before giving up and labeling the recording as failed.
           </span>
         </div>
+        <div class="settings-field">
+          <label>Language</label>
+          <div>${renderField(
+            {
+              key: "whisper.language",
+              label: "",
+              kind: "select",
+              options: [
+                { value: "",   label: "Auto-detect (recommended)" },
+                { value: "en", label: "English" },
+                { value: "es", label: "Spanish" },
+                { value: "fr", label: "French" },
+                { value: "de", label: "German" },
+                { value: "it", label: "Italian" },
+                { value: "pt", label: "Portuguese" },
+                { value: "nl", label: "Dutch" },
+                { value: "ru", label: "Russian" },
+                { value: "ja", label: "Japanese" },
+                { value: "zh", label: "Chinese" },
+                { value: "ko", label: "Korean" },
+                { value: "ar", label: "Arabic" },
+                { value: "hi", label: "Hindi" },
+                { value: "tr", label: "Turkish" },
+                { value: "pl", label: "Polish" },
+                { value: "uk", label: "Ukrainian" },
+                { value: "sv", label: "Swedish" },
+                { value: "da", label: "Danish" },
+                { value: "fi", label: "Finnish" },
+                { value: "no", label: "Norwegian" },
+              ],
+            },
+            this.config.whisper.language ?? "",
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Hint the language of your speech to improve accuracy. Leave on <b>Auto-detect</b> if you record in multiple languages.
+          </span>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
