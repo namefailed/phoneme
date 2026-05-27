@@ -82,10 +82,12 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 
 ## 🔮 v1.6.0 — Real-time & Recording Quality
 
-*Focus: making the recording experience itself better.*
+*Focus: making the recording experience itself better — including full meeting capture.*
 
 - [ ] **Streaming transcription preview** — use whisper.cpp's streaming endpoint to push partial transcript tokens to the UI in real time; eliminates the "Transcribing…" wait
-- [ ] **Windows loopback / system audio** — record from WASAPI loopback (speaker output) for transcribing meetings, videos, and any PC audio; add as a second input source option
+- [ ] **Windows loopback / system audio** — record from WASAPI loopback (speaker output) for transcribing meetings, videos, and any PC audio; foundation for Meeting Mode below
+- [ ] **Meeting Mode — dual-track capture** — simultaneously record microphone (your voice) and system audio (the meeting) as two separate streams; each is transcribed independently and stored as a linked pair under a shared session ID; use case: you get the meeting transcript *and* your own spoken notes/reactions as a separate document, both timestamped and searchable
+- [ ] **Session grouping in the recordings list** — linked recordings from a dual-track session appear as a collapsible group with a shared session label; expand to see the two tracks individually or view them side-by-side in the detail pane
 - [ ] **Pre-roll audio buffer** — 500 ms ring buffer so the first syllable isn't clipped when reacting to the hotkey
 - [ ] **Notes field** — free-form text area in the detail pane, separate from the transcript; never overwritten by re-transcription or AI
 - [ ] **Multiple config profiles** — switch between named TOML profiles (e.g., work vs. personal) from the tray menu without editing files
@@ -109,6 +111,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 
 ### Recording
 - [ ] **Real-time word-by-word transcription** — live transcript appears as you speak using `whisper-live` or a streaming-capable backend; requires v1.6 streaming foundation
+- [ ] **Merged conversation view** — takes a v1.6 dual-track session and interleaves the two transcripts by timestamp into a single chronological conversation; labels each line "You:" vs. "Meeting:"; exportable as a structured conversation log; optionally feeds both transcripts to the LLM post-processor as a single context for summarisation or action-item extraction
 - [ ] **Multi-microphone** — capture from two input devices simultaneously; useful for two-person interviews
 - [ ] **Audio normalization** — normalize gain before sending to Whisper; improves accuracy on quiet voices
 
