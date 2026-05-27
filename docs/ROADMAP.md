@@ -1,116 +1,141 @@
 # Phoneme Roadmap
 
-This document tracks the full vision for Phoneme — from near-term polish through long-term platform expansion. Items within each version are roughly prioritized top-to-bottom.
+This document tracks the full vision for Phoneme. Items are ordered by impact within each version.
+
+**Design principle:** every item must pass the "would a real user hit this friction?" test. Features that duplicate existing functionality (e.g., "favorites" when tags exist), bloat the installer without benefit (e.g., "bundled Ollama"), or serve fewer than ~10% of users are cut or moved to Long Term.
 
 ---
 
 ## ✅ v1.3.x — Maintenance (shipped)
 
-- [x] Stale tag in filter dropdown after detach — fixed in v1.3.1
-- [x] Audit: shared format utilities, type-safe `UiFilter`, `RefireHook` config triple-load, inline style extraction — v1.3.1
-- [x] Keyboard arrow-key navigation in the recordings list (Up/Down to move, Enter to open)
-- [x] Toast / snackbar notification system — non-blocking feedback for copy, delete, export
+- [x] Stale tag in filter dropdown after detach
+- [x] Audit: shared format utilities, type-safe `UiFilter`, `RefireHook` config triple-load
+- [x] Keyboard arrow-key navigation in the recordings list
+- [x] Toast / snackbar notification system
 - [x] Tray icon visual state change while recording is active
-- [x] Whisper connectivity indicator in the header bar (reacts to `WhisperStatusChanged` events)
-- [x] Queue depth badge in the header (reacts to `QueueDepthChanged` events)
+- [x] Whisper connectivity indicator + queue depth badge in the header bar
 - [x] Window position and size persistence across restarts
 - [x] Search term highlighting in transcript previews
 - [x] Sort toggle on the recordings list (newest-first ↔ oldest-first)
 
 ---
 
-## ✅ v1.4 — Polish & Power (shipped)
+## ✅ v1.4.0 — Polish & Power (shipped, test-verified)
 
-### UX & Interface
-- [x] **Tag Manager** — dedicated settings panel to rename tags, pick colors with a proper color picker, reorder, and bulk-delete
-- [x] **Cancel button** during active recording (wired to the IPC `RecordCancel` command)
-- [x] **Sort toggle** — newest-first / oldest-first with backend `sort_desc` field
-- [ ] **Custom date range filter** — replace the preset-only time dropdown with an actual date picker
-- [ ] **Duration filter** — filter recordings by minimum/maximum length
-- [ ] **Bulk actions** — multi-select recordings (Shift+Click, Ctrl+A) for batch delete, re-transcribe, or export
-- [ ] **Column sorting** — click column headers to sort by date, duration, or status
-- [ ] **Favorites / starring** — star important recordings; add a "starred" filter
-
-### Recording Quality
-- [ ] **Pre-roll audio buffer** (~500 ms ring buffer) so the first word isn't clipped when reacting to the hotkey
-- [x] **Language selector** — expose Whisper's `--language` parameter as a per-session or global setting (Whisper supports 97 languages)
-- [ ] **Audio device hot-switch recovery** — detect device disconnect mid-recording and fall back gracefully instead of silently dropping audio
-
-### AI / LLM
-- [ ] **User-defined prompt library** — replace the 9 hardcoded presets with a saved, editable list of custom prompts
-- [ ] **Per-recording AI post-processing** — "Run AI on this transcript" button in the detail pane, with prompt picker
-- [ ] **Chained post-processing** — define an ordered list of LLM passes (e.g., clean → summarize → extract action items) that run sequentially
-
-### Data Management
-- [x] **Export** — export selected recordings or entire catalog as JSON, CSV, or plain-text TXT
-- [ ] **Import audio** — drag an audio file onto the app (or `phoneme import <file.wav>`) to queue it for transcription
-- [x] **Auto-delete / retention policy** — configurable rule: "delete recordings older than N days" or "keep only last N recordings"
-- [ ] **Backup / restore** — one-click export of the SQLite catalog + audio files as a zip archive
-
-### Distribution
-- [ ] **Bundled Ollama** — ship Ollama binaries with the installer for fully offline AI without manual setup
-- [ ] **Portable build** — unsigned ZIP alongside the MSI for users who can't run installers
-- [ ] **Winget package** — submit to the Windows Package Manager community repo
-- [ ] **Scoop package** — add a Scoop bucket entry
-- [x] **Extended hook presets** — Notion, Obsidian vault drop, Discord webhook, Slack webhook, email via SMTP
-
-### macOS
-- [ ] **macOS Beta** — early Apple Silicon port; feature parity for recording + transcription + hooks; no bundled whisper-server yet
+- [x] **Cancel recording** button in the header bar with toast feedback
+- [x] **Tag Manager** — rename tags, pick colors, delete from Settings
+- [x] **Language selector** — pass BCP-47 language hint to Whisper; 20 languages + auto-detect
+- [x] **Export** — single transcript (action row) and bulk catalog export (JSON / CSV / TXT)
+- [x] **Auto-delete retention policy** — max age in days and/or max count; hourly daemon cleanup
+- [x] **Extended hook presets** — grouped: Clipboard, Files, Obsidian, Discord webhook, Slack webhook, Python/Node scripts
 
 ---
 
-## 🚀 v1.5 — Intelligence & Integration (next)
-*Focus: making Phoneme smarter about what it captures and easier to integrate with everything else.*
+## 🚀 v1.5.0 — Model Choice & Provider Flexibility
 
-### UX & Interface
-- [ ] **Real waveform visualization** — render the actual audio waveform from the saved `.wav` file in the detail pane using the Web Audio API (the canvas placeholder is already there)
-- [ ] **Word count & reading time** — display word count, character count, and reading-time estimate (e.g. "243 words · ~1 min read") in the detail pane footer
-- [ ] **Pause / resume recording** — add a ⏸ button during active recording; resume without creating a new entry; essential for meeting notes
+*The single biggest frustration for new users: they don't know which model to use, and the LLM settings require manually entering URLs and model names with no guidance. This version fixes that end-to-end.*
 
-### Recording Quality
-- [ ] **Re-transcribe with model picker** — an action-row button that re-queues the recording against a selectable model size (tiny → base → small → medium); critical for upgrading quality on older recordings
-- [ ] **Windows loopback / system audio capture** — record from WASAPI loopback (speaker output) instead of or alongside the microphone, enabling transcription of Teams calls, videos, and any PC audio
-- [ ] **Streaming transcription preview** — use whisper.cpp's streaming endpoint to push partial transcript tokens to the detail pane in real time, eliminating the "Transcribing…" wait on long recordings
+### Transcription — Multi-Provider Backend
 
-### AI
-- [ ] **Summary field** — auto-generated one-sentence summary stored alongside each transcript; shown in the list as an optional column
-- [ ] **Action item extraction** — dedicated LLM pass that produces a structured list of action items, stored per recording and copyable independently
-- [ ] **Semantic search** — local embedding index (e.g., via Ollama) enabling "find recordings similar to this phrase" beyond FTS keyword matching
+Right now transcription is hardwired to whisper.cpp. A trait-based `TranscriptionProvider` abstraction lets users pick what runs their audio.
 
-### Integration
-- [ ] **Local REST API** — expose an HTTP API (localhost only) so any external app, script, or browser extension can subscribe to events, list recordings, or trigger recording
-- [ ] **Browser extension** — trigger recording from the browser; paste transcript into the focused input field
-- [ ] **Obsidian / Logseq hook preset** — built-in preset that appends transcripts to a daily note in a configured vault path
-- [ ] **Webhook improvements** — fire webhook before hook, after hook, or independently; support custom headers and auth tokens
+- [ ] **OpenAI Whisper API** — cloud transcription via `api.openai.com/v1/audio/transcriptions`; just needs an API key; most accurate option for users without a local GPU
+- [ ] **Deepgram** — real-time-capable, good for long recordings; cheaper than OpenAI for bulk use
+- [ ] **AssemblyAI** — solid accuracy, built-in speaker diarization (who said what)
+- [ ] **Groq Whisper** — whisper-large-v3 via Groq's free tier; fastest cloud option today
+- [ ] **Provider picker in Settings → Whisper** — radio/select between: Local (whisper.cpp), OpenAI, Deepgram, AssemblyAI, Groq
+
+> **Intentionally excluded:** Azure Speech, AWS Transcribe — too enterprise-focused; add only if users request them.
+
+### Whisper Model Management
+
+Users on low-end hardware get poor transcription not because Whisper is bad but because they're running the wrong model size.
+
+- [ ] **Model manager UI** — shows all GGML model variants (tiny·75 MB, base·142 MB, small·466 MB, medium·1.5 GB, large-v3·3.1 GB) with speed/accuracy tradeoffs written in plain English
+- [ ] **Hardware-aware recommendation** — detect available RAM (and GPU VRAM via DXGI on Windows) and auto-suggest the largest model that fits; surfaced as a tooltip/"Recommended" badge
+- [ ] **Per-model one-click download** — replace the single "Download Default" button with per-model download buttons; show progress and disk usage
+- [ ] **Re-transcribe with model picker** — action-row button that re-queues a recording against a different model; lets users upgrade quality on old recordings after switching to a bigger model
+
+### LLM Post-Processing — Provider Flexibility
+
+The current LLM settings are blank text boxes. Most users abandon them because they don't know what to type.
+
+- [ ] **Anthropic Claude** — `claude-3-haiku` and `claude-3-sonnet` via `api.anthropic.com`; add API key, select model, done
+- [ ] **Groq** — OpenAI-compatible; `llama-3.1-8b-instant` is free-tier and fast enough for cleanup
+- [ ] **LM Studio / OpenAI-compatible** — generic "OpenAI-compatible endpoint" provider for LM Studio, Jan, text-generation-webui, and any other local server
+- [ ] **Provider picker with live model list** — when a provider is selected and an API key entered, fetch available models and populate a dropdown (OpenAI, Anthropic, and Groq all have `/models` endpoints)
+- [ ] **Preset prompts** — saved library of named prompts (clean, summarize, extract action items, translate to English) rather than one editable text field; users can add their own
+
+### UX
+- [ ] **Waveform visualization** — render the actual audio waveform in the detail pane canvas element using the Web Audio API; the placeholder is already in the HTML
+- [ ] **Pause / resume recording** — ⏸ button during active recording; resumes without creating a new entry; essential for meeting notes
+- [ ] **Transcript history** — preserve the original Whisper output when a user manually edits; "View original" toggle + "Restore" button in the detail pane
+- [ ] **Word count & reading time** — "243 words · ~1 min read" in the detail footer; small scope, frequently useful
+- [ ] **Bulk actions** — Shift+Click and Ctrl+A to multi-select recordings; batch delete, re-transcribe, or export
 
 ### Data
-- [ ] **Transcript history** — store previous versions of a transcript when it is manually edited or re-processed, with a diff view and one-click restore
-- [ ] **Pre-deletion notification** — before the hourly retention task removes anything, emit a Windows toast notification: "X recordings will be deleted in 24 hours per your retention policy"
-- [ ] **Notes field** — a free-form notes area separate from the transcript, not touched by AI or re-transcription
-- [ ] **Multiple profiles** — switch between named config profiles (e.g., work vs. personal) without editing TOML manually
+- [ ] **Custom date range filter** — date picker replacing the preset-only time dropdown
+- [ ] **Pre-deletion notification** — Windows toast before the retention cleanup runs: "3 recordings will be deleted in 24 hours per your retention policy"
+
+---
+
+## 🔮 v1.6.0 — Real-time & Recording Quality
+
+*Focus: making the recording experience itself better.*
+
+- [ ] **Streaming transcription preview** — use whisper.cpp's streaming endpoint to push partial transcript tokens to the UI in real time; eliminates the "Transcribing…" wait
+- [ ] **Windows loopback / system audio** — record from WASAPI loopback (speaker output) for transcribing meetings, videos, and any PC audio; add as a second input source option
+- [ ] **Pre-roll audio buffer** — 500 ms ring buffer so the first syllable isn't clipped when reacting to the hotkey
+- [ ] **Notes field** — free-form text area in the detail pane, separate from the transcript; never overwritten by re-transcription or AI
+- [ ] **Multiple config profiles** — switch between named TOML profiles (e.g., work vs. personal) from the tray menu without editing files
+- [ ] **Import audio file** — drag a `.wav`/`.mp3`/`.m4a` onto the app window (or `phoneme import <file>`) to queue it for transcription
+
+---
+
+## 🔮 v2.0 — Platform & Integration
+
+*Focus: cross-platform availability and opening Phoneme to external tools.*
 
 ### Platform
-- [ ] **macOS full port** — Intel + Apple Silicon; bundled whisper-server; full feature parity with Windows
-- [ ] **Linux port** — PipeWire / ALSA audio; X11 + Wayland global hotkey via `evdev` or `rdev`
-- [ ] **Windows ARM** — native ARM64 build for Snapdragon-based Windows machines
+- [ ] **macOS port** — Apple Silicon first; bundled whisper.cpp server; full feature parity with Windows
+- [ ] **Linux port** — PipeWire / ALSA audio; X11 + Wayland global hotkey
+- [ ] **Windows ARM** — native ARM64 build for Snapdragon-based machines
+
+### Integration
+- [ ] **Local REST API** — `localhost:3737` HTTP server (off by default) exposing list, get, and event-stream endpoints; enables Obsidian plugins, Raycast extensions, and shell scripts
+- [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers
+
+### Recording
+- [ ] **Real-time word-by-word transcription** — live transcript appears as you speak using `whisper-live` or a streaming-capable backend; requires v1.6 streaming foundation
+- [ ] **Multi-microphone** — capture from two input devices simultaneously; useful for two-person interviews
+- [ ] **Audio normalization** — normalize gain before sending to Whisper; improves accuracy on quiet voices
+
+### Data
+- [ ] **Cloud sync** (opt-in, user-controlled) — encrypted sync of the catalog to a user-owned S3/Backblaze bucket for multi-machine access; audio files excluded by default
 
 ---
 
-## 🔮 v2.0 — Platform & Real-time
-*Focus: streaming and cross-platform maturity.*
+## 🌌 Long Term
+*No fixed timeline. These require either significant platform work or community infrastructure.*
 
-- [ ] **Real-time streaming transcription** — live transcript appears word-by-word as you speak using Whisper streaming / `whisper-live`; no waiting for recording to stop
-- [ ] **Multi-microphone** — capture from multiple input devices simultaneously (e.g., headset + room mic), merge or keep separate
-- [ ] **Noise suppression** — optional pre-processing pass (RNNoise or similar) before sending audio to Whisper
-- [ ] **Audio normalization** — normalize gain before transcription for better accuracy on quiet voices
-- [ ] **Cloud sync** (opt-in) — encrypted sync of the catalog (not audio) to a user-controlled S3/Backblaze bucket for multi-machine access
+- [ ] **Mobile thin-client** — iOS/Android app that records locally and syncs to the desktop daemon over LAN; transcription runs on the desktop
+- [ ] **Plugin ecosystem** — standardized API for community hooks, themes, and post-processors; distributed via a JSON registry
+- [ ] **Phoneme Cloud** (optional, self-hostable) — shared catalogs and role-based access for teams; the desktop daemon remains fully offline-capable
+- [ ] **Accessibility pass** — full NVDA/JAWS screen reader support, ARIA labels, font-size scaling, high-contrast theme
 
 ---
 
-## 🌌 Long Term Vision
-*No fixed timeline — ideas that require either significant infrastructure or platform work.*
+## ❌ Explicitly Not Doing
 
-- [ ] **Mobile thin-client** — iOS/Android companion that records locally and streams to the desktop daemon over LAN or a self-hosted relay; transcription and hooks run on the desktop
-- [ ] **Plugin ecosystem** — a standardized plugin API for community-contributed hooks, themes, and post-processors; distributed via a simple JSON registry
-- [ ] **Accessibility pass** — full screen reader (NVDA/JAWS) support, ARIA labels, font-size scaling, high-contrast theme, `prefers-reduced-motion` handling
-- [ ] **Phoneme Cloud** (optional, self-hostable) — a lightweight server component for teams: shared catalogs, role-based access, audit log; the desktop daemon remains fully functional offline
+Things that were considered and rejected — so we don't revisit them:
+
+| Idea | Reason |
+|------|--------|
+| Bundled Ollama in installer | Adds 3–4 GB to download; users who want Ollama install it; we document it |
+| Browser extension | Conflicts with desktop-first philosophy; massive scope for tiny audience |
+| Favorites / starring | Tags already do this — create a "⭐ Favorite" tag |
+| Duration filter | Niche; no user has asked; search + tags already narrow the list |
+| Backup/restore ZIP | Manual export covers this; SQLite DB is already a single copyable file |
+| Azure Speech / AWS Transcribe | Enterprise pricing; not the Phoneme target user; add if demand emerges |
+| Portable (unsigned) ZIP | Valid distribution target but a CI task, not a product feature; just ship it |
+| Winget / Scoop packages | Same — automation task for when v1.5 ships, not a roadmap feature |
