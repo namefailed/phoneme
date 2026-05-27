@@ -31,6 +31,7 @@ fn list_recordings_request_roundtrips() {
         status: Some(RecordingStatus::Done),
         search: Some("sarah".into()),
         tag_id: None,
+        sort_desc: None,
     };
     roundtrip(&Request::ListRecordings { filter });
 }

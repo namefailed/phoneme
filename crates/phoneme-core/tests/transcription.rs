@@ -27,7 +27,7 @@ async fn returns_transcript_text_on_200() {
     let wav = fake_wav(&dir).await;
     let client = TranscriptionClient::new().unwrap();
     let result = client
-        .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav)
+        .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav, None)
         .await
         .unwrap();
     assert_eq!(result, "hello world");
@@ -46,7 +46,7 @@ async fn returns_whisper_error_on_500() {
     let wav = fake_wav(&dir).await;
     let client = TranscriptionClient::new().unwrap();
     let err = client
-        .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav)
+        .transcribe(&server.uri(), std::time::Duration::from_secs(5), &wav, None)
         .await
         .unwrap_err();
     match err {
@@ -75,7 +75,7 @@ async fn returns_timeout_when_server_slow() {
     let wav = fake_wav(&dir).await;
     let client = TranscriptionClient::new().unwrap();
     let err = client
-        .transcribe(&server.uri(), std::time::Duration::from_millis(100), &wav)
+        .transcribe(&server.uri(), std::time::Duration::from_millis(100), &wav, None)
         .await
         .unwrap_err();
     assert!(matches!(err, Error::WhisperTimeout { .. }));
@@ -97,6 +97,7 @@ async fn returns_unreachable_when_no_server() {
             "http://127.0.0.1:1",
             std::time::Duration::from_secs(2),
             &wav,
+            None,
         )
         .await
         .unwrap_err();
@@ -117,6 +118,7 @@ async fn errors_on_missing_audio_file() {
             "http://127.0.0.1:9999",
             std::time::Duration::from_secs(2),
             Path::new("/no/such/file.wav"),
+            None,
         )
         .await
         .unwrap_err();
