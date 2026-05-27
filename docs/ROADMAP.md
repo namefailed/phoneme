@@ -2,7 +2,7 @@
 
 This document tracks the full vision for Phoneme. Items are ordered by impact within each version.
 
-**Design principle:** every item must pass the "would a real user hit this friction?" test. Features that duplicate existing functionality (e.g., "favorites" when tags exist), bloat the installer without benefit (e.g., "bundled Ollama"), or serve fewer than ~10% of users are cut or moved to Long Term.
+**Design principle:** every item must pass the "would a real user hit this friction?" test. Features that duplicate existing functionality (e.g., "favorites" when tags exist) or serve fewer than ~10% of users are cut or moved to Long Term.
 
 ---
 
@@ -65,6 +65,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [ ] **LM Studio / OpenAI-compatible** — generic "OpenAI-compatible endpoint" provider for LM Studio, Jan, text-generation-webui, and any other local server
 - [ ] **Provider picker with live model list** — when a provider is selected and an API key entered, fetch available models and populate a dropdown (OpenAI, Anthropic, and Groq all have `/models` endpoints)
 - [ ] **Preset prompts** — saved library of named prompts (clean, summarize, extract action items, translate to English) rather than one editable text field; users can add their own
+- [ ] **Ollama setup wizard** — guided in-app flow that downloads and configures Ollama (not bundled in the installer); detects whether Ollama is already running, pulls the selected model, wires up the endpoint and model name automatically; users who already have Ollama just skip to the model-select step
 
 ### UX
 - [ ] **Waveform visualization** — render the actual audio waveform in the detail pane canvas element using the Web Audio API; the placeholder is already in the HTML
@@ -104,6 +105,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 ### Integration
 - [ ] **Local REST API** — `localhost:3737` HTTP server (off by default) exposing list, get, and event-stream endpoints; enables Obsidian plugins, Raycast extensions, and shell scripts
 - [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers
+- [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
 
 ### Recording
 - [ ] **Real-time word-by-word transcription** — live transcript appears as you speak using `whisper-live` or a streaming-capable backend; requires v1.6 streaming foundation
@@ -131,8 +133,6 @@ Things that were considered and rejected — so we don't revisit them:
 
 | Idea | Reason |
 |------|--------|
-| Bundled Ollama in installer | Adds 3–4 GB to download; users who want Ollama install it; we document it |
-| Browser extension | Conflicts with desktop-first philosophy; massive scope for tiny audience |
 | Favorites / starring | Tags already do this — create a "⭐ Favorite" tag |
 | Duration filter | Niche; no user has asked; search + tags already narrow the list |
 | Backup/restore ZIP | Manual export covers this; SQLite DB is already a single copyable file |
