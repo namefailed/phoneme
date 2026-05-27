@@ -382,10 +382,29 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::ListAllTags => match state.catalog.list_all_tags().await {
+            Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::AddTag { name, color } => {
             match state.catalog.add_tag(&name, color.as_deref()).await {
                 Ok(tag) => {
                     state.events.emit(DaemonEvent::TagCreated { id: tag.id });
+                    Response::Ok(serde_json::to_value(tag).unwrap_or_default())
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::UpdateTag { id, name, color } => {
+            match state.catalog.update_tag(id, &name, color.as_deref()).await {
+                Ok(tag) => {
+                    state.events.emit(DaemonEvent::TagUpdated { id });
                     Response::Ok(serde_json::to_value(tag).unwrap_or_default())
                 }
                 Err(e) => Response::Err(IpcError {

@@ -232,6 +232,56 @@ select[data-key="daemon.log_level"] {
   box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.15);
 }
 
+/* Tag Manager rows */
+.tag-mgr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  transition: border-color 0.15s;
+}
+.tag-mgr-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.tag-mgr-row.editing {
+  border-color: var(--accent);
+  background: rgba(203, 166, 247, 0.04);
+}
+.tag-mgr-row button {
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 4px;
+  color: var(--fg-default);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tag-mgr-row button:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tag-mgr-row button.danger {
+  color: var(--err);
+  border-color: rgba(243, 139, 168, 0.3);
+}
+.tag-mgr-row button.danger:hover {
+  background: rgba(243, 139, 168, 0.1);
+  border-color: var(--err);
+}
+.tag-mgr-name-input {
+  flex: 1;
+  background: var(--bg-surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--fg-default);
+}
+
 /* AI prompt field — overrides the two-column grid to let the textarea
    span the full control column while keeping the label aligned left. */
 .settings-field.ai-prompt-field {

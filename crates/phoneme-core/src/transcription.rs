@@ -32,6 +32,8 @@ impl TranscriptionClient {
     /// * `base_url` - The base URL of the whisper server (e.g. `http://127.0.0.1:8080`)
     /// * `timeout` - Maximum duration to wait for the transcription to complete
     /// * `audio_path` - Path to the `.wav` file on disk to be transcribed
+    /// * `language` - Optional BCP-47 language code hint (e.g. `"en"`, `"es"`).
+    ///   `None` means auto-detect.
     ///
     /// # Returns
     /// The transcribed text string on success. Returns `Error::WhisperTimeout` or
@@ -42,6 +44,7 @@ impl TranscriptionClient {
         base_url: &str,
         timeout: Duration,
         audio_path: &Path,
+        language: Option<&str>,
     ) -> Result<String> {
         let bytes = fs::read(audio_path).await?;
         let part = multipart::Part::bytes(bytes)
@@ -54,7 +57,10 @@ impl TranscriptionClient {
             )
             .mime_str("audio/wav")
             .map_err(|e| Error::Internal(format!("multipart mime: {e}")))?;
-        let form = multipart::Form::new().part("file", part);
+        let mut form = multipart::Form::new().part("file", part);
+        if let Some(lang) = language {
+            form = form.text("language", lang.to_string());
+        }
 
         let url = format!("{}/v1/audio/transcriptions", base_url.trim_end_matches('/'));
         let response = match self

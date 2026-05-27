@@ -51,6 +51,7 @@ pub fn run() {
                 }
             }
         })
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -166,7 +167,10 @@ pub fn run() {
             commands::wizard_test_hook,
             commands::list_input_devices,
             commands::list_tags,
+            commands::list_all_tags,
             commands::add_tag,
+            commands::update_tag,
+            commands::delete_tag,
             commands::attach_tag,
             commands::detach_tag,
             commands::tags_for,

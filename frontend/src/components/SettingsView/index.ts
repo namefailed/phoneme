@@ -10,6 +10,7 @@ import { SectionInterface } from "./SectionInterface";
 import { SectionAccessibility } from "./SectionAccessibility";
 import { SectionEditor } from "./SectionEditor";
 import { SectionAdvanced } from "./SectionAdvanced";
+import { SectionTags } from "./SectionTags";
 import "./styles.css";
 
 /**
@@ -62,6 +63,7 @@ export class SettingsView {
           <div class="sv-tab ${this.activeTab === "interface" ? "active" : ""}" data-tab="interface">Interface</div>
           <div class="sv-tab ${this.activeTab === "editor" ? "active" : ""}" data-tab="editor">Editor</div>
           <div class="sv-tab ${this.activeTab === "accessibility" ? "active" : ""}" data-tab="accessibility">Post-Processing</div>
+          <div class="sv-tab ${this.activeTab === "tags" ? "active" : ""}" data-tab="tags">Tags</div>
           <div class="sv-tab ${this.activeTab === "hook" ? "active" : ""}" data-tab="hook">Action Hook</div>
           <div class="sv-tab ${this.activeTab === "storage" ? "active" : ""}" data-tab="storage">Storage</div>
           <div class="sv-tab ${this.activeTab === "advanced" ? "active" : ""}" data-tab="advanced">Advanced</div>
@@ -91,6 +93,7 @@ export class SettingsView {
       case "interface": new SectionInterface(this.sectionHost(body), config); break;
       case "accessibility": new SectionAccessibility(this.sectionHost(body), config); break;
       case "editor": new SectionEditor(this.sectionHost(body), config); break;
+      case "tags": new SectionTags(this.sectionHost(body), config); break;
       case "advanced": new SectionAdvanced(this.sectionHost(body), config); break;
     }
 

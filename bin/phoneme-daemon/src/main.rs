@@ -13,6 +13,7 @@ mod pipeline;
 mod queue_worker;
 mod reconcile;
 mod recorder;
+mod retention;
 mod shutdown;
 mod whisper_supervisor;
 
@@ -53,6 +54,12 @@ async fn main() -> Result<()> {
         if let Err(e) = whisper_supervisor::run(supervisor_state, supervisor_signal).await {
             tracing::error!(error = %e, "whisper supervisor terminated");
         }
+    });
+
+    let retention_state = state.clone();
+    let retention_shutdown = state.shutdown.signal.clone_receiver();
+    tokio::spawn(async move {
+        retention::run(retention_state, retention_shutdown).await;
     });
 
     tracing::info!(

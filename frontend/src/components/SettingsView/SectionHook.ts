@@ -31,10 +31,23 @@ export class SectionHook {
             <div style="display: flex; gap: 8px; align-items: center; margin-right: auto;">
               <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
                 <option value="" disabled selected>Load a preset hook...</option>
-                <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
-                <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path '~/Documents/VoiceNotes.md' -Value &quot;&quot;&quot;$($d.transcript)&quot;&quot;&quot;&quot;">Append to VoiceNotes.md file</option>
-                <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $msg=$d.transcript; Invoke-RestMethod -Uri 'YOUR_WEBHOOK_URL' -Method Post -Body (@{content=$msg}|ConvertTo-Json) -ContentType 'application/json'&quot;">Send to Discord/Slack Webhook</option>
-                <option value="python process_note.py">Run custom Python script</option>
+                <optgroup label="Clipboard">
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
+                </optgroup>
+                <optgroup label="Files &amp; Notes">
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\VoiceNotes.md') -Value $d.transcript&quot;">Append to VoiceNotes.md</option>
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $ts=(Get-Date -Format 'yyyy-MM-dd HH:mm'); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\phoneme.log') -Value &quot;&quot;&quot;[$ts] $($d.transcript)&quot;&quot;&quot;&quot;">Append to timestamped log</option>
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\todo.txt') -Value &quot;&quot;&quot;[ ] $($d.transcript)&quot;&quot;&quot;&quot;">Add to todo.txt</option>
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $date=(Get-Date -Format 'yyyy-MM-dd'); $obsidian=Join-Path $env:USERPROFILE 'Documents\Obsidian\Daily\'+$date+'.md'; Add-Content -Path $obsidian -Value &quot;&quot;&quot;`n## Voice Note`n$($d.transcript)&quot;&quot;&quot;&quot;">Append to Obsidian daily note</option>
+                </optgroup>
+                <optgroup label="Web &amp; Webhooks">
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Invoke-RestMethod -Uri 'YOUR_DISCORD_WEBHOOK_URL' -Method Post -Body (@{content=$d.transcript}|ConvertTo-Json) -ContentType 'application/json'&quot;">Discord webhook</option>
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Invoke-RestMethod -Uri 'YOUR_SLACK_WEBHOOK_URL' -Method Post -Body (@{text=$d.transcript}|ConvertTo-Json) -ContentType 'application/json'&quot;">Slack webhook</option>
+                </optgroup>
+                <optgroup label="Scripts">
+                  <option value="python process_note.py">Run Python script</option>
+                  <option value="node process_note.js">Run Node.js script</option>
+                </optgroup>
               </select>
               <span style="font-size: 11px; color: var(--fg-faded);">← Try these!</span>
             </div>

@@ -40,6 +40,29 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/**
+ * Returns HTML with occurrences of `term` inside `text` wrapped in
+ * `<mark class="search-hit">` tags. Both the surrounding text and the
+ * matched portions are HTML-escaped so it is safe to inject into innerHTML.
+ * Returns plain-escaped text when term is empty.
+ */
+export function highlightMatch(text: string, term: string): string {
+  if (!term) return escapeHtml(text);
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(escaped, "gi");
+  const parts: string[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    parts.push(escapeHtml(text.slice(lastIndex, match.index)));
+    parts.push(`<mark class="search-hit">${escapeHtml(match[0])}</mark>`);
+    lastIndex = re.lastIndex;
+    if (re.lastIndex === match.index) re.lastIndex++;
+  }
+  parts.push(escapeHtml(text.slice(lastIndex)));
+  return parts.join("");
+}
+
 /** Format a timestamp as a locale time string. */
 export function formatTime(iso: string, use24h: boolean): string {
   const d = new Date(iso);

@@ -9,6 +9,7 @@ import {
   statusToClass,
   statusLabel,
   escapeHtml,
+  highlightMatch,
 } from "../../utils/format";
 import "../shared/styles.css";
 import "./styles.css";
@@ -27,6 +28,8 @@ export class RecordingsList {
   /** Cached app config — loaded once and refreshed when settings are saved. */
   private config: any = null;
   private currentWidths: string[] | null = null;
+  /** Index of the keyboard-focused row (-1 = none). */
+  private focusedIndex = -1;
 
   constructor(
     container: HTMLElement,
@@ -126,15 +129,44 @@ export class RecordingsList {
       </div>
     `;
 
-    const rows = s.recordings
-      .map((r) => this.renderRow(r, r.id === s.selectedId, visibleCols, gridTemplate))
-      .join("");
-    this.container.innerHTML = `<div class="rec-table">${head}${rows}</div>`;
+    // Clamp focusedIndex to valid range after list changes
+    if (this.focusedIndex >= s.recordings.length) {
+      this.focusedIndex = s.recordings.length - 1;
+    }
 
-    this.container.querySelectorAll<HTMLElement>(".rec-row").forEach((el) => {
+    const rows = s.recordings
+      .map((r, i) => this.renderRow(r, r.id === s.selectedId, i === this.focusedIndex, visibleCols, gridTemplate))
+      .join("");
+    this.container.innerHTML = `<div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings">${head}${rows}</div>`;
+
+    const table = this.container.querySelector<HTMLElement>(".rec-table")!;
+
+    // Keyboard navigation: arrow keys navigate rows, Enter selects
+    table.addEventListener("keydown", (e: KeyboardEvent) => {
+      const recs = this.state.get().recordings;
+      if (!recs.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        this.moveFocus(Math.min(this.focusedIndex + 1, recs.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        this.moveFocus(Math.max(this.focusedIndex - 1, 0));
+      } else if (e.key === "Enter" && this.focusedIndex >= 0) {
+        e.preventDefault();
+        const id = recs[this.focusedIndex]?.id;
+        if (id) this.onSelect(id);
+      }
+    });
+
+    this.container.querySelectorAll<HTMLElement>(".rec-row").forEach((el, i) => {
       el.addEventListener("click", () => {
         const id = el.getAttribute("data-id");
-        if (id) this.onSelect(id);
+        if (id) {
+          this.focusedIndex = i;
+          this.updateFocusClasses();
+          this.onSelect(id);
+          table.focus({ preventScroll: true });
+        }
       });
     });
 
@@ -176,9 +208,24 @@ export class RecordingsList {
     });
   }
 
+  private moveFocus(newIndex: number) {
+    this.focusedIndex = newIndex;
+    this.updateFocusClasses();
+    // Scroll focused row into view
+    const rows = this.container.querySelectorAll<HTMLElement>(".rec-row");
+    rows[this.focusedIndex]?.scrollIntoView({ block: "nearest" });
+  }
+
+  private updateFocusClasses() {
+    this.container.querySelectorAll<HTMLElement>(".rec-row").forEach((el, i) => {
+      el.classList.toggle("kbd-focused", i === this.focusedIndex);
+    });
+  }
+
   private renderRow(
     r: Recording,
     active: boolean,
+    kbFocused: boolean,
     visibleCols: string[],
     gridTemplate: string,
   ): string {
@@ -189,19 +236,20 @@ export class RecordingsList {
     const cls = statusToClass(r.status);
     const label = statusLabel(r.status);
     const preview = r.transcript ?? truncatedError(r);
+    const searchTerm = filterStore.get().search ?? "";
 
     const cellMap: Record<string, string> = {
       day: `<span class="rec-time">${day}</span>`,
       time: `<span class="rec-time">${time}</span>`,
       duration: `<span class="rec-dur">${dur}</span>`,
       status: `<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
-      transcript: `<span class="rec-preview">${escapeHtml(preview)}</span>`,
+      transcript: `<span class="rec-preview">${highlightMatch(preview, searchTerm)}</span>`,
     };
 
     const cells = visibleCols.map((c) => cellMap[c] || "").join("");
 
     return `
-      <div class="rec-row ${active ? "active" : ""}" data-id="${r.id}" style="grid-template-columns: ${gridTemplate}">
+      <div class="rec-row ${active ? "active" : ""}${kbFocused ? " kbd-focused" : ""}" data-id="${r.id}" role="option" aria-selected="${active}" style="grid-template-columns: ${gridTemplate}">
         ${cells}
       </div>
     `;

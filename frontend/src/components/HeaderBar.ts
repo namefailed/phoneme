@@ -2,9 +2,10 @@
 
 import "./shared/styles.css";
 import { filterStore, type UiFilter } from "../state/filter";
-import { listTags, type Tag } from "../services/ipc";
+import { listTags, recordCancel, type Tag } from "../services/ipc";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { showToast } from "../utils/toast";
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
@@ -15,6 +16,10 @@ export class HeaderBar {
   private callbacks: HeaderBarCallbacks;
   private tags: Tag[] = [];
   private unsubEvent: (() => void) | null = null;
+  private isRecording = false;
+  private whisperReachable: boolean | null = null; // null = status unknown
+  private queuePending = 0;
+  private queueProcessing = 0;
 
   constructor(container: HTMLElement, callbacks: HeaderBarCallbacks) {
     this.container = container;
@@ -32,14 +37,22 @@ export class HeaderBar {
     this.render();
 
     this.unsubEvent = await listen<any>("daemon-event", async (e) => {
-      const eventName = e.payload.event;
+      const p = e.payload;
+      const eventName = p.event;
+
       if (eventName === "recording_started") {
         this.setRecordingState(true);
-      } else if (eventName === "recording_stopped" || eventName === "recording_deleted") {
+      } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
         this.setRecordingState(false);
+      } else if (eventName === "whisper_status_changed") {
+        this.whisperReachable = p.reachable as boolean;
+        this.updateStatusIndicators();
+      } else if (eventName === "queue_depth_changed") {
+        this.queuePending = (p.pending as number) ?? 0;
+        this.queueProcessing = (p.processing as number) ?? 0;
+        this.updateStatusIndicators();
       }
-      // Stale UI Fix: reload tags if something might have changed them.
-      // E.g. we just do a silent background reload on any event, or we can just reload occasionally.
+
       if (
         eventName === "tag_created" ||
         eventName === "tag_deleted" ||
@@ -55,30 +68,59 @@ export class HeaderBar {
   }
 
   dispose() {
-      if (this.unsubEvent) {
-          this.unsubEvent();
-          this.unsubEvent = null;
-      }
+    if (this.unsubEvent) {
+      this.unsubEvent();
+      this.unsubEvent = null;
+    }
   }
-
-  private isRecording = false;
 
   private setRecordingState(recording: boolean) {
     this.isRecording = recording;
-    const btn = this.container.querySelector<HTMLButtonElement>("#hb-record");
-    if (btn) {
+    const stopBtn = this.container.querySelector<HTMLButtonElement>("#hb-record");
+    const cancelBtn = this.container.querySelector<HTMLButtonElement>("#hb-cancel");
+    if (stopBtn) {
       if (recording) {
-        btn.innerHTML = "⏹ Stop";
-        btn.classList.add("recording-active");
-        btn.style.color = "";
-        btn.style.borderColor = "";
-        btn.style.background = "";
+        stopBtn.innerHTML = "⏹ Stop";
+        stopBtn.classList.add("recording-active");
       } else {
-        btn.innerHTML = "🔴 Record";
-        btn.classList.remove("recording-active");
-        btn.style.color = "";
-        btn.style.borderColor = "";
-        btn.style.background = "";
+        stopBtn.innerHTML = "🔴 Record";
+        stopBtn.classList.remove("recording-active");
+      }
+      stopBtn.style.color = "";
+      stopBtn.style.borderColor = "";
+      stopBtn.style.background = "";
+    }
+    if (cancelBtn) {
+      cancelBtn.style.display = recording ? "flex" : "none";
+    }
+  }
+
+  /** Update only the status indicator elements without re-rendering the whole bar. */
+  private updateStatusIndicators() {
+    const whisperDot = this.container.querySelector<HTMLElement>("#hb-whisper-dot");
+    const queueBadge = this.container.querySelector<HTMLElement>("#hb-queue-badge");
+
+    if (whisperDot) {
+      if (this.whisperReachable === null) {
+        whisperDot.className = "hb-whisper-dot";
+        whisperDot.title = "Whisper status unknown";
+      } else if (this.whisperReachable) {
+        whisperDot.className = "hb-whisper-dot reachable";
+        whisperDot.title = "Whisper: connected";
+      } else {
+        whisperDot.className = "hb-whisper-dot unreachable";
+        whisperDot.title = "Whisper: unreachable";
+      }
+    }
+
+    if (queueBadge) {
+      const total = this.queuePending + this.queueProcessing;
+      if (total > 0) {
+        queueBadge.textContent = String(total);
+        queueBadge.style.display = "inline-flex";
+        queueBadge.title = `${this.queueProcessing} processing, ${this.queuePending} queued`;
+      } else {
+        queueBadge.style.display = "none";
       }
     }
   }
@@ -109,10 +151,24 @@ export class HeaderBar {
           <option value="">All tags</option>
           ${tagOptions}
         </select>
-        <button class="record-btn" id="hb-record" style="margin-left: auto;" title="Start/Stop recording manually (or use your global hotkey)">🔴 Record</button>
+        <div class="hb-status-cluster" style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
+          <span id="hb-whisper-dot" class="hb-whisper-dot${this.whisperReachable === true ? " reachable" : this.whisperReachable === false ? " unreachable" : ""}"
+            title="${this.whisperReachable === true ? "Whisper: connected" : this.whisperReachable === false ? "Whisper: unreachable" : "Whisper status unknown"}"></span>
+          <span id="hb-queue-badge" class="hb-queue-badge" style="display:${this.queuePending + this.queueProcessing > 0 ? "inline-flex" : "none"}"
+            title="${this.queueProcessing} processing, ${this.queuePending} queued">${this.queuePending + this.queueProcessing || ""}</span>
+          <button class="record-btn" id="hb-cancel" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" title="Cancel recording and discard audio">✕ Cancel</button>
+          <button class="record-btn" id="hb-record" title="Start/Stop recording manually (or use your global hotkey)">${this.isRecording ? "⏹ Stop" : "🔴 Record"}</button>
+        </div>
+        <button class="icon-btn" id="hb-sort" aria-label="Toggle sort order" title="${filterStore.get().sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}">${filterStore.get().sort_desc === false ? "↑ Oldest" : "↓ Newest"}</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
     `;
+
+    // Restore recording-active class if we were recording before re-render
+    if (this.isRecording) {
+      this.container.querySelector("#hb-record")?.classList.add("recording-active");
+    }
+
     const search = this.container.querySelector<HTMLInputElement>("#hb-search");
     if (search) {
       search.addEventListener("input", (e) => {
@@ -122,12 +178,9 @@ export class HeaderBar {
     }
     const timeSelect = this.container.querySelector<HTMLSelectElement>(".hb-time-select");
     if (timeSelect) {
-      // Set the UI state based on some heuristic or simple matching since ListFilter just has 'since' datetime.
-      // But we just re-rendered with no selected state on these options!
-      // To fix that, we can just look at filterStore.get()._timePreset. (Which we should add to store)
       const preset = filterStore.get()._timePreset || "";
       timeSelect.value = preset;
-      
+
       timeSelect.addEventListener("change", (e) => {
         const val = (e.target as HTMLSelectElement).value;
         if (val) {
@@ -165,17 +218,38 @@ export class HeaderBar {
         filterStore.set({ ...filterStore.get(), status: val || null });
       });
     }
+    const sortBtn = this.container.querySelector<HTMLButtonElement>("#hb-sort");
+    if (sortBtn) {
+      sortBtn.addEventListener("click", () => {
+        const current = filterStore.get().sort_desc;
+        const newDesc = current === false ? true : false; // toggle
+        filterStore.set({ ...filterStore.get(), sort_desc: newDesc });
+        sortBtn.textContent = newDesc ? "↓ Newest" : "↑ Oldest";
+        sortBtn.title = newDesc ? "Sort: newest first — click for oldest first" : "Sort: oldest first — click for newest first";
+      });
+    }
     const settings = this.container.querySelector("#hb-settings");
     if (settings) {
       settings.addEventListener("click", () => this.callbacks.onOpenSettings());
     }
-    const recordBtn = this.container.querySelector("#hb-record");
+    const recordBtn = this.container.querySelector<HTMLButtonElement>("#hb-record");
     if (recordBtn) {
       recordBtn.addEventListener("click", async () => {
         if (this.isRecording) {
           await invoke("record_stop");
         } else {
           await invoke("record_start", { mode: "oneshot" });
+        }
+      });
+    }
+    const cancelBtn = this.container.querySelector<HTMLButtonElement>("#hb-cancel");
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", async () => {
+        try {
+          await recordCancel();
+          showToast("Recording cancelled", "info");
+        } catch (e) {
+          showToast(`Cancel failed: ${e}`, "error");
         }
       });
     }

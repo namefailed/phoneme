@@ -21,12 +21,15 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     // connection pool to the local whisper-server stays warm across items.
     let cfg = state.config.load();
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
+    // Filter empty string to None — frontend sends "" for "auto-detect"
+    let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
     let transcript = match state
         .transcription
         .transcribe(
             &cfg.whisper.external_url,
             Duration::from_secs(cfg.whisper.timeout_secs),
             &audio_path,
+            language.as_deref(),
         )
         .await
     {

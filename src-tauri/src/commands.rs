@@ -343,6 +343,30 @@ pub async fn tags_for(bridge: Br<'_>, recording_id: String) -> Result<Value, Str
     forward(&bridge, Request::TagsFor { recording_id }).await
 }
 
+/// Return ALL tags (including orphaned ones with no recordings attached).
+/// Used by the Tag Manager settings UI.
+#[tauri::command]
+pub async fn list_all_tags(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::ListAllTags).await
+}
+
+/// Rename a tag and/or change its color.
+#[tauri::command]
+pub async fn update_tag(
+    bridge: Br<'_>,
+    id: i64,
+    name: String,
+    color: Option<String>,
+) -> Result<Value, String> {
+    forward(&bridge, Request::UpdateTag { id, name, color }).await
+}
+
+/// Delete a tag by ID and detach it from all recordings.
+#[tauri::command]
+pub async fn delete_tag(bridge: Br<'_>, id: i64) -> Result<Value, String> {
+    forward(&bridge, Request::DeleteTag { id }).await
+}
+
 #[derive(serde::Serialize, Clone)]
 struct DownloadProgress {
     downloaded: u64,
