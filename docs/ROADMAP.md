@@ -106,6 +106,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 
 ### Integration
 - [ ] **Local REST API** — `localhost:3737` HTTP server (off by default) exposing list, get, and event-stream endpoints; enables Obsidian plugins, Raycast extensions, and shell scripts
+- [ ] **MCP server** — `phoneme-mcp` binary implementing the Model Context Protocol; exposes tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`; lets any MCP-compatible AI agent (Hermes, Claude Desktop, Spark, OpenClaw, or any custom agent stack) use Phoneme as a voice input and transcript search tool without needing the full REST API
 - [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers
 - [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
 
