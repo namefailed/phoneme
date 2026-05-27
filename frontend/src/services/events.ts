@@ -12,7 +12,11 @@ export type DaemonEvent =
   | { event: "queue_depth_changed"; pending: number; processing: number; failed: number }
   | { event: "whisper_status_changed"; reachable: boolean }
   | { event: "recording_deleted"; id: string }
-  | { event: "transcript_updated"; id: string };
+  | { event: "transcript_updated"; id: string }
+  | { event: "tag_created"; id: number }
+  | { event: "tag_deleted"; id: number }
+  | { event: "tag_attached"; tag_id: number }
+  | { event: "tag_detached"; tag_id: number };
 
 export type EventHandler = (event: DaemonEvent) => void;
 

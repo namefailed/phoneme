@@ -40,11 +40,16 @@ export class HeaderBar {
       }
       // Stale UI Fix: reload tags if something might have changed them.
       // E.g. we just do a silent background reload on any event, or we can just reload occasionally.
-      if (eventName === "tag_created" || eventName === "tag_deleted") {
-          try {
-              this.tags = await listTags();
-              this.render();
-          } catch {}
+      if (
+        eventName === "tag_created" ||
+        eventName === "tag_deleted" ||
+        eventName === "tag_attached" ||
+        eventName === "tag_detached"
+      ) {
+        try {
+          this.tags = await listTags();
+          this.render();
+        } catch {}
       }
     });
   }

@@ -172,4 +172,10 @@ pub enum DaemonEvent {
     TagDeleted {
         id: i64,
     },
+    TagAttached {
+        tag_id: i64,
+    },
+    TagDetached {
+        tag_id: i64,
+    },
 }
