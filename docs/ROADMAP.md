@@ -4,37 +4,36 @@ This document tracks the full vision for Phoneme — from near-term polish throu
 
 ---
 
-## ✅ v1.3.x — Maintenance (current)
-*Ongoing patch releases: bug fixes and small improvements that don't require a feature flag.*
+## ✅ v1.3.x — Maintenance (shipped)
 
 - [x] Stale tag in filter dropdown after detach — fixed in v1.3.1
 - [x] Audit: shared format utilities, type-safe `UiFilter`, `RefireHook` config triple-load, inline style extraction — v1.3.1
-- [ ] Keyboard arrow-key navigation in the recordings list (Up/Down to move, Enter to open)
-- [ ] Toast / snackbar notification system — non-blocking feedback for copy, delete, export
-- [ ] Tray icon visual state change while recording is active
-- [ ] Whisper connectivity indicator in the header bar (reacts to `WhisperStatusChanged` events)
-- [ ] Queue depth badge in the header (reacts to `QueueDepthChanged` events)
-- [ ] Window position and size persistence across restarts
-- [ ] Search term highlighting in transcript previews
-- [ ] Sort toggle on the recordings list (newest-first ↔ oldest-first)
+- [x] Keyboard arrow-key navigation in the recordings list (Up/Down to move, Enter to open)
+- [x] Toast / snackbar notification system — non-blocking feedback for copy, delete, export
+- [x] Tray icon visual state change while recording is active
+- [x] Whisper connectivity indicator in the header bar (reacts to `WhisperStatusChanged` events)
+- [x] Queue depth badge in the header (reacts to `QueueDepthChanged` events)
+- [x] Window position and size persistence across restarts
+- [x] Search term highlighting in transcript previews
+- [x] Sort toggle on the recordings list (newest-first ↔ oldest-first)
 
 ---
 
-## 🚀 v1.4 — Polish & Power
-*Focus: filling the gaps that power users hit every day.*
+## ✅ v1.4 — Polish & Power (shipped)
 
 ### UX & Interface
-- [ ] **Tag Manager** — dedicated settings panel to rename tags, pick colors with a proper color picker, reorder, and bulk-delete
+- [x] **Tag Manager** — dedicated settings panel to rename tags, pick colors with a proper color picker, reorder, and bulk-delete
+- [x] **Cancel button** during active recording (wired to the IPC `RecordCancel` command)
+- [x] **Sort toggle** — newest-first / oldest-first with backend `sort_desc` field
 - [ ] **Custom date range filter** — replace the preset-only time dropdown with an actual date picker
 - [ ] **Duration filter** — filter recordings by minimum/maximum length
 - [ ] **Bulk actions** — multi-select recordings (Shift+Click, Ctrl+A) for batch delete, re-transcribe, or export
 - [ ] **Column sorting** — click column headers to sort by date, duration, or status
 - [ ] **Favorites / starring** — star important recordings; add a "starred" filter
-- [ ] **Cancel button** during active recording (the IPC `RecordCancel` command already exists; just wire the UI)
 
 ### Recording Quality
 - [ ] **Pre-roll audio buffer** (~500 ms ring buffer) so the first word isn't clipped when reacting to the hotkey
-- [ ] **Language selector** — expose Whisper's `--language` parameter as a per-session or global setting (Whisper supports 97 languages)
+- [x] **Language selector** — expose Whisper's `--language` parameter as a per-session or global setting (Whisper supports 97 languages)
 - [ ] **Audio device hot-switch recovery** — detect device disconnect mid-recording and fall back gracefully instead of silently dropping audio
 
 ### AI / LLM
@@ -43,9 +42,9 @@ This document tracks the full vision for Phoneme — from near-term polish throu
 - [ ] **Chained post-processing** — define an ordered list of LLM passes (e.g., clean → summarize → extract action items) that run sequentially
 
 ### Data Management
-- [ ] **Export** — export selected recordings or entire catalog as JSON, CSV, or plain-text TXT
+- [x] **Export** — export selected recordings or entire catalog as JSON, CSV, or plain-text TXT
 - [ ] **Import audio** — drag an audio file onto the app (or `phoneme import <file.wav>`) to queue it for transcription
-- [ ] **Auto-delete / retention policy** — configurable rule: "delete recordings older than N days" or "keep only last N recordings"
+- [x] **Auto-delete / retention policy** — configurable rule: "delete recordings older than N days" or "keep only last N recordings"
 - [ ] **Backup / restore** — one-click export of the SQLite catalog + audio files as a zip archive
 
 ### Distribution
@@ -53,15 +52,25 @@ This document tracks the full vision for Phoneme — from near-term polish throu
 - [ ] **Portable build** — unsigned ZIP alongside the MSI for users who can't run installers
 - [ ] **Winget package** — submit to the Windows Package Manager community repo
 - [ ] **Scoop package** — add a Scoop bucket entry
-- [ ] **Extended hook presets** — Notion, Obsidian vault drop, Discord webhook, Slack webhook, email via SMTP
+- [x] **Extended hook presets** — Notion, Obsidian vault drop, Discord webhook, Slack webhook, email via SMTP
 
 ### macOS
 - [ ] **macOS Beta** — early Apple Silicon port; feature parity for recording + transcription + hooks; no bundled whisper-server yet
 
 ---
 
-## 🔮 v1.5 — Intelligence & Integration
+## 🚀 v1.5 — Intelligence & Integration (next)
 *Focus: making Phoneme smarter about what it captures and easier to integrate with everything else.*
+
+### UX & Interface
+- [ ] **Real waveform visualization** — render the actual audio waveform from the saved `.wav` file in the detail pane using the Web Audio API (the canvas placeholder is already there)
+- [ ] **Word count & reading time** — display word count, character count, and reading-time estimate (e.g. "243 words · ~1 min read") in the detail pane footer
+- [ ] **Pause / resume recording** — add a ⏸ button during active recording; resume without creating a new entry; essential for meeting notes
+
+### Recording Quality
+- [ ] **Re-transcribe with model picker** — an action-row button that re-queues the recording against a selectable model size (tiny → base → small → medium); critical for upgrading quality on older recordings
+- [ ] **Windows loopback / system audio capture** — record from WASAPI loopback (speaker output) instead of or alongside the microphone, enabling transcription of Teams calls, videos, and any PC audio
+- [ ] **Streaming transcription preview** — use whisper.cpp's streaming endpoint to push partial transcript tokens to the detail pane in real time, eliminating the "Transcribing…" wait on long recordings
 
 ### AI
 - [ ] **Summary field** — auto-generated one-sentence summary stored alongside each transcript; shown in the list as an optional column
@@ -76,6 +85,7 @@ This document tracks the full vision for Phoneme — from near-term polish throu
 
 ### Data
 - [ ] **Transcript history** — store previous versions of a transcript when it is manually edited or re-processed, with a diff view and one-click restore
+- [ ] **Pre-deletion notification** — before the hourly retention task removes anything, emit a Windows toast notification: "X recordings will be deleted in 24 hours per your retention policy"
 - [ ] **Notes field** — a free-form notes area separate from the transcript, not touched by AI or re-transcription
 - [ ] **Multiple profiles** — switch between named config profiles (e.g., work vs. personal) without editing TOML manually
 
@@ -89,7 +99,7 @@ This document tracks the full vision for Phoneme — from near-term polish throu
 ## 🔮 v2.0 — Platform & Real-time
 *Focus: streaming and cross-platform maturity.*
 
-- [ ] **Streaming transcription** — live transcript appears word-by-word as you speak using Whisper streaming / `whisper-live`; no waiting for recording to stop
+- [ ] **Real-time streaming transcription** — live transcript appears word-by-word as you speak using Whisper streaming / `whisper-live`; no waiting for recording to stop
 - [ ] **Multi-microphone** — capture from multiple input devices simultaneously (e.g., headset + room mic), merge or keep separate
 - [ ] **Noise suppression** — optional pre-processing pass (RNNoise or similar) before sending audio to Whisper
 - [ ] **Audio normalization** — normalize gain before transcription for better accuracy on quiet voices
