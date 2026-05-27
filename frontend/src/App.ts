@@ -32,17 +32,6 @@ export class App {
         <div id="hdr"></div>
         <div id="main"></div>
       </div>
-      <style>
-        .app-shell { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
-        #main { overflow: hidden; }
-        .rv-shell {
-          display: grid;
-          height: 100%;
-        }
-        .rv-list, .rv-detail { overflow: auto; }
-        .rv-splitter { background: var(--border); cursor: col-resize; }
-        .rv-splitter:hover { background: var(--accent); }
-      </style>
     `;
     this.headerEl = this.container.querySelector("#hdr") as HTMLElement;
     this.mainEl = this.container.querySelector("#main") as HTMLElement;

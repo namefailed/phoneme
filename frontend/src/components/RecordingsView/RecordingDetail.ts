@@ -1,4 +1,5 @@
 import { getRecording, type Recording } from "../../services/ipc";
+import { formatDuration, statusToClass, statusLabel } from "../../utils/format";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptEditor } from "./TranscriptEditor";
@@ -52,7 +53,7 @@ export class RecordingDetail {
             <div class="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">${formatDate(r.started_at)}</div>
             <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
               <span>${formatDuration(r.duration_ms)}</span>
-              <span class="status-pill ${statusToClass(r.status)}">${getStatusLabel(r.status)}</span>
+              <span class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
             </div>
           </div>
         </div>
@@ -107,27 +108,4 @@ function formatDate(iso: string): string {
   const dateObj = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   const timeObj = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${dateObj} at ${timeObj}`;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)
-    .toString()
-    .padStart(2, "0")}s`;
-}
-
-function statusToClass(status: string): string {
-  if (status === "done") return "done";
-  if (status === "transcribe_failed" || status === "hook_failed") return "failed";
-  return "pending";
-}
-
-function getStatusLabel(status: string): string {
-  const cls = statusToClass(status);
-  const statusLabels: Record<string, string> = {
-    done: "Done",
-    failed: "Failed",
-    pending: "Pending"
-  };
-  return statusLabels[cls] || "Unknown";
 }

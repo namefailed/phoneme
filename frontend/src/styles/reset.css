@@ -44,3 +44,13 @@ input, textarea {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* ── App shell layout ───────────────────────────────────────────────────── */
+.app-shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+}
+#main {
+  overflow: hidden;
+}
