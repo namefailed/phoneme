@@ -102,7 +102,7 @@ export class HeaderBar {
           <option value="transcribing" ${f.status === "transcribing" ? "selected" : ""}>Transcribing</option>
           <option value="hook_running" ${f.status === "hook_running" ? "selected" : ""}>Hook Running</option>
           <option value="done" ${f.status === "done" ? "selected" : ""}>Done</option>
-          <option value="transcribe_failed" ${f.status === "transcribe_failed" ? "selected" : ""}>Transcript Failed</option>
+          <option value="transcribe_failed" ${f.status === "transcribe_failed" ? "selected" : ""}>Transcription Failed</option>
           <option value="hook_failed" ${f.status === "hook_failed" ? "selected" : ""}>Hook Failed</option>
         </select>
         <select class="filter-pill hb-tag-select" title="Filter recordings by tag">
