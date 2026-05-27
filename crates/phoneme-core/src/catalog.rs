@@ -544,6 +544,7 @@ mod tests {
             status: None,
             search: None,
             tag_id: None,
+            sort_desc: None,
         };
         let list = db.list(&filter).await.expect("list");
         assert_eq!(list.len(), 1);
