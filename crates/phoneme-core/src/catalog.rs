@@ -248,9 +248,16 @@ impl Catalog {
     }
 
     pub async fn list_tags(&self) -> Result<Vec<Tag>> {
-        let rows = sqlx::query("SELECT id, name, color FROM tags ORDER BY name")
-            .fetch_all(&self.pool)
-            .await?;
+        // Only return tags that are attached to at least one recording.
+        // Orphaned tags (detached from all recordings) are excluded so they
+        // don't pollute the filter dropdown or tag autocomplete.
+        let rows = sqlx::query(
+            "SELECT id, name, color FROM tags \
+             WHERE id IN (SELECT tag_id FROM recording_tags) \
+             ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         rows.into_iter()
             .map(|r| {
                 Ok(Tag {

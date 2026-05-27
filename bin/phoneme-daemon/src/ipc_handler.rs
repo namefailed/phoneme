@@ -419,7 +419,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             recording_id,
             tag_id,
         } => match state.catalog.attach_tag(&recording_id, tag_id).await {
-            Ok(()) => Response::Ok(serde_json::Value::Null),
+            Ok(()) => {
+                state.events.emit(DaemonEvent::TagAttached { tag_id });
+                Response::Ok(serde_json::Value::Null)
+            }
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
                 message: e.to_string(),
@@ -429,7 +432,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             recording_id,
             tag_id,
         } => match state.catalog.detach_tag(&recording_id, tag_id).await {
-            Ok(()) => Response::Ok(serde_json::Value::Null),
+            Ok(()) => {
+                state.events.emit(DaemonEvent::TagDetached { tag_id });
+                Response::Ok(serde_json::Value::Null)
+            }
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
                 message: e.to_string(),
