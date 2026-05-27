@@ -26,7 +26,7 @@ export function statusToClass(status: string): "done" | "failed" | "pending" {
 export function statusLabel(status: string): string {
   switch (status) {
     case "done":              return "Done";
-    case "transcribe_failed": return "Transcript Failed";
+    case "transcribe_failed": return "Transcription Failed";
     case "hook_failed":       return "Hook Failed";
     case "recording":         return "Recording";
     case "transcribing":      return "Transcribing";
