@@ -84,6 +84,13 @@ impl Transcriber {
                 model_or(&whisper.model, "nova-2"),
                 timeout,
             )),
+            TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
+                self.http.clone(),
+                cloud_base_url(&whisper.api_url, "https://api.assemblyai.com"),
+                whisper.api_key.trim().to_string(),
+                whisper.model.trim().to_string(),
+                timeout,
+            )),
         }
     }
 }
@@ -318,5 +325,174 @@ impl TranscriptionProvider for DeepgramProvider {
             .and_then(|c| c.alternatives.into_iter().next())
             .map(|a| a.transcript)
             .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))
+    }
+}
+
+/// Provider for AssemblyAI's async speech-to-text API.
+///
+/// Unlike the others this is a three-step flow: upload the audio
+/// (`POST /v2/upload`), request a transcript (`POST /v2/transcript`), then poll
+/// (`GET /v2/transcript/{id}`) until `status` is `completed`. Auth is the raw
+/// API key in the `Authorization` header (no scheme prefix). `timeout_secs`
+/// bounds the overall poll budget.
+#[derive(Debug, Clone)]
+pub struct AssemblyAiProvider {
+    http: reqwest::Client,
+    base_url: String,
+    api_key: String,
+    /// Optional `speech_model` (e.g. "best", "nano"); empty = AssemblyAI default.
+    model: String,
+    timeout: Duration,
+}
+
+impl AssemblyAiProvider {
+    pub fn new(
+        http: reqwest::Client,
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            http,
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            timeout,
+        }
+    }
+
+    /// Send a request, map transport/HTTP failures to the shared `Error`
+    /// variants, and decode the JSON body.
+    async fn send_json<T: serde::de::DeserializeOwned>(
+        &self,
+        req: reqwest::RequestBuilder,
+        url: &str,
+    ) -> Result<T> {
+        let response = match req.timeout(self.timeout).send().await {
+            Ok(r) => r,
+            Err(e) if e.is_timeout() => {
+                return Err(Error::WhisperTimeout {
+                    secs: self.timeout.as_secs(),
+                })
+            }
+            Err(e) => {
+                return Err(Error::WhisperUnreachable {
+                    url: url.to_string(),
+                    source: e,
+                })
+            }
+        };
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::WhisperError {
+                status: status.as_u16(),
+                body,
+            });
+        }
+        response
+            .json::<T>()
+            .await
+            .map_err(|e| Error::Internal(format!("decoding AssemblyAI response: {e}")))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AaiUpload {
+    upload_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AaiCreated {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AaiTranscript {
+    status: String,
+    text: Option<String>,
+    error: Option<String>,
+}
+
+/// Delay between AssemblyAI status polls.
+const ASSEMBLYAI_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+#[async_trait]
+impl TranscriptionProvider for AssemblyAiProvider {
+    async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
+        let bytes = fs::read(audio_path).await?;
+        let base = self.base_url.trim_end_matches('/').to_string();
+
+        // 1. Upload the raw audio.
+        let upload_url = format!("{base}/v2/upload");
+        let uploaded: AaiUpload = self
+            .send_json(
+                self.http
+                    .post(&upload_url)
+                    .header("Authorization", &self.api_key)
+                    .header("Content-Type", "application/octet-stream")
+                    .body(bytes),
+                &upload_url,
+            )
+            .await?;
+
+        // 2. Request the transcript.
+        let create_url = format!("{base}/v2/transcript");
+        let mut req_body = serde_json::json!({ "audio_url": uploaded.upload_url });
+        if let Some(lang) = language {
+            req_body["language_code"] = serde_json::Value::String(lang.to_string());
+        }
+        if !self.model.trim().is_empty() {
+            req_body["speech_model"] = serde_json::Value::String(self.model.trim().to_string());
+        }
+        let created: AaiCreated = self
+            .send_json(
+                self.http
+                    .post(&create_url)
+                    .header("Authorization", &self.api_key)
+                    .json(&req_body),
+                &create_url,
+            )
+            .await?;
+
+        // 3. Poll until the job reaches a terminal state, bounded by timeout_secs.
+        let poll_url = format!("{base}/v2/transcript/{}", created.id);
+        let polled = tokio::time::timeout(self.timeout, async {
+            loop {
+                let t: AaiTranscript = self
+                    .send_json(
+                        self.http
+                            .get(&poll_url)
+                            .header("Authorization", &self.api_key),
+                        &poll_url,
+                    )
+                    .await?;
+                match t.status.as_str() {
+                    "completed" => {
+                        return t.text.ok_or_else(|| {
+                            Error::Internal("AssemblyAI completed without text".into())
+                        })
+                    }
+                    "error" => {
+                        return Err(Error::WhisperError {
+                            status: 200,
+                            body: t
+                                .error
+                                .unwrap_or_else(|| "AssemblyAI transcription failed".into()),
+                        })
+                    }
+                    _ => tokio::time::sleep(ASSEMBLYAI_POLL_INTERVAL).await,
+                }
+            }
+        })
+        .await;
+
+        match polled {
+            Ok(result) => result,
+            Err(_elapsed) => Err(Error::WhisperTimeout {
+                secs: self.timeout.as_secs(),
+            }),
+        }
     }
 }

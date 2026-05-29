@@ -92,6 +92,9 @@ pub enum TranscriptionBackend {
     Groq,
     /// Deepgram cloud speech-to-text — sends audio to api.deepgram.com. Needs `api_key`.
     Deepgram,
+    /// AssemblyAI cloud speech-to-text — sends audio to api.assemblyai.com
+    /// (async upload + poll). Needs `api_key`.
+    Assemblyai,
 }
 
 /// Configuration for the Whisper transcription engine.

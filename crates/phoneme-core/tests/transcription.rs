@@ -261,3 +261,46 @@ async fn factory_builds_deepgram_provider_with_token_auth() {
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "deepgram text");
 }
+
+/// AssemblyAI is a three-step async flow (upload -> create -> poll). Drives all
+/// three through the factory and asserts the raw-key auth + final text.
+#[tokio::test]
+async fn factory_builds_assemblyai_provider_upload_create_poll() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v2/upload"))
+        .and(header("authorization", "aai-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "upload_url": "https://cdn.assemblyai.test/upload/abc"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v2/transcript"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "t-123",
+            "status": "queued"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/transcript/t-123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "status": "completed",
+            "text": "assemblyai text"
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+
+    let mut whisper = phoneme_core::Config::default().whisper;
+    whisper.provider = phoneme_core::config::TranscriptionBackend::Assemblyai;
+    whisper.api_key = "aai-test".into();
+    whisper.api_url = server.uri();
+
+    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let result = provider.transcribe(&wav, None).await.unwrap();
+    assert_eq!(result, "assemblyai text");
+}
