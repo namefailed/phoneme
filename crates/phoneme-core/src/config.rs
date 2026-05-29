@@ -41,7 +41,7 @@ pub struct Config {
 pub struct LlmPostProcessConfig {
     /// Whether the LLM post-processing step is active.
     pub enabled: bool,
-    /// The provider type to use (e.g., `ollama`, `openai`, `none`).
+    /// The provider type to use: `none`, `ollama`, `openai`, `groq`, or `anthropic`.
     pub provider: String,
     /// API key for authentication, if required by the chosen provider.
     pub api_key: String,
@@ -52,6 +52,10 @@ pub struct LlmPostProcessConfig {
     pub model: String,
     /// The system prompt used to instruct the LLM on how to clean the text.
     pub prompt: String,
+    /// Max seconds to wait for the post-processing LLM before giving up and
+    /// falling back to the raw transcript.
+    #[serde(default = "default_llm_timeout_secs")]
+    pub timeout_secs: u64,
 }
 
 fn default_llm_post_process() -> LlmPostProcessConfig {
@@ -62,7 +66,12 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         api_url: "".into(),
         model: "llama3.2:3b".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
+        timeout_secs: 30,
     }
+}
+
+fn default_llm_timeout_secs() -> u64 {
+    30
 }
 
 /// Defines the execution strategy for the Whisper transcription model.
@@ -393,6 +402,7 @@ impl Default for Config {
                 api_url: "".into(),
                 model: "llama3.2:3b".into(),
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
+                timeout_secs: 30,
             },
             retention: RetentionConfig::default(),
         }
@@ -622,6 +632,24 @@ mod tests {
         assert!(!parsed.llm_post_process.enabled);
         assert_eq!(parsed.llm_post_process.provider, "none");
         assert_eq!(parsed.llm_post_process.model, "llama3.2:3b");
+    }
+
+    #[test]
+    fn llm_timeout_absent_in_legacy_toml_uses_default() {
+        // A config written before timeout_secs existed must still parse.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(llm) = toml_val
+            .get_mut("llm_post_process")
+            .and_then(|v| v.as_table_mut())
+        {
+            llm.remove("timeout_secs");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads config without llm timeout_secs");
+        assert_eq!(parsed.llm_post_process.timeout_secs, 30);
     }
 
     #[test]

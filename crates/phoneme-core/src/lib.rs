@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod hook;
 pub mod id;
+pub mod llm;
 pub mod queue;
 pub mod tags;
 pub mod transcription;
@@ -16,6 +17,7 @@ pub use config::Config;
 pub use error::{Error, Result};
 pub use hook::{HookResult, HookRunner};
 pub use id::RecordingId;
+pub use llm::{LlmPostProcessor, LlmProvider};
 pub use queue::{InboxCounts, InboxQueue, InboxState};
 pub use tags::Tag;
 pub use transcription::{

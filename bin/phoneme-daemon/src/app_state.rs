@@ -4,7 +4,9 @@ use crate::event_bus::EventBus;
 use crate::recorder::DaemonRecorder;
 use crate::shutdown::ShutdownCoordinator;
 use arc_swap::ArcSwap;
-use phoneme_core::{webhook::WebhookClient, Catalog, Config, InboxQueue, Transcriber};
+use phoneme_core::{
+    webhook::WebhookClient, Catalog, Config, InboxQueue, LlmPostProcessor, Transcriber,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -66,6 +68,9 @@ pub struct AppState {
     /// connection pool and mints a per-recording `TranscriptionProvider` from
     /// the live config, so the pool is reused instead of rebuilt per recording.
     pub transcription: Transcriber,
+    /// Shared LLM post-processing client. Like `transcription`, holds a warm
+    /// connection pool and mints an `LlmProvider` per run from the live config.
+    pub llm: LlmPostProcessor,
     pub webhook: WebhookClient,
 }
 
@@ -82,6 +87,7 @@ impl AppState {
         let catalog = Catalog::open(&paths.catalog_db).await?;
         let inbox = InboxQueue::new(&paths.inbox_dir).await?;
         let transcription = Transcriber::new()?;
+        let llm = LlmPostProcessor::new()?;
         let webhook = WebhookClient::new()?;
 
         Ok(Self {
@@ -93,6 +99,7 @@ impl AppState {
             recorder: DaemonRecorder::default(),
             shutdown: Arc::new(ShutdownCoordinator::new()),
             transcription,
+            llm,
             webhook,
         })
     }

@@ -9,8 +9,10 @@ export class SectionAccessibility {
         enabled: false,
         provider: "none",
         api_key: "",
+        api_url: "",
         model: "llama3.2:3b",
-        prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone."
+        prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
+        timeout_secs: 30
       };
     }
 
@@ -48,7 +50,9 @@ export class SectionAccessibility {
               options: [
                 { value: "none", label: "None" },
                 { value: "ollama", label: "Local Ollama (http://127.0.0.1:11434)" },
-                { value: "openai", label: "OpenAI-Compatible Endpoint" }
+                { value: "openai", label: "OpenAI-Compatible Endpoint" },
+                { value: "groq", label: "Groq (cloud)" },
+                { value: "anthropic", label: "Anthropic Claude (cloud)" }
               ]
             },
             config.llm_post_process.provider || "none",
@@ -92,6 +96,62 @@ export class SectionAccessibility {
           <div>${renderField(
             { key: "llm_post_process.api_url", label: "", kind: "text" },
             config.llm_post_process.api_url || "https://api.openai.com/v1/chat/completions",
+          )}</div>
+        </div>
+
+        <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
+          <label>Groq Model</label>
+          <div>${renderField(
+            { key: "llm_post_process.model", label: "", kind: "text" },
+            config.llm_post_process.model || "llama-3.1-8b-instant",
+          )}</div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
+          <label>API Key</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
+            config.llm_post_process.api_key || "",
+          )}</div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
+          <label>API URL (optional)</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_url", label: "", kind: "text" },
+            config.llm_post_process.api_url || "https://api.groq.com/openai/v1/chat/completions",
+          )}</div>
+        </div>
+
+        <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
+          <label>Claude Model</label>
+          <div>${renderField(
+            { key: "llm_post_process.model", label: "", kind: "text" },
+            config.llm_post_process.model || "claude-3-5-haiku-latest",
+          )}</div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
+          <label>API Key</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
+            config.llm_post_process.api_key || "",
+          )}</div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
+          <label>API URL (optional)</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_url", label: "", kind: "text" },
+            config.llm_post_process.api_url || "https://api.anthropic.com/v1/messages",
+          )}</div>
+        </div>
+
+        <div id="llm-cloud-note" style="display:none; border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin:4px 0 12px; font-size:12px; line-height:1.45;">
+          ⚠️ <b>Cloud post-processing.</b> Your transcript text is sent to this provider's servers for processing. Use <b>Local Ollama</b> to keep everything offline.
+        </div>
+
+        <div class="settings-field" id="llm-timeout-field" style="display:none;">
+          <label>Request timeout (seconds)</label>
+          <div>${renderField(
+            { key: "llm_post_process.timeout_secs", label: "", kind: "number" },
+            config.llm_post_process.timeout_secs ?? 30,
           )}</div>
         </div>
 
@@ -151,6 +211,12 @@ export class SectionAccessibility {
           el.style.display = "none";
         }
       });
+      // Timeout applies to every active provider; the cloud note only to remote ones.
+      const isCloud = provider === "openai" || provider === "groq" || provider === "anthropic";
+      const timeoutEl = container.querySelector<HTMLElement>("#llm-timeout-field");
+      if (timeoutEl) timeoutEl.style.display = provider === "none" ? "none" : "";
+      const cloudNote = container.querySelector<HTMLElement>("#llm-cloud-note");
+      if (cloudNote) cloudNote.style.display = isCloud ? "" : "none";
     };
 
     if (providerSelect) {
