@@ -90,6 +90,8 @@ pub enum TranscriptionBackend {
     /// Groq cloud Whisper API (OpenAI-compatible) — sends audio to api.groq.com.
     /// Needs `api_key`.
     Groq,
+    /// Deepgram cloud speech-to-text — sends audio to api.deepgram.com. Needs `api_key`.
+    Deepgram,
 }
 
 /// Configuration for the Whisper transcription engine.
@@ -419,13 +421,11 @@ impl Config {
                 "whisper.model_path is required when whisper.mode = bundled_model".into(),
             ));
         }
-        if matches!(
-            self.whisper.provider,
-            TranscriptionBackend::Openai | TranscriptionBackend::Groq
-        ) && self.whisper.api_key.trim().is_empty()
+        if self.whisper.provider != TranscriptionBackend::Local
+            && self.whisper.api_key.trim().is_empty()
         {
             return Err(Error::InvalidConfig(
-                "whisper.api_key is required for cloud transcription providers (openai/groq)"
+                "whisper.api_key is required for cloud transcription providers (openai/groq/deepgram)"
                     .into(),
             ));
         }

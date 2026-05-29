@@ -18,5 +18,7 @@ pub use hook::{HookResult, HookRunner};
 pub use id::RecordingId;
 pub use queue::{InboxCounts, InboxQueue, InboxState};
 pub use tags::Tag;
-pub use transcription::{OpenAiCompatProvider, Transcriber, TranscriptionProvider};
+pub use transcription::{
+    DeepgramProvider, OpenAiCompatProvider, Transcriber, TranscriptionProvider,
+};
 pub use types::{HookMetadata, HookPayload, ListFilter, RecordMode, Recording, RecordingStatus};

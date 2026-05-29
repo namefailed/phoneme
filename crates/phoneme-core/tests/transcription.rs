@@ -229,3 +229,35 @@ async fn factory_builds_openai_provider_with_auth_and_model() {
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "cloud");
 }
+
+/// Deepgram is not OpenAI-compatible: it authenticates with `Token <key>` and
+/// nests the transcript under results.channels[].alternatives[]. Drives the
+/// DeepgramProvider through the factory and asserts both.
+#[tokio::test]
+async fn factory_builds_deepgram_provider_with_token_auth() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/listen"))
+        .and(header("authorization", "Token dg-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "results": {
+                "channels": [
+                    { "alternatives": [ { "transcript": "deepgram text" } ] }
+                ]
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+
+    let mut whisper = phoneme_core::Config::default().whisper;
+    whisper.provider = phoneme_core::config::TranscriptionBackend::Deepgram;
+    whisper.api_key = "dg-test".into();
+    whisper.api_url = server.uri();
+
+    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let result = provider.transcribe(&wav, None).await.unwrap();
+    assert_eq!(result, "deepgram text");
+}

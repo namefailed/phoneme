@@ -77,6 +77,13 @@ impl Transcriber {
                 Some(model_or(&whisper.model, "whisper-large-v3")),
                 timeout,
             )),
+            TranscriptionBackend::Deepgram => Box::new(DeepgramProvider::new(
+                self.http.clone(),
+                cloud_base_url(&whisper.api_url, "https://api.deepgram.com"),
+                whisper.api_key.trim().to_string(),
+                model_or(&whisper.model, "nova-2"),
+                timeout,
+            )),
         }
     }
 }
@@ -205,5 +212,111 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .await
             .map_err(|e| Error::Internal(format!("decoding transcription response: {e}")))?;
         Ok(parsed.text)
+    }
+}
+
+/// Provider for Deepgram's prerecorded speech-to-text API (`/v1/listen`).
+///
+/// Deepgram is **not** OpenAI-compatible: it authenticates with
+/// `Authorization: Token <key>`, takes the raw audio as the request body, and
+/// returns the transcript nested under `results.channels[].alternatives[]`.
+#[derive(Debug, Clone)]
+pub struct DeepgramProvider {
+    http: reqwest::Client,
+    base_url: String,
+    api_key: String,
+    model: String,
+    timeout: Duration,
+}
+
+impl DeepgramProvider {
+    pub fn new(
+        http: reqwest::Client,
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            http,
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            timeout,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DeepgramResponse {
+    results: DeepgramResults,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeepgramResults {
+    channels: Vec<DeepgramChannel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeepgramChannel {
+    alternatives: Vec<DeepgramAlternative>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeepgramAlternative {
+    transcript: String,
+}
+
+#[async_trait]
+impl TranscriptionProvider for DeepgramProvider {
+    async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
+        let bytes = fs::read(audio_path).await?;
+        let url = format!("{}/v1/listen", self.base_url.trim_end_matches('/'));
+        let mut query: Vec<(&str, &str)> =
+            vec![("model", self.model.as_str()), ("smart_format", "true")];
+        if let Some(lang) = language {
+            query.push(("language", lang));
+        }
+        let response = match self
+            .http
+            .post(&url)
+            .query(&query)
+            .header("Authorization", format!("Token {}", self.api_key))
+            .header("Content-Type", "audio/wav")
+            .timeout(self.timeout)
+            .body(bytes)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) if e.is_timeout() => {
+                return Err(Error::WhisperTimeout {
+                    secs: self.timeout.as_secs(),
+                })
+            }
+            Err(e) => return Err(Error::WhisperUnreachable { url, source: e }),
+        };
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::WhisperError {
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let parsed: DeepgramResponse = response
+            .json()
+            .await
+            .map_err(|e| Error::Internal(format!("decoding Deepgram response: {e}")))?;
+        parsed
+            .results
+            .channels
+            .into_iter()
+            .next()
+            .and_then(|c| c.alternatives.into_iter().next())
+            .map(|a| a.transcript)
+            .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))
     }
 }

@@ -28,6 +28,7 @@ export class SectionWhisper {
                 { value: "local", label: "Local — whisper.cpp (offline, default)" },
                 { value: "openai", label: "OpenAI (cloud)" },
                 { value: "groq", label: "Groq (cloud)" },
+                { value: "deepgram", label: "Deepgram (cloud)" },
               ],
             },
             this.config.whisper.provider ?? "local",
@@ -159,7 +160,7 @@ export class SectionWhisper {
 
     // Show local vs cloud settings based on the selected provider.
     const applyProviderVisibility = (provider: string) => {
-      const isLocal = provider !== "openai" && provider !== "groq";
+      const isLocal = provider === "local";
       container.querySelector<HTMLElement>("#whisper-local")!.style.display = isLocal
         ? ""
         : "none";
@@ -168,10 +169,13 @@ export class SectionWhisper {
         : "";
       if (isLocal) return;
 
-      // provider/host/model are from a fixed set, not user input — safe in innerHTML.
-      const name = provider === "groq" ? "Groq" : "OpenAI";
-      const host = provider === "groq" ? "api.groq.com" : "api.openai.com";
-      const defaultModel = provider === "groq" ? "whisper-large-v3" : "whisper-1";
+      // provider metadata is from a fixed set, not user input — safe in innerHTML.
+      const meta: Record<string, { name: string; host: string; model: string }> = {
+        openai: { name: "OpenAI", host: "api.openai.com", model: "whisper-1" },
+        groq: { name: "Groq", host: "api.groq.com", model: "whisper-large-v3" },
+        deepgram: { name: "Deepgram", host: "api.deepgram.com", model: "nova-2" },
+      };
+      const { name, host, model: defaultModel } = meta[provider] ?? meta.openai;
       container.querySelector<HTMLElement>("#cloud-warning")!.innerHTML =
         `⚠️ <b>Cloud transcription.</b> Selecting ${name} uploads your recorded audio to ` +
         `${host} for processing — your audio leaves your machine. Switch back to ` +
