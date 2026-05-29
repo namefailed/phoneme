@@ -457,3 +457,119 @@ async fn deleting_recording_cascades_to_recording_tags() {
     let still_tagged = catalog.tags_for(&rec.id).await.unwrap();
     assert!(still_tagged.is_empty());
 }
+
+#[tokio::test]
+async fn deleting_tag_cascades_to_recording_tags() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("soon-deleted", Some("#ff0000")).await.unwrap();
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog.attach_tag(&rec.id, tag.id).await.unwrap();
+
+    // Confirm the tag is attached.
+    assert_eq!(catalog.tags_for(&rec.id).await.unwrap().len(), 1);
+
+    // Delete the tag itself — the junction row must vanish too.
+    catalog.delete_tag(tag.id).await.unwrap();
+
+    let after = catalog.tags_for(&rec.id).await.unwrap();
+    assert!(after.is_empty(), "delete_tag should cascade to recording_tags");
+
+    // Tag must be gone from list_all_tags as well.
+    let all = catalog.list_all_tags().await.unwrap();
+    assert!(!all.iter().any(|t| t.id == tag.id));
+}
+
+// ── Tag CRUD edge cases ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn add_tag_without_color_stores_null() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("no-color", None).await.unwrap();
+    assert_eq!(tag.name, "no-color");
+    assert!(tag.color.is_none(), "color should be None when not supplied");
+
+    let all = catalog.list_all_tags().await.unwrap();
+    let found = all.iter().find(|t| t.id == tag.id).expect("tag must appear in list_all_tags");
+    assert!(found.color.is_none());
+}
+
+#[tokio::test]
+async fn attach_tag_is_idempotent() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("idempotent", None).await.unwrap();
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    catalog.attach_tag(&rec.id, tag.id).await.unwrap();
+    // Attaching a second time must not error (INSERT OR IGNORE) and must not create a duplicate.
+    catalog.attach_tag(&rec.id, tag.id).await.unwrap();
+
+    let tags = catalog.tags_for(&rec.id).await.unwrap();
+    assert_eq!(tags.len(), 1, "duplicate attach should not create a second row");
+}
+
+#[tokio::test]
+async fn tags_for_is_scoped_to_the_queried_recording() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag_a = catalog.add_tag("alpha", None).await.unwrap();
+    let tag_b = catalog.add_tag("beta", None).await.unwrap();
+    let r1 = sample_recording(RecordingId::new());
+    let r2 = sample_recording(RecordingId::new());
+    catalog.insert(&r1).await.unwrap();
+    catalog.insert(&r2).await.unwrap();
+    catalog.attach_tag(&r1.id, tag_a.id).await.unwrap();
+    catalog.attach_tag(&r2.id, tag_b.id).await.unwrap();
+
+    let tags1 = catalog.tags_for(&r1.id).await.unwrap();
+    assert_eq!(tags1.len(), 1);
+    assert_eq!(tags1[0].id, tag_a.id, "r1 should only carry tag_a");
+
+    let tags2 = catalog.tags_for(&r2.id).await.unwrap();
+    assert_eq!(tags2.len(), 1);
+    assert_eq!(tags2[0].id, tag_b.id, "r2 should only carry tag_b");
+}
+
+// ── Tag filter in list() ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn list_filters_by_tag_id() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("rust", None).await.unwrap();
+    let r1 = sample_recording(RecordingId::new());
+    let r2 = sample_recording(RecordingId::new());
+    catalog.insert(&r1).await.unwrap();
+    catalog.insert(&r2).await.unwrap();
+    catalog.attach_tag(&r1.id, tag.id).await.unwrap();
+    // r2 is intentionally untagged.
+
+    let results = catalog
+        .list(&ListFilter {
+            tag_id: Some(tag.id),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 1, "only the tagged recording should be returned");
+    assert_eq!(results[0].id, r1.id);
+}
+
+#[tokio::test]
+async fn list_with_tag_filter_returns_empty_for_unused_tag() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let tag = catalog.add_tag("orphan", None).await.unwrap();
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    // Tag exists but is not attached to any recording.
+
+    let results = catalog
+        .list(&ListFilter {
+            tag_id: Some(tag.id),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert!(results.is_empty(), "unattached tag should match no recordings");
+}

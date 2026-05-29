@@ -8,42 +8,101 @@ vi.mock('@tauri-apps/api/event', () => {
   };
 });
 
+function captureSubscribeHandler(): Promise<{ handler: (e: any) => void; unsub: () => void }> {
+  return new Promise((resolve) => {
+    vi.mocked(tauriEvent.listen).mockImplementationOnce(async (_event, handler) => {
+      const unsub = vi.fn();
+      resolve({ handler: handler as (e: any) => void, unsub });
+      return unsub;
+    });
+  });
+}
+
 describe('Event Services', () => {
   it('subscribes to daemon-event and unwraps payload', async () => {
-    // Mock the listen function to capture the handler
-    let capturedHandler: (e: any) => void = () => {};
-    vi.mocked(tauriEvent.listen).mockImplementationOnce(async (event, handler) => {
-      expect(event).toBe('daemon-event');
-      capturedHandler = handler as (e: any) => void;
-      return vi.fn(); // Return mock unlisten fn
-    });
-
+    const captured = captureSubscribeHandler();
     const mockCallback = vi.fn();
     const unsub = await subscribe(mockCallback);
-    
-    // Simulate an event arriving from Tauri
-    const fakeEventPayload: DaemonEvent = { event: 'recording_started', id: '123', started_at: 'now' };
-    capturedHandler({ payload: fakeEventPayload });
-    
-    expect(mockCallback).toHaveBeenCalledWith(fakeEventPayload);
+    const { handler } = await captured;
+
+    const payload: DaemonEvent = { event: 'recording_started', id: '123', started_at: 'now' };
+    handler({ payload });
+
+    expect(mockCallback).toHaveBeenCalledWith(payload);
     expect(unsub).toBeTypeOf('function');
+  });
+
+  it('passes tag_created events through to the handler', async () => {
+    const captured = captureSubscribeHandler();
+    const mockCallback = vi.fn();
+    await subscribe(mockCallback);
+    const { handler } = await captured;
+
+    const payload: DaemonEvent = { event: 'tag_created', id: 7 };
+    handler({ payload });
+
+    expect(mockCallback).toHaveBeenCalledWith(payload);
+  });
+
+  it('passes tag_updated events through to the handler', async () => {
+    const captured = captureSubscribeHandler();
+    const mockCallback = vi.fn();
+    await subscribe(mockCallback);
+    const { handler } = await captured;
+
+    const payload: DaemonEvent = { event: 'tag_updated', id: 42 };
+    handler({ payload });
+
+    expect(mockCallback).toHaveBeenCalledWith(payload);
+  });
+
+  it('passes tag_deleted events through to the handler', async () => {
+    const captured = captureSubscribeHandler();
+    const mockCallback = vi.fn();
+    await subscribe(mockCallback);
+    const { handler } = await captured;
+
+    const payload: DaemonEvent = { event: 'tag_deleted', id: 3 };
+    handler({ payload });
+
+    expect(mockCallback).toHaveBeenCalledWith(payload);
+  });
+
+  it('passes tag_attached events through to the handler', async () => {
+    const captured = captureSubscribeHandler();
+    const mockCallback = vi.fn();
+    await subscribe(mockCallback);
+    const { handler } = await captured;
+
+    const payload: DaemonEvent = { event: 'tag_attached', tag_id: 1 };
+    handler({ payload });
+
+    expect(mockCallback).toHaveBeenCalledWith(payload);
+  });
+
+  it('passes tag_detached events through to the handler', async () => {
+    const captured = captureSubscribeHandler();
+    const mockCallback = vi.fn();
+    await subscribe(mockCallback);
+    const { handler } = await captured;
+
+    const payload: DaemonEvent = { event: 'tag_detached', tag_id: 1 };
+    handler({ payload });
+
+    expect(mockCallback).toHaveBeenCalledWith(payload);
   });
 
   it('subscribes to onMenu events', async () => {
     vi.mocked(tauriEvent.listen).mockResolvedValueOnce(vi.fn());
-    
     const mockCallback = vi.fn();
     await onMenu('settings', mockCallback);
-    
     expect(tauriEvent.listen).toHaveBeenCalledWith('menu:settings', expect.any(Function));
   });
 
   it('subscribes to onNav events', async () => {
     vi.mocked(tauriEvent.listen).mockResolvedValueOnce(vi.fn());
-    
     const mockCallback = vi.fn();
     await onNav('wizard', mockCallback);
-    
     expect(tauriEvent.listen).toHaveBeenCalledWith('nav:wizard', expect.any(Function));
   });
 });

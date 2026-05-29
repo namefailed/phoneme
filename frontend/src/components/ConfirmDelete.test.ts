@@ -79,3 +79,64 @@ describe("confirmDelete", () => {
     expect(await promise).toBe(false);
   });
 });
+
+describe("confirmDelete — ConfirmDeleteOpts customisation", () => {
+  it("shows a custom title in the modal header", async () => {
+    const promise = confirmDelete({ title: 'Delete this tag?' });
+    expect(document.querySelector(".modal-title")?.textContent).toContain("Delete this tag?");
+    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    await promise;
+  });
+
+  it("shows custom body text", async () => {
+    const promise = confirmDelete({ body: 'This will remove it from all recordings.' });
+    expect(document.querySelector(".modal-body")?.textContent).toContain(
+      "This will remove it from all recordings."
+    );
+    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    await promise;
+  });
+
+  it("shows a custom confirm button label", async () => {
+    const promise = confirmDelete({ confirmLabel: 'Delete Tag' });
+    const btn = document.querySelector<HTMLButtonElement>("#btn-confirm");
+    expect(btn?.textContent?.trim()).toBe("Delete Tag");
+    btn?.click();
+    await promise;
+  });
+
+  it("stores 'don't ask again' under the custom skipKey, not the default key", async () => {
+    const promise = confirmDelete({ skipKey: 'phoneme_skip_tag_delete_confirm' });
+    const cb = document.querySelector<HTMLInputElement>("#dont-ask-again")!;
+    cb.checked = true;
+    (document.querySelector("#btn-confirm") as HTMLButtonElement)?.click();
+    await promise;
+    expect(localStorage.getItem("phoneme_skip_tag_delete_confirm")).toBe("true");
+    expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBeNull();
+  });
+
+  it("custom skipKey pref does not affect the default skipKey (keys are isolated)", async () => {
+    localStorage.setItem("phoneme_skip_tag_delete_confirm", "true");
+    // Default skipKey ('phoneme_skip_delete_confirm') is not set, so the modal must appear.
+    const promise = confirmDelete();
+    expect(getOverlay()).not.toBeNull();
+    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    await promise;
+  });
+
+  it("custom skipKey bypasses the modal when already set to true", async () => {
+    localStorage.setItem("phoneme_skip_tag_delete_confirm", "true");
+    const result = await confirmDelete({ skipKey: "phoneme_skip_tag_delete_confirm" });
+    expect(result).toBe(true);
+    expect(getOverlay()).toBeNull();
+  });
+
+  it("uses default title/body/confirmLabel when opts are omitted", async () => {
+    const promise = confirmDelete();
+    expect(document.querySelector(".modal-title")?.textContent).toContain("Delete Recording?");
+    expect(document.querySelector(".modal-body")?.textContent).toContain("permanently delete");
+    expect(document.querySelector<HTMLButtonElement>("#btn-confirm")?.textContent?.trim()).toBe("Delete");
+    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    await promise;
+  });
+});

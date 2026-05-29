@@ -1,4 +1,4 @@
-import { addTag, attachTag, detachTag, listTags, tagsFor, type Tag } from "../../services/ipc";
+import { addTag, attachTag, detachTag, listAllTags, tagsFor, type Tag } from "../../services/ipc";
 import { escapeHtml } from "../../utils/format";
 import { showToast } from "../../utils/toast";
 
@@ -16,7 +16,7 @@ export class TagChips {
 
   private async load() {
     try {
-      this.allTags = await listTags();
+      this.allTags = await listAllTags();
       this.attached = await tagsFor(this.recordingId);
       this.render();
     } catch (e) {
