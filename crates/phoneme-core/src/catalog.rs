@@ -205,8 +205,14 @@ impl Catalog {
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
-        let dir = if filter.sort_desc.unwrap_or(true) { "DESC" } else { "ASC" };
-        sql.push_str(&format!(" ORDER BY recordings.started_at {dir}, recordings.id {dir}"));
+        let dir = if filter.sort_desc.unwrap_or(true) {
+            "DESC"
+        } else {
+            "ASC"
+        };
+        sql.push_str(&format!(
+            " ORDER BY recordings.started_at {dir}, recordings.id {dir}"
+        ));
         if let Some(n) = filter.limit {
             sql.push_str(&format!(" LIMIT {n}"));
         }
@@ -362,8 +368,8 @@ impl Catalog {
 
         // Age-based cleanup — delete everything older than max_age_days.
         if let Some(max_age) = cfg.max_age_days {
-            let cutoff = chrono::Utc::now()
-                - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
+            let cutoff =
+                chrono::Utc::now() - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
             let cutoff_str = cutoff.to_rfc3339();
             let rows = sqlx::query(
                 "SELECT id, audio_path FROM recordings \
