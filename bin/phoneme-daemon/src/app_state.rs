@@ -4,7 +4,7 @@ use crate::event_bus::EventBus;
 use crate::recorder::DaemonRecorder;
 use crate::shutdown::ShutdownCoordinator;
 use arc_swap::ArcSwap;
-use phoneme_core::{webhook::WebhookClient, Catalog, Config, InboxQueue, TranscriptionClient};
+use phoneme_core::{webhook::WebhookClient, Catalog, Config, InboxQueue, Transcriber};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -62,10 +62,10 @@ pub struct AppState {
     /// both reference this one instance so `phoneme daemon stop` actually
     /// stops the daemon.
     pub shutdown: Arc<ShutdownCoordinator>,
-    /// One transcription HTTP client for the whole process. Reused across
-    /// every queued item so the connection pool to the local whisper-server
-    /// is kept warm instead of rebuilt per recording.
-    pub transcription: TranscriptionClient,
+    /// Shared transcription HTTP client for the whole process. Holds the warm
+    /// connection pool and mints a per-recording `TranscriptionProvider` from
+    /// the live config, so the pool is reused instead of rebuilt per recording.
+    pub transcription: Transcriber,
     pub webhook: WebhookClient,
 }
 
@@ -81,7 +81,7 @@ impl AppState {
 
         let catalog = Catalog::open(&paths.catalog_db).await?;
         let inbox = InboxQueue::new(&paths.inbox_dir).await?;
-        let transcription = TranscriptionClient::new()?;
+        let transcription = Transcriber::new()?;
         let webhook = WebhookClient::new()?;
 
         Ok(Self {

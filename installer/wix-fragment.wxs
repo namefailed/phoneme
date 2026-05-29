@@ -3,7 +3,7 @@
   <Fragment>
     <!-- PATH integration: default enabled (ADDTOPATH=1).
          To install without modifying PATH, run:
-           msiexec /i Phoneme-1.0.0-x64.msi /quiet ADDTOPATH=0 -->
+           msiexec /i Phoneme-<version>-x64.msi /quiet ADDTOPATH=0 -->
     <Property Id="ADDTOPATH" Value="1" />
 
     <DirectoryRef Id="INSTALLDIR">

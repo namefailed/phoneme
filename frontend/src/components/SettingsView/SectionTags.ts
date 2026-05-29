@@ -1,6 +1,6 @@
 import { listAllTags, listTags, addTag, updateTag, deleteTag, type Tag } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { escapeHtml } from "../../utils/format";
+import { escapeHtml, escapeAttr } from "../../utils/format";
 import { confirmDelete } from "../ConfirmDelete";
 
 /**
@@ -92,19 +92,19 @@ export class SectionTags {
           <input
             type="color"
             class="tag-mgr-color-btn tag-edit-color"
-            value="${escapeHtml(color)}"
+            value="${escapeAttr(color)}"
             data-tag-id="${t.id}"
             title="Tag color"
           />
           <span
             class="tag-mgr-swatch"
             id="swatch-preview-${t.id}"
-            style="background: ${escapeHtml(color)};"
+            style="background: ${escapeAttr(color)};"
           ></span>
           <input
             type="text"
             class="tag-mgr-name-input"
-            value="${escapeHtml(t.name)}"
+            value="${escapeAttr(t.name)}"
             data-tag-id="${t.id}"
           />
           <button class="tag-mgr-save" data-tag-id="${t.id}">Save</button>
@@ -115,7 +115,7 @@ export class SectionTags {
 
     return `
       <div class="tag-mgr-row" data-tag-id="${t.id}">
-        <span class="tag-mgr-swatch" style="background: ${escapeHtml(color)};"></span>
+        <span class="tag-mgr-swatch" style="background: ${escapeAttr(color)};"></span>
         <span class="tag-mgr-name">${escapeHtml(t.name)}</span>
         <span class="tag-mgr-badge ${inUse ? "in-use" : "orphaned"}" title="${
       inUse

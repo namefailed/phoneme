@@ -41,6 +41,15 @@ export function escapeHtml(s: string): string {
 }
 
 /**
+ * Escape a string for safe insertion into a double-quoted HTML attribute.
+ * Extends escapeHtml by also encoding `"`, so the value cannot break out of
+ * the attribute. Use for `value="..."`, `style="..."`, `title="..."`, etc.
+ */
+export function escapeAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, "&quot;");
+}
+
+/**
  * Returns HTML with occurrences of `term` inside `text` wrapped in
  * `<mark class="search-hit">` tags. Both the surrounding text and the
  * matched portions are HTML-escaped so it is safe to inject into innerHTML.
