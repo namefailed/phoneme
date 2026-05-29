@@ -8,6 +8,9 @@ dist/
 **/*.rs.bk
 Cargo.lock.bak
 
+# insta pending snapshots — review with `cargo insta`, never commit
+*.snap.new
+
 # Tauri auto-generated files
 src-tauri/gen/
 
