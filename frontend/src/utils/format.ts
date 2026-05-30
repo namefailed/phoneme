@@ -72,6 +72,21 @@ export function highlightMatch(text: string, term: string): string {
   return parts.join("");
 }
 
+/**
+ * Human-readable word count + reading time for a transcript, e.g.
+ * `"243 words · ~1 min read"`. Returns `""` for empty/whitespace text (so the
+ * caller can omit the element entirely). Reading time assumes ~200 wpm, min 1.
+ */
+export function wordCountSummary(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  const words = trimmed.split(/\s+/).length;
+  const minutes = Math.max(1, Math.round(words / 200));
+  const wordLabel = words === 1 ? "word" : "words";
+  const minLabel = minutes === 1 ? "min" : "mins";
+  return `${words} ${wordLabel} · ~${minutes} ${minLabel} read`;
+}
+
 /** Format a timestamp as a locale time string. */
 export function formatTime(iso: string, use24h: boolean): string {
   const d = new Date(iso);

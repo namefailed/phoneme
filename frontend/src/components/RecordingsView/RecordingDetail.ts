@@ -1,5 +1,5 @@
 import { getRecording, type Recording } from "../../services/ipc";
-import { formatDuration, statusToClass, statusLabel } from "../../utils/format";
+import { formatDuration, statusToClass, statusLabel, wordCountSummary } from "../../utils/format";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptEditor } from "./TranscriptEditor";
@@ -46,6 +46,7 @@ export class RecordingDetail {
   private renderRecording() {
     if (!this.recording) return;
     const r = this.recording;
+    const stats = wordCountSummary(r.transcript ?? "");
     this.container.innerHTML = `
       <div class="detail">
         <div class="detail-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -64,6 +65,7 @@ export class RecordingDetail {
           <div id="editor"></div>
         </div>
         <div class="detail-footer">
+          ${stats ? `<span>${stats}</span>` : ""}
           <span>Hook exit: ${r.hook_exit_code ?? "—"}</span>
           <span>${r.audio_path}</span>
         </div>
