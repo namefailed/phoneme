@@ -347,6 +347,51 @@ async fn insert_done_recording_aged(catalog: &Catalog, days_ago: i64) -> Recordi
 }
 
 #[tokio::test]
+async fn analyze_upcoming_retention_counts_only_terminal_rows_entering_window() {
+    // Pre-deletion warning math (was untested). For max_age_days=30, hours_ahead=72
+    // the "about to age out" window is started_at in [now-30d, now-27d): recordings
+    // 28–30 days old will cross the 30-day deletion threshold within the next 72h.
+    let (_dir, catalog) = fresh_catalog().await;
+
+    insert_done_recording_aged(&catalog, 29).await; // in window, terminal -> COUNTS
+    insert_done_recording_aged(&catalog, 31).await; // already past max_age -> not "upcoming"
+    insert_done_recording_aged(&catalog, 10).await; // far too new -> not counted
+
+    // In-progress recording inside the window must NOT count — only terminal
+    // statuses (done / transcribe_failed / hook_failed) are eligible for deletion.
+    let started = Local::now() - Duration::try_days(28).unwrap();
+    let mut in_progress = sample_recording(RecordingId::from_datetime(started));
+    in_progress.started_at = started;
+    in_progress.audio_path = format!("/tmp/{}.wav", in_progress.id);
+    catalog.insert(&in_progress).await.unwrap(); // stays RecordingStatus::Recording
+
+    let cfg = RetentionConfig {
+        max_age_days: Some(30),
+        max_count: None,
+        delete_audio: false,
+    };
+    let count = catalog.analyze_upcoming_retention(&cfg, 72).await.unwrap();
+    assert_eq!(
+        count, 1,
+        "only the terminal recording entering the 72h window should be counted"
+    );
+
+    // No age policy => nothing is ever 'upcoming' (early return at max_age_days=None).
+    let no_age = RetentionConfig {
+        max_age_days: None,
+        max_count: Some(5),
+        delete_audio: false,
+    };
+    assert_eq!(
+        catalog
+            .analyze_upcoming_retention(&no_age, 72)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn apply_retention_age_deletes_old_removes_catalog_row() {
     let (_dir, catalog) = fresh_catalog().await;
     let old = insert_done_recording_aged(&catalog, 31).await;
