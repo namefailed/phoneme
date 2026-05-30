@@ -38,6 +38,7 @@ reqwest.workspace = true
 which = "6"
 futures = "0.3"
 zip = "0.6"
+tauri-plugin-notification = "2.3.3"
 
 [dev-dependencies]
 wiremock.workspace = true

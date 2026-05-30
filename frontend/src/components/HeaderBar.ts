@@ -2,7 +2,7 @@
 
 import "./shared/styles.css";
 import { filterStore, type UiFilter } from "../state/filter";
-import { listTags, recordCancel, type Tag } from "../services/ipc";
+import { listTags, type Tag } from "../services/ipc";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../utils/toast";
@@ -56,6 +56,23 @@ export class HeaderBar {
         this.queuePending = (p.pending as number) ?? 0;
         this.queueProcessing = (p.processing as number) ?? 0;
         this.updateStatusIndicators();
+      } else if (eventName === "retention_warning") {
+        try {
+          const { isPermissionGranted, requestPermission, sendNotification } = await import("@tauri-apps/plugin-notification");
+          let permissionGranted = await isPermissionGranted();
+          if (!permissionGranted) {
+            const permission = await requestPermission();
+            permissionGranted = permission === "granted";
+          }
+          if (permissionGranted) {
+            sendNotification({ 
+              title: "Phoneme Retention Policy", 
+              body: `${p.count} recordings will be permanently deleted in the next 24 hours per your auto-delete settings.`
+            });
+          }
+        } catch (e) {
+          console.error("Failed to send native notification:", e);
+        }
       }
 
       if (

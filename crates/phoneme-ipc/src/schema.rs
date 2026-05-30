@@ -175,6 +175,10 @@ pub enum DaemonEvent {
         processing: usize,
         failed: usize,
     },
+    RetentionWarning {
+        count: u32,
+        hours: u32,
+    },
     WhisperStatusChanged {
         reachable: bool,
     },

@@ -452,6 +452,36 @@ impl Catalog {
         Ok(deleted_paths)
     }
 
+    /// Predicts how many recordings will be deleted by the age-based retention policy
+    /// in the next `hours_ahead` hours.
+    pub async fn analyze_upcoming_retention(
+        &self,
+        cfg: &crate::config::RetentionConfig,
+        hours_ahead: u32,
+    ) -> Result<u32> {
+        let max_age = match cfg.max_age_days {
+            Some(v) => v,
+            None => return Ok(0),
+        };
+
+        // cutoff_now is items older than this are ALREADY deleted or being deleted now.
+        let cutoff_now = chrono::Utc::now() - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
+        // cutoff_future is items older than this will be deleted in the next `hours_ahead` hours.
+        let cutoff_future = cutoff_now + chrono::Duration::try_hours(hours_ahead as i64).unwrap_or_default();
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM recordings \
+             WHERE started_at >= ? AND started_at < ? \
+             AND status IN ('done','transcribe_failed','hook_failed')"
+        )
+        .bind(cutoff_now.to_rfc3339())
+        .bind(cutoff_future.to_rfc3339())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count as u32)
+    }
+
     pub async fn tags_for(&self, recording_id: &RecordingId) -> Result<Vec<Tag>> {
         let rows = sqlx::query(
             r#"SELECT t.id, t.name, t.color
