@@ -86,8 +86,12 @@ export class ConfigureMode {
       }
     });
 
-    const path = await invoke<string>("wizard_download_model", { url, filename });
-    if (unlisten) unlisten();
+    let path: string;
+    try {
+      path = await invoke<string>("wizard_download_model", { url, filename });
+    } finally {
+      if (unlisten) unlisten();
+    }
 
     this.config.whisper.mode = "bundled_model";
     this.config.whisper.model_path = path;
@@ -141,11 +145,15 @@ export class ConfigureMode {
         }
       });
 
-      const installerPath = await invoke<string>("wizard_download_file", {
-        url: "https://ollama.com/download/OllamaSetup.exe",
-        filename: "OllamaSetup.exe",
-      });
-      if (unlisten) unlisten();
+      let installerPath: string;
+      try {
+        installerPath = await invoke<string>("wizard_download_file", {
+          url: "https://ollama.com/download/OllamaSetup.exe",
+          filename: "OllamaSetup.exe",
+        });
+      } finally {
+        if (unlisten) unlisten();
+      }
 
       this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Running Ollama installer. Please complete the setup window!";
       this.body.querySelector<HTMLProgressElement>("#progress")!.removeAttribute("value");

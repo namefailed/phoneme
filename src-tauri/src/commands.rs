@@ -161,7 +161,11 @@ pub async fn write_config(
     bridge: Br<'_>,
     config: Config,
 ) -> Result<(), String> {
-    config_io::write(&config).map_err(|e| e.to_string())?;
+    let cfg = config.clone();
+    tokio::task::spawn_blocking(move || config_io::write(&cfg))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
 
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
@@ -386,6 +390,10 @@ pub async fn wizard_download_model(
     url: String,
     filename: String,
 ) -> Result<String, String> {
+    if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
+        return Err("Invalid filename".to_string());
+    }
+
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| "could not resolve project directories".to_string())?;
     let models_dir = dirs.data_local_dir().join("models");
@@ -580,40 +588,45 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
     }
     drop(file);
 
-    // Extract zip
-    let zip_file = std::fs::File::open(&temp_zip)
-        .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
+    let zip_path = temp_zip.clone();
+    let bin_path = bin_dir.clone();
+    
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let zip_file = std::fs::File::open(&zip_path)
+            .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
 
-    let mut archive =
-        zip::ZipArchive::new(zip_file).map_err(|e| format!("failed to read zip archive: {}", e))?;
+        let mut archive =
+            zip::ZipArchive::new(zip_file).map_err(|e| format!("failed to read zip archive: {}", e))?;
 
-    for i in 0..archive.len() {
-        let mut file = match archive.by_index(i) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
+        for i in 0..archive.len() {
+            let mut file = match archive.by_index(i) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
 
-        let outpath = match file.enclosed_name() {
-            Some(path) => path.to_owned(),
-            None => continue,
-        };
+            let outpath = match file.enclosed_name() {
+                Some(path) => path.to_owned(),
+                None => continue,
+            };
 
-        // We only care about the binaries in the 'whisper-bin-x64' root or nested, just grab exe and dlls.
-        if file.is_file() {
-            if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
-                if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
-                    let extract_to = bin_dir.join(file_name);
-                    let mut outfile = std::fs::File::create(&extract_to).map_err(|e| {
-                        format!("failed to create output file {}: {}", file_name, e)
-                    })?;
-                    std::io::copy(&mut file, &mut outfile)
-                        .map_err(|e| format!("failed to extract {}: {}", file_name, e))?;
+            if file.is_file() {
+                if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
+                    if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
+                        let extract_to = bin_path.join(file_name);
+                        let mut outfile = std::fs::File::create(&extract_to).map_err(|e| {
+                            format!("failed to create output file {}: {}", file_name, e)
+                        })?;
+                        std::io::copy(&mut file, &mut outfile)
+                            .map_err(|e| format!("failed to extract {}: {}", file_name, e))?;
+                    }
                 }
             }
         }
-    }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {}", e))??;
 
-    drop(archive);
     let _ = tokio::fs::remove_file(&temp_zip).await;
 
     Ok(exe_path.to_string_lossy().into_owned())
@@ -750,6 +763,10 @@ pub async fn wizard_download_file(
     url: String,
     filename: String,
 ) -> Result<String, String> {
+    if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
+        return Err("Invalid filename".to_string());
+    }
+
     let dest_path = std::env::temp_dir().join(&filename);
     
     let mut file = tokio::fs::File::create(&dest_path)
@@ -794,6 +811,14 @@ pub async fn wizard_download_file(
 
 #[tauri::command]
 pub fn wizard_run_installer(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.starts_with(std::env::temp_dir()) {
+        return Err("Execution is restricted to the temporary directory".to_string());
+    }
+    if !p.exists() {
+        return Err("Installer file does not exist".to_string());
+    }
+
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new(&path)
@@ -805,6 +830,9 @@ pub fn wizard_run_installer(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn open_file(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("File does not exist: {}", path));
+    }
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")

@@ -103,8 +103,7 @@ export class SectionWhisper {
         }
 
         const { listen } = await import("@tauri-apps/api/event");
-        let unlisten: (() => void) | undefined;
-        listen<{ downloaded: number; total: number | null }>("download_progress", (ev) => {
+        const unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (ev) => {
           if (progressEl) {
             if (ev.payload.total) {
               progressEl.textContent = `${(ev.payload.downloaded / 1024 / 1024).toFixed(1)} / ${(ev.payload.total / 1024 / 1024).toFixed(1)} MB`;
@@ -112,7 +111,7 @@ export class SectionWhisper {
               progressEl.textContent = `${(ev.payload.downloaded / 1024 / 1024).toFixed(1)} MB`;
             }
           }
-        }).then(f => unlisten = f);
+        });
 
         try {
           const newPath = await invoke<string>("wizard_download_model", { url, filename });
