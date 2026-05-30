@@ -28,6 +28,7 @@ fn list_recordings_request_roundtrips() {
     let filter = ListFilter {
         limit: Some(50),
         since: None,
+        until: None,
         status: Some(RecordingStatus::Done),
         search: Some("sarah".into()),
         tag_id: None,

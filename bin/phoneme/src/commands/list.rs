@@ -53,5 +53,6 @@ fn build_filter(args: ListArgs) -> ListFilter {
         search: args.search,
         tag_id: None,
         sort_desc: None,
+        until: None,
     }
 }

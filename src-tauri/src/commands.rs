@@ -112,7 +112,7 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
 #[tauri::command]
 pub async fn replay_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::ReplayRecording { id }).await
+    forward(&bridge, Request::ReplayRecording { id, model: None }).await
 }
 
 /// Force the daemon to re-execute the post-processing hook for a given recording ID.
@@ -683,6 +683,124 @@ mod tests {
             );
         }
     }
+}
+
+#[tauri::command]
+pub async fn wizard_ping_ollama() -> Result<bool, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client.get("http://127.0.0.1:11434/api/version").send().await {
+        Ok(r) => Ok(r.status().is_success()),
+        Err(_) => Ok(false),
+    }
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct OllamaPullProgress {
+    pub status: String,
+    pub completed: Option<u64>,
+    pub total: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn wizard_pull_ollama_model(
+    window: tauri::Window,
+    model: String,
+) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({ "name": model });
+    let response = client
+        .post("http://127.0.0.1:11434/api/pull")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("pull failed with status: {}", response.status()));
+    }
+
+    use futures::StreamExt;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("stream error: {}", e))?;
+        if let Ok(s) = std::str::from_utf8(&chunk) {
+            for line in s.lines() {
+                if line.trim().is_empty() { continue; }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    let status = v["status"].as_str().unwrap_or("").to_string();
+                    let completed = v["completed"].as_u64();
+                    let total = v["total"].as_u64();
+                    let _ = window.emit(
+                        "ollama_pull_progress",
+                        OllamaPullProgress { status, completed, total },
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn wizard_download_file(
+    window: tauri::Window,
+    url: String,
+    filename: String,
+) -> Result<String, String> {
+    let dest_path = std::env::temp_dir().join(&filename);
+    
+    let mut file = tokio::fs::File::create(&dest_path)
+        .await
+        .map_err(|e| format!("failed to create file: {}", e))?;
+
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("download failed: {}", response.status()));
+    }
+
+    let total = response.content_length();
+    let mut downloaded: u64 = 0;
+    
+    use futures::StreamExt;
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(&dest_path).await;
+                return Err(format!("stream error: {}", e));
+            }
+        };
+        if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+            drop(file);
+            let _ = tokio::fs::remove_file(&dest_path).await;
+            return Err(format!("write error: {}", e));
+        }
+        downloaded += chunk.len() as u64;
+
+        let _ = window.emit("download_progress", DownloadProgress { downloaded, total });
+    }
+
+    Ok(dest_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn wizard_run_installer(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new(&path)
+            .spawn()
+            .map_err(|e| format!("failed to run installer: {}", e))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

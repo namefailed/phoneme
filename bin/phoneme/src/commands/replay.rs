@@ -10,7 +10,7 @@ pub async fn run(args: IdArgs, cfg: &Config) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    match client.send(Request::ReplayRecording { id }).await {
+    match client.send(Request::ReplayRecording { id, model: None }).await {
         Ok(_) => {
             println!("replay queued");
             ExitCode::SUCCESS

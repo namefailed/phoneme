@@ -3,111 +3,79 @@ import { listen } from "@tauri-apps/api/event";
 import type { StepCallbacks } from "./Welcome";
 
 export class ConfigureMode {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(
-    body: HTMLElement,
-    footer: HTMLElement,
+    private body: HTMLElement,
+    private footer: HTMLElement,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private config: any,
-    cbs: StepCallbacks,
+    private cbs: StepCallbacks,
   ) {
-    const mode = this.config.whisper.mode;
-    if (mode === "external") {
-      this.renderExternal(body, footer, cbs);
-    } else if (mode === "bundled_model") {
-      this.renderBundledModel(body, footer, cbs);
-    } else if (mode === "bundled_download") {
-      this.renderBundledDownload(body, footer, cbs);
-    } else {
-      cbs.onNext();
+    void this.runPipeline();
+  }
+
+  private async runPipeline() {
+    const mode = this.config._setup_mode || "none";
+    
+    if (mode === "none") {
+      this.config.whisper.mode = "external";
+      this.cbs.onNext();
+      return;
     }
-  }
 
-  private renderExternal(body: HTMLElement, footer: HTMLElement, cbs: StepCallbacks) {
-    body.innerHTML = `
-      <h2 class="wizard-title">Point at your whisper-server</h2>
-      <p class="wizard-subtitle">Enter the URL of your running whisper-server with an OpenAI-compatible API.</p>
-      <div class="wizard-field">
-        <label>Endpoint URL</label>
-        <input type="text" id="url" value="${this.config.whisper.external_url}" />
-      </div>
-      <button class="wizard-btn" id="test">Test connection</button>
-      <div class="test-result" id="result" style="display:none"></div>
-    `;
-    this.renderFooter(footer, cbs);
-    body.querySelector<HTMLInputElement>("#url")!.addEventListener("input", (e) => {
-      this.config.whisper.external_url = (e.target as HTMLInputElement).value;
-    });
-    body.querySelector("#test")?.addEventListener("click", async () => {
-      const r = await invoke<{ ok: boolean; message: string }>("wizard_test_whisper", {
-        url: this.config.whisper.external_url,
-      });
-      const el = body.querySelector<HTMLElement>("#result")!;
-      el.style.display = "block";
-      el.className = `test-result ${r.ok ? "ok" : "err"}`;
-      el.textContent = r.message;
-    });
-  }
-
-  private renderBundledModel(
-    body: HTMLElement,
-    footer: HTMLElement,
-    cbs: StepCallbacks,
-  ) {
-    body.innerHTML = `
-      <h2 class="wizard-title">Pick your model file</h2>
-      <p class="wizard-subtitle">A GGUF model file (e.g., Gemma-4-E4B Q5_K_M).</p>
-      <div class="wizard-field">
-        <label>Model path</label>
-        <input type="text" id="path" value="${this.config.whisper.model_path}" />
-        <button class="wizard-btn small" id="browse">Browse…</button>
-      </div>
-    `;
-    this.renderFooter(footer, cbs);
-    body.querySelector("#browse")?.addEventListener("click", async () => {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const path = await open({
-        multiple: false,
-        filters: [{ name: "GGUF model", extensions: ["gguf"] }],
-      });
-      if (typeof path === "string") {
-        this.config.whisper.model_path = path;
-        body.querySelector<HTMLInputElement>("#path")!.value = path;
-      }
-    });
-    body.querySelector<HTMLInputElement>("#path")!.addEventListener("input", (e) => {
-      this.config.whisper.model_path = (e.target as HTMLInputElement).value;
-    });
-  }
-
-  private renderBundledDownload(
-    body: HTMLElement,
-    footer: HTMLElement,
-    cbs: StepCallbacks,
-  ) {
-    body.innerHTML = `
-      <h2 class="wizard-title" id="download-title">Downloading model</h2>
-      <p class="wizard-subtitle" id="download-subtitle">Fetching the default Whisper model (ggml-base.en.bin) for transcription...</p>
+    this.body.innerHTML = `
+      <h2 class="wizard-title" id="download-title">Downloading models</h2>
+      <p class="wizard-subtitle" id="download-subtitle">Please wait while Phoneme downloads and configures the required local AI models...</p>
       <div class="download-progress-container" style="margin-top:2rem;">
         <progress id="progress" max="100" value="0" style="width:100%;"></progress>
-        <div id="status" style="text-align:center; font-size:12px; margin-top:8px;">Starting download...</div>
+        <div id="status" style="text-align:center; font-size:12px; margin-top:8px;">Starting...</div>
       </div>
     `;
-    // Footer back button only while downloading, or disabled next until done
-    footer.innerHTML = `
+    this.footer.innerHTML = `
       <button class="wizard-btn" id="back" disabled>← Back</button>
       <span class="spacer"></span>
       <button class="wizard-btn primary" id="next" disabled>Continue →</button>
     `;
 
-    // Download URL - hardcoded or from a list
+    try {
+      if (mode === "whisper" || mode === "both") {
+        await this.doWhisper();
+      }
+      if (mode === "ollama" || mode === "both") {
+        await this.doOllama();
+      }
+
+      this.body.querySelector<HTMLElement>("#download-title")!.textContent = "Setup complete!";
+      this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "All components are installed and configured.";
+      this.body.querySelector<HTMLElement>("#status")!.textContent = "Done.";
+      this.body.querySelector<HTMLProgressElement>("#progress")!.value = 100;
+      
+      this.footer.querySelector<HTMLButtonElement>("#next")!.disabled = false;
+      this.footer.querySelector<HTMLButtonElement>("#back")!.disabled = false;
+      this.footer.querySelector("#next")?.addEventListener("click", () => this.cbs.onNext());
+      this.footer.querySelector("#back")?.addEventListener("click", () => this.cbs.onBack());
+    } catch (err) {
+      console.error(err);
+      this.body.querySelector<HTMLElement>("#download-title")!.textContent = "Setup failed";
+      this.body.querySelector<HTMLElement>("#status")!.textContent = String(err);
+      this.body.querySelector<HTMLElement>("#status")!.style.color = "red";
+      this.footer.querySelector<HTMLButtonElement>("#back")!.disabled = false;
+      this.footer.querySelector("#back")?.addEventListener("click", () => this.cbs.onBack());
+    }
+  }
+
+  private async doWhisper() {
+    this.body.querySelector<HTMLElement>("#download-title")!.textContent = "Whisper Setup";
+    this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Fetching the default Whisper model (ggml-base.en.bin)...";
+    this.body.querySelector<HTMLProgressElement>("#progress")!.value = 0;
+    this.body.querySelector<HTMLElement>("#status")!.textContent = "Starting download...";
+
     const url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
     const filename = "ggml-base.en.bin";
 
     let unlisten: (() => void) | undefined;
-    listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
-      const p = body.querySelector<HTMLProgressElement>("#progress")!;
-      const s = body.querySelector<HTMLElement>("#status")!;
+    unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
+      const p = this.body.querySelector<HTMLProgressElement>("#progress")!;
+      const s = this.body.querySelector<HTMLElement>("#status")!;
       if (e.payload.total) {
         p.max = e.payload.total;
         p.value = e.payload.downloaded;
@@ -116,67 +84,110 @@ export class ConfigureMode {
         p.removeAttribute("value");
         s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB downloaded`;
       }
-    }).then((f) => {
-      unlisten = f;
     });
 
-    invoke<string>("wizard_download_model", { url, filename })
-      .then(async (path) => {
-        if (unlisten) unlisten();
-        this.config.whisper.mode = "bundled_model";
-        this.config.whisper.model_path = path;
-        
-        // Start server download
-        body.querySelector<HTMLElement>("#download-title")!.textContent = "Downloading server";
-        body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Fetching the Whisper server engine (approx 15MB)...";
-        body.querySelector<HTMLProgressElement>("#progress")!.value = 0;
-        body.querySelector<HTMLElement>("#status")!.textContent = "Starting server download...";
+    const path = await invoke<string>("wizard_download_model", { url, filename });
+    if (unlisten) unlisten();
 
-        let serverUnlisten: (() => void) | undefined;
-        serverUnlisten = await listen<{ downloaded: number; total: number | null }>("server_download_progress", (e) => {
-          const p = body.querySelector<HTMLProgressElement>("#progress")!;
-          const s = body.querySelector<HTMLElement>("#status")!;
-          if (e.payload.total) {
-            p.max = e.payload.total;
-            p.value = e.payload.downloaded;
-            s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
-          } else {
-            p.removeAttribute("value");
-            s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB downloaded`;
-          }
-        });
+    this.config.whisper.mode = "bundled_model";
+    this.config.whisper.model_path = path;
+    
+    // Server download
+    this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Fetching the Whisper server engine (approx 15MB)...";
+    this.body.querySelector<HTMLProgressElement>("#progress")!.value = 0;
+    this.body.querySelector<HTMLElement>("#status")!.textContent = "Starting server download...";
 
-        return invoke<string>("wizard_download_server").then(() => {
-          if (serverUnlisten) serverUnlisten();
-        }).catch((err) => {
-          if (serverUnlisten) serverUnlisten();
-          throw err;
-        });
-      })
-      .then(() => {
-        body.querySelector<HTMLElement>("#status")!.textContent = "All downloads complete!";
-        footer.querySelector<HTMLButtonElement>("#next")!.disabled = false;
-        footer.querySelector<HTMLButtonElement>("#back")!.disabled = false;
-        footer.querySelector("#next")?.addEventListener("click", () => cbs.onNext());
-      })
-      .catch((err) => {
-        if (unlisten) unlisten();
-        body.querySelector<HTMLElement>("#status")!.textContent = `Error: ${err}`;
-        body.querySelector<HTMLElement>("#status")!.style.color = "red";
-        footer.querySelector<HTMLButtonElement>("#back")!.disabled = false;
-        footer.querySelector("#back")?.addEventListener("click", () => cbs.onBack());
-      });
+    let serverUnlisten: (() => void) | undefined;
+    serverUnlisten = await listen<{ downloaded: number; total: number | null }>("server_download_progress", (e) => {
+      const p = this.body.querySelector<HTMLProgressElement>("#progress")!;
+      const s = this.body.querySelector<HTMLElement>("#status")!;
+      if (e.payload.total) {
+        p.max = e.payload.total;
+        p.value = e.payload.downloaded;
+        s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+      } else {
+        p.removeAttribute("value");
+        s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB downloaded`;
+      }
+    });
+
+    try {
+      await invoke<string>("wizard_download_server");
+    } finally {
+      if (serverUnlisten) serverUnlisten();
+    }
   }
 
-  private renderFooter(footer: HTMLElement, cbs: StepCallbacks) {
-    footer.innerHTML = `
-      <button class="wizard-btn" id="back">← Back</button>
-      <span class="spacer"></span>
-      <button class="wizard-btn" id="skip">Skip setup</button>
-      <button class="wizard-btn primary" id="next">Continue →</button>
-    `;
-    footer.querySelector("#back")?.addEventListener("click", () => cbs.onBack());
-    footer.querySelector("#skip")?.addEventListener("click", () => cbs.onSkip());
-    footer.querySelector("#next")?.addEventListener("click", () => cbs.onNext());
+  private async doOllama() {
+    this.body.querySelector<HTMLElement>("#download-title")!.textContent = "Ollama Setup";
+    this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Checking if Ollama is running...";
+    this.body.querySelector<HTMLProgressElement>("#progress")!.removeAttribute("value");
+    this.body.querySelector<HTMLElement>("#status")!.textContent = "Pinging API...";
+
+    const isRunning = await invoke<boolean>("wizard_ping_ollama");
+
+    if (!isRunning) {
+      this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Downloading Ollama installer...";
+      this.body.querySelector<HTMLProgressElement>("#progress")!.value = 0;
+      
+      let unlisten: (() => void) | undefined;
+      unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
+        const p = this.body.querySelector<HTMLProgressElement>("#progress")!;
+        const s = this.body.querySelector<HTMLElement>("#status")!;
+        if (e.payload.total) {
+          p.max = e.payload.total;
+          p.value = e.payload.downloaded;
+          s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+        }
+      });
+
+      const installerPath = await invoke<string>("wizard_download_file", {
+        url: "https://ollama.com/download/OllamaSetup.exe",
+        filename: "OllamaSetup.exe",
+      });
+      if (unlisten) unlisten();
+
+      this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Running Ollama installer. Please complete the setup window!";
+      this.body.querySelector<HTMLProgressElement>("#progress")!.removeAttribute("value");
+      this.body.querySelector<HTMLElement>("#status")!.textContent = "Waiting for Ollama to start...";
+
+      await invoke("wizard_run_installer", { path: installerPath });
+
+      // Poll until ping succeeds
+      while (true) {
+        await new Promise(r => setTimeout(r, 2000));
+        const ok = await invoke<boolean>("wizard_ping_ollama");
+        if (ok) break;
+      }
+    }
+
+    this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Pulling Llama 3.2 (3B)...";
+    this.body.querySelector<HTMLProgressElement>("#progress")!.value = 0;
+    this.body.querySelector<HTMLElement>("#status")!.textContent = "Starting pull...";
+
+    let pullUnlisten: (() => void) | undefined;
+    pullUnlisten = await listen<{ status: string; completed: number | null; total: number | null }>("ollama_pull_progress", (e) => {
+      const p = this.body.querySelector<HTMLProgressElement>("#progress")!;
+      const s = this.body.querySelector<HTMLElement>("#status")!;
+      s.textContent = e.payload.status;
+      if (e.payload.total && e.payload.completed) {
+        p.max = e.payload.total;
+        p.value = e.payload.completed;
+      }
+    });
+
+    try {
+      await invoke("wizard_pull_ollama_model", { model: "llama3.2:3b" });
+    } finally {
+      if (pullUnlisten) pullUnlisten();
+    }
+
+    if (!this.config.llm_post_process) {
+      this.config.llm_post_process = {};
+    }
+    this.config.llm_post_process.enabled = true;
+    this.config.llm_post_process.provider = "ollama";
+    this.config.llm_post_process.model = "llama3.2:3b";
+    this.config.llm_post_process.api_url = "http://127.0.0.1:11434/api/generate";
   }
 }
