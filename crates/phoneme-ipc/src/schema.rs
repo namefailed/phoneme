@@ -44,6 +44,10 @@ pub enum Request {
         id: RecordingId,
         text: String,
     },
+    /// Fetch the preserved original (machine) transcript for a recording, if any.
+    GetOriginalTranscript {
+        id: RecordingId,
+    },
 
     // Daemon control
     DaemonStatus,

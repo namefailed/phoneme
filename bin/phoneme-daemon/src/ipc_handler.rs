@@ -180,14 +180,21 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::UpdateTranscript { id, text } => {
-            match state
-                .catalog
-                .update_transcript(&id, &text, "user-edit")
-                .await
-            {
+            match state.catalog.update_user_transcript(&id, &text).await {
                 Ok(()) => {
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
                     Response::Ok(serde_json::Value::Null)
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::GetOriginalTranscript { id } => {
+            match state.catalog.get_original_transcript(&id).await {
+                Ok(original) => {
+                    Response::Ok(serde_json::to_value(original).unwrap_or(serde_json::Value::Null))
                 }
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),

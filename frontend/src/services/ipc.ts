@@ -83,6 +83,11 @@ export async function updateTranscript(id: string, text: string): Promise<void> 
   await tauriInvoke("update_transcript", { id, text });
 }
 
+/** The preserved original (machine) transcript, or null if none was saved. */
+export async function getOriginalTranscript(id: string): Promise<string | null> {
+  return await tauriInvoke<string | null>("get_original_transcript", { id });
+}
+
 export async function daemonStatus(): Promise<{ running: boolean; pid: number }> {
   return await tauriInvoke("daemon_status");
 }

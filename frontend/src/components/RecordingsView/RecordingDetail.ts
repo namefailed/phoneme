@@ -1,5 +1,17 @@
-import { getRecording, type Recording } from "../../services/ipc";
-import { formatDuration, statusToClass, statusLabel, wordCountSummary } from "../../utils/format";
+import {
+  getRecording,
+  updateTranscript,
+  getOriginalTranscript,
+  type Recording,
+} from "../../services/ipc";
+import {
+  formatDuration,
+  statusToClass,
+  statusLabel,
+  wordCountSummary,
+  escapeHtml,
+} from "../../utils/format";
+import { showToast } from "../../utils/toast";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptEditor } from "./TranscriptEditor";
@@ -63,6 +75,10 @@ export class RecordingDetail {
         <div id="tags"></div>
         <div class="transcript-block">
           <div id="editor"></div>
+          <div class="transcript-history" style="margin-top: 6px;">
+            <button class="inline-button" id="view-original">View original transcript</button>
+            <div id="original-box" style="display: none; margin-top: 6px;"></div>
+          </div>
         </div>
         <div class="detail-footer">
           ${stats ? `<span>${stats}</span>` : ""}
@@ -94,6 +110,34 @@ export class RecordingDetail {
         this.dirty = d;
       });
     }
+
+    // Transcript history: lazily fetch the preserved original on demand and
+    // offer a one-click restore.
+    this.container.querySelector("#view-original")?.addEventListener("click", async () => {
+      const box = this.container.querySelector<HTMLElement>("#original-box")!;
+      if (box.style.display !== "none") {
+        box.style.display = "none";
+        return;
+      }
+      const original = await getOriginalTranscript(r.id);
+      box.style.display = "block";
+      if (original == null) {
+        box.innerHTML = `<div style="font-size: 11px; color: var(--fg-muted);">No earlier version saved for this recording.</div>`;
+        return;
+      }
+      box.innerHTML = `
+        <div style="border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px;">
+          <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 4px;">Original (machine) transcript</div>
+          <div style="white-space: pre-wrap;">${escapeHtml(original)}</div>
+          <button class="inline-button" id="restore-original" style="margin-top: 6px;">Restore this version</button>
+        </div>`;
+      box.querySelector("#restore-original")?.addEventListener("click", async () => {
+        await updateTranscript(r.id, original);
+        showToast("Transcript restored to the original.", "success");
+        this.onRefresh();
+        void this.show(r.id);
+      });
+    });
   }
 
   hasDirtyEdits(): boolean {

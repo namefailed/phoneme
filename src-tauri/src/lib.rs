@@ -155,6 +155,7 @@ pub fn run() {
             commands::replay_recording,
             commands::refire_hook,
             commands::update_transcript,
+            commands::get_original_transcript,
             commands::daemon_status,
             commands::read_config,
             commands::write_config,

@@ -129,6 +129,13 @@ pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Resu
     forward(&bridge, Request::UpdateTranscript { id, text }).await
 }
 
+/// Fetch the preserved original (machine) transcript for a recording, if any.
+#[tauri::command]
+pub async fn get_original_transcript(bridge: Br<'_>, id: String) -> Result<Value, String> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetOriginalTranscript { id }).await
+}
+
 /// Check the background daemon's current runtime status.
 /// Returns whether the daemon is actively running and its process ID.
 #[tauri::command]

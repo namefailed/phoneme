@@ -129,18 +129,50 @@ impl Catalog {
         transcript: &str,
         model: &str,
     ) -> Result<()> {
+        // Machine transcription: store the output as both the live transcript
+        // and the preserved `original_transcript`, so later user edits can be
+        // reverted to it. Re-transcription overwrites both (a fresh baseline).
         sqlx::query(
             r#"UPDATE recordings
-               SET transcript = ?, model = ?,
+               SET transcript = ?, original_transcript = ?, model = ?,
                    transcribed_at = datetime('now'), updated_at = datetime('now')
                WHERE id = ?"#,
         )
+        .bind(transcript)
         .bind(transcript)
         .bind(model)
         .bind(id.as_str())
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Update the transcript from a manual user edit, preserving
+    /// `original_transcript` (the machine output) so the edit can be reverted.
+    pub async fn update_user_transcript(&self, id: &RecordingId, transcript: &str) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET transcript = ?, model = 'user-edit', updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(transcript)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The preserved original (machine) transcript, if any. `None` for
+    /// recordings transcribed before this column existed, or never transcribed.
+    pub async fn get_original_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT original_transcript FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok(r.try_get::<Option<String>, _>("original_transcript")?),
+            None => Ok(None),
+        }
     }
 
     pub async fn update_hook_result(
@@ -555,5 +587,50 @@ mod tests {
         let list = db.list(&filter).await.expect("list");
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id.as_str(), r.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn original_transcript_preserved_across_user_edit() {
+        let db = Catalog::open(Path::new("sqlite::memory:"))
+            .await
+            .expect("open db");
+        let r = Recording {
+            id: RecordingId::new(),
+            started_at: Local::now(),
+            duration_ms: 1000,
+            audio_path: "x.wav".into(),
+            transcript: None,
+            model: None,
+            status: RecordingStatus::Transcribing,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+        };
+        db.insert(&r).await.expect("insert");
+
+        // Machine transcription stores transcript + original.
+        db.update_transcript(&r.id, "machine output", "ggml-base")
+            .await
+            .expect("machine transcript");
+        assert_eq!(
+            db.get_original_transcript(&r.id).await.unwrap().as_deref(),
+            Some("machine output")
+        );
+
+        // A user edit changes the transcript but preserves the original.
+        db.update_user_transcript(&r.id, "edited by the user")
+            .await
+            .expect("user edit");
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.transcript.as_deref(), Some("edited by the user"));
+        assert_eq!(got.model.as_deref(), Some("user-edit"));
+        assert_eq!(
+            db.get_original_transcript(&r.id).await.unwrap().as_deref(),
+            Some("machine output")
+        );
     }
 }
