@@ -164,6 +164,59 @@ async fn max_duration_truncates_a_runaway_recording() {
 }
 
 #[tokio::test]
+async fn pause_discards_audio_until_resume() {
+    // Verifies the core pause/resume contract: audio that arrives while paused
+    // is drained from the source (so it can't back up) but NOT recorded, and
+    // recording continues seamlessly into the same file after resume.
+    //
+    // Timeline: capture 0.5s, pause, push 1.0s (must be discarded), resume,
+    // capture 0.5s. Final recording should be ~1.0s — never ~2.0s.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("paused.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 10_000, // never auto-stop on silence during this test
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+
+    // `settle` lets the recorder task drain whichever single channel is ready
+    // before the next command/push, so the two channels never race within one
+    // `select!` iteration. Matches the sleep-based sequencing used elsewhere in
+    // this suite; tolerance below absorbs scheduling jitter.
+    let settle = || tokio::time::sleep(Duration::from_millis(100));
+
+    sink.push(loud_block(8000)).await.unwrap(); // 0.5s captured
+    settle().await;
+
+    recorder.pause().await.unwrap();
+    settle().await;
+    sink.push(loud_block(16_000)).await.unwrap(); // 1.0s — drained while paused, discarded
+    settle().await;
+
+    recorder.resume().await.unwrap();
+    settle().await;
+    sink.push(loud_block(8000)).await.unwrap(); // 0.5s captured
+    settle().await;
+    sink.close();
+
+    let result = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    assert!(
+        (result.duration_ms - 1000).abs() < 150,
+        "paused audio should be discarded: expected ~1000ms, got {}ms",
+        result.duration_ms
+    );
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    assert!(
+        samples.len() < 24_000,
+        "captured {} samples — the 1.0s paused block was not discarded",
+        samples.len()
+    );
+}
+
+#[tokio::test]
 async fn config_is_canonical_format() {
     let (source, _sink) = make_synthetic();
     let cfg = RecorderConfig::default();

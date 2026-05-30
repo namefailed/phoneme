@@ -68,8 +68,8 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [x] **Ollama setup wizard** — guided in-app flow that downloads and configures Ollama (not bundled in the installer); detects whether Ollama is already running, pulls the selected model, wires up the endpoint and model name automatically; users who already have Ollama just skip to the model-select step.
 
 ### UX
-- [ ] **Waveform visualization** — render the actual audio waveform in the detail pane canvas element using the Web Audio API; the placeholder is already in the HTML
-- [ ] **Pause / resume recording** — ⏸ button during active recording; resumes without creating a new entry; essential for meeting notes
+- [x] **Waveform visualization** — interactive waveform in the detail pane via wavesurfer.js: timeline, hover-seek, click-to-play, theme-aware colors
+- [x] **Pause / resume recording** — ⏸ button during active recording; resumes without creating a new entry; essential for meeting notes
 - [x] **Transcript history** — preserve the original Whisper output when a user manually edits; "View original" toggle + "Restore" button in the detail pane
 - [x] **Word count & reading time** — "243 words · ~1 min read" in the detail footer; small scope, frequently useful
 - [x] **Bulk actions** — Shift+Click and Ctrl+A to multi-select recordings; batch delete, re-transcribe, or export
