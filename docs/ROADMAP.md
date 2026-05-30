@@ -39,11 +39,11 @@ This document tracks the full vision for Phoneme. Items are ordered by impact wi
 
 Right now transcription is hardwired to whisper.cpp. A trait-based `TranscriptionProvider` abstraction lets users pick what runs their audio.
 
-- [ ] **OpenAI Whisper API** — cloud transcription via `api.openai.com/v1/audio/transcriptions`; just needs an API key; most accurate option for users without a local GPU
-- [ ] **Deepgram** — real-time-capable, good for long recordings; cheaper than OpenAI for bulk use
-- [ ] **AssemblyAI** — solid accuracy, built-in speaker diarization (who said what)
-- [ ] **Groq Whisper** — whisper-large-v3 via Groq's free tier; fastest cloud option today
-- [ ] **Provider picker in Settings → Whisper** — radio/select between: Local (whisper.cpp), OpenAI, Deepgram, AssemblyAI, Groq
+- [x] **OpenAI Whisper API** — cloud transcription via `api.openai.com/v1/audio/transcriptions`; just needs an API key; most accurate option for users without a local GPU
+- [x] **Deepgram** — real-time-capable, good for long recordings; cheaper than OpenAI for bulk use
+- [x] **AssemblyAI** — solid accuracy, built-in speaker diarization (who said what)
+- [x] **Groq Whisper** — whisper-large-v3 via Groq's free tier; fastest cloud option today
+- [x] **Provider picker in Settings → Whisper** — radio/select between: Local (whisper.cpp), OpenAI, Deepgram, AssemblyAI, Groq, Custom
 
 > **Intentionally excluded:** Azure Speech, AWS Transcribe — too enterprise-focused; add only if users request them.
 
@@ -60,9 +60,9 @@ Users on low-end hardware get poor transcription not because Whisper is bad but 
 
 The current LLM settings are blank text boxes. Most users abandon them because they don't know what to type.
 
-- [ ] **Anthropic Claude** — `claude-3-haiku` and `claude-3-sonnet` via `api.anthropic.com`; add API key, select model, done
-- [ ] **Groq** — OpenAI-compatible; `llama-3.1-8b-instant` is free-tier and fast enough for cleanup
-- [ ] **LM Studio / OpenAI-compatible** — generic "OpenAI-compatible endpoint" provider for LM Studio, Jan, text-generation-webui, and any other local server
+- [x] **Anthropic Claude** — `claude-3-haiku` and `claude-3-sonnet` via `api.anthropic.com`; add API key, select model, done
+- [x] **Groq** — OpenAI-compatible; `llama-3.1-8b-instant` is free-tier and fast enough for cleanup
+- [x] **LM Studio / OpenAI-compatible / Ollama** — generic "OpenAI-compatible endpoint" provider for LM Studio, Jan, text-generation-webui, Ollama, and any other local server
 - [ ] **Provider picker with live model list** — when a provider is selected and an API key entered, fetch available models and populate a dropdown (OpenAI, Anthropic, and Groq all have `/models` endpoints)
 - [ ] **Preset prompts** — saved library of named prompts (clean, summarize, extract action items, translate to English) rather than one editable text field; users can add their own
 - [ ] **Ollama setup wizard** — guided in-app flow that downloads and configures Ollama (not bundled in the installer); detects whether Ollama is already running, pulls the selected model, wires up the endpoint and model name automatically; users who already have Ollama just skip to the model-select step
@@ -70,9 +70,9 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 ### UX
 - [ ] **Waveform visualization** — render the actual audio waveform in the detail pane canvas element using the Web Audio API; the placeholder is already in the HTML
 - [ ] **Pause / resume recording** — ⏸ button during active recording; resumes without creating a new entry; essential for meeting notes
-- [ ] **Transcript history** — preserve the original Whisper output when a user manually edits; "View original" toggle + "Restore" button in the detail pane
-- [ ] **Word count & reading time** — "243 words · ~1 min read" in the detail footer; small scope, frequently useful
-- [ ] **Bulk actions** — Shift+Click and Ctrl+A to multi-select recordings; batch delete, re-transcribe, or export
+- [x] **Transcript history** — preserve the original Whisper output when a user manually edits; "View original" toggle + "Restore" button in the detail pane
+- [x] **Word count & reading time** — "243 words · ~1 min read" in the detail footer; small scope, frequently useful
+- [x] **Bulk actions** — Shift+Click and Ctrl+A to multi-select recordings; batch delete, re-transcribe, or export
 
 ### Data
 - [ ] **Custom date range filter** — date picker replacing the preset-only time dropdown
