@@ -195,6 +195,12 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         if let Some(model) = &self.model {
             form = form.text("model", model.clone());
         }
+        // Force the JSON response shape (`{ "text": ... }`) that OpenAiResponse
+        // decodes below. OpenAI/Groq already default to this, but a Custom
+        // OpenAI-compatible proxy may default to plain text or verbose_json,
+        // which would fail the decode. whisper.cpp's server also accepts (and
+        // defaults to) json, so this is a no-op for the local backend.
+        form = form.text("response_format", "json");
 
         let url = format!(
             "{}/v1/audio/transcriptions",
