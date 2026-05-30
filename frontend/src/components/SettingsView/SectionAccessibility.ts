@@ -26,7 +26,7 @@ export class SectionAccessibility {
         <div style="background-color: var(--bg-inset); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 16px;">
           <strong style="display: block; font-size: 13px; margin-bottom: 6px; color: var(--fg-default);">How to use this for free (Offline):</strong>
           <ol style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--fg-muted); line-height: 1.5;">
-            <li>Download and install <a href="#" onclick="require('@tauri-apps/api/core').invoke('open_file', { path: 'https://ollama.com/download' })" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>
+            <li>Download and install <a href="#" id="ollama-download-link" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>
             <li>Open your terminal and run <code>ollama run llama3.2:3b</code>.</li>
             <li>Select <strong>Local Ollama</strong> below and use <code>llama3.2:3b</code> as your Model Name!</li>
           </ol>
@@ -210,6 +210,17 @@ export class SectionAccessibility {
     `;
 
     bindFieldEvents(container, config);
+
+    // Open the Ollama download page in the user's browser. (Was a broken inline
+    // `onclick="require(...)"` — `require` doesn't exist in the Vite/ESM bundle,
+    // so the link silently threw. Use the shell plugin like the rest of the app.)
+    container
+      .querySelector<HTMLAnchorElement>("#ollama-download-link")
+      ?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const { open } = await import("@tauri-apps/plugin-shell");
+        await open("https://ollama.com/download").catch(() => {});
+      });
 
     const presetSelect = container.querySelector<HTMLSelectElement>("#prompt-preset-select");
     const promptArea = container.querySelector<HTMLTextAreaElement>("[data-key='llm_post_process.prompt']");
