@@ -631,10 +631,7 @@ async fn machine_transcription_sets_original_transcript() {
         .await
         .unwrap();
 
-    let original = catalog
-        .get_original_transcript(&rec.id)
-        .await
-        .unwrap();
+    let original = catalog.get_original_transcript(&rec.id).await.unwrap();
     assert_eq!(
         original.as_deref(),
         Some("hello world"),
@@ -674,10 +671,7 @@ async fn user_edit_preserves_original_transcript() {
         "model must be set to 'user-edit'"
     );
 
-    let original = catalog
-        .get_original_transcript(&rec.id)
-        .await
-        .unwrap();
+    let original = catalog.get_original_transcript(&rec.id).await.unwrap();
     assert_eq!(
         original.as_deref(),
         Some("raw whisper output"),

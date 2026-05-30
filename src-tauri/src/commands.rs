@@ -590,13 +590,13 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
 
     let zip_path = temp_zip.clone();
     let bin_path = bin_dir.clone();
-    
+
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         let zip_file = std::fs::File::open(&zip_path)
             .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
 
-        let mut archive =
-            zip::ZipArchive::new(zip_file).map_err(|e| format!("failed to read zip archive: {}", e))?;
+        let mut archive = zip::ZipArchive::new(zip_file)
+            .map_err(|e| format!("failed to read zip archive: {}", e))?;
 
         for i in 0..archive.len() {
             let mut file = match archive.by_index(i) {
@@ -704,7 +704,11 @@ pub async fn wizard_ping_ollama() -> Result<bool, String> {
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .map_err(|e| e.to_string())?;
-    match client.get("http://127.0.0.1:11434/api/version").send().await {
+    match client
+        .get("http://127.0.0.1:11434/api/version")
+        .send()
+        .await
+    {
         Ok(r) => Ok(r.status().is_success()),
         Err(_) => Ok(false),
     }
@@ -718,10 +722,7 @@ pub struct OllamaPullProgress {
 }
 
 #[tauri::command]
-pub async fn wizard_pull_ollama_model(
-    window: tauri::Window,
-    model: String,
-) -> Result<(), String> {
+pub async fn wizard_pull_ollama_model(window: tauri::Window, model: String) -> Result<(), String> {
     let client = reqwest::Client::new();
     let body = serde_json::json!({ "name": model });
     let response = client
@@ -741,14 +742,20 @@ pub async fn wizard_pull_ollama_model(
         let chunk = chunk.map_err(|e| format!("stream error: {}", e))?;
         if let Ok(s) = std::str::from_utf8(&chunk) {
             for line in s.lines() {
-                if line.trim().is_empty() { continue; }
+                if line.trim().is_empty() {
+                    continue;
+                }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
                     let status = v["status"].as_str().unwrap_or("").to_string();
                     let completed = v["completed"].as_u64();
                     let total = v["total"].as_u64();
                     let _ = window.emit(
                         "ollama_pull_progress",
-                        OllamaPullProgress { status, completed, total },
+                        OllamaPullProgress {
+                            status,
+                            completed,
+                            total,
+                        },
                     );
                 }
             }
@@ -768,7 +775,7 @@ pub async fn wizard_download_file(
     }
 
     let dest_path = std::env::temp_dir().join(&filename);
-    
+
     let mut file = tokio::fs::File::create(&dest_path)
         .await
         .map_err(|e| format!("failed to create file: {}", e))?;
@@ -783,7 +790,7 @@ pub async fn wizard_download_file(
 
     let total = response.content_length();
     let mut downloaded: u64 = 0;
-    
+
     use futures::StreamExt;
     let mut stream = response.bytes_stream();
 
@@ -835,8 +842,11 @@ pub fn open_file(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &path])
+        // Use explorer.exe directly instead of `cmd /c start`: the latter runs
+        // through the shell, so a filename containing `&` or `"` could be parsed
+        // as commands. explorer takes the path literally — no shell layer.
+        std::process::Command::new("explorer")
+            .arg(&path)
             .spawn()
             .map_err(|e| format!("failed to open file: {}", e))?;
     }

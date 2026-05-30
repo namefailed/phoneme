@@ -190,14 +190,20 @@ impl DaemonRecorder {
         if active.paused {
             return Ok(active.id.clone());
         }
-        
+
         if let Some(recorder) = self.handle.lock().await.as_ref() {
-            recorder.pause().await.map_err(|e| Error::Internal(e.to_string()))?;
+            recorder
+                .pause()
+                .await
+                .map_err(|e| Error::Internal(e.to_string()))?;
         }
-        
+
         active.paused = true;
-        state.catalog.update_status(&active.id, RecordingStatus::Paused).await?;
-        
+        state
+            .catalog
+            .update_status(&active.id, RecordingStatus::Paused)
+            .await?;
+
         state.events.emit(DaemonEvent::RecordingPaused {
             id: active.id.clone(),
         });
@@ -212,14 +218,20 @@ impl DaemonRecorder {
         if !active.paused {
             return Ok(active.id.clone());
         }
-        
+
         if let Some(recorder) = self.handle.lock().await.as_ref() {
-            recorder.resume().await.map_err(|e| Error::Internal(e.to_string()))?;
+            recorder
+                .resume()
+                .await
+                .map_err(|e| Error::Internal(e.to_string()))?;
         }
-        
+
         active.paused = false;
-        state.catalog.update_status(&active.id, RecordingStatus::Recording).await?;
-        
+        state
+            .catalog
+            .update_status(&active.id, RecordingStatus::Recording)
+            .await?;
+
         state.events.emit(DaemonEvent::RecordingResumed {
             id: active.id.clone(),
         });

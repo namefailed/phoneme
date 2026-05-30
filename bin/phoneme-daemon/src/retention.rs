@@ -5,10 +5,10 @@
 //! recordings are never touched.
 
 use crate::app_state::AppState;
+use phoneme_ipc::DaemonEvent;
+use std::time::Instant;
 use tokio::sync::watch;
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use std::time::Instant;
-use phoneme_ipc::DaemonEvent;
 
 pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) {
     let mut tick = interval(Duration::from_secs(3600));
@@ -39,14 +39,17 @@ async fn run_once(state: &AppState, last_warning: &mut Option<Instant>) {
     }
 
     // Pre-deletion warning for 24h age boundary
-    if let Ok(count) = state.catalog.analyze_upcoming_retention(retention, 24).await {
+    if let Ok(count) = state
+        .catalog
+        .analyze_upcoming_retention(retention, 24)
+        .await
+    {
         if count > 0 {
-            let should_warn = match last_warning {
-                Some(t) if t.elapsed().as_secs() < 86400 => false,
-                _ => true,
-            };
+            let should_warn = !matches!(last_warning, Some(t) if t.elapsed().as_secs() < 86400);
             if should_warn {
-                state.events.emit(DaemonEvent::RetentionWarning { count, hours: 24 });
+                state
+                    .events
+                    .emit(DaemonEvent::RetentionWarning { count, hours: 24 });
                 *last_warning = Some(Instant::now());
                 tracing::info!(count, "emitted retention warning");
             }

@@ -7,7 +7,13 @@ use phoneme_ipc::Request;
 use std::process::ExitCode;
 
 pub async fn run(args: ShowArgs, cfg: &Config, json: bool) -> ExitCode {
-    let id = RecordingId::from_string(args.id.clone());
+    let id = match RecordingId::parse(args.id.as_str()) {
+        Some(id) => id,
+        None => {
+            eprintln!("error: '{}' is not a valid recording id", args.id);
+            return ExitCode::FAILURE;
+        }
+    };
     let mut client = match Client::connect(cfg).await {
         Ok(c) => c,
         Err(code) => return code,
