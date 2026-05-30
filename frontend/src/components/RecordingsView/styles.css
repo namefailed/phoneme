@@ -272,6 +272,7 @@ mark.search-hit {
 .rv-list {
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 .rv-splitter {
   background: var(--border-subtle);
@@ -300,4 +301,150 @@ mark.search-hit {
   overflow: hidden;
 }
 
+/* ── Checkbox column ──────────────────────────────────────────────────────── */
+.col-checkbox {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px !important;
+  border-right: 1px solid var(--border) !important;
+}
+.row-cb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border-subtle);
+  border-radius: 3px;
+  background: var(--bg-deep);
+  cursor: pointer;
+  transition: background 0.15s ease-out, border-color 0.15s ease-out;
+  flex-shrink: 0;
+  position: relative;
+}
+.row-cb:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.row-cb:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border: 2px solid var(--accent-fg, #1e1e2e);
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+.row-cb:indeterminate {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  border-color: var(--accent);
+}
+.row-cb:indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  width: 8px;
+  height: 2px;
+  background: var(--accent);
+}
+.row-cb:hover:not(:checked) {
+  border-color: var(--accent);
+}
 
+/* ── Multi-selected row highlight ─────────────────────────────────────────── */
+.rec-row.multi-selected {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-left-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.rec-row.multi-selected:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* ── Bulk action bar ─────────────────────────────────────────────────────── */
+#rv-bulk-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+.bulk-bar {
+  pointer-events: all;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  animation: bulk-bar-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes bulk-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.bulk-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.bulk-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.bulk-btn {
+  transition: all 0.15s ease-out;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-default);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bulk-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.bulk-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bulk-btn--danger {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 30%, transparent);
+}
+.bulk-btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+  border-color: var(--err);
+  color: var(--err);
+}
+.bulk-btn--muted {
+  color: var(--fg-muted);
+  border-color: var(--border-subtle);
+}
+.bulk-btn--muted:hover:not(:disabled) {
+  color: var(--fg-default);
+  border-color: var(--border);
+}

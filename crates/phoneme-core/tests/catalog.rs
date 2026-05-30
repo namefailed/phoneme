@@ -74,7 +74,7 @@ async fn update_transcript_persists_text() {
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
     catalog
-        .update_transcript(&rec.id, "hello world", "gemma-4-E4B")
+        .update_transcript(&rec.id, "hello world", "hello world", "gemma-4-E4B")
         .await
         .unwrap();
     let got = catalog.get(&rec.id).await.unwrap().unwrap();
@@ -146,7 +146,12 @@ async fn search_finds_by_transcript_text() {
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
     catalog
-        .update_transcript(&rec.id, "remind me to email Sarah about the contract", "m")
+        .update_transcript(
+            &rec.id,
+            "remind me to email Sarah about the contract",
+            "remind me to email Sarah about the contract",
+            "m",
+        )
         .await
         .unwrap();
     let hits = catalog
@@ -174,7 +179,7 @@ async fn delete_removes_recording_and_fts_row() {
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
     catalog
-        .update_transcript(&rec.id, "deletable", "m")
+        .update_transcript(&rec.id, "deletable", "deletable", "m")
         .await
         .unwrap();
     catalog.delete(&rec.id).await.unwrap();
@@ -609,5 +614,106 @@ async fn list_with_tag_filter_returns_empty_for_unused_tag() {
     assert!(
         results.is_empty(),
         "unattached tag should match no recordings"
+    );
+}
+
+// ── Transcript history (original_transcript) ──────────────────────────────────
+
+/// Machine transcription stores the output in both columns so the original
+/// is preserved for "View original" even before any user edits.
+#[tokio::test]
+async fn machine_transcription_sets_original_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_transcript(&rec.id, "hello world", "hello world", "m")
+        .await
+        .unwrap();
+
+    let original = catalog
+        .get_original_transcript(&rec.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some("hello world"),
+        "original_transcript must be set by machine transcription"
+    );
+}
+
+/// A user edit must update only the live `transcript` column, leaving
+/// `original_transcript` untouched so the user can still revert.
+#[tokio::test]
+async fn user_edit_preserves_original_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    // Machine transcription sets both.
+    catalog
+        .update_transcript(&rec.id, "raw whisper output", "raw whisper output", "m")
+        .await
+        .unwrap();
+
+    // User edits the live transcript.
+    catalog
+        .update_user_transcript(&rec.id, "edited by user")
+        .await
+        .unwrap();
+
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(
+        got.transcript.as_deref(),
+        Some("edited by user"),
+        "live transcript must reflect the user edit"
+    );
+    assert_eq!(
+        got.model.as_deref(),
+        Some("user-edit"),
+        "model must be set to 'user-edit'"
+    );
+
+    let original = catalog
+        .get_original_transcript(&rec.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some("raw whisper output"),
+        "original_transcript must not be touched by user edits"
+    );
+}
+
+/// When LLM post-processing is active the pipeline stores the LLM-cleaned
+/// text as `transcript` but the raw Whisper output as `original_transcript`.
+/// This test simulates that by passing different values to `update_transcript`.
+#[tokio::test]
+async fn llm_post_processing_does_not_overwrite_original_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    let raw = "um so like yeah we uh talked about the thing";
+    let llm_cleaned = "We talked about the thing.";
+
+    // Pipeline passes (llm_output, raw_whisper) to update_transcript.
+    catalog
+        .update_transcript(&rec.id, llm_cleaned, raw, "whisper-base")
+        .await
+        .unwrap();
+
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(
+        got.transcript.as_deref(),
+        Some(llm_cleaned),
+        "live transcript must be the LLM-cleaned version"
+    );
+
+    let original = catalog.get_original_transcript(&rec.id).await.unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some(raw),
+        "original_transcript must be the raw Whisper output, not the LLM output"
     );
 }

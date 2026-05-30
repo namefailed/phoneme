@@ -123,15 +123,21 @@ impl Catalog {
         Ok(())
     }
 
+    /// Update the transcript after machine transcription.
+    ///
+    /// `transcript` is the text to store as the live transcript — for
+    /// recordings with LLM post-processing enabled this will be the LLM-
+    /// cleaned text. `original_transcript` is **always** the raw Whisper
+    /// output, so the "View original" feature shows the pre-LLM version even
+    /// when post-processing is active. Re-transcription overwrites both
+    /// columns (fresh baseline).
     pub async fn update_transcript(
         &self,
         id: &RecordingId,
         transcript: &str,
+        original_transcript: &str,
         model: &str,
     ) -> Result<()> {
-        // Machine transcription: store the output as both the live transcript
-        // and the preserved `original_transcript`, so later user edits can be
-        // reverted to it. Re-transcription overwrites both (a fresh baseline).
         sqlx::query(
             r#"UPDATE recordings
                SET transcript = ?, original_transcript = ?, model = ?,
@@ -139,7 +145,7 @@ impl Catalog {
                WHERE id = ?"#,
         )
         .bind(transcript)
-        .bind(transcript)
+        .bind(original_transcript)
         .bind(model)
         .bind(id.as_str())
         .execute(&self.pool)
@@ -613,7 +619,7 @@ mod tests {
         db.insert(&r).await.expect("insert");
 
         // Machine transcription stores transcript + original.
-        db.update_transcript(&r.id, "machine output", "ggml-base")
+        db.update_transcript(&r.id, "machine output", "machine output", "ggml-base")
             .await
             .expect("machine transcript");
         assert_eq!(

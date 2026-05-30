@@ -43,6 +43,11 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         }
     };
 
+    // Preserve the raw Whisper output as the "original" transcript regardless
+    // of whether LLM post-processing rewrites the live version. Users can
+    // always restore to this via "View original transcript" in the detail pane.
+    let raw_transcript = transcript.clone();
+
     // Optional LLM post-processing. Non-fatal: on any failure we keep the raw
     // transcript. `provider()` returns None when disabled or provider = none.
     let mut transcript = transcript;
@@ -68,9 +73,11 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .unwrap_or("unknown")
         .to_string();
 
+    // `transcript` = LLM-processed (or raw if LLM is disabled/failed).
+    // `raw_transcript` = raw Whisper output, always preserved as the original.
     state
         .catalog
-        .update_transcript(&id, &transcript, &payload.model)
+        .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
     state
         .catalog
