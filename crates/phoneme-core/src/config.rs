@@ -2,6 +2,17 @@ use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Render an API key for `Debug` output without leaking it. Used by the manual
+/// `Debug` impls on the key-bearing config structs so a stray `debug!(?cfg)`
+/// can never dump a plaintext key into the daemon log.
+fn redact_key(key: &str) -> &'static str {
+    if key.is_empty() {
+        "<unset>"
+    } else {
+        "<redacted>"
+    }
+}
+
 /// The root configuration object for Phoneme.
 /// This configuration encapsulates the entire system state, including settings for
 /// transcription (Whisper), audio recording parameters, post-processing hooks,
@@ -37,7 +48,7 @@ pub struct Config {
 }
 
 /// Configures the optional accessibility layer for post-processing transcriptions using an LLM.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmPostProcessConfig {
     /// Whether the LLM post-processing step is active.
     pub enabled: bool,
@@ -56,6 +67,20 @@ pub struct LlmPostProcessConfig {
     /// falling back to the raw transcript.
     #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
+}
+
+impl std::fmt::Debug for LlmPostProcessConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmPostProcessConfig")
+            .field("enabled", &self.enabled)
+            .field("provider", &self.provider)
+            .field("api_key", &redact_key(&self.api_key))
+            .field("api_url", &self.api_url)
+            .field("model", &self.model)
+            .field("prompt", &self.prompt)
+            .field("timeout_secs", &self.timeout_secs)
+            .finish()
+    }
 }
 
 fn default_llm_post_process() -> LlmPostProcessConfig {
@@ -110,7 +135,7 @@ pub enum TranscriptionBackend {
 }
 
 /// Configuration for the Whisper transcription engine.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct LlmConfig {
     /// The execution mode determining how the transcription server is managed.
     pub mode: WhisperMode,
@@ -143,6 +168,24 @@ pub struct LlmConfig {
     /// gateways). Empty uses the provider's default endpoint. Ignored for `local`.
     #[serde(default)]
     pub api_url: String,
+}
+
+impl std::fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmConfig")
+            .field("mode", &self.mode)
+            .field("external_url", &self.external_url)
+            .field("model_path", &self.model_path)
+            .field("bundled_server_port", &self.bundled_server_port)
+            .field("bundled_server_args", &self.bundled_server_args)
+            .field("timeout_secs", &self.timeout_secs)
+            .field("language", &self.language)
+            .field("provider", &self.provider)
+            .field("api_key", &redact_key(&self.api_key))
+            .field("model", &self.model)
+            .field("api_url", &self.api_url)
+            .finish()
+    }
 }
 
 impl LlmConfig {
@@ -544,6 +587,24 @@ pub fn default_config_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn debug_redacts_api_keys() {
+        // Latent-leak guard: a future `debug!(?cfg)` / `{:?}` must never print
+        // plaintext API keys into logs.
+        let mut cfg = Config::default();
+        cfg.whisper.api_key = "sk-WHISPER-supersecret".into();
+        cfg.llm_post_process.api_key = "sk-LLM-supersecret".into();
+        let dump = format!("{cfg:?}");
+        assert!(
+            !dump.contains("supersecret"),
+            "Debug output leaked a plaintext API key: {dump}"
+        );
+        assert!(
+            dump.contains("<redacted>"),
+            "expected the redaction marker in Debug output: {dump}"
+        );
+    }
 
     fn write_config(dir: &TempDir, contents: &str) -> PathBuf {
         let path = dir.path().join("config.toml");
