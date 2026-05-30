@@ -30,6 +30,7 @@ export class SectionWhisper {
                 { value: "groq", label: "Groq (cloud)" },
                 { value: "deepgram", label: "Deepgram (cloud)" },
                 { value: "assemblyai", label: "AssemblyAI (cloud)" },
+                { value: "custom", label: "Custom (OpenAI-compatible endpoint)" },
               ],
             },
             this.config.whisper.provider ?? "local",
@@ -176,6 +177,7 @@ export class SectionWhisper {
         groq: { name: "Groq", host: "api.groq.com", model: "whisper-large-v3" },
         deepgram: { name: "Deepgram", host: "api.deepgram.com", model: "nova-2" },
         assemblyai: { name: "AssemblyAI", host: "api.assemblyai.com", model: "best" },
+        custom: { name: "your custom endpoint", host: "the URL you set below", model: "(optional)" },
       };
       const { name, host, model: defaultModel } = meta[provider] ?? meta.openai;
       container.querySelector<HTMLElement>("#cloud-warning")!.innerHTML =

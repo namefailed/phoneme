@@ -95,6 +95,9 @@ pub enum TranscriptionBackend {
     /// AssemblyAI cloud speech-to-text — sends audio to api.assemblyai.com
     /// (async upload + poll). Needs `api_key`.
     Assemblyai,
+    /// Any OpenAI-compatible `/v1/audio/transcriptions` endpoint (Fireworks,
+    /// self-hosted, gateways). Needs `api_url`; `api_key` and `model` optional.
+    Custom,
 }
 
 /// Configuration for the Whisper transcription engine.
@@ -424,13 +427,24 @@ impl Config {
                 "whisper.model_path is required when whisper.mode = bundled_model".into(),
             ));
         }
-        if self.whisper.provider != TranscriptionBackend::Local
-            && self.whisper.api_key.trim().is_empty()
-        {
-            return Err(Error::InvalidConfig(
-                "whisper.api_key is required for cloud transcription providers (openai/groq/deepgram)"
-                    .into(),
-            ));
+        match self.whisper.provider {
+            TranscriptionBackend::Local => {}
+            TranscriptionBackend::Custom => {
+                if self.whisper.api_url.trim().is_empty() {
+                    return Err(Error::InvalidConfig(
+                        "whisper.api_url is required for the custom (OpenAI-compatible) transcription provider"
+                            .into(),
+                    ));
+                }
+            }
+            _ => {
+                if self.whisper.api_key.trim().is_empty() {
+                    return Err(Error::InvalidConfig(
+                        "whisper.api_key is required for cloud transcription providers (openai/groq/deepgram/assemblyai)"
+                            .into(),
+                    ));
+                }
+            }
         }
         match self.daemon.log_level.as_str() {
             "error" | "warn" | "info" | "debug" | "trace" => {}
@@ -787,5 +801,24 @@ mod tests {
         Config::default()
             .validate()
             .expect("local default is valid");
+    }
+
+    #[test]
+    fn custom_provider_requires_api_url() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Custom;
+        cfg.whisper.api_url = String::new();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, Error::InvalidConfig(_)));
+        assert!(format!("{err}").contains("api_url"));
+    }
+
+    #[test]
+    fn custom_provider_with_api_url_validates_without_key() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Custom;
+        cfg.whisper.api_url = "http://127.0.0.1:9000".into();
+        cfg.whisper.api_key = String::new(); // custom/self-hosted may need no key
+        cfg.validate().expect("custom with api_url is valid");
     }
 }

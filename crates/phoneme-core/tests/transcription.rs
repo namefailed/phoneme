@@ -304,3 +304,28 @@ async fn factory_builds_assemblyai_provider_upload_create_poll() {
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "assemblyai text");
 }
+
+/// The `custom` provider points an OpenAiCompatProvider at any user-supplied
+/// base URL (no key/model required) — the universal OpenAI-compatible escape hatch.
+#[tokio::test]
+async fn factory_builds_custom_openai_compatible_provider() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "custom"})),
+        )
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+
+    let mut whisper = phoneme_core::Config::default().whisper;
+    whisper.provider = phoneme_core::config::TranscriptionBackend::Custom;
+    whisper.api_url = server.uri(); // user-supplied OpenAI-compatible base URL
+
+    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let result = provider.transcribe(&wav, None).await.unwrap();
+    assert_eq!(result, "custom");
+}

@@ -91,6 +91,15 @@ impl Transcriber {
                 whisper.model.trim().to_string(),
                 timeout,
             )),
+            // Any OpenAI-compatible endpoint the user points at via `api_url`
+            // (key/model optional — many self-hosted servers need neither).
+            TranscriptionBackend::Custom => Box::new(OpenAiCompatProvider::new(
+                self.http.clone(),
+                whisper.api_url.trim().to_string(),
+                non_empty(&whisper.api_key),
+                non_empty(&whisper.model),
+                timeout,
+            )),
         }
     }
 }
