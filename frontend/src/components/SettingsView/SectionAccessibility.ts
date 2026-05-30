@@ -61,10 +61,16 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
           <label>Model Name</label>
-          <div>${renderField(
-            { key: "llm_post_process.model", label: "", kind: "text" },
-            config.llm_post_process.model || "llama3.2:3b",
-          )}</div>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "ollama-models" },
+                config.llm_post_process.model || "llama3.2:3b",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="ollama" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="ollama-models"></datalist>
+          </div>
         </div>
 
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
@@ -77,10 +83,16 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
           <label>OpenAI Model</label>
-          <div>${renderField(
-            { key: "llm_post_process.model", label: "", kind: "text" },
-            config.llm_post_process.model || "gpt-4o",
-          )}</div>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "openai-models" },
+                config.llm_post_process.model || "gpt-4o",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="openai" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="openai-models"></datalist>
+          </div>
         </div>
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
@@ -101,10 +113,16 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
           <label>Groq Model</label>
-          <div>${renderField(
-            { key: "llm_post_process.model", label: "", kind: "text" },
-            config.llm_post_process.model || "llama-3.1-8b-instant",
-          )}</div>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "groq-models" },
+                config.llm_post_process.model || "llama-3.1-8b-instant",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="groq" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="groq-models"></datalist>
+          </div>
         </div>
         <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
           <label>API Key</label>
@@ -123,10 +141,16 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
           <label>Claude Model</label>
-          <div>${renderField(
-            { key: "llm_post_process.model", label: "", kind: "text" },
-            config.llm_post_process.model || "claude-3-5-haiku-latest",
-          )}</div>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "anthropic-models" },
+                config.llm_post_process.model || "claude-3-5-haiku-latest",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="anthropic" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="anthropic-models"></datalist>
+          </div>
         </div>
         <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
           <label>API Key</label>
@@ -223,5 +247,84 @@ export class SectionAccessibility {
       providerSelect.addEventListener("change", updateProviderVisibility);
       updateProviderVisibility(); // Initial run
     }
+
+    container.querySelectorAll<HTMLButtonElement>(".fetch-models-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const provider = btn.dataset.provider;
+        if (!provider) return;
+        
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = "Loading...";
+
+        try {
+          const datalist = container.querySelector<HTMLDataListElement>(`#${provider}-models`);
+          if (!datalist) return;
+
+          let urlStr = config.llm_post_process.api_url || "";
+          const apiKey = config.llm_post_process.api_key || "";
+
+          let endpoint = "";
+          let headers: Record<string, string> = {};
+          
+          if (provider === "ollama") {
+            if (!urlStr) urlStr = "http://127.0.0.1:11434/api/generate";
+            const url = new URL(urlStr);
+            endpoint = `${url.protocol}//${url.host}/api/tags`;
+          } else if (provider === "openai" || provider === "groq") {
+            if (!urlStr) {
+              urlStr = provider === "openai" 
+                ? "https://api.openai.com/v1/chat/completions" 
+                : "https://api.groq.com/openai/v1/chat/completions";
+            }
+            const url = new URL(urlStr);
+            // Replace /chat/completions with /models
+            let path = url.pathname;
+            if (path.endsWith("/chat/completions")) {
+              path = path.replace("/chat/completions", "/models");
+            } else if (!path.endsWith("/models")) {
+              path = path.endsWith("/") ? path + "models" : path + "/models";
+            }
+            endpoint = `${url.protocol}//${url.host}${path}`;
+            headers["Authorization"] = `Bearer ${apiKey}`;
+          } else if (provider === "anthropic") {
+            if (!urlStr) urlStr = "https://api.anthropic.com/v1/messages";
+            const url = new URL(urlStr);
+            endpoint = `${url.protocol}//${url.host}/v1/models`;
+            headers["x-api-key"] = apiKey;
+            headers["anthropic-version"] = "2023-06-01";
+          }
+
+          const res = await fetch(endpoint, { headers });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          
+          const data = await res.json();
+          let models: string[] = [];
+          
+          if (provider === "ollama") {
+            models = (data.models || []).map((m: any) => m.name);
+          } else if (provider === "openai" || provider === "groq" || provider === "anthropic") {
+            models = (data.data || []).map((m: any) => m.id);
+          }
+
+          datalist.innerHTML = "";
+          models.forEach(model => {
+            const option = document.createElement("option");
+            option.value = model;
+            datalist.appendChild(option);
+          });
+          
+          btn.textContent = `Loaded ${models.length}`;
+        } catch (e) {
+          console.error(`Failed to fetch models for ${provider}:`, e);
+          btn.textContent = "Error";
+        } finally {
+          setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+          }, 2000);
+        }
+      });
+    });
   }
 }
