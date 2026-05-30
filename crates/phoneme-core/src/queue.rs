@@ -103,13 +103,26 @@ impl InboxQueue {
             .and_then(|s| s.to_str())
             .ok_or_else(|| Error::Internal(format!("bad inbox filename: {}", file.display())))?
             .to_string();
-        let processing = self.root.join("processing").join(format!("{id_str}.json"));
+        // Reject filenames that aren't a canonical RecordingId (e.g. a file a
+        // user manually dropped into pending/). Without this, the fixed-offset
+        // slicing in file_stem()/day_folder() — and the debug_assert in
+        // from_str_unchecked — would panic the daemon. Quarantine and move on.
+        let Some(id) = RecordingId::parse(id_str) else {
+            if let Some(name) = file.file_name() {
+                let _ = fs::rename(file, self.root.join("failed").join(name)).await;
+            }
+            tracing::warn!(file = %file.display(), "quarantined inbox file with malformed id");
+            return Ok(None);
+        };
+        let processing = self
+            .root
+            .join("processing")
+            .join(format!("{}.json", id.as_str()));
         fs::rename(file, &processing).await?;
         let payload = match read_payload(&processing).await {
             Ok(p) => p,
             Err(e) => {
                 // Quarantine the unparseable file so it stops blocking the queue.
-                let id = RecordingId::from_str_unchecked(&id_str);
                 self.finish_failed(&id, "corrupt_payload", &e.to_string())
                     .await?;
                 return Ok(None);
@@ -181,8 +194,19 @@ impl InboxQueue {
             let id_str = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
                 Error::Internal(format!("bad orphan filename: {}", path.display()))
             })?;
-            let id = RecordingId::from_str_unchecked(id_str);
-            let dest = self.root.join("pending").join(format!("{id}.json"));
+            // Skip/quarantine orphans whose name isn't a valid RecordingId
+            // instead of slicing out of bounds on them.
+            let Some(id) = RecordingId::parse(id_str) else {
+                if let Some(name) = path.file_name() {
+                    let _ = fs::rename(&path, self.root.join("failed").join(name)).await;
+                }
+                tracing::warn!(file = %path.display(), "quarantined orphan with malformed id");
+                continue;
+            };
+            let dest = self
+                .root
+                .join("pending")
+                .join(format!("{}.json", id.as_str()));
             fs::rename(&path, &dest).await?;
             recovered.push(id);
         }

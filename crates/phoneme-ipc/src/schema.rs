@@ -18,6 +18,8 @@ pub enum Request {
     },
     RecordStop,
     RecordToggle,
+    RecordPause,
+    RecordResume,
     RecordCancel,
     RecordStatus,
 
@@ -36,6 +38,7 @@ pub enum Request {
     // Queue operations
     ReplayRecording {
         id: RecordingId,
+        model: Option<String>,
     },
     RefireHook {
         id: RecordingId,
@@ -43,6 +46,10 @@ pub enum Request {
     UpdateTranscript {
         id: RecordingId,
         text: String,
+    },
+    /// Fetch the preserved original (machine) transcript for a recording, if any.
+    GetOriginalTranscript {
+        id: RecordingId,
     },
 
     // Daemon control
@@ -136,6 +143,12 @@ pub enum DaemonEvent {
         duration_ms: i64,
         audio_path: String,
     },
+    RecordingPaused {
+        id: RecordingId,
+    },
+    RecordingResumed {
+        id: RecordingId,
+    },
     TranscriptionStarted {
         id: RecordingId,
     },
@@ -162,6 +175,10 @@ pub enum DaemonEvent {
         pending: usize,
         processing: usize,
         failed: usize,
+    },
+    RetentionWarning {
+        count: u32,
+        hours: u32,
     },
     WhisperStatusChanged {
         reachable: bool,

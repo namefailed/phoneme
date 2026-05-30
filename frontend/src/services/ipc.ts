@@ -26,6 +26,7 @@ export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
 export type ListFilter = {
   limit?: number | null;
   since?: string | null;
+  until?: string | null;
   status?: string | null;
   search?: string | null;
   tag_id?: number | null;
@@ -64,12 +65,20 @@ export async function recordStop(): Promise<void> {
   await tauriInvoke("record_stop");
 }
 
+export async function recordPause(): Promise<void> {
+  await tauriInvoke("record_pause");
+}
+
+export async function recordResume(): Promise<void> {
+  await tauriInvoke("record_resume");
+}
+
 export async function recordCancel(): Promise<void> {
   await tauriInvoke("record_cancel");
 }
 
-export async function replayRecording(id: string): Promise<void> {
-  await tauriInvoke("replay_recording", { id });
+export async function replayRecording(id: string, model?: string): Promise<void> {
+  await tauriInvoke("replay_recording", { id, model: model || null });
 }
 
 export async function refireHook(id: string): Promise<void> {
@@ -81,6 +90,11 @@ export async function refireHook(id: string): Promise<void> {
  */
 export async function updateTranscript(id: string, text: string): Promise<void> {
   await tauriInvoke("update_transcript", { id, text });
+}
+
+/** The preserved original (machine) transcript, or null if none was saved. */
+export async function getOriginalTranscript(id: string): Promise<string | null> {
+  return await tauriInvoke<string | null>("get_original_transcript", { id });
 }
 
 export async function daemonStatus(): Promise<{ running: boolean; pid: number }> {

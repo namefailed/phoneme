@@ -6,6 +6,6 @@ import type { ListFilter } from "../services/ipc";
  * `_timePreset` tracks which named preset is active in the time dropdown so
  * the select can restore its selected value after a re-render.
  */
-export type UiFilter = ListFilter & { _timePreset?: string | null };
+export type UiFilter = ListFilter;
 
 export const filterStore = new Store<UiFilter>({});

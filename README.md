@@ -17,13 +17,13 @@
 
 Phoneme bridges the gap between quick voice dictation and your personal knowledge management systems. It is designed for power users who want the friction-free experience of hitting a hotkey to capture a thought, but without the privacy concerns, subscription fees, or cloud lock-in of modern AI tools.
 
-Everything runs **100% locally** on your machine.
+By default, everything runs **100% locally** on your machine.
 
 When you press your global hotkey (e.g., `Ctrl+Alt+Space`), Phoneme records your voice. When you stop, it leverages a local [Whisper](https://github.com/ggerganov/whisper.cpp) instance to transcribe your speech into text. Finally, it pipes that text through **your own scripts (hooks)** or into an LLM (like Ollama) for cleanup, formatting, or translation.
 
 The app does not force you into a specific ecosystem. It transcribes. You decide where it goes.
 
-## 🚀 What's in v1.3.0
+## 🚀 What's in v1.4
 
 This is the stable public release. Everything in this list is available today:
 
@@ -32,7 +32,9 @@ This is the stable public release. Everything in this list is available today:
 - **AI post-processing** — optionally clean up, format, or translate transcripts through a local [Ollama](https://ollama.ai) model or OpenAI. Includes 9 preset prompts.
 - **Hook pipeline** — every transcript is delivered to your script as JSON on stdin. Chain scripts, POST to webhooks, send to Obsidian, Org-mode, Notion, or anywhere. Five reference hooks included.
 - **Full CLI** — every GUI action is also available as `phoneme` commands. Works with AutoHotkey, Kanata, Stream Deck, or any hotkey daemon.
-- **Tags** — attach colour-coded tags to recordings; filter and search the catalog.
+- **Tags** — attach colour-coded tags to recordings; rename, recolour, or delete them in a tag manager; filter and search the catalog.
+- **Language selector** — pass a BCP-47 language hint to Whisper; 20 languages plus auto-detect.
+- **Auto-delete retention** — optional cleanup policy by max age and/or max count; the daemon prunes hourly.
 - **Transcript editor** — edit transcripts in-app with optional full Vim mode (visual, linewise, mouse selection all work).
 - **Doctor** — built-in health checker that tests the daemon, audio dir, hooks, Whisper server, and Ollama, with one-click fixes.
 - **11 themes** — Catppuccin Mocha/Macchiato/Latte, Dracula, Everforest, Gruvbox, Nord, One Dark, Rosé Pine, Solarized Light, Tokyo Night.
@@ -54,7 +56,7 @@ On first launch, the wizard walks you through:
 
 ## 🔒 Why "local-first"?
 
-No cloud. No telemetry. No update pings. The only network calls Phoneme makes are to your configured whisper-server endpoint, your chosen local LLM, and (optionally) Hugging Face when you explicitly click to download a model during setup. Your voice and your thoughts stay on your hard drive.
+**Local-first, not local-only.** No telemetry, no update pings — ever. By default the only network calls Phoneme makes are to your own whisper-server endpoint, your chosen local LLM, and (optionally) Hugging Face when you explicitly click to download a model during setup; your voice and your thoughts stay on your hard drive. If you deliberately switch transcription to a cloud provider, Phoneme warns you up front that your audio will leave your machine before sending anything. Local is the default and the recommended path.
 
 ## 🤝 Other Projects That Pair Well With Phoneme
 
@@ -95,7 +97,7 @@ Because the CLI seamlessly controls the daemon, setting up a custom workflow is 
 
 ## 🪝 Hooks
 
-A hook is your script. Phoneme invokes it with the transcript as JSON on stdin. Ship your own or use one of the four reference hooks:
+A hook is your script. Phoneme invokes it with the transcript as JSON on stdin. Ship your own or use one of the five reference hooks:
 
 | Hook | What it does |
 |---|---|

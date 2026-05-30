@@ -2,7 +2,7 @@
 
 import "./shared/styles.css";
 import { filterStore, type UiFilter } from "../state/filter";
-import { listTags, recordCancel, type Tag } from "../services/ipc";
+import { listTags, type Tag } from "../services/ipc";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../utils/toast";
@@ -17,6 +17,7 @@ export class HeaderBar {
   private tags: Tag[] = [];
   private unsubEvent: (() => void) | null = null;
   private isRecording = false;
+  private isPaused = false;
   private whisperReachable: boolean | null = null; // null = status unknown
   private queuePending = 0;
   private queueProcessing = 0;
@@ -41,9 +42,13 @@ export class HeaderBar {
       const eventName = p.event;
 
       if (eventName === "recording_started") {
-        this.setRecordingState(true);
+        this.setRecordingState(true, false);
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
-        this.setRecordingState(false);
+        this.setRecordingState(false, false);
+      } else if (eventName === "recording_paused") {
+        this.setRecordingState(true, true);
+      } else if (eventName === "recording_resumed") {
+        this.setRecordingState(true, false);
       } else if (eventName === "whisper_status_changed") {
         this.whisperReachable = p.reachable as boolean;
         this.updateStatusIndicators();
@@ -51,6 +56,23 @@ export class HeaderBar {
         this.queuePending = (p.pending as number) ?? 0;
         this.queueProcessing = (p.processing as number) ?? 0;
         this.updateStatusIndicators();
+      } else if (eventName === "retention_warning") {
+        try {
+          const { isPermissionGranted, requestPermission, sendNotification } = await import("@tauri-apps/plugin-notification");
+          let permissionGranted = await isPermissionGranted();
+          if (!permissionGranted) {
+            const permission = await requestPermission();
+            permissionGranted = permission === "granted";
+          }
+          if (permissionGranted) {
+            sendNotification({ 
+              title: "Phoneme Retention Policy", 
+              body: `${p.count} recordings will be permanently deleted in the next 24 hours per your auto-delete settings.`
+            });
+          }
+        } catch (e) {
+          console.error("Failed to send native notification:", e);
+        }
       }
 
       if (
@@ -75,17 +97,26 @@ export class HeaderBar {
     }
   }
 
-  private setRecordingState(recording: boolean) {
+  private setRecordingState(recording: boolean, paused: boolean = false) {
     this.isRecording = recording;
+    this.isPaused = paused;
     const stopBtn = this.container.querySelector<HTMLButtonElement>("#hb-record");
     const cancelBtn = this.container.querySelector<HTMLButtonElement>("#hb-cancel");
+    const pauseBtn = this.container.querySelector<HTMLButtonElement>("#hb-pause");
+    
     if (stopBtn) {
       if (recording) {
         stopBtn.innerHTML = "⏹ Stop";
         stopBtn.classList.add("recording-active");
+        if (paused) {
+          stopBtn.classList.add("recording-paused");
+        } else {
+          stopBtn.classList.remove("recording-paused");
+        }
       } else {
         stopBtn.innerHTML = "🔴 Record";
         stopBtn.classList.remove("recording-active");
+        stopBtn.classList.remove("recording-paused");
       }
       stopBtn.style.color = "";
       stopBtn.style.borderColor = "";
@@ -93,6 +124,14 @@ export class HeaderBar {
     }
     if (cancelBtn) {
       cancelBtn.style.display = recording ? "flex" : "none";
+    }
+    if (pauseBtn) {
+      pauseBtn.style.display = recording ? "flex" : "none";
+      if (paused) {
+        pauseBtn.innerHTML = "▶ Resume";
+      } else {
+        pauseBtn.innerHTML = "⏸ Pause";
+      }
     }
   }
 
@@ -133,13 +172,11 @@ export class HeaderBar {
       <div class="headerbar" data-tauri-drag-region>
         <button class="icon-btn hb-sort-btn" id="hb-sort" aria-label="Toggle sort order" title="${filterStore.get().sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}">${filterStore.get().sort_desc === false ? "↑ Oldest" : "↓ Newest"}</button>
         <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" />
-        <select class="filter-pill hb-time-select" title="Filter recordings by date">
-          <option value="">All time</option>
-          <option value="today">Today</option>
-          <option value="recently">Recently (3 Days)</option>
-          <option value="this_week">This Week</option>
-          <option value="this_month">This Month</option>
-        </select>
+        <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">
+          <input type="date" class="filter-pill hb-date-since" title="Start date (from)" value="${f.since ? f.since.split('T')[0] : ''}">
+          <span style="color: var(--fg-muted)">-</span>
+          <input type="date" class="filter-pill hb-date-until" title="End date (to)" value="${f.until ? f.until.split('T')[0] : ''}">
+        </div>
         <select class="filter-pill hb-status-select" title="Filter recordings by processing status">
           <option value="">All status</option>
           <option value="recording" ${f.status === "recording" ? "selected" : ""}>Recording</option>
@@ -158,6 +195,7 @@ export class HeaderBar {
             title="${this.whisperReachable === true ? "Whisper: connected" : this.whisperReachable === false ? "Whisper: unreachable" : "Whisper status unknown"}"></span>
           <span id="hb-queue-badge" class="hb-queue-badge" style="display:${this.queuePending + this.queueProcessing > 0 ? "inline-flex" : "none"}"
             title="${this.queueProcessing} processing, ${this.queuePending} queued">${this.queuePending + this.queueProcessing || ""}</span>
+          <button class="record-btn" id="hb-pause" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" title="Pause / Resume recording">${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
           <button class="record-btn" id="hb-cancel" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" title="Cancel recording and discard audio">✕ Cancel</button>
           <button class="record-btn" id="hb-record" title="Start/Stop recording manually (or use your global hotkey)">${this.isRecording ? "⏹ Stop" : "🔴 Record"}</button>
         </div>
@@ -177,32 +215,31 @@ export class HeaderBar {
         filterStore.set({ ...filterStore.get(), search: q || null });
       });
     }
-    const timeSelect = this.container.querySelector<HTMLSelectElement>(".hb-time-select");
-    if (timeSelect) {
-      const preset = filterStore.get()._timePreset || "";
-      timeSelect.value = preset;
+    const dateSince = this.container.querySelector<HTMLInputElement>(".hb-date-since");
+    const dateUntil = this.container.querySelector<HTMLInputElement>(".hb-date-until");
+    const formatLocalIso = (dateStr: string, endOfDay: boolean) => {
+      if (!dateStr) return null;
+      const [y, m, d] = dateStr.split('-');
+      const date = new Date(Number(y), Number(m) - 1, Number(d), endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
+      const offset = date.getTimezoneOffset();
+      const absOffset = Math.abs(offset);
+      const sign = offset <= 0 ? "+" : "-";
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${dateStr}T${endOfDay ? "23:59:59" : "00:00:00"}${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+    };
 
-      timeSelect.addEventListener("change", (e) => {
-        const val = (e.target as HTMLSelectElement).value;
-        if (val) {
-          const target = new Date();
-          target.setHours(0, 0, 0, 0);
-          if (val === "recently") {
-            target.setDate(target.getDate() - 3);
-          } else if (val === "this_week") {
-            target.setDate(target.getDate() - target.getDay());
-          } else if (val === "this_month") {
-            target.setDate(1);
-          }
-          const offset = target.getTimezoneOffset();
-          const absOffset = Math.abs(offset);
-          const sign = offset <= 0 ? "+" : "-";
-          const pad = (n: number) => String(n).padStart(2, "0");
-          const formatted = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T00:00:00${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
-          filterStore.set({ ...filterStore.get(), since: formatted, _timePreset: val } satisfies UiFilter);
-        } else {
-          filterStore.set({ ...filterStore.get(), since: null, _timePreset: null } satisfies UiFilter);
-        }
+    if (dateSince) {
+      dateSince.addEventListener("change", (e) => {
+        const val = (e.target as HTMLInputElement).value;
+        const sinceStr = formatLocalIso(val, false);
+        filterStore.set({ ...filterStore.get(), since: sinceStr } satisfies UiFilter);
+      });
+    }
+    if (dateUntil) {
+      dateUntil.addEventListener("change", (e) => {
+        const val = (e.target as HTMLInputElement).value;
+        const untilStr = formatLocalIso(val, true);
+        filterStore.set({ ...filterStore.get(), until: untilStr } satisfies UiFilter);
       });
     }
     const tagSelect = this.container.querySelector<HTMLSelectElement>(".hb-tag-select");
@@ -247,10 +284,24 @@ export class HeaderBar {
     if (cancelBtn) {
       cancelBtn.addEventListener("click", async () => {
         try {
-          await recordCancel();
+          await invoke("record_cancel");
           showToast("Recording cancelled", "info");
         } catch (e) {
           showToast(`Cancel failed: ${e}`, "error");
+        }
+      });
+    }
+    const pauseBtn = this.container.querySelector<HTMLButtonElement>("#hb-pause");
+    if (pauseBtn) {
+      pauseBtn.addEventListener("click", async () => {
+        try {
+          if (this.isPaused) {
+            await invoke("record_resume");
+          } else {
+            await invoke("record_pause");
+          }
+        } catch (e) {
+          showToast(`Toggle pause failed: ${e}`, "error");
         }
       });
     }

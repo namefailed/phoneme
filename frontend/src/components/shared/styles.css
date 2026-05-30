@@ -41,6 +41,18 @@
   background: var(--border-subtle);
   border-color: var(--accent);
 }
+input[type="date"].filter-pill {
+  font-family: inherit;
+  color-scheme: dark;
+}
+input[type="date"].filter-pill::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: 0.2s;
+}
+input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
 
 .headerbar .icon-btn {
   background: var(--bg-deep);
@@ -132,6 +144,12 @@ option {
   color: var(--bg-deep);
   border-color: var(--err);
   animation: pulse 2s infinite;
+}
+.record-btn.recording-paused {
+  background: rgba(249, 226, 175, 0.2);
+  color: var(--warn);
+  border-color: var(--warn);
+  animation: none;
 }
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 rgba(243, 139, 168, 0.4); }

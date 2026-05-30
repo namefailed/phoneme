@@ -4,6 +4,7 @@ import { subscribe, type DaemonEvent } from "../../services/events";
 import { Store } from "../../state/store";
 import { RecordingsList, type RecordingsListState } from "./RecordingsList";
 import { RecordingDetail } from "./RecordingDetail";
+import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
 import "./styles.css";
 
@@ -17,6 +18,11 @@ export class RecordingsView {
   private unsub: (() => void) | null = null;
   private keydownHandler: (e: KeyboardEvent) => void;
 
+  /** Current multi-selection. Empty when no checkboxes are checked. */
+  private multiSelected = new Set<string>();
+  /** Reference to the bulk bar root element for re-mounting. */
+  private bulkBarRoot: HTMLElement | null = null;
+
   constructor(container: HTMLElement) {
     this.container = container;
     this.state = new Store<RecordingsListState>({
@@ -28,17 +34,23 @@ export class RecordingsView {
 
     this.container.innerHTML = `
       <div class="rv-shell" id="rv-shell">
-        <div class="rv-list" id="rv-list"></div>
+        <div class="rv-list" id="rv-list">
+          <div id="rv-list-inner" style="height:100%; overflow:hidden;"></div>
+          <div id="rv-bulk-bar" style="display:none;"></div>
+        </div>
         <div class="rv-splitter" id="rv-split"></div>
         <div class="rv-detail" id="rv-detail"></div>
       </div>
     `;
 
-    const listRoot = this.container.querySelector<HTMLElement>("#rv-list")!;
+    const listRoot = this.container.querySelector<HTMLElement>("#rv-list-inner")!;
     const detailRoot = this.container.querySelector<HTMLElement>("#rv-detail")!;
     const splitRoot = this.container.querySelector<HTMLElement>("#rv-split")!;
+    this.bulkBarRoot = this.container.querySelector<HTMLElement>("#rv-bulk-bar");
 
-    this.list = new RecordingsList(listRoot, this.state, (id) => this.onSelect(id));
+    this.list = new RecordingsList(listRoot, this.state, (id) => this.onSelect(id), (ids) => {
+      this.onSelectionChange(ids);
+    });
     this.detail = new RecordingDetail(detailRoot, () => {
       void this.refresh();
     });
@@ -89,8 +101,35 @@ export class RecordingsView {
   }
 
   private onSelect(id: string) {
+    // Single-click navigates to the detail pane; does NOT clear multi-selection
+    // (so users can single-click to preview while still having checkboxes ticked).
     this.state.set({ ...this.state.get(), selectedId: id });
     void this.detail.show(id);
+  }
+
+  private onSelectionChange(ids: Set<string>) {
+    this.multiSelected = ids;
+    this.renderBulkBar();
+  }
+
+  private renderBulkBar() {
+    const root = this.bulkBarRoot;
+    if (!root) return;
+
+    if (this.multiSelected.size === 0) {
+      root.innerHTML = "";
+      root.style.display = "none";
+      return;
+    }
+
+    // Re-mount the BulkActionBar into the root element.
+    new BulkActionBar(root, this.multiSelected, this.state.get().recordings, {
+      onRefresh: () => { void this.refresh(); },
+      onClear: () => {
+        this.list.clearSelection();
+        // clearSelection() will fire onSelectionChange(empty set) which hides the bar.
+      },
+    });
   }
 
   private async subscribeToEvents() {
@@ -119,6 +158,13 @@ export class RecordingsView {
       e.preventDefault();
       this.toggleDetail();
     } else if (e.key === "Delete") {
+      // If we have a multi-selection, bulk-delete via the bar; otherwise single-delete.
+      if (this.multiSelected.size > 1) {
+        // Delegate to BulkActionBar by programmatically clicking its delete button.
+        const btn = this.bulkBarRoot?.querySelector<HTMLButtonElement>("#bulk-delete");
+        btn?.click();
+        return;
+      }
       const id = this.state.get().selectedId;
       if (id) {
         e.preventDefault();
@@ -130,7 +176,6 @@ export class RecordingsView {
             this.refresh();
           } catch (err) {
             console.error("Failed to delete recording:", err);
-            // Optionally could show a toast here
           }
         }
       }

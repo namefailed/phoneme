@@ -107,12 +107,25 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::RecordCancel).await
 }
 
+/// Signal the daemon to pause the current recording. Audio captured while
+/// paused is discarded; recording continues into the same file on resume.
+#[tauri::command]
+pub async fn record_pause(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::RecordPause).await
+}
+
+/// Signal the daemon to resume a previously paused recording.
+#[tauri::command]
+pub async fn record_resume(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::RecordResume).await
+}
+
 /// Request the daemon to re-transcribe an existing recording by its ID.
 /// This will push the recording back into the background queue.
 #[tauri::command]
 pub async fn replay_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::ReplayRecording { id }).await
+    forward(&bridge, Request::ReplayRecording { id, model: None }).await
 }
 
 /// Force the daemon to re-execute the post-processing hook for a given recording ID.
@@ -127,6 +140,13 @@ pub async fn refire_hook(bridge: Br<'_>, id: String) -> Result<Value, String> {
 pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::UpdateTranscript { id, text }).await
+}
+
+/// Fetch the preserved original (machine) transcript for a recording, if any.
+#[tauri::command]
+pub async fn get_original_transcript(bridge: Br<'_>, id: String) -> Result<Value, String> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetOriginalTranscript { id }).await
 }
 
 /// Check the background daemon's current runtime status.
@@ -154,7 +174,11 @@ pub async fn write_config(
     bridge: Br<'_>,
     config: Config,
 ) -> Result<(), String> {
-    config_io::write(&config).map_err(|e| e.to_string())?;
+    let cfg = config.clone();
+    tokio::task::spawn_blocking(move || config_io::write(&cfg))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
 
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
@@ -379,6 +403,10 @@ pub async fn wizard_download_model(
     url: String,
     filename: String,
 ) -> Result<String, String> {
+    if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
+        return Err("Invalid filename".to_string());
+    }
+
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| "could not resolve project directories".to_string())?;
     let models_dir = dirs.data_local_dir().join("models");
@@ -438,6 +466,42 @@ pub async fn wizard_download_model(
     }
 
     Ok(dest_path.to_string_lossy().into_owned())
+}
+
+#[derive(serde::Serialize)]
+pub struct SystemInfo {
+    pub ram_mb: u64,
+}
+
+#[tauri::command]
+pub fn wizard_get_system_info() -> SystemInfo {
+    let mut sys = sysinfo::System::new_all();
+    sys.refresh_memory();
+    SystemInfo {
+        ram_mb: sys.total_memory() / 1024 / 1024,
+    }
+}
+
+#[tauri::command]
+pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, String> {
+    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| "could not resolve project directories".to_string())?;
+    let models_dir = dirs.data_local_dir().join("models");
+    let mut downloaded = Vec::new();
+    let models = [
+        "ggml-tiny.en.bin",
+        "ggml-base.en.bin",
+        "ggml-small.en.bin",
+        "ggml-medium.en.bin",
+        "ggml-large-v3.bin",
+    ];
+    for model in models {
+        let path = models_dir.join(model);
+        if tokio::fs::metadata(&path).await.is_ok() {
+            downloaded.push(path.to_string_lossy().into_owned());
+        }
+    }
+    Ok(downloaded)
 }
 
 #[tauri::command]
@@ -537,40 +601,45 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
     }
     drop(file);
 
-    // Extract zip
-    let zip_file = std::fs::File::open(&temp_zip)
-        .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
+    let zip_path = temp_zip.clone();
+    let bin_path = bin_dir.clone();
 
-    let mut archive =
-        zip::ZipArchive::new(zip_file).map_err(|e| format!("failed to read zip archive: {}", e))?;
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let zip_file = std::fs::File::open(&zip_path)
+            .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
 
-    for i in 0..archive.len() {
-        let mut file = match archive.by_index(i) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
+        let mut archive = zip::ZipArchive::new(zip_file)
+            .map_err(|e| format!("failed to read zip archive: {}", e))?;
 
-        let outpath = match file.enclosed_name() {
-            Some(path) => path.to_owned(),
-            None => continue,
-        };
+        for i in 0..archive.len() {
+            let mut file = match archive.by_index(i) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
 
-        // We only care about the binaries in the 'whisper-bin-x64' root or nested, just grab exe and dlls.
-        if file.is_file() {
-            if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
-                if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
-                    let extract_to = bin_dir.join(file_name);
-                    let mut outfile = std::fs::File::create(&extract_to).map_err(|e| {
-                        format!("failed to create output file {}: {}", file_name, e)
-                    })?;
-                    std::io::copy(&mut file, &mut outfile)
-                        .map_err(|e| format!("failed to extract {}: {}", file_name, e))?;
+            let outpath = match file.enclosed_name() {
+                Some(path) => path.to_owned(),
+                None => continue,
+            };
+
+            if file.is_file() {
+                if let Some(file_name) = outpath.file_name().and_then(|n| n.to_str()) {
+                    if file_name.ends_with(".exe") || file_name.ends_with(".dll") {
+                        let extract_to = bin_path.join(file_name);
+                        let mut outfile = std::fs::File::create(&extract_to).map_err(|e| {
+                            format!("failed to create output file {}: {}", file_name, e)
+                        })?;
+                        std::io::copy(&mut file, &mut outfile)
+                            .map_err(|e| format!("failed to extract {}: {}", file_name, e))?;
+                    }
                 }
             }
         }
-    }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {}", e))??;
 
-    drop(archive);
     let _ = tokio::fs::remove_file(&temp_zip).await;
 
     Ok(exe_path.to_string_lossy().into_owned())
@@ -643,11 +712,154 @@ mod tests {
 }
 
 #[tauri::command]
-pub fn open_file(path: String) -> Result<(), String> {
+pub async fn wizard_ping_ollama() -> Result<bool, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client
+        .get("http://127.0.0.1:11434/api/version")
+        .send()
+        .await
+    {
+        Ok(r) => Ok(r.status().is_success()),
+        Err(_) => Ok(false),
+    }
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct OllamaPullProgress {
+    pub status: String,
+    pub completed: Option<u64>,
+    pub total: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn wizard_pull_ollama_model(window: tauri::Window, model: String) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({ "name": model });
+    let response = client
+        .post("http://127.0.0.1:11434/api/pull")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("pull failed with status: {}", response.status()));
+    }
+
+    use futures::StreamExt;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("stream error: {}", e))?;
+        if let Ok(s) = std::str::from_utf8(&chunk) {
+            for line in s.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    let status = v["status"].as_str().unwrap_or("").to_string();
+                    let completed = v["completed"].as_u64();
+                    let total = v["total"].as_u64();
+                    let _ = window.emit(
+                        "ollama_pull_progress",
+                        OllamaPullProgress {
+                            status,
+                            completed,
+                            total,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn wizard_download_file(
+    window: tauri::Window,
+    url: String,
+    filename: String,
+) -> Result<String, String> {
+    if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
+        return Err("Invalid filename".to_string());
+    }
+
+    let dest_path = std::env::temp_dir().join(&filename);
+
+    let mut file = tokio::fs::File::create(&dest_path)
+        .await
+        .map_err(|e| format!("failed to create file: {}", e))?;
+
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("download failed: {}", response.status()));
+    }
+
+    let total = response.content_length();
+    let mut downloaded: u64 = 0;
+
+    use futures::StreamExt;
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(&dest_path).await;
+                return Err(format!("stream error: {}", e));
+            }
+        };
+        if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+            drop(file);
+            let _ = tokio::fs::remove_file(&dest_path).await;
+            return Err(format!("write error: {}", e));
+        }
+        downloaded += chunk.len() as u64;
+
+        let _ = window.emit("download_progress", DownloadProgress { downloaded, total });
+    }
+
+    Ok(dest_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn wizard_run_installer(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.starts_with(std::env::temp_dir()) {
+        return Err("Execution is restricted to the temporary directory".to_string());
+    }
+    if !p.exists() {
+        return Err("Installer file does not exist".to_string());
+    }
+
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &path])
+        std::process::Command::new(&path)
+            .spawn()
+            .map_err(|e| format!("failed to run installer: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_file(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("File does not exist: {}", path));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Use explorer.exe directly instead of `cmd /c start`: the latter runs
+        // through the shell, so a filename containing `&` or `"` could be parsed
+        // as commands. explorer takes the path literally — no shell layer.
+        std::process::Command::new("explorer")
+            .arg(&path)
             .spawn()
             .map_err(|e| format!("failed to open file: {}", e))?;
     }

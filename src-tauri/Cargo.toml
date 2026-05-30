@@ -27,6 +27,7 @@ tauri-plugin-fs.workspace = true
 tauri-plugin-global-shortcut.workspace = true
 tauri-plugin-window-state.workspace = true
 tauri-plugin-updater = "2"
+sysinfo = "0.30"
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -38,6 +39,7 @@ reqwest.workspace = true
 which = "6"
 futures = "0.3"
 zip = "0.6"
+tauri-plugin-notification = "2.3.3"
 
 [dev-dependencies]
 wiremock.workspace = true

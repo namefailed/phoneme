@@ -123,24 +123,62 @@ impl Catalog {
         Ok(())
     }
 
+    /// Update the transcript after machine transcription.
+    ///
+    /// `transcript` is the text to store as the live transcript — for
+    /// recordings with LLM post-processing enabled this will be the LLM-
+    /// cleaned text. `original_transcript` is **always** the raw Whisper
+    /// output, so the "View original" feature shows the pre-LLM version even
+    /// when post-processing is active. Re-transcription overwrites both
+    /// columns (fresh baseline).
     pub async fn update_transcript(
         &self,
         id: &RecordingId,
         transcript: &str,
+        original_transcript: &str,
         model: &str,
     ) -> Result<()> {
         sqlx::query(
             r#"UPDATE recordings
-               SET transcript = ?, model = ?,
+               SET transcript = ?, original_transcript = ?, model = ?,
                    transcribed_at = datetime('now'), updated_at = datetime('now')
                WHERE id = ?"#,
         )
         .bind(transcript)
+        .bind(original_transcript)
         .bind(model)
         .bind(id.as_str())
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Update the transcript from a manual user edit, preserving
+    /// `original_transcript` (the machine output) so the edit can be reverted.
+    pub async fn update_user_transcript(&self, id: &RecordingId, transcript: &str) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET transcript = ?, model = 'user-edit', updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(transcript)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The preserved original (machine) transcript, if any. `None` for
+    /// recordings transcribed before this column existed, or never transcribed.
+    pub async fn get_original_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT original_transcript FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok(r.try_get::<Option<String>, _>("original_transcript")?),
+            None => Ok(None),
+        }
     }
 
     pub async fn update_hook_result(
@@ -205,8 +243,17 @@ impl Catalog {
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
-        let dir = if filter.sort_desc.unwrap_or(true) { "DESC" } else { "ASC" };
-        sql.push_str(&format!(" ORDER BY recordings.started_at {dir}, recordings.id {dir}"));
+        if filter.until.is_some() {
+            sql.push_str(" AND recordings.started_at <= ?");
+        }
+        let dir = if filter.sort_desc.unwrap_or(true) {
+            "DESC"
+        } else {
+            "ASC"
+        };
+        sql.push_str(&format!(
+            " ORDER BY recordings.started_at {dir}, recordings.id {dir}"
+        ));
         if let Some(n) = filter.limit {
             sql.push_str(&format!(" LIMIT {n}"));
         }
@@ -222,6 +269,9 @@ impl Catalog {
             q = q.bind(s.as_str().to_string());
         }
         if let Some(t) = filter.since {
+            q = q.bind(t.to_rfc3339());
+        }
+        if let Some(t) = filter.until {
             q = q.bind(t.to_rfc3339());
         }
         let rows = q.fetch_all(&self.pool).await?;
@@ -362,8 +412,8 @@ impl Catalog {
 
         // Age-based cleanup — delete everything older than max_age_days.
         if let Some(max_age) = cfg.max_age_days {
-            let cutoff = chrono::Utc::now()
-                - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
+            let cutoff =
+                chrono::Utc::now() - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
             let cutoff_str = cutoff.to_rfc3339();
             let rows = sqlx::query(
                 "SELECT id, audio_path FROM recordings \
@@ -406,6 +456,38 @@ impl Catalog {
         }
 
         Ok(deleted_paths)
+    }
+
+    /// Predicts how many recordings will be deleted by the age-based retention policy
+    /// in the next `hours_ahead` hours.
+    pub async fn analyze_upcoming_retention(
+        &self,
+        cfg: &crate::config::RetentionConfig,
+        hours_ahead: u32,
+    ) -> Result<u32> {
+        let max_age = match cfg.max_age_days {
+            Some(v) => v,
+            None => return Ok(0),
+        };
+
+        // cutoff_now is items older than this are ALREADY deleted or being deleted now.
+        let cutoff_now =
+            chrono::Utc::now() - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
+        // cutoff_future is items older than this will be deleted in the next `hours_ahead` hours.
+        let cutoff_future =
+            cutoff_now + chrono::Duration::try_hours(hours_ahead as i64).unwrap_or_default();
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM recordings \
+             WHERE started_at >= ? AND started_at < ? \
+             AND status IN ('done','transcribe_failed','hook_failed')",
+        )
+        .bind(cutoff_now.to_rfc3339())
+        .bind(cutoff_future.to_rfc3339())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count as u32)
     }
 
     pub async fn tags_for(&self, recording_id: &RecordingId) -> Result<Vec<Tag>> {
@@ -473,6 +555,7 @@ fn parse_dt(s: &str) -> Result<DateTime<Local>> {
 fn parse_status(s: &str) -> Result<RecordingStatus> {
     Ok(match s {
         "recording" => RecordingStatus::Recording,
+        "paused" => RecordingStatus::Paused,
         "transcribing" => RecordingStatus::Transcribing,
         "hook_running" => RecordingStatus::HookRunning,
         "done" => RecordingStatus::Done,
@@ -489,6 +572,29 @@ fn parse_status(s: &str) -> Result<RecordingStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_status_round_trips_all_variants_incl_paused() {
+        // Regression: `parse_status` lacked a "paused" arm, so the moment a
+        // recording was paused, `catalog.list()`/`get()` failed for the ENTIRE
+        // result set (one bad row errored the whole query). Every status the DB
+        // can hold must round-trip.
+        for s in [
+            "recording",
+            "paused",
+            "transcribing",
+            "hook_running",
+            "done",
+            "transcribe_failed",
+            "hook_failed",
+        ] {
+            assert_eq!(
+                parse_status(s).unwrap().as_str(),
+                s,
+                "status {s} did not round-trip through parse_status/as_str"
+            );
+        }
+    }
 
     #[test]
     fn test_sanitize_fts5_query() {
@@ -541,6 +647,7 @@ mod tests {
         let filter = ListFilter {
             limit: Some(10),
             since: None,
+            until: None,
             status: None,
             search: None,
             tag_id: None,
@@ -549,5 +656,50 @@ mod tests {
         let list = db.list(&filter).await.expect("list");
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id.as_str(), r.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn original_transcript_preserved_across_user_edit() {
+        let db = Catalog::open(Path::new("sqlite::memory:"))
+            .await
+            .expect("open db");
+        let r = Recording {
+            id: RecordingId::new(),
+            started_at: Local::now(),
+            duration_ms: 1000,
+            audio_path: "x.wav".into(),
+            transcript: None,
+            model: None,
+            status: RecordingStatus::Transcribing,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+        };
+        db.insert(&r).await.expect("insert");
+
+        // Machine transcription stores transcript + original.
+        db.update_transcript(&r.id, "machine output", "machine output", "ggml-base")
+            .await
+            .expect("machine transcript");
+        assert_eq!(
+            db.get_original_transcript(&r.id).await.unwrap().as_deref(),
+            Some("machine output")
+        );
+
+        // A user edit changes the transcript but preserves the original.
+        db.update_user_transcript(&r.id, "edited by the user")
+            .await
+            .expect("user edit");
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.transcript.as_deref(), Some("edited by the user"));
+        assert_eq!(got.model.as_deref(), Some("user-edit"));
+        assert_eq!(
+            db.get_original_transcript(&r.id).await.unwrap().as_deref(),
+            Some("machine output")
+        );
     }
 }
