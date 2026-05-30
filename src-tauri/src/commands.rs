@@ -107,6 +107,19 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::RecordCancel).await
 }
 
+/// Signal the daemon to pause the current recording. Audio captured while
+/// paused is discarded; recording continues into the same file on resume.
+#[tauri::command]
+pub async fn record_pause(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::RecordPause).await
+}
+
+/// Signal the daemon to resume a previously paused recording.
+#[tauri::command]
+pub async fn record_resume(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::RecordResume).await
+}
+
 /// Request the daemon to re-transcribe an existing recording by its ID.
 /// This will push the recording back into the background queue.
 #[tauri::command]

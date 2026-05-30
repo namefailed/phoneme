@@ -153,6 +153,8 @@ pub fn run() {
             commands::record_start,
             commands::record_stop,
             commands::record_cancel,
+            commands::record_pause,
+            commands::record_resume,
             commands::replay_recording,
             commands::refire_hook,
             commands::update_transcript,

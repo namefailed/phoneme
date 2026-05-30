@@ -555,6 +555,7 @@ fn parse_dt(s: &str) -> Result<DateTime<Local>> {
 fn parse_status(s: &str) -> Result<RecordingStatus> {
     Ok(match s {
         "recording" => RecordingStatus::Recording,
+        "paused" => RecordingStatus::Paused,
         "transcribing" => RecordingStatus::Transcribing,
         "hook_running" => RecordingStatus::HookRunning,
         "done" => RecordingStatus::Done,
@@ -571,6 +572,29 @@ fn parse_status(s: &str) -> Result<RecordingStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_status_round_trips_all_variants_incl_paused() {
+        // Regression: `parse_status` lacked a "paused" arm, so the moment a
+        // recording was paused, `catalog.list()`/`get()` failed for the ENTIRE
+        // result set (one bad row errored the whole query). Every status the DB
+        // can hold must round-trip.
+        for s in [
+            "recording",
+            "paused",
+            "transcribing",
+            "hook_running",
+            "done",
+            "transcribe_failed",
+            "hook_failed",
+        ] {
+            assert_eq!(
+                parse_status(s).unwrap().as_str(),
+                s,
+                "status {s} did not round-trip through parse_status/as_str"
+            );
+        }
+    }
 
     #[test]
     fn test_sanitize_fts5_query() {
