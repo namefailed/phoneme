@@ -216,8 +216,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
-        Request::ReplayRecording { id } => match state.catalog.get(&id).await {
+        Request::ReplayRecording { id, model } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
+                if let Some(m) = model {
+                    let mut cfg = state.config.load().as_ref().clone();
+                    cfg.whisper.model_path = m;
+                    state.config.store(std::sync::Arc::new(cfg));
+                    // Wait a moment for the supervisor to restart the server
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
                 let payload = HookPayload {
                     id: r.id.clone(),
                     timestamp: r.started_at,

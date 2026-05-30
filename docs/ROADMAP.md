@@ -51,10 +51,10 @@ Right now transcription is hardwired to whisper.cpp. A trait-based `Transcriptio
 
 Users on low-end hardware get poor transcription not because Whisper is bad but because they're running the wrong model size.
 
-- [ ] **Model manager UI** — shows all GGML model variants (tiny·75 MB, base·142 MB, small·466 MB, medium·1.5 GB, large-v3·3.1 GB) with speed/accuracy tradeoffs written in plain English
-- [ ] **Hardware-aware recommendation** — detect available RAM (and GPU VRAM via DXGI on Windows) and auto-suggest the largest model that fits; surfaced as a tooltip/"Recommended" badge
-- [ ] **Per-model one-click download** — replace the single "Download Default" button with per-model download buttons; show progress and disk usage
-- [ ] **Re-transcribe with model picker** — action-row button that re-queues a recording against a different model; lets users upgrade quality on old recordings after switching to a bigger model
+- [x] **Model manager UI** — shows all GGML model variants (tiny·75 MB, base·142 MB, small·466 MB, medium·1.5 GB, large-v3·3.1 GB) with speed/accuracy tradeoffs written in plain English
+- [x] **Hardware-aware recommendation** — detect available RAM (and GPU VRAM via DXGI on Windows) and auto-suggest the largest model that fits; surfaced as a tooltip/"Recommended" badge
+- [x] **Per-model one-click download** — replace the single "Download Default" button with per-model download buttons; show progress and disk usage
+- [x] **Re-transcribe with model picker** — action-row button that re-queues a recording against a different model; lets users upgrade quality on old recordings after switching to a bigger model
 
 ### LLM Post-Processing — Provider Flexibility
 
@@ -75,7 +75,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [x] **Bulk actions** — Shift+Click and Ctrl+A to multi-select recordings; batch delete, re-transcribe, or export
 
 ### Data
-- [ ] **Custom date range filter** — date picker replacing the preset-only time dropdown
+- [x] **Custom date range filter** — date picker replacing the preset-only time dropdown
 - [x] **Pre-deletion notification** — Windows toast before the retention cleanup runs: "3 recordings will be deleted in 24 hours per your retention policy"
 
 ---

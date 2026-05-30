@@ -77,8 +77,8 @@ export async function recordCancel(): Promise<void> {
   await tauriInvoke("record_cancel");
 }
 
-export async function replayRecording(id: string): Promise<void> {
-  await tauriInvoke("replay_recording", { id });
+export async function replayRecording(id: string, model?: string): Promise<void> {
+  await tauriInvoke("replay_recording", { id, model: model || null });
 }
 
 export async function refireHook(id: string): Promise<void> {

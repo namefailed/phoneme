@@ -447,6 +447,42 @@ pub async fn wizard_download_model(
     Ok(dest_path.to_string_lossy().into_owned())
 }
 
+#[derive(serde::Serialize)]
+pub struct SystemInfo {
+    pub ram_mb: u64,
+}
+
+#[tauri::command]
+pub fn wizard_get_system_info() -> SystemInfo {
+    let mut sys = sysinfo::System::new_all();
+    sys.refresh_memory();
+    SystemInfo {
+        ram_mb: sys.total_memory() / 1024 / 1024,
+    }
+}
+
+#[tauri::command]
+pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, String> {
+    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| "could not resolve project directories".to_string())?;
+    let models_dir = dirs.data_local_dir().join("models");
+    let mut downloaded = Vec::new();
+    let models = [
+        "ggml-tiny.en.bin",
+        "ggml-base.en.bin",
+        "ggml-small.en.bin",
+        "ggml-medium.en.bin",
+        "ggml-large-v3.bin",
+    ];
+    for model in models {
+        let path = models_dir.join(model);
+        if tokio::fs::metadata(&path).await.is_ok() {
+            downloaded.push(path.to_string_lossy().into_owned());
+        }
+    }
+    Ok(downloaded)
+}
+
 #[tauri::command]
 pub fn reveal_file(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]

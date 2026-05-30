@@ -38,6 +38,7 @@ pub enum Request {
     // Queue operations
     ReplayRecording {
         id: RecordingId,
+        model: Option<String>,
     },
     RefireHook {
         id: RecordingId,

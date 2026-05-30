@@ -177,6 +177,8 @@ pub fn run() {
             commands::detach_tag,
             commands::tags_for,
             commands::wizard_download_model,
+            commands::wizard_get_system_info,
+            commands::wizard_list_downloaded_models,
             commands::wizard_download_server,
             commands::reveal_file,
             commands::open_file,

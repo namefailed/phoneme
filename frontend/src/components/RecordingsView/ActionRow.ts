@@ -21,11 +21,16 @@ export class ActionRow {
     this.render();
   }
 
-  private render() {
+  private async render() {
     this.container.innerHTML = `
       <div class="action-row">
         <button class="primary" data-act="play" id="btn-play">▶ Play</button>
-        <button data-act="replay">↻ Re-transcribe</button>
+        <div style="display: flex; align-items: center; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 6px; background: var(--bg-deep);">
+          <button data-act="replay" style="border: none; background: transparent; padding-right: 4px; box-shadow: none;">↻ Re-transcribe</button>
+          <select id="replay-model" style="border: none; background: transparent; padding-left: 4px; padding-right: 20px; font-size: 11px; max-width: 90px; box-shadow: none;">
+            <option value="">Default</option>
+          </select>
+        </div>
         <button data-act="refire">⚡ Re-fire hook</button>
         <button data-act="copy">📋 Copy</button>
         <button data-act="export">⬇ Export</button>
@@ -39,6 +44,26 @@ export class ActionRow {
         if (act) void this.handle(act);
       });
     });
+
+    try {
+      const downloaded = await invoke<string[]>("wizard_list_downloaded_models");
+      const sel = this.container.querySelector<HTMLSelectElement>("#replay-model");
+      if (sel) {
+        const filenames = ["ggml-tiny.en.bin", "ggml-base.en.bin", "ggml-small.en.bin", "ggml-medium.en.bin", "ggml-large-v3.bin"];
+        for (const f of filenames) {
+          const path = downloaded.find((p: string) => p.endsWith(f));
+          if (path) {
+            const name = f.replace("ggml-", "").replace(".en.bin", "").replace(".bin", "");
+            const opt = document.createElement("option");
+            opt.value = path;
+            opt.textContent = name;
+            sel.appendChild(opt);
+          }
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   setPlayState(playing: boolean) {
@@ -53,7 +78,9 @@ export class ActionRow {
       this.cbs.onTogglePlay();
     } else if (act === "replay") {
       try {
-        await replayRecording(this.id);
+        const sel = this.container.querySelector<HTMLSelectElement>("#replay-model");
+        const override = sel?.value || undefined;
+        await replayRecording(this.id, override);
         showToast("Queued for re-transcription", "info");
         this.cbs.onRefresh();
       } catch (e) {
