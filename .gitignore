@@ -23,3 +23,11 @@ src-tauri/gen/
 *.zip
 *.wav
 whisper-bin/
+
+# pnpm 10 auto-generates frontend/pnpm-workspace.yaml as a placeholder stub
+# ("allowBuilds: esbuild: set this to true or false") whenever it approves a
+# build script. CI uses pnpm 9, where build approval lives in
+# frontend/package.json (pnpm.onlyBuiltDependencies). A workspace file with no
+# `packages:` field makes `pnpm install` fail on CI ("packages field missing"),
+# so this locally-regenerated stub must never be committed.
+frontend/pnpm-workspace.yaml
