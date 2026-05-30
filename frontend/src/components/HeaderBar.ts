@@ -172,13 +172,11 @@ export class HeaderBar {
       <div class="headerbar" data-tauri-drag-region>
         <button class="icon-btn hb-sort-btn" id="hb-sort" aria-label="Toggle sort order" title="${filterStore.get().sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}">${filterStore.get().sort_desc === false ? "↑ Oldest" : "↓ Newest"}</button>
         <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" />
-        <select class="filter-pill hb-time-select" title="Filter recordings by date">
-          <option value="">All time</option>
-          <option value="today">Today</option>
-          <option value="recently">Recently (3 Days)</option>
-          <option value="this_week">This Week</option>
-          <option value="this_month">This Month</option>
-        </select>
+        <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">
+          <input type="date" class="filter-pill hb-date-since" title="Start date (from)" value="${f.since ? f.since.split('T')[0] : ''}">
+          <span style="color: var(--fg-muted)">-</span>
+          <input type="date" class="filter-pill hb-date-until" title="End date (to)" value="${f.until ? f.until.split('T')[0] : ''}">
+        </div>
         <select class="filter-pill hb-status-select" title="Filter recordings by processing status">
           <option value="">All status</option>
           <option value="recording" ${f.status === "recording" ? "selected" : ""}>Recording</option>
@@ -217,32 +215,31 @@ export class HeaderBar {
         filterStore.set({ ...filterStore.get(), search: q || null });
       });
     }
-    const timeSelect = this.container.querySelector<HTMLSelectElement>(".hb-time-select");
-    if (timeSelect) {
-      const preset = filterStore.get()._timePreset || "";
-      timeSelect.value = preset;
+    const dateSince = this.container.querySelector<HTMLInputElement>(".hb-date-since");
+    const dateUntil = this.container.querySelector<HTMLInputElement>(".hb-date-until");
+    const formatLocalIso = (dateStr: string, endOfDay: boolean) => {
+      if (!dateStr) return null;
+      const [y, m, d] = dateStr.split('-');
+      const date = new Date(Number(y), Number(m) - 1, Number(d), endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
+      const offset = date.getTimezoneOffset();
+      const absOffset = Math.abs(offset);
+      const sign = offset <= 0 ? "+" : "-";
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${dateStr}T${endOfDay ? "23:59:59" : "00:00:00"}${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
+    };
 
-      timeSelect.addEventListener("change", (e) => {
-        const val = (e.target as HTMLSelectElement).value;
-        if (val) {
-          const target = new Date();
-          target.setHours(0, 0, 0, 0);
-          if (val === "recently") {
-            target.setDate(target.getDate() - 3);
-          } else if (val === "this_week") {
-            target.setDate(target.getDate() - target.getDay());
-          } else if (val === "this_month") {
-            target.setDate(1);
-          }
-          const offset = target.getTimezoneOffset();
-          const absOffset = Math.abs(offset);
-          const sign = offset <= 0 ? "+" : "-";
-          const pad = (n: number) => String(n).padStart(2, "0");
-          const formatted = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T00:00:00${sign}${pad(Math.floor(absOffset / 60))}:${pad(absOffset % 60)}`;
-          filterStore.set({ ...filterStore.get(), since: formatted, _timePreset: val } satisfies UiFilter);
-        } else {
-          filterStore.set({ ...filterStore.get(), since: null, _timePreset: null } satisfies UiFilter);
-        }
+    if (dateSince) {
+      dateSince.addEventListener("change", (e) => {
+        const val = (e.target as HTMLInputElement).value;
+        const sinceStr = formatLocalIso(val, false);
+        filterStore.set({ ...filterStore.get(), since: sinceStr } satisfies UiFilter);
+      });
+    }
+    if (dateUntil) {
+      dateUntil.addEventListener("change", (e) => {
+        const val = (e.target as HTMLInputElement).value;
+        const untilStr = formatLocalIso(val, true);
+        filterStore.set({ ...filterStore.get(), until: untilStr } satisfies UiFilter);
       });
     }
     const tagSelect = this.container.querySelector<HTMLSelectElement>(".hb-tag-select");

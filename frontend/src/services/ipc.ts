@@ -26,6 +26,7 @@ export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
 export type ListFilter = {
   limit?: number | null;
   since?: string | null;
+  until?: string | null;
   status?: string | null;
   search?: string | null;
   tag_id?: number | null;

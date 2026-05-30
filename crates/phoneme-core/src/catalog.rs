@@ -243,6 +243,9 @@ impl Catalog {
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
+        if filter.until.is_some() {
+            sql.push_str(" AND recordings.started_at <= ?");
+        }
         let dir = if filter.sort_desc.unwrap_or(true) {
             "DESC"
         } else {
@@ -266,6 +269,9 @@ impl Catalog {
             q = q.bind(s.as_str().to_string());
         }
         if let Some(t) = filter.since {
+            q = q.bind(t.to_rfc3339());
+        }
+        if let Some(t) = filter.until {
             q = q.bind(t.to_rfc3339());
         }
         let rows = q.fetch_all(&self.pool).await?;
@@ -615,6 +621,7 @@ mod tests {
         let filter = ListFilter {
             limit: Some(10),
             since: None,
+            until: None,
             status: None,
             search: None,
             tag_id: None,

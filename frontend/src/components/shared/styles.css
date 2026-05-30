@@ -41,6 +41,18 @@
   background: var(--border-subtle);
   border-color: var(--accent);
 }
+input[type="date"].filter-pill {
+  font-family: inherit;
+  color-scheme: dark;
+}
+input[type="date"].filter-pill::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: 0.2s;
+}
+input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
 
 .headerbar .icon-btn {
   background: var(--bg-deep);

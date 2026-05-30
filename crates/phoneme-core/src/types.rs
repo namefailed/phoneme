@@ -69,6 +69,7 @@ pub struct Recording {
 pub struct ListFilter {
     pub limit: Option<u32>,
     pub since: Option<DateTime<Local>>,
+    pub until: Option<DateTime<Local>>,
     pub status: Option<RecordingStatus>,
     pub search: Option<String>,
     pub tag_id: Option<i64>,

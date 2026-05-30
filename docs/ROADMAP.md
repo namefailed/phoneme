@@ -76,7 +76,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 
 ### Data
 - [ ] **Custom date range filter** — date picker replacing the preset-only time dropdown
-- [ ] **Pre-deletion notification** — Windows toast before the retention cleanup runs: "3 recordings will be deleted in 24 hours per your retention policy"
+- [x] **Pre-deletion notification** — Windows toast before the retention cleanup runs: "3 recordings will be deleted in 24 hours per your retention policy"
 
 ---
 
