@@ -16,6 +16,21 @@ fn make_payload(id: RecordingId) -> HookPayload {
 }
 
 #[tokio::test]
+async fn claim_next_quarantines_file_with_malformed_id() {
+    // Regression: a file with a non-RecordingId name (e.g. dropped in manually)
+    // must be quarantined, not slice-panic the daemon.
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let bad = dir.path().join("pending").join("not-an-id.json");
+    std::fs::write(&bad, b"{}").unwrap();
+
+    let claimed = q.claim_next().await.unwrap();
+    assert!(claimed.is_none(), "malformed file must not be claimed");
+    assert!(!bad.exists(), "malformed file should leave pending/");
+    assert!(dir.path().join("failed").join("not-an-id.json").exists());
+}
+
+#[tokio::test]
 async fn enqueue_creates_pending_file() {
     let dir = TempDir::new().unwrap();
     let q = InboxQueue::new(dir.path()).await.unwrap();

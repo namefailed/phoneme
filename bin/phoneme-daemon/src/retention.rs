@@ -5,17 +5,20 @@
 //! recordings are never touched.
 
 use crate::app_state::AppState;
+use phoneme_ipc::DaemonEvent;
+use std::time::Instant;
 use tokio::sync::watch;
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) {
     let mut tick = interval(Duration::from_secs(3600));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut last_warning: Option<Instant> = None;
 
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                run_once(&state).await;
+                run_once(&state, &mut last_warning).await;
             }
             result = shutdown.changed() => {
                 if result.is_err() || *shutdown.borrow() {
@@ -27,12 +30,30 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) {
     }
 }
 
-async fn run_once(state: &AppState) {
+async fn run_once(state: &AppState, last_warning: &mut Option<Instant>) {
     let cfg = state.config.load();
     let retention = &cfg.retention;
 
     if retention.max_age_days.is_none() && retention.max_count.is_none() {
         return;
+    }
+
+    // Pre-deletion warning for 24h age boundary
+    if let Ok(count) = state
+        .catalog
+        .analyze_upcoming_retention(retention, 24)
+        .await
+    {
+        if count > 0 {
+            let should_warn = !matches!(last_warning, Some(t) if t.elapsed().as_secs() < 86400);
+            if should_warn {
+                state
+                    .events
+                    .emit(DaemonEvent::RetentionWarning { count, hours: 24 });
+                *last_warning = Some(Instant::now());
+                tracing::info!(count, "emitted retention warning");
+            }
+        }
     }
 
     match state.catalog.apply_retention(retention).await {

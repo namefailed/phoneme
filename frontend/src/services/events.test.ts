@@ -10,7 +10,7 @@ vi.mock('@tauri-apps/api/event', () => {
 
 function captureSubscribeHandler(): Promise<{ handler: (e: any) => void; unsub: () => void }> {
   return new Promise((resolve) => {
-    vi.mocked(tauriEvent.listen).mockImplementationOnce(async (_event, handler) => {
+    vi.mocked(tauriEvent.listen).mockImplementationOnce(async (_event: string, handler: (e: any) => void) => {
       const unsub = vi.fn();
       resolve({ handler: handler as (e: any) => void, unsub });
       return unsub;

@@ -121,6 +121,20 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }
             }
         }
+        Request::RecordPause => match state.recorder.pause(state).await {
+            Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::RecordResume => match state.recorder.resume(state).await {
+            Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::RecordCancel => match state.recorder.cancel(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
             Err(e) => Response::Err(IpcError {
@@ -180,11 +194,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::UpdateTranscript { id, text } => {
-            match state
-                .catalog
-                .update_transcript(&id, &text, "user-edit")
-                .await
-            {
+            match state.catalog.update_user_transcript(&id, &text).await {
                 Ok(()) => {
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
                     Response::Ok(serde_json::Value::Null)
@@ -195,8 +205,26 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
-        Request::ReplayRecording { id } => match state.catalog.get(&id).await {
+        Request::GetOriginalTranscript { id } => {
+            match state.catalog.get_original_transcript(&id).await {
+                Ok(original) => {
+                    Response::Ok(serde_json::to_value(original).unwrap_or(serde_json::Value::Null))
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::ReplayRecording { id, model } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
+                if let Some(m) = model {
+                    let mut cfg = state.config.load().as_ref().clone();
+                    cfg.whisper.model_path = m;
+                    state.config.store(std::sync::Arc::new(cfg));
+                    // Wait a moment for the supervisor to restart the server
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
                 let payload = HookPayload {
                     id: r.id.clone(),
                     timestamp: r.started_at,
@@ -247,10 +275,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // the async task — avoids holding the Arc guard across await
                 // points and eliminates the previous triple load.
                 let cfg = state.config.load();
-                let command = cfg.hook.commands.first().cloned().unwrap_or_default();
                 let timeout = std::time::Duration::from_secs(cfg.hook.timeout_secs);
+                // Expand path tokens (%APPDATA%, ~/) exactly as the queue
+                // pipeline does, so a refired hook resolves identically.
+                let commands = match cfg.expanded() {
+                    Ok(c) => c.hook.commands,
+                    Err(_) => cfg.hook.commands.clone(),
+                };
                 drop(cfg);
-                let runner = HookRunner::new(command.clone(), timeout);
                 // Run the hook OFF the IPC connection. A hook can take up to
                 // its full timeout (30s default); running it inline froze the
                 // connection — and with it the single-connection Tauri bridge,
@@ -267,45 +299,71 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     task_state.events.emit(DaemonEvent::HookStarted {
                         id: hook_id.clone(),
                     });
-                    match runner.run(&payload).await {
-                        Ok(result) => {
-                            if let Err(e) = task_state
-                                .catalog
-                                .update_hook_result(
-                                    &hook_id,
-                                    &command,
-                                    result.exit_code,
-                                    result.duration_ms,
-                                )
-                                .await
-                            {
-                                tracing::error!("failed to update hook result: {e}");
-                            }
-                            if let Err(e) = task_state
-                                .catalog
-                                .update_status(&hook_id, RecordingStatus::Done)
-                                .await
-                            {
-                                tracing::error!("failed to update status to done: {e}");
-                            }
-                            task_state.events.emit(DaemonEvent::HookDone {
-                                id: hook_id,
-                                exit_code: result.exit_code,
-                            });
+
+                    // Mirror pipeline::run: execute every configured hook in
+                    // order, stopping at the first non-zero exit, and record the
+                    // last command that ran.
+                    let mut final_exit_code = 0;
+                    let mut total_duration = 0;
+                    let mut last_cmd = String::new();
+                    let mut hook_error: Option<String> = None;
+                    for cmd in &commands {
+                        let trimmed = cmd.trim();
+                        if trimmed.is_empty() {
+                            continue;
                         }
-                        Err(e) => {
-                            if let Err(err) = task_state
-                                .catalog
-                                .update_status(&hook_id, RecordingStatus::HookFailed)
-                                .await
-                            {
-                                tracing::error!("failed to update status to hook_failed: {err}");
+                        let runner = HookRunner::new(trimmed.to_string(), timeout);
+                        match runner.run(&payload).await {
+                            Ok(result) => {
+                                final_exit_code = result.exit_code;
+                                total_duration += result.duration_ms;
+                                last_cmd = cmd.clone();
+                                if result.exit_code != 0 {
+                                    break;
+                                }
                             }
-                            task_state.events.emit(DaemonEvent::HookFailed {
-                                id: hook_id,
-                                error: e.to_string(),
-                            });
+                            Err(e) => {
+                                hook_error = Some(e.to_string());
+                                break;
+                            }
                         }
+                    }
+
+                    if let Some(error) = hook_error {
+                        if let Err(e) = task_state
+                            .catalog
+                            .update_status(&hook_id, RecordingStatus::HookFailed)
+                            .await
+                        {
+                            tracing::error!("failed to update status to hook_failed: {e}");
+                        }
+                        task_state
+                            .events
+                            .emit(DaemonEvent::HookFailed { id: hook_id, error });
+                    } else {
+                        if let Err(e) = task_state
+                            .catalog
+                            .update_hook_result(
+                                &hook_id,
+                                &last_cmd,
+                                final_exit_code,
+                                total_duration,
+                            )
+                            .await
+                        {
+                            tracing::error!("failed to update hook result: {e}");
+                        }
+                        if let Err(e) = task_state
+                            .catalog
+                            .update_status(&hook_id, RecordingStatus::Done)
+                            .await
+                        {
+                            tracing::error!("failed to update status to done: {e}");
+                        }
+                        task_state.events.emit(DaemonEvent::HookDone {
+                            id: hook_id,
+                            exit_code: final_exit_code,
+                        });
                     }
                 });
                 Response::Ok(serde_json::Value::Null)

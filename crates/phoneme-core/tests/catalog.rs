@@ -74,7 +74,7 @@ async fn update_transcript_persists_text() {
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
     catalog
-        .update_transcript(&rec.id, "hello world", "gemma-4-E4B")
+        .update_transcript(&rec.id, "hello world", "hello world", "gemma-4-E4B")
         .await
         .unwrap();
     let got = catalog.get(&rec.id).await.unwrap().unwrap();
@@ -146,7 +146,12 @@ async fn search_finds_by_transcript_text() {
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
     catalog
-        .update_transcript(&rec.id, "remind me to email Sarah about the contract", "m")
+        .update_transcript(
+            &rec.id,
+            "remind me to email Sarah about the contract",
+            "remind me to email Sarah about the contract",
+            "m",
+        )
         .await
         .unwrap();
     let hits = catalog
@@ -174,7 +179,7 @@ async fn delete_removes_recording_and_fts_row() {
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
     catalog
-        .update_transcript(&rec.id, "deletable", "m")
+        .update_transcript(&rec.id, "deletable", "deletable", "m")
         .await
         .unwrap();
     catalog.delete(&rec.id).await.unwrap();
@@ -310,12 +315,18 @@ async fn list_all_tags_includes_unattached_tags() {
     let all = catalog.list_all_tags().await.unwrap();
     let names: Vec<&str> = all.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"attached"), "attached tag must appear");
-    assert!(names.contains(&"orphan"), "orphan tag must appear in list_all_tags");
+    assert!(
+        names.contains(&"orphan"),
+        "orphan tag must appear in list_all_tags"
+    );
 
     // Contrast: list_tags (filter-dropdown variant) must exclude the orphan.
     let attached_only = catalog.list_tags().await.unwrap();
     let attached_names: Vec<&str> = attached_only.iter().map(|t| t.name.as_str()).collect();
-    assert!(!attached_names.contains(&"orphan"), "list_tags must exclude unattached tags");
+    assert!(
+        !attached_names.contains(&"orphan"),
+        "list_tags must exclude unattached tags"
+    );
 }
 
 // ── Retention policy ──────────────────────────────────────────────────────────
@@ -350,7 +361,11 @@ async fn apply_retention_age_deletes_old_removes_catalog_row() {
         .await
         .unwrap();
 
-    assert_eq!(deleted_paths.len(), 1, "only the 31-day-old recording should be deleted");
+    assert_eq!(
+        deleted_paths.len(),
+        1,
+        "only the 31-day-old recording should be deleted"
+    );
     assert_eq!(deleted_paths[0], old.audio_path);
 
     // Old recording gone from catalog; recent one survives.
@@ -383,7 +398,11 @@ async fn apply_retention_count_keeps_most_recent_n() {
         .await
         .unwrap();
 
-    assert_eq!(deleted_paths.len(), 2, "2 of 5 should be pruned to keep newest 3");
+    assert_eq!(
+        deleted_paths.len(),
+        2,
+        "2 of 5 should be pruned to keep newest 3"
+    );
 
     // The 3 newest (days 0, 1, 2) must still be present.
     for rec in &inserted[..3] {
@@ -399,9 +418,7 @@ async fn apply_retention_count_keeps_most_recent_n() {
 async fn apply_retention_ignores_in_progress_recordings() {
     let (_dir, catalog) = fresh_catalog().await;
     // A recording that is still transcribing — must never be deleted.
-    let in_progress_id = RecordingId::from_datetime(
-        Local::now() - Duration::try_days(60).unwrap(),
-    );
+    let in_progress_id = RecordingId::from_datetime(Local::now() - Duration::try_days(60).unwrap());
     let mut in_progress = sample_recording(in_progress_id);
     in_progress.started_at = Local::now() - Duration::try_days(60).unwrap();
     in_progress.audio_path = "/tmp/active.wav".into();
@@ -441,7 +458,10 @@ async fn apply_retention_noop_when_both_limits_are_none() {
         .await
         .unwrap();
 
-    assert!(deleted.is_empty(), "no-policy retention must never delete anything");
+    assert!(
+        deleted.is_empty(),
+        "no-policy retention must never delete anything"
+    );
 }
 
 // ── Tag cascade ───────────────────────────────────────────────────────────────
@@ -461,7 +481,10 @@ async fn deleting_recording_cascades_to_recording_tags() {
 #[tokio::test]
 async fn deleting_tag_cascades_to_recording_tags() {
     let (_dir, catalog) = fresh_catalog().await;
-    let tag = catalog.add_tag("soon-deleted", Some("#ff0000")).await.unwrap();
+    let tag = catalog
+        .add_tag("soon-deleted", Some("#ff0000"))
+        .await
+        .unwrap();
     let rec = sample_recording(RecordingId::new());
     catalog.insert(&rec).await.unwrap();
     catalog.attach_tag(&rec.id, tag.id).await.unwrap();
@@ -473,7 +496,10 @@ async fn deleting_tag_cascades_to_recording_tags() {
     catalog.delete_tag(tag.id).await.unwrap();
 
     let after = catalog.tags_for(&rec.id).await.unwrap();
-    assert!(after.is_empty(), "delete_tag should cascade to recording_tags");
+    assert!(
+        after.is_empty(),
+        "delete_tag should cascade to recording_tags"
+    );
 
     // Tag must be gone from list_all_tags as well.
     let all = catalog.list_all_tags().await.unwrap();
@@ -487,10 +513,16 @@ async fn add_tag_without_color_stores_null() {
     let (_dir, catalog) = fresh_catalog().await;
     let tag = catalog.add_tag("no-color", None).await.unwrap();
     assert_eq!(tag.name, "no-color");
-    assert!(tag.color.is_none(), "color should be None when not supplied");
+    assert!(
+        tag.color.is_none(),
+        "color should be None when not supplied"
+    );
 
     let all = catalog.list_all_tags().await.unwrap();
-    let found = all.iter().find(|t| t.id == tag.id).expect("tag must appear in list_all_tags");
+    let found = all
+        .iter()
+        .find(|t| t.id == tag.id)
+        .expect("tag must appear in list_all_tags");
     assert!(found.color.is_none());
 }
 
@@ -506,7 +538,11 @@ async fn attach_tag_is_idempotent() {
     catalog.attach_tag(&rec.id, tag.id).await.unwrap();
 
     let tags = catalog.tags_for(&rec.id).await.unwrap();
-    assert_eq!(tags.len(), 1, "duplicate attach should not create a second row");
+    assert_eq!(
+        tags.len(),
+        1,
+        "duplicate attach should not create a second row"
+    );
 }
 
 #[tokio::test]
@@ -551,7 +587,11 @@ async fn list_filters_by_tag_id() {
         .await
         .unwrap();
 
-    assert_eq!(results.len(), 1, "only the tagged recording should be returned");
+    assert_eq!(
+        results.len(),
+        1,
+        "only the tagged recording should be returned"
+    );
     assert_eq!(results[0].id, r1.id);
 }
 
@@ -571,5 +611,103 @@ async fn list_with_tag_filter_returns_empty_for_unused_tag() {
         .await
         .unwrap();
 
-    assert!(results.is_empty(), "unattached tag should match no recordings");
+    assert!(
+        results.is_empty(),
+        "unattached tag should match no recordings"
+    );
+}
+
+// ── Transcript history (original_transcript) ──────────────────────────────────
+
+/// Machine transcription stores the output in both columns so the original
+/// is preserved for "View original" even before any user edits.
+#[tokio::test]
+async fn machine_transcription_sets_original_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    catalog
+        .update_transcript(&rec.id, "hello world", "hello world", "m")
+        .await
+        .unwrap();
+
+    let original = catalog.get_original_transcript(&rec.id).await.unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some("hello world"),
+        "original_transcript must be set by machine transcription"
+    );
+}
+
+/// A user edit must update only the live `transcript` column, leaving
+/// `original_transcript` untouched so the user can still revert.
+#[tokio::test]
+async fn user_edit_preserves_original_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    // Machine transcription sets both.
+    catalog
+        .update_transcript(&rec.id, "raw whisper output", "raw whisper output", "m")
+        .await
+        .unwrap();
+
+    // User edits the live transcript.
+    catalog
+        .update_user_transcript(&rec.id, "edited by user")
+        .await
+        .unwrap();
+
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(
+        got.transcript.as_deref(),
+        Some("edited by user"),
+        "live transcript must reflect the user edit"
+    );
+    assert_eq!(
+        got.model.as_deref(),
+        Some("user-edit"),
+        "model must be set to 'user-edit'"
+    );
+
+    let original = catalog.get_original_transcript(&rec.id).await.unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some("raw whisper output"),
+        "original_transcript must not be touched by user edits"
+    );
+}
+
+/// When LLM post-processing is active the pipeline stores the LLM-cleaned
+/// text as `transcript` but the raw Whisper output as `original_transcript`.
+/// This test simulates that by passing different values to `update_transcript`.
+#[tokio::test]
+async fn llm_post_processing_does_not_overwrite_original_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    let raw = "um so like yeah we uh talked about the thing";
+    let llm_cleaned = "We talked about the thing.";
+
+    // Pipeline passes (llm_output, raw_whisper) to update_transcript.
+    catalog
+        .update_transcript(&rec.id, llm_cleaned, raw, "whisper-base")
+        .await
+        .unwrap();
+
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(
+        got.transcript.as_deref(),
+        Some(llm_cleaned),
+        "live transcript must be the LLM-cleaned version"
+    );
+
+    let original = catalog.get_original_transcript(&rec.id).await.unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some(raw),
+        "original_transcript must be the raw Whisper output, not the LLM output"
+    );
 }

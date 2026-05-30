@@ -56,6 +56,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -152,9 +153,12 @@ pub fn run() {
             commands::record_start,
             commands::record_stop,
             commands::record_cancel,
+            commands::record_pause,
+            commands::record_resume,
             commands::replay_recording,
             commands::refire_hook,
             commands::update_transcript,
+            commands::get_original_transcript,
             commands::daemon_status,
             commands::read_config,
             commands::write_config,
@@ -175,7 +179,13 @@ pub fn run() {
             commands::detach_tag,
             commands::tags_for,
             commands::wizard_download_model,
+            commands::wizard_get_system_info,
+            commands::wizard_list_downloaded_models,
             commands::wizard_download_server,
+            commands::wizard_ping_ollama,
+            commands::wizard_pull_ollama_model,
+            commands::wizard_download_file,
+            commands::wizard_run_installer,
             commands::reveal_file,
             commands::open_file,
             commands::read_file_string,

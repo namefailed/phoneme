@@ -7,7 +7,7 @@ $title = (($payload.transcript -split '\s+' | Select-Object -First 6) -join ' ')
 if ([string]::IsNullOrWhiteSpace($title)) { $title = "voice-note" }
 $slug = ($title -replace '[^a-zA-Z0-9 ]', '' -replace '\s+', '-').ToLower()
 $dir  = Join-Path $env:USERPROFILE "Documents\org\notes"
-$path = Join-Path $dir "$id--$slug__voice.org"
+$path = Join-Path $dir "${id}--${slug}__voice.org"
 
 if (-not (Test-Path $dir)) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null

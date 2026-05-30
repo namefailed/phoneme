@@ -6,6 +6,7 @@ import {
   escapeHtml,
   highlightMatch,
   formatTime,
+  wordCountSummary,
 } from "./format";
 
 describe("formatDuration", () => {
@@ -140,6 +141,34 @@ describe("highlightMatch", () => {
   it("handles parentheses in the search term", () => {
     expect(highlightMatch("call foo()", "foo()")).toBe(
       'call <mark class="search-hit">foo()</mark>'
+    );
+  });
+});
+
+describe("wordCountSummary", () => {
+  it("returns empty string for empty or whitespace-only text", () => {
+    expect(wordCountSummary("")).toBe("");
+    expect(wordCountSummary("   \n\t ")).toBe("");
+  });
+
+  it("uses singular labels for a single word / minute", () => {
+    expect(wordCountSummary("hello")).toBe("1 word · ~1 min read");
+  });
+
+  it("counts whitespace-separated words and pluralizes", () => {
+    expect(wordCountSummary("one two three")).toBe("3 words · ~1 min read");
+  });
+
+  it("collapses irregular whitespace when counting", () => {
+    expect(wordCountSummary("  a   b\n\nc  ")).toBe("3 words · ~1 min read");
+  });
+
+  it("computes reading time at ~200 wpm (min 1 min)", () => {
+    expect(wordCountSummary(Array(200).fill("w").join(" "))).toBe(
+      "200 words · ~1 min read"
+    );
+    expect(wordCountSummary(Array(600).fill("w").join(" "))).toBe(
+      "600 words · ~3 mins read"
     );
   });
 });

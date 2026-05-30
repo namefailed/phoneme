@@ -59,6 +59,8 @@ pub struct Recorder {
 enum RecorderCommand {
     Stop,
     Cancel,
+    Pause,
+    Resume,
 }
 
 struct TaskOutput {
@@ -95,6 +97,7 @@ impl Recorder {
             };
 
             let mut cancelled = false;
+            let mut is_paused = false;
 
             loop {
                 tokio::select! {
@@ -102,26 +105,30 @@ impl Recorder {
                         match cmd {
                             Some(RecorderCommand::Stop) => break,
                             Some(RecorderCommand::Cancel) => { cancelled = true; break; }
+                            Some(RecorderCommand::Pause) => { is_paused = true; }
+                            Some(RecorderCommand::Resume) => { is_paused = false; }
                             None => break,
                         }
                     }
                     block = source.next_block() => {
                         match block? {
                             Some(b) => {
-                                detector.push(&b);
-                                samples.extend_from_slice(&b);
-                                if cfg.mode == RecordingMode::Oneshot && detector.is_silent() {
-                                    break;
-                                }
-                                if let Some(target) = duration_samples {
-                                    if samples.len() as u64 >= target {
-                                        samples.truncate(target as usize);
+                                if !is_paused {
+                                    detector.push(&b);
+                                    samples.extend_from_slice(&b);
+                                    if cfg.mode == RecordingMode::Oneshot && detector.is_silent() {
                                         break;
                                     }
-                                }
-                                if samples.len() >= max_samples {
-                                    samples.truncate(max_samples);
-                                    break;
+                                    if let Some(target) = duration_samples {
+                                        if samples.len() as u64 >= target {
+                                            samples.truncate(target as usize);
+                                            break;
+                                        }
+                                    }
+                                    if samples.len() >= max_samples {
+                                        samples.truncate(max_samples);
+                                        break;
+                                    }
                                 }
                             }
                             None => break,
@@ -177,6 +184,18 @@ impl Recorder {
     pub async fn cancel(self) -> Result<()> {
         let _ = self.cmd_tx.send(RecorderCommand::Cancel).await;
         let _ = self.task.await;
+        Ok(())
+    }
+
+    /// Pause the recording. Audio frames will be pulled but discarded.
+    pub async fn pause(&self) -> Result<()> {
+        let _ = self.cmd_tx.send(RecorderCommand::Pause).await;
+        Ok(())
+    }
+
+    /// Resume the recording after a pause.
+    pub async fn resume(&self) -> Result<()> {
+        let _ = self.cmd_tx.send(RecorderCommand::Resume).await;
         Ok(())
     }
 

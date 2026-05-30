@@ -41,7 +41,7 @@ pub struct Config {
 pub struct LlmPostProcessConfig {
     /// Whether the LLM post-processing step is active.
     pub enabled: bool,
-    /// The provider type to use (e.g., `ollama`, `openai`, `none`).
+    /// The provider type to use: `none`, `ollama`, `openai`, `groq`, or `anthropic`.
     pub provider: String,
     /// API key for authentication, if required by the chosen provider.
     pub api_key: String,
@@ -52,6 +52,10 @@ pub struct LlmPostProcessConfig {
     pub model: String,
     /// The system prompt used to instruct the LLM on how to clean the text.
     pub prompt: String,
+    /// Max seconds to wait for the post-processing LLM before giving up and
+    /// falling back to the raw transcript.
+    #[serde(default = "default_llm_timeout_secs")]
+    pub timeout_secs: u64,
 }
 
 fn default_llm_post_process() -> LlmPostProcessConfig {
@@ -62,7 +66,12 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         api_url: "".into(),
         model: "llama3.2:3b".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
+        timeout_secs: 30,
     }
+}
+
+fn default_llm_timeout_secs() -> u64 {
+    30
 }
 
 /// Defines the execution strategy for the Whisper transcription model.
@@ -75,6 +84,29 @@ pub enum WhisperMode {
     BundledModel,
     /// Download and run a bundled model seamlessly as part of the first-run experience.
     BundledDownload,
+}
+
+/// Which backend transcribes recorded audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptionBackend {
+    /// Local whisper.cpp server (default). Audio never leaves the machine; the
+    /// endpoint is resolved from `mode` / `external_url` / bundled settings.
+    #[default]
+    Local,
+    /// OpenAI cloud Whisper API — sends audio to api.openai.com. Needs `api_key`.
+    Openai,
+    /// Groq cloud Whisper API (OpenAI-compatible) — sends audio to api.groq.com.
+    /// Needs `api_key`.
+    Groq,
+    /// Deepgram cloud speech-to-text — sends audio to api.deepgram.com. Needs `api_key`.
+    Deepgram,
+    /// AssemblyAI cloud speech-to-text — sends audio to api.assemblyai.com
+    /// (async upload + poll). Needs `api_key`.
+    Assemblyai,
+    /// Any OpenAI-compatible `/v1/audio/transcriptions` endpoint (Fireworks,
+    /// self-hosted, gateways). Needs `api_url`; `api_key` and `model` optional.
+    Custom,
 }
 
 /// Configuration for the Whisper transcription engine.
@@ -96,6 +128,21 @@ pub struct LlmConfig {
     /// `None` means auto-detect (recommended unless you know the language).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// Which transcription backend handles audio. Defaults to the local
+    /// whisper server; cloud options send audio off-device.
+    #[serde(default)]
+    pub provider: TranscriptionBackend,
+    /// API key for a cloud transcription provider (OpenAI/Groq). Ignored for `local`.
+    #[serde(default)]
+    pub api_key: String,
+    /// Cloud model identifier (e.g. `whisper-1` for OpenAI, `whisper-large-v3`
+    /// for Groq). Empty uses the provider's default. Ignored for `local`.
+    #[serde(default)]
+    pub model: String,
+    /// Override the cloud provider's base URL (proxies / OpenAI-compatible
+    /// gateways). Empty uses the provider's default endpoint. Ignored for `local`.
+    #[serde(default)]
+    pub api_url: String,
 }
 
 impl LlmConfig {
@@ -233,7 +280,7 @@ fn default_visible_columns() -> Vec<String> {
 }
 
 /// Automatic cleanup policy for recordings.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RetentionConfig {
     /// Delete recordings older than this many days (audio + catalog row).
     /// Set to `None` to disable age-based cleanup.
@@ -247,16 +294,6 @@ pub struct RetentionConfig {
     /// Keeps metadata searchable while freeing disk space.
     #[serde(default)]
     pub delete_audio: bool,
-}
-
-impl Default for RetentionConfig {
-    fn default() -> Self {
-        Self {
-            max_age_days: None,
-            max_count: None,
-            delete_audio: false,
-        }
-    }
 }
 
 /// Background daemon runtime settings.
@@ -303,6 +340,10 @@ impl Default for Config {
                 bundled_server_args: vec![],
                 timeout_secs: 60,
                 language: None,
+                provider: TranscriptionBackend::Local,
+                api_key: String::new(),
+                model: String::new(),
+                api_url: String::new(),
             },
             recording: RecordingConfig {
                 audio_dir: "~/Documents/phoneme/audio".into(),
@@ -361,6 +402,7 @@ impl Default for Config {
                 api_url: "".into(),
                 model: "llama3.2:3b".into(),
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
+                timeout_secs: 30,
             },
             retention: RetentionConfig::default(),
         }
@@ -394,6 +436,25 @@ impl Config {
             return Err(Error::InvalidConfig(
                 "whisper.model_path is required when whisper.mode = bundled_model".into(),
             ));
+        }
+        match self.whisper.provider {
+            TranscriptionBackend::Local => {}
+            TranscriptionBackend::Custom => {
+                if self.whisper.api_url.trim().is_empty() {
+                    return Err(Error::InvalidConfig(
+                        "whisper.api_url is required for the custom (OpenAI-compatible) transcription provider"
+                            .into(),
+                    ));
+                }
+            }
+            _ => {
+                if self.whisper.api_key.trim().is_empty() {
+                    return Err(Error::InvalidConfig(
+                        "whisper.api_key is required for cloud transcription providers (openai/groq/deepgram/assemblyai)"
+                            .into(),
+                    ));
+                }
+            }
         }
         match self.daemon.log_level.as_str() {
             "error" | "warn" | "info" | "debug" | "trace" => {}
@@ -574,6 +635,24 @@ mod tests {
     }
 
     #[test]
+    fn llm_timeout_absent_in_legacy_toml_uses_default() {
+        // A config written before timeout_secs existed must still parse.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(llm) = toml_val
+            .get_mut("llm_post_process")
+            .and_then(|v| v.as_table_mut())
+        {
+            llm.remove("timeout_secs");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads config without llm timeout_secs");
+        assert_eq!(parsed.llm_post_process.timeout_secs, 30);
+    }
+
+    #[test]
     fn parses_interface_configuration() {
         let dir = TempDir::new().unwrap();
         let mut cfg = Config::default();
@@ -688,5 +767,86 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.whisper.language.as_deref(), Some("es"));
+    }
+
+    #[test]
+    fn transcription_provider_defaults_to_local_in_legacy_toml() {
+        // A config written before the multi-provider fields existed must parse
+        // with provider=local and empty cloud fields.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(whisper) = toml_val.get_mut("whisper").and_then(|v| v.as_table_mut()) {
+            whisper.remove("provider");
+            whisper.remove("api_key");
+            whisper.remove("model");
+            whisper.remove("api_url");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without provider fields");
+        assert_eq!(parsed.whisper.provider, TranscriptionBackend::Local);
+        assert!(parsed.whisper.api_key.is_empty());
+        assert!(parsed.whisper.model.is_empty());
+        assert!(parsed.whisper.api_url.is_empty());
+    }
+
+    #[test]
+    fn transcription_provider_round_trips() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Openai;
+        cfg.whisper.api_key = "sk-test".into();
+        cfg.whisper.model = "whisper-1".into();
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.whisper.provider, TranscriptionBackend::Openai);
+        assert_eq!(parsed.whisper.api_key, "sk-test");
+        assert_eq!(parsed.whisper.model, "whisper-1");
+    }
+
+    #[test]
+    fn cloud_provider_requires_api_key() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Groq;
+        cfg.whisper.api_key = String::new();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, Error::InvalidConfig(_)));
+        assert!(format!("{err}").contains("api_key"));
+    }
+
+    #[test]
+    fn cloud_provider_with_api_key_validates() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Openai;
+        cfg.whisper.api_key = "sk-test".into();
+        cfg.validate()
+            .expect("cloud provider with api_key is valid");
+    }
+
+    #[test]
+    fn local_provider_needs_no_api_key() {
+        // Default provider is Local; empty api_key must still validate.
+        Config::default()
+            .validate()
+            .expect("local default is valid");
+    }
+
+    #[test]
+    fn custom_provider_requires_api_url() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Custom;
+        cfg.whisper.api_url = String::new();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, Error::InvalidConfig(_)));
+        assert!(format!("{err}").contains("api_url"));
+    }
+
+    #[test]
+    fn custom_provider_with_api_url_validates_without_key() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Custom;
+        cfg.whisper.api_url = "http://127.0.0.1:9000".into();
+        cfg.whisper.api_key = String::new(); // custom/self-hosted may need no key
+        cfg.validate().expect("custom with api_url is valid");
     }
 }

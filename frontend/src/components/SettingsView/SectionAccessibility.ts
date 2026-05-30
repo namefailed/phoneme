@@ -9,8 +9,10 @@ export class SectionAccessibility {
         enabled: false,
         provider: "none",
         api_key: "",
+        api_url: "",
         model: "llama3.2:3b",
-        prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone."
+        prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
+        timeout_secs: 30
       };
     }
 
@@ -24,7 +26,7 @@ export class SectionAccessibility {
         <div style="background-color: var(--bg-inset); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 16px;">
           <strong style="display: block; font-size: 13px; margin-bottom: 6px; color: var(--fg-default);">How to use this for free (Offline):</strong>
           <ol style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--fg-muted); line-height: 1.5;">
-            <li>Download and install <a href="#" onclick="require('@tauri-apps/api/core').invoke('open_file', { path: 'https://ollama.com/download' })" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>
+            <li>Download and install <a href="#" id="ollama-download-link" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>
             <li>Open your terminal and run <code>ollama run llama3.2:3b</code>.</li>
             <li>Select <strong>Local Ollama</strong> below and use <code>llama3.2:3b</code> as your Model Name!</li>
           </ol>
@@ -48,7 +50,9 @@ export class SectionAccessibility {
               options: [
                 { value: "none", label: "None" },
                 { value: "ollama", label: "Local Ollama (http://127.0.0.1:11434)" },
-                { value: "openai", label: "OpenAI-Compatible Endpoint" }
+                { value: "openai", label: "OpenAI-Compatible Endpoint" },
+                { value: "groq", label: "Groq (cloud)" },
+                { value: "anthropic", label: "Anthropic Claude (cloud)" }
               ]
             },
             config.llm_post_process.provider || "none",
@@ -57,10 +61,16 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
           <label>Model Name</label>
-          <div>${renderField(
-            { key: "llm_post_process.model", label: "", kind: "text" },
-            config.llm_post_process.model || "llama3.2:3b",
-          )}</div>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "ollama-models" },
+                config.llm_post_process.model || "llama3.2:3b",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="ollama" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="ollama-models"></datalist>
+          </div>
         </div>
 
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
@@ -73,10 +83,16 @@ export class SectionAccessibility {
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
           <label>OpenAI Model</label>
-          <div>${renderField(
-            { key: "llm_post_process.model", label: "", kind: "text" },
-            config.llm_post_process.model || "gpt-4o",
-          )}</div>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "openai-models" },
+                config.llm_post_process.model || "gpt-4o",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="openai" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="openai-models"></datalist>
+          </div>
         </div>
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
@@ -92,6 +108,74 @@ export class SectionAccessibility {
           <div>${renderField(
             { key: "llm_post_process.api_url", label: "", kind: "text" },
             config.llm_post_process.api_url || "https://api.openai.com/v1/chat/completions",
+          )}</div>
+        </div>
+
+        <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
+          <label>Groq Model</label>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "groq-models" },
+                config.llm_post_process.model || "llama-3.1-8b-instant",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="groq" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="groq-models"></datalist>
+          </div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
+          <label>API Key</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
+            config.llm_post_process.api_key || "",
+          )}</div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
+          <label>API URL (optional)</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_url", label: "", kind: "text" },
+            config.llm_post_process.api_url || "https://api.groq.com/openai/v1/chat/completions",
+          )}</div>
+        </div>
+
+        <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
+          <label>Claude Model</label>
+          <div>
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">${renderField(
+                { key: "llm_post_process.model", label: "", kind: "text", list: "anthropic-models" },
+                config.llm_post_process.model || "claude-3-5-haiku-latest",
+              )}</div>
+              <button class="inline-button fetch-models-btn" data-provider="anthropic" type="button" style="padding: 4px 10px;">Refresh</button>
+            </div>
+            <datalist id="anthropic-models"></datalist>
+          </div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
+          <label>API Key</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
+            config.llm_post_process.api_key || "",
+          )}</div>
+        </div>
+        <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
+          <label>API URL (optional)</label>
+          <div>${renderField(
+            { key: "llm_post_process.api_url", label: "", kind: "text" },
+            config.llm_post_process.api_url || "https://api.anthropic.com/v1/messages",
+          )}</div>
+        </div>
+
+        <div id="llm-cloud-note" style="display:none; border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin:4px 0 12px; font-size:12px; line-height:1.45;">
+          ⚠️ <b>Cloud post-processing.</b> Your transcript text is sent to this provider's servers for processing. Use <b>Local Ollama</b> to keep everything offline.
+        </div>
+
+        <div class="settings-field" id="llm-timeout-field" style="display:none;">
+          <label>Request timeout (seconds)</label>
+          <div>${renderField(
+            { key: "llm_post_process.timeout_secs", label: "", kind: "number" },
+            config.llm_post_process.timeout_secs ?? 30,
           )}</div>
         </div>
 
@@ -127,6 +211,17 @@ export class SectionAccessibility {
 
     bindFieldEvents(container, config);
 
+    // Open the Ollama download page in the user's browser. (Was a broken inline
+    // `onclick="require(...)"` — `require` doesn't exist in the Vite/ESM bundle,
+    // so the link silently threw. Use the shell plugin like the rest of the app.)
+    container
+      .querySelector<HTMLAnchorElement>("#ollama-download-link")
+      ?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const { open } = await import("@tauri-apps/plugin-shell");
+        await open("https://ollama.com/download").catch(() => {});
+      });
+
     const presetSelect = container.querySelector<HTMLSelectElement>("#prompt-preset-select");
     const promptArea = container.querySelector<HTMLTextAreaElement>("[data-key='llm_post_process.prompt']");
     if (presetSelect && promptArea) {
@@ -151,11 +246,96 @@ export class SectionAccessibility {
           el.style.display = "none";
         }
       });
+      // Timeout applies to every active provider; the cloud note only to remote ones.
+      const isCloud = provider === "openai" || provider === "groq" || provider === "anthropic";
+      const timeoutEl = container.querySelector<HTMLElement>("#llm-timeout-field");
+      if (timeoutEl) timeoutEl.style.display = provider === "none" ? "none" : "";
+      const cloudNote = container.querySelector<HTMLElement>("#llm-cloud-note");
+      if (cloudNote) cloudNote.style.display = isCloud ? "" : "none";
     };
 
     if (providerSelect) {
       providerSelect.addEventListener("change", updateProviderVisibility);
       updateProviderVisibility(); // Initial run
     }
+
+    container.querySelectorAll<HTMLButtonElement>(".fetch-models-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const provider = btn.dataset.provider;
+        if (!provider) return;
+        
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = "Loading...";
+
+        try {
+          const datalist = container.querySelector<HTMLDataListElement>(`#${provider}-models`);
+          if (!datalist) return;
+
+          let urlStr = config.llm_post_process.api_url || "";
+          const apiKey = config.llm_post_process.api_key || "";
+
+          let endpoint = "";
+          let headers: Record<string, string> = {};
+          
+          if (provider === "ollama") {
+            if (!urlStr) urlStr = "http://127.0.0.1:11434/api/generate";
+            const url = new URL(urlStr);
+            endpoint = `${url.protocol}//${url.host}/api/tags`;
+          } else if (provider === "openai" || provider === "groq") {
+            if (!urlStr) {
+              urlStr = provider === "openai" 
+                ? "https://api.openai.com/v1/chat/completions" 
+                : "https://api.groq.com/openai/v1/chat/completions";
+            }
+            const url = new URL(urlStr);
+            // Replace /chat/completions with /models
+            let path = url.pathname;
+            if (path.endsWith("/chat/completions")) {
+              path = path.replace("/chat/completions", "/models");
+            } else if (!path.endsWith("/models")) {
+              path = path.endsWith("/") ? path + "models" : path + "/models";
+            }
+            endpoint = `${url.protocol}//${url.host}${path}`;
+            headers["Authorization"] = `Bearer ${apiKey}`;
+          } else if (provider === "anthropic") {
+            if (!urlStr) urlStr = "https://api.anthropic.com/v1/messages";
+            const url = new URL(urlStr);
+            endpoint = `${url.protocol}//${url.host}/v1/models`;
+            headers["x-api-key"] = apiKey;
+            headers["anthropic-version"] = "2023-06-01";
+          }
+
+          const res = await fetch(endpoint, { headers });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          
+          const data = await res.json();
+          let models: string[] = [];
+          
+          if (provider === "ollama") {
+            models = (data.models || []).map((m: any) => m.name);
+          } else if (provider === "openai" || provider === "groq" || provider === "anthropic") {
+            models = (data.data || []).map((m: any) => m.id);
+          }
+
+          datalist.innerHTML = "";
+          models.forEach(model => {
+            const option = document.createElement("option");
+            option.value = model;
+            datalist.appendChild(option);
+          });
+          
+          btn.textContent = `Loaded ${models.length}`;
+        } catch (e) {
+          console.error(`Failed to fetch models for ${provider}:`, e);
+          btn.textContent = "Error";
+        } finally {
+          setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+          }, 2000);
+        }
+      });
+    });
   }
 }

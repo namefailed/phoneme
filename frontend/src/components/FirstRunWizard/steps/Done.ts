@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { showToast } from "../../../utils/toast";
 import type { StepCallbacks } from "./Welcome";
 
 export class Done {
@@ -23,7 +24,7 @@ export class Done {
       try {
         await invoke("record_start", { mode: "oneshot" });
       } catch (e) {
-        alert(`Failed: ${e}`);
+        showToast(`Failed to start recording: ${e}`, "error");
       }
     });
     footer.querySelector("#back")?.addEventListener("click", () => cbs.onBack());
