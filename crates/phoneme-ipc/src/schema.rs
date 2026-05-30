@@ -18,6 +18,8 @@ pub enum Request {
     },
     RecordStop,
     RecordToggle,
+    RecordPause,
+    RecordResume,
     RecordCancel,
     RecordStatus,
 
@@ -139,6 +141,12 @@ pub enum DaemonEvent {
         id: RecordingId,
         duration_ms: i64,
         audio_path: String,
+    },
+    RecordingPaused {
+        id: RecordingId,
+    },
+    RecordingResumed {
+        id: RecordingId,
     },
     TranscriptionStarted {
         id: RecordingId,

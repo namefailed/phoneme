@@ -17,6 +17,7 @@ export class HeaderBar {
   private tags: Tag[] = [];
   private unsubEvent: (() => void) | null = null;
   private isRecording = false;
+  private isPaused = false;
   private whisperReachable: boolean | null = null; // null = status unknown
   private queuePending = 0;
   private queueProcessing = 0;
@@ -41,9 +42,13 @@ export class HeaderBar {
       const eventName = p.event;
 
       if (eventName === "recording_started") {
-        this.setRecordingState(true);
+        this.setRecordingState(true, false);
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
-        this.setRecordingState(false);
+        this.setRecordingState(false, false);
+      } else if (eventName === "recording_paused") {
+        this.setRecordingState(true, true);
+      } else if (eventName === "recording_resumed") {
+        this.setRecordingState(true, false);
       } else if (eventName === "whisper_status_changed") {
         this.whisperReachable = p.reachable as boolean;
         this.updateStatusIndicators();
@@ -75,17 +80,26 @@ export class HeaderBar {
     }
   }
 
-  private setRecordingState(recording: boolean) {
+  private setRecordingState(recording: boolean, paused: boolean = false) {
     this.isRecording = recording;
+    this.isPaused = paused;
     const stopBtn = this.container.querySelector<HTMLButtonElement>("#hb-record");
     const cancelBtn = this.container.querySelector<HTMLButtonElement>("#hb-cancel");
+    const pauseBtn = this.container.querySelector<HTMLButtonElement>("#hb-pause");
+    
     if (stopBtn) {
       if (recording) {
         stopBtn.innerHTML = "⏹ Stop";
         stopBtn.classList.add("recording-active");
+        if (paused) {
+          stopBtn.classList.add("recording-paused");
+        } else {
+          stopBtn.classList.remove("recording-paused");
+        }
       } else {
         stopBtn.innerHTML = "🔴 Record";
         stopBtn.classList.remove("recording-active");
+        stopBtn.classList.remove("recording-paused");
       }
       stopBtn.style.color = "";
       stopBtn.style.borderColor = "";
@@ -93,6 +107,14 @@ export class HeaderBar {
     }
     if (cancelBtn) {
       cancelBtn.style.display = recording ? "flex" : "none";
+    }
+    if (pauseBtn) {
+      pauseBtn.style.display = recording ? "flex" : "none";
+      if (paused) {
+        pauseBtn.innerHTML = "▶ Resume";
+      } else {
+        pauseBtn.innerHTML = "⏸ Pause";
+      }
     }
   }
 
@@ -158,6 +180,7 @@ export class HeaderBar {
             title="${this.whisperReachable === true ? "Whisper: connected" : this.whisperReachable === false ? "Whisper: unreachable" : "Whisper status unknown"}"></span>
           <span id="hb-queue-badge" class="hb-queue-badge" style="display:${this.queuePending + this.queueProcessing > 0 ? "inline-flex" : "none"}"
             title="${this.queueProcessing} processing, ${this.queuePending} queued">${this.queuePending + this.queueProcessing || ""}</span>
+          <button class="record-btn" id="hb-pause" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" title="Pause / Resume recording">${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
           <button class="record-btn" id="hb-cancel" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" title="Cancel recording and discard audio">✕ Cancel</button>
           <button class="record-btn" id="hb-record" title="Start/Stop recording manually (or use your global hotkey)">${this.isRecording ? "⏹ Stop" : "🔴 Record"}</button>
         </div>
@@ -247,10 +270,24 @@ export class HeaderBar {
     if (cancelBtn) {
       cancelBtn.addEventListener("click", async () => {
         try {
-          await recordCancel();
+          await invoke("record_cancel");
           showToast("Recording cancelled", "info");
         } catch (e) {
           showToast(`Cancel failed: ${e}`, "error");
+        }
+      });
+    }
+    const pauseBtn = this.container.querySelector<HTMLButtonElement>("#hb-pause");
+    if (pauseBtn) {
+      pauseBtn.addEventListener("click", async () => {
+        try {
+          if (this.isPaused) {
+            await invoke("record_resume");
+          } else {
+            await invoke("record_pause");
+          }
+        } catch (e) {
+          showToast(`Toggle pause failed: ${e}`, "error");
         }
       });
     }

@@ -121,6 +121,20 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }
             }
         }
+        Request::RecordPause => match state.recorder.pause(state).await {
+            Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::RecordResume => match state.recorder.resume(state).await {
+            Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::RecordCancel => match state.recorder.cancel(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
             Err(e) => Response::Err(IpcError {

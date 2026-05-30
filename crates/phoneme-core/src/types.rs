@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum RecordingStatus {
     Recording,
+    Paused,
     Transcribing,
     HookRunning,
     Done,
@@ -18,6 +19,7 @@ impl RecordingStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Recording => "recording",
+            Self::Paused => "paused",
             Self::Transcribing => "transcribing",
             Self::HookRunning => "hook_running",
             Self::Done => "done",
@@ -119,6 +121,7 @@ mod tests {
     fn recording_status_round_trips() {
         for v in [
             RecordingStatus::Recording,
+            RecordingStatus::Paused,
             RecordingStatus::Transcribing,
             RecordingStatus::HookRunning,
             RecordingStatus::Done,
@@ -137,6 +140,7 @@ mod tests {
         assert!(RecordingStatus::TranscribeFailed.is_terminal());
         assert!(RecordingStatus::HookFailed.is_terminal());
         assert!(!RecordingStatus::Recording.is_terminal());
+        assert!(!RecordingStatus::Paused.is_terminal());
         assert!(!RecordingStatus::Transcribing.is_terminal());
         assert!(!RecordingStatus::HookRunning.is_terminal());
     }

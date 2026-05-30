@@ -64,6 +64,14 @@ export async function recordStop(): Promise<void> {
   await tauriInvoke("record_stop");
 }
 
+export async function recordPause(): Promise<void> {
+  await tauriInvoke("record_pause");
+}
+
+export async function recordResume(): Promise<void> {
+  await tauriInvoke("record_resume");
+}
+
 export async function recordCancel(): Promise<void> {
   await tauriInvoke("record_cancel");
 }

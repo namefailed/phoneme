@@ -40,6 +40,7 @@ pub struct ActiveRecording {
     pub mode: RecordMode,
     pub audio_path: PathBuf,
     pub started_at: chrono::DateTime<Local>,
+    pub paused: bool,
 }
 
 #[derive(Clone, Default)]
@@ -111,6 +112,7 @@ impl DaemonRecorder {
             mode,
             audio_path,
             started_at,
+            paused: false,
         });
 
         // If it's a self-terminating mode, spawn a task to auto-stop when the recorder task finishes natively.
@@ -179,5 +181,49 @@ impl DaemonRecorder {
         }
         state.catalog.delete(&active.id).await?;
         Ok(active.id)
+    }
+
+    /// Pause the active recording.
+    pub async fn pause(&self, state: &AppState) -> Result<RecordingId> {
+        let mut active_lock = self.active.lock().await;
+        let active = active_lock.as_mut().ok_or(Error::NotRecording)?;
+        if active.paused {
+            return Ok(active.id.clone());
+        }
+        
+        if let Some(recorder) = self.handle.lock().await.as_ref() {
+            recorder.pause().await.map_err(|e| Error::Internal(e.to_string()))?;
+        }
+        
+        active.paused = true;
+        state.catalog.update_status(&active.id, RecordingStatus::Paused).await?;
+        
+        state.events.emit(DaemonEvent::RecordingPaused {
+            id: active.id.clone(),
+        });
+        tracing::info!(id = %active.id, "recording paused");
+        Ok(active.id.clone())
+    }
+
+    /// Resume the active recording.
+    pub async fn resume(&self, state: &AppState) -> Result<RecordingId> {
+        let mut active_lock = self.active.lock().await;
+        let active = active_lock.as_mut().ok_or(Error::NotRecording)?;
+        if !active.paused {
+            return Ok(active.id.clone());
+        }
+        
+        if let Some(recorder) = self.handle.lock().await.as_ref() {
+            recorder.resume().await.map_err(|e| Error::Internal(e.to_string()))?;
+        }
+        
+        active.paused = false;
+        state.catalog.update_status(&active.id, RecordingStatus::Recording).await?;
+        
+        state.events.emit(DaemonEvent::RecordingResumed {
+            id: active.id.clone(),
+        });
+        tracing::info!(id = %active.id, "recording resumed");
+        Ok(active.id.clone())
     }
 }
