@@ -530,6 +530,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             match crate::load_config() {
                 Ok(cfg) => {
                     state.config.store(std::sync::Arc::new(cfg));
+                    // Start/stop idle pre-roll pre-capture to match the new
+                    // config (e.g. user just toggled pre_roll_ms).
+                    state.recorder.sync_preroll(state).await;
                     Response::Ok(serde_json::Value::Null)
                 }
                 Err(e) => Response::Err(IpcError {

@@ -4,8 +4,11 @@
 use crate::app_state::AppState;
 use chrono::Local;
 use phoneme_audio::device::resolve_input_device;
+use phoneme_audio::format::SampleRate;
+use phoneme_audio::preroll::PreRollBuffer;
 use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
-use phoneme_audio::source::CpalSource;
+use phoneme_audio::source::{CpalSource, Source};
+use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
 use phoneme_core::{HookMetadata, HookPayload, Recording, RecordingId, RecordingStatus};
 use phoneme_ipc::DaemonEvent;
@@ -43,15 +46,160 @@ pub struct ActiveRecording {
     pub paused: bool,
 }
 
+/// A running idle pre-roll pre-capture: a background task pulls canonical
+/// microphone blocks into a shared ring buffer that retains the last
+/// `pre_roll_ms` of audio. The task runs *between* recordings; it is stopped
+/// (and its ring drained) when a recording starts, and restarted afterwards.
+struct PreRoll {
+    /// Shared ring buffer the idle task feeds; snapshotted on RecordStart.
+    ring: Arc<Mutex<PreRollBuffer>>,
+    /// Dropping/sending tells the idle task to stop pulling and exit.
+    stop_tx: tokio::sync::oneshot::Sender<()>,
+    /// The idle task handle — joined when stopping so the `CpalSource` is fully
+    /// torn down (mic released) before we proceed.
+    task: tokio::task::JoinHandle<()>,
+}
+
 #[derive(Clone, Default)]
 pub struct DaemonRecorder {
     active: Arc<Mutex<Option<ActiveRecording>>>,
     handle: Arc<Mutex<Option<Recorder>>>,
+    /// Idle pre-roll pre-capture, present only while enabled and not actively
+    /// recording. `None` means no continuous capture is running (the default).
+    preroll: Arc<Mutex<Option<PreRoll>>>,
+}
+
+/// Whether pre-roll should be active for the current config: opt-in
+/// (`pre_roll_ms > 0`) and microphone-only (loopback/system-audio is skipped).
+fn preroll_enabled(cfg: &phoneme_core::Config) -> bool {
+    cfg.recording.pre_roll_ms > 0 && cfg.recording.source == CaptureSource::Microphone
 }
 
 impl DaemonRecorder {
     pub async fn current(&self) -> Option<ActiveRecording> {
         self.active.lock().await.clone()
+    }
+
+    /// Start idle pre-roll pre-capture if it's enabled for the current config
+    /// and not already running. Safe to call repeatedly (idempotent) and
+    /// whenever the daemon is idle (startup, after a recording finishes).
+    ///
+    /// When pre-roll is disabled this is a no-op, so the default path keeps the
+    /// microphone closed between recordings exactly as before.
+    pub async fn ensure_preroll(&self, state: &AppState) {
+        let cfg = state.config.load();
+        if !preroll_enabled(&cfg) {
+            return;
+        }
+        // Don't pre-capture while a recording is in flight.
+        if self.active.lock().await.is_some() {
+            return;
+        }
+        let mut slot = self.preroll.lock().await;
+        if slot.is_some() {
+            return; // already running
+        }
+
+        let device = match resolve_input_device(&cfg.recording.input_device) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "pre-roll: could not resolve input device; skipping");
+                return;
+            }
+        };
+        // Pre-roll is mic-only; open the microphone explicitly.
+        let source = match CpalSource::open_kind(device, CaptureSource::Microphone) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "pre-roll: could not open microphone; skipping");
+                return;
+            }
+        };
+
+        let ring = Arc::new(Mutex::new(PreRollBuffer::with_duration_ms(
+            cfg.recording.pre_roll_ms,
+            SampleRate::HZ_16K,
+        )));
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let ring_task = ring.clone();
+        let task = tokio::spawn(async move {
+            let mut source: Box<dyn Source> = Box::new(source);
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => break,
+                    block = source.next_block() => {
+                        match block {
+                            Ok(Some(b)) => ring_task.lock().await.push(&b),
+                            // Source drained/closed unexpectedly — stop idling.
+                            Ok(None) => break,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "pre-roll: capture error; stopping idle pre-capture");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // Release the microphone cleanly.
+            let _ = source.stop().await;
+        });
+
+        *slot = Some(PreRoll {
+            ring,
+            stop_tx,
+            task,
+        });
+        tracing::info!(
+            pre_roll_ms = cfg.recording.pre_roll_ms,
+            "pre-roll idle pre-capture started"
+        );
+    }
+
+    /// Reconcile the running idle pre-capture against the current config: start
+    /// it if pre-roll is (now) enabled, stop it if it was disabled or the source
+    /// switched away from the microphone. Call after a config reload and at
+    /// daemon startup. No-op while a recording is active.
+    pub async fn sync_preroll(&self, state: &AppState) {
+        if self.active.lock().await.is_some() {
+            return;
+        }
+        let enabled = preroll_enabled(&state.config.load());
+        let running = self.preroll.lock().await.is_some();
+        match (enabled, running) {
+            (true, false) => self.ensure_preroll(state).await,
+            (false, true) => {
+                // Drop the buffered audio — nothing is persisted.
+                let _ = self.take_preroll_samples().await;
+                tracing::info!("pre-roll disabled; idle pre-capture stopped");
+            }
+            _ => {}
+        }
+    }
+
+    /// Stop idle pre-capture (if running), join its task so the microphone is
+    /// released, and return the buffered samples (oldest → newest). Returns an
+    /// empty Vec when no pre-capture was running.
+    async fn take_preroll_samples(&self) -> Vec<i16> {
+        let Some(pr) = self.preroll.lock().await.take() else {
+            return Vec::new();
+        };
+        let PreRoll {
+            ring,
+            stop_tx,
+            task,
+        } = pr;
+        let _ = stop_tx.send(());
+        // Wait for the idle task to exit so the CpalSource (and the mic) is
+        // fully torn down before the recording opens its own source.
+        let _ = task.await;
+        let samples = ring.lock().await.to_vec();
+        if !samples.is_empty() {
+            tracing::info!(
+                samples = samples.len(),
+                "pre-roll: prepending buffered audio"
+            );
+        }
+        samples
     }
 
     /// Start a recording. Returns `AlreadyRecording` if one is in flight.
@@ -90,6 +238,11 @@ impl DaemonRecorder {
         };
         state.catalog.insert(&row).await?;
 
+        // If idle pre-roll pre-capture is running, stop it and grab the buffered
+        // audio to prepend; this also releases the microphone before we reopen
+        // it for the recording. Empty when pre-roll is disabled (default path).
+        let prepend = self.take_preroll_samples().await;
+
         // Open the CPAL device and the audio Recorder.
         let app_cfg = state.config.load();
         let device = resolve_input_device(&app_cfg.recording.input_device)?;
@@ -106,7 +259,8 @@ impl DaemonRecorder {
             silence_window_ms: state.config.load().recording.silence_window_ms,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let recorder = Recorder::start(Box::new(source), recorder_cfg, Some(tx)).await?;
+        let recorder =
+            Recorder::start_with_prepend(Box::new(source), recorder_cfg, Some(tx), prepend).await?;
         *self.handle.lock().await = Some(recorder);
 
         *active = Some(ActiveRecording {
@@ -170,7 +324,13 @@ impl DaemonRecorder {
             audio_path: active.audio_path.to_string_lossy().into_owned(),
         });
         tracing::info!(id = %active.id, ms = result.duration_ms, "recording stopped");
-        Ok(active.id)
+
+        // Release the active lock before resuming idle pre-capture
+        // (`ensure_preroll` re-acquires it). No-op when pre-roll is disabled.
+        let id = active.id;
+        drop(active_lock);
+        self.ensure_preroll(state).await;
+        Ok(id)
     }
 
     /// Cancel the current recording: discard samples, delete catalog row, no
@@ -186,7 +346,13 @@ impl DaemonRecorder {
             id: active.id.clone(),
         });
         tracing::info!(id = %active.id, "recording cancelled");
-        Ok(active.id)
+
+        // Resume idle pre-capture after releasing the active lock. No-op when
+        // pre-roll is disabled.
+        let id = active.id;
+        drop(active_lock);
+        self.ensure_preroll(state).await;
+        Ok(id)
     }
 
     /// Pause the active recording.
