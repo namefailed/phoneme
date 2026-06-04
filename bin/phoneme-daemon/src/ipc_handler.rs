@@ -547,21 +547,51 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
     }
 }
 
+/// Hard cap on the on-disk size of an importable file. The Tauri file dialog is
+/// the intended sole producer, but `ImportRecording` accepts an arbitrary client
+/// path — this bounds a bypass that could otherwise feed the decoder a
+/// pathologically large file and exhaust memory (the decoder buffers the whole
+/// file into a single `Vec<f32>`; see `phoneme-audio::decode`). 2 GiB is far
+/// beyond any realistic voice note while still leaving the decode duration cap
+/// (in `phoneme-audio`) as the real memory bound.
+const MAX_IMPORT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Returns `true` if an on-disk file of `len` bytes exceeds the import size cap.
+/// Factored out so the bound is unit-testable without a multi-GiB fixture file.
+fn exceeds_import_size_cap(len: u64) -> bool {
+    len > MAX_IMPORT_BYTES
+}
+
 /// Import an existing audio file: decode it to a canonical WAV under the audio
 /// dir, insert a catalog row, and enqueue it for the normal transcription
 /// pipeline. Mirrors `DaemonRecorder::stop` (catalog row at `Transcribing` +
 /// `inbox.enqueue`) so an imported file is processed exactly like a mic
 /// recording — the only difference is where the WAV came from.
 async fn import_recording(state: &AppState, path: String) -> Response {
-    let input = std::path::PathBuf::from(&path);
+    let requested = std::path::PathBuf::from(&path);
 
     // Validate before doing any work, so the client gets a clean error.
-    if !input.exists() {
+    if !requested.exists() {
         return Response::Err(IpcError {
             kind: IpcErrorKind::NotFound,
             message: format!("file not found: {path}"),
         });
     }
+
+    // Canonicalize so the path we open is a fully-resolved, real filesystem
+    // location (resolves `..`, symlinks, and relative components). The dialog
+    // hands us absolute paths already; this hardens the arbitrary-client-path
+    // bypass by ensuring we never act on a half-resolved or traversal path.
+    let input = match std::fs::canonicalize(&requested) {
+        Ok(p) => p,
+        Err(e) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::NotFound,
+                message: format!("could not resolve path {path}: {e}"),
+            });
+        }
+    };
+
     if !phoneme_audio::is_supported_extension(&input) {
         return Response::Err(IpcError {
             kind: IpcErrorKind::Internal,
@@ -570,6 +600,36 @@ async fn import_recording(state: &AppState, path: String) -> Response {
                 phoneme_audio::SUPPORTED_EXTENSIONS.join(", ")
             ),
         });
+    }
+
+    // Reject oversized files up front via metadata, before decoding allocates
+    // anything. Doubles as the coarse memory bound for the import path.
+    match std::fs::metadata(&input) {
+        Ok(meta) => {
+            if !meta.is_file() {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!("not a regular file: {path}"),
+                });
+            }
+            if exceeds_import_size_cap(meta.len()) {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!(
+                        "file too large to import ({} bytes; max {} bytes / {} GiB)",
+                        meta.len(),
+                        MAX_IMPORT_BYTES,
+                        MAX_IMPORT_BYTES / (1024 * 1024 * 1024)
+                    ),
+                });
+            }
+        }
+        Err(e) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::Io,
+                message: format!("could not stat {path}: {e}"),
+            });
+        }
     }
 
     let id = phoneme_core::RecordingId::new();
@@ -669,5 +729,20 @@ fn error_to_kind(e: &phoneme_core::Error) -> IpcErrorKind {
         ShuttingDown => IpcErrorKind::ShuttingDown,
         Io(_) => IpcErrorKind::Io,
         _ => IpcErrorKind::Internal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn import_size_cap_rejects_oversized_files() {
+        // At or below the cap is accepted; one byte over is rejected.
+        assert!(!exceeds_import_size_cap(0));
+        assert!(!exceeds_import_size_cap(MAX_IMPORT_BYTES));
+        assert!(exceeds_import_size_cap(MAX_IMPORT_BYTES + 1));
+        // A clearly-oversized file (3 GiB) is rejected.
+        assert!(exceeds_import_size_cap(3 * 1024 * 1024 * 1024));
     }
 }
