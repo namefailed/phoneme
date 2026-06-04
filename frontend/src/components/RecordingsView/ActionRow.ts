@@ -25,11 +25,9 @@ export class ActionRow {
     this.container.innerHTML = `
       <div class="action-row">
         <button class="primary" data-act="play" id="btn-play">▶ Play</button>
-        <div style="display: flex; align-items: center; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 6px; background: var(--bg-deep);">
-          <button data-act="replay" style="border: none; background: transparent; padding-right: 4px; box-shadow: none;">↻ Re-transcribe</button>
-          <select id="replay-model" style="border: none; background: transparent; padding-left: 4px; padding-right: 20px; font-size: 11px; max-width: 90px; box-shadow: none;">
-            <option value="">Default</option>
-          </select>
+        <div style="display: flex; align-items: stretch; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 6px; background: var(--bg-deep);">
+          <button data-act="replay" style="border: none; background: transparent; box-shadow: none;">↻ Re-transcribe</button>
+          <button data-act="replay-with" title="Re-transcribe with…" aria-label="Re-transcribe with…" style="border: none; border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); background: transparent; box-shadow: none; padding: 0 8px; font-size: 10px;">▾</button>
         </div>
         <button data-act="refire">⚡ Re-fire hook</button>
         <button data-act="copy">📋 Copy</button>
@@ -44,26 +42,6 @@ export class ActionRow {
         if (act) void this.handle(act);
       });
     });
-
-    try {
-      const downloaded = await invoke<string[]>("wizard_list_downloaded_models");
-      const sel = this.container.querySelector<HTMLSelectElement>("#replay-model");
-      if (sel) {
-        const filenames = ["ggml-tiny.en.bin", "ggml-base.en.bin", "ggml-small.en.bin", "ggml-medium.en.bin", "ggml-large-v3.bin"];
-        for (const f of filenames) {
-          const path = downloaded.find((p: string) => p.endsWith(f));
-          if (path) {
-            const name = f.replace("ggml-", "").replace(".en.bin", "").replace(".bin", "");
-            const opt = document.createElement("option");
-            opt.value = path;
-            opt.textContent = name;
-            sel.appendChild(opt);
-          }
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
   }
 
   setPlayState(playing: boolean) {
@@ -78,13 +56,26 @@ export class ActionRow {
       this.cbs.onTogglePlay();
     } else if (act === "replay") {
       try {
-        const sel = this.container.querySelector<HTMLSelectElement>("#replay-model");
-        const override = sel?.value || undefined;
-        await replayRecording(this.id, override);
+        // Re-runs with the configured transcription model. A per-run model
+        // override needs backend plumbing that is intentionally deferred; use
+        // the "Re-transcribe with…" caret to change the configured model first.
+        await replayRecording(this.id);
         showToast("Queued for re-transcription", "info");
         this.cbs.onRefresh();
       } catch (e) {
         showToast(`Re-transcribe failed: ${e}`, "error");
+      }
+    } else if (act === "replay-with") {
+      const { openModelPicker } = await import("../ModelPicker");
+      const saved = await openModelPicker("transcription");
+      if (saved) {
+        try {
+          await replayRecording(this.id);
+          showToast("Queued for re-transcription", "info");
+          this.cbs.onRefresh();
+        } catch (e) {
+          showToast(`Re-transcribe failed: ${e}`, "error");
+        }
       }
     } else if (act === "refire") {
       try {

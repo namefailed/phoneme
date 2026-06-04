@@ -1,0 +1,80 @@
+/* Model-picker modal — extends the shared .modal-* styles. */
+
+.mp-dialog {
+  width: 480px;
+}
+
+.mp-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mp-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.mp-tab:hover {
+  color: var(--fg-default);
+}
+.mp-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
+}
+
+.mp-panel[hidden] {
+  display: none;
+}
+
+.mp-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-default);
+  margin: 12px 0 4px;
+}
+.mp-panel > .mp-label:first-child {
+  margin-top: 0;
+}
+
+.mp-input {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 7px 10px;
+  color: var(--fg-default);
+  font-size: 13px;
+}
+.mp-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.mp-hint {
+  font-size: 11px;
+  color: var(--fg-faded);
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+
+.modal-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.modal-btn-primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  opacity: 0.88;
+}
