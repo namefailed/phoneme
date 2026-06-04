@@ -73,15 +73,37 @@ impl Recorder {
     /// Begin recording with the given source. The task starts pulling
     /// immediately.
     pub async fn start(
+        source: Box<dyn Source>,
+        cfg: RecorderConfig,
+        on_done: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> Result<Self> {
+        Self::start_with_prepend(source, cfg, on_done, Vec::new()).await
+    }
+
+    /// Begin recording, seeding the output with `prepend` samples *before* live
+    /// capture begins. Used for the pre-roll feature: the daemon hands over the
+    /// last few hundred milliseconds of buffered microphone audio so the first
+    /// syllable isn't clipped. The prepended samples are treated as already-
+    /// captured audio — they are not fed to the silence detector (they're
+    /// historical, not "now") but do count toward the max-duration cap.
+    ///
+    /// `prepend` must already be in the source's canonical format (16 kHz mono
+    /// i16). An empty `prepend` is identical to [`Recorder::start`].
+    pub async fn start_with_prepend(
         mut source: Box<dyn Source>,
         cfg: RecorderConfig,
         on_done: Option<tokio::sync::oneshot::Sender<()>>,
+        prepend: Vec<i16>,
     ) -> Result<Self> {
         let audio_cfg = source.config();
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<RecorderCommand>(4);
 
         let task = tokio::spawn(async move {
-            let mut samples: Vec<i16> = Vec::with_capacity(audio_cfg.sample_rate.as_u32() as usize);
+            let mut samples: Vec<i16> = if prepend.is_empty() {
+                Vec::with_capacity(audio_cfg.sample_rate.as_u32() as usize)
+            } else {
+                prepend
+            };
             let mut detector = SilenceDetector::new(
                 cfg.silence_threshold_dbfs,
                 cfg.silence_window_ms,

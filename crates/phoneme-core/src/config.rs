@@ -236,6 +236,16 @@ pub struct RecordingConfig {
     /// audio output via WASAPI loopback.
     #[serde(default)]
     pub source: CaptureSource,
+    /// Pre-roll buffer length in milliseconds. When greater than 0 *and*
+    /// `source == Microphone`, the daemon keeps the microphone open between
+    /// recordings, retaining the last `pre_roll_ms` of audio in an in-memory
+    /// ring buffer that is continuously discarded. On RecordStart those buffered
+    /// samples are prepended to the new recording so the first syllable isn't
+    /// clipped. **Default 0 = disabled** — when 0, the microphone is only opened
+    /// while actively recording (the historical behavior). The rolling buffer is
+    /// never written to disk unless a recording starts.
+    #[serde(default)]
+    pub pre_roll_ms: u32,
 }
 
 /// Settings governing external script execution (hooks) upon transcription success.
@@ -416,6 +426,7 @@ impl Default for Config {
                 max_duration_secs: 300,
                 input_device: "default".into(),
                 source: CaptureSource::Microphone,
+                pre_roll_ms: 0,
             },
             hook: HookConfig {
                 commands: vec![
@@ -650,6 +661,38 @@ mod tests {
             .join("\n");
         let parsed: Config = toml::from_str(&stripped).unwrap();
         assert_eq!(parsed.recording.source, CaptureSource::Microphone);
+    }
+
+    #[test]
+    fn pre_roll_ms_defaults_to_zero() {
+        assert_eq!(Config::default().recording.pre_roll_ms, 0);
+    }
+
+    #[test]
+    fn pre_roll_ms_absent_in_legacy_toml_defaults_to_zero() {
+        // A config written before pre_roll_ms existed must still load and
+        // default to 0 (disabled), so existing users keep the historical
+        // record-only-while-active behavior.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(recording) = toml_val.get_mut("recording").and_then(|v| v.as_table_mut()) {
+            recording.remove("pre_roll_ms");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without pre_roll_ms");
+        assert_eq!(parsed.recording.pre_roll_ms, 0);
+    }
+
+    #[test]
+    fn pre_roll_ms_round_trips_through_toml() {
+        let mut cfg = Config::default();
+        cfg.recording.pre_roll_ms = 1500;
+        let serialized = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(parsed.recording.pre_roll_ms, 1500);
+        assert_eq!(parsed, cfg);
     }
 
     #[test]
