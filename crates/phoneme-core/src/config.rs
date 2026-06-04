@@ -617,6 +617,42 @@ mod tests {
     }
 
     #[test]
+    fn capture_source_round_trips_through_toml() {
+        // Default (Microphone) round-trips.
+        let cfg = Config::default();
+        let parsed: Config = toml::from_str(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(parsed.recording.source, CaptureSource::Microphone);
+
+        // Explicit SystemAudio survives a serialize/deserialize cycle.
+        let mut cfg = Config::default();
+        cfg.recording.source = CaptureSource::SystemAudio;
+        let serialized = toml::to_string(&cfg).unwrap();
+        assert!(
+            serialized.contains("source = \"system_audio\""),
+            "expected snake_case source key, got: {serialized}"
+        );
+        let parsed: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(parsed.recording.source, CaptureSource::SystemAudio);
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn capture_source_missing_key_defaults_to_microphone() {
+        // A config that predates `recording.source` must still load (serde
+        // `#[serde(default)]`), defaulting to Microphone.
+        let mut cfg = Config::default();
+        cfg.recording.source = CaptureSource::SystemAudio;
+        let serialized = toml::to_string(&cfg).unwrap();
+        let stripped: String = serialized
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("source ="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: Config = toml::from_str(&stripped).unwrap();
+        assert_eq!(parsed.recording.source, CaptureSource::Microphone);
+    }
+
+    #[test]
     fn debug_redacts_api_keys() {
         // Latent-leak guard: a future `debug!(?cfg)` / `{:?}` must never print
         // plaintext API keys into logs.
