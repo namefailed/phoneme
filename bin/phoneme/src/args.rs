@@ -47,6 +47,8 @@ pub enum Command {
     Hook(HookArgs),
     /// Manage recording tags.
     Tag(TagArgs),
+    /// Manage config profiles (named full-config snapshots).
+    Profile(ProfileArgs),
     /// Export all recordings and metadata to a zip file.
     Export(ExportArgs),
     /// Print version + commit info.
@@ -189,6 +191,20 @@ pub enum TagAction {
         recording_id: String,
         tag: String,
     },
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ProfileArgs {
+    #[command(subcommand)]
+    pub action: ProfileAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileAction {
+    /// List saved profiles.
+    List,
+    /// Switch the active config to a saved profile and reload the daemon.
+    Use { name: String },
 }
 
 #[derive(Debug, clap::Args)]
