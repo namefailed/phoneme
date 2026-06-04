@@ -31,6 +31,26 @@ export class SectionRecording {
             )}
           </div>
         </div>
+        <div class="settings-field">
+          <label>Audio source</label>
+          <div>
+            ${renderField(
+              {
+                key: "recording.source",
+                label: "",
+                kind: "select",
+                options: [
+                  { value: "microphone", label: "Microphone" },
+                  { value: "system_audio", label: "System audio (loopback) — Windows" },
+                ],
+              },
+              this.config.recording.source || "microphone",
+            )}
+          </div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            <b>System audio</b> records what's playing through your speakers (meetings, videos) via WASAPI loopback. Windows only.
+          </span>
+        </div>
         <div class="settings-field long-input">
           <label>Audio directory</label>
           <div>${renderField(
