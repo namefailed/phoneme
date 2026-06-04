@@ -1,6 +1,7 @@
 import {
   getRecording,
   updateTranscript,
+  updateNotes,
   getOriginalTranscript,
   type Recording,
 } from "../../services/ipc";
@@ -81,6 +82,10 @@ export class RecordingDetail {
             <div id="original-box" style="display: none; margin-top: 6px;"></div>
           </div>
         </div>
+        <div class="notes-block" style="margin-top: 12px;">
+          <label for="notes-field" style="display: block; font-size: 11px; color: var(--fg-muted); margin-bottom: 4px;">Notes</label>
+          <textarea id="notes-field" rows="3" placeholder="Add notes for this recording…" style="width: 100%; box-sizing: border-box; resize: vertical; font: inherit;">${escapeHtml(r.notes ?? "")}</textarea>
+        </div>
         <div class="detail-footer">
           ${stats ? `<span>${stats}</span>` : ""}
           <span>Hook exit: ${r.hook_exit_code ?? "—"}</span>
@@ -140,6 +145,34 @@ export class RecordingDetail {
         void this.show(r.id);
       });
     });
+
+    // Notes: a plain textarea, kept entirely separate from the transcript
+    // editor. Saves on blur (and debounced while typing). Notes are stored in
+    // their own column and survive re-transcription / AI post-processing.
+    const notesField = this.container.querySelector<HTMLTextAreaElement>("#notes-field");
+    if (notesField) {
+      let lastSaved = r.notes ?? "";
+      const saveNotes = async () => {
+        const value = notesField.value;
+        if (value === lastSaved) return;
+        try {
+          await updateNotes(r.id, value);
+          lastSaved = value;
+          if (this.recording) this.recording.notes = value;
+        } catch (e) {
+          showToast(`Failed to save notes: ${String(e)}`, "error");
+        }
+      };
+      let debounce: ReturnType<typeof setTimeout> | undefined;
+      notesField.addEventListener("input", () => {
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(() => void saveNotes(), 800);
+      });
+      notesField.addEventListener("blur", () => {
+        if (debounce) clearTimeout(debounce);
+        void saveNotes();
+      });
+    }
   }
 
   hasDirtyEdits(): boolean {

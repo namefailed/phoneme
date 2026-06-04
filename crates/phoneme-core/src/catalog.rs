@@ -79,8 +79,8 @@ impl Catalog {
             r#"INSERT INTO recordings
                  (id, started_at, duration_ms, audio_path, transcript, model, status,
                   error_kind, error_message, hook_command, hook_exit_code,
-                  hook_duration_ms, transcribed_at, hook_ran_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                  hook_duration_ms, transcribed_at, hook_ran_at, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -96,6 +96,7 @@ impl Catalog {
         .bind(r.hook_duration_ms)
         .bind(r.transcribed_at.map(|t| t.to_rfc3339()))
         .bind(r.hook_ran_at.map(|t| t.to_rfc3339()))
+        .bind(r.notes.as_deref())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -179,6 +180,25 @@ impl Catalog {
             Some(r) => Ok(r.try_get::<Option<String>, _>("original_transcript")?),
             None => Ok(None),
         }
+    }
+
+    /// Update the free-form user notes for a recording.
+    ///
+    /// Notes live in their own column and are completely independent of the
+    /// transcript: neither machine (re-)transcription (`update_transcript`)
+    /// nor user transcript edits (`update_user_transcript`) touch this column,
+    /// so notes always survive those operations.
+    pub async fn update_notes(&self, id: &RecordingId, notes: &str) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET notes = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(notes)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn update_hook_result(
@@ -538,6 +558,7 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
             .try_get::<Option<String>, _>("hook_ran_at")?
             .map(|s| parse_dt(&s))
             .transpose()?,
+        notes: row.try_get("notes")?,
     })
 }
 
@@ -630,6 +651,7 @@ mod tests {
             hook_duration_ms: Some(100),
             transcribed_at: Some(Local::now()),
             hook_ran_at: Some(Local::now()),
+            notes: None,
         };
         db.insert(&r).await.expect("insert");
 
@@ -678,6 +700,7 @@ mod tests {
             hook_duration_ms: None,
             transcribed_at: None,
             hook_ran_at: None,
+            notes: None,
         };
         db.insert(&r).await.expect("insert");
 
@@ -700,6 +723,68 @@ mod tests {
         assert_eq!(
             db.get_original_transcript(&r.id).await.unwrap().as_deref(),
             Some("machine output")
+        );
+    }
+
+    #[tokio::test]
+    async fn notes_round_trip_and_survive_transcription() {
+        let db = Catalog::open(Path::new("sqlite::memory:"))
+            .await
+            .expect("open db");
+        let r = Recording {
+            id: RecordingId::new(),
+            started_at: Local::now(),
+            duration_ms: 1000,
+            audio_path: "x.wav".into(),
+            transcript: None,
+            model: None,
+            status: RecordingStatus::Transcribing,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+        };
+        db.insert(&r).await.expect("insert");
+
+        // Fresh insert: notes default to NULL.
+        assert_eq!(db.get(&r.id).await.unwrap().unwrap().notes, None);
+
+        // Notes round-trip through update_notes + get.
+        db.update_notes(&r.id, "remember to follow up")
+            .await
+            .expect("update notes");
+        assert_eq!(
+            db.get(&r.id).await.unwrap().unwrap().notes.as_deref(),
+            Some("remember to follow up")
+        );
+
+        // (Re-)transcription writes the transcript columns but must NOT touch notes.
+        db.update_transcript(&r.id, "machine output", "machine output", "ggml-base")
+            .await
+            .expect("machine transcript");
+        let after_transcribe = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(
+            after_transcribe.transcript.as_deref(),
+            Some("machine output")
+        );
+        assert_eq!(
+            after_transcribe.notes.as_deref(),
+            Some("remember to follow up"),
+            "re-transcription must not clear notes"
+        );
+
+        // A manual transcript edit must also preserve notes.
+        db.update_user_transcript(&r.id, "edited by the user")
+            .await
+            .expect("user edit");
+        assert_eq!(
+            db.get(&r.id).await.unwrap().unwrap().notes.as_deref(),
+            Some("remember to follow up"),
+            "user transcript edit must not clear notes"
         );
     }
 }

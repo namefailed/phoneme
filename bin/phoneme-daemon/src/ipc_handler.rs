@@ -216,6 +216,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
+            Ok(()) => {
+                state.events.emit(DaemonEvent::NotesUpdated { id });
+                Response::Ok(serde_json::Value::Null)
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::ReplayRecording { id, model } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 if let Some(m) = model {

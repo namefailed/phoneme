@@ -19,6 +19,8 @@ export type Recording = {
   hook_duration_ms?: number | null;
   transcribed_at?: string | null;
   hook_ran_at?: string | null;
+  /** Free-form user notes, stored separately from the transcript. */
+  notes?: string | null;
 };
 
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
@@ -95,6 +97,14 @@ export async function updateTranscript(id: string, text: string): Promise<void> 
 /** The preserved original (machine) transcript, or null if none was saved. */
 export async function getOriginalTranscript(id: string): Promise<string | null> {
   return await tauriInvoke<string | null>("get_original_transcript", { id });
+}
+
+/**
+ * Update the free-form user notes for a recording. Notes are stored separately
+ * from the transcript and are never affected by (re-)transcription.
+ */
+export async function updateNotes(id: string, notes: string): Promise<void> {
+  await tauriInvoke("update_notes", { id, notes });
 }
 
 export async function daemonStatus(): Promise<{ running: boolean; pid: number }> {
