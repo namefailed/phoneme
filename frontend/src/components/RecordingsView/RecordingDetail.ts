@@ -89,7 +89,7 @@ export class RecordingDetail {
         <div class="detail-footer">
           ${stats ? `<span>${stats}</span>` : ""}
           <span>Hook exit: ${r.hook_exit_code ?? "—"}</span>
-          <span>${r.audio_path}</span>
+          <span>${escapeHtml(r.audio_path)}</span>
         </div>
       </div>
     `;
