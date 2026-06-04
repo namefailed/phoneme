@@ -34,8 +34,12 @@ impl DaemonHarness {
             .mount(&whisper)
             .await;
 
-        // Generate a config that points at our stub.
+        // Generate a config that points at our stub. External mode makes the
+        // daemon use `external_url` (our mock) instead of spawning a bundled
+        // whisper binary, so transcription works in CI without a real
+        // whisper-server present.
         let mut cfg = phoneme_core::Config::default();
+        cfg.whisper.mode = phoneme_core::config::WhisperMode::External;
         cfg.whisper.external_url = whisper.uri();
         cfg.recording.audio_dir = temp.path().join("audio").to_string_lossy().into_owned();
         cfg.daemon.pipe_name = pipe_name.clone();
