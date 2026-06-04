@@ -305,6 +305,37 @@ async fn factory_builds_assemblyai_provider_upload_create_poll() {
     assert_eq!(result, "assemblyai text");
 }
 
+/// ElevenLabs Scribe is not OpenAI-compatible: it authenticates with an
+/// `xi-api-key` header and posts multipart `file` + `model_id` to
+/// `/v1/speech-to-text`, returning `{ "text": ... }`. Drives it through the
+/// factory and asserts the header, model_id field, and decoded text.
+#[tokio::test]
+async fn factory_builds_elevenlabs_provider_with_xi_api_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/speech-to-text"))
+        .and(header("xi-api-key", "el-test"))
+        .and(body_string_contains("scribe_v1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"text": "elevenlabs text"})),
+        )
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+
+    let mut whisper = phoneme_core::Config::default().whisper;
+    whisper.provider = phoneme_core::config::TranscriptionBackend::Elevenlabs;
+    whisper.api_key = "el-test".into();
+    whisper.api_url = server.uri();
+
+    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let result = provider.transcribe(&wav, None).await.unwrap();
+    assert_eq!(result, "elevenlabs text");
+}
+
 /// The `custom` provider points an OpenAiCompatProvider at any user-supplied
 /// base URL (no key/model required) — the universal OpenAI-compatible escape hatch.
 #[tokio::test]

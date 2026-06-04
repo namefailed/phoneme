@@ -129,6 +129,10 @@ pub enum TranscriptionBackend {
     /// AssemblyAI cloud speech-to-text — sends audio to api.assemblyai.com
     /// (async upload + poll). Needs `api_key`.
     Assemblyai,
+    /// ElevenLabs Scribe speech-to-text — sends audio to api.elevenlabs.io
+    /// (`/v1/speech-to-text`, `xi-api-key` auth, multipart). Needs `api_key`;
+    /// `model` defaults to `scribe_v1`.
+    Elevenlabs,
     /// Any OpenAI-compatible `/v1/audio/transcriptions` endpoint (Fireworks,
     /// self-hosted, gateways). Needs `api_url`; `api_key` and `model` optional.
     Custom,

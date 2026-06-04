@@ -59,6 +59,26 @@ export class SectionAccessibility {
           )}</div>
         </div>
 
+        <div class="settings-field">
+          <label>Quick preset</label>
+          <div>
+            <select id="llm-preset-select" style="max-width: 400px;">
+              <option value="">— Pick a provider preset —</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="mistral">Mistral</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="together">Together</option>
+              <option value="xai">xAI / Grok</option>
+              <option value="cerebras">Cerebras</option>
+              <option value="lmstudio">LM Studio (local)</option>
+            </select>
+          </div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Sets provider to <b>OpenAI-Compatible Endpoint</b> and fills in the API URL and a default model. Add your own API key below.
+          </span>
+        </div>
+
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
           <label>Model Name</label>
           <div>
@@ -258,6 +278,43 @@ export class SectionAccessibility {
       providerSelect.addEventListener("change", updateProviderVisibility);
       updateProviderVisibility(); // Initial run
     }
+
+    // Provider presets — map a named entry onto the OpenAI-compatible provider
+    // and prefill the endpoint + a default model. Frontend-only: the backend
+    // already speaks OpenAI-compatible /v1/chat/completions.
+    const LLM_PRESETS: Record<string, { apiUrl: string; model: string }> = {
+      gemini: { apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-flash-latest" },
+      mistral: { apiUrl: "https://api.mistral.ai/v1/chat/completions", model: "mistral-small-latest" },
+      deepseek: { apiUrl: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" },
+      openrouter: { apiUrl: "https://openrouter.ai/api/v1/chat/completions", model: "meta-llama/llama-3.3-70b-instruct:free" },
+      together: { apiUrl: "https://api.together.xyz/v1/chat/completions", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
+      xai: { apiUrl: "https://api.x.ai/v1/chat/completions", model: "grok-2-latest" },
+      cerebras: { apiUrl: "https://api.cerebras.ai/v1/chat/completions", model: "llama-3.3-70b" },
+      lmstudio: { apiUrl: "http://localhost:1234/v1/chat/completions", model: "" },
+    };
+    const llmPresetSelect = container.querySelector<HTMLSelectElement>("#llm-preset-select");
+    llmPresetSelect?.addEventListener("change", () => {
+      const preset = LLM_PRESETS[llmPresetSelect.value];
+      if (!preset || !providerSelect) return;
+      providerSelect.value = "openai";
+      providerSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      // The api_url + model inputs live inside the now-visible openai panel.
+      const urlInput = container.querySelector<HTMLInputElement>(
+        ".provider-settings[data-provider='openai'] [data-key='llm_post_process.api_url']",
+      );
+      const modelInput = container.querySelector<HTMLInputElement>(
+        ".provider-settings[data-provider='openai'] [data-key='llm_post_process.model']",
+      );
+      if (urlInput) {
+        urlInput.value = preset.apiUrl;
+        urlInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (modelInput) {
+        modelInput.value = preset.model;
+        modelInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      llmPresetSelect.value = ""; // reset to placeholder after applying
+    });
 
     container.querySelectorAll<HTMLButtonElement>(".fetch-models-btn").forEach(btn => {
       btn.addEventListener("click", async () => {
