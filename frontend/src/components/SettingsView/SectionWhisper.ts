@@ -167,6 +167,7 @@ export class SectionWhisper {
                 { value: "groq", label: "Groq (cloud)" },
                 { value: "deepgram", label: "Deepgram (cloud)" },
                 { value: "assemblyai", label: "AssemblyAI (cloud)" },
+                { value: "elevenlabs", label: "ElevenLabs Scribe (cloud)" },
                 { value: "custom", label: "Custom (OpenAI-compatible endpoint)" },
               ],
             },
@@ -182,6 +183,18 @@ export class SectionWhisper {
             id="cloud-warning"
             style="border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin-bottom:14px; font-size:12px; line-height:1.45;"
           ></div>
+          <div class="settings-field long-input">
+            <label>Quick preset</label>
+            <div>
+              <select id="stt-preset-select">
+                <option value="">— Pick a provider preset —</option>
+                <option value="fireworks">Fireworks</option>
+              </select>
+            </div>
+            <span style="${HELP}">
+              Sets provider to <b>Custom (OpenAI-compatible)</b> and fills in the API URL and a default model. Add your own API key below.
+            </span>
+          </div>
           <div class="settings-field long-input">
             <label>API key</label>
             <div>${renderField(
@@ -319,6 +332,7 @@ export class SectionWhisper {
         groq: { name: "Groq", host: "api.groq.com", model: "whisper-large-v3" },
         deepgram: { name: "Deepgram", host: "api.deepgram.com", model: "nova-2" },
         assemblyai: { name: "AssemblyAI", host: "api.assemblyai.com", model: "best" },
+        elevenlabs: { name: "ElevenLabs", host: "api.elevenlabs.io", model: "scribe_v1" },
         custom: { name: "your custom endpoint", host: "the URL you set below", model: "(optional)" },
       };
       const { name, host, model: defaultModel } = meta[provider] ?? meta.openai;
@@ -340,6 +354,31 @@ export class SectionWhisper {
       applyProviderVisibility(providerSelect.value),
     );
     applyProviderVisibility(this.config.whisper.provider ?? "local");
+
+    // Transcription provider presets — map onto the existing `custom`
+    // (OpenAI-compatible) provider and prefill the base URL + default model.
+    // Frontend-only: the backend appends /v1/audio/transcriptions.
+    const STT_PRESETS: Record<string, { apiUrl: string; model: string }> = {
+      fireworks: { apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
+    };
+    const sttPresetSelect = container.querySelector<HTMLSelectElement>("#stt-preset-select");
+    sttPresetSelect?.addEventListener("change", () => {
+      const preset = STT_PRESETS[sttPresetSelect.value];
+      if (!preset || !providerSelect) return;
+      providerSelect.value = "custom";
+      providerSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      const urlInput = container.querySelector<HTMLInputElement>(`[data-key="whisper.api_url"]`);
+      const modelInput = container.querySelector<HTMLInputElement>(`[data-key="whisper.model"]`);
+      if (urlInput) {
+        urlInput.value = preset.apiUrl;
+        urlInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (modelInput) {
+        modelInput.value = preset.model;
+        modelInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      sttPresetSelect.value = "";
+    });
 
     container.querySelector("#test-whisper")?.addEventListener("click", async () => {
       const result = await invoke<{ ok: boolean; message: string }>("wizard_test_whisper", {

@@ -91,6 +91,13 @@ impl Transcriber {
                 whisper.model.trim().to_string(),
                 timeout,
             )),
+            TranscriptionBackend::Elevenlabs => Box::new(ElevenLabsProvider::new(
+                self.http.clone(),
+                cloud_base_url(&whisper.api_url, "https://api.elevenlabs.io"),
+                whisper.api_key.trim().to_string(),
+                model_or(&whisper.model, "scribe_v1"),
+                timeout,
+            )),
             // Any OpenAI-compatible endpoint the user points at via `api_url`
             // (key/model optional — many self-hosted servers need neither).
             TranscriptionBackend::Custom => Box::new(OpenAiCompatProvider::new(
@@ -523,5 +530,96 @@ impl TranscriptionProvider for AssemblyAiProvider {
                 secs: self.timeout.as_secs(),
             }),
         }
+    }
+}
+
+/// Provider for ElevenLabs Scribe speech-to-text (`/v1/speech-to-text`).
+///
+/// ElevenLabs is **not** OpenAI-compatible: it authenticates with an
+/// `xi-api-key` header (no scheme prefix) and takes the audio plus a `model_id`
+/// field as multipart form data. The transcript is returned as `{ "text": ... }`.
+#[derive(Debug, Clone)]
+pub struct ElevenLabsProvider {
+    http: reqwest::Client,
+    base_url: String,
+    api_key: String,
+    /// The Scribe model id (e.g. `scribe_v1`).
+    model: String,
+    timeout: Duration,
+}
+
+impl ElevenLabsProvider {
+    pub fn new(
+        http: reqwest::Client,
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            http,
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            timeout,
+        }
+    }
+}
+
+#[async_trait]
+impl TranscriptionProvider for ElevenLabsProvider {
+    async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
+        let bytes = fs::read(audio_path).await?;
+        let part = multipart::Part::bytes(bytes)
+            .file_name(
+                audio_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("audio.wav")
+                    .to_string(),
+            )
+            .mime_str("audio/wav")
+            .map_err(|e| Error::Internal(format!("multipart mime: {e}")))?;
+        let mut form = multipart::Form::new()
+            .part("file", part)
+            .text("model_id", self.model.clone());
+        if let Some(lang) = language {
+            // ElevenLabs uses ISO-639 language codes under `language_code`.
+            form = form.text("language_code", lang.to_string());
+        }
+
+        let url = format!("{}/v1/speech-to-text", self.base_url.trim_end_matches('/'));
+        let response = match self
+            .http
+            .post(&url)
+            .header("xi-api-key", &self.api_key)
+            .timeout(self.timeout)
+            .multipart(form)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) if e.is_timeout() => {
+                return Err(Error::WhisperTimeout {
+                    secs: self.timeout.as_secs(),
+                })
+            }
+            Err(e) => return Err(Error::WhisperUnreachable { url, source: e }),
+        };
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(Error::WhisperError {
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let parsed: OpenAiResponse = response
+            .json()
+            .await
+            .map_err(|e| Error::Internal(format!("decoding ElevenLabs response: {e}")))?;
+        Ok(parsed.text)
     }
 }
