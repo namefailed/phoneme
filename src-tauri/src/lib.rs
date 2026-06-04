@@ -159,6 +159,7 @@ pub fn run() {
             commands::refire_hook,
             commands::update_transcript,
             commands::get_original_transcript,
+            commands::update_notes,
             commands::daemon_status,
             commands::read_config,
             commands::write_config,

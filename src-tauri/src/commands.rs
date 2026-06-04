@@ -149,6 +149,14 @@ pub async fn get_original_transcript(bridge: Br<'_>, id: String) -> Result<Value
     forward(&bridge, Request::GetOriginalTranscript { id }).await
 }
 
+/// Update the free-form user notes for a specific recording. Independent of the
+/// transcript; never affected by (re-)transcription.
+#[tauri::command]
+pub async fn update_notes(bridge: Br<'_>, id: String, notes: String) -> Result<Value, String> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::UpdateNotes { id, notes }).await
+}
+
 /// Check the background daemon's current runtime status.
 /// Returns whether the daemon is actively running and its process ID.
 #[tauri::command]

@@ -86,6 +86,7 @@ impl DaemonRecorder {
             hook_duration_ms: None,
             transcribed_at: None,
             hook_ran_at: None,
+            notes: None,
         };
         state.catalog.insert(&row).await?;
 

@@ -51,6 +51,12 @@ pub enum Request {
     GetOriginalTranscript {
         id: RecordingId,
     },
+    /// Update the free-form user notes for a recording. Independent of the
+    /// transcript; never affected by (re-)transcription.
+    UpdateNotes {
+        id: RecordingId,
+        notes: String,
+    },
 
     // Daemon control
     DaemonStatus,
@@ -190,6 +196,9 @@ pub enum DaemonEvent {
         id: RecordingId,
     },
     TranscriptUpdated {
+        id: RecordingId,
+    },
+    NotesUpdated {
         id: RecordingId,
     },
     TagCreated {
