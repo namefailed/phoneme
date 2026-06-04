@@ -86,6 +86,17 @@ export class SectionRecording {
             How long you must pause (in milliseconds) before Phoneme considers you finished speaking and automatically stops the recording. (e.g. 1500 = 1.5 seconds)
           </span>
         </div>
+        <div class="settings-field">
+          <label>Pre-roll (ms)</label>
+          <div>${renderField(
+            { key: "recording.pre_roll_ms", label: "", kind: "number" },
+            this.config.recording.pre_roll_ms ?? 0,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Captures up to this many milliseconds of audio from <b>before</b> you hit record, so the first syllable isn't clipped. (e.g. 500 = 0.5 seconds)<br/>
+            <b>0 disables it</b> (default). When set above 0, Phoneme keeps your <b>microphone open continuously</b> between recordings, holding the most recent audio in a rolling in-memory buffer that is constantly discarded. Nothing is written to disk unless you actually start a recording. Microphone source only — ignored for system audio.
+          </span>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);

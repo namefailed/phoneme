@@ -217,6 +217,65 @@ async fn pause_discards_audio_until_resume() {
 }
 
 #[tokio::test]
+async fn prepend_samples_lead_the_recording() {
+    // Pre-roll contract: samples handed to `start_with_prepend` appear at the
+    // very front of the finalized WAV, ahead of anything captured live.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("preroll.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 10_000,
+    };
+    // 0.25s of pre-roll (4000 samples), distinct marker value.
+    let preroll: Vec<i16> = vec![123; 4000];
+    let recorder = Recorder::start_with_prepend(Box::new(source), cfg, None, preroll.clone())
+        .await
+        .unwrap();
+
+    sink.push(loud_block(8000)).await.unwrap(); // 0.5s live
+    sink.close();
+
+    let result = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    // Duration should reflect pre-roll (0.25s) + live (0.5s) ≈ 0.75s.
+    assert!(
+        (result.duration_ms - 750).abs() < 100,
+        "duration was {}ms (expected ~750)",
+        result.duration_ms
+    );
+
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    assert!(samples.len() >= 12_000 - 100);
+    // The first 4000 samples must be the pre-roll marker, in order, ahead of
+    // the captured audio.
+    assert_eq!(&samples[..4000], &preroll[..]);
+}
+
+#[tokio::test]
+async fn empty_prepend_matches_plain_start() {
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("empty_prepend.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 10_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 1000,
+    };
+    let recorder = Recorder::start_with_prepend(Box::new(source), cfg, None, Vec::new())
+        .await
+        .unwrap();
+    sink.push(loud_block(8000)).await.unwrap();
+    sink.close();
+    let result = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    assert!((result.duration_ms - 500).abs() < 50);
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    assert!(samples.len() >= 8000 - 100);
+}
+
+#[tokio::test]
 async fn config_is_canonical_format() {
     let (source, _sink) = make_synthetic();
     let cfg = RecorderConfig::default();

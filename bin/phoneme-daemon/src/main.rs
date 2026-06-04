@@ -36,6 +36,9 @@ async fn main() -> Result<()> {
 
     reconcile::run(&state).await?;
 
+    // Start idle pre-roll pre-capture if enabled (opt-in; no-op by default).
+    state.recorder.ensure_preroll(&state).await;
+
     // Single shutdown coordinator, owned by AppState so the IPC `Shutdown`
     // handler triggers the same channel `main` waits on.
     state.shutdown.install_signals();
