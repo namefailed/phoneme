@@ -48,6 +48,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::Watch => commands::watch::run(cfg).await,
         Command::Hook(args) => commands::hook_cmd::run(args, cfg, cli.json).await,
         Command::Tag(args) => commands::tag::run(args, cfg, cli.json).await,
+        Command::Profile(args) => commands::profile_cmd::run(args, cfg, cli.json).await,
         Command::Export(args) => commands::export::run(args, cfg).await,
     }
 }

@@ -196,6 +196,15 @@ pub async fn write_config(
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
+    apply_config(&app, &bridge, &config).await;
+    Ok(())
+}
+
+/// Apply the side effects of a config that has just been written to
+/// `config.toml`: refresh the "start at login" registry key, tell the daemon
+/// to reload, and re-register the global hotkey. Shared by `write_config` and
+/// `switch_profile` so switching a profile behaves identically to a manual save.
+async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &Config) {
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
     {
@@ -243,7 +252,7 @@ pub async fn write_config(
     }
 
     // Tell daemon to reload
-    if let Err(e) = forward(&bridge, Request::ReloadConfig).await {
+    if let Err(e) = forward(bridge, Request::ReloadConfig).await {
         tracing::warn!("failed to reload daemon config: {e}");
     }
 
@@ -260,7 +269,46 @@ pub async fn write_config(
             }
         }
     }
+}
+
+/// List the names of all saved config profiles.
+#[tauri::command]
+pub fn list_profiles() -> Result<Vec<String>, String> {
+    phoneme_core::profiles::list_profiles().map_err(|e| e.to_string())
+}
+
+/// Snapshot the CURRENT `config.toml` and save it as a profile named `name`.
+#[tauri::command]
+pub fn save_profile(name: String) -> Result<(), String> {
+    let cfg = config_io::read().map_err(|e| e.to_string())?;
+    phoneme_core::profiles::save_profile(&name, &cfg).map_err(|e| e.to_string())
+}
+
+/// Switch the active config to profile `name`: load the profile, write it as
+/// `config.toml`, then reload the daemon and re-apply side effects (registry,
+/// hotkey) — identical to a manual save.
+#[tauri::command]
+pub async fn switch_profile(
+    app: tauri::AppHandle,
+    bridge: Br<'_>,
+    name: String,
+) -> Result<(), String> {
+    let config = tokio::task::spawn_blocking(move || -> Result<Config, String> {
+        let cfg = phoneme_core::profiles::load_profile(&name).map_err(|e| e.to_string())?;
+        config_io::write(&cfg).map_err(|e| e.to_string())?;
+        Ok(cfg)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    apply_config(&app, &bridge, &config).await;
     Ok(())
+}
+
+/// Delete the saved profile named `name`. Does not touch the live config.
+#[tauri::command]
+pub fn delete_profile(name: String) -> Result<(), String> {
+    phoneme_core::profiles::delete_profile(&name).map_err(|e| e.to_string())
 }
 
 /// Check if a `config.toml` file already exists on disk.

@@ -6,6 +6,7 @@ pub mod error;
 pub mod hook;
 pub mod id;
 pub mod llm;
+pub mod profiles;
 pub mod queue;
 pub mod tags;
 pub mod transcription;

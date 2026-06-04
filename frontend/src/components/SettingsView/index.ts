@@ -11,6 +11,7 @@ import { SectionAccessibility } from "./SectionAccessibility";
 import { SectionEditor } from "./SectionEditor";
 import { SectionAdvanced } from "./SectionAdvanced";
 import { SectionTags } from "./SectionTags";
+import { SectionProfiles } from "./SectionProfiles";
 import "./styles.css";
 
 /**
@@ -30,10 +31,22 @@ export class SettingsView {
     void this.init();
   }
 
+  private onConfigSaved = (e: Event) => {
+    // A profile switch (or the model picker) rewrote config.toml from outside
+    // this form's Save button. Adopt the new config so the open view reflects
+    // it and the unsaved-changes guard doesn't clobber it on the next save.
+    const detail = (e as CustomEvent).detail;
+    if (!detail) return;
+    this.config = detail;
+    this.originalConfigStr = JSON.stringify(this.config);
+    this.render();
+  };
+
   private async init() {
     try {
       this.config = await invoke("read_config");
       this.originalConfigStr = JSON.stringify(this.config);
+      window.addEventListener("config:saved", this.onConfigSaved);
       this.render();
     } catch (e) {
       this.container.innerHTML = `<div class="error">Failed to load settings: ${e}</div>`;
@@ -64,6 +77,7 @@ export class SettingsView {
           <div class="sv-tab ${this.activeTab === "editor" ? "active" : ""}" data-tab="editor">Editor</div>
           <div class="sv-tab ${this.activeTab === "accessibility" ? "active" : ""}" data-tab="accessibility">Post-Processing</div>
           <div class="sv-tab ${this.activeTab === "tags" ? "active" : ""}" data-tab="tags">Tags</div>
+          <div class="sv-tab ${this.activeTab === "profiles" ? "active" : ""}" data-tab="profiles">Profiles</div>
           <div class="sv-tab ${this.activeTab === "hook" ? "active" : ""}" data-tab="hook">Action Hook</div>
           <div class="sv-tab ${this.activeTab === "storage" ? "active" : ""}" data-tab="storage">Storage</div>
           <div class="sv-tab ${this.activeTab === "advanced" ? "active" : ""}" data-tab="advanced">Advanced</div>
@@ -95,6 +109,7 @@ export class SettingsView {
       case "accessibility": new SectionAccessibility(this.sectionHost(body), config); break;
       case "editor": new SectionEditor(this.sectionHost(body), config); break;
       case "tags": new SectionTags(this.sectionHost(body), config); break;
+      case "profiles": new SectionProfiles(this.sectionHost(body), config); break;
       case "advanced": new SectionAdvanced(this.sectionHost(body), config); break;
     }
 
@@ -157,5 +172,7 @@ export class SettingsView {
     return el;
   }
 
-  dispose() {}
+  dispose() {
+    window.removeEventListener("config:saved", this.onConfigSaved);
+  }
 }
