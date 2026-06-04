@@ -12,6 +12,7 @@ export type DaemonEvent =
   | { event: "queue_depth_changed"; pending: number; processing: number; failed: number }
   | { event: "whisper_status_changed"; reachable: boolean }
   | { event: "recording_deleted"; id: string }
+  | { event: "recording_cancelled"; id: string }
   | { event: "recording_paused"; id: string }
   | { event: "recording_resumed"; id: string }
   | { event: "retention_warning"; count: number; hours: number }

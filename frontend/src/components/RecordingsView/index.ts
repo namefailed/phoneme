@@ -72,7 +72,9 @@ export class RecordingsView {
     if (s.selectedId && !s.recordings.some(r => r.id === s.selectedId)) {
       this.state.set({ ...s, selectedId: null });
       this.detail.clear();
-    } else if (s.selectedId) {
+    } else if (s.selectedId && !this.detail.hasDirtyEdits()) {
+      // Don't re-render the detail (which rebuilds the editor) out from under
+      // unsaved edits when a background daemon event triggers a refresh.
       void this.detail.show(s.selectedId);
     }
   }
@@ -82,7 +84,10 @@ export class RecordingsView {
     this.applyLayout();
   }
 
+  private disposed = false;
+
   dispose() {
+    this.disposed = true;
     if (this.unsub) {
       this.unsub();
       this.unsub = null;
@@ -133,7 +138,7 @@ export class RecordingsView {
   }
 
   private async subscribeToEvents() {
-    this.unsub = await subscribe((event: DaemonEvent) => {
+    const unsub = await subscribe((event: DaemonEvent) => {
       const eventName = (event as { event: string }).event;
       if (
         eventName === "recording_stopped" ||
@@ -147,6 +152,13 @@ export class RecordingsView {
         void this.refresh();
       }
     });
+    // If the view was disposed while subscribe() was awaiting, unsubscribe
+    // immediately so the daemon-event listener doesn't leak.
+    if (this.disposed) {
+      unsub();
+      return;
+    }
+    this.unsub = unsub;
   }
 
   private async handleKeydown(e: KeyboardEvent) {

@@ -125,7 +125,11 @@ export class ActionRow {
         showToast(`Export failed: ${e}`, "error");
       }
     } else if (act === "reveal") {
-      await invoke("reveal_file", { path: this.cbs.getAudioPath() });
+      try {
+        await invoke("reveal_file", { path: this.cbs.getAudioPath() });
+      } catch (e) {
+        showToast(`Reveal failed: ${e}`, "error");
+      }
     } else if (act === "delete") {
       const { confirmDelete } = await import("../ConfirmDelete");
       if (await confirmDelete()) {
