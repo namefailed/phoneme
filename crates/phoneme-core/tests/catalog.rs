@@ -20,6 +20,7 @@ fn sample_recording(id: RecordingId) -> Recording {
         hook_duration_ms: None,
         transcribed_at: None,
         hook_ran_at: None,
+        notes: None,
     }
 }
 
