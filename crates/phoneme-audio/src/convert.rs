@@ -15,7 +15,9 @@ pub fn f32_to_i16(input: &[f32]) -> Vec<i16> {
         .iter()
         .map(|&s| {
             let clamped = s.clamp(-1.0, 1.0);
-            (clamped * i16::MAX as f32) as i16
+            // Scale by 32768 so -1.0 uses the full negative range (i16::MIN);
+            // clamp keeps +1.0 at i16::MAX (32768 isn't representable as i16).
+            (clamped * 32768.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16
         })
         .collect()
 }
@@ -85,7 +87,7 @@ mod tests {
     fn f32_to_i16_clamps_out_of_range() {
         let v = f32_to_i16(&[1.5, -2.0, 0.0]);
         assert_eq!(v[0], i16::MAX);
-        assert_eq!(v[1], i16::MIN + 1); // ((-1.0)*32767) as i16 = -32767
+        assert_eq!(v[1], i16::MIN); // (-1.0)*32768 = -32768 = full-scale negative
         assert_eq!(v[2], 0);
     }
 

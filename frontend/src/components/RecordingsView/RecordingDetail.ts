@@ -42,6 +42,7 @@ export class RecordingDetail {
 
   clear() {
     this.recording = null;
+    this.editor?.dispose();
     this.editor = null;
     this.player.destroy();
     this.renderEmpty();
@@ -106,6 +107,7 @@ export class RecordingDetail {
 
     const editorRoot = this.container.querySelector<HTMLElement>("#editor");
     if (editorRoot) {
+      this.editor?.dispose();
       this.editor = new TranscriptEditor(editorRoot, r.id, r.transcript ?? "", (d) => {
         this.dirty = d;
       });

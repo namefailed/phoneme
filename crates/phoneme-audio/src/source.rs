@@ -261,6 +261,23 @@ impl CpalSource {
                     }
                 }
             }
+
+            // Flush the final partial chunk (zero-padded to one full chunk) so
+            // the trailing fraction of a second isn't dropped when capture stops.
+            if !accumulator.is_empty() {
+                let needed = chunk_frames * device_channels;
+                accumulator.resize(needed, 0.0);
+                let mono = downmix_to_mono_f32(&accumulator, device_channels);
+                let processed = if let Some(r) = resampler.as_mut() {
+                    r.process(&[mono], None)
+                        .ok()
+                        .and_then(|out| out.into_iter().next())
+                        .unwrap_or_default()
+                } else {
+                    mono
+                };
+                let _ = out_tx.send(f32_to_i16(&processed)).await;
+            }
         });
 
         Ok(Self {
@@ -285,11 +302,12 @@ impl Source for CpalSource {
 
     async fn stop(&mut self) -> Result<()> {
         // Tell the stream thread to drop its cpal::Stream, which stops capture.
-        // Closing out_rx is redundant once the stream stops, but does no harm.
+        // Do NOT close out_rx here: let the worker drain its accumulator and
+        // flush the final partial chunk first. The channel closes naturally when
+        // the worker finishes (out_tx is dropped), which ends the recorder drain.
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
         }
-        self.out_rx.close();
         Ok(())
     }
 }

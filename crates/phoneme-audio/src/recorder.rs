@@ -98,15 +98,16 @@ impl Recorder {
 
             let mut cancelled = false;
             let mut is_paused = false;
+            let mut should_drain = false;
 
             loop {
                 tokio::select! {
                     cmd = cmd_rx.recv() => {
                         match cmd {
-                            Some(RecorderCommand::Stop) => break,
+                            Some(RecorderCommand::Stop) => { should_drain = true; break; }
                             Some(RecorderCommand::Cancel) => { cancelled = true; break; }
                             Some(RecorderCommand::Pause) => { is_paused = true; }
-                            Some(RecorderCommand::Resume) => { is_paused = false; }
+                            Some(RecorderCommand::Resume) => { is_paused = false; detector.reset(); }
                             None => break,
                         }
                     }
@@ -133,6 +134,19 @@ impl Recorder {
                             }
                             None => break,
                         }
+                    }
+                }
+            }
+
+            // On an explicit stop, drain audio the source already buffered plus
+            // its flushed final partial chunk, so the trailing fraction of a
+            // second isn't lost. Stop capture first so no post-stop audio is
+            // recorded; the drain ends when the source closes its channel.
+            if should_drain {
+                let _ = source.stop().await;
+                while let Ok(Some(b)) = source.next_block().await {
+                    if !is_paused {
+                        samples.extend_from_slice(&b);
                     }
                 }
             }

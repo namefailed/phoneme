@@ -7,10 +7,19 @@ $title = (($payload.transcript -split '\s+' | Select-Object -First 6) -join ' ')
 if ([string]::IsNullOrWhiteSpace($title)) { $title = "voice-note" }
 $slug = ($title -replace '[^a-zA-Z0-9 ]', '' -replace '\s+', '-').ToLower()
 $dir  = Join-Path $env:USERPROFILE "Documents\org\notes"
-$path = Join-Path $dir "${id}--${slug}__voice.org"
 
 if (-not (Test-Path $dir)) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
+}
+
+# The timestamp id is only second-precision, so two recordings in the same
+# second with similar opening words would map to one path. Uniquify the slug
+# instead of silently overwriting the earlier note.
+$path = Join-Path $dir "${id}--${slug}__voice.org"
+$n = 1
+while (Test-Path $path) {
+    $path = Join-Path $dir "${id}--${slug}-$n__voice.org"
+    $n++
 }
 
 $body = @"

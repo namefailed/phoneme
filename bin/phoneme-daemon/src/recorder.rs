@@ -180,6 +180,10 @@ impl DaemonRecorder {
             let _ = recorder.cancel().await;
         }
         state.catalog.delete(&active.id).await?;
+        state.events.emit(DaemonEvent::RecordingCancelled {
+            id: active.id.clone(),
+        });
+        tracing::info!(id = %active.id, "recording cancelled");
         Ok(active.id)
     }
 
