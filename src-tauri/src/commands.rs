@@ -128,6 +128,14 @@ pub async fn replay_recording(bridge: Br<'_>, id: String) -> Result<Value, Strin
     forward(&bridge, Request::ReplayRecording { id, model: None }).await
 }
 
+/// Import an existing audio file (wav/mp3/m4a) as a new recording. The daemon
+/// decodes it to a canonical WAV and runs it through the normal transcription
+/// pipeline. Returns `{ id }` for the new recording.
+#[tauri::command]
+pub async fn import_recording(bridge: Br<'_>, path: String) -> Result<Value, String> {
+    forward(&bridge, Request::ImportRecording { path }).await
+}
+
 /// Force the daemon to re-execute the post-processing hook for a given recording ID.
 #[tauri::command]
 pub async fn refire_hook(bridge: Br<'_>, id: String) -> Result<Value, String> {

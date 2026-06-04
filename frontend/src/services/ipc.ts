@@ -83,6 +83,17 @@ export async function replayRecording(id: string, model?: string): Promise<void>
   await tauriInvoke("replay_recording", { id, model: model || null });
 }
 
+/**
+ * Import an existing audio file (wav/mp3/m4a). The daemon decodes it to a
+ * canonical WAV and transcribes it like a normal recording. Returns the new id.
+ */
+export async function importRecording(path: string): Promise<{ id: string }> {
+  return await tauriInvoke<{ id: string }>("import_recording", { path });
+}
+
+/** File extensions accepted by the import flow (no leading dot). */
+export const IMPORT_AUDIO_EXTENSIONS = ["wav", "mp3", "m4a"] as const;
+
 export async function refireHook(id: string): Promise<void> {
   await tauriInvoke("refire_hook", { id });
 }
