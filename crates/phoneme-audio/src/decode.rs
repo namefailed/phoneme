@@ -24,6 +24,17 @@ use symphonia::core::probe::Hint;
 /// Extensions accepted for import. Lowercase, no leading dot.
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a"];
 
+/// Maximum decoded audio duration accepted for import, in seconds (6 hours).
+///
+/// `decode_to_f32` buffers the entire decoded stream into one `Vec<f32>` and
+/// `convert::resample_mono` builds a `SincFixedIn` sized to the *whole* input,
+/// so a long or maliciously-crafted file could exhaust memory. We enforce this
+/// cap with a running per-channel sample counter as packets are decoded and
+/// bail out BEFORE allocating the full-size resampler. 6 hours is far beyond
+/// any realistic voice note (~6.6 GiB of f32 at 48 kHz stereo) while still
+/// being a hard upper bound.
+pub const MAX_IMPORT_DURATION_SECS: u64 = 6 * 60 * 60;
+
 /// Returns `true` if `path`'s extension is one Phoneme can import.
 pub fn is_supported_extension(path: &Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
@@ -70,6 +81,14 @@ pub fn decode_to_canonical_wav(input: &Path, out_wav: &Path) -> Result<i64> {
     let frames = pcm.len() as i64; // mono, so frames == samples
     let duration_ms = (frames * 1000) / AudioConfig::phoneme_default().sample_rate.as_u32() as i64;
     Ok(duration_ms)
+}
+
+/// Returns `true` once `frames` (per-channel samples) at `sample_rate` exceeds
+/// [`MAX_IMPORT_DURATION_SECS`]. Factored out so the cap is unit-testable
+/// without synthesizing a multi-hour file.
+fn exceeds_duration_cap(frames: u64, sample_rate: u32) -> bool {
+    let max_frames = MAX_IMPORT_DURATION_SECS.saturating_mul(sample_rate as u64);
+    frames > max_frames
 }
 
 /// Demux + decode `input` into interleaved f32 samples, returning
@@ -138,6 +157,18 @@ fn decode_to_f32(input: &Path) -> Result<(Vec<f32>, u32, usize)> {
                     channels = decoded.spec().channels.count();
                 }
                 append_samples(&decoded, &mut out);
+                // Enforce the duration cap with a running counter so we bail out
+                // mid-decode (before the full-size resampler is ever built) on a
+                // long or crafted file, rather than after buffering everything.
+                if sample_rate > 0 && channels > 0 {
+                    let frames = (out.len() / channels) as u64;
+                    if exceeds_duration_cap(frames, sample_rate) {
+                        return Err(Error::Internal(format!(
+                            "audio too long to import (max {} hours)",
+                            MAX_IMPORT_DURATION_SECS / 3600
+                        )));
+                    }
+                }
             }
             // Recoverable decode hiccups: skip the packet, keep going.
             Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
@@ -265,6 +296,25 @@ mod tests {
         std::fs::write(&src, b"RIFFnonsense-not-a-real-wav").unwrap();
         let dst = dir.path().join("out.wav");
         assert!(decode_to_canonical_wav(&src, &dst).is_err());
+    }
+
+    #[test]
+    fn duration_cap_rejects_over_limit() {
+        let rate = 16_000u32;
+        let max_frames = MAX_IMPORT_DURATION_SECS * rate as u64;
+        // Exactly at the cap is allowed; one frame over is rejected.
+        assert!(!exceeds_duration_cap(max_frames, rate));
+        assert!(exceeds_duration_cap(max_frames + 1, rate));
+        // A clearly-oversized count (7 hours) is rejected.
+        assert!(exceeds_duration_cap(7 * 60 * 60 * rate as u64, rate));
+    }
+
+    #[test]
+    fn duration_cap_allows_normal_clip() {
+        // A 10-minute clip at 48 kHz is well under the cap.
+        let rate = 48_000u32;
+        let frames = 10 * 60 * rate as u64;
+        assert!(!exceeds_duration_cap(frames, rate));
     }
 
     #[test]
