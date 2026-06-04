@@ -202,10 +202,16 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         // defaults to) json, so this is a no-op for the local backend.
         form = form.text("response_format", "json");
 
-        let url = format!(
-            "{}/v1/audio/transcriptions",
-            self.base_url.trim_end_matches('/')
-        );
+        // Accept `api_url` as either a host base (…/v1) or the full endpoint, so a
+        // Custom/proxy URL already ending in the path isn't doubled into a 404.
+        let base = self.base_url.trim_end_matches('/');
+        let url = if base.ends_with("/v1/audio/transcriptions") {
+            base.to_string()
+        } else if base.ends_with("/v1") {
+            format!("{base}/audio/transcriptions")
+        } else {
+            format!("{base}/v1/audio/transcriptions")
+        };
         let mut req = self.http.post(&url).timeout(self.timeout).multipart(form);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
@@ -298,6 +304,10 @@ impl TranscriptionProvider for DeepgramProvider {
             vec![("model", self.model.as_str()), ("smart_format", "true")];
         if let Some(lang) = language {
             query.push(("language", lang));
+        } else {
+            // Deepgram defaults to English when no language is given; opt into
+            // auto-detect so absent-language behaves like the Whisper providers.
+            query.push(("detect_language", "true"));
         }
         let response = match self
             .http
@@ -438,6 +448,9 @@ impl TranscriptionProvider for AssemblyAiProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
         let bytes = fs::read(audio_path).await?;
         let base = self.base_url.trim_end_matches('/').to_string();
+        // One overall budget: subtract upload+create time from the poll wait so
+        // the whole operation stays within timeout_secs rather than ~3x it.
+        let started = std::time::Instant::now();
 
         // 1. Upload the raw audio.
         let upload_url = format!("{base}/v2/upload");
@@ -473,7 +486,8 @@ impl TranscriptionProvider for AssemblyAiProvider {
 
         // 3. Poll until the job reaches a terminal state, bounded by timeout_secs.
         let poll_url = format!("{base}/v2/transcript/{}", created.id);
-        let polled = tokio::time::timeout(self.timeout, async {
+        let poll_budget = self.timeout.saturating_sub(started.elapsed());
+        let polled = tokio::time::timeout(poll_budget, async {
             loop {
                 let t: AaiTranscript = self
                     .send_json(
