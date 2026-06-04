@@ -156,6 +156,7 @@ pub fn run() {
             commands::record_pause,
             commands::record_resume,
             commands::replay_recording,
+            commands::import_recording,
             commands::refire_hook,
             commands::update_transcript,
             commands::get_original_transcript,

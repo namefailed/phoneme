@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../utils/toast";
 import { escapeHtml, escapeAttr } from "../utils/format";
+import { pickAndImportAudio } from "../utils/import";
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
@@ -200,6 +201,7 @@ export class HeaderBar {
           <button class="record-btn" id="hb-cancel" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" title="Cancel recording and discard audio">✕ Cancel</button>
           <button class="record-btn" id="hb-record" title="Start/Stop recording manually (or use your global hotkey)">${this.isRecording ? "⏹ Stop" : "🔴 Record"}</button>
         </div>
+        <button class="icon-btn" id="hb-import" aria-label="Import audio file" title="Import an audio file (wav/mp3/m4a) to transcribe">⬇ Import</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
     `;
@@ -265,6 +267,12 @@ export class HeaderBar {
         filterStore.set({ ...filterStore.get(), sort_desc: newDesc });
         sortBtn.textContent = newDesc ? "↓ Newest" : "↑ Oldest";
         sortBtn.title = newDesc ? "Sort: newest first — click for oldest first" : "Sort: oldest first — click for newest first";
+      });
+    }
+    const importBtn = this.container.querySelector<HTMLButtonElement>("#hb-import");
+    if (importBtn) {
+      importBtn.addEventListener("click", () => {
+        void pickAndImportAudio();
       });
     }
     const settings = this.container.querySelector("#hb-settings");

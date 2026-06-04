@@ -4,6 +4,7 @@ pub mod delete;
 pub mod doctor;
 pub mod export;
 pub mod hook_cmd;
+pub mod import;
 pub mod list;
 pub mod record;
 pub mod replay;
