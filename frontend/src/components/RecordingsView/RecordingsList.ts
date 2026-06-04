@@ -9,6 +9,7 @@ import {
   statusToClass,
   statusLabel,
   highlightMatch,
+  escapeHtml,
 } from "../../utils/format";
 import "../shared/styles.css";
 import "./styles.css";
@@ -104,7 +105,7 @@ export class RecordingsList {
       return;
     }
     if (s.error) {
-      this.container.innerHTML = `<div class="empty error">${s.error}</div>`;
+      this.container.innerHTML = `<div class="empty error">${escapeHtml(s.error)}</div>`;
       return;
     }
     if (s.recordings.length === 0) {

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
+import { escapeAttr } from "../../utils/format";
 
 const HELP =
   "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
@@ -60,7 +61,7 @@ export class SectionWhisper {
         if (isSelected) {
           btnArea.innerHTML = `<button disabled style="background: var(--accent); color: var(--bg-surface); border-color: var(--accent);">✅ Selected</button>`;
         } else if (isDownloaded) {
-          btnArea.innerHTML = `<button class="select-btn" data-id="${m.id}" data-path="${downloadedPath}">Select</button>`;
+          btnArea.innerHTML = `<button class="select-btn" data-id="${escapeAttr(m.id)}" data-path="${escapeAttr(downloadedPath ?? "")}">Select</button>`;
         } else {
           btnArea.innerHTML = `
             <button class="download-btn" data-id="${m.id}" data-url="${m.url}" data-filename="${m.filename}">
