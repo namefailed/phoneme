@@ -3,10 +3,14 @@
 use anyhow::Result;
 use tauri::{
     image::Image,
-    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
     tray::{TrayIcon, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager,
 };
+
+/// Menu-item id prefix for "switch to profile <name>" entries in the tray
+/// Profiles submenu. The suffix after the colon is the profile name.
+const PROFILE_PREFIX: &str = "profile:";
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +55,8 @@ pub fn install(app: &AppHandle) -> Result<TrayIcon> {
     let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
+    let profiles_submenu = build_profiles_submenu(app)?;
+
     let menu = Menu::with_items(
         app,
         &[
@@ -60,6 +66,7 @@ pub fn install(app: &AppHandle) -> Result<TrayIcon> {
             &show_item,
             &doctor_item,
             &settings_item,
+            &profiles_submenu,
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
         ],
@@ -76,8 +83,88 @@ pub fn install(app: &AppHandle) -> Result<TrayIcon> {
     Ok(tray)
 }
 
+/// Build the "Profiles" submenu listing every saved profile. Selecting an
+/// entry switches the live config to that profile (see `handle_menu_event`).
+/// If there are no saved profiles, a single disabled placeholder is shown.
+fn build_profiles_submenu(app: &AppHandle) -> Result<Submenu<tauri::Wry>> {
+    let submenu = Submenu::with_id(app, "profiles", "Profiles", true)?;
+    let names = phoneme_core::profiles::list_profiles().unwrap_or_default();
+    if names.is_empty() {
+        let empty = MenuItem::with_id(
+            app,
+            "profiles_empty",
+            "No saved profiles",
+            false,
+            None::<&str>,
+        )?;
+        submenu.append(&empty)?;
+    } else {
+        for name in names {
+            let item = MenuItem::with_id(
+                app,
+                format!("{PROFILE_PREFIX}{name}"),
+                &name,
+                true,
+                None::<&str>,
+            )?;
+            submenu.append(&item)?;
+        }
+    }
+    Ok(submenu)
+}
+
+/// Switch the live `config.toml` to a saved profile, then reload the daemon
+/// and re-register the global hotkey. Runs entirely in the tray process so it
+/// works whether or not the main window is open. Mirrors the side effects of
+/// the `switch_profile` Tauri command.
+fn switch_to_profile(app: &AppHandle, name: String) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let cfg = match phoneme_core::profiles::load_profile(&name) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("failed to load profile {name:?}: {e}");
+                return;
+            }
+        };
+        if let Err(e) = crate::config_io::write(&cfg) {
+            tracing::error!("failed to write config for profile {name:?}: {e}");
+            return;
+        }
+
+        // Reload the daemon so it adopts the new config.
+        if let Some(bridge) = app.state::<Option<crate::bridge::Bridge>>().inner().clone() {
+            if let Err(e) = bridge.request(phoneme_ipc::Request::ReloadConfig).await {
+                tracing::warn!("failed to reload daemon after profile switch: {e}");
+            }
+        }
+
+        // Re-register the global hotkey to match the new config.
+        use std::str::FromStr;
+        use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+        if let Err(e) = app.global_shortcut().unregister_all() {
+            tracing::warn!("failed to unregister shortcuts: {e}");
+        }
+        if cfg.hotkey.enabled {
+            if let Ok(shortcut) = Shortcut::from_str(&cfg.hotkey.combo) {
+                if let Err(e) = app.global_shortcut().register(shortcut) {
+                    tracing::warn!("failed to register shortcut: {e}");
+                }
+            }
+        }
+
+        // Notify any open window so the UI reflects the switch.
+        let _ = app.emit("config:switched", &name);
+    });
+}
+
 fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
-    match event.id.as_ref() {
+    let id = event.id.as_ref();
+    if let Some(name) = id.strip_prefix(PROFILE_PREFIX) {
+        switch_to_profile(app, name.to_string());
+        return;
+    }
+    match id {
         "record" => {
             let _ = app.emit("menu:record", ());
         }

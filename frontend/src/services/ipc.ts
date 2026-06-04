@@ -156,3 +156,25 @@ export async function detachTag(recordingId: string, tagId: number): Promise<voi
 export async function tagsFor(recordingId: string): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("tags_for", { recordingId });
 }
+
+// ── Config profiles ─────────────────────────────────────────────────────────
+
+/** List the names of all saved config profiles. */
+export async function listProfiles(): Promise<string[]> {
+  return await tauriInvoke<string[]>("list_profiles");
+}
+
+/** Snapshot the current config.toml under the given profile name. */
+export async function saveProfile(name: string): Promise<void> {
+  await tauriInvoke("save_profile", { name });
+}
+
+/** Switch the active config to the named profile (and reload the daemon). */
+export async function switchProfile(name: string): Promise<void> {
+  await tauriInvoke("switch_profile", { name });
+}
+
+/** Delete a saved profile (does not touch the live config). */
+export async function deleteProfile(name: string): Promise<void> {
+  await tauriInvoke("delete_profile", { name });
+}
