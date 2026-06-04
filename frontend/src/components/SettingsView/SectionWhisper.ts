@@ -230,8 +230,8 @@ export class SectionWhisper {
             </span>
           </div>
           
-          <div class="settings-field" style="display: flex; flex-direction: column; align-items: stretch;">
-            <label style="margin-bottom: 8px;">Bundled Model</label>
+          <div class="settings-field stacked">
+            <label>Bundled Model</label>
             <!-- Hidden input to maintain form binding -->
             <div style="display:none;">
               ${renderField(
