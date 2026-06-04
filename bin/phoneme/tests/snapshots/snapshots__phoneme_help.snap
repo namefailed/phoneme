@@ -8,6 +8,7 @@ Usage: phoneme.exe [OPTIONS] <COMMAND>
 
 Commands:
   record   Push-to-talk: read stdin until EOF / Enter, then stop
+  import   Import an existing audio file (wav/mp3/m4a) and transcribe it
   list     List recordings
   show     Show one recording
   replay   Re-transcribe a saved recording

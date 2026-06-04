@@ -226,6 +226,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::ImportRecording { path } => import_recording(state, path).await,
         Request::ReplayRecording { id, model } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 if let Some(m) = model {
@@ -544,6 +545,113 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     .into(),
         }),
     }
+}
+
+/// Import an existing audio file: decode it to a canonical WAV under the audio
+/// dir, insert a catalog row, and enqueue it for the normal transcription
+/// pipeline. Mirrors `DaemonRecorder::stop` (catalog row at `Transcribing` +
+/// `inbox.enqueue`) so an imported file is processed exactly like a mic
+/// recording — the only difference is where the WAV came from.
+async fn import_recording(state: &AppState, path: String) -> Response {
+    let input = std::path::PathBuf::from(&path);
+
+    // Validate before doing any work, so the client gets a clean error.
+    if !input.exists() {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::NotFound,
+            message: format!("file not found: {path}"),
+        });
+    }
+    if !phoneme_audio::is_supported_extension(&input) {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::Internal,
+            message: format!(
+                "unsupported audio format (supported: {})",
+                phoneme_audio::SUPPORTED_EXTENSIONS.join(", ")
+            ),
+        });
+    }
+
+    let id = phoneme_core::RecordingId::new();
+    let started_at = chrono::Local::now();
+    let audio_path = state
+        .paths
+        .audio_dir
+        .join(id.day_folder())
+        .join(format!("{}.wav", id.file_stem()));
+
+    // Decode is CPU-bound and blocking — run it off the async runtime so the
+    // IPC connection (and the single-connection Tauri bridge) stays responsive.
+    let decode_out = audio_path.clone();
+    let decode_result = tokio::task::spawn_blocking(move || {
+        phoneme_audio::decode_to_canonical_wav(&input, &decode_out)
+    })
+    .await;
+    let duration_ms = match decode_result {
+        Ok(Ok(ms)) => ms,
+        Ok(Err(e)) => {
+            return Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: format!("failed to decode audio: {e}"),
+            });
+        }
+        Err(e) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::Internal,
+                message: format!("decode task panicked: {e}"),
+            });
+        }
+    };
+
+    let row = phoneme_core::Recording {
+        id: id.clone(),
+        started_at,
+        duration_ms,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        transcript: None,
+        model: None,
+        status: RecordingStatus::Transcribing,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+    };
+    if let Err(e) = state.catalog.insert(&row).await {
+        // Clean up the WAV we just wrote — no row means it's orphaned.
+        let _ = tokio::fs::remove_file(&audio_path).await;
+        return Response::Err(IpcError {
+            kind: error_to_kind(&e),
+            message: e.to_string(),
+        });
+    }
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: started_at,
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    if let Err(e) = state.inbox.enqueue(&payload).await {
+        return Response::Err(IpcError {
+            kind: error_to_kind(&e),
+            message: e.to_string(),
+        });
+    }
+
+    state.events.emit(DaemonEvent::RecordingStopped {
+        id: id.clone(),
+        duration_ms,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+    });
+    tracing::info!(id = %id, source = %path, ms = duration_ms, "imported recording");
+    Response::Ok(serde_json::json!({ "id": id.to_string() }))
 }
 
 fn error_to_kind(e: &phoneme_core::Error) -> IpcErrorKind {

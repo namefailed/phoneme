@@ -35,6 +35,13 @@ pub enum Request {
         keep_audio: bool,
     },
 
+    /// Import an existing audio file (wav/mp3/m4a) as a new recording.
+    /// The daemon decodes it to a canonical WAV and runs it through the same
+    /// transcription pipeline as a microphone recording. Returns the new id.
+    ImportRecording {
+        path: String,
+    },
+
     // Queue operations
     ReplayRecording {
         id: RecordingId,

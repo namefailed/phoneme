@@ -8,6 +8,7 @@ import { onNav } from "./services/events";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { importAudioPaths } from "./utils/import";
 
 /// A mounted view. Every view exposes an optional `dispose` for teardown
 /// (RecordingsView unsubscribes its event listeners there).
@@ -65,6 +66,7 @@ export class App {
     // Auto-launch the first-run wizard if no config exists yet.
     void this.maybeAutoWizard();
     void this.loadAndApplyTheme();
+    void this.setupFileDrop();
 
     window.addEventListener("config:saved", (e: any) => {
       const cfg = e.detail;
@@ -91,6 +93,27 @@ export class App {
     } catch (e) {
       console.warn("Failed to load or apply theme:", e);
       // fallback to default theme defined in CSS
+    }
+  }
+
+  /**
+   * Import audio files dropped onto the app window. Uses Tauri's native
+   * drag-drop event (paths are real filesystem paths, which the daemon needs —
+   * the browser File API would only give us opaque blobs).
+   */
+  private async setupFileDrop() {
+    try {
+      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+      await getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type === "drop") {
+          const paths = event.payload.paths ?? [];
+          if (paths.length > 0) {
+            void importAudioPaths(paths);
+          }
+        }
+      });
+    } catch (e) {
+      console.warn("Failed to register file-drop handler:", e);
     }
   }
 

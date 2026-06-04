@@ -25,6 +25,8 @@ pub struct Cli {
 pub enum Command {
     /// Push-to-talk: read stdin until EOF / Enter, then stop.
     Record(RecordArgs),
+    /// Import an existing audio file (wav/mp3/m4a) and transcribe it.
+    Import(ImportArgs),
     /// List recordings.
     List(ListArgs),
     /// Show one recording.
@@ -96,6 +98,12 @@ pub struct ShowArgs {
 #[derive(Debug, clap::Args)]
 pub struct IdArgs {
     pub id: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ImportArgs {
+    /// Path to an audio file to import (wav/mp3/m4a).
+    pub file: String,
 }
 
 #[derive(Debug, clap::Args)]
