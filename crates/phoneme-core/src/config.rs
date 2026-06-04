@@ -204,6 +204,17 @@ impl LlmConfig {
     }
 }
 
+/// Which audio source a recording captures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureSource {
+    /// The default (or configured) microphone input device.
+    #[default]
+    Microphone,
+    /// The system's audio output, captured via WASAPI loopback (Windows only).
+    SystemAudio,
+}
+
 /// Hardware and threshold settings for the audio recording stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordingConfig {
@@ -221,6 +232,10 @@ pub struct RecordingConfig {
     pub max_duration_secs: u32,
     /// The name of the specific input device to record from, or `"default"` to use the system default.
     pub input_device: String,
+    /// Which audio source to capture: the microphone (default) or the system's
+    /// audio output via WASAPI loopback.
+    #[serde(default)]
+    pub source: CaptureSource,
 }
 
 /// Settings governing external script execution (hooks) upon transcription success.
@@ -400,6 +415,7 @@ impl Default for Config {
                 silence_window_ms: 3000,
                 max_duration_secs: 300,
                 input_device: "default".into(),
+                source: CaptureSource::Microphone,
             },
             hook: HookConfig {
                 commands: vec![
@@ -591,6 +607,14 @@ pub fn default_config_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn recording_source_defaults_to_microphone() {
+        assert_eq!(
+            Config::default().recording.source,
+            CaptureSource::Microphone
+        );
+    }
 
     #[test]
     fn debug_redacts_api_keys() {

@@ -5,8 +5,9 @@
 
 use crate::convert::{downmix_to_mono_f32, f32_to_i16, i16_to_f32};
 use crate::format::{AudioConfig, SampleRate};
-use cpal::traits::{DeviceTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat as CpalSampleFormat, StreamConfig};
+use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -113,11 +114,66 @@ pub struct CpalSource {
 }
 
 impl CpalSource {
+    /// Open the given device as a microphone (default input) capture.
+    ///
+    /// This is the historical entry point and keeps the original behavior: it
+    /// uses the device's default *input* config and builds a normal input
+    /// stream.
     pub fn open(device: cpal::Device) -> Result<Self> {
         let supported = device
             .default_input_config()
             .map_err(|e| Error::Internal(format!("cpal default_input_config: {e}")))?;
+        Self::open_with_config(device, supported)
+    }
 
+    /// Open a capture source for the requested [`CaptureSource`].
+    ///
+    /// - [`CaptureSource::Microphone`] captures `device` as an input stream
+    ///   (identical to [`CpalSource::open`]).
+    /// - [`CaptureSource::SystemAudio`] ignores `device` and captures the
+    ///   default *output* device in WASAPI loopback mode.
+    pub fn open_kind(device: cpal::Device, kind: CaptureSource) -> Result<Self> {
+        match kind {
+            CaptureSource::Microphone => Self::open(device),
+            CaptureSource::SystemAudio => Self::system_audio(),
+        }
+    }
+
+    /// Open a system-audio (loopback) capture on the default output device.
+    ///
+    /// On Windows, building an *input* stream on the default *output* (render)
+    /// device makes cpal/WASAPI transparently capture loopback — i.e. whatever
+    /// is currently playing through the speakers. The device's output format
+    /// (typically 48 kHz stereo f32) feeds the same downmix → resample → i16
+    /// pipeline used for the microphone path.
+    ///
+    /// Returns a clear error on platforms / hosts without a usable default
+    /// output device or loopback support.
+    pub fn system_audio() -> Result<Self> {
+        if !cfg!(windows) {
+            return Err(Error::Internal(
+                "system-audio capture (WASAPI loopback) is only available on Windows in this build"
+                    .into(),
+            ));
+        }
+        let host = cpal::default_host();
+        let device = host.default_output_device().ok_or_else(|| {
+            Error::Internal(
+                "system-audio capture not available: no default output device for loopback".into(),
+            )
+        })?;
+        // For loopback, the stream config must come from the output device's
+        // default *output* config — the render endpoint's mix format.
+        let supported = device
+            .default_output_config()
+            .map_err(|e| Error::Internal(format!("cpal default_output_config (loopback): {e}")))?;
+        Self::open_with_config(device, supported)
+    }
+
+    fn open_with_config(
+        device: cpal::Device,
+        supported: cpal::SupportedStreamConfig,
+    ) -> Result<Self> {
         let device_sample_rate = supported.sample_rate().0;
         let device_channels = supported.channels() as usize;
         let device_format = supported.sample_format();
@@ -344,5 +400,21 @@ mod tests {
         let (mut src, _sink) = SyntheticSource::new(cfg);
         src.stop().await.unwrap();
         assert_eq!(src.next_block().await.unwrap(), None);
+    }
+
+    #[test]
+    fn capture_source_defaults_to_microphone() {
+        assert_eq!(CaptureSource::default(), CaptureSource::Microphone);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn system_audio_unavailable_off_windows() {
+        // Real loopback can't be unit-tested with hardware, but the
+        // platform-gate must report a clear, non-panicking error off Windows.
+        let err = CpalSource::system_audio()
+            .err()
+            .expect("system_audio should error off Windows");
+        assert!(format!("{err}").contains("only available on Windows"));
     }
 }
