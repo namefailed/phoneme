@@ -6,6 +6,7 @@ import { listTags, type Tag } from "../services/ipc";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../utils/toast";
+import { escapeHtml, escapeAttr } from "../utils/format";
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
@@ -167,11 +168,11 @@ export class HeaderBar {
 
   render() {
     const f = filterStore.get();
-    const tagOptions = this.tags.map(t => `<option value="${t.id}" ${f.tag_id === t.id ? "selected" : ""}>${t.name}</option>`).join("");
+    const tagOptions = this.tags.map(t => `<option value="${t.id}" ${f.tag_id === t.id ? "selected" : ""}>${escapeHtml(t.name)}</option>`).join("");
     this.container.innerHTML = `
       <div class="headerbar" data-tauri-drag-region>
         <button class="icon-btn hb-sort-btn" id="hb-sort" aria-label="Toggle sort order" title="${filterStore.get().sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}">${filterStore.get().sort_desc === false ? "↑ Oldest" : "↓ Newest"}</button>
-        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${f.search || ""}" title="Search through your transcripts by text" />
+        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${escapeAttr(f.search || "")}" title="Search through your transcripts by text" />
         <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">
           <input type="date" class="filter-pill hb-date-since" title="Start date (from)" value="${f.since ? f.since.split('T')[0] : ''}">
           <span style="color: var(--fg-muted)">-</span>

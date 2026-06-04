@@ -524,7 +524,21 @@ pub fn reveal_file(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn read_file_string(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("failed to read {}: {}", path, e))
+    // Security: this command exists only to load the user's configured external
+    // vimrc. Restrict it to exactly that file (canonicalized) so a compromised
+    // renderer cannot read arbitrary files like ~/.ssh/id_rsa.
+    let cfg = config_io::read().map_err(|e| format!("config error: {e}"))?;
+    if cfg.editor.vimrc_path.is_empty() {
+        return Err("no external vimrc is configured".into());
+    }
+    let allowed =
+        std::fs::canonicalize(&cfg.editor.vimrc_path).map_err(|e| format!("config error: {e}"))?;
+    let requested =
+        std::fs::canonicalize(&path).map_err(|e| format!("failed to read {}: {}", path, e))?;
+    if requested != allowed {
+        return Err("path not permitted".into());
+    }
+    std::fs::read_to_string(&requested).map_err(|e| format!("failed to read {}: {}", path, e))
 }
 
 #[tauri::command]
@@ -777,6 +791,32 @@ pub async fn wizard_pull_ollama_model(window: tauri::Window, model: String) -> R
     Ok(())
 }
 
+/// Hosts Phoneme may download from. Anything else is rejected so a compromised
+/// renderer cannot fetch an arbitrary (e.g. malicious .exe) URL that could then
+/// be run via wizard_run_installer.
+fn is_allowed_download_url(url: &str) -> bool {
+    if !url.starts_with("https://") {
+        return false;
+    }
+    let host = match reqwest::Url::parse(url) {
+        Ok(u) => match u.host_str() {
+            Some(h) => h.to_ascii_lowercase(),
+            None => return false,
+        },
+        Err(_) => return false,
+    };
+    const ALLOWED: &[&str] = &[
+        "huggingface.co",
+        "github.com",
+        "objects.githubusercontent.com",
+        "ollama.com",
+        "registry.ollama.ai",
+    ];
+    ALLOWED
+        .iter()
+        .any(|a| host == *a || host.ends_with(&format!(".{a}")))
+}
+
 #[tauri::command]
 pub async fn wizard_download_file(
     window: tauri::Window,
@@ -785,6 +825,9 @@ pub async fn wizard_download_file(
 ) -> Result<String, String> {
     if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
         return Err("Invalid filename".to_string());
+    }
+    if !is_allowed_download_url(&url) {
+        return Err("Download URL is not from an allowed host".to_string());
     }
 
     let dest_path = std::env::temp_dir().join(&filename);

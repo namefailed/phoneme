@@ -23,19 +23,24 @@ When you press your global hotkey (e.g., `Ctrl+Alt+Space`), Phoneme records your
 
 The app does not force you into a specific ecosystem. It transcribes. You decide where it goes.
 
-## 🚀 What's in v1.4
+## 🚀 What's in v1.5
 
 This is the stable public release. Everything in this list is available today:
 
 - **Press-to-talk & toggle modes** — bind any global hotkey, choose Hold or Toggle behaviour.
-- **Local Whisper transcription** — uses your own [whisper-server][whisper-server] or the bundled one; your audio never leaves your machine.
-- **AI post-processing** — optionally clean up, format, or translate transcripts through a local [Ollama](https://ollama.ai) model or OpenAI. Includes 9 preset prompts.
+- **Multi-provider transcription** — local [whisper-server][whisper-server] (default; audio never leaves your machine) or cloud: OpenAI, Groq, Deepgram, AssemblyAI, or any OpenAI-compatible endpoint.
+- **Whisper model manager** — browse, download, and switch GGML model sizes in-app with a hardware-aware recommendation; re-transcribe old recordings against a different model.
+- **AI post-processing** — optionally clean up, format, or translate transcripts through local [Ollama](https://ollama.ai) or a cloud LLM (OpenAI-compatible, Groq, or Anthropic Claude), with a guided Ollama setup wizard and 9 preset prompts.
 - **Hook pipeline** — every transcript is delivered to your script as JSON on stdin. Chain scripts, POST to webhooks, send to Obsidian, Org-mode, Notion, or anywhere. Five reference hooks included.
 - **Full CLI** — every GUI action is also available as `phoneme` commands. Works with AutoHotkey, Kanata, Stream Deck, or any hotkey daemon.
 - **Tags** — attach colour-coded tags to recordings; rename, recolour, or delete them in a tag manager; filter and search the catalog.
 - **Language selector** — pass a BCP-47 language hint to Whisper; 20 languages plus auto-detect.
 - **Auto-delete retention** — optional cleanup policy by max age and/or max count; the daemon prunes hourly.
 - **Transcript editor** — edit transcripts in-app with optional full Vim mode (visual, linewise, mouse selection all work).
+- **Pause / resume recording** — pause mid-recording and resume into the same file; an interactive waveform plays back in the detail pane.
+- **Bulk actions** — multi-select recordings to delete, re-transcribe, or export in one go.
+- **Transcript history** — the original machine transcript is preserved when you edit; view or restore it anytime.
+- **Word count & custom date filter** — reading-time estimate per note plus a custom date-range filter for the catalog.
 - **Doctor** — built-in health checker that tests the daemon, audio dir, hooks, Whisper server, and Ollama, with one-click fixes.
 - **11 themes** — Catppuccin Mocha/Macchiato/Latte, Dracula, Everforest, Gruvbox, Nord, One Dark, Rosé Pine, Solarized Light, Tokyo Night.
 - **Auto-updater** — downloads and installs new releases directly from GitHub.

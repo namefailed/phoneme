@@ -15,7 +15,7 @@ On very slow machines the first cold start may exceed this.
 ## "Pipe in use" when starting the daemon
 
 ```
-$ phoneme daemon --start
+$ phoneme daemon start
 error: another phoneme-daemon is running (pid 4521)
 ```
 
@@ -23,8 +23,8 @@ Another instance is already running.
 
 **Fix:**
 ```powershell
-phoneme daemon --stop
-phoneme daemon --start
+phoneme daemon stop
+phoneme daemon start
 ```
 
 Or kill the process:

@@ -29,7 +29,7 @@ JSON on stdin**.
   "duration_ms": 8470,
   "model": "ggml-base.en",
   "metadata": {
-    "phoneme_version": "1.4.1",
+    "phoneme_version": "1.5.0",
     "hook_version": 1
   }
 }
@@ -51,12 +51,14 @@ webhook_url = "https://your-webhook.app/api/ingest"
 
 [llm_post_process]
 enabled = true
-provider = "openai" # "openai", "ollama", or "none"
+provider = "openai" # none | ollama | openai | groq | anthropic
 api_url = ""        # Leave empty to use the provider default (OpenAI:
                     # https://api.openai.com/v1/chat/completions,
-                    # Ollama: http://127.0.0.1:11434/api/generate)
-model = "gpt-4o"    # gpt-4o-mini / gpt-4o for OpenAI; llama3.2:3b for Ollama
-api_key = "sk-..."  # Required for OpenAI, ignored by Ollama
+                    # Ollama: http://127.0.0.1:11434/api/generate;
+                    # Groq and Anthropic use their standard endpoints)
+model = "gpt-4o"    # e.g. gpt-4o (OpenAI), llama-3.1-8b-instant (Groq),
+                    # claude-3-5-haiku-latest (Anthropic), llama3.2:3b (Ollama)
+api_key = "sk-..."  # Required for cloud providers; ignored by Ollama
 prompt = "Clean up this voice transcript, removing stutters and filler words. Reply ONLY with the cleaned text."
 
 ```
@@ -72,7 +74,7 @@ Hooks are not on PATH. The full command string is invoked via the system shell:
 
 ## Reference hooks
 
-Phoneme ships four reference hooks. On first run they're copied to
+Phoneme ships five reference hooks (including `to-clipboard.ps1`). On first run they're copied to
 `%APPDATA%\phoneme\hooks\`. **The installer never overwrites them**, so feel
 free to edit.
 

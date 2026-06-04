@@ -1,5 +1,5 @@
 import { addTag, attachTag, detachTag, listAllTags, tagsFor, type Tag } from "../../services/ipc";
-import { escapeHtml } from "../../utils/format";
+import { escapeHtml, escapeAttr } from "../../utils/format";
 import { showToast } from "../../utils/toast";
 
 export class TagChips {
@@ -36,7 +36,7 @@ export class TagChips {
       <div class="tags">
         ${chips}
         <input class="tag-add" placeholder="+ add tag" list="all-tags" />
-        <datalist id="all-tags">${this.allTags.map((t) => `<option value="${t.name}">`).join("")}</datalist>
+        <datalist id="all-tags">${this.allTags.map((t) => `<option value="${escapeAttr(t.name)}">`).join("")}</datalist>
       </div>
     `;
     this.container.querySelectorAll<HTMLButtonElement>(".tag-x").forEach((btn) => {

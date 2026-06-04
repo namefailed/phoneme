@@ -215,6 +215,9 @@ struct AnthropicProvider {
 #[derive(Debug, Deserialize)]
 struct AnthropicResponse {
     content: Vec<AnthropicBlock>,
+    /// "end_turn", "max_tokens", "stop_sequence", … — used to detect truncation.
+    #[serde(default)]
+    stop_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,7 +232,7 @@ impl LlmProvider for AnthropicProvider {
     async fn process(&self, prompt: &str, text: &str) -> Result<String> {
         let body = serde_json::json!({
             "model": self.model,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
             "messages": [{ "role": "user", "content": combine(prompt, text) }],
         });
         let req = self
@@ -240,6 +243,13 @@ impl LlmProvider for AnthropicProvider {
             .header("anthropic-version", "2023-06-01")
             .json(&body);
         let parsed: AnthropicResponse = send_json(req, "Anthropic").await?;
+        // Don't return a transcript Claude truncated at max_tokens — fail so the
+        // (non-fatal) post-processing step falls back to the raw transcript.
+        if parsed.stop_reason.as_deref() == Some("max_tokens") {
+            return Err(Error::Internal(
+                "Anthropic response truncated at max_tokens".into(),
+            ));
+        }
         parsed
             .content
             .into_iter()

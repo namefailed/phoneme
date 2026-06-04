@@ -64,6 +64,7 @@ fn derive_tray_state(event: &DaemonEvent) -> Option<TrayState> {
         }
         DaemonEvent::WhisperStatusChanged { reachable: false } => Some(TrayState::WhisperError),
         DaemonEvent::WhisperStatusChanged { reachable: true } => Some(TrayState::Idle),
+        DaemonEvent::RecordingCancelled { .. } => Some(TrayState::Idle),
         _ => None,
     }
 }
