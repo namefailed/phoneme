@@ -27,20 +27,18 @@ export class SectionStorage {
           </div>
         </div>
 
-        <div class="settings-field" style="margin-top: 24px; border-top: 1px solid var(--border-subtle); padding-top: 20px;">
+        <div class="settings-field stacked" style="margin-top: 24px; border-top: 1px solid var(--border-subtle); padding-top: 20px;">
           <label>Auto-Delete Policy</label>
           <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
             <div style="display: flex; align-items: center; gap: 10px;">
               <label style="min-width: 130px; font-weight: normal; color: var(--fg-muted);">Max age (days)</label>
               <input type="number" min="1" id="ret-max-age" placeholder="disabled"
-                style="width: 100px;"
                 value="${this.config.retention?.max_age_days ?? ""}" />
               <span style="font-size: 11px; color: var(--fg-faded);">Leave blank to disable</span>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
               <label style="min-width: 130px; font-weight: normal; color: var(--fg-muted);">Max recordings</label>
               <input type="number" min="1" id="ret-max-count" placeholder="disabled"
-                style="width: 100px;"
                 value="${this.config.retention?.max_count ?? ""}" />
               <span style="font-size: 11px; color: var(--fg-faded);">Keep only the most recent N</span>
             </div>

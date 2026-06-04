@@ -284,6 +284,26 @@ select[data-key="daemon.log_level"] {
   color: var(--fg-default);
 }
 
+/* Stacked field — overrides the two-column grid so a custom control group
+   spans the full row width, with the label sitting on top and the content
+   filling the row left-aligned (instead of being pushed into the narrow
+   right-hand control column). Used by the Bundled Model card list and the
+   Auto-Delete Policy fields. */
+.settings-field.stacked {
+  display: block;
+  width: 100%;
+}
+.settings-field.stacked > label {
+  display: block;
+  margin-bottom: 8px;
+}
+/* Reset the narrow number-input cap inside stacked groups so placeholders
+   like "disabled" are not truncated. */
+.settings-field.stacked input[type="number"] {
+  max-width: none;
+  width: 110px;
+}
+
 /* AI prompt field — overrides the two-column grid to let the textarea
    span the full control column while keeping the label aligned left. */
 .settings-field.ai-prompt-field {
