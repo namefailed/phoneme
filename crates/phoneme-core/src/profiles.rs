@@ -157,14 +157,7 @@ mod tests {
         // Path separators, parent refs, and dots must all be rejected so a
         // crafted name can never escape the profiles directory.
         for bad in [
-            "..",
-            "../evil",
-            "..\\evil",
-            "foo/bar",
-            "foo\\bar",
-            "a.b",
-            "C:evil",
-            "name\0",
+            "..", "../evil", "..\\evil", "foo/bar", "foo\\bar", "a.b", "C:evil", "name\0",
         ] {
             assert!(
                 validate_name(bad).is_err(),
