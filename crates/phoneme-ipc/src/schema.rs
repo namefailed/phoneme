@@ -149,6 +149,9 @@ pub enum DaemonEvent {
     RecordingResumed {
         id: RecordingId,
     },
+    RecordingCancelled {
+        id: RecordingId,
+    },
     TranscriptionStarted {
         id: RecordingId,
     },
