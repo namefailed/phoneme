@@ -62,6 +62,9 @@ pub struct Recording {
     pub hook_duration_ms: Option<i64>,
     pub transcribed_at: Option<DateTime<Local>>,
     pub hook_ran_at: Option<DateTime<Local>>,
+    /// Free-form user notes, stored separately from the transcript and never
+    /// touched by (re-)transcription or AI post-processing.
+    pub notes: Option<String>,
 }
 
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.
