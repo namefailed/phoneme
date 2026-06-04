@@ -90,8 +90,9 @@ impl DaemonRecorder {
         state.catalog.insert(&row).await?;
 
         // Open the CPAL device and the audio Recorder.
-        let device = resolve_input_device(&state.config.load().recording.input_device)?;
-        let source = CpalSource::open(device)?;
+        let app_cfg = state.config.load();
+        let device = resolve_input_device(&app_cfg.recording.input_device)?;
+        let source = CpalSource::open_kind(device, app_cfg.recording.source)?;
         let audio_mode = match mode {
             RecordMode::Hold => AudioMode::Hold,
             RecordMode::Oneshot => AudioMode::Oneshot,
