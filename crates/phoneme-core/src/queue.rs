@@ -95,40 +95,53 @@ impl InboxQueue {
     pub async fn claim_next(&self) -> Result<Option<HookPayload>> {
         let pending = self.root.join("pending");
         let entries = read_json_entries_sorted(&pending).await?;
-        let Some(file) = entries.first() else {
-            return Ok(None);
-        };
-        let id_str = file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| Error::Internal(format!("bad inbox filename: {}", file.display())))?
-            .to_string();
-        // Reject filenames that aren't a canonical RecordingId (e.g. a file a
-        // user manually dropped into pending/). Without this, the fixed-offset
-        // slicing in file_stem()/day_folder() — and the debug_assert in
-        // from_str_unchecked — would panic the daemon. Quarantine and move on.
-        let Some(id) = RecordingId::parse(id_str) else {
-            if let Some(name) = file.file_name() {
-                let _ = fs::rename(file, self.root.join("failed").join(name)).await;
+        // Walk the queue oldest-first and return the first file we can actually
+        // claim. Crucially, a file we *can't* claim (malformed name, OS-level
+        // rename failure from an AV/dangling-handle lock, or a corrupt payload)
+        // must NOT block the rest of the queue: we skip it and try the next one.
+        // A locked file is left in pending/ and retried on the next poll; a
+        // structurally-bad file is quarantined to failed/. The old code always
+        // took entries.first() and propagated a rename error, so one stuck file
+        // would starve the entire queue forever.
+        for file in &entries {
+            let Some(id_str) = file.file_stem().and_then(|s| s.to_str()) else {
+                tracing::warn!(file = %file.display(), "skipping inbox file with non-utf8 name");
+                continue;
+            };
+            // Reject filenames that aren't a canonical RecordingId (e.g. a file a
+            // user manually dropped into pending/). Without this, the fixed-offset
+            // slicing in file_stem()/day_folder() — and the debug_assert in
+            // from_str_unchecked — would panic the daemon. Quarantine and move on.
+            let Some(id) = RecordingId::parse(id_str) else {
+                if let Some(name) = file.file_name() {
+                    let _ = fs::rename(file, self.root.join("failed").join(name)).await;
+                }
+                tracing::warn!(file = %file.display(), "quarantined inbox file with malformed id");
+                continue;
+            };
+            let processing = self
+                .root
+                .join("processing")
+                .join(format!("{}.json", id.as_str()));
+            // If the claim rename fails (file locked by AV, a dangling read
+            // handle from a crashed process, etc.) skip this file for now and try
+            // the next — never let one un-renameable file starve the queue. It
+            // stays in pending/ and is retried on the next poll once unlocked.
+            if let Err(e) = fs::rename(file, &processing).await {
+                tracing::debug!(file = %file.display(), error = %e, "could not claim inbox file (locked?); skipping for now");
+                continue;
             }
-            tracing::warn!(file = %file.display(), "quarantined inbox file with malformed id");
-            return Ok(None);
-        };
-        let processing = self
-            .root
-            .join("processing")
-            .join(format!("{}.json", id.as_str()));
-        fs::rename(file, &processing).await?;
-        let payload = match read_payload(&processing).await {
-            Ok(p) => p,
-            Err(e) => {
-                // Quarantine the unparseable file so it stops blocking the queue.
-                self.finish_failed(&id, "corrupt_payload", &e.to_string())
-                    .await?;
-                return Ok(None);
+            match read_payload(&processing).await {
+                Ok(p) => return Ok(Some(p)),
+                Err(e) => {
+                    // Quarantine the unparseable file and keep scanning.
+                    self.finish_failed(&id, "corrupt_payload", &e.to_string())
+                        .await?;
+                    continue;
+                }
             }
-        };
-        Ok(Some(payload))
+        }
+        Ok(None)
     }
 
     /// Move a processing payload to `done/`, replacing it with the final form

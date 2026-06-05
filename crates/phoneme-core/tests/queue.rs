@@ -101,11 +101,21 @@ async fn claim_next_skips_corrupt_then_serves_valid() {
     let good = RecordingId::from_datetime(Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap());
     q.enqueue(&make_payload(good.clone())).await.unwrap();
 
-    // First claim quarantines the corrupt file → None.
-    assert!(q.claim_next().await.unwrap().is_none());
-    // Second claim serves the valid payload.
-    let claimed = q.claim_next().await.unwrap().expect("valid payload");
+    // A single claim quarantines the corrupt file AND serves the valid one in
+    // the same pass — an un-claimable file must never cost a whole poll cycle or
+    // starve the rest of the queue.
+    let claimed = q
+        .claim_next()
+        .await
+        .unwrap()
+        .expect("valid payload served despite corrupt file");
     assert_eq!(claimed.id, good);
+    // The corrupt file was quarantined to failed/.
+    assert!(dir
+        .path()
+        .join("failed")
+        .join("20260519T090000000.json")
+        .exists());
 }
 
 #[tokio::test]
