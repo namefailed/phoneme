@@ -7,7 +7,7 @@
  */
 import {
   deleteRecording,
-  replayRecording,
+  retranscribeRecording,
   type Recording,
 } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
@@ -96,7 +96,7 @@ export class BulkActionBar {
     let failed = 0;
     for (const r of recs) {
       try {
-        await replayRecording(r.id);
+        await retranscribeRecording(r.id);
         ok++;
       } catch {
         failed++;

@@ -41,7 +41,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::Import(args) => commands::import::run(args, cfg).await,
         Command::List(args) => commands::list::run(args, cfg, cli.json).await,
         Command::Show(args) => commands::show::run(args, cfg, cli.json).await,
-        Command::Replay(args) => commands::replay::run(args, cfg).await,
+        Command::Retranscribe(args) => commands::retranscribe::run(args, cfg).await,
         Command::Delete(args) => commands::delete::run(args, cfg).await,
         Command::Doctor(args) => commands::doctor::run(args, cfg, cli.json).await,
         Command::Config(args) => commands::config_cmd::run(args, cfg).await,

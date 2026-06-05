@@ -58,7 +58,10 @@ pub enum Request {
     },
 
     // Queue operations
-    ReplayRecording {
+    /// Re-run transcription for a saved recording (optionally with a different
+    /// model). Named "retranscribe" because it re-transcribes — it does not
+    /// replay audio.
+    RetranscribeRecording {
         id: RecordingId,
         model: Option<String>,
     },

@@ -145,9 +145,9 @@ pub async fn record_resume(bridge: Br<'_>) -> Result<Value, String> {
 /// Request the daemon to re-transcribe an existing recording by its ID.
 /// This will push the recording back into the background queue.
 #[tauri::command]
-pub async fn replay_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
+pub async fn retranscribe_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::ReplayRecording { id, model: None }).await
+    forward(&bridge, Request::RetranscribeRecording { id, model: None }).await
 }
 
 /// Import an existing audio file (wav/mp3/m4a) as a new recording. The daemon
