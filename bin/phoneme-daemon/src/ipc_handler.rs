@@ -79,13 +79,29 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         })),
         Request::RecordStatus => {
             let active = state.recorder.current().await;
+            let meeting_active = state.recorder.meeting_active().await;
             Response::Ok(serde_json::json!({
                 "recording": active.is_some(),
                 "id": active.as_ref().map(|a| a.id.to_string()),
+                "meeting": meeting_active,
             }))
         }
         Request::RecordStart { mode } => match state.recorder.start(state, mode.into()).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::StartMeeting => match state.recorder.start_meeting(state).await {
+            Ok(session_id) => Response::Ok(serde_json::json!({ "session_id": session_id })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::StopMeeting => match state.recorder.stop_meeting(state).await {
+            Ok(session_id) => Response::Ok(serde_json::json!({ "session_id": session_id })),
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
                 message: e.to_string(),
@@ -682,6 +698,8 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         transcribed_at: None,
         hook_ran_at: None,
         notes: None,
+        session_id: None,
+        track: None,
     };
     if let Err(e) = state.catalog.insert(&row).await {
         // Clean up the WAV we just wrote — no row means it's orphaned.

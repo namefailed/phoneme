@@ -23,6 +23,14 @@ pub enum Request {
     RecordCancel,
     RecordStatus,
 
+    /// Meeting Mode (v1.6): start a dual-track recording — the microphone and
+    /// the system audio (WASAPI loopback) are captured concurrently as two
+    /// separate recordings linked by a shared `session_id`. Both are
+    /// transcribed independently through the normal pipeline.
+    StartMeeting,
+    /// Stop the active meeting: both tracks are finalized and enqueued.
+    StopMeeting,
+
     // Catalog queries
     ListRecordings {
         filter: ListFilter,
