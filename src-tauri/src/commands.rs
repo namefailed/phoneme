@@ -107,6 +107,20 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::RecordCancel).await
 }
 
+/// Meeting Mode (v1.6): start a dual-track recording. The daemon captures the
+/// microphone AND the system audio (WASAPI loopback) concurrently as two
+/// separate recordings linked by a shared `session_id`. Returns `{ session_id }`.
+#[tauri::command]
+pub async fn start_meeting(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::StartMeeting).await
+}
+
+/// Stop the active meeting. Both tracks are finalized and transcribed.
+#[tauri::command]
+pub async fn stop_meeting(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::StopMeeting).await
+}
+
 /// Signal the daemon to pause the current recording. Audio captured while
 /// paused is discarded; recording continues into the same file on resume.
 #[tauri::command]

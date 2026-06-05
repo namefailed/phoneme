@@ -21,6 +21,10 @@ export type Recording = {
   hook_ran_at?: string | null;
   /** Free-form user notes, stored separately from the transcript. */
   notes?: string | null;
+  /** Meeting-session link (v1.6). Two recordings of one meeting share this. */
+  session_id?: string | null;
+  /** Which track of a meeting this is: "mic" or "system". Null otherwise. */
+  track?: string | null;
 };
 
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
@@ -77,6 +81,20 @@ export async function recordResume(): Promise<void> {
 
 export async function recordCancel(): Promise<void> {
   await tauriInvoke("record_cancel");
+}
+
+/**
+ * Meeting Mode (v1.6): start a dual-track recording. The daemon captures the
+ * microphone AND the system audio (WASAPI loopback) concurrently as two
+ * separate recordings linked by a shared `session_id`. Returns the session id.
+ */
+export async function startMeeting(): Promise<{ session_id: string }> {
+  return await tauriInvoke<{ session_id: string }>("start_meeting");
+}
+
+/** Stop the active meeting. Both tracks are finalized and transcribed. */
+export async function stopMeeting(): Promise<{ session_id: string }> {
+  return await tauriInvoke<{ session_id: string }>("stop_meeting");
 }
 
 export async function replayRecording(id: string, model?: string): Promise<void> {
