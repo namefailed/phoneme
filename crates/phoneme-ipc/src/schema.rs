@@ -168,6 +168,16 @@ pub enum DaemonEvent {
     TranscriptionStarted {
         id: RecordingId,
     },
+    /// A live, partial transcript of an in-progress recording, emitted
+    /// periodically while `recording.streaming_preview` is enabled. Each event
+    /// carries the latest best-effort transcript of the audio captured so far;
+    /// the UI replaces the displayed preview each time. This is NOT the
+    /// authoritative result — the final transcript still arrives via
+    /// `TranscriptionDone` after the recording stops.
+    TranscriptionPartial {
+        id: RecordingId,
+        text: String,
+    },
     TranscriptionDone {
         id: RecordingId,
         transcript: String,
