@@ -120,14 +120,17 @@ export class RecordingDetail {
 
     // Transcript history: lazily fetch the preserved original on demand and
     // offer a one-click restore.
-    this.container.querySelector("#view-original")?.addEventListener("click", async () => {
+    const viewOriginalBtn = this.container.querySelector<HTMLButtonElement>("#view-original");
+    viewOriginalBtn?.addEventListener("click", async () => {
       const box = this.container.querySelector<HTMLElement>("#original-box")!;
       if (box.style.display !== "none") {
         box.style.display = "none";
+        if (viewOriginalBtn) viewOriginalBtn.textContent = "View original transcript";
         return;
       }
       const original = await getOriginalTranscript(r.id);
       box.style.display = "block";
+      if (viewOriginalBtn) viewOriginalBtn.textContent = "Hide original transcript";
       if (original == null) {
         box.innerHTML = `<div style="font-size: 11px; color: var(--fg-muted);">No earlier version saved for this recording.</div>`;
         return;
