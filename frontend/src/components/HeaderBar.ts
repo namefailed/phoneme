@@ -239,6 +239,7 @@ export class HeaderBar {
         </div>
         <button class="icon-btn" id="hb-import" aria-label="Import audio file" title="Import an audio file (wav/mp3/m4a) to transcribe">⬇ Import</button>
         <button class="icon-btn" id="hb-models" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models">🎛 Models</button>
+        <button class="icon-btn" id="hb-tags" aria-label="Manage tags" title="Create, rename, recolor, and delete tags">🏷 Tags</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
       <div id="hb-preview" class="hb-preview" style="display:none" title="Live transcription preview (updates while recording)"></div>
@@ -322,6 +323,13 @@ export class HeaderBar {
         // Anchored to the button so the picker drops down from it; it persists
         // via write_config and broadcasts `config:saved` for any open view.
         await openModelPicker("transcription", modelsBtn);
+      });
+    }
+    const tagsBtn = this.container.querySelector<HTMLButtonElement>("#hb-tags");
+    if (tagsBtn) {
+      tagsBtn.addEventListener("click", async () => {
+        const { openTagManager } = await import("./TagManager");
+        await openTagManager();
       });
     }
     const settings = this.container.querySelector("#hb-settings");
