@@ -448,3 +448,70 @@ mark.search-hit {
   color: var(--fg-default);
   border-color: var(--border);
 }
+
+/* ── Session grouping (Meeting Mode) ──────────────────────────────────────── */
+.rec-group-head {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: 3px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-default);
+  transition: background 0.15s ease-out;
+}
+.rec-group-head:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.rec-group-head > .col-checkbox {
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rec-group-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  overflow: hidden;
+}
+.rec-group-chevron {
+  color: var(--accent);
+  font-size: 11px;
+  width: 12px;
+  flex-shrink: 0;
+}
+.rec-group-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rec-group-meta {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Expanded meeting track rows: indented and tagged with a track badge. */
+.rec-row--track {
+  background: color-mix(in srgb, var(--accent) 2%, transparent);
+}
+.rec-track-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  vertical-align: middle;
+}
