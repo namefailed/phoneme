@@ -20,6 +20,7 @@ export class HeaderBar {
   private unsubEvent: (() => void) | null = null;
   private isRecording = false;
   private isPaused = false;
+  private previewText: string | null = null;
   private whisperReachable: boolean | null = null; // null = status unknown
   private queuePending = 0;
   private queueProcessing = 0;
@@ -45,8 +46,16 @@ export class HeaderBar {
 
       if (eventName === "recording_started") {
         this.setRecordingState(true, false);
+        this.setPreview(null);
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
         this.setRecordingState(false, false);
+        this.setPreview(null);
+      } else if (eventName === "transcription_partial") {
+        // Live streaming preview (opt-in). Only show while actively recording;
+        // the final transcript arrives via the normal pipeline after stop.
+        if (this.isRecording) {
+          this.setPreview(typeof p.text === "string" ? p.text : null);
+        }
       } else if (eventName === "recording_paused") {
         this.setRecordingState(true, true);
       } else if (eventName === "recording_resumed") {
@@ -137,6 +146,24 @@ export class HeaderBar {
     }
   }
 
+  /**
+   * Update the live streaming-transcription preview line shown under the header
+   * bar. Pass a string to show the latest partial transcript (replacing the
+   * previous one), or `null` to hide the line. Text is escaped before insertion.
+   */
+  private setPreview(text: string | null) {
+    this.previewText = text && text.trim() ? text.trim() : null;
+    const el = this.container.querySelector<HTMLElement>("#hb-preview");
+    if (!el) return;
+    if (this.previewText) {
+      el.innerHTML = `<span class="hb-preview-label">live</span> ${escapeHtml(this.previewText)}`;
+      el.style.display = "block";
+    } else {
+      el.textContent = "";
+      el.style.display = "none";
+    }
+  }
+
   /** Update only the status indicator elements without re-rendering the whole bar. */
   private updateStatusIndicators() {
     const whisperDot = this.container.querySelector<HTMLElement>("#hb-whisper-dot");
@@ -204,12 +231,15 @@ export class HeaderBar {
         <button class="icon-btn" id="hb-import" aria-label="Import audio file" title="Import an audio file (wav/mp3/m4a) to transcribe">⬇ Import</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
+      <div id="hb-preview" class="hb-preview" style="display:none" title="Live transcription preview (updates while recording)"></div>
     `;
 
     // Restore recording-active class if we were recording before re-render
     if (this.isRecording) {
       this.container.querySelector("#hb-record")?.classList.add("recording-active");
     }
+    // Restore the live preview line if one was showing before this re-render.
+    this.setPreview(this.previewText);
 
     const search = this.container.querySelector<HTMLInputElement>("#hb-search");
     if (search) {
