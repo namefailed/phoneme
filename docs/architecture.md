@@ -23,11 +23,15 @@ Phoneme is built as a highly modular, decoupled system. It is composed of three 
 
 ### 1. The Daemon (`phoneme-daemon`)
 The core engine of Phoneme. It runs in the background (completely headless) and is responsible for:
-- Managing audio capture (`cpal`).
+- Managing audio capture (`cpal`) from the microphone or, on Windows, the system-audio loopback device.
+- Dual-track **Meeting Mode** — capturing the microphone and system audio simultaneously as two recordings linked by a shared `session_id`.
+- The **pre-roll** ring buffer (idle pre-capture) so the first syllable isn't clipped, and the optional **streaming preview** loop that periodically re-transcribes the in-progress recording.
+- **Importing** existing audio files (`.wav`/`.mp3`/`.m4a`) by decoding them to the canonical format and running them through the same pipeline.
 - Maintaining the SQLite database catalog.
-- Running inference jobs (via Whisper).
-- Executing Smart Cleanup (LLM Post-processing).
-- Firing webhook and command scripts.
+- Running transcription jobs through the configured provider (local whisper.cpp or a cloud backend).
+- Executing Smart Cleanup (LLM post-processing).
+- Firing webhook and command scripts (hooks).
+- Enforcing the auto-delete retention policy.
 - Broadcasting state changes over named pipes.
 
 ### 2. The CLI (`phoneme`)
@@ -46,6 +50,42 @@ To enforce boundaries, the repository is split into several workspaces and direc
 - `phoneme`: The CLI frontend.
 - `src-tauri`: The GUI backend.
 - `frontend`: The GUI frontend (TypeScript/Vite/HTML/CSS).
+
+## Lifecycle of a Recording
+
+Understanding one recording's journey explains most of the daemon:
+
+1. **Trigger.** A `RecordStart` (or `RecordToggle`) request arrives over the named pipe — from the CLI, the GUI, or any external hotkey daemon. Meeting Mode instead sends `StartMeeting`, which opens two capture sources at once.
+2. **Capture.** The daemon opens a `cpal` stream on the selected device (microphone, or the system-audio loopback device on Windows). Audio is resampled to the canonical **16 kHz mono `i16`** format. If pre-roll is enabled, the buffered idle audio is prepended so the first syllable survives. A catalog row is inserted immediately at `status = recording`.
+3. **Live feedback.** While capturing, the daemon emits `RecordingStarted`; if the streaming preview is enabled, a periodic loop snapshots the in-progress buffer, transcribes it, and emits `TranscriptionPartial` events.
+4. **Finalize.** On `RecordStop` the capture task drains its tail, writes a `.wav` to the audio directory, and updates the row's duration.
+5. **Transcribe.** The recording is handed to the configured `TranscriptionProvider`. The daemon emits `TranscriptionStarted`, then `TranscriptionDone` (or `TranscriptionFailed`). The raw provider output is preserved as `original_transcript`.
+6. **Post-process (optional).** If LLM post-processing is configured, the transcript is cleaned/formatted/translated; the cleaned text becomes the live `transcript` while the raw text stays in `original_transcript`.
+7. **Hooks.** The final transcript is delivered to the user's hook scripts as JSON on stdin (and optionally POSTed to a webhook). The daemon emits `HookStarted` / `HookDone` / `HookFailed`.
+8. **Retention.** An hourly sweep enforces the optional auto-delete policy, emitting a `RetentionWarning` before anything is removed.
+
+Imported files skip steps 1–4: the file is decoded to the canonical format, copied into the audio directory, and enters the pipeline at step 5.
+
+## IPC Protocol
+
+All three binaries speak the same protocol defined in `phoneme-ipc`:
+
+- **Transport:** a Windows named pipe (`\\.\pipe\phoneme-daemon`), framed as **newline-delimited JSON** (`JsonLineCodec`). Each line is one complete message.
+- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case), e.g. `{"type":"record_start", ...}`. Covers recording control, meeting control, catalog queries (`list_recordings`, `get_recording`, `list_session`), editing (`update_transcript`, `update_notes`), import, tags, and lifecycle (`reload_config`, `shutdown`).
+- **`Response`** — daemon → client, tagged on `"status"` with a `value` payload: either `Ok(value)` or `Err(IpcError)`. `IpcError` carries a machine-readable `kind` (`already_recording`, `not_found`, `whisper_unreachable`, …) plus a human message.
+- **`DaemonEvent`** — daemon → all subscribers, tagged on `"event"`. Clients send `subscribe_events` and then receive the one-way stream (`recording_started`, `transcription_partial`, `queue_depth_changed`, `notes_updated`, …). This is how the GUI stays in sync when the CLI drives the daemon, and vice versa.
+
+Because the schema lives in one shared crate, the CLI, GUI backend, and daemon can never drift out of sync — adding a request variant is a compile error until every match arm handles it.
+
+## Data Model
+
+The catalog is a single SQLite database (WAL mode, with an FTS5 full-text index over transcripts), managed through `sqlx` with versioned migrations in `phoneme-core/migrations`.
+
+- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`, `audio_path`, `transcript`, `original_transcript`, `model`, `status`, hook result columns, `notes`, and the meeting-link columns `session_id` + `track`. Standalone recordings have a null `session_id`; the two tracks of a meeting share one non-null `session_id` and differ by `track` (`mic` / `system`).
+- **`tags`** and **`recording_tags`** — colour-coded tags and their many-to-many attachments.
+- **FTS5 mirror** — kept in sync via triggers so `list_recordings` can do prefix search safely (the query string is sanitised into a robust `term* AND term*` form before it ever reaches SQLite).
+
+Audio is stored on disk under a date-foldered directory, not in the database — the SQLite file stays small and copyable.
 
 ### Frontend Architecture
 
