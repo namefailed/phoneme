@@ -13,9 +13,13 @@ export class SectionTags {
   private allTags: Tag[] = [];
   private activeTags: Set<number> = new Set(); // tags attached to ≥1 recording
   private editingId: number | null = null;
+  /** When true, omit the outer settings-section card/heading so the component
+   *  can be embedded in a modal that already provides the frame + title. */
+  private bare: boolean;
 
-  constructor(container: HTMLElement, _config: any) {
+  constructor(container: HTMLElement, _config: any, opts?: { bare?: boolean }) {
     this.container = container;
+    this.bare = opts?.bare ?? false;
     void this.load();
   }
 
@@ -37,13 +41,7 @@ export class SectionTags {
   private render() {
     const sorted = [...this.allTags].sort((a, b) => a.name.localeCompare(b.name));
 
-    this.container.innerHTML = `
-      <div class="settings-section">
-        <h3>Tag Manager</h3>
-        <p class="settings-help-text" style="margin-bottom: 20px;">
-          Changes apply immediately and are reflected in the filter bar and recording detail panel.
-        </p>
-
+    const inner = `
         <div id="tag-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px;">
           ${
             sorted.length === 0
@@ -75,6 +73,17 @@ export class SectionTags {
             <button class="primary" id="btn-add-tag">Add</button>
           </div>
         </div>
+    `;
+
+    this.container.innerHTML = this.bare
+      ? inner
+      : `
+      <div class="settings-section">
+        <h3>Tag Manager</h3>
+        <p class="settings-help-text" style="margin-bottom: 20px;">
+          Changes apply immediately and are reflected in the filter bar and recording detail panel.
+        </p>
+        ${inner}
       </div>
     `;
 
