@@ -1,5 +1,9 @@
-# to-denote.ps1 - creates a Denote-flavored note file with proper filename
-# slug under ~/Documents/org/notes/.
+# to-denote.ps1 — ADVANCED example. Creates a Denote-flavoured Org note (with a
+# proper `ID--slug__tags.org` filename) under ~/Documents/org/notes/. For
+# Emacs/Denote users; a template to adapt rather than a general default.
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 $payload = $input | Out-String | ConvertFrom-Json
 $id    = Get-Date -Date $payload.timestamp -Format "yyyyMMddTHHmmss"
