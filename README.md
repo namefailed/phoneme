@@ -23,9 +23,22 @@ When you press your global hotkey (e.g., `Ctrl+Alt+Space`), Phoneme records your
 
 The app does not force you into a specific ecosystem. It transcribes. You decide where it goes.
 
-## 🚀 What's in v1.5
+## 🚀 What's in v1.6
 
-This is the stable public release. Everything in this list is available today:
+This is the stable public release. Everything in this list is available today.
+
+**New in v1.6:**
+
+- **System-audio capture** — record what's playing through your speakers (WASAPI loopback), not just your microphone. Switch the capture source in Recording settings.
+- **Meeting Mode** — capture your microphone *and* system audio at the same time as two linked tracks, so you get both sides of a call. Start it from the toolbar or `phoneme meeting start`.
+- **Session grouping** — the two tracks of a meeting collapse into a single group in the recordings list, expandable to the individual Microphone / System tracks.
+- **Import audio** — drop an existing `.wav`, `.mp3`, or `.m4a` file into the catalog and run it through the same transcription + hook pipeline as a live recording.
+- **Pre-roll buffer** — Phoneme keeps a rolling few hundred milliseconds of audio before you hit record, so your first syllable is never clipped. Tunable (or disabled) in settings.
+- **Streaming live preview** — watch a running transcript appear while you're still speaking (opt-in toggle).
+- **Per-recording notes** — attach free-form notes to any recording in a dedicated field that survives re-transcription and transcript edits.
+- **Config profiles** — save named configuration profiles and switch between them from the tray or `phoneme profile use <name>`.
+
+**Also included:**
 
 - **Press-to-talk & toggle modes** — bind any global hotkey, choose Hold or Toggle behaviour.
 - **Multi-provider transcription** — local [whisper-server][whisper-server] (default; audio never leaves your machine) or cloud: OpenAI, Groq, Deepgram, AssemblyAI, or any OpenAI-compatible endpoint.
@@ -161,7 +174,7 @@ cargo tauri dev
 
 ## 🗺️ Roadmap
 
-For a detailed look at our upcoming features—including macOS/Linux ports, Streaming Transcription, and Bundled Ollama—please see our [Roadmap](docs/ROADMAP.md).
+For a detailed look at upcoming features—including macOS/Linux ports, a bundled Ollama runtime, and an MCP server for AI-agent integration—please see the [Roadmap](docs/ROADMAP.md).
 
 ## 🤝 Contributing
 
