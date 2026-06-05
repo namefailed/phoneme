@@ -76,6 +76,20 @@ On first launch, the wizard walks you through:
 
 **Local-first, not local-only.** No telemetry, no update pings — ever. By default the only network calls Phoneme makes are to your own whisper-server endpoint, your chosen local LLM, and (optionally) Hugging Face when you explicitly click to download a model during setup; your voice and your thoughts stay on your hard drive. If you deliberately switch transcription to a cloud provider, Phoneme warns you up front that your audio will leave your machine before sending anything. Local is the default and the recommended path.
 
+## 🆚 What makes Phoneme different
+
+There are some great dictation apps out there. Here's where Phoneme stakes its claim:
+
+- **Local-first by default, not as an afterthought.** Your audio and transcripts never leave your machine unless *you* pick a cloud provider — and Phoneme warns you when you do. No telemetry, no account, no subscription.
+- **Open source (MIT/Apache-2.0).** Read it, fork it, audit it. No black box deciding what happens to your voice.
+- **It's a *pipeline*, not a silo.** Every transcript is handed to *your* scripts as JSON. Send notes to Obsidian, a webhook, a task manager, or a local LLM — and trigger different actions on different keywords. Most dictation apps stop at "copy to clipboard."
+- **CLI-first, automation-friendly.** Every GUI action is also a `phoneme` command, so you can bind it to AutoHotkey, Kanata, a Stream Deck — or run the whole thing headless with no GUI at all.
+- **Your model, your choice.** Run fully offline with local whisper.cpp, or point it at OpenAI / Groq / Deepgram / AssemblyAI / ElevenLabs / any OpenAI-compatible endpoint. Same for LLM cleanup (Ollama / OpenAI-compatible / Groq / Anthropic).
+- **Meeting capture built in.** Record your mic *and* system audio as two linked tracks, then transcribe both.
+- **Windows-first.** The most polished local dictation apps are macOS-only; Phoneme is built for Windows today (macOS/Linux are on the roadmap).
+
+Not the right fit? Phoneme is honest about that — see [Alternatives](#-alternatives--similar-projects) below.
+
 ## 🤝 Other Projects That Pair Well With Phoneme
 
 Because Phoneme pipes JSON directly into your own scripts (`hooks`), it pairs perfectly with local-first, text-based productivity apps:
@@ -86,10 +100,14 @@ Because Phoneme pipes JSON directly into your own scripts (`hooks`), it pairs pe
 
 ## 🔄 Alternatives & Similar Projects
 
-If Phoneme doesn't quite fit your workflow, or if you're on a different operating system, check out these excellent alternatives:
-- **[MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper)** & **[Superwhisper](https://superwhisper.com/)**: Fantastic, highly polished local dictation apps built exclusively for macOS.
-- **[AudioPen](https://audiopen.ai/)**: A popular cloud-based web app that records and beautifully summarizes your thoughts.
-- **[AquaVoice](https://withaqua.com/)**: A voice-native text editor.
+Phoneme isn't for everyone, and that's fine. If one of these fits your needs better, use it — here's an honest map:
+
+- **[Wispr Flow](https://wisprflow.ai/)** — the closest commercial competitor. Polished, cross-platform, with excellent instant system-wide dictation that types into any app. **Pick it if** you want a turnkey paid product and seamless inline dictation everywhere, and you're comfortable with a cloud service. **Pick Phoneme if** you want local-first, open-source, and scriptable.
+- **[MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper)** & **[Superwhisper](https://superwhisper.com/)** — fantastic, highly polished local dictation apps. **Pick them if** you're on **macOS** (Phoneme is Windows-first for now).
+- **[AudioPen](https://audiopen.ai/)** — a cloud web app that beautifully summarizes rambling thoughts. **Pick it if** you want zero setup and don't mind cloud processing.
+- **[AquaVoice](https://withaqua.com/)** — a voice-native text editor. **Pick it if** your main use is composing long-form text by voice.
+
+**Reach for Phoneme** when you want it local-first, open-source, Windows-native, and scriptable — voice notes that flow into *your* tools, not a walled garden.
 
 ## 💻 CLI is a peer, not a fallback
 
@@ -113,21 +131,40 @@ We deliberately built Phoneme with a CLI-first architecture to provide you with 
 
 Because the CLI seamlessly controls the daemon, setting up a custom workflow is as simple as making your tool shell out to `phoneme record --start` and `phoneme record --stop`!
 
+### Headless / no-GUI
+
+Don't want the tray app at all? You don't need it. The daemon and CLI are fully standalone — the GUI is just one of several clients:
+
+```bash
+phoneme daemon --start      # launch the headless background daemon
+phoneme record --oneshot    # record → transcribe → run your hooks
+phoneme daemon --stop       # shut it down
+```
+
+Bind those commands to your own hotkey tool and you have a complete voice-notes pipeline with no window ever opening. The installer drops all three binaries (`phoneme`, `phoneme-daemon`, `phoneme-tray`) on disk, so you can simply ignore the tray; or build only the daemon + CLI from source (`cargo build -p phoneme-daemon -p phoneme`).
+
 ## 🪝 Hooks
 
-A hook is your script. Phoneme invokes it with the transcript as JSON on stdin. Ship your own or use one of the five reference hooks:
+A hook is your script. Phoneme invokes it with the transcript as JSON on stdin. Ship your own or start from one of the **nine** reference hooks:
 
 | Hook | What it does |
 |---|---|
 | `to-stdout.ps1` | Default. Echoes the transcript to stdout. |
-| `to-clipboard.ps1` | Copies the transcript to the Windows clipboard instantly. |
-| `to-org-journal.ps1` | Appends to `~/Documents/org/journal.org` (Doom Emacs / Denote). |
+| `to-clipboard.ps1` | Copies the transcript to the Windows clipboard. |
+| `to-file.ps1` | Appends every note (timestamped) to one running Markdown file. |
 | `to-markdown-daily.ps1` | Appends to `~/Documents/notes/YYYY-MM-DD.md` (Obsidian-style). |
-| `to-denote.ps1` | Creates a Denote-flavored note file under `~/Documents/org/notes/`. |
+| `to-webhook.ps1` | POSTs the transcript to Discord/Slack/any webhook. |
+| `summarize-with-ollama.ps1` | Local-LLM summary + action items, fully offline. |
+| `to-todoist.ps1` | Turns an "action item:" note into a Todoist task (great with keyword rules). |
+| `to-org-journal.ps1` / `to-denote.ps1` | Advanced Emacs / Org-mode examples. |
 
-Chain multiple hooks under `[hook] commands = ["script1.ps1", "script2.bat"]`, and optionally POST the JSON payload to a `webhook_url` simultaneously.
+Beyond always-on hooks you can:
+- **Chain** multiple commands: `[hook] commands = ["script1.ps1", "script2.bat"]`
+- **POST to a webhook** concurrently via `webhook_url`
+- **Trigger by keyword** — run a specific hook only when the transcript matches a phrase (e.g. `"action item:"` → `to-todoist.ps1`)
+- **Run on demand** — turn off auto-firing and use the **⚡ Re-fire hook** button
 
-See [docs/hooks.md](docs/hooks.md) for the full contract.
+See [docs/hooks.md](docs/hooks.md) for the full contract and worked examples.
 
 ## 🏗️ Architecture
 
@@ -149,6 +186,10 @@ Three binaries, three libraries, one workspace:
     │      (CLI)      │                                           │   (Tauri GUI)   │
     └─────────────────┘                                           └─────────────────┘
 ```
+
+See [docs/architecture.md](docs/architecture.md) for the design and
+[docs/INTERNAL.md](docs/INTERNAL.md) for a contributor's deep dive (async task
+topology, the audio path, the SQLite/FTS5 catalog, and the IPC wire protocol).
 
 ## 🛠️ Building from source
 

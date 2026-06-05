@@ -4,6 +4,10 @@ Thank you for your interest in contributing to Phoneme! This document outlines t
 
 ## Architecture
 
+> For a contributor's deep dive — the async task topology, the audio path, the
+> SQLite/FTS5 catalog, and the IPC wire protocol — see
+> [`docs/INTERNAL.md`](docs/INTERNAL.md).
+
 Phoneme is designed as a local-first voice transcription suite for Windows. The project is split into three main components within a single Cargo workspace:
 
 1. **`phoneme-daemon`**: The headless backend. It manages the audio recording lifecycle (via CPAL), queueing, sqlite catalog storage, and the lifecycle of the local Whisper (whisper-server). It exposes a Windows Named Pipe (`\\.\pipe\phoneme-daemon`) for IPC.
