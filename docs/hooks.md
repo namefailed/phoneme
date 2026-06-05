@@ -45,9 +45,23 @@ Set the hook in `%APPDATA%\phoneme\config.toml`:
 
 ```toml
 [hook]
-commands = ["powershell -File %APPDATA%/phoneme/hooks/to-org-journal.ps1"]
+# Run one or more commands, in order, after every transcription.
+commands = ["powershell -File %APPDATA%/phoneme/hooks/to-file.ps1"]
 timeout_secs = 30
 webhook_url = "https://your-webhook.app/api/ingest"
+# When false, transcription just saves the text and does NOT fire hooks/webhook;
+# run them on demand with the "⚡ Re-fire hook" button. Default: true.
+run_on_transcribe = true
+
+# Conditional hooks: run an extra command only when the transcript matches.
+[[hook.keyword_rules]]
+pattern = "action item:"        # case-insensitive by default
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
+
+[[hook.keyword_rules]]
+pattern = "summarize:"
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/summarize-with-ollama.ps1"
+case_sensitive = false
 
 [llm_post_process]
 enabled = true
@@ -74,46 +88,100 @@ Hooks are not on PATH. The full command string is invoked via the system shell:
 
 ## Reference hooks
 
-Phoneme ships five reference hooks (including `to-clipboard.ps1`). On first run they're copied to
-`%APPDATA%\phoneme\hooks\`. **The installer never overwrites them**, so feel
-free to edit.
+Phoneme ships nine reference hooks. On first run they're copied to
+`%APPDATA%\phoneme\hooks\`. **The installer never overwrites them**, so feel free
+to edit. Every shipped hook uses `Set-StrictMode` + `$ErrorActionPreference =
+'Stop'`, so a real failure reports as a failed hook instead of a silent success.
 
-### to-stdout.ps1
+### General-purpose
 
-The default. Echoes the transcript to stdout. Use this to verify the pipeline
-works.
+| Hook | What it does |
+|---|---|
+| `to-stdout.ps1` | The default. Echoes the transcript to stdout — use it to verify the pipeline works. |
+| `to-clipboard.ps1` | Copies the transcript to the Windows clipboard, ready to paste anywhere. |
+| `to-file.ps1` | Appends every transcript (timestamped) to one running Markdown file. Destination defaults to `~/Documents/VoiceNotes.md`; override with the `PHONEME_NOTES_FILE` env var. |
+| `to-markdown-daily.ps1` | Obsidian-style daily note at `~/Documents/notes/YYYY-MM-DD.md`: `- **14:35** — … ^20260519T143500823` |
 
-### to-org-journal.ps1
+### Showcase / integrations
 
-Appends each transcript to `~/Documents/org/journal.org` under today's date
-heading. Matches Doom Emacs / Denote workflows.
+| Hook | What it does |
+|---|---|
+| `to-webhook.ps1` | POSTs the transcript as JSON to a webhook (Discord/Slack/n8n/your own server). Set `PHONEME_WEBHOOK_URL`. A spoken note can hit a team channel or automation the instant you stop talking. |
+| `summarize-with-ollama.ps1` | Sends the transcript to a **local** Ollama model and saves a summary + action items to `~/Documents/notes/YYYY-MM-DD-summaries.md` — fully offline, no API keys. Set `PHONEME_OLLAMA_MODEL` (default `llama3.2:3b`). |
+| `to-todoist.ps1` | Creates a Todoist task from the note. Designed to be **keyword-triggered** on `"action item:"` so only your action items become tasks. Set `PHONEME_TODOIST_TOKEN`. |
 
-```org
-* 2026-05-19 Tue
-** 14:35 The cleaned transcription text
-   :PROPERTIES:
-   :PHONEME_ID: 20260519T143500823
-   :AUDIO: C:/.../143500823.wav
-   :END:
+### Advanced (Emacs / Org)
+
+| Hook | What it does |
+|---|---|
+| `to-org-journal.ps1` | Appends to `~/Documents/org/journal.org` under today's "Log" section — a worked example of a richer Org integration; adapt to your own journal layout. |
+| `to-denote.ps1` | Creates a Denote-flavoured note (`20260519T143500--slug__voice.org`) under `~/Documents/org/notes/`. |
+
+> [!TIP]
+> Pair a showcase hook with a **keyword-triggered rule** (Settings → Action Hook):
+> e.g. only run `summarize-with-ollama.ps1` when the transcript contains
+> `"summarize:"`, or fire a Todoist webhook only on `"action item:"`.
+
+## Keyword-triggered hooks
+
+Run an extra command **only when the transcript matches a phrase** — on top of
+the always-on `commands`. Configure them in **Settings → Action Hook**, or in
+`config.toml`:
+
+```toml
+[[hook.keyword_rules]]
+pattern = "action item:"   # matched case-insensitively unless case_sensitive = true
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
+
+[[hook.keyword_rules]]
+pattern = "TODO"
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-file.ps1"
+case_sensitive = true
 ```
 
-### to-markdown-daily.ps1
+Now saying *"…action item: send Sarah the contract"* runs `to-todoist.ps1`
+(which strips the `action item:` prefix and files the task), while ordinary notes
+are left alone. Each matching rule receives the **same JSON payload on stdin** as
+a normal hook, so any of the reference hooks works as a rule target. An empty
+`pattern` never matches.
 
-Obsidian-style daily note at `~/Documents/notes/YYYY-MM-DD.md`:
+## Run hooks only on demand
 
-```markdown
-# 2026-05-19
+By default hooks fire after **every** transcription, including re-transcriptions.
+If you'd rather a re-transcribe just fix the text *without* re-running side
+effects (re-appending to a note, re-posting a webhook), turn hooks off:
 
-- **14:35** — The cleaned transcription text ^20260519T143500823
+```toml
+[hook]
+run_on_transcribe = false
 ```
 
-### to-denote.ps1
+Transcription still saves the transcript; you then fire hooks deliberately with
+the **⚡ Re-fire hook** button on a recording.
 
-Creates a Denote-flavored note file under `~/Documents/org/notes/`:
+## Putting it all together
 
+A config that uses every hook feature at once — chain two always-on hooks, POST
+to a webhook, and route action items to Todoist via a keyword rule:
+
+```toml
+[hook]
+commands = [
+  "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-clipboard.ps1",
+  "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-file.ps1",
+]
+webhook_url = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+run_on_transcribe = true
+timeout_secs = 30
+
+[[hook.keyword_rules]]
+pattern = "action item:"
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
 ```
-20260519T143500--the-cleaned-transcription-text__voice.org
-```
+
+Every note is copied to the clipboard, appended to your notes file, and POSTed to
+Slack; notes containing *"action item:"* additionally become Todoist tasks.
+Subprocess hooks run serially in order; the webhook fires concurrently.
 
 ## Writing your own
 

@@ -1,5 +1,10 @@
-# to-org-journal.ps1 - appends each transcript to ~/Documents/org/journal.org
-# under today's Log section. Matches the specific user's daily journal format.
+# to-org-journal.ps1 — ADVANCED example. Appends each transcript to
+# ~/Documents/org/journal.org under today's "Log" section, matching one specific
+# Org-mode daily-journal layout. Included as a worked example of a richer
+# integration; adapt the headings/format to your own journal.
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 $payload = $input | Out-String | ConvertFrom-Json
 $journal = Join-Path $env:USERPROFILE "Documents\org\journal.org"
