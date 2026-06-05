@@ -3788,7 +3788,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3816,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-audio"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3835,7 +3835,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-core"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3858,7 +3858,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-daemon"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3888,7 +3888,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-ipc"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3907,7 +3907,7 @@ dependencies = [
 
 [[package]]
 name = "phoneme-tray"
-version = "1.5.2"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "directories",
