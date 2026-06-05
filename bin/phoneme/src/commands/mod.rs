@@ -6,6 +6,7 @@ pub mod export;
 pub mod hook_cmd;
 pub mod import;
 pub mod list;
+pub mod meeting;
 pub mod profile_cmd;
 pub mod record;
 pub mod replay;
