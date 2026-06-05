@@ -1,4 +1,4 @@
-import { deleteRecording, refireHook, replayRecording } from "../../services/ipc";
+import { deleteRecording, refireHook, retranscribeRecording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -26,8 +26,8 @@ export class ActionRow {
       <div class="action-row">
         <button class="primary" data-act="play" id="btn-play">▶ Play</button>
         <div class="split-btn">
-          <button data-act="replay">↻ Re-transcribe</button>
-          <button class="split-caret" data-act="replay-with" title="Re-transcribe with…" aria-label="Re-transcribe with…">▾</button>
+          <button data-act="retranscribe">↻ Re-transcribe</button>
+          <button class="split-caret" data-act="retranscribe-with" title="Re-transcribe with…" aria-label="Re-transcribe with…">▾</button>
         </div>
         <button data-act="refire">⚡ Re-fire hook</button>
         <button data-act="copy">📋 Copy</button>
@@ -54,23 +54,23 @@ export class ActionRow {
   private async handle(act: string, btn: HTMLButtonElement) {
     if (act === "play") {
       this.cbs.onTogglePlay();
-    } else if (act === "replay") {
+    } else if (act === "retranscribe") {
       try {
         // Re-runs with the configured transcription model. A per-run model
         // override needs backend plumbing that is intentionally deferred; use
         // the "Re-transcribe with…" caret to change the configured model first.
-        await replayRecording(this.id);
+        await retranscribeRecording(this.id);
         showToast("Queued for re-transcription", "info");
         this.cbs.onRefresh();
       } catch (e) {
         showToast(`Re-transcribe failed: ${e}`, "error");
       }
-    } else if (act === "replay-with") {
+    } else if (act === "retranscribe-with") {
       const { openModelPicker } = await import("../ModelPicker");
       const saved = await openModelPicker("transcription", btn);
       if (saved) {
         try {
-          await replayRecording(this.id);
+          await retranscribeRecording(this.id);
           showToast("Queued for re-transcription", "info");
           this.cbs.onRefresh();
         } catch (e) {

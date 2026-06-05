@@ -9,7 +9,7 @@ pub mod list;
 pub mod meeting;
 pub mod profile_cmd;
 pub mod record;
-pub mod replay;
+pub mod retranscribe;
 pub mod show;
 pub mod tag;
 pub mod watch;

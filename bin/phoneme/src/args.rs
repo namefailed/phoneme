@@ -34,7 +34,8 @@ pub enum Command {
     /// Show one recording.
     Show(ShowArgs),
     /// Re-transcribe a saved recording.
-    Replay(IdArgs),
+    #[command(alias = "replay")]
+    Retranscribe(IdArgs),
     /// Delete a recording.
     Delete(DeleteArgs),
     /// Health check.

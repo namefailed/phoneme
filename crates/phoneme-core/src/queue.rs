@@ -170,8 +170,8 @@ impl InboxQueue {
         Ok(())
     }
 
-    /// Move a processing payload back to pending (e.g., user-initiated replay
-    /// from `failed/` goes pending -> processing on next claim).
+    /// Move a processing payload back to pending (e.g., a user-initiated
+    /// re-transcribe from `failed/` goes pending -> processing on next claim).
     pub async fn requeue(&self, id: &RecordingId) -> Result<()> {
         let processing = self.root.join("processing").join(format!("{id}.json"));
         let pending = self.root.join("pending").join(format!("{id}.json"));
