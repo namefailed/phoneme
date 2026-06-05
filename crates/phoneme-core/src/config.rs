@@ -267,6 +267,39 @@ pub struct RecordingConfig {
     pub streaming_preview: bool,
 }
 
+/// A conditional hook: when a transcript matches `pattern`, `command` is run in
+/// addition to the always-on `HookConfig::commands`. Enables workflows like
+/// "if the note contains 'Action Item:', send it to my task manager".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KeywordRule {
+    /// Substring to look for in the (post-processed) transcript.
+    pub pattern: String,
+    /// The shell command / script to run when `pattern` matches. Receives the
+    /// same JSON `HookPayload` on stdin as a normal hook.
+    pub command: String,
+    /// When `false` (default), matching is case-insensitive.
+    #[serde(default)]
+    pub case_sensitive: bool,
+}
+
+impl KeywordRule {
+    /// Whether this rule's `pattern` occurs in `transcript`. An empty pattern
+    /// never matches (so a half-filled rule in the UI doesn't fire on every
+    /// recording).
+    pub fn matches(&self, transcript: &str) -> bool {
+        if self.pattern.is_empty() {
+            return false;
+        }
+        if self.case_sensitive {
+            transcript.contains(&self.pattern)
+        } else {
+            transcript
+                .to_lowercase()
+                .contains(&self.pattern.to_lowercase())
+        }
+    }
+}
+
 /// Settings governing external script execution (hooks) upon transcription success.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookConfig {
@@ -285,6 +318,10 @@ pub struct HookConfig {
     /// behaviour for existing configs.
     #[serde(default = "default_true")]
     pub run_on_transcribe: bool,
+    /// Conditional hooks that run only when the transcript matches a pattern, in
+    /// addition to the always-on `commands`. Empty by default.
+    #[serde(default)]
+    pub keyword_rules: Vec<KeywordRule>,
 }
 
 /// Global keyboard shortcut bindings for triggering push-to-talk.
@@ -462,6 +499,7 @@ impl Default for Config {
                 timeout_secs: 30,
                 webhook_url: None,
                 run_on_transcribe: true,
+                keyword_rules: Vec::new(),
             },
             hotkey: HotkeyConfig {
                 enabled: false,
@@ -581,6 +619,15 @@ impl Config {
         // run them through shellexpand::env, which would misinterpret those
         // shell variables as OS environment variable references and error.
         out.hook.commands = out.hook.commands.iter().map(|c| expand_cmd(c)).collect();
+        out.hook.keyword_rules = out
+            .hook
+            .keyword_rules
+            .iter()
+            .map(|r| KeywordRule {
+                command: expand_cmd(&r.command),
+                ..r.clone()
+            })
+            .collect();
         Ok(out)
     }
 }
@@ -997,6 +1044,77 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert!(!parsed.hook.run_on_transcribe);
+    }
+
+    #[test]
+    fn keyword_rule_matches_respects_case_sensitivity_and_empty() {
+        let ci = KeywordRule {
+            pattern: "action item".into(),
+            command: "x".into(),
+            case_sensitive: false,
+        };
+        assert!(ci.matches("Here is an ACTION ITEM: call Bob"));
+        assert!(!ci.matches("nothing relevant here"));
+
+        let cs = KeywordRule {
+            pattern: "TODO".into(),
+            command: "x".into(),
+            case_sensitive: true,
+        };
+        assert!(cs.matches("TODO: ship it"));
+        assert!(!cs.matches("todo lowercase"));
+
+        // An empty pattern must never match (avoids firing on every recording).
+        let empty = KeywordRule {
+            pattern: String::new(),
+            command: "x".into(),
+            case_sensitive: false,
+        };
+        assert!(!empty.matches("anything at all"));
+    }
+
+    #[test]
+    fn keyword_rules_round_trip() {
+        let mut cfg = Config::default();
+        cfg.hook.keyword_rules = vec![KeywordRule {
+            pattern: "Action Item:".into(),
+            command: "powershell -File ~/hooks/todo.ps1".into(),
+            case_sensitive: false,
+        }];
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.hook.keyword_rules.len(), 1);
+        assert_eq!(parsed.hook.keyword_rules[0].pattern, "Action Item:");
+        assert!(!parsed.hook.keyword_rules[0].case_sensitive);
+    }
+
+    #[test]
+    fn keyword_rules_absent_in_legacy_toml_defaults_empty() {
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(hook) = toml_val.get_mut("hook").and_then(|v| v.as_table_mut()) {
+            hook.remove("keyword_rules");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without keyword_rules");
+        assert!(parsed.hook.keyword_rules.is_empty());
+    }
+
+    #[test]
+    fn expanded_expands_keyword_rule_command_paths() {
+        let mut cfg = Config::default();
+        cfg.hook.keyword_rules = vec![KeywordRule {
+            pattern: "x".into(),
+            command: "~/hooks/todo.ps1".into(),
+            case_sensitive: false,
+        }];
+        let expanded = cfg.expanded().expect("expands");
+        assert!(
+            !expanded.hook.keyword_rules[0].command.starts_with("~"),
+            "the ~ path token in a keyword rule command should be expanded"
+        );
     }
 
     #[test]

@@ -155,6 +155,35 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         }
     }
 
+    // Conditional keyword-triggered hooks: run each rule whose pattern matches
+    // the (post-processed) transcript. These are supplementary — a failure is
+    // logged but does NOT fail the recording, since the always-on commands
+    // above already succeeded.
+    for rule in &expanded_cfg.hook.keyword_rules {
+        if !rule.matches(&payload.transcript) {
+            continue;
+        }
+        let cmd = rule.command.trim();
+        if cmd.is_empty() {
+            continue;
+        }
+        let runner = HookRunner::new(cmd.to_string(), Duration::from_secs(cfg.hook.timeout_secs));
+        match runner.run(&payload).await {
+            Ok(result) => {
+                total_duration += result.duration_ms;
+                last_cmd = rule.command.clone();
+                if result.exit_code != 0 {
+                    tracing::warn!(pattern = %rule.pattern, exit_code = result.exit_code, "keyword hook exited non-zero");
+                } else {
+                    tracing::info!(pattern = %rule.pattern, "keyword hook ran");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(pattern = %rule.pattern, error = %e, "keyword hook failed to run");
+            }
+        }
+    }
+
     state
         .catalog
         .update_hook_result(&id, &last_cmd, final_exit_code, total_duration)
