@@ -238,6 +238,7 @@ export class HeaderBar {
           <button class="record-btn" id="hb-meeting" title="Meeting Mode: record your mic and the system audio (the meeting) as two linked recordings" ${this.isRecording ? "disabled" : ""}>${this.isMeeting ? "⏹ End Meeting" : "👥 Meeting"}</button>
         </div>
         <button class="icon-btn" id="hb-import" aria-label="Import audio file" title="Import an audio file (wav/mp3/m4a) to transcribe">⬇ Import</button>
+        <button class="icon-btn" id="hb-models" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models">🎛 Models</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
       <div id="hb-preview" class="hb-preview" style="display:none" title="Live transcription preview (updates while recording)"></div>
@@ -312,6 +313,15 @@ export class HeaderBar {
     if (importBtn) {
       importBtn.addEventListener("click", () => {
         void pickAndImportAudio();
+      });
+    }
+    const modelsBtn = this.container.querySelector<HTMLButtonElement>("#hb-models");
+    if (modelsBtn) {
+      modelsBtn.addEventListener("click", async () => {
+        const { openModelPicker } = await import("./ModelPicker");
+        // Anchored to the button so the picker drops down from it; it persists
+        // via write_config and broadcasts `config:saved` for any open view.
+        await openModelPicker("transcription", modelsBtn);
       });
     }
     const settings = this.container.querySelector("#hb-settings");
