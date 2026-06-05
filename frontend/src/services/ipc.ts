@@ -105,8 +105,8 @@ export async function stopMeeting(): Promise<{ session_id: string }> {
   return await tauriInvoke<{ session_id: string }>("stop_meeting");
 }
 
-export async function replayRecording(id: string, model?: string): Promise<void> {
-  await tauriInvoke("replay_recording", { id, model: model || null });
+export async function retranscribeRecording(id: string, model?: string): Promise<void> {
+  await tauriInvoke("retranscribe_recording", { id, model: model || null });
 }
 
 /**
