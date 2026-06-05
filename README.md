@@ -44,7 +44,7 @@ This is the stable public release. Everything in this list is available today.
 - **Multi-provider transcription** — local [whisper-server][whisper-server] (default; audio never leaves your machine) or cloud: OpenAI, Groq, Deepgram, AssemblyAI, or any OpenAI-compatible endpoint.
 - **Whisper model manager** — browse, download, and switch GGML model sizes in-app with a hardware-aware recommendation; re-transcribe old recordings against a different model.
 - **AI post-processing** — optionally clean up, format, or translate transcripts through local [Ollama](https://ollama.ai) or a cloud LLM (OpenAI-compatible, Groq, or Anthropic Claude), with a guided Ollama setup wizard and 9 preset prompts.
-- **Hook pipeline** — every transcript is delivered to your script as JSON on stdin. Chain scripts, POST to webhooks, send to Obsidian, Org-mode, Notion, or anywhere. Five reference hooks included.
+- **Hook pipeline** — every transcript is delivered to your script as JSON on stdin. Chain scripts, POST to webhooks, run keyword-triggered actions, send to Obsidian, Org-mode, Notion, or anywhere. Nine reference hooks included.
 - **Full CLI** — every GUI action is also available as `phoneme` commands. Works with AutoHotkey, Kanata, Stream Deck, or any hotkey daemon.
 - **Tags** — attach colour-coded tags to recordings; rename, recolour, or delete them in a tag manager; filter and search the catalog.
 - **Language selector** — pass a BCP-47 language hint to Whisper; 20 languages plus auto-detect.
