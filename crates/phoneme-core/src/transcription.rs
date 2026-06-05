@@ -147,18 +147,49 @@ struct OpenAiResponse {
     text: String,
 }
 
+/// Cap a third-party error response body before it flows into an `Error` (and
+/// from there into the daemon log and IPC error messages), so a hostile or
+/// chatty endpoint can't flood them. 500 characters is ample to diagnose a real
+/// failure.
+fn truncate_error_body(body: String) -> String {
+    const MAX_CHARS: usize = 500;
+    if body.chars().count() > MAX_CHARS {
+        let mut out: String = body.chars().take(MAX_CHARS).collect();
+        out.push_str("… (truncated)");
+        out
+    } else {
+        body
+    }
+}
+
 /// Provider for any OpenAI-compatible `/v1/audio/transcriptions` endpoint.
 ///
 /// One implementation serves three backends:
 /// * **local whisper.cpp** — `api_key` and `model` are `None`
 /// * **OpenAI** / **Groq** — `api_key` set (sent as Bearer auth) and `model` set
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OpenAiCompatProvider {
     http: reqwest::Client,
     base_url: String,
     api_key: Option<String>,
     model: Option<String>,
     timeout: Duration,
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for OpenAiCompatProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAiCompatProvider")
+            .field("http", &self.http)
+            .field("base_url", &self.base_url)
+            .field(
+                "api_key",
+                &self.api_key.as_deref().map(crate::config::redact_key),
+            )
+            .field("model", &self.model)
+            .field("timeout", &self.timeout)
+            .finish()
+    }
 }
 
 impl OpenAiCompatProvider {
@@ -235,7 +266,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = truncate_error_body(response.text().await.unwrap_or_default());
             return Err(Error::WhisperError {
                 status: status.as_u16(),
                 body,
@@ -255,13 +286,26 @@ impl TranscriptionProvider for OpenAiCompatProvider {
 /// Deepgram is **not** OpenAI-compatible: it authenticates with
 /// `Authorization: Token <key>`, takes the raw audio as the request body, and
 /// returns the transcript nested under `results.channels[].alternatives[]`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DeepgramProvider {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
     model: String,
     timeout: Duration,
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for DeepgramProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeepgramProvider")
+            .field("http", &self.http)
+            .field("base_url", &self.base_url)
+            .field("api_key", &crate::config::redact_key(&self.api_key))
+            .field("model", &self.model)
+            .field("timeout", &self.timeout)
+            .finish()
+    }
 }
 
 impl DeepgramProvider {
@@ -338,7 +382,7 @@ impl TranscriptionProvider for DeepgramProvider {
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = truncate_error_body(response.text().await.unwrap_or_default());
             return Err(Error::WhisperError {
                 status: status.as_u16(),
                 body,
@@ -367,7 +411,7 @@ impl TranscriptionProvider for DeepgramProvider {
 /// (`GET /v2/transcript/{id}`) until `status` is `completed`. Auth is the raw
 /// API key in the `Authorization` header (no scheme prefix). `timeout_secs`
 /// bounds the overall poll budget.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AssemblyAiProvider {
     http: reqwest::Client,
     base_url: String,
@@ -375,6 +419,19 @@ pub struct AssemblyAiProvider {
     /// Optional `speech_model` (e.g. "best", "nano"); empty = AssemblyAI default.
     model: String,
     timeout: Duration,
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for AssemblyAiProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssemblyAiProvider")
+            .field("http", &self.http)
+            .field("base_url", &self.base_url)
+            .field("api_key", &crate::config::redact_key(&self.api_key))
+            .field("model", &self.model)
+            .field("timeout", &self.timeout)
+            .finish()
+    }
 }
 
 impl AssemblyAiProvider {
@@ -417,7 +474,7 @@ impl AssemblyAiProvider {
         };
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = truncate_error_body(response.text().await.unwrap_or_default());
             return Err(Error::WhisperError {
                 status: status.as_u16(),
                 body,
@@ -538,7 +595,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
 /// ElevenLabs is **not** OpenAI-compatible: it authenticates with an
 /// `xi-api-key` header (no scheme prefix) and takes the audio plus a `model_id`
 /// field as multipart form data. The transcript is returned as `{ "text": ... }`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ElevenLabsProvider {
     http: reqwest::Client,
     base_url: String,
@@ -546,6 +603,19 @@ pub struct ElevenLabsProvider {
     /// The Scribe model id (e.g. `scribe_v1`).
     model: String,
     timeout: Duration,
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for ElevenLabsProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ElevenLabsProvider")
+            .field("http", &self.http)
+            .field("base_url", &self.base_url)
+            .field("api_key", &crate::config::redact_key(&self.api_key))
+            .field("model", &self.model)
+            .field("timeout", &self.timeout)
+            .finish()
+    }
 }
 
 impl ElevenLabsProvider {
@@ -609,7 +679,7 @@ impl TranscriptionProvider for ElevenLabsProvider {
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = truncate_error_body(response.text().await.unwrap_or_default());
             return Err(Error::WhisperError {
                 status: status.as_u16(),
                 body,
@@ -621,5 +691,82 @@ impl TranscriptionProvider for ElevenLabsProvider {
             .await
             .map_err(|e| Error::Internal(format!("decoding ElevenLabs response: {e}")))?;
         Ok(parsed.text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &str = "sk-SUPER-SECRET-12345";
+
+    fn client() -> reqwest::Client {
+        reqwest::Client::new()
+    }
+
+    // Every cloud provider holds a plaintext API key but must never render it in
+    // `Debug` output (which can reach the daemon log or a panic backtrace).
+    #[test]
+    fn openai_compat_provider_debug_redacts_api_key() {
+        let p = OpenAiCompatProvider::new(
+            client(),
+            "https://api.openai.com",
+            Some(SECRET.to_string()),
+            Some("whisper-1".to_string()),
+            Duration::from_secs(30),
+        );
+        let dbg = format!("{p:?}");
+        assert!(!dbg.contains(SECRET), "api key leaked: {dbg}");
+        assert!(dbg.contains("redacted"));
+    }
+
+    #[test]
+    fn deepgram_provider_debug_redacts_api_key() {
+        let p = DeepgramProvider::new(
+            client(),
+            "https://api.deepgram.com",
+            SECRET,
+            "nova-2",
+            Duration::from_secs(30),
+        );
+        assert!(!format!("{p:?}").contains(SECRET));
+    }
+
+    #[test]
+    fn assemblyai_provider_debug_redacts_api_key() {
+        let p = AssemblyAiProvider::new(
+            client(),
+            "https://api.assemblyai.com",
+            SECRET,
+            "best",
+            Duration::from_secs(30),
+        );
+        assert!(!format!("{p:?}").contains(SECRET));
+    }
+
+    #[test]
+    fn elevenlabs_provider_debug_redacts_api_key() {
+        let p = ElevenLabsProvider::new(
+            client(),
+            "https://api.elevenlabs.io",
+            SECRET,
+            "scribe_v1",
+            Duration::from_secs(30),
+        );
+        assert!(!format!("{p:?}").contains(SECRET));
+    }
+
+    #[test]
+    fn truncate_error_body_caps_long_bodies_but_passes_short_ones() {
+        let short = "boom".to_string();
+        assert_eq!(truncate_error_body(short.clone()), short);
+
+        let out = truncate_error_body("x".repeat(5000));
+        assert!(
+            out.chars().count() <= 520,
+            "expected truncation, got {} chars",
+            out.chars().count()
+        );
+        assert!(out.ends_with("(truncated)"));
     }
 }
