@@ -8,13 +8,23 @@ use phoneme_audio::format::SampleRate;
 use phoneme_audio::preroll::PreRollBuffer;
 use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
 use phoneme_audio::source::{CpalSource, Source};
+use phoneme_audio::wav;
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
 use phoneme_core::{HookMetadata, HookPayload, Recording, RecordingId, RecordingStatus};
 use phoneme_ipc::DaemonEvent;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
+
+/// How often the streaming-preview loop transcribes the in-progress recording.
+const PREVIEW_INTERVAL: Duration = Duration::from_millis(2500);
+
+/// Minimum number of *new* samples (beyond the previous preview) before we spend
+/// a transcription on a fresh tick. At 16 kHz this is ~0.5 s — below that a
+/// re-transcription rarely changes the text enough to be worth the round trip.
+const PREVIEW_MIN_NEW_SAMPLES: usize = 8_000;
 
 #[derive(Clone, Copy, Debug)]
 pub enum RecordMode {
@@ -60,6 +70,16 @@ struct PreRoll {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// A running streaming-preview loop: periodically transcribes the in-progress
+/// recording and emits `TranscriptionPartial` events. Present only while a
+/// recording is active *and* `recording.streaming_preview` is enabled.
+struct PreviewTask {
+    /// Sending (or dropping) tells the loop to stop and exit.
+    stop_tx: tokio::sync::oneshot::Sender<()>,
+    /// The loop's join handle — awaited on stop so it tears down cleanly.
+    task: tokio::task::JoinHandle<()>,
+}
+
 #[derive(Clone, Default)]
 pub struct DaemonRecorder {
     active: Arc<Mutex<Option<ActiveRecording>>>,
@@ -67,6 +87,9 @@ pub struct DaemonRecorder {
     /// Idle pre-roll pre-capture, present only while enabled and not actively
     /// recording. `None` means no continuous capture is running (the default).
     preroll: Arc<Mutex<Option<PreRoll>>>,
+    /// Streaming transcription preview loop, present only while recording with
+    /// the feature enabled. `None` (the default) means no preview is running.
+    preview: Arc<Mutex<Option<PreviewTask>>>,
 }
 
 /// Whether pre-roll should be active for the current config: opt-in
@@ -202,6 +225,102 @@ impl DaemonRecorder {
         samples
     }
 
+    /// Spawn the streaming-preview loop for `id`, if `recording.streaming_preview`
+    /// is enabled. No-op (and no task) when the flag is off — that default path
+    /// is byte-for-byte the historical behavior. The loop snapshots the live
+    /// recorder every `PREVIEW_INTERVAL`, transcribes the audio so far via the
+    /// configured provider, and emits `TranscriptionPartial`. It transcribes one
+    /// tick at a time (a slow transcription simply means the next tick is
+    /// skipped — never two in flight), and stops when told to via `stop_tx`.
+    async fn start_preview(&self, state: &AppState, id: RecordingId) {
+        if !state.config.load().recording.streaming_preview {
+            return;
+        }
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let state = state.clone();
+        let handle = self.handle.clone();
+        let log_id = id.clone();
+        let task = tokio::spawn(async move {
+            // Reuse a single temp WAV path for every tick; each write truncates.
+            let tmp_wav =
+                std::env::temp_dir().join(format!("phoneme-preview-{}.wav", id.file_stem()));
+            let mut interval = tokio::time::interval(PREVIEW_INTERVAL);
+            // If a transcription overruns the interval, skip missed ticks rather
+            // than firing a burst — this is the "never two at once" throttle.
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // Burn the immediate first tick so we don't transcribe near-empty audio.
+            interval.tick().await;
+            let mut last_len = 0usize;
+
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => break,
+                    _ = interval.tick() => {}
+                }
+
+                // Snapshot the audio captured so far. If the recorder is gone
+                // (race with stop), end the loop.
+                let samples = {
+                    let guard = handle.lock().await;
+                    match guard.as_ref() {
+                        Some(rec) => match rec.snapshot().await {
+                            Ok(s) => s,
+                            Err(_) => break,
+                        },
+                        None => break,
+                    }
+                };
+                // Skip until enough *new* audio has accumulated to be worth a tick.
+                if samples.len() < last_len + PREVIEW_MIN_NEW_SAMPLES {
+                    continue;
+                }
+                last_len = samples.len();
+
+                // Write a temp WAV and transcribe via the configured provider.
+                let cfg = state.config.load();
+                let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
+                if let Err(e) = wav::write_wav(&tmp_wav, &samples, audio_cfg) {
+                    tracing::warn!(error = %e, "streaming preview: failed to write temp WAV; skipping tick");
+                    continue;
+                }
+                let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
+                let provider = state.transcription.provider(&cfg.whisper);
+                match provider.transcribe(&tmp_wav, language.as_deref()).await {
+                    Ok(text) => {
+                        let text = text.trim().to_string();
+                        if !text.is_empty() {
+                            state.events.emit(DaemonEvent::TranscriptionPartial {
+                                id: id.clone(),
+                                text,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        // Preview is best-effort: a failed tick is logged at debug
+                        // and never surfaces to the user (the final pipeline owns
+                        // authoritative success/failure reporting).
+                        tracing::debug!(error = %e, "streaming preview: transcription tick failed");
+                    }
+                }
+            }
+
+            let _ = tokio::fs::remove_file(&tmp_wav).await;
+        });
+
+        *self.preview.lock().await = Some(PreviewTask { stop_tx, task });
+        tracing::info!(id = %log_id, "streaming transcription preview started");
+    }
+
+    /// Stop the streaming-preview loop (if running) and wait for it to exit so
+    /// its temp WAV is cleaned up. No-op when no preview is running.
+    async fn stop_preview(&self) {
+        let Some(PreviewTask { stop_tx, task }) = self.preview.lock().await.take() else {
+            return;
+        };
+        let _ = stop_tx.send(());
+        let _ = task.await;
+    }
+
     /// Start a recording. Returns `AlreadyRecording` if one is in flight.
     pub async fn start(&self, state: &AppState, mode: RecordMode) -> Result<RecordingId> {
         let mut active = self.active.lock().await;
@@ -282,6 +401,10 @@ impl DaemonRecorder {
             });
         }
 
+        // Spawn the live streaming-preview loop. No-op unless
+        // `recording.streaming_preview` is enabled (default: off).
+        self.start_preview(state, id.clone()).await;
+
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
             started_at,
@@ -295,6 +418,9 @@ impl DaemonRecorder {
     pub async fn stop(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
         let active = active_lock.take().ok_or(Error::NotRecording)?;
+        // Stop the streaming-preview loop first so it isn't mid-snapshot when we
+        // take the recorder handle. No-op when no preview is running.
+        self.stop_preview().await;
         let recorder = self.handle.lock().await.take().ok_or(Error::NotRecording)?;
         let result = recorder.stop_and_finalize(&active.audio_path).await?;
 
@@ -338,6 +464,8 @@ impl DaemonRecorder {
     pub async fn cancel(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
         let active = active_lock.take().ok_or(Error::NotRecording)?;
+        // Stop the preview loop before tearing down the recorder. No-op when off.
+        self.stop_preview().await;
         if let Some(recorder) = self.handle.lock().await.take() {
             let _ = recorder.cancel().await;
         }

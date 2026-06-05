@@ -197,3 +197,31 @@ option {
   padding: 0 5px;
   cursor: default;
 }
+
+/* Live streaming-transcription preview line (opt-in feature). Sits directly
+   under the header bar; only shown while recording with the preview enabled. */
+.hb-preview {
+  padding: 4px 12px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg-muted) 12%, transparent);
+}
+.hb-preview .hb-preview-label {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  vertical-align: middle;
+}
