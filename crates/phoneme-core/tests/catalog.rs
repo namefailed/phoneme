@@ -21,6 +21,8 @@ fn sample_recording(id: RecordingId) -> Recording {
         transcribed_at: None,
         hook_ran_at: None,
         notes: None,
+        session_id: None,
+        track: None,
     }
 }
 
