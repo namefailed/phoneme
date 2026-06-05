@@ -4,6 +4,7 @@ export type DaemonEvent =
   | { event: "recording_started"; id: string; started_at: string }
   | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string }
   | { event: "transcription_started"; id: string }
+  | { event: "transcription_partial"; id: string; text: string }
   | { event: "transcription_done"; id: string; transcript: string }
   | { event: "transcription_failed"; id: string; error: string }
   | { event: "hook_started"; id: string }
