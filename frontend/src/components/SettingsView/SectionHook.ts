@@ -76,6 +76,16 @@ export class SectionHook {
             Maximum time (in seconds) to wait for the Integration Script to finish before giving up and labeling the post-processing phase as failed.
           </span>
         </div>
+        <div class="settings-field">
+          <label>Run hooks after transcription</label>
+          <div>${renderField(
+            { key: "hook.run_on_transcribe", label: "", kind: "checkbox" },
+            this.config.hook.run_on_transcribe ?? true,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            When on (default), your Integration Script and webhook fire automatically after every transcription — including re-transcriptions. Turn it off if you only want hooks to run on demand via the <b>⚡ Re-fire hook</b> button (so re-transcribing fixes the text without re-triggering side effects like re-appending to a note).
+          </span>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
