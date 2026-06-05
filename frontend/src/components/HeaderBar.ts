@@ -20,6 +20,7 @@ export class HeaderBar {
   private unsubEvent: (() => void) | null = null;
   private isRecording = false;
   private isPaused = false;
+  private isMeeting = false;
   private previewText: string | null = null;
   private whisperReachable: boolean | null = null; // null = status unknown
   private queuePending = 0;
@@ -45,11 +46,18 @@ export class HeaderBar {
       const eventName = p.event;
 
       if (eventName === "recording_started") {
-        this.setRecordingState(true, false);
-        this.setPreview(null);
+        // A meeting emits recording_started for each of its two tracks; those
+        // must not flip the single-record button into "Stop". The meeting flag
+        // is driven by the Meeting button itself.
+        if (!this.isMeeting) {
+          this.setRecordingState(true, false);
+          this.setPreview(null);
+        }
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
-        this.setRecordingState(false, false);
-        this.setPreview(null);
+        if (!this.isMeeting) {
+          this.setRecordingState(false, false);
+          this.setPreview(null);
+        }
       } else if (eventName === "transcription_partial") {
         // Live streaming preview (opt-in). Only show while actively recording;
         // the final transcript arrives via the normal pipeline after stop.
@@ -226,7 +234,8 @@ export class HeaderBar {
             title="${this.queueProcessing} processing, ${this.queuePending} queued">${this.queuePending + this.queueProcessing || ""}</span>
           <button class="record-btn" id="hb-pause" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" title="Pause / Resume recording">${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
           <button class="record-btn" id="hb-cancel" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" title="Cancel recording and discard audio">✕ Cancel</button>
-          <button class="record-btn" id="hb-record" title="Start/Stop recording manually (or use your global hotkey)">${this.isRecording ? "⏹ Stop" : "🔴 Record"}</button>
+          <button class="record-btn" id="hb-record" title="Start/Stop recording manually (or use your global hotkey)" ${this.isMeeting ? "disabled" : ""}>${this.isRecording ? "⏹ Stop" : "🔴 Record"}</button>
+          <button class="record-btn" id="hb-meeting" title="Meeting Mode: record your mic and the system audio (the meeting) as two linked recordings" ${this.isRecording ? "disabled" : ""}>${this.isMeeting ? "⏹ End Meeting" : "👥 Meeting"}</button>
         </div>
         <button class="icon-btn" id="hb-import" aria-label="Import audio file" title="Import an audio file (wav/mp3/m4a) to transcribe">⬇ Import</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
@@ -316,6 +325,25 @@ export class HeaderBar {
           await invoke("record_stop");
         } else {
           await invoke("record_start", { mode: "oneshot" });
+        }
+      });
+    }
+    const meetingBtn = this.container.querySelector<HTMLButtonElement>("#hb-meeting");
+    if (meetingBtn) {
+      meetingBtn.addEventListener("click", async () => {
+        try {
+          if (this.isMeeting) {
+            await invoke("stop_meeting");
+            this.isMeeting = false;
+            showToast("Meeting stopped — both tracks are transcribing", "info");
+          } else {
+            await invoke("start_meeting");
+            this.isMeeting = true;
+            showToast("Meeting started — recording mic + system audio", "info");
+          }
+          this.render();
+        } catch (e) {
+          showToast(`Meeting toggle failed: ${e}`, "error");
         }
       });
     }
