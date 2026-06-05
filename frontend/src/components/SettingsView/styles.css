@@ -297,6 +297,15 @@ select[data-key="daemon.log_level"] {
   display: block;
   margin-bottom: 8px;
 }
+/* Inner control wrappers in a stacked field must lay their content out
+   full-width and left-aligned. Without this they inherit `align-items:
+   center` from the generic `.settings-field > div` rule above, which — once
+   the wrapper is overridden to `flex-direction: column` (the model-card list
+   and the auto-delete rows) — centres every child horizontally instead of
+   filling the row. That is the "centered when it shouldn't be" bug. */
+.settings-field.stacked > div {
+  align-items: stretch;
+}
 /* Reset the narrow number-input cap inside stacked groups so placeholders
    like "disabled" are not truncated. */
 .settings-field.stacked input[type="number"] {

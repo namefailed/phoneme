@@ -205,6 +205,70 @@ mark.search-hit {
   border-color: var(--err);
   color: var(--err);
 }
+
+/* Split button (primary action + caret) — e.g. "Re-transcribe ▾". The group
+   shares the same surface, border, and shadow as the other action buttons so
+   it no longer reads as a different-coloured control; the two inner buttons
+   are flush segments that hover independently. */
+.action-row .split-btn {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  transition: border-color 0.15s ease-out;
+}
+.action-row .split-btn:hover {
+  border-color: var(--accent);
+}
+.action-row .split-btn button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.action-row .split-btn button:hover {
+  background: var(--bg-surface);
+  color: var(--accent);
+  transform: none;
+}
+.action-row .split-btn .split-caret {
+  border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 0 9px;
+  font-size: 10px;
+}
+
+/* Secondary inline button — used outside Settings (e.g. "View original
+   transcript", "Restore this version", "Browse for custom .bin…"). Settings
+   keeps its own scoped `.settings-field .inline-button` rule, which wins there
+   by specificity; this is the shared baseline everywhere else so these buttons
+   match the app's button scheme instead of rendering unstyled. */
+.inline-button {
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-default);
+  cursor: pointer;
+  transition: all 0.15s ease-out;
+}
+.inline-button:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Transcript history row holding the "View original transcript" toggle. */
+.transcript-history {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
 .transcript-block {
   margin: 0 18px 18px;
   background: var(--bg-surface);
