@@ -3,9 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Render an API key for `Debug` output without leaking it. Used by the manual
-/// `Debug` impls on the key-bearing config structs so a stray `debug!(?cfg)`
-/// can never dump a plaintext key into the daemon log.
-fn redact_key(key: &str) -> &'static str {
+/// `Debug` impls on the key-bearing config structs — and the transcription/LLM
+/// provider structs — so a stray `debug!(?cfg)` can never dump a plaintext key
+/// into the daemon log.
+pub(crate) fn redact_key(key: &str) -> &'static str {
     if key.is_empty() {
         "<unset>"
     } else {

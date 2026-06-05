@@ -346,6 +346,17 @@ impl DaemonRecorder {
 
     /// Start a recording. Returns `AlreadyRecording` if one is in flight.
     pub async fn start(&self, state: &AppState, mode: RecordMode) -> Result<RecordingId> {
+        // A meeting owns both the microphone and the system-audio device. Refuse
+        // to start a single-track recording while one is running — otherwise we
+        // would open a second microphone stream concurrent with the meeting's
+        // mic track and finalize two overlapping recordings. Checked before
+        // acquiring `active` (mirrors `start_meeting`'s ordering) so we never
+        // hold both locks at once.
+        if self.meeting.lock().await.is_some() {
+            return Err(Error::AlreadyRecording {
+                current: "meeting in progress".into(),
+            });
+        }
         let mut active = self.active.lock().await;
         if let Some(a) = active.as_ref() {
             return Err(Error::AlreadyRecording {
@@ -620,6 +631,22 @@ impl DaemonRecorder {
         self.start_meeting_with_sources(state, sources).await
     }
 
+    /// Roll back a partially-started meeting: cancel each already-started
+    /// track's recorder (releasing its capture device) and delete its catalog
+    /// row. Used when a later track fails to start, so a mid-start failure
+    /// leaves no orphaned `recording`-status rows or live capture tasks behind.
+    /// Best-effort — cleanup failures are logged, not propagated.
+    async fn abort_partial_meeting(state: &AppState, tracks: Vec<MeetingTrackHandle>) {
+        for t in tracks {
+            if let Err(e) = t.recorder.cancel().await {
+                tracing::warn!(id = %t.id, error = %e, "meeting rollback: cancel recorder failed");
+            }
+            if let Err(e) = state.catalog.delete(&t.id).await {
+                tracing::warn!(id = %t.id, error = %e, "meeting rollback: delete catalog row failed");
+            }
+        }
+    }
+
     /// Core meeting orchestration, decoupled from hardware so it can be tested
     /// with `SyntheticSource`s.
     ///
@@ -627,7 +654,9 @@ impl DaemonRecorder {
     /// row at `Recording` status carrying the shared `session_id` + track
     /// label, and starts an audio `Recorder` (always `Hold` mode — a meeting
     /// runs until explicitly stopped). All started recorders are tracked
-    /// together so `stop_meeting` can finalize them as a unit.
+    /// together so `stop_meeting` can finalize them as a unit. If any track
+    /// fails to start, every already-started track is rolled back (see
+    /// [`Self::abort_partial_meeting`]) and the error is returned.
     pub async fn start_meeting_with_sources(
         &self,
         state: &AppState,
@@ -671,7 +700,13 @@ impl DaemonRecorder {
                 session_id: Some(session_id.clone()),
                 track: Some(track.as_str().to_string()),
             };
-            state.catalog.insert(&row).await?;
+            // Insert the catalog row. If it fails, roll back every track already
+            // started so we never leave orphaned `recording`-status rows or live
+            // capture tasks behind.
+            if let Err(e) = state.catalog.insert(&row).await {
+                Self::abort_partial_meeting(state, tracks).await;
+                return Err(e);
+            }
 
             // A meeting always records in Hold mode — it ends only when the
             // user stops it (no silence auto-stop, no fixed duration).
@@ -681,7 +716,18 @@ impl DaemonRecorder {
                 silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
                 silence_window_ms: state.config.load().recording.silence_window_ms,
             };
-            let recorder = Recorder::start(source, recorder_cfg, None).await?;
+            // Start the audio recorder. If it fails, delete the row we just
+            // inserted *and* roll back the earlier tracks before bailing out.
+            let recorder = match Recorder::start(source, recorder_cfg, None).await {
+                Ok(r) => r,
+                Err(e) => {
+                    if let Err(del) = state.catalog.delete(&id).await {
+                        tracing::warn!(id = %id, error = %del, "meeting rollback: delete catalog row failed");
+                    }
+                    Self::abort_partial_meeting(state, tracks).await;
+                    return Err(e);
+                }
+            };
 
             state.events.emit(DaemonEvent::RecordingStarted {
                 id: id.clone(),
@@ -900,5 +946,120 @@ mod tests {
             .await
             .expect_err("second meeting must be rejected");
         assert!(matches!(err, Error::AlreadyRecording { .. }));
+    }
+
+    #[tokio::test]
+    async fn cannot_start_recording_while_meeting_active() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let audio_cfg = AudioConfig::phoneme_default();
+
+        // Occupy the recorder with a meeting (one synthetic track is enough).
+        let (s, _sink) = SyntheticSource::new(audio_cfg);
+        state
+            .recorder
+            .start_meeting_with_sources(&state, vec![(MeetingTrack::Mic, Box::new(s))])
+            .await
+            .expect("meeting starts");
+
+        // A single-track recording must be refused while the meeting holds the
+        // capture devices. The guard runs before any audio device is opened, so
+        // this is safe to assert without real hardware.
+        let err = state
+            .recorder
+            .start(&state, RecordMode::Hold)
+            .await
+            .expect_err("recording must be rejected during a meeting");
+        assert!(matches!(err, Error::AlreadyRecording { .. }));
+    }
+
+    #[tokio::test]
+    async fn cannot_start_meeting_while_single_recording_active() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+
+        // Simulate an in-flight single recording by populating `active`
+        // directly (starting a real one would require audio hardware). The
+        // active-recording guard in `start_meeting` runs before any device open.
+        *state.recorder.active.lock().await = Some(ActiveRecording {
+            id: RecordingId::new(),
+            mode: RecordMode::Hold,
+            audio_path: tmp.path().join("x.wav"),
+            started_at: Local::now(),
+            paused: false,
+        });
+
+        let err = state
+            .recorder
+            .start_meeting(&state)
+            .await
+            .expect_err("meeting must be rejected during a single recording");
+        assert!(matches!(err, Error::AlreadyRecording { .. }));
+    }
+
+    #[tokio::test]
+    async fn abort_partial_meeting_cancels_recorders_and_deletes_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let audio_cfg = AudioConfig::phoneme_default();
+
+        // Stand up one already-started track — a catalog row at `recording`
+        // status plus a live recorder — exactly as the meeting loop leaves the
+        // first track when a later track fails to start.
+        let id = RecordingId::new();
+        let audio_path = tmp.path().join("track.wav");
+        let row = Recording {
+            id: id.clone(),
+            started_at: Local::now(),
+            duration_ms: 0,
+            audio_path: audio_path.to_string_lossy().into_owned(),
+            transcript: None,
+            model: None,
+            status: RecordingStatus::Recording,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+            session_id: Some("meeting-test".to_string()),
+            track: Some(MeetingTrack::Mic.as_str().to_string()),
+        };
+        state.catalog.insert(&row).await.unwrap();
+
+        let (src, _sink) = SyntheticSource::new(audio_cfg);
+        let recorder = Recorder::start(
+            Box::new(src),
+            RecorderConfig {
+                mode: AudioMode::Hold,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+        let handle = MeetingTrackHandle {
+            id: id.clone(),
+            audio_path,
+            started_at: Local::now(),
+            track: MeetingTrack::Mic,
+            recorder,
+        };
+
+        // Roll back: the orphaned catalog row must be gone afterward, and the
+        // cancelled recorder must not have written a WAV.
+        DaemonRecorder::abort_partial_meeting(&state, vec![handle]).await;
+
+        assert!(
+            state.catalog.get(&id).await.unwrap().is_none(),
+            "rollback must delete the orphaned recording row"
+        );
+        assert!(
+            !std::path::Path::new(&row.audio_path).exists(),
+            "cancelled recorder must not write a WAV"
+        );
     }
 }
