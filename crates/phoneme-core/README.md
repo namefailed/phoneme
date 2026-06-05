@@ -12,16 +12,20 @@ This crate is platform-agnostic and provides the building blocks consumed by
 | `config` | TOML config loading, validation, and `~`/`%VAR%` expansion |
 | `error` | Single `Error` enum mirroring the IPC `ErrorKind` taxonomy |
 | `id` | `RecordingId` (sortable `YYYYMMDDTHHmmssNNN` string, per-process monotonic counter) |
-| `types` | `Recording`, `RecordingStatus`, `RecordMode`, `HookPayload`, `ListFilter` |
+| `types` | `Recording` (incl. `notes` and the `session_id` / `track` meeting links), `RecordingStatus`, `RecordMode`, `MeetingTrack`, `HookPayload`, `ListFilter` |
 | `catalog` | SQLite-backed recordings catalog (WAL mode + FTS5 search) |
+| `profiles` | Named config-profile storage with a path-traversal-safe name whitelist |
+| `tags` | Colour-coded tag model and validation |
 | `queue` | Filesystem-backed inbox queue with atomic state transitions |
-| `transcription` | HTTP client for `/v1/audio/transcriptions` (OpenAI-compatible) |
+| `transcription` | `TranscriptionProvider` abstraction: local whisper.cpp plus OpenAI, Deepgram, AssemblyAI, Groq, ElevenLabs, and any OpenAI-compatible endpoint |
+| `llm` | LLM post-processing provider abstraction (OpenAI-compatible, Groq, Anthropic) |
 | `hook` | Subprocess runner for user hook scripts (stdin JSON + timeout) |
+| `webhook` | Optional HTTP POST of the hook payload to a configured URL |
 
 ## Public API stability
 
-The crate is `1.1.0-dev` and does not yet commit to a stable API. Once Phoneme
-ships v1.1 the public surface here will be stabilised.
+This crate is internal to the Phoneme workspace and does not commit to a stable
+public API; its surface may change between releases as the binaries evolve.
 
 ## Hook contract
 
