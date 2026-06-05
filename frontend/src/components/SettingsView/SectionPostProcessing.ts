@@ -1,6 +1,6 @@
 import { renderField, bindFieldEvents } from "./form";
 
-export class SectionAccessibility {
+export class SectionPostProcessing {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(container: HTMLElement, config: any) {
     // Ensure nested object exists in the loaded config to prevent undefined errors
