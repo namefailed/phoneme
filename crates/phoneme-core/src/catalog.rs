@@ -79,8 +79,9 @@ impl Catalog {
             r#"INSERT INTO recordings
                  (id, started_at, duration_ms, audio_path, transcript, model, status,
                   error_kind, error_message, hook_command, hook_exit_code,
-                  hook_duration_ms, transcribed_at, hook_ran_at, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                  hook_duration_ms, transcribed_at, hook_ran_at, notes,
+                  session_id, track)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -97,6 +98,8 @@ impl Catalog {
         .bind(r.transcribed_at.map(|t| t.to_rfc3339()))
         .bind(r.hook_ran_at.map(|t| t.to_rfc3339()))
         .bind(r.notes.as_deref())
+        .bind(r.session_id.as_deref())
+        .bind(r.track.as_deref())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -559,6 +562,8 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
             .map(|s| parse_dt(&s))
             .transpose()?,
         notes: row.try_get("notes")?,
+        session_id: row.try_get("session_id")?,
+        track: row.try_get("track")?,
     })
 }
 
@@ -652,6 +657,8 @@ mod tests {
             transcribed_at: Some(Local::now()),
             hook_ran_at: Some(Local::now()),
             notes: None,
+            session_id: None,
+            track: None,
         };
         db.insert(&r).await.expect("insert");
 
@@ -701,6 +708,8 @@ mod tests {
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
+            session_id: None,
+            track: None,
         };
         db.insert(&r).await.expect("insert");
 
@@ -747,6 +756,8 @@ mod tests {
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
+            session_id: None,
+            track: None,
         };
         db.insert(&r).await.expect("insert");
 
@@ -786,5 +797,85 @@ mod tests {
             Some("remember to follow up"),
             "user transcript edit must not clear notes"
         );
+    }
+
+    #[tokio::test]
+    async fn meeting_session_two_tracks_share_session_id_and_round_trip() {
+        // Meeting Mode (v1.6): a meeting produces TWO recordings that share a
+        // freshly-minted session_id and differ only by `track`. Both must
+        // round-trip through insert/get/list, and a fresh single-track
+        // recording must leave both columns NULL.
+        let db = Catalog::open(Path::new("sqlite::memory:"))
+            .await
+            .expect("open db");
+
+        let session_id = "meeting-abc123".to_string();
+        let make = |track: &str| Recording {
+            id: RecordingId::new(),
+            started_at: Local::now(),
+            duration_ms: 1000,
+            audio_path: format!("{track}.wav"),
+            transcript: None,
+            model: None,
+            status: RecordingStatus::Transcribing,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+            session_id: Some(session_id.clone()),
+            track: Some(track.to_string()),
+        };
+        let mic = make("mic");
+        let system = make("system");
+        db.insert(&mic).await.expect("insert mic");
+        db.insert(&system).await.expect("insert system");
+
+        // Each row round-trips with its session_id + track intact.
+        let got_mic = db.get(&mic.id).await.unwrap().unwrap();
+        let got_sys = db.get(&system.id).await.unwrap().unwrap();
+        assert_eq!(got_mic.session_id.as_deref(), Some("meeting-abc123"));
+        assert_eq!(got_mic.track.as_deref(), Some("mic"));
+        assert_eq!(got_sys.session_id.as_deref(), Some("meeting-abc123"));
+        assert_eq!(got_sys.track.as_deref(), Some("system"));
+
+        // The two recordings share one session_id.
+        assert_eq!(got_mic.session_id, got_sys.session_id);
+
+        // A normal single-track recording leaves both columns NULL.
+        let solo = Recording {
+            id: RecordingId::new(),
+            started_at: Local::now(),
+            duration_ms: 1000,
+            audio_path: "solo.wav".into(),
+            transcript: None,
+            model: None,
+            status: RecordingStatus::Recording,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+            session_id: None,
+            track: None,
+        };
+        db.insert(&solo).await.expect("insert solo");
+        let got_solo = db.get(&solo.id).await.unwrap().unwrap();
+        assert_eq!(got_solo.session_id, None);
+        assert_eq!(got_solo.track, None);
+
+        // Both meeting rows are visible via list().
+        let all = db.list(&ListFilter::default()).await.unwrap();
+        let with_session: Vec<_> = all
+            .iter()
+            .filter(|r| r.session_id.as_deref() == Some("meeting-abc123"))
+            .collect();
+        assert_eq!(with_session.len(), 2, "both meeting tracks must be listed");
     }
 }
