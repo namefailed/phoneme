@@ -7,7 +7,7 @@ import { SectionHook } from "./SectionHook";
 import { SectionStorage } from "./SectionStorage";
 import { SectionTray } from "./SectionTray";
 import { SectionInterface } from "./SectionInterface";
-import { SectionAccessibility } from "./SectionAccessibility";
+import { SectionPostProcessing } from "./SectionPostProcessing";
 import { SectionEditor } from "./SectionEditor";
 import { SectionAdvanced } from "./SectionAdvanced";
 import { SectionTags } from "./SectionTags";
@@ -75,7 +75,7 @@ export class SettingsView {
           <div class="sv-tab ${this.activeTab === "tray" ? "active" : ""}" data-tab="tray">System Tray</div>
           <div class="sv-tab ${this.activeTab === "interface" ? "active" : ""}" data-tab="interface">Interface</div>
           <div class="sv-tab ${this.activeTab === "editor" ? "active" : ""}" data-tab="editor">Editor</div>
-          <div class="sv-tab ${this.activeTab === "accessibility" ? "active" : ""}" data-tab="accessibility">Post-Processing</div>
+          <div class="sv-tab ${this.activeTab === "post-processing" ? "active" : ""}" data-tab="post-processing">Post-Processing</div>
           <div class="sv-tab ${this.activeTab === "tags" ? "active" : ""}" data-tab="tags">Tags</div>
           <div class="sv-tab ${this.activeTab === "profiles" ? "active" : ""}" data-tab="profiles">Profiles</div>
           <div class="sv-tab ${this.activeTab === "hook" ? "active" : ""}" data-tab="hook">Action Hook</div>
@@ -105,7 +105,7 @@ export class SettingsView {
       case "storage": new SectionStorage(this.sectionHost(body), config); break;
       case "tray": new SectionTray(this.sectionHost(body), config); break;
       case "interface": new SectionInterface(this.sectionHost(body), config); break;
-      case "accessibility": new SectionAccessibility(this.sectionHost(body), config); break;
+      case "post-processing": new SectionPostProcessing(this.sectionHost(body), config); break;
       case "editor": new SectionEditor(this.sectionHost(body), config); break;
       case "tags": new SectionTags(this.sectionHost(body), config); break;
       case "profiles": new SectionProfiles(this.sectionHost(body), config); break;
