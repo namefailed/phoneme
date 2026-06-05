@@ -19,7 +19,7 @@ Clients: `phoneme` CLI, the Tauri GUI shell (`phoneme-tray`), and external scrip
 | `pipeline` | Per-payload pipeline: transcribe → hook → done |
 | `queue_worker` | Drains `inbox/pending/` serially; exponential backoff on Whisper outage |
 | `reconcile` | Startup recovery (orphan inbox files, stale catalog rows) |
-| `recorder` | Daemon-side recorder wrapper; owns the single active recording |
+| `recorder` | Daemon-side recorder wrapper; owns the active single-track recording, dual-track Meeting Mode, the idle pre-roll buffer, and the streaming-preview loop |
 | `shutdown` | Ctrl+C handler + `watch::Sender<bool>` shutdown coordinator |
 
 ## Single instance
@@ -59,11 +59,13 @@ cargo test -p phoneme-daemon -- --test-threads=1
 ```
 
 Integration tests use the `DaemonHarness` in `tests/common/mod.rs`, which
-spins up a temp directory, a wiremock-backed stub whisper-server, and the
-real daemon binary. `--test-threads=1` keeps named-pipe bind races out of
-the picture during early development; revisit once we add pipe-name
-randomization to the harness.
+spins up a temp directory, a wiremock-backed stub whisper-server (routed via
+`WhisperMode::External`), and the real daemon binary. `--test-threads=1`
+keeps named-pipe bind races out of the picture.
 
-Recording-flow integration tests (basic_flow, whisper_unreachable, hook_timeout,
-crash_recovery, concurrent_record, replay, event_stream, rebuild_catalog)
-rely on synthetic-audio plumbing via `--test-mode` flags to assert deterministic transcriptions without requiring physical microphone access.
+The integration suite covers daemon status (`daemon_status`), the empty-catalog
+and not-found query paths (`list_empty`), audio import including the rejection
+paths for missing files and unsupported extensions (`import`), meeting session
+grouping over IPC (`list_session`), and single-instance enforcement
+(`pipe_singleton`). The transcription paths assert deterministic results
+against the stub whisper-server, so no physical microphone is required.

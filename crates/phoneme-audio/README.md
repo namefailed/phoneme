@@ -11,8 +11,10 @@ Audio capture and WAV encoding for the [Phoneme](../../README.md) voice notes ap
 | `device` | CPAL input device enumeration + lookup |
 | `convert` | `f32 ↔ i16`, downmix-to-mono, resample (rubato) |
 | `silence` | `SilenceDetector` — RMS over rolling window |
-| `source` | `Source` trait: production `CpalSource` + test `SyntheticSource` |
-| `recorder` | `Recorder` public API — start/stop/cancel + auto-modes |
+| `source` | `Source` trait: production `CpalSource` (microphone or Windows system-audio loopback) + test `SyntheticSource` |
+| `preroll` | `PreRollBuffer` — ring buffer of recent audio prepended on record so the first syllable isn't clipped |
+| `decode` | Decode imported `.wav`/`.mp3`/`.m4a` files to the canonical format via symphonia (bounded by a max-duration cap) |
+| `recorder` | `Recorder` public API — start/stop/cancel/pause/resume, snapshot, auto-modes, and pre-roll prepend |
 
 ## Canonical format
 
@@ -47,7 +49,7 @@ hand-crafted PCM data:
 
 ```rust
 let (source, sink) = SyntheticSource::new(AudioConfig::phoneme_default());
-let recorder = Recorder::start(Box::new(source), RecorderConfig::default()).await?;
+let recorder = Recorder::start(Box::new(source), RecorderConfig::default(), None).await?;
 sink.push(loud_samples).await?;
 sink.close();
 let result = recorder.wait_for_finalize(&wav_path).await?;
