@@ -38,6 +38,13 @@ pub enum Request {
     GetRecording {
         id: RecordingId,
     },
+    /// Fetch all recordings belonging to a single meeting session (the two
+    /// tracks linked by a shared `session_id`), ordered by track then time.
+    /// Additive to `ListRecordings` — grouping is a presentation concern, so
+    /// the flat `ListRecordings` shape is unchanged.
+    ListSession {
+        session_id: String,
+    },
     DeleteRecording {
         id: RecordingId,
         keep_audio: bool,

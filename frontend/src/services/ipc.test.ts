@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   listRecordings,
+  listSession,
   recordStart,
   listTags,
   listAllTags,
@@ -32,6 +33,15 @@ describe('IPC Services', () => {
     const res = await listRecordings(filter);
 
     expect(tauriCore.invoke).toHaveBeenCalledWith('list_recordings', { filter });
+    expect(res).toEqual([]);
+  });
+
+  it('calls list_session with the camelCase sessionId arg', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce([]);
+
+    const res = await listSession('sess-1');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('list_session', { sessionId: 'sess-1' });
     expect(res).toEqual([]);
   });
 

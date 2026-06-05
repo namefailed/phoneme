@@ -176,6 +176,17 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::ListSession { session_id } => {
+            match state.catalog.list_by_session(&session_id).await {
+                Ok(rows) => {
+                    Response::Ok(serde_json::to_value(rows).unwrap_or(serde_json::Value::Null))
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::DeleteRecording { id, keep_audio } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 // Delete the catalog row first. If it fails, report the error

@@ -63,6 +63,14 @@ pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, String> 
     forward(&bridge, Request::GetRecording { id }).await
 }
 
+/// Fetch all recordings belonging to a single meeting session (the two tracks
+/// linked by a shared `session_id`), ordered by track then start time. Used by
+/// the recordings list to render a meeting as one collapsible group.
+#[tauri::command]
+pub async fn list_session(bridge: Br<'_>, session_id: String) -> Result<Value, String> {
+    forward(&bridge, Request::ListSession { session_id }).await
+}
+
 /// Delete a recording from the catalog.
 /// If `keep_audio` is false, the `.wav` file on disk will also be permanently deleted.
 #[tauri::command]
