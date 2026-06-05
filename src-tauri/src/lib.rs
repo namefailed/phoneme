@@ -153,6 +153,8 @@ pub fn run() {
             commands::record_start,
             commands::record_stop,
             commands::record_cancel,
+            commands::start_meeting,
+            commands::stop_meeting,
             commands::record_pause,
             commands::record_resume,
             commands::replay_recording,

@@ -11,7 +11,9 @@ use phoneme_audio::source::{CpalSource, Source};
 use phoneme_audio::wav;
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
-use phoneme_core::{HookMetadata, HookPayload, Recording, RecordingId, RecordingStatus};
+use phoneme_core::{
+    HookMetadata, HookPayload, MeetingTrack, Recording, RecordingId, RecordingStatus,
+};
 use phoneme_ipc::DaemonEvent;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -80,6 +82,23 @@ struct PreviewTask {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// One track of an in-flight meeting: its catalog id, where the WAV will be
+/// written, when it started, the track label, and the live recorder handle.
+struct MeetingTrackHandle {
+    id: RecordingId,
+    audio_path: PathBuf,
+    started_at: chrono::DateTime<Local>,
+    track: MeetingTrack,
+    recorder: Recorder,
+}
+
+/// An in-flight meeting: the two concurrently-recording tracks (mic + system).
+/// Both share `session_id`; stopping the meeting finalizes both together.
+struct ActiveMeeting {
+    session_id: String,
+    tracks: Vec<MeetingTrackHandle>,
+}
+
 #[derive(Clone, Default)]
 pub struct DaemonRecorder {
     active: Arc<Mutex<Option<ActiveRecording>>>,
@@ -90,6 +109,10 @@ pub struct DaemonRecorder {
     /// Streaming transcription preview loop, present only while recording with
     /// the feature enabled. `None` (the default) means no preview is running.
     preview: Arc<Mutex<Option<PreviewTask>>>,
+    /// In-flight meeting (Meeting Mode, v1.6). `None` (the default) means no
+    /// meeting is recording. Held separately from `active` so the existing
+    /// single-recording path is completely untouched.
+    meeting: Arc<Mutex<Option<ActiveMeeting>>>,
 }
 
 /// Whether pre-roll should be active for the current config: opt-in
@@ -354,6 +377,9 @@ impl DaemonRecorder {
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
+            // A normal single-track recording is not part of a meeting.
+            session_id: None,
+            track: None,
         };
         state.catalog.insert(&row).await?;
 
@@ -537,5 +563,342 @@ impl DaemonRecorder {
         });
         tracing::info!(id = %active.id, "recording resumed");
         Ok(active.id.clone())
+    }
+
+    /// Is a meeting currently recording?
+    pub async fn meeting_active(&self) -> bool {
+        self.meeting.lock().await.is_some()
+    }
+
+    /// Start Meeting Mode (v1.6): record the microphone AND the system audio
+    /// (WASAPI loopback) concurrently as two separate, linked recordings.
+    ///
+    /// Opens a mic `CpalSource` and a system-audio (loopback) `CpalSource`,
+    /// then delegates to [`Self::start_meeting_with_sources`], which owns the
+    /// catalog/inbox orchestration. Tests drive that helper directly with
+    /// `SyntheticSource`s; this method is the production entry point that wires
+    /// in the real hardware sources.
+    ///
+    /// Returns the freshly-minted `session_id` shared by both tracks.
+    pub async fn start_meeting(&self, state: &AppState) -> Result<String> {
+        // Refuse to start a meeting while a normal recording is in flight, and
+        // refuse to start a second meeting. This keeps the single-recording
+        // path's invariants intact (it never has to reason about a meeting).
+        if self.active.lock().await.is_some() {
+            return Err(Error::AlreadyRecording {
+                current: "single recording in progress".into(),
+            });
+        }
+        if self.meeting.lock().await.is_some() {
+            return Err(Error::AlreadyRecording {
+                current: "meeting already in progress".into(),
+            });
+        }
+
+        // Stop idle pre-roll pre-capture so the microphone is free for the
+        // meeting's own mic source. The buffered audio is discarded — meeting
+        // tracks don't use pre-roll. No-op when pre-roll is disabled.
+        let _ = self.take_preroll_samples().await;
+
+        let cfg = state.config.load();
+        let device = resolve_input_device(&cfg.recording.input_device)?;
+
+        // Open both capture sources up front. If either fails we abort before
+        // mutating any state, so a failed meeting leaves the daemon idle.
+        // `open_kind(.., SystemAudio)` ignores the passed device and opens the
+        // default output device in WASAPI loopback mode.
+        let mic_source = CpalSource::open_kind(device, CaptureSource::Microphone)
+            .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
+        let system_device = resolve_input_device(&cfg.recording.input_device)?;
+        let system_source = CpalSource::open_kind(system_device, CaptureSource::SystemAudio)
+            .map_err(|e| Error::Internal(format!("meeting: open system audio (loopback): {e}")))?;
+
+        let sources: Vec<(MeetingTrack, Box<dyn Source>)> = vec![
+            (MeetingTrack::Mic, Box::new(mic_source)),
+            (MeetingTrack::System, Box::new(system_source)),
+        ];
+        self.start_meeting_with_sources(state, sources).await
+    }
+
+    /// Core meeting orchestration, decoupled from hardware so it can be tested
+    /// with `SyntheticSource`s.
+    ///
+    /// For each `(track, source)` it mints a `RecordingId`, inserts a catalog
+    /// row at `Recording` status carrying the shared `session_id` + track
+    /// label, and starts an audio `Recorder` (always `Hold` mode — a meeting
+    /// runs until explicitly stopped). All started recorders are tracked
+    /// together so `stop_meeting` can finalize them as a unit.
+    pub async fn start_meeting_with_sources(
+        &self,
+        state: &AppState,
+        sources: Vec<(MeetingTrack, Box<dyn Source>)>,
+    ) -> Result<String> {
+        let mut meeting_lock = self.meeting.lock().await;
+        if meeting_lock.is_some() {
+            return Err(Error::AlreadyRecording {
+                current: "meeting already in progress".into(),
+            });
+        }
+
+        let session_id = format!("meeting-{}", RecordingId::new());
+        let mut tracks = Vec::with_capacity(sources.len());
+
+        for (track, source) in sources {
+            let id = RecordingId::new();
+            let started_at = Local::now();
+            let audio_path = state
+                .paths
+                .audio_dir
+                .join(id.day_folder())
+                .join(format!("{}.wav", id.file_stem()));
+
+            let row = Recording {
+                id: id.clone(),
+                started_at,
+                duration_ms: 0,
+                audio_path: audio_path.to_string_lossy().into_owned(),
+                transcript: None,
+                model: None,
+                status: RecordingStatus::Recording,
+                error_kind: None,
+                error_message: None,
+                hook_command: None,
+                hook_exit_code: None,
+                hook_duration_ms: None,
+                transcribed_at: None,
+                hook_ran_at: None,
+                notes: None,
+                session_id: Some(session_id.clone()),
+                track: Some(track.as_str().to_string()),
+            };
+            state.catalog.insert(&row).await?;
+
+            // A meeting always records in Hold mode — it ends only when the
+            // user stops it (no silence auto-stop, no fixed duration).
+            let recorder_cfg = RecorderConfig {
+                mode: AudioMode::Hold,
+                max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
+                silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
+                silence_window_ms: state.config.load().recording.silence_window_ms,
+            };
+            let recorder = Recorder::start(source, recorder_cfg, None).await?;
+
+            state.events.emit(DaemonEvent::RecordingStarted {
+                id: id.clone(),
+                started_at,
+            });
+            tracing::info!(id = %id, track = track.as_str(), session = %session_id, "meeting track started");
+
+            tracks.push(MeetingTrackHandle {
+                id,
+                audio_path,
+                started_at,
+                track,
+                recorder,
+            });
+        }
+
+        *meeting_lock = Some(ActiveMeeting {
+            session_id: session_id.clone(),
+            tracks,
+        });
+        tracing::info!(session = %session_id, "meeting started");
+        Ok(session_id)
+    }
+
+    /// Stop the active meeting: finalize every track (write its WAV, mark the
+    /// catalog row `Transcribing`, enqueue it for the normal pipeline) and emit
+    /// a `RecordingStopped` for each. Returns the session id that was stopped.
+    pub async fn stop_meeting(&self, state: &AppState) -> Result<String> {
+        let meeting = self
+            .meeting
+            .lock()
+            .await
+            .take()
+            .ok_or(Error::NotRecording)?;
+        let session_id = meeting.session_id.clone();
+
+        for handle in meeting.tracks {
+            let MeetingTrackHandle {
+                id,
+                audio_path,
+                started_at,
+                track,
+                recorder,
+            } = handle;
+
+            let result = match recorder.stop_and_finalize(&audio_path).await {
+                Ok(r) => r,
+                Err(e) => {
+                    // One track failing to finalize shouldn't abort the others.
+                    // Mark it failed and continue stopping the rest.
+                    tracing::error!(id = %id, track = track.as_str(), error = %e, "meeting track finalize failed");
+                    let _ = state
+                        .catalog
+                        .update_status(&id, RecordingStatus::TranscribeFailed)
+                        .await;
+                    continue;
+                }
+            };
+
+            state
+                .catalog
+                .update_status(&id, RecordingStatus::Transcribing)
+                .await?;
+            state
+                .catalog
+                .update_duration(&id, result.duration_ms)
+                .await?;
+
+            let payload = HookPayload {
+                id: id.clone(),
+                timestamp: started_at,
+                transcript: String::new(),
+                audio_path: audio_path.to_string_lossy().into_owned(),
+                duration_ms: result.duration_ms,
+                model: String::new(),
+                metadata: HookMetadata::current(),
+            };
+            state.inbox.enqueue(&payload).await?;
+
+            state.events.emit(DaemonEvent::RecordingStopped {
+                id: id.clone(),
+                duration_ms: result.duration_ms,
+                audio_path: audio_path.to_string_lossy().into_owned(),
+            });
+            tracing::info!(id = %id, track = track.as_str(), ms = result.duration_ms, "meeting track stopped");
+        }
+
+        tracing::info!(session = %session_id, "meeting stopped");
+
+        // Resume idle pre-capture now the meeting released the microphone.
+        // No-op when pre-roll is disabled.
+        self.ensure_preroll(state).await;
+        Ok(session_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_state::AppState;
+    use phoneme_audio::format::AudioConfig;
+    use phoneme_audio::source::SyntheticSource;
+    use phoneme_core::{Config, ListFilter};
+
+    /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
+    /// so meeting orchestration can be tested without touching the real install.
+    async fn test_state(tmp: &std::path::Path) -> AppState {
+        // Redirect inbox/catalog/logs away from the real per-user AppData.
+        std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
+        let mut cfg = Config::default();
+        cfg.recording.audio_dir = tmp.join("audio").to_string_lossy().into_owned();
+        AppState::new(cfg).await.expect("build test AppState")
+    }
+
+    #[tokio::test]
+    async fn start_meeting_with_sources_produces_two_linked_recordings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+
+        // Two synthetic sources stand in for the mic + system-audio captures.
+        let audio_cfg = AudioConfig::phoneme_default();
+        let (mic_src, mic_sink) = SyntheticSource::new(audio_cfg);
+        let (sys_src, sys_sink) = SyntheticSource::new(audio_cfg);
+
+        let session_id = state
+            .recorder
+            .start_meeting_with_sources(
+                &state,
+                vec![
+                    (MeetingTrack::Mic, Box::new(mic_src)),
+                    (MeetingTrack::System, Box::new(sys_src)),
+                ],
+            )
+            .await
+            .expect("start meeting");
+
+        assert!(
+            state.recorder.meeting_active().await,
+            "meeting should be active"
+        );
+
+        // Feed a little audio into each track, then close the sinks so the
+        // recorders can drain and finalize on stop.
+        mic_sink.push(vec![100i16; 8_000]).await.unwrap();
+        sys_sink.push(vec![200i16; 8_000]).await.unwrap();
+        mic_sink.close();
+        sys_sink.close();
+
+        let stopped = state
+            .recorder
+            .stop_meeting(&state)
+            .await
+            .expect("stop meeting");
+        assert_eq!(stopped, session_id);
+        assert!(
+            !state.recorder.meeting_active().await,
+            "meeting should be cleared"
+        );
+
+        // Two catalog rows exist, both carrying the shared session_id and the
+        // two distinct track labels.
+        let rows = state.catalog.list(&ListFilter::default()).await.unwrap();
+        let meeting_rows: Vec<_> = rows
+            .iter()
+            .filter(|r| r.session_id.as_deref() == Some(session_id.as_str()))
+            .collect();
+        assert_eq!(
+            meeting_rows.len(),
+            2,
+            "meeting must produce exactly two recordings"
+        );
+
+        let mut tracks: Vec<&str> = meeting_rows
+            .iter()
+            .filter_map(|r| r.track.as_deref())
+            .collect();
+        tracks.sort_unstable();
+        assert_eq!(tracks, vec!["mic", "system"]);
+
+        // Both were enqueued for transcription (status flipped to Transcribing).
+        for r in &meeting_rows {
+            assert_eq!(
+                r.status,
+                RecordingStatus::Transcribing,
+                "each meeting track must be enqueued for transcription"
+            );
+        }
+
+        // Both WAVs were written to disk.
+        for r in &meeting_rows {
+            assert!(
+                std::path::Path::new(&r.audio_path).exists(),
+                "expected WAV written at {}",
+                r.audio_path
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cannot_start_two_meetings_at_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let audio_cfg = AudioConfig::phoneme_default();
+
+        let (s1, _k1) = SyntheticSource::new(audio_cfg);
+        state
+            .recorder
+            .start_meeting_with_sources(&state, vec![(MeetingTrack::Mic, Box::new(s1))])
+            .await
+            .expect("first meeting starts");
+
+        let (s2, _k2) = SyntheticSource::new(audio_cfg);
+        let err = state
+            .recorder
+            .start_meeting_with_sources(&state, vec![(MeetingTrack::Mic, Box::new(s2))])
+            .await
+            .expect_err("second meeting must be rejected");
+        assert!(matches!(err, Error::AlreadyRecording { .. }));
     }
 }
