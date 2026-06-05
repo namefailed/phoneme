@@ -80,7 +80,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 
 ---
 
-## ✅ v1.6.0 — Real-time & Recording Quality (shipped)
+## ✅ v1.6.0 — Real-time & Recording Quality (shipped & tagged)
 
 *Focus: making the recording experience itself better — including full meeting capture.*
 
@@ -92,6 +92,24 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [x] **Notes field** — free-form text area in the detail pane, separate from the transcript; never overwritten by re-transcription or post-processing
 - [x] **Multiple config profiles** — switch between named TOML profiles (e.g., work vs. personal) from the tray menu without editing files
 - [x] **Import audio file** — bring a `.wav`/`.mp3`/`.m4a` into the catalog (or `phoneme import <file>`) to queue it through the same transcription + hook pipeline as a live recording
+
+---
+
+## 🔮 v1.7 — Local Intelligence & Internal Quality
+
+*Focus: solidify the full Windows feature set — especially local, on-device AI —
+and pay down internal debt, so the v2.0 cross-platform port inherits a complete,
+clean base.*
+
+### Local AI (on-device, offline)
+- [ ] **Local semantic search** — bundle a local embedding model (e.g. all-MiniLM-L6-v2 via ONNX) + a vector index so you can search by *meaning* ("that idea about rust error handling last week"), not just exact text. Complements the existing FTS5 keyword search.
+- [ ] **Local speaker diarization** — label Speaker A / Speaker B in Meeting Mode transcripts using a local diarization model alongside Whisper (the offline equivalent of the AssemblyAI feature).
+- [ ] **Merged conversation view** — interleave a dual-track meeting's two transcripts by timestamp into one chronological "You:" / "Meeting:" conversation; exportable, and feedable to the LLM post-processor as a single context for summaries/action items.
+- [ ] **Real-time word-by-word transcription** — upgrade the v1.6 streaming *preview* to true word-level streaming as you speak (`whisper-live` or a streaming-capable backend).
+
+### Internal quality
+- [ ] **Frontend reactivity** — evaluate/adopt a lightweight declarative layer (SolidJS or Lit) to get automatic component lifecycle + listener cleanup as the UI grows.
+- [ ] **Typed errors** — `thiserror` for the library crates, `anyhow` in the binaries, for clean `?` propagation and better traces.
 
 ---
 
@@ -111,8 +129,6 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
 
 ### Recording
-- [ ] **Real-time word-by-word transcription** — v1.6 already ships a streaming *preview* (the in-progress recording is periodically re-transcribed); this item upgrades that to true word-level streaming as you speak, using `whisper-live` or a streaming-capable backend
-- [ ] **Merged conversation view** — takes a v1.6 dual-track session and interleaves the two transcripts by timestamp into a single chronological conversation; labels each line "You:" vs. "Meeting:"; exportable as a structured conversation log; optionally feeds both transcripts to the LLM post-processor as a single context for summarisation or action-item extraction
 - [ ] **Multi-microphone** — capture from two input devices simultaneously; useful for two-person interviews
 - [ ] **Audio normalization** — normalize gain before sending to Whisper; improves accuracy on quiet voices
 
