@@ -1,0 +1,12 @@
+/* Tag Manager modal — extends the shared .modal-* styles. */
+
+.tag-mgr-dialog {
+  width: 520px;
+}
+
+/* The tag list can grow; keep the dialog usable by scrolling the body. */
+.tag-mgr-dialog .tm-body {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
