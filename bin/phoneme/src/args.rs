@@ -25,6 +25,8 @@ pub struct Cli {
 pub enum Command {
     /// Push-to-talk: read stdin until EOF / Enter, then stop.
     Record(RecordArgs),
+    /// Meeting Mode: record mic + system audio as two linked recordings.
+    Meeting(MeetingArgs),
     /// Import an existing audio file (wav/mp3/m4a) and transcribe it.
     Import(ImportArgs),
     /// List recordings.
@@ -72,6 +74,20 @@ pub struct RecordArgs {
     /// Discard the active recording without saving.
     #[arg(long, conflicts_with_all = ["start", "stop", "oneshot", "duration"])]
     pub cancel: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct MeetingArgs {
+    #[command(subcommand)]
+    pub action: MeetingAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MeetingAction {
+    /// Start a meeting: capture microphone + system audio concurrently.
+    Start,
+    /// Stop the active meeting; both tracks are finalized and transcribed.
+    Stop,
 }
 
 #[derive(Debug, clap::Args)]
