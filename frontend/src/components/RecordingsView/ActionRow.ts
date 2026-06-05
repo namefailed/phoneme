@@ -25,9 +25,9 @@ export class ActionRow {
     this.container.innerHTML = `
       <div class="action-row">
         <button class="primary" data-act="play" id="btn-play">▶ Play</button>
-        <div style="display: flex; align-items: stretch; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 6px; background: var(--bg-deep);">
-          <button data-act="replay" style="border: none; background: transparent; box-shadow: none;">↻ Re-transcribe</button>
-          <button data-act="replay-with" title="Re-transcribe with…" aria-label="Re-transcribe with…" style="border: none; border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); background: transparent; box-shadow: none; padding: 0 8px; font-size: 10px;">▾</button>
+        <div class="split-btn">
+          <button data-act="replay">↻ Re-transcribe</button>
+          <button class="split-caret" data-act="replay-with" title="Re-transcribe with…" aria-label="Re-transcribe with…">▾</button>
         </div>
         <button data-act="refire">⚡ Re-fire hook</button>
         <button data-act="copy">📋 Copy</button>
@@ -39,7 +39,7 @@ export class ActionRow {
     this.container.querySelectorAll<HTMLButtonElement>("button[data-act]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const act = btn.dataset.act;
-        if (act) void this.handle(act);
+        if (act) void this.handle(act, btn);
       });
     });
   }
@@ -51,7 +51,7 @@ export class ActionRow {
     }
   }
 
-  private async handle(act: string) {
+  private async handle(act: string, btn: HTMLButtonElement) {
     if (act === "play") {
       this.cbs.onTogglePlay();
     } else if (act === "replay") {
@@ -67,7 +67,7 @@ export class ActionRow {
       }
     } else if (act === "replay-with") {
       const { openModelPicker } = await import("../ModelPicker");
-      const saved = await openModelPicker("transcription");
+      const saved = await openModelPicker("transcription", btn);
       if (saved) {
         try {
           await replayRecording(this.id);
