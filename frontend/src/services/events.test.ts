@@ -32,6 +32,18 @@ describe('Event Services', () => {
     expect(unsub).toBeTypeOf('function');
   });
 
+  it('passes transcription_partial events through to the handler', async () => {
+    const captured = captureSubscribeHandler();
+    const mockCallback = vi.fn();
+    await subscribe(mockCallback);
+    const { handler } = await captured;
+
+    const payload: DaemonEvent = { event: 'transcription_partial', id: 'abc', text: 'hello wor' };
+    handler({ payload });
+
+    expect(mockCallback).toHaveBeenCalledWith(payload);
+  });
+
   it('passes tag_created events through to the handler', async () => {
     const captured = captureSubscribeHandler();
     const mockCallback = vi.fn();

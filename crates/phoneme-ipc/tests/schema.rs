@@ -64,6 +64,10 @@ fn all_daemon_events_roundtrip() {
             audio_path: "C:/tmp/x.wav".into(),
         },
         DaemonEvent::TranscriptionStarted { id: id.clone() },
+        DaemonEvent::TranscriptionPartial {
+            id: id.clone(),
+            text: "hel".into(),
+        },
         DaemonEvent::TranscriptionDone {
             id: id.clone(),
             transcript: "hello".into(),

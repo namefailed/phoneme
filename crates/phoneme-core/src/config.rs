@@ -246,6 +246,18 @@ pub struct RecordingConfig {
     /// never written to disk unless a recording starts.
     #[serde(default)]
     pub pre_roll_ms: u32,
+    /// Live streaming transcription preview. When `true`, the daemon transcribes
+    /// the audio captured so far every few seconds *while recording* and emits a
+    /// partial transcript the UI shows live, instead of only displaying a result
+    /// after the recording stops. This is a *preview* — the authoritative final
+    /// transcript is still produced by the normal post-stop pipeline. Because the
+    /// whisper.cpp `/v1/audio/transcriptions` endpoint returns a full transcript
+    /// per request (it is not a token-streaming endpoint), the preview is built
+    /// from periodic incremental re-transcriptions rather than true token
+    /// streaming. **Default false = disabled** — when off, no preview task is
+    /// spawned and behavior is identical to before this feature existed.
+    #[serde(default)]
+    pub streaming_preview: bool,
 }
 
 /// Settings governing external script execution (hooks) upon transcription success.
@@ -427,6 +439,7 @@ impl Default for Config {
                 input_device: "default".into(),
                 source: CaptureSource::Microphone,
                 pre_roll_ms: 0,
+                streaming_preview: false,
             },
             hook: HookConfig {
                 commands: vec![
@@ -692,6 +705,38 @@ mod tests {
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed.recording.pre_roll_ms, 1500);
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn streaming_preview_defaults_to_false() {
+        assert!(!Config::default().recording.streaming_preview);
+    }
+
+    #[test]
+    fn streaming_preview_absent_in_legacy_toml_defaults_to_false() {
+        // A config written before streaming_preview existed must still load and
+        // default to false (disabled), preserving the historical behavior of
+        // only showing a transcript after the recording stops.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(recording) = toml_val.get_mut("recording").and_then(|v| v.as_table_mut()) {
+            recording.remove("streaming_preview");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without streaming_preview");
+        assert!(!parsed.recording.streaming_preview);
+    }
+
+    #[test]
+    fn streaming_preview_round_trips_through_toml() {
+        let mut cfg = Config::default();
+        cfg.recording.streaming_preview = true;
+        let serialized = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&serialized).unwrap();
+        assert!(parsed.recording.streaming_preview);
         assert_eq!(parsed, cfg);
     }
 
