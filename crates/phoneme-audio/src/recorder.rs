@@ -61,6 +61,9 @@ enum RecorderCommand {
     Cancel,
     Pause,
     Resume,
+    /// Reply with a clone of the samples captured so far, without disturbing
+    /// capture. Used by the streaming preview to transcribe audio mid-recording.
+    Snapshot(tokio::sync::oneshot::Sender<Vec<i16>>),
 }
 
 struct TaskOutput {
@@ -130,6 +133,13 @@ impl Recorder {
                             Some(RecorderCommand::Cancel) => { cancelled = true; break; }
                             Some(RecorderCommand::Pause) => { is_paused = true; }
                             Some(RecorderCommand::Resume) => { is_paused = false; detector.reset(); }
+                            Some(RecorderCommand::Snapshot(reply)) => {
+                                // Hand back a clone of what we've captured so
+                                // far. Capture continues uninterrupted; if the
+                                // requester has already gone away the send fails
+                                // harmlessly.
+                                let _ = reply.send(samples.clone());
+                            }
                             None => break,
                         }
                     }
@@ -233,6 +243,20 @@ impl Recorder {
     pub async fn resume(&self) -> Result<()> {
         let _ = self.cmd_tx.send(RecorderCommand::Resume).await;
         Ok(())
+    }
+
+    /// Clone the samples captured so far without disturbing capture. Used by the
+    /// streaming-preview loop to transcribe the in-progress recording. The
+    /// capture task answers from its in-memory buffer, so calling this does not
+    /// pause, stop, or otherwise change the recording in any way.
+    pub async fn snapshot(&self) -> Result<Vec<i16>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.cmd_tx
+            .send(RecorderCommand::Snapshot(tx))
+            .await
+            .map_err(|_| Error::Internal("recorder task is gone".into()))?;
+        rx.await
+            .map_err(|_| Error::Internal("recorder dropped snapshot reply".into()))
     }
 
     /// Wait for the recorder to auto-finalize (Oneshot / Duration modes,

@@ -276,6 +276,54 @@ async fn empty_prepend_matches_plain_start() {
 }
 
 #[tokio::test]
+async fn snapshot_returns_captured_samples_without_stopping() {
+    // Streaming-preview contract: `snapshot()` returns a clone of the audio
+    // captured so far while leaving capture running, so a later snapshot sees
+    // more, and the final WAV still contains everything.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("snap.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 10_000, // never auto-stop during this test
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+
+    let settle = || tokio::time::sleep(Duration::from_millis(100));
+
+    sink.push(loud_block(8000)).await.unwrap(); // 0.5s
+    settle().await;
+    let snap1 = recorder.snapshot().await.unwrap();
+    assert!(
+        (snap1.len() as i64 - 8000).abs() < 200,
+        "first snapshot had {} samples (expected ~8000)",
+        snap1.len()
+    );
+
+    // Capture must continue after the snapshot — push more and snapshot again.
+    sink.push(loud_block(8000)).await.unwrap(); // 1.0s total
+    settle().await;
+    let snap2 = recorder.snapshot().await.unwrap();
+    assert!(
+        snap2.len() > snap1.len(),
+        "second snapshot ({}) should exceed first ({})",
+        snap2.len(),
+        snap1.len()
+    );
+
+    sink.close();
+    let result = recorder.wait_for_finalize(&wav_path).await.unwrap();
+    // The recording was never disturbed by the snapshots — full ~1.0s survives.
+    assert!(
+        (result.duration_ms - 1000).abs() < 100,
+        "snapshots should not affect the recording: got {}ms",
+        result.duration_ms
+    );
+}
+
+#[tokio::test]
 async fn config_is_canonical_format() {
     let (source, _sink) = make_synthetic();
     let cfg = RecorderConfig::default();
