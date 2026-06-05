@@ -155,13 +155,26 @@ impl LlmProvider for OllamaProvider {
 
 // ── OpenAI-compatible chat completions (OpenAI, Groq, LM Studio, ...) ──────────
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct OpenAiChatProvider {
     http: reqwest::Client,
     url: String,
     api_key: String,
     model: String,
     timeout: Duration,
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for OpenAiChatProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenAiChatProvider")
+            .field("http", &self.http)
+            .field("url", &self.url)
+            .field("api_key", &crate::config::redact_key(&self.api_key))
+            .field("model", &self.model)
+            .field("timeout", &self.timeout)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -203,13 +216,26 @@ impl LlmProvider for OpenAiChatProvider {
 
 // ── Anthropic Claude (POST /v1/messages) ───────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct AnthropicProvider {
     http: reqwest::Client,
     url: String,
     api_key: String,
     model: String,
     timeout: Duration,
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for AnthropicProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnthropicProvider")
+            .field("http", &self.http)
+            .field("url", &self.url)
+            .field("api_key", &crate::config::redact_key(&self.api_key))
+            .field("model", &self.model)
+            .field("timeout", &self.timeout)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,6 +288,42 @@ impl LlmProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The provider structs hold a plaintext API key but must never render it in
+    // `Debug` output (which can reach logs / panic backtraces).
+    #[test]
+    fn openai_chat_provider_debug_redacts_api_key() {
+        let p = OpenAiChatProvider {
+            http: reqwest::Client::new(),
+            url: "https://api.openai.com/v1/chat/completions".to_string(),
+            api_key: "sk-SUPER-SECRET-12345".to_string(),
+            model: "gpt-4o".to_string(),
+            timeout: Duration::from_secs(30),
+        };
+        let dbg = format!("{p:?}");
+        assert!(
+            !dbg.contains("sk-SUPER-SECRET-12345"),
+            "api key leaked: {dbg}"
+        );
+        assert!(dbg.contains("redacted"));
+    }
+
+    #[test]
+    fn anthropic_provider_debug_redacts_api_key() {
+        let p = AnthropicProvider {
+            http: reqwest::Client::new(),
+            url: "https://api.anthropic.com/v1/messages".to_string(),
+            api_key: "sk-ant-SUPER-SECRET-67890".to_string(),
+            model: "claude-3-haiku".to_string(),
+            timeout: Duration::from_secs(30),
+        };
+        let dbg = format!("{p:?}");
+        assert!(
+            !dbg.contains("sk-ant-SUPER-SECRET-67890"),
+            "api key leaked: {dbg}"
+        );
+        assert!(dbg.contains("redacted"));
+    }
 
     #[test]
     fn non_empty_or_falls_back_when_blank() {
