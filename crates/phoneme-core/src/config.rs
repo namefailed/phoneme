@@ -23,7 +23,7 @@ pub(crate) fn redact_key(key: &str) -> &'static str {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// Configuration for the Whisper transcription engine.
-    pub whisper: LlmConfig,
+    pub whisper: WhisperConfig,
     /// Hardware and threshold settings for the audio recording stream.
     pub recording: RecordingConfig,
     /// Settings governing external script execution (hooks) upon transcription success.
@@ -147,7 +147,7 @@ pub enum TranscriptionBackend {
 
 /// Configuration for the Whisper transcription engine.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct LlmConfig {
+pub struct WhisperConfig {
     /// The execution mode determining how the transcription server is managed.
     pub mode: WhisperMode,
     /// The URL of the OpenAI-compatible transcription endpoint (used in `External` mode).
@@ -181,9 +181,9 @@ pub struct LlmConfig {
     pub api_url: String,
 }
 
-impl std::fmt::Debug for LlmConfig {
+impl std::fmt::Debug for WhisperConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LlmConfig")
+        f.debug_struct("WhisperConfig")
             .field("mode", &self.mode)
             .field("external_url", &self.external_url)
             .field("model_path", &self.model_path)
@@ -199,7 +199,7 @@ impl std::fmt::Debug for LlmConfig {
     }
 }
 
-impl LlmConfig {
+impl WhisperConfig {
     /// OpenAI-compatible Whisper server base URL (no trailing path).
     pub fn server_base_url(&self) -> String {
         match self.mode {
@@ -467,7 +467,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            whisper: LlmConfig {
+            whisper: WhisperConfig {
                 mode: WhisperMode::BundledDownload,
                 external_url: "http://127.0.0.1:5809".into(),
                 model_path: String::new(),
