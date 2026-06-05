@@ -100,6 +100,12 @@ fn default_llm_timeout_secs() -> u64 {
     30
 }
 
+/// Serde default for boolean fields that should default to `true` when absent
+/// from an older config file.
+fn default_true() -> bool {
+    true
+}
+
 /// Defines the execution strategy for the Whisper transcription model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -272,6 +278,13 @@ pub struct HookConfig {
     /// An optional HTTP URL where the transcription payload will be POSTed concurrently.
     #[serde(default)]
     pub webhook_url: Option<String>,
+    /// Whether hooks (and the webhook) fire automatically after every
+    /// transcription, including re-transcriptions. When `false`, transcription
+    /// just updates the stored transcript and the user fires hooks on demand via
+    /// the "Re-fire hook" action. Defaults to `true` to preserve the historical
+    /// behaviour for existing configs.
+    #[serde(default = "default_true")]
+    pub run_on_transcribe: bool,
 }
 
 /// Global keyboard shortcut bindings for triggering push-to-talk.
@@ -448,6 +461,7 @@ impl Default for Config {
                 ],
                 timeout_secs: 30,
                 webhook_url: None,
+                run_on_transcribe: true,
             },
             hotkey: HotkeyConfig {
                 enabled: false,
@@ -957,6 +971,32 @@ mod tests {
         let parsed = Config::load(&path).expect("loads legacy config without retention");
         assert!(parsed.retention.max_age_days.is_none());
         assert!(parsed.retention.max_count.is_none());
+    }
+
+    #[test]
+    fn hook_run_on_transcribe_absent_in_legacy_toml_defaults_true() {
+        // A config serialized before `run_on_transcribe` existed must still
+        // parse, defaulting to the historical behaviour (hooks fire on every
+        // transcription).
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(hook) = toml_val.get_mut("hook").and_then(|v| v.as_table_mut()) {
+            hook.remove("run_on_transcribe");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without run_on_transcribe");
+        assert!(parsed.hook.run_on_transcribe);
+    }
+
+    #[test]
+    fn hook_run_on_transcribe_round_trips_false() {
+        let mut cfg = Config::default();
+        cfg.hook.run_on_transcribe = false;
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert!(!parsed.hook.run_on_transcribe);
     }
 
     #[test]

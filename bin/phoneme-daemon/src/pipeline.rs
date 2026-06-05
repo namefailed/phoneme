@@ -79,6 +79,25 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .catalog
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
+
+    // Hooks are optional. When `run_on_transcribe` is off, finalize the
+    // recording right after transcription without firing hooks or the webhook;
+    // the user can run them on demand later via "Re-fire hook". This is what
+    // lets a re-transcription update the text without re-triggering side effects
+    // (e.g. re-appending to an Obsidian daily note).
+    if !cfg.hook.run_on_transcribe {
+        state
+            .catalog
+            .update_status(&id, RecordingStatus::Done)
+            .await?;
+        state.events.emit(DaemonEvent::TranscriptionDone {
+            id: id.clone(),
+            transcript: transcript.clone(),
+        });
+        state.inbox.finish_done(&id, &payload).await?;
+        return Ok(());
+    }
+
     state
         .catalog
         .update_status(&id, RecordingStatus::HookRunning)
