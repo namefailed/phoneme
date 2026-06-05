@@ -16,6 +16,7 @@ const REFERENCE_HOOKS: &[&str] = &[
     // Showcase / integrations
     "to-webhook.ps1",
     "summarize-with-ollama.ps1",
+    "to-todoist.ps1",
     // Advanced (Emacs / Org)
     "to-org-journal.ps1",
     "to-denote.ps1",
