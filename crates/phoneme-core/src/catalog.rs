@@ -301,6 +301,24 @@ impl Catalog {
         rows.into_iter().map(row_to_recording).collect()
     }
 
+    /// Fetch all recordings belonging to a single meeting session.
+    ///
+    /// Returns the rows that share `session_id`, ordered by `track` then
+    /// `started_at` so the two tracks of a meeting come back in a stable order
+    /// (e.g. "mic" before "system", since "mic" < "system" lexicographically).
+    /// A `session_id` with no rows yields an empty `Vec` (not an error) — the
+    /// caller treats that as "no such session".
+    pub async fn list_by_session(&self, session_id: &str) -> Result<Vec<Recording>> {
+        let rows = sqlx::query(
+            "SELECT * FROM recordings WHERE session_id = ? \
+             ORDER BY track ASC, started_at ASC, id ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(row_to_recording).collect()
+    }
+
     pub async fn delete(&self, id: &RecordingId) -> Result<()> {
         sqlx::query("DELETE FROM recordings WHERE id = ?")
             .bind(id.as_str())

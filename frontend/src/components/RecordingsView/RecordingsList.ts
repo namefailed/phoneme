@@ -11,6 +11,7 @@ import {
   highlightMatch,
   escapeHtml,
 } from "../../utils/format";
+import { groupRecordings, visibleRecordings, trackLabel } from "./grouping";
 import "../shared/styles.css";
 import "./styles.css";
 
@@ -38,6 +39,20 @@ export class RecordingsList {
   private multiSelected = new Set<string>();
   /** Index of the anchor row for Shift+Click range selection. */
   private anchorIndex = -1;
+
+  // ── Session grouping state ───────────────────────────────────────────────
+  /**
+   * Session ids whose meeting group is expanded. Collapsed by default (a fresh
+   * id is absent from the set), so dual-track meetings start as one tidy row.
+   */
+  private expandedSessions = new Set<string>();
+  /**
+   * The recordings that are actually rendered as `.rec-row` rows, in DOM order.
+   * Group member rows only appear here when their group is expanded, so every
+   * index-based handler (keyboard nav, range select, click) uses THIS array —
+   * its indices line up 1:1 with the `.rec-row` elements in the DOM.
+   */
+  private visibleRows: Recording[] = [];
 
   constructor(
     container: HTMLElement,
@@ -183,35 +198,78 @@ export class RecordingsList {
       </div>
     `;
 
+    // Group dual-track meetings into collapsible groups; standalone recordings
+    // stay flat. `visibleRows` is the flattened list of rows actually rendered
+    // (member rows only when their group is expanded), in DOM order — every
+    // index-based handler below indexes into THIS array.
+    const grouped = groupRecordings(s.recordings);
+    this.visibleRows = visibleRecordings(grouped, (sid) => this.expandedSessions.has(sid));
+
     // Clamp focusedIndex to valid range after list changes
-    if (this.focusedIndex >= s.recordings.length) {
-      this.focusedIndex = s.recordings.length - 1;
+    if (this.focusedIndex >= this.visibleRows.length) {
+      this.focusedIndex = this.visibleRows.length - 1;
     }
 
-    const rows = s.recordings
-      .map((r, i) =>
-        this.renderRow(
-          r,
-          r.id === s.selectedId,
-          i === this.focusedIndex,
-          this.multiSelected.has(r.id),
-          visibleCols,
-          gridTemplate,
-        ),
-      )
+    // Render grouped items in order. A group emits a header (not a `.rec-row`)
+    // plus, when expanded, its member rows. `rowIndex` tracks the position of
+    // each `.rec-row` so it stays aligned with `visibleRows`.
+    let rowIndex = 0;
+    const body = grouped
+      .map((item) => {
+        if (item.kind === "single") {
+          const r = item.recording;
+          const html = this.renderRow(
+            r,
+            r.id === s.selectedId,
+            rowIndex === this.focusedIndex,
+            this.multiSelected.has(r.id),
+            visibleCols,
+            gridTemplate,
+            null,
+          );
+          rowIndex++;
+          return html;
+        }
+        // Group: header + (if expanded) member rows.
+        const expanded = this.expandedSessions.has(item.sessionId);
+        const header = this.renderGroupHeader(item.sessionId, item.tracks, expanded, gridTemplate);
+        if (!expanded) return header;
+        const memberRows = item.tracks
+          .map((r) => {
+            const html = this.renderRow(
+              r,
+              r.id === s.selectedId,
+              rowIndex === this.focusedIndex,
+              this.multiSelected.has(r.id),
+              visibleCols,
+              gridTemplate,
+              r.track ?? null,
+            );
+            rowIndex++;
+            return html;
+          })
+          .join("");
+        return header + memberRows;
+      })
       .join("");
 
-    this.container.innerHTML = `<div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings">${head}${rows}</div>`;
+    this.container.innerHTML = `<div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings">${head}${body}</div>`;
 
     // Restore indeterminate state on the select-all checkbox (can't be set via HTML attr).
     const selectAllCb = this.container.querySelector<HTMLInputElement>("#select-all-cb");
     if (selectAllCb && someSelected) selectAllCb.indeterminate = true;
 
+    // Group-header checkboxes also need their indeterminate state restored (it
+    // can't be expressed as an HTML attribute), so sync them post-render.
+    this.updateCheckboxesOnly();
+
     const table = this.container.querySelector<HTMLElement>(".rec-table")!;
 
     // ── Keyboard navigation ───────────────────────────────────────────────────
     table.addEventListener("keydown", (e: KeyboardEvent) => {
-      const recs = this.state.get().recordings;
+      // Navigation operates over the VISIBLE rows so collapsed group members
+      // are skipped and indices stay aligned with the rendered `.rec-row`s.
+      const recs = this.visibleRows;
       if (!recs.length) return;
 
       // Ctrl+A = select all
@@ -265,7 +323,7 @@ export class RecordingsList {
           // The checkbox input already reflects the new state via its change event;
           // we handle toggle here directly so Shift+Click range works too.
           if (e.shiftKey && this.anchorIndex >= 0) {
-            this.selectRange(this.anchorIndex, i, this.state.get().recordings);
+            this.selectRange(this.anchorIndex, i, this.visibleRows);
           } else {
             this.toggleId(id, i);
           }
@@ -274,7 +332,7 @@ export class RecordingsList {
 
         // Normal row click: Shift = range select; otherwise single-select navigate.
         if (e.shiftKey && this.anchorIndex >= 0) {
-          this.selectRange(this.anchorIndex, i, this.state.get().recordings);
+          this.selectRange(this.anchorIndex, i, this.visibleRows);
           return;
         }
 
@@ -298,11 +356,29 @@ export class RecordingsList {
         }
         return;
       }
+      // Group header checkbox — select/deselect every track in the meeting.
+      const groupHead = cb.closest<HTMLElement>(".rec-group-head");
+      if (groupHead) {
+        const sid = groupHead.getAttribute("data-session");
+        if (!sid) return;
+        const memberIds = this.state
+          .get()
+          .recordings.filter((r) => r.session_id === sid)
+          .map((r) => r.id);
+        if (cb.checked) {
+          memberIds.forEach((mid) => this.multiSelected.add(mid));
+        } else {
+          memberIds.forEach((mid) => this.multiSelected.delete(mid));
+        }
+        this.onSelectionChange(new Set(this.multiSelected));
+        this.updateCheckboxesOnly();
+        return;
+      }
       // Individual row checkbox — id is encoded in data-id of the parent row.
       const row = cb.closest<HTMLElement>(".rec-row");
       const id = row?.getAttribute("data-id");
       if (!id) return;
-      const idx = this.state.get().recordings.findIndex((r) => r.id === id);
+      const idx = this.visibleRows.findIndex((r) => r.id === id);
       if (cb.checked) {
         this.multiSelected.add(id);
         this.anchorIndex = idx;
@@ -311,6 +387,25 @@ export class RecordingsList {
       }
       this.onSelectionChange(new Set(this.multiSelected));
       this.updateCheckboxesOnly();
+    });
+
+    // ── Group expand/collapse ──────────────────────────────────────────────
+    this.container.querySelectorAll<HTMLElement>(".rec-group-head").forEach((el) => {
+      el.addEventListener("click", (e: MouseEvent) => {
+        // Clicking the group's checkbox must not also toggle expansion.
+        const target = e.target as HTMLElement;
+        if (target.classList.contains("row-cb") || target.closest(".col-checkbox")) {
+          return;
+        }
+        const sid = el.getAttribute("data-session");
+        if (!sid) return;
+        if (this.expandedSessions.has(sid)) {
+          this.expandedSessions.delete(sid);
+        } else {
+          this.expandedSessions.add(sid);
+        }
+        this.render();
+      });
     });
 
     // ── Column resizing ────────────────────────────────────────────────────
@@ -403,6 +498,21 @@ export class RecordingsList {
       if (cb) cb.checked = checked;
       el.classList.toggle("multi-selected", checked);
     });
+
+    // Refresh each group header checkbox: checked when all its member tracks are
+    // selected, indeterminate when only some are.
+    const allRecs = this.state.get().recordings;
+    this.container.querySelectorAll<HTMLElement>(".rec-group-head").forEach((el) => {
+      const sid = el.getAttribute("data-session");
+      if (!sid) return;
+      const members = allRecs.filter((r) => r.session_id === sid);
+      const sel = members.filter((r) => this.multiSelected.has(r.id)).length;
+      const cb = el.querySelector<HTMLInputElement>(".row-cb");
+      if (cb) {
+        cb.checked = members.length > 0 && sel === members.length;
+        cb.indeterminate = sel > 0 && sel < members.length;
+      }
+    });
   }
 
   private moveFocus(newIndex: number) {
@@ -426,6 +536,8 @@ export class RecordingsList {
     multiChecked: boolean,
     visibleCols: string[],
     gridTemplate: string,
+    /** Non-null when this row is a member of an (expanded) meeting group. */
+    track: string | null,
   ): string {
     const day = formatDay(r.started_at);
     const use24h = (this.config as any)?.interface?.format_24h ?? false;
@@ -436,19 +548,27 @@ export class RecordingsList {
     const preview = r.transcript ?? truncatedError(r);
     const searchTerm = filterStore.get().search ?? "";
 
+    // For an expanded meeting track, prefix the transcript cell with a small
+    // track badge (Microphone / System audio). escapeHtml keeps the track value
+    // safe even though it currently comes from a fixed set.
+    const trackBadge = track
+      ? `<span class="rec-track-badge">${escapeHtml(trackLabel(track))}</span> `
+      : "";
+
     const cellMap: Record<string, string> = {
       day: `<span class="rec-time">${day}</span>`,
       time: `<span class="rec-time">${time}</span>`,
       duration: `<span class="rec-dur">${dur}</span>`,
       status: `<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
-      transcript: `<span class="rec-preview">${highlightMatch(preview, searchTerm)}</span>`,
+      transcript: `<span class="rec-preview">${trackBadge}${highlightMatch(preview, searchTerm)}</span>`,
     };
 
     const cells = visibleCols.map((c) => cellMap[c] || "").join("");
     const multiClass = multiChecked ? " multi-selected" : "";
+    const memberClass = track ? " rec-row--track" : "";
 
     return `
-      <div class="rec-row ${active ? "active" : ""}${kbFocused ? " kbd-focused" : ""}${multiClass}" data-id="${r.id}" role="option" aria-selected="${active}" style="grid-template-columns: ${gridTemplate}">
+      <div class="rec-row ${active ? "active" : ""}${kbFocused ? " kbd-focused" : ""}${multiClass}${memberClass}" data-id="${r.id}" role="option" aria-selected="${active}" style="grid-template-columns: ${gridTemplate}">
         <span class="col-checkbox">
           <input
             type="checkbox"
@@ -458,6 +578,50 @@ export class RecordingsList {
           />
         </span>
         ${cells}
+      </div>
+    `;
+  }
+
+  /**
+   * Render the collapsible header row for a meeting group. Spans the full grid
+   * (a single cell after the checkbox column) and carries `data-session` so the
+   * click/checkbox handlers can resolve it back to its member recordings.
+   */
+  private renderGroupHeader(
+    sessionId: string,
+    tracks: Recording[],
+    expanded: boolean,
+    _gridTemplate: string,
+  ): string {
+    const use24h = (this.config as any)?.interface?.format_24h ?? false;
+    // The earliest start time across the tracks represents the meeting time.
+    const startIso = tracks
+      .map((t) => t.started_at)
+      .sort()[0];
+    const time = formatTime(startIso, use24h);
+    const day = formatDay(startIso);
+    const count = tracks.length;
+    // All member ids selected → header checkbox is checked; some → indeterminate.
+    const selectedCount = tracks.filter((t) => this.multiSelected.has(t.id)).length;
+    const allChecked = selectedCount === count && count > 0;
+    const chevron = expanded ? "▾" : "▸";
+
+    // Everything dynamic here is either a fixed glyph or escaped.
+    return `
+      <div class="rec-group-head" data-session="${escapeHtml(sessionId)}" role="group" aria-expanded="${expanded}">
+        <span class="col-checkbox">
+          <input
+            type="checkbox"
+            class="row-cb"
+            ${allChecked ? "checked" : ""}
+            aria-label="Select all tracks in this meeting"
+          />
+        </span>
+        <span class="rec-group-label">
+          <span class="rec-group-chevron">${chevron}</span>
+          <span class="rec-group-title">🎙 Meeting — ${count} tracks</span>
+          <span class="rec-group-meta">${escapeHtml(day)} · ${escapeHtml(time)}</span>
+        </span>
       </div>
     `;
   }
