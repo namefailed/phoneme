@@ -82,15 +82,25 @@ function buildProviderOptions(
   return `${real}<optgroup label="Presets">${presetOpts}</optgroup>`;
 }
 
-/** Opens the modal. Resolves `true` if the user saved, `false` if cancelled. */
+/**
+ * Opens the model picker. Resolves `true` if the user saved, `false` if
+ * cancelled.
+ *
+ * When `anchor` is supplied (e.g. the "Re-transcribe ▾" caret) the picker is
+ * rendered as a dropdown positioned directly beneath that element instead of a
+ * centered modal. Without an anchor (e.g. the Settings button) it stays a
+ * centered modal.
+ */
 export function openModelPicker(
   initialTab: "transcription" | "postprocessing" = "transcription",
+  anchor?: HTMLElement,
 ): Promise<boolean> {
-  return run(initialTab);
+  return run(initialTab, anchor);
 }
 
 async function run(
   initialTab: "transcription" | "postprocessing",
+  anchor?: HTMLElement,
 ): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let config: any;
@@ -111,7 +121,7 @@ async function run(
   return await new Promise<boolean>((resolve) => {
 
   const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
+  overlay.className = anchor ? "modal-overlay mp-anchored" : "modal-overlay";
   overlay.innerHTML = `
     <div class="modal-dialog mp-dialog" role="dialog" aria-modal="true" aria-labelledby="mp-title">
       <div class="modal-header">
@@ -170,6 +180,27 @@ async function run(
   `;
 
   document.body.appendChild(overlay);
+
+  // When anchored to a trigger (the Re-transcribe caret), position the dialog
+  // as a dropdown directly beneath it, clamped to stay within the viewport.
+  if (anchor) {
+    const dialog = overlay.querySelector<HTMLElement>(".mp-dialog")!;
+    const rect = anchor.getBoundingClientRect();
+    const width = dialog.offsetWidth;
+    const margin = 8;
+    let left = rect.left;
+    if (left + width + margin > window.innerWidth) {
+      left = Math.max(margin, window.innerWidth - width - margin);
+    }
+    let top = rect.bottom + 4;
+    const height = dialog.offsetHeight;
+    // If it would overflow the bottom, flip above the anchor when there's room.
+    if (top + height + margin > window.innerHeight && rect.top - height - 4 > margin) {
+      top = rect.top - height - 4;
+    }
+    dialog.style.top = `${Math.max(margin, top)}px`;
+    dialog.style.left = `${left}px`;
+  }
 
   const sttProvider = overlay.querySelector<HTMLSelectElement>("#mp-stt-provider")!;
   const sttUrl = overlay.querySelector<HTMLInputElement>("#mp-stt-url")!;

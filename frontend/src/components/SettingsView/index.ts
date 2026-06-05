@@ -85,7 +85,6 @@ export class SettingsView {
         <div class="settings-main" style="display: flex; flex-direction: column; height: 100%;">
           <div class="settings-body" id="settings-body" style="flex: 1; overflow-y: auto;"></div>
           <div class="settings-toolbar" style="padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px;">
-            <button id="settings-model-picker">Quick model picker…</button>
             <span class="spacer"></span>
             <button id="settings-close">Close</button>
             <button class="primary" id="settings-save">Save</button>
@@ -122,25 +121,6 @@ export class SettingsView {
         }
       });
     });
-
-    this.container
-      .querySelector("#settings-model-picker")
-      ?.addEventListener("click", async () => {
-        const { openModelPicker } = await import("../ModelPicker");
-        const saved = await openModelPicker("transcription");
-        if (saved) {
-          // The picker wrote to disk; reload so the open Settings view and its
-          // unsaved-changes guard reflect the new values instead of clobbering
-          // them on the next Save.
-          try {
-            this.config = await invoke("read_config");
-            this.originalConfigStr = JSON.stringify(this.config);
-            this.render();
-          } catch (e) {
-            showToast(`Failed to reload settings: ${e}`, "error");
-          }
-        }
-      });
 
     this.container
       .querySelector("#settings-close")
