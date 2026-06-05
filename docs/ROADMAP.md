@@ -104,12 +104,14 @@ clean base.*
 ### Local AI (on-device, offline)
 - [ ] **Local semantic search** — bundle a local embedding model (e.g. all-MiniLM-L6-v2 via ONNX) + a vector index so you can search by *meaning* ("that idea about rust error handling last week"), not just exact text. Complements the existing FTS5 keyword search.
 - [ ] **Local speaker diarization** — label Speaker A / Speaker B in Meeting Mode transcripts using a local diarization model alongside Whisper (the offline equivalent of the AssemblyAI feature).
-- [ ] **Merged conversation view** — interleave a dual-track meeting's two transcripts by timestamp into one chronological "You:" / "Meeting:" conversation; exportable, and feedable to the LLM post-processor as a single context for summaries/action items.
+- [ ] **Merged conversation view** — interleave a dual-track meeting's two transcripts by timestamp into one chronological "You:" / "Meeting:" conversation; exportable, and feedable to the LLM post-processor as a single context for summaries/action items. **Build this on Lit (below), not raw `innerHTML`** — interleaving two dynamic arrays while preserving interactive elements (play/edit state) is exactly the case manual DOM templating handles badly.
 - [ ] **Real-time word-by-word transcription** — upgrade the v1.6 streaming *preview* to true word-level streaming as you speak (`whisper-live` or a streaming-capable backend).
 
 ### Internal quality
-- [ ] **Frontend reactivity** — evaluate/adopt a lightweight declarative layer (SolidJS or Lit) to get automatic component lifecycle + listener cleanup as the UI grows.
+- [ ] **Frontend reactivity (Lit for complex views)** — the framework-less `Store.ts` pattern is great for flat lists/forms and stays. But adopt **Lit (Web Components)** for the complex, dynamically-reconciled views (the merged conversation timeline first) to get declarative rendering + automatic lifecycle/listener cleanup without a full React/Vue. Do this *before* the merged conversation view.
+- [ ] **Test audio backend for full CI E2E** — the `Source` trait already abstracts capture (`CpalSource` prod, `SyntheticSource` tests), and Meeting Mode is end-to-end testable via `start_meeting_with_sources`. Extend the same injection to the **single-recording** daemon path so a CI test can drive CLI → daemon → (mock sine/silence) capture → SQLite without hardware, closing the "cpal device tests skipped in CI" gap.
 - [ ] **Typed errors** — `thiserror` for the library crates, `anyhow` in the binaries, for clean `?` propagation and better traces.
+- [ ] **Paginated recordings list** — `ListFilter` has `limit` but no `offset`, and the GUI fetches the list unpaginated. At 5,000+ recordings that floods the named pipe and hydrates thousands of `RecordingsList` rows at once, locking the UI thread and ballooning memory. Add `offset` to `ListRecordings` + catalog `list()`, plus a "Load More" / `IntersectionObserver` infinite scroll in `RecordingsList.ts`. (Pairs with the Lit adoption above.)
 
 ---
 
@@ -118,13 +120,22 @@ clean base.*
 *Focus: cross-platform availability and opening Phoneme to external tools.*
 
 ### Platform
-- [ ] **macOS port** — Apple Silicon first; bundled whisper.cpp server; full feature parity with Windows
-- [ ] **Linux port** — PipeWire / ALSA audio; X11 + Wayland global hotkey
+- [ ] **macOS port** — Apple Silicon first; bundled whisper.cpp server. **Ship microphone-only first; do NOT let Meeting Mode block the macOS launch.** `cpal` has no system-audio loopback on macOS — it requires a virtual device (BlackHole / Loopback). So on macOS: mic capture works natively; system-audio capture is opt-in via an external loopback device the user installs. Treat full feature parity as a follow-up, not a launch gate.
+- [ ] **Linux port** — PipeWire / ALSA audio (PipeWire monitor sources give system-audio loopback natively, unlike macOS); X11 + Wayland global hotkey
 - [ ] **Windows ARM** — native ARM64 build for Snapdragon-based machines
 
 ### Integration
-- [ ] **Local REST API** — `localhost:3737` HTTP server (off by default) exposing list, get, and event-stream endpoints; enables Obsidian plugins, Raycast extensions, and shell scripts
-- [ ] **MCP server** — `phoneme-mcp` binary implementing the Model Context Protocol; exposes tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`; lets any MCP-compatible AI agent (Hermes, Claude Desktop, Spark, OpenClaw, or any custom agent stack) use Phoneme as a voice input and transcript search tool without needing the full REST API
+
+> **Architecture decision (locked):** the daemon already speaks newline-delimited
+> JSON over a named pipe behind the `phoneme-ipc` `Transport` trait. v2.0 adds an
+> **HTTP front-end, not a new eventing model**: an `axum` server maps one-off
+> `Request`s to REST endpoints (`POST /api/record/start`, `GET /api/recordings`)
+> and streams `DaemonEvent`s as **Server-Sent Events** (`GET /api/events`, an
+> `EventSource` in the frontend). REST API, browser extension, Raycast scripts,
+> and the MCP server then all share one `fetch()`/`EventSource` surface.
+
+- [ ] **Local REST API** — `localhost:3737` `axum` server (off by default): REST endpoints over the existing `Request`/`Response` enums + an SSE `/api/events` stream over `DaemonEvent`. Add an `HttpTransport` impl of the `Transport` trait so clients reuse the same typed surface.
+- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). Implement it as a **thin translator over the existing `Transport` trait**: a `CallTool("start_recording")` just maps to `Request::RecordStart` and fires it at the daemon over the pipe/socket — near-zero business logic in the MCP crate. Exposes tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`.
 - [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers
 - [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
 
