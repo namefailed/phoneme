@@ -74,46 +74,38 @@ Hooks are not on PATH. The full command string is invoked via the system shell:
 
 ## Reference hooks
 
-Phoneme ships five reference hooks (including `to-clipboard.ps1`). On first run they're copied to
-`%APPDATA%\phoneme\hooks\`. **The installer never overwrites them**, so feel
-free to edit.
+Phoneme ships eight reference hooks. On first run they're copied to
+`%APPDATA%\phoneme\hooks\`. **The installer never overwrites them**, so feel free
+to edit. Every shipped hook uses `Set-StrictMode` + `$ErrorActionPreference =
+'Stop'`, so a real failure reports as a failed hook instead of a silent success.
 
-### to-stdout.ps1
+### General-purpose
 
-The default. Echoes the transcript to stdout. Use this to verify the pipeline
-works.
+| Hook | What it does |
+|---|---|
+| `to-stdout.ps1` | The default. Echoes the transcript to stdout — use it to verify the pipeline works. |
+| `to-clipboard.ps1` | Copies the transcript to the Windows clipboard, ready to paste anywhere. |
+| `to-file.ps1` | Appends every transcript (timestamped) to one running Markdown file. Destination defaults to `~/Documents/VoiceNotes.md`; override with the `PHONEME_NOTES_FILE` env var. |
+| `to-markdown-daily.ps1` | Obsidian-style daily note at `~/Documents/notes/YYYY-MM-DD.md`: `- **14:35** — … ^20260519T143500823` |
 
-### to-org-journal.ps1
+### Showcase / integrations
 
-Appends each transcript to `~/Documents/org/journal.org` under today's date
-heading. Matches Doom Emacs / Denote workflows.
+| Hook | What it does |
+|---|---|
+| `to-webhook.ps1` | POSTs the transcript as JSON to a webhook (Discord/Slack/n8n/your own server). Set `PHONEME_WEBHOOK_URL`. A spoken note can hit a team channel or automation the instant you stop talking. |
+| `summarize-with-ollama.ps1` | Sends the transcript to a **local** Ollama model and saves a summary + action items to `~/Documents/notes/YYYY-MM-DD-summaries.md` — fully offline, no API keys. Set `PHONEME_OLLAMA_MODEL` (default `llama3.2:3b`). |
 
-```org
-* 2026-05-19 Tue
-** 14:35 The cleaned transcription text
-   :PROPERTIES:
-   :PHONEME_ID: 20260519T143500823
-   :AUDIO: C:/.../143500823.wav
-   :END:
-```
+### Advanced (Emacs / Org)
 
-### to-markdown-daily.ps1
+| Hook | What it does |
+|---|---|
+| `to-org-journal.ps1` | Appends to `~/Documents/org/journal.org` under today's "Log" section — a worked example of a richer Org integration; adapt to your own journal layout. |
+| `to-denote.ps1` | Creates a Denote-flavoured note (`20260519T143500--slug__voice.org`) under `~/Documents/org/notes/`. |
 
-Obsidian-style daily note at `~/Documents/notes/YYYY-MM-DD.md`:
-
-```markdown
-# 2026-05-19
-
-- **14:35** — The cleaned transcription text ^20260519T143500823
-```
-
-### to-denote.ps1
-
-Creates a Denote-flavored note file under `~/Documents/org/notes/`:
-
-```
-20260519T143500--the-cleaned-transcription-text__voice.org
-```
+> [!TIP]
+> Pair a showcase hook with a **keyword-triggered rule** (Settings → Action Hook):
+> e.g. only run `summarize-with-ollama.ps1` when the transcript contains
+> `"summarize:"`, or fire a Todoist webhook only on `"action item:"`.
 
 ## Writing your own
 
