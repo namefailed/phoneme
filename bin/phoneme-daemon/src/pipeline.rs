@@ -79,6 +79,25 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .catalog
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
+
+    // Hooks are optional. When `run_on_transcribe` is off, finalize the
+    // recording right after transcription without firing hooks or the webhook;
+    // the user can run them on demand later via "Re-fire hook". This is what
+    // lets a re-transcription update the text without re-triggering side effects
+    // (e.g. re-appending to an Obsidian daily note).
+    if !cfg.hook.run_on_transcribe {
+        state
+            .catalog
+            .update_status(&id, RecordingStatus::Done)
+            .await?;
+        state.events.emit(DaemonEvent::TranscriptionDone {
+            id: id.clone(),
+            transcript: transcript.clone(),
+        });
+        state.inbox.finish_done(&id, &payload).await?;
+        return Ok(());
+    }
+
     state
         .catalog
         .update_status(&id, RecordingStatus::HookRunning)
@@ -132,6 +151,35 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
                     error: e.to_string(),
                 });
                 return Err(e);
+            }
+        }
+    }
+
+    // Conditional keyword-triggered hooks: run each rule whose pattern matches
+    // the (post-processed) transcript. These are supplementary — a failure is
+    // logged but does NOT fail the recording, since the always-on commands
+    // above already succeeded.
+    for rule in &expanded_cfg.hook.keyword_rules {
+        if !rule.matches(&payload.transcript) {
+            continue;
+        }
+        let cmd = rule.command.trim();
+        if cmd.is_empty() {
+            continue;
+        }
+        let runner = HookRunner::new(cmd.to_string(), Duration::from_secs(cfg.hook.timeout_secs));
+        match runner.run(&payload).await {
+            Ok(result) => {
+                total_duration += result.duration_ms;
+                last_cmd = rule.command.clone();
+                if result.exit_code != 0 {
+                    tracing::warn!(pattern = %rule.pattern, exit_code = result.exit_code, "keyword hook exited non-zero");
+                } else {
+                    tracing::info!(pattern = %rule.pattern, "keyword hook ran");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(pattern = %rule.pattern, error = %e, "keyword hook failed to run");
             }
         }
     }

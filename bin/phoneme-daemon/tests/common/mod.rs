@@ -21,6 +21,17 @@ pub struct DaemonHarness {
 impl DaemonHarness {
     #[allow(dead_code)]
     pub async fn start() -> Self {
+        Self::start_with(|_cfg| {}).await
+    }
+
+    /// Like [`start`], but lets the caller mutate the generated `Config` before
+    /// the daemon is spawned — e.g. to set hook commands, `run_on_transcribe`,
+    /// or keyword rules for hook-behaviour tests.
+    #[allow(dead_code)]
+    pub async fn start_with<F>(customize: F) -> Self
+    where
+        F: FnOnce(&mut phoneme_core::Config),
+    {
         let temp = TempDir::new().unwrap();
         let pipe_name = format!("phoneme-test-{}", uuid_like());
 
@@ -43,6 +54,7 @@ impl DaemonHarness {
         cfg.whisper.external_url = whisper.uri();
         cfg.recording.audio_dir = temp.path().join("audio").to_string_lossy().into_owned();
         cfg.daemon.pipe_name = pipe_name.clone();
+        customize(&mut cfg);
         let cfg_path = temp.path().join("config.toml");
         std::fs::write(&cfg_path, toml::to_string(&cfg).unwrap()).unwrap();
 

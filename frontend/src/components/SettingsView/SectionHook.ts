@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
+import { escapeAttr } from "../../utils/format";
+
+type KeywordRule = { pattern: string; command: string; case_sensitive: boolean };
 
 export class SectionHook {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,8 +17,15 @@ export class SectionHook {
       config.hook.command = config.hook.commands;
       delete config.hook.commands;
     }
-    
+    if (!Array.isArray(config.hook.keyword_rules)) {
+      config.hook.keyword_rules = [];
+    }
+
     this.render(container);
+  }
+
+  private get rules(): KeywordRule[] {
+    return this.config.hook.keyword_rules as KeywordRule[];
   }
 
   private render(container: HTMLElement) {
@@ -76,6 +86,24 @@ export class SectionHook {
             Maximum time (in seconds) to wait for the Integration Script to finish before giving up and labeling the post-processing phase as failed.
           </span>
         </div>
+        <div class="settings-field">
+          <label>Run hooks after transcription</label>
+          <div>${renderField(
+            { key: "hook.run_on_transcribe", label: "", kind: "checkbox" },
+            this.config.hook.run_on_transcribe ?? true,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            When on (default), your Integration Script and webhook fire automatically after every transcription — including re-transcriptions. Turn it off if you only want hooks to run on demand via the <b>⚡ Re-fire hook</b> button (so re-transcribing fixes the text without re-triggering side effects like re-appending to a note).
+          </span>
+        </div>
+        <div class="settings-field stacked">
+          <label>Keyword-triggered hooks</label>
+          <div id="kw-rules-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+          <button class="inline-button" id="kw-add-rule" style="margin-top: 8px; align-self: flex-start;">+ Add rule</button>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 6px; display: block;">
+            Run an extra command <i>only</i> when the transcript contains a phrase — on top of the Integration Script above. Example: phrase <code>Action Item:</code> → a command that sends the note to your task manager. The command receives the same JSON on <code>stdin</code>.
+          </span>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
@@ -120,5 +148,53 @@ export class SectionHook {
         }
       });
     }
+
+    this.renderKwRules(container);
+    container.querySelector("#kw-add-rule")?.addEventListener("click", () => {
+      this.rules.push({ pattern: "", command: "", case_sensitive: false });
+      this.renderKwRules(container);
+    });
+  }
+
+  /** Render the keyword-rule rows from config and wire their inputs. */
+  private renderKwRules(container: HTMLElement) {
+    const list = container.querySelector<HTMLElement>("#kw-rules-list");
+    if (!list) return;
+    if (this.rules.length === 0) {
+      list.innerHTML = `<span style="font-size: 11px; color: var(--fg-faded);">No keyword rules yet.</span>`;
+      return;
+    }
+    list.innerHTML = this.rules
+      .map(
+        (r, i) => `
+        <div class="kw-rule-row" data-idx="${i}" style="display: flex; gap: 6px; align-items: center;">
+          <input class="kw-pattern" type="text" placeholder="Phrase to match…" value="${escapeAttr(r.pattern)}"
+            style="width: 180px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
+          <input class="kw-command" type="text" placeholder="Command to run…" value="${escapeAttr(r.command)}"
+            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
+          <label title="Case-sensitive match" style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted); white-space: nowrap;">
+            <input type="checkbox" class="kw-cs" ${r.case_sensitive ? "checked" : ""} /> Aa
+          </label>
+          <button class="inline-button kw-remove" title="Remove rule" style="padding: 4px 8px;">✕</button>
+        </div>`,
+      )
+      .join("");
+
+    list.querySelectorAll<HTMLElement>(".kw-rule-row").forEach((row) => {
+      const idx = Number(row.dataset.idx);
+      row.querySelector<HTMLInputElement>(".kw-pattern")?.addEventListener("input", (e) => {
+        this.rules[idx].pattern = (e.target as HTMLInputElement).value;
+      });
+      row.querySelector<HTMLInputElement>(".kw-command")?.addEventListener("input", (e) => {
+        this.rules[idx].command = (e.target as HTMLInputElement).value;
+      });
+      row.querySelector<HTMLInputElement>(".kw-cs")?.addEventListener("change", (e) => {
+        this.rules[idx].case_sensitive = (e.target as HTMLInputElement).checked;
+      });
+      row.querySelector(".kw-remove")?.addEventListener("click", () => {
+        this.rules.splice(idx, 1);
+        this.renderKwRules(container);
+      });
+    });
   }
 }
