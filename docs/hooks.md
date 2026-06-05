@@ -45,9 +45,23 @@ Set the hook in `%APPDATA%\phoneme\config.toml`:
 
 ```toml
 [hook]
-commands = ["powershell -File %APPDATA%/phoneme/hooks/to-org-journal.ps1"]
+# Run one or more commands, in order, after every transcription.
+commands = ["powershell -File %APPDATA%/phoneme/hooks/to-file.ps1"]
 timeout_secs = 30
 webhook_url = "https://your-webhook.app/api/ingest"
+# When false, transcription just saves the text and does NOT fire hooks/webhook;
+# run them on demand with the "⚡ Re-fire hook" button. Default: true.
+run_on_transcribe = true
+
+# Conditional hooks: run an extra command only when the transcript matches.
+[[hook.keyword_rules]]
+pattern = "action item:"        # case-insensitive by default
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
+
+[[hook.keyword_rules]]
+pattern = "summarize:"
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/summarize-with-ollama.ps1"
+case_sensitive = false
 
 [llm_post_process]
 enabled = true
@@ -74,7 +88,7 @@ Hooks are not on PATH. The full command string is invoked via the system shell:
 
 ## Reference hooks
 
-Phoneme ships eight reference hooks. On first run they're copied to
+Phoneme ships nine reference hooks. On first run they're copied to
 `%APPDATA%\phoneme\hooks\`. **The installer never overwrites them**, so feel free
 to edit. Every shipped hook uses `Set-StrictMode` + `$ErrorActionPreference =
 'Stop'`, so a real failure reports as a failed hook instead of a silent success.
@@ -94,6 +108,7 @@ to edit. Every shipped hook uses `Set-StrictMode` + `$ErrorActionPreference =
 |---|---|
 | `to-webhook.ps1` | POSTs the transcript as JSON to a webhook (Discord/Slack/n8n/your own server). Set `PHONEME_WEBHOOK_URL`. A spoken note can hit a team channel or automation the instant you stop talking. |
 | `summarize-with-ollama.ps1` | Sends the transcript to a **local** Ollama model and saves a summary + action items to `~/Documents/notes/YYYY-MM-DD-summaries.md` — fully offline, no API keys. Set `PHONEME_OLLAMA_MODEL` (default `llama3.2:3b`). |
+| `to-todoist.ps1` | Creates a Todoist task from the note. Designed to be **keyword-triggered** on `"action item:"` so only your action items become tasks. Set `PHONEME_TODOIST_TOKEN`. |
 
 ### Advanced (Emacs / Org)
 
@@ -106,6 +121,67 @@ to edit. Every shipped hook uses `Set-StrictMode` + `$ErrorActionPreference =
 > Pair a showcase hook with a **keyword-triggered rule** (Settings → Action Hook):
 > e.g. only run `summarize-with-ollama.ps1` when the transcript contains
 > `"summarize:"`, or fire a Todoist webhook only on `"action item:"`.
+
+## Keyword-triggered hooks
+
+Run an extra command **only when the transcript matches a phrase** — on top of
+the always-on `commands`. Configure them in **Settings → Action Hook**, or in
+`config.toml`:
+
+```toml
+[[hook.keyword_rules]]
+pattern = "action item:"   # matched case-insensitively unless case_sensitive = true
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
+
+[[hook.keyword_rules]]
+pattern = "TODO"
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-file.ps1"
+case_sensitive = true
+```
+
+Now saying *"…action item: send Sarah the contract"* runs `to-todoist.ps1`
+(which strips the `action item:` prefix and files the task), while ordinary notes
+are left alone. Each matching rule receives the **same JSON payload on stdin** as
+a normal hook, so any of the reference hooks works as a rule target. An empty
+`pattern` never matches.
+
+## Run hooks only on demand
+
+By default hooks fire after **every** transcription, including re-transcriptions.
+If you'd rather a re-transcribe just fix the text *without* re-running side
+effects (re-appending to a note, re-posting a webhook), turn hooks off:
+
+```toml
+[hook]
+run_on_transcribe = false
+```
+
+Transcription still saves the transcript; you then fire hooks deliberately with
+the **⚡ Re-fire hook** button on a recording.
+
+## Putting it all together
+
+A config that uses every hook feature at once — chain two always-on hooks, POST
+to a webhook, and route action items to Todoist via a keyword rule:
+
+```toml
+[hook]
+commands = [
+  "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-clipboard.ps1",
+  "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-file.ps1",
+]
+webhook_url = "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+run_on_transcribe = true
+timeout_secs = 30
+
+[[hook.keyword_rules]]
+pattern = "action item:"
+command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
+```
+
+Every note is copied to the clipboard, appended to your notes file, and POSTed to
+Slack; notes containing *"action item:"* additionally become Todoist tasks.
+Subprocess hooks run serially in order; the webhook fires concurrently.
 
 ## Writing your own
 
