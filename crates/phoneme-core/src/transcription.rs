@@ -11,7 +11,7 @@
 //! compatible). Cloud backends with bespoke protocols (Deepgram, AssemblyAI)
 //! will add their own `TranscriptionProvider` implementations.
 
-use crate::config::{LlmConfig, TranscriptionBackend};
+use crate::config::{TranscriptionBackend, WhisperConfig};
 use crate::error::{Error, Result};
 use async_trait::async_trait;
 use reqwest::multipart;
@@ -51,7 +51,7 @@ impl Transcriber {
     ///
     /// `server_base_url()` resolves the correct endpoint for both external and
     /// bundled whisper-server modes.
-    pub fn provider(&self, whisper: &LlmConfig) -> Box<dyn TranscriptionProvider> {
+    pub fn provider(&self, whisper: &WhisperConfig) -> Box<dyn TranscriptionProvider> {
         let timeout = Duration::from_secs(whisper.timeout_secs);
         match whisper.provider {
             // Local whisper.cpp: no auth, no model field; endpoint resolved from
