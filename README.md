@@ -174,7 +174,7 @@ cargo tauri dev
 
 ## 🗺️ Roadmap
 
-For a detailed look at upcoming features—including macOS/Linux ports, a bundled Ollama runtime, and an MCP server for AI-agent integration—please see the [Roadmap](docs/ROADMAP.md).
+For a detailed look at upcoming features—including macOS/Linux ports, a local REST API, and an MCP server for AI-agent integration—please see the [Roadmap](docs/ROADMAP.md).
 
 ## 🤝 Contributing
 
