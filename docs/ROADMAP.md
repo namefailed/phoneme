@@ -111,7 +111,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
 
 ### Recording
-- [ ] **Real-time word-by-word transcription** — live transcript appears as you speak using `whisper-live` or a streaming-capable backend; requires v1.6 streaming foundation
+- [ ] **Real-time word-by-word transcription** — v1.6 already ships a streaming *preview* (the in-progress recording is periodically re-transcribed); this item upgrades that to true word-level streaming as you speak, using `whisper-live` or a streaming-capable backend
 - [ ] **Merged conversation view** — takes a v1.6 dual-track session and interleaves the two transcripts by timestamp into a single chronological conversation; labels each line "You:" vs. "Meeting:"; exportable as a structured conversation log; optionally feeds both transcripts to the LLM post-processor as a single context for summarisation or action-item extraction
 - [ ] **Multi-microphone** — capture from two input devices simultaneously; useful for two-person interviews
 - [ ] **Audio normalization** — normalize gain before sending to Whisper; improves accuracy on quiet voices
