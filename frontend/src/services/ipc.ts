@@ -53,6 +53,14 @@ export async function getRecording(id: string): Promise<Recording> {
 }
 
 /**
+ * Fetch all recordings belonging to a single meeting session (the two tracks
+ * sharing a `session_id`), ordered by track then start time.
+ */
+export async function listSession(sessionId: string): Promise<Recording[]> {
+  return await tauriInvoke<Recording[]>("list_session", { sessionId });
+}
+
+/**
  * Deletes a recording by ID. If keepAudio is true, the catalog entry is removed
  * but the raw `.wav` file is preserved on disk.
  */
