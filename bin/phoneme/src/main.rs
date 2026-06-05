@@ -37,6 +37,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Record(args) => commands::record::run(args, cfg, cli.json).await,
+        Command::Meeting(args) => commands::meeting::run(args, cfg, cli.json).await,
         Command::Import(args) => commands::import::run(args, cfg).await,
         Command::List(args) => commands::list::run(args, cfg, cli.json).await,
         Command::Show(args) => commands::show::run(args, cfg, cli.json).await,
