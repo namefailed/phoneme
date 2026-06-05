@@ -24,6 +24,15 @@ src-tauri/gen/
 *.wav
 whisper-bin/
 
+# Local developer tooling / assistant scratch files — never part of the project.
+.claude/
+CLAUDE.md
+AGENTS.md
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md
+
 # pnpm 10 auto-generates frontend/pnpm-workspace.yaml as a placeholder stub
 # ("allowBuilds: esbuild: set this to true or false") whenever it approves a
 # build script. CI uses pnpm 9, where build approval lives in
