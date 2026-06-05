@@ -17,11 +17,11 @@ pub async fn run(args: IdArgs, cfg: &Config) -> ExitCode {
         Err(code) => return code,
     };
     match client
-        .send(Request::ReplayRecording { id, model: None })
+        .send(Request::RetranscribeRecording { id, model: None })
         .await
     {
         Ok(_) => {
-            println!("replay queued");
+            println!("re-transcribe queued");
             ExitCode::SUCCESS
         }
         Err(code) => code,

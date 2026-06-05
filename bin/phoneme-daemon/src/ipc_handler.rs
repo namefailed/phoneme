@@ -254,7 +254,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::ImportRecording { path } => import_recording(state, path).await,
-        Request::ReplayRecording { id, model } => match state.catalog.get(&id).await {
+        Request::RetranscribeRecording { id, model } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 if let Some(m) = model {
                     let mut cfg = state.config.load().as_ref().clone();
@@ -327,7 +327,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // stalling every other UI request. The outcome is reported via
                 // DaemonEvents, exactly like the queue pipeline.
                 //
-                // We deliberately do NOT re-enqueue (as ReplayRecording does):
+                // We deliberately do NOT re-enqueue (as RetranscribeRecording does):
                 // the queue pipeline always re-transcribes first, which would
                 // overwrite a user's manual transcript edit. RefireHook must
                 // re-run only the hook against the stored transcript.

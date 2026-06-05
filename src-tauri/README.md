@@ -8,7 +8,7 @@ that talks to `phoneme-daemon` over the same named-pipe IPC as the CLI.
 | Module | Responsibility |
 |---|---|
 | `bridge` | `NamedPipeTransport` wrapper with auto-reconnect |
-| `commands` | `#[tauri::command]` handlers (list/get/delete/record_*/replay/refire/update_transcript/daemon_status) |
+| `commands` | `#[tauri::command]` handlers (list/get/delete/record_*/retranscribe/refire/update_transcript/daemon_status) |
 | `tray` | System tray icon + menu + state-driven icon/tooltip swaps |
 | `events` | Background task that subscribes to `DaemonEvent` and re-emits to the frontend via Tauri events |
 

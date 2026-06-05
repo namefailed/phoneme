@@ -7,23 +7,23 @@ Phoneme CLI
 Usage: phoneme.exe [OPTIONS] <COMMAND>
 
 Commands:
-  record   Push-to-talk: read stdin until EOF / Enter, then stop
-  meeting  Meeting Mode: record mic + system audio as two linked recordings
-  import   Import an existing audio file (wav/mp3/m4a) and transcribe it
-  list     List recordings
-  show     Show one recording
-  replay   Re-transcribe a saved recording
-  delete   Delete a recording
-  doctor   Health check
-  config   Configuration management
-  daemon   Daemon control
-  watch    Subscribe to the daemon's event stream
-  hook     Test the configured hook
-  tag      Manage recording tags
-  profile  Manage config profiles (named full-config snapshots)
-  export   Export all recordings and metadata to a zip file
-  version  Print version + commit info
-  help     Print this message or the help of the given subcommand(s)
+  record        Push-to-talk: read stdin until EOF / Enter, then stop
+  meeting       Meeting Mode: record mic + system audio as two linked recordings
+  import        Import an existing audio file (wav/mp3/m4a) and transcribe it
+  list          List recordings
+  show          Show one recording
+  retranscribe  Re-transcribe a saved recording
+  delete        Delete a recording
+  doctor        Health check
+  config        Configuration management
+  daemon        Daemon control
+  watch         Subscribe to the daemon's event stream
+  hook          Test the configured hook
+  tag           Manage recording tags
+  profile       Manage config profiles (named full-config snapshots)
+  export        Export all recordings and metadata to a zip file
+  version       Print version + commit info
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
       --no-color  Disable colored output (or set NO_COLOR=1)
