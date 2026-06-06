@@ -27,6 +27,7 @@ fn record_start_request_roundtrips() {
 fn list_recordings_request_roundtrips() {
     let filter = ListFilter {
         limit: Some(50),
+        offset: Some(50),
         since: None,
         until: None,
         status: Some(RecordingStatus::Done),

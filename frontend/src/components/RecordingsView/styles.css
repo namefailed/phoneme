@@ -329,6 +329,14 @@ mark.search-hit {
   font-size: 11px;
   min-width: 100px;
 }
+.rec-loadmore {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 18px;
+}
+.rec-loadmore .inline-button {
+  min-width: 120px;
+}
 .tag-manage {
   transition: all 0.15s ease-out;
   background: var(--bg-surface);
