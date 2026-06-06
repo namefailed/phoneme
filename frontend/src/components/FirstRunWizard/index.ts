@@ -3,6 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../../utils/toast";
+import "./styles.css";
 
 
 export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "hook" | "hotkey" | "done";
