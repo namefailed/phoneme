@@ -1,4 +1,4 @@
-import { LitElement, html, css, unsafeCSS } from 'lit';
+import { LitElement, html } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 
 import { filterStore, type UiFilter } from '../state/filter';
@@ -13,6 +13,7 @@ export type HeaderBarCallbacks = {
 
 @customElement('ph-header-bar')
 export class HeaderBarElement extends LitElement {
+  protected createRenderRoot() { return this; }
 
   @property({ type: Object })
   callbacks!: HeaderBarCallbacks;

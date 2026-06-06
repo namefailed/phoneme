@@ -11,6 +11,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 @customElement('ph-transcript-editor')
 export class TranscriptEditorElement extends LitElement {
+  protected createRenderRoot() { return this; }
+
   static styles = css`
     :host {
       display: block;

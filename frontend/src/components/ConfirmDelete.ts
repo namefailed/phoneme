@@ -1,4 +1,4 @@
-import { LitElement, html, css, unsafeCSS } from 'lit';
+import { LitElement, html } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
 
 
@@ -12,6 +12,7 @@ export type ConfirmDeleteOpts = {
 
 @customElement('ph-confirm-delete')
 export class ConfirmDeleteElement extends LitElement {
+  protected createRenderRoot() { return this; }
 
   @property({ type: String }) modalTitle = "Delete Recording?";
   @property({ type: String }) bodyText = "This will permanently delete the recording and its audio file. This action cannot be undone.";
@@ -35,7 +36,7 @@ export class ConfirmDeleteElement extends LitElement {
   }
 
   firstUpdated() {
-    const btnCancel = this.shadowRoot?.querySelector('#btn-cancel') as HTMLButtonElement | null;
+    const btnCancel = this.querySelector('#btn-cancel') as HTMLButtonElement | null;
     btnCancel?.focus();
   }
 

@@ -3,6 +3,8 @@ import { customElement, property } from 'lit/decorators.js';
 
 @customElement('ph-splitter')
 export class SplitterElement extends LitElement {
+  protected createRenderRoot() { return this; }
+
   static styles = css`
     :host {
       display: block;
@@ -32,7 +34,7 @@ export class SplitterElement extends LitElement {
   private onMouseDown = () => {
     this.dragging = true;
     document.body.style.cursor = "col-resize";
-    const handle = this.shadowRoot?.querySelector('.splitter-handle');
+    const handle = this.querySelector('.splitter-handle');
     if (handle) handle.classList.add('dragging');
   };
 
@@ -40,7 +42,7 @@ export class SplitterElement extends LitElement {
     if (!this.dragging) return;
     this.dragging = false;
     document.body.style.cursor = "";
-    const handle = this.shadowRoot?.querySelector('.splitter-handle');
+    const handle = this.querySelector('.splitter-handle');
     if (handle) handle.classList.remove('dragging');
   };
 
