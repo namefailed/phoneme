@@ -104,14 +104,20 @@ pub fn run() {
                             match event.state() {
                                 ShortcutState::Pressed => {
                                     tauri::async_runtime::spawn(async move {
-                                        if let Err(e) = bridge
-                                            .request(phoneme_ipc::Request::RecordStart {
-                                                mode: RecordMode::Hold,
-                                                in_place: true,
-                                            })
-                                            .await
-                                        {
-                                            tracing::error!("failed to start in-place record: {e}");
+                                        if mode == phoneme_core::config::HotkeyMode::Toggle {
+                                            if let Err(e) = bridge.request(phoneme_ipc::Request::RecordToggle { in_place: true }).await {
+                                                tracing::error!("failed to toggle in-place record: {e}");
+                                            }
+                                        } else {
+                                            if let Err(e) = bridge
+                                                .request(phoneme_ipc::Request::RecordStart {
+                                                    mode: RecordMode::Hold,
+                                                    in_place: true,
+                                                })
+                                                .await
+                                            {
+                                                tracing::error!("failed to start in-place record: {e}");
+                                            }
                                         }
                                     });
                                 }
@@ -140,7 +146,7 @@ pub fn run() {
                                 tauri::async_runtime::spawn(async move {
                                     if mode == phoneme_core::config::HotkeyMode::Toggle {
                                         if let Err(e) =
-                                            bridge.request(phoneme_ipc::Request::RecordToggle).await
+                                            bridge.request(phoneme_ipc::Request::RecordToggle { in_place: false }).await
                                         {
                                             tracing::error!(
                                                 "failed to toggle record from hotkey: {e}"

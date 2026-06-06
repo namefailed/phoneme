@@ -40,6 +40,7 @@ which = "6"
 futures = "0.3"
 zip = "0.6"
 tauri-plugin-notification = "2.3.3"
+speakrs = "0.4.2"
 
 [dev-dependencies]
 wiremock.workspace = true

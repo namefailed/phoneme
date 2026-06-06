@@ -65,6 +65,7 @@ Phoneme is packed with power-user tools out of the box.
 - **In-Place Transcription** — Bind a special global hotkey to directly type your voice transcripts into whatever text box or application you currently have focused (via simulated keystrokes).
 - **Offline Speaker Diarization** — Record a meeting and let Phoneme's built-in Pyannote ONNX integration automatically separate the speakers (e.g. `[Speaker 1]: Hello!`). Fully offline, completely private.
 - **Meeting Mode (Dual-Track)** — Capture your microphone *and* system audio at the same time as two linked tracks. You get both sides of a call, merged into a beautiful conversation view.
+- **Session Naming** — Rename meeting sessions easily in the UI for better organization and clarity.
 - **Multi-provider Transcription** — Use the bundled, fully-offline native Whisper engine, or plug in OpenAI, Groq, Deepgram, or AssemblyAI if you prefer cloud speed.
 
 ### 🧠 Intelligence & Search

@@ -25,6 +25,7 @@ export type Recording = {
   session_id?: string | null;
   /** Which track of a meeting this is: "mic" or "system". Null otherwise. */
   track?: string | null;
+  session_name?: string | null;
 };
 
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
@@ -96,6 +97,16 @@ export async function recordPause(): Promise<void> {
 
 export async function recordResume(): Promise<void> {
   await tauriInvoke("record_resume");
+}
+
+export async function updateSessionName(sessionId: string, name: string | null): Promise<void> {
+  await tauriInvoke("ipc_request", {
+    req: { type: "update_session_name", session_id: sessionId, name },
+  });
+}
+
+export async function checkMicrophoneAccess(): Promise<boolean> {
+  return await tauriInvoke("check_microphone_access");
 }
 
 export async function recordCancel(): Promise<void> {

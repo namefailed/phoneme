@@ -859,6 +859,7 @@ mod tests {
             Some(SECRET.to_string()),
             Some("whisper-1".to_string()),
             Duration::from_secs(30),
+            false,
         );
         let dbg = format!("{p:?}");
         assert!(!dbg.contains(SECRET), "api key leaked: {dbg}");
@@ -873,6 +874,7 @@ mod tests {
             SECRET,
             "nova-2",
             Duration::from_secs(30),
+            false,
         );
         assert!(!format!("{p:?}").contains(SECRET));
     }
@@ -885,6 +887,7 @@ mod tests {
             SECRET,
             "best",
             Duration::from_secs(30),
+            false,
         );
         assert!(!format!("{p:?}").contains(SECRET));
     }

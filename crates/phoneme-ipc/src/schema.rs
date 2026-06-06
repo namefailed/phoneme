@@ -19,7 +19,10 @@ pub enum Request {
         in_place: bool,
     },
     RecordStop,
-    RecordToggle,
+    RecordToggle {
+        #[serde(default)]
+        in_place: bool,
+    },
     RecordPause,
     RecordResume,
     RecordCancel,
@@ -77,6 +80,10 @@ pub enum Request {
     UpdateTranscript {
         id: RecordingId,
         text: String,
+    },
+    UpdateSessionName {
+        session_id: String,
+        name: Option<String>,
     },
     /// Fetch the preserved original (machine) transcript for a recording, if any.
     GetOriginalTranscript {
@@ -255,6 +262,9 @@ pub enum DaemonEvent {
     },
     NotesUpdated {
         id: RecordingId,
+    },
+    SessionNameUpdated {
+        session_id: String,
     },
     TagCreated {
         id: i64,

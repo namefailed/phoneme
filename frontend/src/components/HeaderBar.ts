@@ -325,10 +325,6 @@ export class HeaderBarElement extends LitElement {
           <option value="transcribe_failed" ?selected=${f.status === "transcribe_failed"}>Transcription Failed</option>
           <option value="hook_failed" ?selected=${f.status === "hook_failed"}>Hook Failed</option>
         </select>
-        <select class="filter-pill hb-tag-select" title="Filter recordings by tag" @change=${this.handleTag}>
-          <option value="">All tags</option>
-          ${this.tags.map(t => html`<option value=${t.id} ?selected=${f.tag_id === t.id}>${t.name}</option>`)}
-        </select>
         <div class="hb-status-cluster" style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
           <span class="hb-whisper-dot ${this.whisperReachable === true ? 'reachable' : this.whisperReachable === false ? 'unreachable' : ''}"
             title=${this.whisperReachable === true ? 'Whisper: connected' : this.whisperReachable === false ? 'Whisper: unreachable' : 'Whisper status unknown'}></span>

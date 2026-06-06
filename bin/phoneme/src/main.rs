@@ -51,6 +51,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
         Command::Tag(args) => commands::tag::run(args, cfg, cli.json).await,
         Command::Profile(args) => commands::profile_cmd::run(args, cfg, cli.json).await,
         Command::Export(args) => commands::export::run(args, cfg).await,
+        Command::Session(args) => commands::session::run(args, cfg).await,
     }
 }
 
