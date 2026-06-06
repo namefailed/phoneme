@@ -756,6 +756,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         id: id.clone(),
         duration_ms,
         audio_path: audio_path.to_string_lossy().into_owned(),
+        session_id: None,
     });
     tracing::info!(id = %id, source = %path, ms = duration_ms, "imported recording");
     Response::Ok(serde_json::json!({ "id": id.to_string() }))
