@@ -96,10 +96,7 @@ impl Transcriber {
                 timeout,
                 false,
             )),
-            TranscriptionBackend::Deepgram => Box::new(DeepgramProvider::new(
-                self.http.clone(),
-                cloud_base_url(&whisper.api_url, "https://api.deepgram.com"),
-                whisper.api_key.expose_secret().trim().to_string(),
+
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.assemblyai.com"),
