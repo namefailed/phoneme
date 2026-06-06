@@ -10,18 +10,30 @@ export class SectionHook {
     container: HTMLElement,
     private config: any,
   ) {
-    if (Array.isArray(config.hook.commands)) {
-      config.hook.command = config.hook.commands.length > 0 ? config.hook.commands[0] : "";
-      delete config.hook.commands;
-    } else if (config.hook.commands) {
-      config.hook.command = config.hook.commands;
-      delete config.hook.commands;
+    // Normalize the hook commands to a string[] (the backend serializes
+    // `commands: Vec<String>`; older configs / the previous UI used a single
+    // `command`). Editing the array directly means we no longer silently drop
+    // additional commands the way the old single-field UI did.
+    const h = config.hook ?? (config.hook = {});
+    let cmds: string[];
+    if (Array.isArray(h.commands)) {
+      cmds = h.commands.map((c: unknown) => String(c ?? ""));
+    } else if (typeof h.commands === "string" && h.commands) {
+      cmds = [h.commands];
+    } else if (typeof h.command === "string" && h.command) {
+      cmds = [h.command];
+    } else {
+      cmds = [];
     }
-    if (!Array.isArray(config.hook.keyword_rules)) {
-      config.hook.keyword_rules = [];
-    }
+    h.commands = cmds;
+    delete h.command; // legacy field — we manage `commands` from here on
+    if (!Array.isArray(h.keyword_rules)) h.keyword_rules = [];
 
     this.render(container);
+  }
+
+  private get commands(): string[] {
+    return this.config.hook.commands as string[];
   }
 
   private get rules(): KeywordRule[] {
@@ -33,14 +45,14 @@ export class SectionHook {
       <div class="settings-section">
         <h3>Destination & Integrations</h3>
         <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-          Phoneme can automatically pass your voice notes to other applications or save them to disk by executing a local script. You can point this to a <code>.bat</code> or <code>.ps1</code> file to save notes to Obsidian, Word, or anything else.
+          Phoneme can automatically pass your voice notes to other applications or save them to disk by executing local scripts. Point these at a <code>.bat</code> or <code>.ps1</code> file to save notes to Obsidian, Word, or anything else. Multiple commands run sequentially in order.
         </p>
         <div class="settings-field long-input" style="align-items: flex-start;">
-          <label style="margin-top: 8px;">Integration Script</label>
+          <label style="margin-top: 8px;">Integration Scripts</label>
           <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
             <div style="display: flex; gap: 8px; align-items: center; margin-right: auto;">
               <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
-                <option value="" disabled selected>Load a preset hook...</option>
+                <option value="" disabled selected>Add a preset hook…</option>
                 <optgroup label="Clipboard">
                   <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
                 </optgroup>
@@ -59,21 +71,15 @@ export class SectionHook {
                   <option value="node process_note.js">Run Node.js script</option>
                 </optgroup>
               </select>
-              <span style="font-size: 11px; color: var(--fg-faded);">← Try these!</span>
+              <span style="font-size: 11px; color: var(--fg-faded);">← adds a command below</span>
             </div>
-            <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
-              ${renderField(
-                { key: "hook.command", label: "", kind: "text" },
-                this.config.hook.command,
-              )}
-              <button class="inline-button" id="pick-hook" style="white-space: nowrap;">Browse…</button>
-              <button class="inline-button" id="test-hook" style="white-space: nowrap;">Test hook</button>
-            </div>
+            <div id="hook-cmd-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+            <button class="inline-button" id="hook-add-cmd" style="align-self: flex-start;">+ Add command</button>
             <div class="test-result" id="hook-result" style="display:none; margin-top: 0;"></div>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); display: block;">
-            A shell command to run automatically. Phoneme will pipe a JSON object containing the recording's data to your command's standard input (<code>stdin</code>). <br/>
-            Example: <code>python process.py</code> (will execute as <code>python process.py &lt; data.json</code>).
+            Each command runs automatically (in order) after transcription. Phoneme pipes a JSON object with the recording's data to the command's standard input (<code>stdin</code>). <br/>
+            Example: <code>python process.py</code> (runs as <code>python process.py &lt; data.json</code>).
           </span>
         </div>
         <div class="settings-field">
@@ -83,7 +89,7 @@ export class SectionHook {
             this.config.hook.timeout_secs,
           )}</div>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            Maximum time (in seconds) to wait for the Integration Script to finish before giving up and labeling the post-processing phase as failed.
+            Maximum time (in seconds) to wait for each Integration Script to finish before giving up and labeling the post-processing phase as failed.
           </span>
         </div>
         <div class="settings-field">
@@ -93,7 +99,7 @@ export class SectionHook {
             this.config.hook.run_on_transcribe ?? true,
           )}</div>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            When on (default), your Integration Script and webhook fire automatically after every transcription — including re-transcriptions. Turn it off if you only want hooks to run on demand via the <b>⚡ Re-fire hook</b> button (so re-transcribing fixes the text without re-triggering side effects like re-appending to a note).
+            When on (default), your Integration Scripts and webhook fire automatically after every transcription — including re-transcriptions. Turn it off if you only want hooks to run on demand via the <b>⚡ Re-fire hook</b> button (so re-transcribing fixes the text without re-triggering side effects like re-appending to a note).
           </span>
         </div>
         <div class="settings-field stacked">
@@ -101,58 +107,88 @@ export class SectionHook {
           <div id="kw-rules-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
           <button class="inline-button" id="kw-add-rule" style="margin-top: 8px; align-self: flex-start;">+ Add rule</button>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 6px; display: block;">
-            Run an extra command <i>only</i> when the transcript contains a phrase — on top of the Integration Script above. Example: phrase <code>Action Item:</code> → a command that sends the note to your task manager. The command receives the same JSON on <code>stdin</code>.
+            Run an extra command <i>only</i> when the transcript contains a phrase — on top of the Integration Scripts above. Example: phrase <code>Action Item:</code> → a command that sends the note to your task manager. The command receives the same JSON on <code>stdin</code>.
           </span>
         </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
 
-    container.querySelector("#pick-hook")?.addEventListener("click", async () => {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const path = await open({ multiple: false });
-      if (typeof path === "string") {
-        const input = container.querySelector<HTMLInputElement>(
-          `[data-key="hook.command"]`,
-        )!;
-        // Quote the path if it contains spaces — the daemon splits the
-        // command with shlex.
-        input.value = path.includes(" ") ? `"${path}"` : path;
-        this.config.hook.command = input.value;
-      }
-    });
-
-    container.querySelector("#test-hook")?.addEventListener("click", async () => {
-      const el = container.querySelector<HTMLElement>("#hook-result")!;
-      el.style.display = "block";
-      el.className = "test-result";
-      el.textContent = "Running hook…";
-      const input = container.querySelector<HTMLInputElement>(`[data-key="hook.command"]`)!;
-      const custom_command = input ? input.value : undefined;
-      const result = await invoke<{ ok: boolean; message: string }>(
-        "wizard_test_hook",
-        { customCommand: custom_command }
-      ).catch((e) => ({ ok: false, message: String(e) }));
-      el.className = `test-result ${result.ok ? "ok" : "err"}`;
-      el.textContent = result.message;
+    this.renderCmds(container);
+    container.querySelector("#hook-add-cmd")?.addEventListener("click", () => {
+      this.commands.push("");
+      this.renderCmds(container);
     });
 
     const presetSelect = container.querySelector<HTMLSelectElement>("#hook-preset-select");
-    const cmdInput = container.querySelector<HTMLInputElement>(`[data-key="hook.command"]`);
-    if (presetSelect && cmdInput) {
-      presetSelect.addEventListener("change", () => {
-        if (presetSelect.value) {
-          cmdInput.value = presetSelect.value;
-          cmdInput.dispatchEvent(new Event("input"));
-          this.config.hook.command = presetSelect.value;
-        }
-      });
-    }
+    presetSelect?.addEventListener("change", () => {
+      if (presetSelect.value) {
+        this.commands.push(presetSelect.value);
+        presetSelect.selectedIndex = 0;
+        this.renderCmds(container);
+      }
+    });
 
     this.renderKwRules(container);
     container.querySelector("#kw-add-rule")?.addEventListener("click", () => {
       this.rules.push({ pattern: "", command: "", case_sensitive: false });
       this.renderKwRules(container);
+    });
+  }
+
+  /** Render the integration-command rows from config and wire their inputs. */
+  private renderCmds(container: HTMLElement) {
+    const list = container.querySelector<HTMLElement>("#hook-cmd-list");
+    if (!list) return;
+    if (this.commands.length === 0) {
+      list.innerHTML = `<span style="font-size: 11px; color: var(--fg-faded);">No integration scripts yet — add one above, or pick a preset.</span>`;
+      return;
+    }
+    list.innerHTML = this.commands
+      .map(
+        (cmd, i) => `
+        <div class="hook-cmd-row" data-idx="${i}" style="display: flex; gap: 8px; align-items: center;">
+          <span style="font-size: 11px; color: var(--fg-faded); width: 14px; text-align: right;">${i + 1}.</span>
+          <input class="hook-cmd" type="text" placeholder="Command to run…" value="${escapeAttr(cmd)}"
+            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
+          <button class="inline-button hook-browse" title="Browse for a script" style="white-space: nowrap;">Browse…</button>
+          <button class="inline-button hook-test" title="Run this command once with sample data" style="white-space: nowrap;">Test</button>
+          <button class="inline-button hook-remove" title="Remove command" style="padding: 4px 8px;">✕</button>
+        </div>`,
+      )
+      .join("");
+
+    list.querySelectorAll<HTMLElement>(".hook-cmd-row").forEach((row) => {
+      const idx = Number(row.dataset.idx);
+      const input = row.querySelector<HTMLInputElement>(".hook-cmd");
+      input?.addEventListener("input", (e) => {
+        this.commands[idx] = (e.target as HTMLInputElement).value;
+      });
+      row.querySelector(".hook-browse")?.addEventListener("click", async () => {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const path = await open({ multiple: false });
+        if (typeof path === "string" && input) {
+          // Quote the path if it contains spaces — the daemon splits with shlex.
+          input.value = path.includes(" ") ? `"${path}"` : path;
+          this.commands[idx] = input.value;
+        }
+      });
+      row.querySelector(".hook-test")?.addEventListener("click", async () => {
+        const el = container.querySelector<HTMLElement>("#hook-result")!;
+        el.style.display = "block";
+        el.className = "test-result";
+        el.textContent = `Running command ${idx + 1}…`;
+        const custom_command = input ? input.value : undefined;
+        const result = await invoke<{ ok: boolean; message: string }>("wizard_test_hook", {
+          customCommand: custom_command,
+        }).catch((e) => ({ ok: false, message: String(e) }));
+        el.className = `test-result ${result.ok ? "ok" : "err"}`;
+        el.textContent = result.message;
+      });
+      row.querySelector(".hook-remove")?.addEventListener("click", () => {
+        this.commands.splice(idx, 1);
+        this.renderCmds(container);
+      });
     });
   }
 
