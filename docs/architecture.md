@@ -89,8 +89,10 @@ Audio is stored on disk under a date-foldered directory, not in the database —
 
 ### Frontend Architecture
 
-The frontend is intentionally built without heavy frameworks like React or Vue. It uses a custom Vanilla TypeScript approach for maximum performance and minimal footprint:
+The frontend is intentionally built for performance and maintainability, leveraging web standards through **Lit**.
 
-1. **State Management (`Store<T>`)**: A custom reactive store implementation in `src/state/Store.ts` allows components to subscribe to state changes (e.g., config updates, recording lists) and trigger minimal DOM updates.
-2. **Routing (`Router`)**: A simple hash-based or internal router in `src/router.ts` handles navigation between the main views (`RecordingsView`, `SettingsView`, `DoctorView`, etc.).
-3. **Components**: UI components are class-based. They instantiate and manage their own DOM lifecycle, manually binding events and subscribing to stores. Examples include `WaveformPlayer`, `RecordingDetail`, and various `Section` files in Settings.
+1. **Lit Components (`LitElement`)**: Instead of heavy virtual DOM frameworks like React, Phoneme uses Lit for reactive, lightweight web components. All UI elements (e.g., `RecordingDetail`, `ModelPicker`, `FirstRunWizard`) extend `LitElement`. 
+   > **Note**: To ensure global CSS styling works (like `.record-btn` classes), most components override `createRenderRoot() { return this; }` to render into the Light DOM rather than the Shadow DOM.
+2. **State Management (`Store<T>`)**: A custom reactive store implementation in `src/state/Store.ts` allows components to subscribe to state changes (e.g., config updates, recording lists) and trigger minimal DOM updates via Lit's `@state()` decorators.
+3. **Routing**: A simple hash-based router handles navigation between the main views (`RecordingsView`, `SettingsView`, `DoctorView`, etc.).
+4. **IPC / Tauri API**: The frontend uses Tauri's `@tauri-apps/api/core` (`invoke`) to communicate with the Rust backend, and listens to event streams for real-time UI updates (like live transcription streaming!).

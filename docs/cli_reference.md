@@ -55,6 +55,14 @@ Bulk export all audio and metadata into a zip archive.
 phoneme export backup.zip
 ```
 
+### `phoneme session rename <SESSION_ID> <NAME>`
+
+Rename a meeting session. This name will appear in the UI instead of the default session ID.
+
+```bash
+phoneme session rename 20260519T143500823 "Q3 Planning Sync"
+```
+
 ### `phoneme doctor`
 
 Run a health check on your system. Checks Whisper status, Diarization status, and hook executability.
