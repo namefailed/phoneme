@@ -10,6 +10,7 @@ const MODELS = [
   { id: "base", filename: "ggml-base.en.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", name: "Base", size: "142 MB", desc: "Fast, decent accuracy. Good balance for older machines." },
   { id: "small", filename: "ggml-small.en.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin", name: "Small", size: "466 MB", desc: "Moderate speed, good accuracy. Standard choice." },
   { id: "medium", filename: "ggml-medium.en.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin", name: "Medium", size: "1.5 GB", desc: "Slower, great accuracy. Recommended for modern PCs." },
+  { id: "large-v3-turbo", filename: "ggml-large-v3-turbo.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin", name: "Large v3 Turbo", size: "1.6 GB", desc: "Fast and highly accurate. High-end hardware recommended." },
   { id: "large-v3", filename: "ggml-large-v3.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin", name: "Large v3", size: "3.1 GB", desc: "Slowest, best accuracy. High-end hardware only." }
 ];
 
@@ -137,8 +138,8 @@ export class SectionWhisper {
 
   private render(container: HTMLElement) {
     const modelCardsHtml = MODELS.map(m => `
-      <div id="model-card-${m.id}" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 8px; background: var(--bg-deep);">
-        <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div id="model-card-${m.id}" style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 4px; background: var(--bg-deep);">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <strong style="color: var(--fg-default); font-size: 13px;">${m.name}</strong>
             <span style="color: var(--fg-faded); font-size: 11px;">${m.size}</span>

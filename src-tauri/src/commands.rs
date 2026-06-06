@@ -983,6 +983,43 @@ pub async fn wizard_ping_ollama() -> Result<bool, String> {
     }
 }
 
+#[tauri::command]
+pub async fn wizard_detect_deps() -> Result<serde_json::Value, String> {
+    let mut has_ollama = false;
+
+    // Check if `ollama` CLI is in PATH
+    if let Ok(output) = std::process::Command::new("ollama").arg("--version").output() {
+        if output.status.success() {
+            has_ollama = true;
+        }
+    }
+
+    // Check default Windows installation paths
+    if !has_ollama {
+        let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        if !localappdata.is_empty() {
+            let ollama_path = std::path::Path::new(&localappdata).join("Programs").join("Ollama").join("ollama.exe");
+            if ollama_path.exists() {
+                has_ollama = true;
+            }
+        }
+    }
+
+    if !has_ollama {
+        let userprofile = std::env::var("USERPROFILE").unwrap_or_default();
+        if !userprofile.is_empty() {
+            let ollama_dir = std::path::Path::new(&userprofile).join(".ollama");
+            if ollama_dir.exists() {
+                has_ollama = true;
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "ollama": has_ollama,
+    }))
+}
+
 #[derive(serde::Serialize, Clone)]
 pub struct OllamaPullProgress {
     pub status: String,

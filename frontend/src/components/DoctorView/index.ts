@@ -2,10 +2,9 @@ import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 
-// We import styles inline. Note that the original DoctorView shared SettingsView/styles.css.
-// We'll import them both to be used as Lit Element styles.
-
-
+// Import styles
+import "../SettingsView/styles.css";
+import "./styles.css";
 
 type CheckResult = {
   name: string;

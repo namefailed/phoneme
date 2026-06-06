@@ -26,8 +26,9 @@ export class SettingsViewElement extends LitElement {
 
   @property({ type: Object }) onClose!: () => void;
 
-  @state() private activeTab: string = "whisper";
+  @state() private activeTab: string = "transcription";
   @state() private config: any = null;
+  @state() private searchQuery: string = "";
   private originalConfigStr: string = "";
 
   @query('#settings-body') bodyEl!: HTMLElement;
@@ -58,7 +59,7 @@ export class SettingsViewElement extends LitElement {
   }
 
   protected updated(changedProperties: Map<string, any>) {
-    if (changedProperties.has('activeTab') || changedProperties.has('config')) {
+    if (changedProperties.has('activeTab') || changedProperties.has('config') || changedProperties.has('searchQuery')) {
       this.mountSection();
     }
   }
@@ -105,27 +106,86 @@ export class SettingsViewElement extends LitElement {
     const sectionHost = document.createElement("div");
     this.bodyEl.appendChild(sectionHost);
 
-    switch (this.activeTab) {
-      case "whisper": new SectionWhisper(sectionHost, this.config); break;
-      case "diarization": new SectionDiarization(sectionHost, this.config); break;
-      case "recording": new SectionRecording(sectionHost, this.config); break;
-      case "hotkey": new SectionHotkey(sectionHost, this.config); break;
-      case "hook": new SectionHook(sectionHost, this.config); break;
-      case "storage": new SectionStorage(sectionHost, this.config); break;
-      case "tray": new SectionTray(sectionHost, this.config); break;
-      case "interface": new SectionInterface(sectionHost, this.config); break;
-      case "post-processing": new SectionPostProcessing(sectionHost, this.config); break;
-      case "editor": new SectionEditor(sectionHost, this.config); break;
-      case "tags": new SectionTags(sectionHost, this.config); break;
-      case "profiles": new SectionProfiles(sectionHost, this.config); break;
-      case "advanced": new SectionAdvanced(sectionHost, this.config); break;
+    const isSearching = this.searchQuery.trim().length > 0;
+
+    const mountAll = () => {
+      new SectionWhisper(sectionHost, this.config);
+      new SectionDiarization(sectionHost, this.config);
+      new SectionRecording(sectionHost, this.config);
+      new SectionHotkey(sectionHost, this.config);
+      new SectionInterface(sectionHost, this.config);
+      new SectionEditor(sectionHost, this.config);
+      new SectionTray(sectionHost, this.config);
+      new SectionTags(sectionHost, this.config);
+      new SectionPostProcessing(sectionHost, this.config);
+      new SectionHook(sectionHost, this.config);
+      new SectionStorage(sectionHost, this.config);
+      new SectionProfiles(sectionHost, this.config);
+      new SectionAdvanced(sectionHost, this.config);
+    };
+
+    if (isSearching) {
+      mountAll();
+      const query = this.searchQuery.toLowerCase();
+      const sections = sectionHost.querySelectorAll('.settings-section');
+      sections.forEach(sec => {
+        let sectionHasMatch = false;
+        const fields = sec.querySelectorAll('.settings-field');
+        fields.forEach(field => {
+          if (field.textContent?.toLowerCase().includes(query)) {
+            (field as HTMLElement).style.display = "";
+            sectionHasMatch = true;
+          } else {
+            (field as HTMLElement).style.display = "none";
+          }
+        });
+        const title = sec.querySelector('h3');
+        if (title?.textContent?.toLowerCase().includes(query)) {
+          sectionHasMatch = true;
+          fields.forEach(f => (f as HTMLElement).style.display = "");
+        }
+        (sec as HTMLElement).style.display = sectionHasMatch ? "" : "none";
+      });
+    } else {
+      switch (this.activeTab) {
+        case "transcription":
+          new SectionWhisper(sectionHost, this.config);
+          new SectionDiarization(sectionHost, this.config);
+          break;
+        case "capture":
+          new SectionRecording(sectionHost, this.config);
+          new SectionHotkey(sectionHost, this.config);
+          break;
+        case "appearance":
+          new SectionInterface(sectionHost, this.config);
+          new SectionEditor(sectionHost, this.config);
+          new SectionTray(sectionHost, this.config);
+          new SectionTags(sectionHost, this.config);
+          break;
+        case "postprocessing":
+          new SectionPostProcessing(sectionHost, this.config);
+          new SectionHook(sectionHost, this.config);
+          break;
+        case "system":
+          new SectionStorage(sectionHost, this.config);
+          new SectionProfiles(sectionHost, this.config);
+          new SectionAdvanced(sectionHost, this.config);
+          break;
+      }
     }
   }
 
   private switchTab(tab: string) {
     if (this.activeTab !== tab) {
       this.activeTab = tab;
+      this.searchQuery = "";
+      const searchInput = this.renderRoot.querySelector('.settings-search') as HTMLInputElement;
+      if (searchInput) searchInput.value = "";
     }
+  }
+
+  private handleSearch(e: Event) {
+    this.searchQuery = (e.target as HTMLInputElement).value;
   }
 
   render() {
@@ -133,23 +193,22 @@ export class SettingsViewElement extends LitElement {
       return html`<div class="error">Loading settings...</div>`;
     }
 
+    const isSearching = this.searchQuery.trim().length > 0;
+
     return html`
       <div class="settings-layout">
         <div class="settings-sidebar">
           <h2>Settings</h2>
-          <div class="sv-tab ${this.activeTab === "whisper" ? "active" : ""}" @click=${() => this.switchTab('whisper')}>Whisper</div>
-          <div class="sv-tab ${this.activeTab === "diarization" ? "active" : ""}" @click=${() => this.switchTab('diarization')}>Diarization</div>
-          <div class="sv-tab ${this.activeTab === "recording" ? "active" : ""}" @click=${() => this.switchTab('recording')}>Recording</div>
-          <div class="sv-tab ${this.activeTab === "hotkey" ? "active" : ""}" @click=${() => this.switchTab('hotkey')}>Hotkey</div>
-          <div class="sv-tab ${this.activeTab === "tray" ? "active" : ""}" @click=${() => this.switchTab('tray')}>System Tray</div>
-          <div class="sv-tab ${this.activeTab === "interface" ? "active" : ""}" @click=${() => this.switchTab('interface')}>Interface</div>
-          <div class="sv-tab ${this.activeTab === "editor" ? "active" : ""}" @click=${() => this.switchTab('editor')}>Editor</div>
-          <div class="sv-tab ${this.activeTab === "post-processing" ? "active" : ""}" @click=${() => this.switchTab('post-processing')}>Post-Processing</div>
-          <div class="sv-tab ${this.activeTab === "tags" ? "active" : ""}" @click=${() => this.switchTab('tags')}>Tags</div>
-          <div class="sv-tab ${this.activeTab === "profiles" ? "active" : ""}" @click=${() => this.switchTab('profiles')}>Profiles</div>
-          <div class="sv-tab ${this.activeTab === "hook" ? "active" : ""}" @click=${() => this.switchTab('hook')}>Action Hook</div>
-          <div class="sv-tab ${this.activeTab === "storage" ? "active" : ""}" @click=${() => this.switchTab('storage')}>Storage</div>
-          <div class="sv-tab ${this.activeTab === "advanced" ? "active" : ""}" @click=${() => this.switchTab('advanced')}>Advanced</div>
+          <input type="search" class="settings-search" placeholder="Search settings..." @input=${this.handleSearch} 
+                 style="width: 100%; padding: 8px 12px; margin-bottom: 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--fg-default); font-size: 13px;" />
+          
+          <div class="sv-tab ${this.activeTab === "transcription" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('transcription')}>Transcription</div>
+          <div class="sv-tab ${this.activeTab === "capture" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('capture')}>Capture & Audio</div>
+          <div class="sv-tab ${this.activeTab === "appearance" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('appearance')}>Appearance & UI</div>
+          <div class="sv-tab ${this.activeTab === "postprocessing" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('postprocessing')}>Post-Processing</div>
+          <div class="sv-tab ${this.activeTab === "system" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('system')}>System & Advanced</div>
+          
+          ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
         <div class="settings-main" style="display: flex; flex-direction: column; height: 100%;">
           <div class="settings-body" id="settings-body" style="flex: 1; overflow-y: auto;"></div>
