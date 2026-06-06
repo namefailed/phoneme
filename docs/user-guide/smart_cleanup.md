@@ -1,10 +1,10 @@
-# Smart Cleanup (LLM Post-Processing)
+# ✨ Smart Cleanup (LLM Post-Processing)
 
 Phoneme provides best-in-class transcription accuracy, but human speech is inherently messy. We stutter, we repeat ourselves, and we use filler words. 
 
 **Smart Cleanup** solves this. Instead of just saving the raw Whisper transcription, Phoneme can automatically pipe your transcript through a Large Language Model (LLM) before saving it. This allows you to effortlessly remove dysfluency, fix phonetic misunderstandings, translate languages on-the-fly, or format your spoken thoughts into pristine bullet points.
 
-## How it works
+## ⚙️ How it works
 
 When Smart Cleanup is enabled, the pipeline looks like this:
 
@@ -26,13 +26,13 @@ flowchart TD
 
 *(Note: Phoneme always preserves the `original_transcript` in the database, so if the AI ever makes a mistake, your original words are perfectly safe).*
 
-## Provider Options
+## ☁️ Provider Options
 
 In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. You can configure this under **Settings → Smart Cleanup (AI)**.
 
 <!-- SCREENSHOT PLACEHOLDER: Settings -> Smart Cleanup showing the provider dropdown -->
 
-### Local AI (Free, Offline, Private)
+### 🏠 Local AI (Free, Offline, Private)
 
 For the ultimate privacy-respecting, local-first experience, you can run the LLM locally on your own hardware using Ollama.
 
@@ -44,7 +44,7 @@ For the ultimate privacy-respecting, local-first experience, you can run the LLM
    - **Model Name**: `llama3.2:3b`
    - **API Key**: Leave blank.
 
-### Cloud Providers (OpenAI, Anthropic, Groq)
+### 🌩️ Cloud Providers (OpenAI, Anthropic, Groq)
 
 If you don't have the hardware to run Ollama smoothly, or want the absolute best reasoning capabilities (like Claude 3.5 Sonnet or GPT-4o), you can plug in your own API keys:
 
@@ -52,7 +52,7 @@ If you don't have the hardware to run Ollama smoothly, or want the absolute best
 2. Enter the Model Name (e.g., `gpt-4o`, `claude-3-5-sonnet-latest`, `llama-3.1-8b-instant`).
 3. Enter your API Key.
 
-## Prompts & Presets
+## 📝 Prompts & Presets
 
 The magic of the LLM is in the prompt. You can select one of our default presets, or write your own to teach the AI exactly how you want your notes formatted.
 

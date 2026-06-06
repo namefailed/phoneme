@@ -1,10 +1,10 @@
-# Getting Started with Phoneme
+# 🚀 Getting Started with Phoneme
 
 Welcome to Phoneme! Phoneme is built on a fundamental philosophy: **Build it your own way.** We provide the tools—lightning-fast transcription, offline privacy, extensive post-processing, and limitless extensibility—but *you* decide how they fit together. 
 
 Whether you want a 100% offline, privacy-first setup that runs entirely on your local hardware, or you want to connect to the fastest cloud APIs for instant results, Phoneme supports it.
 
-## The First Run Wizard
+## 🧙‍♂️ The First Run Wizard
 
 When you launch Phoneme for the first time, you will be greeted by the First Run Wizard. This wizard is designed to get you up and running with the best possible configuration for your specific hardware.
 
@@ -13,9 +13,9 @@ When you launch Phoneme for the first time, you will be greeted by the First Run
 ### Step 1: Choosing Your Mode
 
 Phoneme will ask you how you intend to use the application. You can choose from:
-1. **Local & Private (Recommended)**: Phoneme will download an optimized `whisper.cpp` model to your machine. Your audio never leaves your computer.
-2. **Cloud Speed**: If you have an OpenAI, Groq, or Deepgram API key, you can plug it in here for near-instantaneous cloud transcription.
-3. **Advanced Setup**: Skip the wizard and configure everything manually in Settings.
+1. **🏠 Local & Private (Recommended)**: Phoneme will download an optimized `whisper.cpp` model to your machine. Your audio never leaves your computer.
+2. **☁️ Cloud Speed**: If you have an OpenAI, Groq, or Deepgram API key, you can plug it in here for near-instantaneous cloud transcription.
+3. **⚙️ Advanced Setup**: Skip the wizard and configure everything manually in Settings.
 
 ### Step 2: Hardware Auto-Detection
 
@@ -30,7 +30,7 @@ Because AI models require memory to run efficiently, Phoneme uses this data to a
 
 You can accept the recommendation, or manually choose a different model. Phoneme will then download the model directly to your device.
 
-## Making Your First Recording
+## 🎤 Making Your First Recording
 
 Once the wizard completes, you'll land on the main Recordings View.
 
@@ -54,10 +54,10 @@ Here you can:
 - **Edit**: Spot a mistake? Click into the transcript to fix it. Phoneme always saves your original raw transcript in the background, so you never lose data.
 - **Take Notes**: Use the free-form Notes text area to jot down thoughts related to the recording. This field is yours and is never overwritten by AI or re-transcription.
 
-## Next Steps
+## ⏭️ Next Steps
 
 Now that you've mastered the basics, explore Phoneme's power-user features:
-- **[Meeting Mode (Dual-Track)](meeting_mode.md)**: Record both sides of a conversation and let AI separate the speakers.
-- **[Smart Cleanup (LLM Post-Processing)](smart_cleanup.md)**: Automatically remove stutters, format notes, or translate your voice.
-- **[Transcribe-in-Place](transcribe_in_place.md)**: Dictate directly into any application on your computer.
-- **[Search & Organization](search_and_organization.md)**: Master tags and full-text search.
+- **[👥 Meeting Mode (Dual-Track)](meeting_mode.md)**: Record both sides of a conversation and let AI separate the speakers.
+- **[✨ Smart Cleanup (LLM Post-Processing)](smart_cleanup.md)**: Automatically remove stutters, format notes, or translate your voice.
+- **[⌨️ Transcribe-in-Place](transcribe_in_place.md)**: Dictate directly into any application on your computer.
+- **[🔍 Search & Organization](search_and_organization.md)**: Master tags and full-text search.
