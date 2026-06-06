@@ -24,6 +24,22 @@ phoneme record --oneshot
 phoneme record --start --in-place
 ```
 
+### 👥 `phoneme meeting`
+
+Start a dual-track Meeting Mode recording.
+
+```bash
+phoneme meeting --start
+```
+
+### 📥 `phoneme import <FILE>`
+
+Import an existing audio file (wav/mp3/m4a) and transcribe it.
+
+```bash
+phoneme import my_meeting.mp3
+```
+
 ### 📋 `phoneme list`
 
 Query the local SQLite recording catalog.
@@ -45,6 +61,22 @@ Display the details of a single recording by its ID.
 
 ```bash
 phoneme show 20260519T143500823
+```
+
+### 🔁 `phoneme retranscribe <ID>`
+
+Re-transcribe a saved recording using your current model settings.
+
+```bash
+phoneme retranscribe 20260519T143500823
+```
+
+### 🗑️ `phoneme delete <ID>`
+
+Delete a recording and its associated audio file.
+
+```bash
+phoneme delete 20260519T143500823
 ```
 
 ### 🪝 `phoneme hook test`
@@ -71,6 +103,23 @@ Rename a meeting session. This name will appear in the UI instead of the default
 phoneme session rename 20260519T143500823 "Q3 Planning Sync"
 ```
 
+### 🏷️ `phoneme tag`
+
+Manage recording tags.
+
+```bash
+# List all tags
+phoneme tag list
+```
+
+### 🎭 `phoneme profile`
+
+Manage config profiles (named full-config snapshots).
+
+```bash
+phoneme profile apply work_mode
+```
+
 ### 🩺 `phoneme doctor`
 
 Run a health check on your system. Checks Whisper status, Diarization status, and hook executability.
@@ -79,7 +128,7 @@ Run a health check on your system. Checks Whisper status, Diarization status, an
 phoneme doctor
 ```
 
-### `phoneme config reload`
+### ⚙️ `phoneme config reload`
 
 Hot-reload the configuration file from disk. The daemon will immediately apply changes (like hotkeys or models) without needing to be restarted.
 
@@ -87,7 +136,7 @@ Hot-reload the configuration file from disk. The daemon will immediately apply c
 phoneme config reload
 ```
 
-### `phoneme watch`
+### 📡 `phoneme watch`
 
 Subscribe to live daemon events as a stream of JSON objects. Useful for building your own UI or integration on top of Phoneme.
 
@@ -95,7 +144,16 @@ Subscribe to live daemon events as a stream of JSON objects. Useful for building
 phoneme watch
 ```
 
-## Daemon Management
+### 👻 `phoneme daemon`
+
+Send daemon control commands.
+
+```bash
+phoneme daemon ping
+phoneme daemon shutdown
+```
+
+## 🧠 Daemon Management
 
 While the daemon is usually auto-spawned by the System Tray application, you can run it directly:
 

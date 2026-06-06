@@ -1,4 +1,4 @@
-# Phoneme Internals
+# ⚙️ Phoneme Internals
 
 A developer's-eye map of how Phoneme works under the hood. Read
 [architecture.md](architecture.md) first for the high-level triad; this document
@@ -8,7 +8,7 @@ catalog, the IPC wire protocol, and the filesystem queue.
 > Audience: contributors. If you just want to *use* Phoneme, see the
 > [README](../README.md).
 
-## Workspace layout
+## 🗂️ Workspace layout
 
 ```
 crates/
@@ -28,7 +28,7 @@ nothing depends on the binaries. `phoneme-ipc` is shared by all three binaries s
 the wire format can never drift between client and daemon (adding a `Request`
 variant is a compile error until every match arm handles it).
 
-## Async task topology (daemon)
+## 🕸️ Async task topology (daemon)
 
 The daemon is a Tokio application. The long-lived tasks and the channels between
 them:
@@ -54,7 +54,7 @@ Channel cheat-sheet (in `phoneme-audio`/daemon `recorder`):
   in real time, and vice-versa).
 - **`watch`** — shutdown flag observed by all loops.
 
-## Lifecycle of a recording
+## ⏱️ Lifecycle of a recording
 
 1. **Trigger** — `RecordStart`/`RecordToggle` (or `StartMeeting` for dual-track)
    arrives over IPC.
@@ -75,7 +75,7 @@ Channel cheat-sheet (in `phoneme-audio`/daemon `recorder`):
 Imported files (`ImportRecording`) skip 1–3: the file is decoded to canonical
 form, copied into the audio dir, and enters at step 4.
 
-## Audio path (`phoneme-audio`)
+## 🔊 Audio path (`phoneme-audio`)
 
 The canonical format is **16 kHz, mono, signed 16-bit PCM**. Everything converges
 on it.
@@ -99,7 +99,7 @@ on it.
   max-duration cap so a crafted file can't OOM the daemon.
 - **`wav`** — final WAV encode/decode via `hound`.
 
-## SQLite catalog (`phoneme-core::catalog`)
+## 🗄️ SQLite catalog (`phoneme-core::catalog`)
 
 A single SQLite database, accessed with `sqlx` and versioned migrations
 (`phoneme-core/migrations`). Opened in **WAL** mode with `synchronous=NORMAL`,
@@ -119,7 +119,7 @@ on idle to bound WAL growth.
 Audio lives on disk under a date-foldered directory, **not** in the DB — the
 SQLite file stays small and copyable.
 
-## IPC (`phoneme-ipc`)
+## 📡 IPC (`phoneme-ipc`)
 
 - **Transport** — a Windows named pipe (`\\.\pipe\phoneme-daemon`), framed as
   **newline-delimited JSON** (`JsonLineCodec`): one JSON value per line.
@@ -137,7 +137,7 @@ SQLite file stays small and copyable.
 - **`Transport` trait** — abstracts the wire so a future `HttpTransport` (v2.0
   mobile/REST) can be added without touching `schema.rs`.
 
-## Inbox queue (`phoneme-core::queue`)
+## 📥 Inbox queue (`phoneme-core::queue`)
 
 A filesystem-backed work queue under the data dir:
 
@@ -156,7 +156,7 @@ with `from_str_unchecked` would panic the daemon; the queue deliberately uses th
 fallible `RecordingId::parse` + quarantine instead). `reconcile` recovers orphans
 left by a crash on startup.
 
-## Frontend (`frontend/`)
+## 🎨 Frontend (`frontend/`)
 
 Deliberately framework-less Vanilla TypeScript (Vite). Components are classes
 that build `innerHTML`.
@@ -172,7 +172,7 @@ that build `innerHTML`.
 > Transcripts, notes, file paths, tag names, search terms, and session ids are
 > all attacker-influenced. `highlightMatch` escapes in every branch.
 
-## Testing without hardware
+## 🧪 Testing without hardware
 
 - **`SyntheticSource`** feeds canned PCM, so recorder/pipeline tests run with no
   microphone.
