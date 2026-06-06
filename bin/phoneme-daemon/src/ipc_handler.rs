@@ -76,6 +76,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::DaemonStatus => Response::Ok(serde_json::json!({
             "running": true,
             "pid": std::process::id(),
+            "version": env!("CARGO_PKG_VERSION"),
         })),
         Request::RecordStatus => {
             let active = state.recorder.current().await;
