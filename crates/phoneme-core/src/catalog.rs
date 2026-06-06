@@ -273,7 +273,7 @@ impl Catalog {
         let rows = sqlx::query(
             "SELECT * FROM recordings \
              WHERE id NOT IN (SELECT id FROM embeddings) \
-             AND transcript IS NOT NULL AND transcript != ''"
+             AND transcript IS NOT NULL AND transcript != ''",
         )
         .fetch_all(&self.pool)
         .await?;

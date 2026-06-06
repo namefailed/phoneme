@@ -290,9 +290,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::UpdateSessionName { session_id, name } => {
-            match state.catalog.update_session_name(&session_id, name.as_deref()).await {
+            match state
+                .catalog
+                .update_session_name(&session_id, name.as_deref())
+                .await
+            {
                 Ok(()) => {
-                    state.events.emit(DaemonEvent::SessionNameUpdated { session_id });
+                    state
+                        .events
+                        .emit(DaemonEvent::SessionNameUpdated { session_id });
                     Response::Ok(serde_json::Value::Null)
                 }
                 Err(e) => Response::Err(IpcError {
@@ -624,13 +630,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             match crate::load_config() {
                 Ok(cfg) => {
                     state.config.store(std::sync::Arc::new(cfg));
-                    
+
                     let cfg_arc = state.config.load();
                     let mut embedder_guard = state.embedder.write().await;
                     if cfg_arc.semantic_search.enabled && embedder_guard.is_none() {
                         match phoneme_core::Embedder::new(&cfg_arc.semantic_search.model_dir) {
                             Ok(e) => *embedder_guard = Some(std::sync::Arc::new(e)),
-                            Err(e) => tracing::warn!(error = %e, "Failed to load semantic search model on reload"),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to load semantic search model on reload")
+                            }
                         }
                     } else if !cfg_arc.semantic_search.enabled {
                         *embedder_guard = None;

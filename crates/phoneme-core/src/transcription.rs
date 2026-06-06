@@ -30,7 +30,9 @@ pub trait TranscriptionProvider: Send + Sync {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String>;
 
     /// Returns true if the provider runs directly within the current process (i.e. whisper-rs).
-    fn is_native(&self) -> bool { false }
+    fn is_native(&self) -> bool {
+        false
+    }
 }
 
 /// Owns the process-wide HTTP client and builds a [`TranscriptionProvider`]
@@ -56,7 +58,11 @@ impl Transcriber {
     ///
     /// `server_base_url()` resolves the correct endpoint for both external and
     /// bundled whisper-server modes.
-    pub fn provider(&self, whisper: &WhisperConfig, diarization: &crate::config::DiarizationConfig) -> Box<dyn TranscriptionProvider> {
+    pub fn provider(
+        &self,
+        whisper: &WhisperConfig,
+        diarization: &crate::config::DiarizationConfig,
+    ) -> Box<dyn TranscriptionProvider> {
         let timeout = Duration::from_secs(whisper.timeout_secs);
         match whisper.provider {
             TranscriptionBackend::Local => {
@@ -64,13 +70,15 @@ impl Transcriber {
                 {
                     if let Some(path) = &whisper.model_path {
                         if !path.trim().is_empty() {
-                            if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(std::path::Path::new(path)) {
+                            if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(
+                                std::path::Path::new(path),
+                            ) {
                                 return Box::new(provider);
                             }
                         }
                     }
                 }
-                
+
                 Box::new(OpenAiCompatProvider::new(
                     self.http.clone(),
                     whisper.server_base_url(),
@@ -79,7 +87,7 @@ impl Transcriber {
                     timeout,
                     diarization.provider == crate::config::DiarizationBackend::Local,
                 ))
-            },
+            }
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.openai.com"),
@@ -316,22 +324,27 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .json()
             .await
             .map_err(|e| Error::Internal(format!("decoding transcription response: {e}")))?;
-            
+
         if self.local_diarize {
             if let Some(whisper_segments) = parsed.segments {
-                let pyannote_segs = if let Err(e) = crate::diarization::run_local_diarization(audio_path) {
-                    tracing::warn!("local diarization failed, falling back to raw whisper: {}", e);
-                    vec![]
-                } else {
-                    tracing::info!("local diarization completed");
-                    crate::diarization::run_local_diarization(audio_path).map_err(|e| crate::error::Error::Internal(e.to_string()))?
-                };
+                let pyannote_segs =
+                    if let Err(e) = crate::diarization::run_local_diarization(audio_path) {
+                        tracing::warn!(
+                            "local diarization failed, falling back to raw whisper: {}",
+                            e
+                        );
+                        vec![]
+                    } else {
+                        tracing::info!("local diarization completed");
+                        crate::diarization::run_local_diarization(audio_path)
+                            .map_err(|e| crate::error::Error::Internal(e.to_string()))?
+                    };
                 let mut final_transcript = String::new();
                 let mut current_speaker = None;
-                
+
                 for w_seg in whisper_segments {
                     let midpoint = w_seg.start + (w_seg.end - w_seg.start) / 2.0;
-                    
+
                     // Find which pyannote segment covers this midpoint
                     let mut spk = 0;
                     for p_seg in &pyannote_segs {
@@ -342,7 +355,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                             break;
                         }
                     }
-                    
+
                     if current_speaker != Some(spk) {
                         if !final_transcript.is_empty() {
                             final_transcript.push_str("\n\n");
@@ -354,11 +367,11 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                     }
                     final_transcript.push_str(w_seg.text.trim());
                 }
-                
+
                 return Ok(final_transcript);
             }
         }
-            
+
         Ok(parsed.text)
     }
 }
@@ -489,7 +502,7 @@ impl TranscriptionProvider for DeepgramProvider {
             .json()
             .await
             .map_err(|e| Error::Internal(format!("decoding Deepgram response: {e}")))?;
-            
+
         let alt = parsed
             .results
             .channels
@@ -501,11 +514,11 @@ impl TranscriptionProvider for DeepgramProvider {
         if !self.diarize || alt.words.is_none() {
             return Ok(alt.transcript);
         }
-        
+
         let words = alt.words.unwrap();
         let mut final_transcript = String::new();
         let mut current_speaker: Option<u32> = None;
-        
+
         for w in words {
             let spk = w.speaker.unwrap_or(0);
             if current_speaker != Some(spk) {
@@ -701,14 +714,15 @@ impl TranscriptionProvider for AssemblyAiProvider {
                                 Error::Internal("AssemblyAI completed without text".into())
                             });
                         }
-                        
+
                         let utterances = t.utterances.unwrap();
                         let mut final_transcript = String::new();
                         for u in utterances {
                             if !final_transcript.is_empty() {
                                 final_transcript.push_str("\n\n");
                             }
-                            final_transcript.push_str(&format!("[Speaker {}]: {}", u.speaker, u.text));
+                            final_transcript
+                                .push_str(&format!("[Speaker {}]: {}", u.speaker, u.text));
                         }
                         return Ok(final_transcript);
                     }

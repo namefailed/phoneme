@@ -175,7 +175,11 @@ impl DaemonRecorder {
         };
         // Pre-roll is mic-only; open the microphone explicitly. Use STOP_TAIL_GRACE
         // so if we reuse this source for a recording, it doesn't clip when stopped.
-        let source = match CpalSource::open_kind_with_grace(device, CaptureSource::Microphone, STOP_TAIL_GRACE) {
+        let source = match CpalSource::open_kind_with_grace(
+            device,
+            CaptureSource::Microphone,
+            STOP_TAIL_GRACE,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "pre-roll: could not open microphone; skipping");
@@ -288,7 +292,7 @@ impl DaemonRecorder {
         let task = tokio::spawn(async move {
             let cfg = state.config.load();
             let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
-            
+
             // If the provider is native (running directly in our RAM), we can safely
             // drop the interval to 500ms for true real-time word-by-word streaming
             // without worrying about HTTP/file-write overhead.
@@ -692,7 +696,7 @@ impl DaemonRecorder {
         // tracks don't use pre-roll. No-op when pre-roll is disabled.
         let (_, preroll_source) = self.take_preroll_samples().await;
         // Since meeting needs two different sources (mic and system loopback)
-        // and we cannot safely assume the preroll source matches the mic one 
+        // and we cannot safely assume the preroll source matches the mic one
         // without more work, we just drop it to release the microphone cleanly.
         if let Some(mut s) = preroll_source {
             let _ = s.stop().await;
