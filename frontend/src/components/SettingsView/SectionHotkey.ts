@@ -59,6 +59,40 @@ export class SectionHotkey {
             config.meeting_hotkey?.combo ?? "Ctrl+Alt+M",
           )}</div>
         </div>
+
+        <h3 style="margin-top: 18px;">In-place Transcription</h3>
+        <span style="font-size: 11px; color: var(--fg-faded); display: block; margin: -6px 0 8px;">
+          A separate shortcut to type the transcription directly into the currently focused window, like Windows Dictation.
+        </span>
+        <div class="settings-field">
+          <label>Enable</label>
+          <div>${renderField(
+            { key: "in_place_hotkey.enabled", label: "", kind: "checkbox" },
+            config.in_place_hotkey?.enabled ?? false,
+          )}</div>
+        </div>
+        <div class="settings-field">
+          <label>Combo</label>
+          <div>${renderField(
+            { key: "in_place_hotkey.combo", label: "", kind: "text" },
+            config.in_place_hotkey?.combo ?? "Ctrl+Alt+I",
+          )}</div>
+        </div>
+        <div class="settings-field">
+          <label>Mode</label>
+          <div>${renderField(
+            {
+              key: "in_place_hotkey.mode",
+              label: "",
+              kind: "select",
+              options: [
+                { value: "hold", label: "Hold (push-to-talk)" },
+                { value: "toggle", label: "Toggle (tap to start, tap to stop)" },
+              ],
+            },
+            config.in_place_hotkey?.mode ?? "hold",
+          )}</div>
+        </div>
       </div>
     `;
     bindFieldEvents(container, config);
@@ -105,5 +139,6 @@ export class SectionHotkey {
 
     wireCombo("hotkey.combo");
     wireCombo("meeting_hotkey.combo");
+    wireCombo("in_place_hotkey.combo");
   }
 }

@@ -15,6 +15,7 @@
 use crate::config::LlmPostProcessConfig;
 use crate::error::{Error, Result};
 use async_trait::async_trait;
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -58,7 +59,7 @@ impl LlmPostProcessor {
             "openai" => Some(Box::new(OpenAiChatProvider {
                 http: self.http.clone(),
                 url: non_empty_or(&cfg.api_url, "https://api.openai.com/v1/chat/completions"),
-                api_key: cfg.api_key.trim().to_string(),
+                api_key: cfg.api_key.expose_secret().trim().to_string(),
                 model: non_empty_or(&cfg.model, "gpt-4o-mini"),
                 timeout,
             })),
@@ -68,14 +69,14 @@ impl LlmPostProcessor {
                     &cfg.api_url,
                     "https://api.groq.com/openai/v1/chat/completions",
                 ),
-                api_key: cfg.api_key.trim().to_string(),
+                api_key: cfg.api_key.expose_secret().trim().to_string(),
                 model: non_empty_or(&cfg.model, "llama-3.1-8b-instant"),
                 timeout,
             })),
             "anthropic" => Some(Box::new(AnthropicProvider {
                 http: self.http.clone(),
                 url: non_empty_or(&cfg.api_url, "https://api.anthropic.com/v1/messages"),
-                api_key: cfg.api_key.trim().to_string(),
+                api_key: cfg.api_key.expose_secret().trim().to_string(),
                 model: non_empty_or(&cfg.model, "claude-3-5-haiku-latest"),
                 timeout,
             })),

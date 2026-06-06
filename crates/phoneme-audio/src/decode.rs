@@ -79,7 +79,10 @@ pub fn decode_to_canonical_wav(input: &Path, out_wav: &Path) -> Result<i64> {
     wav::write_wav(out_wav, &pcm, AudioConfig::phoneme_default())?;
 
     let frames = pcm.len() as i64; // mono, so frames == samples
-    let duration_ms = (frames * 1000) / AudioConfig::phoneme_default().sample_rate.as_u32() as i64;
+    let duration_ms = frames
+        .checked_mul(1000)
+        .and_then(|v| v.checked_div(AudioConfig::phoneme_default().sample_rate.as_u32() as i64))
+        .ok_or_else(|| Error::Internal("duration calculation overflowed".into()))?;
     Ok(duration_ms)
 }
 

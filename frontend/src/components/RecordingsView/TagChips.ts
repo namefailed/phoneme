@@ -1,65 +1,39 @@
+import { LitElement, html, css, PropertyValues } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 import { addTag, attachTag, detachTag, listAllTags, tagsFor, type Tag } from "../../services/ipc";
-import { escapeHtml, escapeAttr } from "../../utils/format";
 import { showToast } from "../../utils/toast";
 
-export class TagChips {
-  private container: HTMLElement;
-  private recordingId: string;
-  private attached: Tag[] = [];
-  private allTags: Tag[] = [];
+@customElement('ph-tag-chips')
+export class TagChipsElement extends LitElement {
+  protected createRenderRoot() {
+    return this; // Use light DOM to inherit global tag-manager styles, or add styles inline
+  }
 
-  constructor(container: HTMLElement, recordingId: string) {
-    this.container = container;
-    this.recordingId = recordingId;
-    void this.load();
+  @property({ type: String }) recordingId = "";
+
+  @state() private attached: Tag[] = [];
+  @state() private allTags: Tag[] = [];
+
+  connectedCallback() {
+    super.connectedCallback();
+    if (this.recordingId) {
+      void this.load();
+    }
+  }
+
+  updated(changedProperties: PropertyValues) {
+    if (changedProperties.has('recordingId') && this.recordingId) {
+      void this.load();
+    }
   }
 
   private async load() {
     try {
       this.allTags = await listAllTags();
       this.attached = await tagsFor(this.recordingId);
-      this.render();
     } catch (e) {
       showToast(`Failed to load tags: ${e}`, "error");
     }
-  }
-
-  private render() {
-    const chips = this.attached
-      .map(
-        (t) => `<span class="tag-chip" data-tag-id="${t.id}" style="${
-          t.color ? `--tag-color: ${t.color}` : ""
-        }">${escapeHtml(t.name)} <button class="tag-x">×</button></span>`
-      )
-      .join("");
-    this.container.innerHTML = `
-      <div class="tags">
-        ${chips}
-        <input class="tag-add" placeholder="+ add tag" list="all-tags" />
-        <datalist id="all-tags">${this.allTags.map((t) => `<option value="${escapeAttr(t.name)}">`).join("")}</datalist>
-        <button class="tag-manage" title="Create, rename, recolor, and delete tags">🏷 Manage tags</button>
-      </div>
-    `;
-    this.container.querySelectorAll<HTMLButtonElement>(".tag-x").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = Number(btn.parentElement!.getAttribute("data-tag-id"));
-        void this.detach(id);
-      });
-    });
-    const input = this.container.querySelector<HTMLInputElement>(".tag-add");
-    input?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        const name = input.value.trim();
-        if (name) void this.attachByName(name);
-      }
-    });
-    const manageBtn = this.container.querySelector<HTMLButtonElement>(".tag-manage");
-    manageBtn?.addEventListener("click", async () => {
-      const { openTagManager } = await import("../TagManager");
-      await openTagManager();
-      // Tags may have been renamed/recolored/deleted — refresh chips + datalist.
-      await this.load();
-    });
   }
 
   private async detach(tagId: number) {
@@ -76,11 +50,55 @@ export class TagChips {
       let tag = this.allTags.find((t) => t.name === name);
       if (!tag) tag = await addTag(name);
       await attachTag(this.recordingId, tag.id);
-      const input = this.container.querySelector<HTMLInputElement>(".tag-add");
+      
+      const input = this.renderRoot.querySelector<HTMLInputElement>(".tag-add");
       if (input) input.value = "";
+      
       await this.load();
     } catch (e) {
       showToast(`Failed to add tag: ${e}`, "error");
     }
+  }
+
+  private onInputKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      const input = e.target as HTMLInputElement;
+      const name = input.value.trim();
+      if (name) void this.attachByName(name);
+    }
+  }
+
+  private async onManageClick() {
+    const { openTagManager } = await import("../TagManager");
+    await openTagManager();
+    // Tags may have been renamed/recolored/deleted — refresh chips + datalist.
+    await this.load();
+  }
+
+  render() {
+    return html`
+      <div class="tags">
+        ${this.attached.map((t) => html`
+          <span class="tag-chip" data-tag-id="${t.id}" style="${t.color ? `--tag-color: ${t.color}` : ""}">
+            ${t.name} <button class="tag-x" @click=${() => this.detach(t.id)}>×</button>
+          </span>
+        `)}
+        <input class="tag-add" placeholder="+ add tag" list="all-tags-${this.recordingId}" @keydown=${this.onInputKeydown} />
+        <datalist id="all-tags-${this.recordingId}">
+          ${this.allTags.map((t) => html`<option value="${t.name}"></option>`)}
+        </datalist>
+        <button class="tag-manage" title="Create, rename, recolor, and delete tags" @click=${this.onManageClick}>🏷 Manage tags</button>
+      </div>
+    `;
+  }
+}
+
+// Keep the vanilla wrapper so we don't break parent components yet.
+export class TagChips {
+  private element: TagChipsElement;
+  constructor(container: HTMLElement, recordingId: string) {
+    this.element = document.createElement('ph-tag-chips') as TagChipsElement;
+    this.element.recordingId = recordingId;
+    container.appendChild(this.element);
   }
 }

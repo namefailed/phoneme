@@ -1,32 +1,40 @@
+import { LitElement, html, css, unsafeCSS } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 import { listAllTags, listTags, addTag, updateTag, deleteTag, type Tag } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { escapeHtml, escapeAttr } from "../../utils/format";
 import { confirmDelete } from "../ConfirmDelete";
 
-/**
- * Tag Manager — lives in the Settings sidebar as its own tab.
- * All CRUD operations go directly through IPC and persist immediately in SQLite.
- * Does NOT touch the app config.
- */
-export class SectionTags {
-  private container: HTMLElement;
-  private allTags: Tag[] = [];
-  private activeTags: Set<number> = new Set(); // tags attached to ≥1 recording
-  private editingId: number | null = null;
-  /** When true, omit the outer settings-section card/heading so the component
-   *  can be embedded in a modal that already provides the frame + title. */
-  private bare: boolean;
+// Note: SettingsView styles are assumed to be loaded globally or in a parent element until SettingsView is fully migrated.
+// We'll define internal styles for the Lit component.
+@customElement('ph-section-tags')
+export class SectionTagsElement extends LitElement {
+  // We disable shadow DOM for this component right now because it relies on 
+  // SettingsView/styles.css and tag-manager.css which are global.
+  // Once SettingsView is migrated, we can encapsulate styles.
+  protected createRenderRoot() {
+    return this;
+  }
 
-  constructor(container: HTMLElement, _config: any, opts?: { bare?: boolean }) {
-    this.container = container;
-    this.bare = opts?.bare ?? false;
+  @property({ type: Boolean }) bare = false;
+
+  @state() private allTags: Tag[] = [];
+  @state() private activeTags: Set<number> = new Set();
+  @state() private editingId: number | null = null;
+
+  @state() private newTagName = "";
+  @state() private newTagColor = "#cba6f7";
+
+  // Temporary state to hold color/name while editing a tag
+  private editColor = "";
+  private editName = "";
+
+  connectedCallback() {
+    super.connectedCallback();
     void this.load();
   }
 
   private async load() {
     try {
-      // listAllTags = every tag; listTags = only tags attached to recordings.
-      // The difference lets us show "in use" vs "unused" without an N+1 query.
       const [all, active] = await Promise.all([listAllTags(), listTags()]);
       this.allTags = all;
       this.activeTags = new Set(active.map((t) => t.id));
@@ -35,226 +43,156 @@ export class SectionTags {
       this.allTags = [];
       this.activeTags = new Set();
     }
-    this.render();
   }
 
-  private render() {
-    const sorted = [...this.allTags].sort((a, b) => a.name.localeCompare(b.name));
-
-    const inner = `
-        <div id="tag-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px;">
-          ${
-            sorted.length === 0
-              ? `<div class="tag-mgr-empty">
-                   <div class="tag-mgr-empty-icon">🏷</div>
-                   <p>No tags yet.</p>
-                   <p class="tag-mgr-empty-hint">Create one below, then attach it to recordings from the detail panel.</p>
-                 </div>`
-              : sorted.map((t) => this.renderRow(t)).join("")
-          }
-        </div>
-
-        <div class="tag-mgr-add-section">
-          <div class="tag-mgr-add-label">New tag</div>
-          <div class="tag-mgr-add-row">
-            <input
-              type="color"
-              id="new-tag-color"
-              value="#cba6f7"
-              class="tag-mgr-color-btn"
-              title="Pick a color for this tag"
-            />
-            <input
-              type="text"
-              id="new-tag-name"
-              placeholder="Tag name…"
-              class="tag-mgr-add-name"
-            />
-            <button class="primary" id="btn-add-tag">Add</button>
-          </div>
-        </div>
-    `;
-
-    this.container.innerHTML = this.bare
-      ? inner
-      : `
-      <div class="settings-section">
-        <h3>Tag Manager</h3>
-        <p class="settings-help-text" style="margin-bottom: 20px;">
-          Changes apply immediately and are reflected in the filter bar and recording detail panel.
-        </p>
-        ${inner}
-      </div>
-    `;
-
-    this.bindEvents();
+  private startEdit(t: Tag) {
+    this.editingId = t.id;
+    this.editName = t.name;
+    this.editColor = t.color ?? "#cba6f7";
   }
 
-  private renderRow(t: Tag): string {
-    const isEditing = this.editingId === t.id;
-    const color = t.color ?? "#cba6f7";
-    const inUse = this.activeTags.has(t.id);
-
-    if (isEditing) {
-      return `
-        <div class="tag-mgr-row editing" data-tag-id="${t.id}">
-          <input
-            type="color"
-            class="tag-mgr-color-btn tag-edit-color"
-            value="${escapeAttr(color)}"
-            data-tag-id="${t.id}"
-            title="Tag color"
-          />
-          <span
-            class="tag-mgr-swatch"
-            id="swatch-preview-${t.id}"
-            style="background: ${escapeAttr(color)};"
-          ></span>
-          <input
-            type="text"
-            class="tag-mgr-name-input"
-            value="${escapeAttr(t.name)}"
-            data-tag-id="${t.id}"
-          />
-          <button class="tag-mgr-save" data-tag-id="${t.id}">Save</button>
-          <button class="tag-mgr-cancel" data-tag-id="${t.id}">Cancel</button>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="tag-mgr-row" data-tag-id="${t.id}">
-        <span class="tag-mgr-swatch" style="background: ${escapeAttr(color)};"></span>
-        <span class="tag-mgr-name">${escapeHtml(t.name)}</span>
-        <span class="tag-mgr-badge ${inUse ? "in-use" : "orphaned"}" title="${
-      inUse
-        ? "This tag is attached to at least one recording"
-        : "This tag is not attached to any recordings"
-    }">${inUse ? "in use" : "unused"}</span>
-        <button class="tag-mgr-edit" data-tag-id="${t.id}">Edit</button>
-        <button class="tag-mgr-delete danger" data-tag-id="${t.id}">Delete</button>
-      </div>
-    `;
-  }
-
-  private bindEvents() {
-    // ── Edit ──────────────────────────────────────────────────────────────────
-    this.container.querySelectorAll<HTMLButtonElement>(".tag-mgr-edit").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        this.editingId = Number(btn.dataset.tagId);
-        this.render();
-      });
-    });
-
-    // ── Cancel ────────────────────────────────────────────────────────────────
-    this.container.querySelectorAll<HTMLButtonElement>(".tag-mgr-cancel").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        this.editingId = null;
-        this.render();
-      });
-    });
-
-    // ── Save ──────────────────────────────────────────────────────────────────
-    this.container.querySelectorAll<HTMLButtonElement>(".tag-mgr-save").forEach((btn) => {
-      btn.addEventListener("click", () => void this.saveEdit(Number(btn.dataset.tagId)));
-    });
-
-    // ── Live color swatch preview ─────────────────────────────────────────────
-    this.container.querySelectorAll<HTMLInputElement>(".tag-edit-color").forEach((input) => {
-      const id = input.dataset.tagId;
-      input.addEventListener("input", () => {
-        const swatch = this.container.querySelector<HTMLElement>(`#swatch-preview-${id}`);
-        if (swatch) swatch.style.background = input.value;
-      });
-    });
-
-    // ── Keyboard shortcuts in edit mode ───────────────────────────────────────
-    this.container.querySelectorAll<HTMLInputElement>(".tag-mgr-name-input").forEach((input) => {
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-          this.editingId = null;
-          this.render();
-        } else if (e.key === "Enter") {
-          void this.saveEdit(Number(input.dataset.tagId));
-        }
-      });
-      // Auto-focus and select so the user can start typing immediately.
-      setTimeout(() => { input.focus(); input.select(); }, 0);
-    });
-
-    // ── Delete ────────────────────────────────────────────────────────────────
-    this.container.querySelectorAll<HTMLButtonElement>(".tag-mgr-delete").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = Number(btn.dataset.tagId);
-        const tag = this.allTags.find((t) => t.id === id);
-        const inUse = this.activeTags.has(id);
-        const confirmed = await confirmDelete({
-          title: `Delete tag "${escapeHtml(tag?.name ?? "")}"?`,
-          body: inUse
-            ? "This tag is attached to recordings. Deleting it will remove it from all of them. This cannot be undone."
-            : "This will permanently delete the tag. This cannot be undone.",
-          confirmLabel: "Delete Tag",
-          skipKey: "phoneme_skip_tag_delete_confirm",
-        });
-        if (!confirmed) return;
-        try {
-          await deleteTag(id);
-          showToast(`Tag "${tag?.name}" deleted`, "success");
-          await this.load();
-        } catch (e) {
-          showToast(`Failed to delete tag: ${e}`, "error");
-        }
-      });
-    });
-
-    // ── Add new tag ───────────────────────────────────────────────────────────
-    const addBtn = this.container.querySelector<HTMLButtonElement>("#btn-add-tag");
-    const nameInput = this.container.querySelector<HTMLInputElement>("#new-tag-name");
-    const colorInput = this.container.querySelector<HTMLInputElement>("#new-tag-color");
-
-    const doAdd = async () => {
-      const name = nameInput?.value.trim() ?? "";
-      const color = colorInput?.value ?? "#cba6f7";
-      if (!name) {
-        showToast("Tag name cannot be empty", "warning");
-        nameInput?.focus();
-        return;
-      }
-      try {
-        await addTag(name, color);
-        showToast(`Tag "${name}" created`, "success");
-        if (nameInput) nameInput.value = "";
-        await this.load();
-        nameInput?.focus();
-      } catch (e) {
-        showToast(`Failed to create tag: ${e}`, "error");
-      }
-    };
-
-    addBtn?.addEventListener("click", () => void doAdd());
-    nameInput?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") void doAdd();
-    });
+  private cancelEdit() {
+    this.editingId = null;
   }
 
   private async saveEdit(id: number) {
-    const row = this.container.querySelector<HTMLElement>(`.tag-mgr-row[data-tag-id="${id}"]`);
-    const nameInput = row?.querySelector<HTMLInputElement>(".tag-mgr-name-input");
-    const colorInput = row?.querySelector<HTMLInputElement>(".tag-edit-color");
-    const name = nameInput?.value.trim() ?? "";
-    const color = colorInput?.value ?? null;
+    const name = this.editName.trim();
     if (!name) {
       showToast("Tag name cannot be empty", "warning");
-      nameInput?.focus();
       return;
     }
     try {
-      await updateTag(id, name, color);
+      await updateTag(id, name, this.editColor);
       showToast("Tag updated", "success");
       this.editingId = null;
       await this.load();
     } catch (e) {
       showToast(`Failed to update tag: ${e}`, "error");
     }
+  }
+
+  private async doDelete(t: Tag) {
+    const inUse = this.activeTags.has(t.id);
+    const confirmed = await confirmDelete({
+      title: `Delete tag "${t.name}"?`,
+      body: inUse
+        ? "This tag is attached to recordings. Deleting it will remove it from all of them. This cannot be undone."
+        : "This will permanently delete the tag. This cannot be undone.",
+      confirmLabel: "Delete Tag",
+      skipKey: "phoneme_skip_tag_delete_confirm",
+    });
+    if (!confirmed) return;
+    try {
+      await deleteTag(t.id);
+      showToast(`Tag "${t.name}" deleted`, "success");
+      await this.load();
+    } catch (e) {
+      showToast(`Failed to delete tag: ${e}`, "error");
+    }
+  }
+
+  private async doAdd() {
+    const name = this.newTagName.trim();
+    if (!name) {
+      showToast("Tag name cannot be empty", "warning");
+      return;
+    }
+    try {
+      await addTag(name, this.newTagColor);
+      showToast(`Tag "${name}" created`, "success");
+      this.newTagName = "";
+      await this.load();
+    } catch (e) {
+      showToast(`Failed to create tag: ${e}`, "error");
+    }
+  }
+
+  renderRow(t: Tag) {
+    const isEditing = this.editingId === t.id;
+    const color = t.color ?? "#cba6f7";
+    const inUse = this.activeTags.has(t.id);
+
+    if (isEditing) {
+      return html`
+        <div class="tag-mgr-row editing">
+          <input type="color" class="tag-mgr-color-btn tag-edit-color" 
+            .value=${this.editColor} title="Tag color" 
+            @input=${(e: Event) => this.editColor = (e.target as HTMLInputElement).value} />
+          <span class="tag-mgr-swatch" style="background: ${this.editColor};"></span>
+          <input type="text" class="tag-mgr-name-input" .value=${this.editName}
+            @input=${(e: Event) => this.editName = (e.target as HTMLInputElement).value}
+            @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter") this.saveEdit(t.id); if (e.key === "Escape") this.cancelEdit(); }} />
+          <button class="tag-mgr-save" @click=${() => this.saveEdit(t.id)}>Save</button>
+          <button class="tag-mgr-cancel" @click=${() => this.cancelEdit()}>Cancel</button>
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="tag-mgr-row">
+        <span class="tag-mgr-swatch" style="background: ${color};"></span>
+        <span class="tag-mgr-name">${t.name}</span>
+        <span class="tag-mgr-badge ${inUse ? 'in-use' : 'orphaned'}" 
+          title=${inUse ? "This tag is attached to at least one recording" : "This tag is not attached to any recordings"}>
+          ${inUse ? "in use" : "unused"}
+        </span>
+        <button class="tag-mgr-edit" @click=${() => this.startEdit(t)}>Edit</button>
+        <button class="tag-mgr-delete danger" @click=${() => this.doDelete(t)}>Delete</button>
+      </div>
+    `;
+  }
+
+  renderInner() {
+    const sorted = [...this.allTags].sort((a, b) => a.name.localeCompare(b.name));
+    return html`
+      <div id="tag-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px;">
+        ${sorted.length === 0
+          ? html`
+            <div class="tag-mgr-empty">
+              <div class="tag-mgr-empty-icon">🏷</div>
+              <p>No tags yet.</p>
+              <p class="tag-mgr-empty-hint">Create one below, then attach it to recordings from the detail panel.</p>
+            </div>
+          `
+          : sorted.map((t) => this.renderRow(t))
+        }
+      </div>
+
+      <div class="tag-mgr-add-section">
+        <div class="tag-mgr-add-label">New tag</div>
+        <div class="tag-mgr-add-row">
+          <input type="color" id="new-tag-color" class="tag-mgr-color-btn" title="Pick a color for this tag" 
+            .value=${this.newTagColor} @input=${(e: Event) => this.newTagColor = (e.target as HTMLInputElement).value} />
+          <input type="text" id="new-tag-name" placeholder="Tag name…" class="tag-mgr-add-name" 
+            .value=${this.newTagName} @input=${(e: Event) => this.newTagName = (e.target as HTMLInputElement).value}
+            @keydown=${(e: KeyboardEvent) => { if (e.key === "Enter") this.doAdd(); }} />
+          <button class="primary" id="btn-add-tag" @click=${this.doAdd}>Add</button>
+        </div>
+      </div>
+    `;
+  }
+
+  render() {
+    if (this.bare) {
+      return this.renderInner();
+    }
+    return html`
+      <div class="settings-section">
+        <h3>Tag Manager</h3>
+        <p class="settings-help-text" style="margin-bottom: 20px;">
+          Changes apply immediately and are reflected in the filter bar and recording detail panel.
+        </p>
+        ${this.renderInner()}
+      </div>
+    `;
+  }
+}
+
+export class SectionTags {
+  private element: SectionTagsElement;
+  constructor(container: HTMLElement, _config: any, opts?: { bare?: boolean }) {
+    this.element = document.createElement('ph-section-tags') as SectionTagsElement;
+    if (opts?.bare) this.element.bare = opts.bare;
+    container.appendChild(this.element);
   }
 }

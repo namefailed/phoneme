@@ -22,6 +22,7 @@ chrono.workspace = true
 ort = "2.0.0-rc.12"
 tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
 ndarray = "0.17.2"
+secrecy.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

@@ -1,50 +1,78 @@
-import "./modal.css";
-// Ensure the .tag-mgr-* styles are in the bundle even when Settings hasn't been
-// opened this session (SectionTags' CSS lives in the SettingsView stylesheet).
-import "./SettingsView/styles.css";
-import "./tag-manager.css";
-import { SectionTags } from "./SettingsView/SectionTags";
+import { LitElement, html, css, unsafeCSS } from 'lit';
+import { customElement } from 'lit/decorators.js';
+import modalStyles from './modal.css?inline';
+import tagManagerStyles from './tag-manager.css?inline';
+import settingsStyles from './SettingsView/styles.css?inline';
+import './SettingsView/SectionTags'; // Make sure the custom element is registered
 
-/**
- * Opens the Tag Manager as a centered modal over the main UI (the same modal
- * style as the model picker). Reuses the existing `SectionTags` CRUD component
- * in "bare" mode so there's a single source of truth for tag editing. Tag
- * changes persist to SQLite immediately and propagate to the filter bar /
- * detail pane via the daemon's tag_* events. Resolves when the modal closes.
- */
-export function openTagManager(): Promise<void> {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.innerHTML = `
-      <div class="modal-dialog tag-mgr-dialog" role="dialog" aria-modal="true" aria-labelledby="tm-title">
-        <div class="modal-header">
-          <h3 class="modal-title" id="tm-title">🏷 Manage Tags</h3>
-        </div>
-        <div class="tm-body"></div>
-        <div class="modal-actions">
-          <button id="tm-close" class="modal-btn modal-btn-primary">Done</button>
+@customElement('ph-tag-manager')
+export class TagManagerElement extends LitElement {
+  static styles = [
+    unsafeCSS(settingsStyles),
+    unsafeCSS(modalStyles),
+    unsafeCSS(tagManagerStyles),
+    css`
+      :host {
+        display: block;
+      }
+    `
+  ];
+
+  private keyHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") this.close();
+  };
+
+  connectedCallback() {
+    super.connectedCallback();
+    document.addEventListener("keydown", this.keyHandler);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    document.removeEventListener("keydown", this.keyHandler);
+  }
+
+  firstUpdated() {
+    const newTagName = this.shadowRoot?.querySelector('ph-section-tags')?.querySelector('#new-tag-name') as HTMLInputElement | null;
+    newTagName?.focus();
+  }
+
+  private close() {
+    this.dispatchEvent(new CustomEvent('resolved'));
+  }
+
+  private handleOverlayClick(e: MouseEvent) {
+    if (e.target === e.currentTarget) {
+      this.close();
+    }
+  }
+
+  render() {
+    return html`
+      <div class="modal-overlay" @click=${this.handleOverlayClick}>
+        <div class="modal-dialog tag-mgr-dialog" role="dialog" aria-modal="true" aria-labelledby="tm-title">
+          <div class="modal-header">
+            <h3 class="modal-title" id="tm-title">🏷 Manage Tags</h3>
+          </div>
+          <div class="tm-body">
+            <ph-section-tags ?bare=${true}></ph-section-tags>
+          </div>
+          <div class="modal-actions">
+            <button id="tm-close" class="modal-btn modal-btn-primary" @click=${this.close}>Done</button>
+          </div>
         </div>
       </div>
     `;
-    document.body.appendChild(overlay);
+  }
+}
 
-    const body = overlay.querySelector<HTMLElement>(".tm-body")!;
-    new SectionTags(body, {}, { bare: true });
-
-    const close = () => {
-      overlay.remove();
-      document.removeEventListener("keydown", keyHandler);
+export function openTagManager(): Promise<void> {
+  return new Promise((resolve) => {
+    const el = document.createElement('ph-tag-manager') as TagManagerElement;
+    el.addEventListener('resolved', () => {
+      el.remove();
       resolve();
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("keydown", keyHandler);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) close();
     });
-    overlay.querySelector("#tm-close")!.addEventListener("click", close);
-    overlay.querySelector<HTMLInputElement>("#new-tag-name")?.focus();
+    document.body.appendChild(el);
   });
 }

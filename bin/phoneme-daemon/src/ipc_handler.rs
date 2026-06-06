@@ -87,7 +87,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 "meeting": meeting_active,
             }))
         }
-        Request::RecordStart { mode } => match state.recorder.start(state, mode.into()).await {
+        Request::RecordStart { mode, in_place } => match state.recorder.start(state, mode.into(), in_place).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
@@ -141,7 +141,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             } else {
                 match state
                     .recorder
-                    .start(state, phoneme_core::RecordMode::Oneshot.into())
+                    .start(state, phoneme_core::RecordMode::Oneshot.into(), false)
                     .await
                 {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
@@ -174,14 +174,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::ListRecordings { filter } => match state.catalog.list(&filter).await {
-            Ok(rows) => Response::Ok(serde_json::to_value(rows).unwrap_or(serde_json::Value::Null)),
+            Ok(rows) => serialize_response(rows),
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
                 message: e.to_string(),
             }),
         },
         Request::GetRecording { id } => match state.catalog.get(&id).await {
-            Ok(Some(r)) => Response::Ok(serde_json::to_value(r).unwrap_or(serde_json::Value::Null)),
+            Ok(Some(r)) => serialize_response(r),
             Ok(None) => Response::Err(IpcError {
                 kind: IpcErrorKind::NotFound,
                 message: format!("recording {id} not found"),
@@ -193,9 +193,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         },
         Request::ListSession { session_id } => {
             match state.catalog.list_by_session(&session_id).await {
-                Ok(rows) => {
-                    Response::Ok(serde_json::to_value(rows).unwrap_or(serde_json::Value::Null))
-                }
+                Ok(rows) => serialize_response(rows),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
                     message: e.to_string(),
@@ -283,7 +281,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::GetOriginalTranscript { id } => {
             match state.catalog.get_original_transcript(&id).await {
                 Ok(original) => {
-                    Response::Ok(serde_json::to_value(original).unwrap_or(serde_json::Value::Null))
+                    serialize_response(original)
                 }
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
@@ -312,10 +310,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 let payload = HookPayload {
-                    id: r.id.clone(),
+                    id: r.id,
                     timestamp: r.started_at,
                     transcript: String::new(),
-                    audio_path: r.audio_path.clone(),
+                    audio_path: r.audio_path,
                     duration_ms: r.duration_ms,
                     model: String::new(),
                     metadata: HookMetadata::current(),
@@ -349,12 +347,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RefireHook { id } => match state.catalog.get(&id).await {
             Ok(Some(r)) if r.transcript.is_some() => {
                 let payload = HookPayload {
-                    id: r.id.clone(),
+                    id: r.id,
                     timestamp: r.started_at,
-                    transcript: r.transcript.clone().unwrap_or_default(),
-                    audio_path: r.audio_path.clone(),
+                    transcript: r.transcript.unwrap_or_default(),
+                    audio_path: r.audio_path,
                     duration_ms: r.duration_ms,
-                    model: r.model.clone().unwrap_or_default(),
+                    model: r.model.unwrap_or_default(),
                     metadata: HookMetadata::current(),
                 };
                 // Load config once and extract what we need before spawning
@@ -648,18 +646,11 @@ fn exceeds_import_size_cap(len: u64) -> bool {
 async fn import_recording(state: &AppState, path: String) -> Response {
     let requested = std::path::PathBuf::from(&path);
 
-    // Validate before doing any work, so the client gets a clean error.
-    if !requested.exists() {
-        return Response::Err(IpcError {
-            kind: IpcErrorKind::NotFound,
-            message: format!("file not found: {path}"),
-        });
-    }
-
     // Canonicalize so the path we open is a fully-resolved, real filesystem
     // location (resolves `..`, symlinks, and relative components). The dialog
     // hands us absolute paths already; this hardens the arbitrary-client-path
     // bypass by ensuring we never act on a half-resolved or traversal path.
+    // This inherently checks existence atomically, preventing TOCTOU issues.
     let input = match std::fs::canonicalize(&requested) {
         Ok(p) => p,
         Err(e) => {
@@ -746,6 +737,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         started_at,
         duration_ms,
         audio_path: audio_path.to_string_lossy().into_owned(),
+        in_place: false,
         transcript: None,
         model: None,
         status: RecordingStatus::Transcribing,
@@ -810,6 +802,16 @@ fn error_to_kind(e: &phoneme_core::Error) -> IpcErrorKind {
         ShuttingDown => IpcErrorKind::ShuttingDown,
         Io(_) => IpcErrorKind::Io,
         _ => IpcErrorKind::Internal,
+    }
+}
+
+fn serialize_response<T: serde::Serialize>(val: T) -> Response {
+    match serde_json::to_value(val) {
+        Ok(v) => Response::Ok(v),
+        Err(e) => Response::Err(IpcError {
+            kind: IpcErrorKind::Internal,
+            message: format!("serialization failed: {e}"),
+        }),
     }
 }
 

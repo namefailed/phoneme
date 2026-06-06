@@ -21,9 +21,7 @@ pub fn read() -> anyhow::Result<Config> {
 pub fn write(config: &Config) -> anyhow::Result<()> {
     config.validate()?;
     let path = config_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    phoneme_core::config::ensure_config_dir()?;
     let body = toml::to_string_pretty(config)?;
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, body)?;

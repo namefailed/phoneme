@@ -1,8 +1,11 @@
+import { LitElement, html, css, unsafeCSS } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
-// The toolbar/body chrome is shared with SettingsView; import its sheet so
-// DoctorView is styled even when opened without visiting Settings first.
-import "../SettingsView/styles.css";
-import "./styles.css";
+
+// We import styles inline. Note that the original DoctorView shared SettingsView/styles.css.
+// We'll import them both to be used as Lit Element styles.
+import settingsStyles from "../SettingsView/styles.css?inline";
+import doctorStyles from "./styles.css?inline";
 
 type CheckResult = {
   name: string;
@@ -11,75 +14,39 @@ type CheckResult = {
   fix_action: string | null;
 };
 
-export class DoctorView {
-  private container: HTMLElement;
-  private onClose: () => void;
+@customElement('ph-doctor-view')
+export class DoctorViewElement extends LitElement {
+  static styles = [
+    unsafeCSS(settingsStyles),
+    unsafeCSS(doctorStyles),
+    css`
+      :host {
+        display: block;
+        height: 100%;
+      }
+    `
+  ];
 
-  constructor(container: HTMLElement, onClose: () => void) {
-    this.container = container;
-    this.onClose = onClose;
-    void this.render();
-  }
+  @property({ type: Object }) onClose!: () => void;
 
-  private async render() {
-    this.container.innerHTML = `
-      <div class="doctor-view">
-        <div class="settings-toolbar">
-          <h2>Doctor</h2>
-          <span class="spacer"></span>
-          <button id="doctor-refresh">Re-run all</button>
-          <button id="doctor-close">Close</button>
-        </div>
-        <div class="settings-body" id="doctor-body">Loading…</div>
-      </div>
-    `;
-    this.container
-      .querySelector("#doctor-close")
-      ?.addEventListener("click", () => this.onClose());
-    this.container
-      .querySelector("#doctor-refresh")
-      ?.addEventListener("click", () => void this.runChecks());
-    await this.runChecks();
+  @state() private checks: CheckResult[] | null = null;
+  @state() private runningFix: string | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    void this.runChecks();
   }
 
   private async runChecks() {
-    const body = this.container.querySelector<HTMLElement>("#doctor-body");
-    if (!body) return;
-    body.textContent = "Running checks…";
+    this.checks = null;
 
-    // Collect all checks concurrently: daemon status, local FS, and async
-    // backend probes (Whisper, Ollama) run in parallel for a fast result.
     const [daemonChecks, localChecks, backendChecks] = await Promise.all([
       this.daemonChecks(),
-      invoke<CheckResult[]>("doctor_local_checks").catch(() => [] as CheckResult[]),
-      invoke<CheckResult[]>("doctor_backend_checks").catch(() => [] as CheckResult[]),
+      invoke<CheckResult[]>("doctor_local_checks").catch(() => []),
+      invoke<CheckResult[]>("doctor_backend_checks").catch(() => []),
     ]);
-    const all = [...daemonChecks, ...localChecks, ...backendChecks];
 
-    body.innerHTML = `
-      <div class="doctor-list">
-        ${all
-          .map(
-            (c) => `
-          <div class="doctor-row ${c.ok ? "ok" : "fail"}">
-            <span class="doctor-mark">${c.ok ? "✓" : "✗"}</span>
-            <div class="doctor-name">${c.name}</div>
-            <div class="doctor-detail">${c.detail}</div>
-            ${
-              c.fix_action
-                ? `<button class="doctor-fix" data-action="${c.fix_action}">Fix</button>`
-                : ""
-            }
-          </div>
-        `,
-          )
-          .join("")}
-      </div>
-    `;
-
-    body.querySelectorAll<HTMLButtonElement>(".doctor-fix").forEach((btn) => {
-      btn.addEventListener("click", () => void this.handleFix(btn, btn.dataset.action!));
-    });
+    this.checks = [...daemonChecks, ...localChecks, ...backendChecks];
   }
 
   private async daemonChecks(): Promise<CheckResult[]> {
@@ -105,11 +72,8 @@ export class DoctorView {
     }
   }
 
-  private async handleFix(btn: HTMLButtonElement, action: string) {
-    // Give the user immediate feedback that the fix is running.
-    const originalText = btn.textContent ?? "Fix";
-    btn.disabled = true;
-    btn.textContent = "Working…";
+  private async handleFix(action: string) {
+    this.runningFix = action;
 
     try {
       const shell = await import("@tauri-apps/plugin-shell");
@@ -129,8 +93,6 @@ export class DoctorView {
           break;
         }
         case "open_hooks_folder": {
-          // Open the hooks-templates directory next to the exe, falling back
-          // to the config path so the user can at least navigate from there.
           await invoke("open_file", {
             path: "%LOCALAPPDATA%\\phoneme\\hooks-templates",
           }).catch(() => invoke("open_file", { path: "%APPDATA%\\phoneme\\hooks" }));
@@ -140,13 +102,55 @@ export class DoctorView {
     } catch (e) {
       console.error("Doctor fix action failed:", action, e);
     } finally {
-      btn.disabled = false;
-      btn.textContent = originalText;
+      this.runningFix = null;
     }
 
-    // Re-run all checks to reflect the new state.
     await this.runChecks();
   }
 
-  dispose() {}
+  render() {
+    return html`
+      <div class="doctor-view">
+        <div class="settings-toolbar">
+          <h2>Doctor</h2>
+          <span class="spacer"></span>
+          <button id="doctor-refresh" @click=${this.runChecks}>Re-run all</button>
+          <button id="doctor-close" @click=${this.onClose}>Close</button>
+        </div>
+        <div class="settings-body" id="doctor-body">
+          ${this.checks === null ? html`Loading…` : html`
+            <div class="doctor-list">
+              ${this.checks.map((c) => html`
+                <div class="doctor-row ${c.ok ? "ok" : "fail"}">
+                  <span class="doctor-mark">${c.ok ? "✓" : "✗"}</span>
+                  <div class="doctor-name">${c.name}</div>
+                  <div class="doctor-detail">${c.detail}</div>
+                  ${c.fix_action
+                    ? html`<button class="doctor-fix" 
+                            ?disabled=${this.runningFix === c.fix_action}
+                            @click=${() => this.handleFix(c.fix_action!)}>
+                            ${this.runningFix === c.fix_action ? "Working…" : "Fix"}
+                          </button>`
+                    : ""}
+                </div>
+              `)}
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  }
+}
+
+// Temporary wrapper for App.ts until App.ts is fully migrated
+export class DoctorView {
+  private element: DoctorViewElement;
+  constructor(container: HTMLElement, onClose: () => void) {
+    this.element = document.createElement('ph-doctor-view') as DoctorViewElement;
+    this.element.onClose = onClose;
+    container.appendChild(this.element);
+  }
+  dispose() {
+    this.element.remove();
+  }
 }

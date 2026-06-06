@@ -15,6 +15,8 @@ pub enum Request {
     // Recording control
     RecordStart {
         mode: RecordMode,
+        #[serde(default)]
+        in_place: bool,
     },
     RecordStop,
     RecordToggle,

@@ -1,17 +1,41 @@
+import { LitElement, html, css } from 'lit';
+import { customElement, property, query } from 'lit/decorators.js';
 import WaveSurfer from "wavesurfer.js";
 import Timeline from "wavesurfer.js/dist/plugins/timeline.js";
 import Hover from "wavesurfer.js/dist/plugins/hover.js";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
-export class WaveformPlayer {
-  private wavesurfer: WaveSurfer | null = null;
-  private onPlayStateChange?: (playing: boolean) => void;
+@customElement('ph-waveform-player')
+export class WaveformPlayerElement extends LitElement {
+  static styles = css`
+    :host {
+      display: block;
+      width: 100%;
+    }
+    #container {
+      width: 100%;
+    }
+  `;
 
-  setOnPlayStateChange(cb: (playing: boolean) => void) {
-    this.onPlayStateChange = cb;
+  @property({ type: String }) audioPath = "";
+
+  @query('#container') container!: HTMLElement;
+
+  private wavesurfer: WaveSurfer | null = null;
+
+  updated(changedProperties: Map<string, any>) {
+    if (changedProperties.has('audioPath') && this.audioPath) {
+      this.mountPlayer();
+    }
   }
 
-  mount(container: HTMLElement, audioPath: string) {
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.wavesurfer?.destroy();
+    this.wavesurfer = null;
+  }
+
+  private mountPlayer() {
     if (this.wavesurfer) {
       this.wavesurfer.destroy();
     }
@@ -21,12 +45,11 @@ export class WaveformPlayer {
     const fgFaded = computed.getPropertyValue("--fg-faded").trim() || "#6c7086";
     const fg = computed.getPropertyValue("--fg-muted").trim() || "#9399b2";
 
-    // Use solid colors instead of gradients which fade into dark backgrounds
     const progressColor = accent;
     const waveColor = fgFaded;
 
     this.wavesurfer = WaveSurfer.create({
-      container,
+      container: this.container,
       waveColor,
       progressColor,
       cursorColor: accent,
@@ -35,7 +58,7 @@ export class WaveformPlayer {
       barGap: 1,
       height: 80,
       normalize: true,
-      url: convertFileSrc(audioPath),
+      url: convertFileSrc(this.audioPath),
       plugins: [
         Timeline.create({
           height: 20,
@@ -55,17 +78,48 @@ export class WaveformPlayer {
       ],
     });
 
-    this.wavesurfer.on("play", () => this.onPlayStateChange?.(true));
-    this.wavesurfer.on("pause", () => this.onPlayStateChange?.(false));
+    this.wavesurfer.on("play", () => {
+      this.dispatchEvent(new CustomEvent('play-state-change', { detail: true }));
+    });
+    this.wavesurfer.on("pause", () => {
+      this.dispatchEvent(new CustomEvent('play-state-change', { detail: false }));
+    });
   }
 
   togglePlay() {
-    if (!this.wavesurfer) return;
-    this.wavesurfer.playPause();
+    this.wavesurfer?.playPause();
+  }
+
+  render() {
+    return html`<div id="container"></div>`;
+  }
+}
+
+// Temporary vanilla wrapper until parent components are migrated
+export class WaveformPlayer {
+  private element: WaveformPlayerElement;
+  constructor() {
+    this.element = document.createElement('ph-waveform-player') as WaveformPlayerElement;
+  }
+
+  setOnPlayStateChange(cb: (playing: boolean) => void) {
+    this.element.addEventListener('play-state-change', (e: Event) => {
+      cb((e as CustomEvent<boolean>).detail);
+    });
+  }
+
+  mount(container: HTMLElement, audioPath: string) {
+    this.element.audioPath = audioPath;
+    if (this.element.parentElement !== container) {
+      container.appendChild(this.element);
+    }
+  }
+
+  togglePlay() {
+    this.element.togglePlay();
   }
 
   destroy() {
-    this.wavesurfer?.destroy();
-    this.wavesurfer = null;
+    this.element.remove();
   }
 }

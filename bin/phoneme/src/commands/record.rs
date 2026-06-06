@@ -18,6 +18,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
             &mut client,
             Request::RecordStart {
                 mode: RecordMode::Hold,
+                in_place: args.in_place,
             },
             json,
         )
@@ -39,7 +40,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         RecordMode::Hold
     };
 
-    if let Err(code) = client.send_silent(Request::RecordStart { mode }).await {
+    if let Err(code) = client.send_silent(Request::RecordStart { mode, in_place: args.in_place }).await {
         return code;
     }
 

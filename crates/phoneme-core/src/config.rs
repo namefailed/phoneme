@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -12,6 +13,17 @@ pub(crate) fn redact_key(key: &str) -> &'static str {
     } else {
         "<redacted>"
     }
+}
+
+fn default_secret_string() -> SecretString {
+    SecretString::from(String::new())
+}
+
+fn serialize_secret_string<S>(secret: &SecretString, serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(secret.expose_secret())
 }
 
 /// The root configuration object for Phoneme.
@@ -28,11 +40,14 @@ pub struct Config {
     pub recording: RecordingConfig,
     /// Settings governing external script execution (hooks) upon transcription success.
     pub hook: HookConfig,
-    /// Global keyboard shortcut bindings for triggering push-to-talk.
+    /// The global keyboard shortcut for triggering standard recordings.
     pub hotkey: HotkeyConfig,
-    /// Optional second global shortcut that toggles a multi-track "meeting"
-    /// recording (mic + system audio). The `mode` field is ignored — a meeting
-    /// always toggles (press to start, press again to stop).
+    /// The global keyboard shortcut for triggering "In-place" transcriptions
+    /// that are typed directly into the focused window.
+    #[serde(default = "default_in_place_hotkey")]
+    pub in_place_hotkey: HotkeyConfig,
+    /// The global keyboard shortcut for toggling a meeting recording
+    /// (simultaneous mic + system audio).
     #[serde(default = "default_meeting_hotkey")]
     pub meeting_hotkey: HotkeyConfig,
     /// Frontend OS-level tray behavior.
@@ -77,14 +92,15 @@ impl Default for SemanticSearchConfig {
 }
 
 /// Configures the optional accessibility layer for post-processing transcriptions using an LLM.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LlmPostProcessConfig {
     /// Whether the LLM post-processing step is active.
     pub enabled: bool,
     /// The provider type to use: `none`, `ollama`, `openai`, `groq`, or `anthropic`.
     pub provider: String,
     /// API key for authentication, if required by the chosen provider.
-    pub api_key: String,
+    #[serde(default = "default_secret_string", serialize_with = "serialize_secret_string")]
+    pub api_key: SecretString,
     /// Base URL for the API. If empty, the provider's default is used.
     #[serde(default)]
     pub api_url: String,
@@ -103,7 +119,7 @@ impl std::fmt::Debug for LlmPostProcessConfig {
         f.debug_struct("LlmPostProcessConfig")
             .field("enabled", &self.enabled)
             .field("provider", &self.provider)
-            .field("api_key", &redact_key(&self.api_key))
+            .field("api_key", &redact_key(self.api_key.expose_secret()))
             .field("api_url", &self.api_url)
             .field("model", &self.model)
             .field("prompt", &self.prompt)
@@ -112,11 +128,23 @@ impl std::fmt::Debug for LlmPostProcessConfig {
     }
 }
 
+impl PartialEq for LlmPostProcessConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.enabled == other.enabled
+            && self.provider == other.provider
+            && self.api_key.expose_secret() == other.api_key.expose_secret()
+            && self.api_url == other.api_url
+            && self.model == other.model
+            && self.prompt == other.prompt
+            && self.timeout_secs == other.timeout_secs
+    }
+}
+
 fn default_llm_post_process() -> LlmPostProcessConfig {
     LlmPostProcessConfig {
         enabled: false,
         provider: "none".into(),
-        api_key: "".into(),
+        api_key: SecretString::from(String::new()),
         api_url: "".into(),
         model: "llama3.2:3b".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
@@ -174,7 +202,7 @@ pub enum TranscriptionBackend {
 }
 
 /// Configuration for the Whisper transcription engine.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WhisperConfig {
     /// The execution mode determining how the transcription server is managed.
     pub mode: WhisperMode,
@@ -197,8 +225,8 @@ pub struct WhisperConfig {
     #[serde(default)]
     pub provider: TranscriptionBackend,
     /// API key for a cloud transcription provider (OpenAI/Groq). Ignored for `local`.
-    #[serde(default)]
-    pub api_key: String,
+    #[serde(default = "default_secret_string", serialize_with = "serialize_secret_string")]
+    pub api_key: SecretString,
     /// Cloud model identifier (e.g. `whisper-1` for OpenAI, `whisper-large-v3`
     /// for Groq). Empty uses the provider's default. Ignored for `local`.
     #[serde(default)]
@@ -220,10 +248,26 @@ impl std::fmt::Debug for WhisperConfig {
             .field("timeout_secs", &self.timeout_secs)
             .field("language", &self.language)
             .field("provider", &self.provider)
-            .field("api_key", &redact_key(&self.api_key))
+            .field("api_key", &redact_key(self.api_key.expose_secret()))
             .field("model", &self.model)
             .field("api_url", &self.api_url)
             .finish()
+    }
+}
+
+impl PartialEq for WhisperConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.mode == other.mode
+            && self.external_url == other.external_url
+            && self.model_path == other.model_path
+            && self.bundled_server_port == other.bundled_server_port
+            && self.bundled_server_args == other.bundled_server_args
+            && self.timeout_secs == other.timeout_secs
+            && self.language == other.language
+            && self.provider == other.provider
+            && self.api_key.expose_secret() == other.api_key.expose_secret()
+            && self.model == other.model
+            && self.api_url == other.api_url
     }
 }
 
@@ -373,6 +417,15 @@ fn default_meeting_hotkey() -> HotkeyConfig {
     }
 }
 
+/// Default for the optional in-place transcription hotkey: disabled, suggested `Ctrl+Alt+I`.
+fn default_in_place_hotkey() -> HotkeyConfig {
+    HotkeyConfig {
+        enabled: false,
+        combo: "Ctrl+Alt+I".into(),
+        mode: HotkeyMode::Hold,
+    }
+}
+
 /// The behavioral mode of the global recording hotkey.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -514,7 +567,7 @@ impl Default for Config {
                 timeout_secs: 60,
                 language: None,
                 provider: TranscriptionBackend::Local,
-                api_key: String::new(),
+                api_key: SecretString::from(String::new()),
                 model: String::new(),
                 api_url: String::new(),
             },
@@ -544,6 +597,7 @@ impl Default for Config {
                 combo: "Ctrl+Alt+Space".into(),
                 mode: HotkeyMode::Hold,
             },
+            in_place_hotkey: default_in_place_hotkey(),
             meeting_hotkey: default_meeting_hotkey(),
             tray: TrayConfig {
                 show_on_startup: true,
@@ -577,7 +631,7 @@ impl Default for Config {
             llm_post_process: LlmPostProcessConfig {
                 enabled: false,
                 provider: "none".into(),
-                api_key: "".into(),
+                api_key: SecretString::from(String::new()),
                 api_url: "".into(),
                 model: "llama3.2:3b".into(),
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
@@ -628,7 +682,7 @@ impl Config {
                 }
             }
             _ => {
-                if self.whisper.api_key.trim().is_empty() {
+                if self.whisper.api_key.expose_secret().trim().is_empty() {
                     return Err(Error::InvalidConfig(
                         "whisper.api_key is required for cloud transcription providers (openai/groq/deepgram/assemblyai)"
                             .into(),
@@ -727,6 +781,28 @@ where
 /// Helper for tests/wizard: resolve the default config file path.
 pub fn default_config_path() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", "phoneme").map(|p| p.config_dir().join("config.toml"))
+}
+
+/// Ensure the default config directory exists with secure (0o700) permissions.
+pub fn ensure_config_dir() -> Result<PathBuf> {
+    let pdirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| Error::Internal("Could not resolve home directory".into()))?;
+    let config_dir = pdirs.config_dir();
+    
+    if !config_dir.exists() {
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder
+            .create(config_dir)
+            .map_err(|e| Error::Internal(format!("Failed to create config dir: {e}")))?;
+    }
+    
+    Ok(config_dir.to_path_buf())
 }
 
 #[cfg(test)]
@@ -847,8 +923,8 @@ mod tests {
         // Latent-leak guard: a future `debug!(?cfg)` / `{:?}` must never print
         // plaintext API keys into logs.
         let mut cfg = Config::default();
-        cfg.whisper.api_key = "sk-WHISPER-supersecret".into();
-        cfg.llm_post_process.api_key = "sk-LLM-supersecret".into();
+        cfg.whisper.api_key = SecretString::from("sk-WHISPER-supersecret".to_string());
+        cfg.llm_post_process.api_key = SecretString::from("sk-LLM-supersecret".to_string());
         let dump = format!("{cfg:?}");
         assert!(
             !dump.contains("supersecret"),
@@ -1198,7 +1274,7 @@ mod tests {
         let path = write_config(&dir, &cfg_text);
         let parsed = Config::load(&path).expect("loads legacy config without provider fields");
         assert_eq!(parsed.whisper.provider, TranscriptionBackend::Local);
-        assert!(parsed.whisper.api_key.is_empty());
+        assert!(parsed.whisper.api_key.expose_secret().is_empty());
         assert!(parsed.whisper.model.is_empty());
         assert!(parsed.whisper.api_url.is_empty());
     }
@@ -1207,12 +1283,12 @@ mod tests {
     fn transcription_provider_round_trips() {
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Openai;
-        cfg.whisper.api_key = "sk-test".into();
+        cfg.whisper.api_key = SecretString::from("sk-test");
         cfg.whisper.model = "whisper-1".into();
         let toml_str = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.whisper.provider, TranscriptionBackend::Openai);
-        assert_eq!(parsed.whisper.api_key, "sk-test");
+        assert_eq!(parsed.whisper.api_key.expose_secret(), "sk-test");
         assert_eq!(parsed.whisper.model, "whisper-1");
     }
 
@@ -1220,7 +1296,7 @@ mod tests {
     fn cloud_provider_requires_api_key() {
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Groq;
-        cfg.whisper.api_key = String::new();
+        cfg.whisper.api_key = SecretString::from("");
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, Error::InvalidConfig(_)));
         assert!(format!("{err}").contains("api_key"));
@@ -1230,7 +1306,7 @@ mod tests {
     fn cloud_provider_with_api_key_validates() {
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Openai;
-        cfg.whisper.api_key = "sk-test".into();
+        cfg.whisper.api_key = SecretString::from("sk-test");
         cfg.validate()
             .expect("cloud provider with api_key is valid");
     }
@@ -1258,7 +1334,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Custom;
         cfg.whisper.api_url = "http://127.0.0.1:9000".into();
-        cfg.whisper.api_key = String::new(); // custom/self-hosted may need no key
+        cfg.whisper.api_key = SecretString::from(String::new()); // custom/self-hosted may need no key
         cfg.validate().expect("custom with api_url is valid");
     }
 }

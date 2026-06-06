@@ -1,3 +1,5 @@
+import { LitElement, html, css, PropertyValues } from 'lit';
+import { customElement, property, state, query } from 'lit/decorators.js';
 import { updateNotes } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { applyVimrc } from "../../utils/vimrc";
@@ -7,35 +9,84 @@ import { standardKeymap } from "@codemirror/commands";
 import { vim, Vim } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
-export class NotesEditor {
-  private container: HTMLElement;
-  private id: string;
-  private initial: string;
-  private current: string;
-  private onDirtyChange: (dirty: boolean) => void;
+@customElement('ph-notes-editor')
+export class NotesEditorElement extends LitElement {
+  static styles = css`
+    :host {
+      display: block;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .title {
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+    }
+    .vim-badge {
+      color: var(--accent);
+      font-size: 9px;
+      margin-left: 6px;
+      border: 1px solid var(--accent);
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    .btn-save {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border: none;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+  `;
+
+  @property({ type: String }) recordingId = "";
+  @property({ type: String }) initialText = "";
+
+  @state() private currentText = "";
+  @state() private vimMode = false;
+
+  @query('#cm-editor-root') editorRoot!: HTMLElement;
+
   private view: EditorView | null = null;
 
-  constructor(
-    container: HTMLElement,
-    id: string,
-    initial: string,
-    onDirtyChange: (dirty: boolean) => void,
-  ) {
-    this.container = container;
-    this.id = id;
-    this.initial = initial;
-    this.current = initial;
-    this.onDirtyChange = onDirtyChange;
-    void this.init();
+  connectedCallback() {
+    super.connectedCallback();
+    this.currentText = this.initialText;
+    void this.initEditor();
   }
 
-  private async init() {
-    let vimMode = false;
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this.disposeEditor();
+  }
+
+  updated(changedProperties: PropertyValues) {
+    if (changedProperties.has('initialText') && this.initialText !== changedProperties.get('initialText')) {
+      if (!this.isDirty()) {
+        this.currentText = this.initialText;
+        if (this.view) {
+          this.view.dispatch({
+            changes: { from: 0, to: this.view.state.doc.length, insert: this.initialText }
+          });
+        }
+      }
+    }
+  }
+
+  private async initEditor() {
     let vimrc = "";
     let vimrcPath = "";
     try {
       const cfg = await invoke<any>("read_config");
-      vimMode = cfg?.editor?.vim_mode || false;
+      this.vimMode = cfg?.editor?.vim_mode || false;
       vimrc = cfg?.editor?.vimrc || "";
       vimrcPath = cfg?.editor?.vimrc_path || "";
     } catch (e) {
@@ -51,31 +102,10 @@ export class NotesEditor {
       }
     }
 
-    this.render(vimMode, vimrc);
+    this.mountEditor(vimrc);
   }
 
-
-  private render(vimMode: boolean, vimrc: string) {
-    this.container.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <span style="font-size: 11px; font-weight: bold; text-transform: uppercase; color: var(--fg-muted);">
-          Notes ${vimMode ? '<span style="color: var(--accent); font-size: 9px; margin-left: 6px; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">Vim Mode</span>' : ""}
-        </span>
-        <button id="btn-save-notes" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">Save Changes</button>
-      </div>
-      <div id="cm-editor-root" class="cm-editor-root"></div>
-    `;
-
-    const editorRoot = this.container.querySelector<HTMLElement>("#cm-editor-root");
-    const saveBtn = this.container.querySelector<HTMLButtonElement>("#btn-save-notes");
-    if (!editorRoot) return;
-
-    const updateSaveBtn = () => {
-      if (saveBtn) {
-        saveBtn.style.display = this.current !== this.initial ? "block" : "none";
-      }
-    };
-
+  private mountEditor(vimrc: string) {
     const theme = EditorView.theme({
       "&": {
         background: "transparent",
@@ -104,23 +134,15 @@ export class NotesEditor {
       ".cm-gutters": {
         display: "none"
       },
-      // Selection backgrounds: CM renders .cm-selectionBackground divs when
-      // drawSelection() is active. We must NOT use `opacity` on these divs
-      // because that makes the div itself translucent, not just the color —
-      // text inside the selected range becomes illegible. Use an rgba background
-      // instead so the text layer above stays at full opacity.
       "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
         backgroundColor: "color-mix(in srgb, var(--accent) 35%, transparent) !important",
       },
-      // Browser ::selection is a fallback for cases drawSelection misses.
       ".cm-content ::selection": {
         backgroundColor: "color-mix(in srgb, var(--accent) 35%, transparent) !important",
       },
-      // Highlight search-match occurrences in the buffer.
       ".cm-selectionMatch": {
         backgroundColor: "color-mix(in srgb, var(--accent) 25%, transparent) !important",
       },
-      // Vim block-cursor in normal mode.
       ".cm-fat-cursor": {
         backgroundColor: "color-mix(in srgb, var(--accent) 60%, transparent) !important",
         outline: "none !important",
@@ -129,17 +151,11 @@ export class NotesEditor {
 
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        this.current = update.state.doc.toString();
-        this.onDirtyChange(this.current !== this.initial);
-        updateSaveBtn();
+        this.currentText = update.state.doc.toString();
+        this.dispatchEvent(new CustomEvent('dirty-change', { detail: this.isDirty() }));
       }
     });
 
-    // drawSelection() must always be present — it replaces the browser's
-    // native ::selection with CM-managed highlight divs (.cm-selectionBackground).
-    // Without it, vim visual mode (v, V) and mouse selections produce no visible
-    // highlight because the browser suppresses ::selection inside a shadow DOM.
-    // It must be listed BEFORE vim() so the vim extension can see it.
     const extensions = [
       theme,
       EditorView.lineWrapping,
@@ -148,55 +164,94 @@ export class NotesEditor {
       keymap.of(standardKeymap),
     ];
 
-    if (vimMode) {
+    if (this.vimMode) {
       extensions.unshift(vim());
       applyVimrc(vimrc, Vim);
     }
 
     this.view = new EditorView({
       state: EditorState.create({
-        doc: this.initial,
+        doc: this.currentText,
         extensions,
       }),
-      parent: editorRoot,
+      parent: this.editorRoot,
     });
+  }
 
-    editorRoot.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        e.preventDefault();
-        void this.save();
-      }
-    });
+  private isDirty(): boolean {
+    return this.currentText !== this.initialText;
+  }
 
-    if (saveBtn) {
-      saveBtn.addEventListener("click", () => {
-        void this.save();
-      });
+  public getText(): string {
+    return this.currentText;
+  }
+
+  private disposeEditor() {
+    if (this.view) {
+      this.view.destroy();
+      this.view = null;
+    }
+  }
+
+  private handleKeydown(e: KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      e.preventDefault();
+      void this.save();
     }
   }
 
   async save() {
-    if (this.current === this.initial) return;
+    if (!this.isDirty()) return;
     try {
-      await updateNotes(this.id, this.current);
-      this.initial = this.current;
-      this.onDirtyChange(false);
-      const saveBtn = this.container.querySelector<HTMLButtonElement>("#btn-save-notes");
-      if (saveBtn) saveBtn.style.display = "none";
+      await updateNotes(this.recordingId, this.currentText);
+      this.initialText = this.currentText;
+      this.dispatchEvent(new CustomEvent('dirty-change', { detail: false }));
       showToast("Notes saved", "success");
     } catch (e) {
       showToast(`Failed to save notes: ${e}`, "error");
     }
   }
 
+  render() {
+    return html`
+      <div class="header">
+        <span class="title">
+          Notes ${this.vimMode ? html`<span class="vim-badge">Vim Mode</span>` : ""}
+        </span>
+        <button class="btn-save" style="display: ${this.isDirty() ? 'block' : 'none'};" @click=${this.save}>Save Changes</button>
+      </div>
+      <div id="cm-editor-root" @keydown=${this.handleKeydown}></div>
+    `;
+  }
+}
+
+// Temporary vanilla wrapper
+export class NotesEditor {
+  private element: NotesEditorElement;
+  constructor(
+    container: HTMLElement,
+    id: string,
+    initial: string,
+    onDirtyChange: (dirty: boolean) => void,
+  ) {
+    this.element = document.createElement('ph-notes-editor') as NotesEditorElement;
+    this.element.recordingId = id;
+    this.element.initialText = initial;
+    this.element.addEventListener('dirty-change', (e: Event) => {
+      onDirtyChange((e as CustomEvent<boolean>).detail);
+    });
+    container.appendChild(this.element);
+  }
+
   getText(): string {
-    return this.current;
+    return this.element.getText();
+  }
+
+  async save() {
+    await this.element.save();
   }
 
   dispose() {
-    if (this.view) {
-      this.view.destroy();
-      this.view = null;
-    }
+    this.element.remove();
   }
 }

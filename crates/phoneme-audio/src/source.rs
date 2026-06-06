@@ -209,6 +209,11 @@ impl CpalSource {
 
         // Raw samples (f32, interleaved at device format) → worker.
         let (raw_tx, mut raw_rx) = mpsc::channel::<Vec<f32>>(64);
+        // Pre-allocated buffers to prevent audio thread allocations.
+        let (pool_tx, pool_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(64);
+        for _ in 0..64 {
+            let _ = pool_tx.try_send(Vec::with_capacity(4096));
+        }
         // Canonical samples (i16 mono 16 kHz) → downstream consumer.
         let (out_tx, out_rx) = mpsc::channel::<SampleBlock>(64);
         // Stop signal to the stream-owning thread.
@@ -229,10 +234,11 @@ impl CpalSource {
                         device.build_input_stream(
                             &stream_cfg,
                             move |data: &[f32], _| {
-                                // Allocate-and-copy is the only "work" on the
-                                // audio thread. No downmix, no resample, no
-                                // synchronous send.
-                                let _ = raw_tx.try_send(data.to_vec());
+                                // Use pre-allocated buffer if available, else allocate.
+                                let mut buf = pool_rx.try_recv().unwrap_or_else(|_| Vec::with_capacity(data.len()));
+                                buf.clear();
+                                buf.extend_from_slice(data);
+                                let _ = raw_tx.try_send(buf);
                             },
                             |err| tracing::warn!("cpal stream error: {err}"),
                             None,
@@ -243,10 +249,12 @@ impl CpalSource {
                         device.build_input_stream(
                             &stream_cfg,
                             move |data: &[i16], _| {
+                                let mut buf = pool_rx.try_recv().unwrap_or_else(|_| Vec::with_capacity(data.len()));
+                                buf.clear();
                                 // Cheap i16→f32 normalize is fine on the audio
                                 // thread (one float multiply per sample).
-                                let f32s = i16_to_f32(data);
-                                let _ = raw_tx.try_send(f32s);
+                                buf.extend(data.iter().map(|&s| (s as f32) / 32768.0));
+                                let _ = raw_tx.try_send(buf);
                             },
                             |err| tracing::warn!("cpal stream error: {err}"),
                             None,
@@ -325,9 +333,19 @@ impl CpalSource {
             };
 
             let mut accumulator = Vec::new();
+            // Max size: 10 seconds of raw float audio per channel. If we hit this, the consumer is dead.
+            let max_accumulator_len = device_sample_rate as usize * device_channels * 10;
 
-            while let Some(raw) = raw_rx.recv().await {
+            while let Some(mut raw) = raw_rx.recv().await {
+                if accumulator.len() + raw.len() > max_accumulator_len {
+                    tracing::warn!("audio accumulator overflow ({} frames), dropping buffered audio!", accumulator.len());
+                    accumulator.clear();
+                }
                 accumulator.extend_from_slice(&raw);
+                
+                // Recycle buffer
+                raw.clear();
+                let _ = pool_tx.try_send(raw);
 
                 while accumulator.len() >= chunk_frames * device_channels {
                     let chunk: Vec<f32> = accumulator
