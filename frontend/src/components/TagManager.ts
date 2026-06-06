@@ -1,4 +1,4 @@
-import { LitElement, html, css, unsafeCSS } from 'lit';
+import { LitElement, html } from 'lit';
 import { customElement } from 'lit/decorators.js';
 
 
@@ -7,6 +7,7 @@ import './SettingsView/SectionTags'; // Make sure the custom element is register
 
 @customElement('ph-tag-manager')
 export class TagManagerElement extends LitElement {
+  protected createRenderRoot() { return this; }
 
   private keyHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape") this.close();
@@ -23,7 +24,7 @@ export class TagManagerElement extends LitElement {
   }
 
   firstUpdated() {
-    const newTagName = this.shadowRoot?.querySelector('ph-section-tags')?.querySelector('#new-tag-name') as HTMLInputElement | null;
+    const newTagName = this.querySelector('ph-section-tags')?.querySelector('#new-tag-name') as HTMLInputElement | null;
     newTagName?.focus();
   }
 

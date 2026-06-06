@@ -1,4 +1,4 @@
-import { LitElement, html, css, unsafeCSS } from 'lit';
+import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 
@@ -16,6 +16,7 @@ type CheckResult = {
 
 @customElement('ph-doctor-view')
 export class DoctorViewElement extends LitElement {
+  protected createRenderRoot() { return this; }
 
   @property({ type: Object }) onClose!: () => void;
 

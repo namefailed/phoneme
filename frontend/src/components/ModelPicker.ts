@@ -1,4 +1,4 @@
-import { LitElement, html, css, unsafeCSS, PropertyValues } from 'lit';
+import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 
 
@@ -62,6 +62,7 @@ function localModelLabel(path: string): string {
 
 @customElement('ph-model-picker')
 export class ModelPickerElement extends LitElement {
+  protected createRenderRoot() { return this; }
 
   @property({ type: String }) initialTab: "transcription" | "postprocessing" = "transcription";
   @property({ type: Object }) anchor?: HTMLElement;
@@ -119,7 +120,7 @@ export class ModelPickerElement extends LitElement {
       this.dialog.style.left = `${left}px`;
     }
     
-    const cancelBtn = this.shadowRoot?.querySelector('#mp-cancel') as HTMLButtonElement | null;
+    const cancelBtn = this.querySelector('#mp-cancel') as HTMLButtonElement | null;
     cancelBtn?.focus();
   }
 
@@ -311,6 +312,9 @@ export async function openModelPicker(
   }
 
   return new Promise((resolve) => {
+    // Remove any existing picker to avoid duplicates
+    document.querySelector('ph-model-picker')?.remove();
+
     const el = document.createElement('ph-model-picker') as ModelPickerElement;
     el.initialTab = initialTab;
     if (anchor) el.anchor = anchor;

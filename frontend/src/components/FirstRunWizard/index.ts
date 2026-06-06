@@ -1,5 +1,5 @@
-import { LitElement, html, css, unsafeCSS, PropertyValues } from 'lit';
-import { customElement, property, state, query } from 'lit/decorators.js';
+import { LitElement, html } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../../utils/toast";
@@ -10,6 +10,7 @@ const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "hook", 
 
 @customElement('ph-first-run-wizard')
 export class FirstRunWizardElement extends LitElement {
+  protected createRenderRoot() { return this; }
 
   @property({ type: Object }) onComplete!: () => void;
   @property({ type: Object }) config: any = null;

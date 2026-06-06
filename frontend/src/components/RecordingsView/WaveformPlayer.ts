@@ -7,6 +7,8 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 @customElement('ph-waveform-player')
 export class WaveformPlayerElement extends LitElement {
+  protected createRenderRoot() { return this; }
+
   static styles = css`
     :host {
       display: block;
