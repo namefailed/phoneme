@@ -277,8 +277,14 @@ impl Catalog {
         sql.push_str(&format!(
             " ORDER BY recordings.started_at {dir}, recordings.id {dir}"
         ));
-        if let Some(n) = filter.limit {
-            sql.push_str(&format!(" LIMIT {n}"));
+        // LIMIT / OFFSET for pagination. SQLite requires a LIMIT before an
+        // OFFSET, so when only an offset is given we use `LIMIT -1` (= no row
+        // cap). `limit`/`offset` are `u32`, so direct formatting is injection-safe.
+        match (filter.limit, filter.offset) {
+            (Some(n), Some(m)) => sql.push_str(&format!(" LIMIT {n} OFFSET {m}")),
+            (Some(n), None) => sql.push_str(&format!(" LIMIT {n}")),
+            (None, Some(m)) => sql.push_str(&format!(" LIMIT -1 OFFSET {m}")),
+            (None, None) => {}
         }
 
         let mut q = sqlx::query(&sql);
@@ -693,6 +699,7 @@ mod tests {
         // Test list
         let filter = ListFilter {
             limit: Some(10),
+            offset: None,
             since: None,
             until: None,
             status: None,

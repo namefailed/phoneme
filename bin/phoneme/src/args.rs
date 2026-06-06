@@ -95,6 +95,9 @@ pub enum MeetingAction {
 pub struct ListArgs {
     #[arg(long, value_name = "N")]
     pub limit: Option<u32>,
+    /// Skip the first N results (pagination; pairs with --limit).
+    #[arg(long, value_name = "N")]
+    pub offset: Option<u32>,
     /// ISO 8601 date (e.g. 2026-05-19).
     #[arg(long)]
     pub since: Option<String>,
