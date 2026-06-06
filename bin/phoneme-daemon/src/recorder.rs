@@ -424,10 +424,9 @@ impl DaemonRecorder {
         // Open the configured capture source (or a GeneratorSource when
         // PHONEME_AUDIO_BACKEND=synthetic is set for headless CI testing).
         let app_cfg = state.config.load();
-        let device = resolve_input_device(&app_cfg.recording.input_device)?;
         let kind = app_cfg.recording.source;
         let source =
-            make_source(|| CpalSource::open_kind_with_grace(device, kind, STOP_TAIL_GRACE))?;
+            make_source(|| CpalSource::open_kind_with_grace(resolve_input_device(&app_cfg.recording.input_device)?, kind, STOP_TAIL_GRACE))?;
         let audio_mode = match mode {
             RecordMode::Hold => AudioMode::Hold,
             RecordMode::Oneshot => AudioMode::Oneshot,
@@ -639,19 +638,20 @@ impl DaemonRecorder {
         let _ = self.take_preroll_samples().await;
 
         let cfg = state.config.load();
-        let device = resolve_input_device(&cfg.recording.input_device)?;
 
         // Open both capture sources up front (or GeneratorSources in CI).
         // If either fails we abort before mutating any state.
-        let mic_device = device;
         let mic_source = make_source(|| {
-            CpalSource::open_kind_with_grace(mic_device, CaptureSource::Microphone, STOP_TAIL_GRACE)
+            CpalSource::open_kind_with_grace(
+                resolve_input_device(&cfg.recording.input_device)?,
+                CaptureSource::Microphone,
+                STOP_TAIL_GRACE,
+            )
         })
         .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
-        let system_device = resolve_input_device(&cfg.recording.input_device)?;
         let system_source = make_source(|| {
             CpalSource::open_kind_with_grace(
-                system_device,
+                resolve_input_device(&cfg.recording.input_device)?,
                 CaptureSource::SystemAudio,
                 STOP_TAIL_GRACE,
             )
