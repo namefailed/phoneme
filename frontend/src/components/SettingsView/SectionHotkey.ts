@@ -40,34 +40,54 @@ export class SectionHotkey {
             config.hotkey.mode,
           )}</div>
         </div>
+
+        <h3 style="margin-top: 18px;">Meeting Hotkey</h3>
+        <span style="font-size: 11px; color: var(--fg-faded); display: block; margin: -6px 0 8px;">
+          A separate shortcut that toggles a multi-track meeting recording (your mic + system audio). Always tap-to-start / tap-to-stop.
+        </span>
+        <div class="settings-field">
+          <label>Enable</label>
+          <div>${renderField(
+            { key: "meeting_hotkey.enabled", label: "", kind: "checkbox" },
+            config.meeting_hotkey?.enabled ?? false,
+          )}</div>
+        </div>
+        <div class="settings-field">
+          <label>Combo</label>
+          <div>${renderField(
+            { key: "meeting_hotkey.combo", label: "", kind: "text" },
+            config.meeting_hotkey?.combo ?? "Ctrl+Alt+M",
+          )}</div>
+        </div>
       </div>
     `;
     bindFieldEvents(container, config);
 
-    // Interactive Keybind Selector
-    const comboInput = container.querySelector<HTMLInputElement>("[data-key='hotkey.combo']");
-    if (comboInput) {
+    // Interactive keybind selector — applied to both combo inputs.
+    const wireCombo = (key: string) => {
+      const comboInput = container.querySelector<HTMLInputElement>(`[data-key='${key}']`);
+      if (!comboInput) return;
       comboInput.readOnly = true;
       comboInput.placeholder = "Click to set keybind";
       comboInput.style.cursor = "pointer";
-      
+
       comboInput.addEventListener("keydown", (e) => {
         e.preventDefault();
-        
+
         const keys = [];
         // tauri-plugin-global-shortcut prefers CommandOrControl or Ctrl
         if (e.ctrlKey) keys.push("Ctrl");
         if (e.altKey) keys.push("Alt");
         if (e.shiftKey) keys.push("Shift");
         if (e.metaKey) keys.push("Super");
-        
+
         const isModifierOnly = ["Control", "Alt", "Shift", "Meta"].includes(e.key);
-        
+
         if (!isModifierOnly) {
           let key = e.key;
           if (key === " ") key = "Space";
           else if (key.length === 1) key = key.toUpperCase();
-          
+
           keys.push(key);
           comboInput.value = keys.join("+");
           // Trigger change event for bindFieldEvents
@@ -77,10 +97,13 @@ export class SectionHotkey {
           comboInput.value = keys.join("+") + "+...";
         }
       });
-      
+
       comboInput.addEventListener("focus", () => {
         comboInput.value = "Press combination...";
       });
-    }
+    };
+
+    wireCombo("hotkey.combo");
+    wireCombo("meeting_hotkey.combo");
   }
 }
