@@ -172,6 +172,16 @@ clean base.*
 
 ---
 
+## 💰 Sustainability & Monetization
+*Ideas for generating revenue while keeping the core desktop app 100% free, local, and open-source.*
+
+- [ ] **Paid Mobile Companion App** — a one-time fee (or micro-subscription) thin-client for iOS/Android that records audio on the go and syncs it securely back to the desktop daemon for processing.
+- [ ] **Phoneme Pro (Managed APIs)** — an optional $8-$10/mo subscription where users get instant, zero-config access to ultra-fast cloud Whisper transcription and premium LLM Smart Cleanup (e.g., Claude 3.5 Sonnet) without needing to manage their own developer accounts or API keys.
+- [ ] **Phoneme Sync** — a low-cost ($4-$5/mo) end-to-end encrypted cloud sync service for power users who want their SQLite catalog and audio files seamlessly synchronized across multiple machines (similar to Obsidian Sync).
+- [ ] **Phoneme for Teams** — a managed, per-seat enterprise backend where dual-track meeting notes are centralized, searchable by the whole team, and strictly governed by role-based access.
+
+---
+
 ## ❌ Explicitly Not Doing
 
 Things that were considered and rejected — so we don't revisit them:
