@@ -1,10 +1,10 @@
-# Transcribe-in-Place
+# ⌨️ Transcribe-in-Place
 
 Phoneme v1.8 introduces one of the most highly requested features: **Transcribe-in-Place**.
 
 Transcribe-in-Place allows you to use Phoneme as a system-wide dictation engine. Instead of recording a note, letting it transcribe, and then copying the text out of the Phoneme UI, Phoneme will simply simulate the keystrokes to type the transcribed text directly into whatever application or text box you currently have focused.
 
-## How to use it
+## 🚀 How to use it
 
 1. Ensure the feature is enabled in **Settings -> Hotkeys**.
 2. By default, the global hotkey is `Ctrl+Alt+I` (though you can change this to anything, like a spare mouse button or F-key).
@@ -15,7 +15,7 @@ Transcribe-in-Place allows you to use Phoneme as a system-wide dictation engine.
 
 Phoneme will silently record your voice, pass it to your active transcription engine (e.g. the blazing fast Native Whisper engine), and instantly type the result into your active window.
 
-## How it works under the hood
+## ⚙️ How it works under the hood
 
 When the `Transcribe-in-Place` hotkey is released:
 1. The daemon tags the recording with an `in_place: true` flag in the SQLite catalog.
