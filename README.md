@@ -76,8 +76,13 @@ We believe that exceptional software requires exceptional documentation. Whether
 ### For Users (Using Phoneme)
 - **[Getting Started](docs/user-guide/getting_started.md)**: A walkthrough of the hardware-aware First Run Wizard.
 - **[Meeting Mode & Dual-Track](docs/user-guide/meeting_mode.md)**: How to capture and separate multi-speaker calls.
+- **[Transcribe-in-Place](docs/user-guide/transcribe_in_place.md)**: Use Phoneme as a system-wide dictation engine.
+- **[Diarization & Whisper](docs/user-guide/diarization_and_whisper.md)**: How local Pyannote speaker tagging works.
 - **[Smart Cleanup (LLM Integration)](docs/user-guide/smart_cleanup.md)**: Using AI to polish, format, and translate your transcripts.
 - **[Search & Organization](docs/user-guide/search_and_organization.md)**: Mastering Tags and Full-Text Search.
+- **[Config Profiles](docs/user-guide/config_profiles.md)**: Snapshots for multiple environments.
+- **[Importing Audio](docs/user-guide/importing_audio.md)**: Process pre-recorded files through the pipeline.
+- **[Exporting & Backup](docs/user-guide/exporting_and_backup.md)**: Taking your data with you.
 - **[Troubleshooting & FAQ](docs/user-guide/troubleshooting.md)**
 
 ### For Developers (Building on Phoneme)
