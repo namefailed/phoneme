@@ -15,6 +15,7 @@ import { SectionEditor } from "./SectionEditor";
 import { SectionAdvanced } from "./SectionAdvanced";
 import { SectionTags } from "./SectionTags";
 import { SectionProfiles } from "./SectionProfiles";
+import "./styles.css";
 
 @customElement('ph-settings-view')
 export class SettingsViewElement extends LitElement {
