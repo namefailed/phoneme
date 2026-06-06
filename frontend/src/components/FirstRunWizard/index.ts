@@ -93,7 +93,25 @@ export class FirstRunWizardElement extends LitElement {
           <li>Transcribes locally with whisper-server (no cloud)</li>
           <li>Emits the transcript as JSON to your hook script</li>
         </ul>
-        <p class="wizard-subtitle">Let's get it set up.</p>
+        
+        <div style="margin-top: 1.5rem; padding: 1rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2);">
+          <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">Interface Theme</label>
+          <select style="width: 100%; padding: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer;"
+                  .value=${this.config?.theme || "system"} 
+                  @change=${(e: Event) => { 
+                    if (this.config) {
+                      this.config.theme = (e.target as HTMLSelectElement).value; 
+                      document.documentElement.setAttribute('data-theme', this.config.theme);
+                      this.requestUpdate(); 
+                    }
+                  }}>
+            <option value="system">System Default</option>
+            <option value="dark">Dark Mode</option>
+            <option value="light">Light Mode</option>
+          </select>
+        </div>
+        
+        <p class="wizard-subtitle" style="margin-top: 1.5rem;">Let's get it set up.</p>
       </div>
       <div class="wizard-footer">
         <span class="spacer"></span>
