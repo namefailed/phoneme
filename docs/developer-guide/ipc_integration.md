@@ -44,7 +44,7 @@ Phoneme supports the following commands (snake_case):
 - `list_recordings`: Fetch the catalog.
 - `get_recording`: Fetch details for a specific recording ID.
 - `list_meeting`: Fetch all recordings sharing a `meeting_id`.
-- `update_meeting_name`: Rename a meeting session.
+- `update_meeting_name`: Rename a meeting.
 - `retranscribe_recording`: Re-queue a recording through the transcription pipeline.
 - `import_recording`: Feed a `.wav`/`.mp3`/`.m4a` file into the transcription pipeline.
 - `update_notes`: Update the free-form notes field for a recording.

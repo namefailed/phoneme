@@ -41,7 +41,7 @@ phoneme meeting start
 # Stop the meeting and transcribe both tracks
 phoneme meeting stop
 
-# Rename a meeting session
+# Rename a meeting
 phoneme meeting rename 20260519T143500823 "Q3 Planning Sync"
 ```
 

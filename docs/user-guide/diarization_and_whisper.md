@@ -23,7 +23,7 @@ Enter **Pyannote**.
 Phoneme integrates the powerful Pyannote ONNX model for offline speaker diarization. This means it can listen to a track and separate out different speakers entirely locally.
 
 ### ⚙️ How it Works
-1. **Recording:** You start a Meeting Mode session. Phoneme captures `Mic` and `System` as two separate files.
+1. **Recording:** You start a Meeting. Phoneme captures `Mic` and `System` as two separate files.
 2. **Diarization Pipeline:** Before transcription, Phoneme pipes the audio through the Pyannote ONNX model.
 3. **Speaker Tagging:** The model emits timestamps of who spoke when.
 4. **Transcription:** Phoneme uses Whisper to transcribe those specific time-slices.
