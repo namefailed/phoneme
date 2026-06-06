@@ -131,10 +131,21 @@ export class SettingsView {
       .querySelector("#settings-save")
       ?.addEventListener("click", async () => {
         try {
-          // The backend serialization uses `commands`
-          if (config.hook && config.hook.command !== undefined) {
-            config.hook.commands = config.hook.command;
-            delete config.hook.command;
+          // The backend serializes `commands: Vec<String>`. The hook editor
+          // maintains that array directly; fold any legacy single `command`
+          // field in, then drop blank rows so we never persist empty commands.
+          if (config.hook) {
+            if (config.hook.command !== undefined) {
+              if (!Array.isArray(config.hook.commands)) {
+                config.hook.commands = [config.hook.command];
+              }
+              delete config.hook.command;
+            }
+            if (Array.isArray(config.hook.commands)) {
+              config.hook.commands = config.hook.commands
+                .map((c: unknown) => String(c ?? ""))
+                .filter((c: string) => c.trim() !== "");
+            }
           }
           await invoke("write_config", { config });
           window.dispatchEvent(new CustomEvent("config:saved", { detail: config }));
