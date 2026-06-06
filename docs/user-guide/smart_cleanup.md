@@ -9,12 +9,13 @@ Phoneme provides best-in-class transcription accuracy, but human speech is inher
 When Smart Cleanup is enabled, the pipeline intercepts your raw transcript right before it hits the database:
 
 ```mermaid
+%%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': false}, 'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
 flowchart TD
-    A[🎤 You Speak] --> B{Whisper}
-    B -->|Raw Text with Stutters| C(LLM: Ollama/OpenAI)
-    C -->|Prompt: 'Fix grammar, remove filler words'| D[Polished Text]
-    D --> E[(SQLite Catalog)]
-    D --> F[[Hooks / Obsidian]]
+    Input[🎤 Speak] --> W{Whisper}
+    W -->|Raw| L{LLM}
+    L -->|Cleaned| Out[Polished]
+    Out --> S[(SQLite)]
+    Out --> H[[Hooks]]
 ```
 
 *(Note: Phoneme always preserves the `original_transcript` in the database, so if the AI ever makes a mistake, your original words are perfectly safe).*

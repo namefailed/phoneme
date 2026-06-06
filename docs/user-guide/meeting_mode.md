@@ -21,27 +21,28 @@ When the meeting ends, Phoneme transcribes both tracks independently. Because th
 This leads to the **Merged Conversation View**.
 
 ```mermaid
+%%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': false}, 'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
 flowchart LR
-    subgraph Audio Capture
-        A[🎤 Your Mic] --> C(Track 1: You)
-        B[🔊 System Audio] --> D(Track 2: The Meeting)
+    subgraph A [Audio]
+        M[🎤 Mic] -->|You| T1[Track 1]
+        S[🔊 System] -->|Meeting| T2[Track 2]
     end
     
-    subgraph Transcription
-        C --> E{Whisper}
-        D --> E
-        E --> F[Raw Transcript 1]
-        E --> G[Raw Transcript 2]
+    subgraph X [Transcribe]
+        T1 --> W{Whisper}
+        T2 --> W
+        W --> R1[Raw 1]
+        W --> R2[Raw 2]
     end
     
-    subgraph Diarization & Merge
-        G --> H{Pyannote}
-        H --> I[Speaker 1 / Speaker 2]
-        F --> J{Timeline Merge}
-        I --> J
+    subgraph D [Diarize & Merge]
+        R2 --> P{Pyannote}
+        P -->|Speakers| L[Labels]
+        R1 --> M{Merge}
+        L --> M
     end
     
-    J --> K[Beautiful Interleaved UI]
+    M --> V[Timeline View]
 ```
 
 Instead of a giant block of text, you get a beautiful, chronological timeline of the conversation, exactly as it happened:

@@ -18,17 +18,18 @@ A "Hook" in Phoneme is simply an executable script (PowerShell, Python, Bash, No
 ### 🏛️ Architecture Flow
 
 ```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
 sequenceDiagram
-    participant D as Phoneme Daemon
-    participant H as Your Plugin (Script)
-    participant E as External Service (Obsidian/Notion/API)
+    participant D as Daemon
+    participant H as Hook Script
+    participant E as External
     
-    D->>H: Execute Command
-    D->>H: Pipe JSON Payload via STDIN
+    D->>H: Execute
+    D->>H: JSON via STDIN
     activate H
-    H->>E: Process Data & Forward
+    H->>E: Forward
     E-->>H: Response
-    H-->>D: Exit Code (0 for Success)
+    H-->>D: Exit 0
     deactivate H
 ```
 

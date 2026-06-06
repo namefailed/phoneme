@@ -31,33 +31,28 @@ Phoneme runs **100% offline** by default. No cloud required, no subscriptions, n
 Phoneme uses a decoupled, pipeline-driven architecture. 
 
 ```mermaid
-%%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': true}, 'theme': 'dark', 'themeVariables': { 'fontSize': '14px' }}}%%
+%%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': false}, 'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
 flowchart TD
-    Input[🎤 Voice / System Audio] -->|Hotkey| Daemon[Phoneme Daemon]
+    Input[🎤 Voice] -->|Hotkey| Daemon[Daemon]
     
-    subgraph Transcribe
+    subgraph T [Transcribe]
         Daemon --> Whisper{Whisper}
-        Whisper -->|Local or Cloud| Raw[Raw Transcript]
+        Whisper -->|Local/Cloud| Raw[Raw Text]
     end
     
-    subgraph Enrich
-        Raw --> Diarize{Diarization}
-        Diarize -->|Optional| Tagged[Tagged Transcript]
+    subgraph E [Enrich]
+        Raw --> Diarize{Diarize}
+        Diarize -->|Opt| Tagged[Tagged]
     end
     
-    subgraph Process
-        Tagged --> LLM{LLM Cleanup}
-        LLM -->|Optional| Final[Final Transcript]
+    subgraph P [Process]
+        Tagged --> LLM{LLM}
+        LLM -->|Opt| Final[Final]
     end
     
-    subgraph Store
-        Final --> Catalog[(SQLite Catalog)]
-    end
-    
-    subgraph Export
-        Final --> Hooks[[Hooks]]
-        Hooks --> Dest[Obsidian / Webhooks / Type Anywhere]
-    end
+    Final --> Catalog[(SQLite)]
+    Final --> Hooks[[Hooks]]
+    Hooks --> Dest[Obsidian/Webhooks/Type]
 ```
 
 ## ✨ Core Features
