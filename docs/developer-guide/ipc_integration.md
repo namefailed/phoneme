@@ -1,10 +1,10 @@
-# IPC Integration Guide (Advanced Automation)
+# 📡 IPC Integration Guide (Advanced Automation)
 
 Phoneme provides a full CLI (`phoneme record --start`, `phoneme list`, etc.) that you can use to automate the application. However, under the hood, the CLI is just a thin wrapper that talks to the Phoneme Daemon.
 
 For developers, hackers, and power users who want the lowest-latency automation possible—or who want to build their own custom user interfaces on top of Phoneme's engine—you can integrate directly with Phoneme's Inter-Process Communication (IPC) layer.
 
-## The IPC Architecture
+## 🏛️ The IPC Architecture
 
 The Phoneme Daemon acts as a headless, always-on engine. It exposes a single, unified interface over a local named pipe.
 
@@ -13,11 +13,11 @@ The Phoneme Daemon acts as a headless, always-on engine. It exposes a single, un
 
 Because the protocol is just JSON over a standard pipe/socket, you can interact with Phoneme using Python, Node, Go, Rust, AutoHotkey, or even raw netcat.
 
-## The Wire Protocol
+## 🧵 The Wire Protocol
 
 When you connect to the named pipe, you can send `Request` objects and you will receive `Response` objects.
 
-### Sending a Request
+### 📤 Sending a Request
 
 Requests must be a single line of JSON ending with a newline `\n`. They must include a `"type"` field indicating the command.
 
@@ -31,7 +31,7 @@ Requests must be a single line of JSON ending with a newline `\n`. They must inc
 {"status": {"Ok": null}}
 ```
 
-### Full Request Schema
+### 📋 Full Request Schema
 
 Phoneme supports the following commands (snake_case):
 - `record_start`: Start capturing the microphone.
@@ -51,7 +51,7 @@ Phoneme supports the following commands (snake_case):
 - `reload_config`: Tell the daemon to hot-reload `config.toml`.
 - `subscribe_events`: (See Event Streaming below).
 
-## Real-Time Event Streaming
+## 🌊 Real-Time Event Streaming
 
 The most powerful feature of the IPC layer is real-time event streaming. By sending the `subscribe_events` request, the daemon will hold the connection open and push live events to your application as they happen.
 
@@ -72,13 +72,13 @@ The most powerful feature of the IPC layer is real-time event streaming. By send
 
 This is the exact same API that the official Phoneme GUI uses to render its live waveform and real-time streaming transcripts. You can use it to build your own custom overlays, status LEDs on hardware, or custom notification systems!
 
-## Example: AutoHotkey Integration
+## ⌨️ Example: AutoHotkey Integration
 
 If you want to trigger Phoneme instantly using a custom keyboard shortcut via AutoHotkey, you don't need to spin up the `phoneme.exe` CLI process. You can write directly to the pipe.
 
 *(Note: While possible, AHK makes named pipes a bit tricky. Python or Node are generally easier for scripting!)*
 
-## Example: Node.js Integration
+## 🟢 Example: Node.js Integration
 
 Here is a complete, working example of how to build a Node.js script that listens to Phoneme's live transcription events as you speak.
 
@@ -113,7 +113,7 @@ client.on('data', (data) => {
 client.on('end', () => console.log('Disconnected'));
 ```
 
-## Security Notice
+## 🛡️ Security Notice
 
 The named pipe `\\.\pipe\phoneme-daemon` is restricted by Windows OS-level security to the current user session. Other users on the same machine cannot connect to your Phoneme daemon. 
 
