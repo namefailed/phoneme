@@ -1283,7 +1283,7 @@ mod tests {
     fn transcription_provider_round_trips() {
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Openai;
-        cfg.whisper.api_key = SecretString::from("sk-test");
+        cfg.whisper.api_key = SecretString::from("sk-test".to_string());
         cfg.whisper.model = "whisper-1".into();
         let toml_str = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
@@ -1296,7 +1296,7 @@ mod tests {
     fn cloud_provider_requires_api_key() {
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Groq;
-        cfg.whisper.api_key = SecretString::from("");
+        cfg.whisper.api_key = SecretString::from("".to_string());
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, Error::InvalidConfig(_)));
         assert!(format!("{err}").contains("api_key"));
@@ -1306,7 +1306,7 @@ mod tests {
     fn cloud_provider_with_api_key_validates() {
         let mut cfg = Config::default();
         cfg.whisper.provider = TranscriptionBackend::Openai;
-        cfg.whisper.api_key = SecretString::from("sk-test");
+        cfg.whisper.api_key = SecretString::from("sk-test".to_string());
         cfg.validate()
             .expect("cloud provider with api_key is valid");
     }

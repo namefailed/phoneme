@@ -4,6 +4,7 @@ import { subscribe, type DaemonEvent } from "../../services/events";
 import { Store } from "../../state/store";
 import { RecordingsList, type RecordingsListState } from "./RecordingsList";
 import { RecordingDetail } from "./RecordingDetail";
+import { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
 import "./styles.css";
@@ -12,6 +13,7 @@ export class RecordingsView {
   private container: HTMLElement;
   private list: RecordingsList;
   private detail: RecordingDetail;
+  private mergedDetail: MergedConversationDetail;
   private state: Store<RecordingsListState>;
   private splitPercent = 50;
   private detailVisible = true;
@@ -39,7 +41,10 @@ export class RecordingsView {
           <div id="rv-bulk-bar" style="display:none;"></div>
         </div>
         <div class="rv-splitter" id="rv-split"></div>
-        <div class="rv-detail" id="rv-detail"></div>
+        <div class="rv-detail" id="rv-detail">
+          <div id="rv-single-detail" style="height: 100%;"></div>
+          <ph-merged-conversation-detail id="rv-merged-detail" style="display:none; height: 100%;"></ph-merged-conversation-detail>
+        </div>
       </div>
     `;
 
@@ -48,12 +53,18 @@ export class RecordingsView {
     const splitRoot = this.container.querySelector<HTMLElement>("#rv-split")!;
     this.bulkBarRoot = this.container.querySelector<HTMLElement>("#rv-bulk-bar");
 
+    const singleDetailRoot = this.container.querySelector<HTMLElement>("#rv-single-detail")!;
+    this.mergedDetail = this.container.querySelector<HTMLElement>("#rv-merged-detail") as MergedConversationDetail;
+    
     this.list = new RecordingsList(listRoot, this.state, (id) => this.onSelect(id), (ids) => {
       this.onSelectionChange(ids);
     });
-    this.detail = new RecordingDetail(detailRoot, () => {
+    this.detail = new RecordingDetail(singleDetailRoot, () => {
       void this.refresh();
     });
+    this.mergedDetail.onRefresh = () => {
+      void this.refresh();
+    };
     new Splitter(splitRoot, this.splitPercent, (pct) => {
       this.splitPercent = pct;
       this.applyLayout();
@@ -69,13 +80,16 @@ export class RecordingsView {
   async refresh() {
     await this.list.refresh();
     const s = this.state.get();
-    if (s.selectedId && !s.recordings.some(r => r.id === s.selectedId)) {
+    if (s.selectedId && !s.recordings.some(r => r.id === s.selectedId || r.session_id === s.selectedId.replace("session:", ""))) {
       this.state.set({ ...s, selectedId: null });
       this.detail.clear();
+      this.mergedDetail.sessionId = "";
     } else if (s.selectedId && !this.detail.hasDirtyEdits()) {
-      // Don't re-render the detail (which rebuilds the editor) out from under
-      // unsaved edits when a background daemon event triggers a refresh.
-      void this.detail.show(s.selectedId);
+      if (s.selectedId.startsWith("session:")) {
+        this.mergedDetail.sessionId = s.selectedId.substring(8);
+      } else {
+        void this.detail.show(s.selectedId);
+      }
     }
   }
 
@@ -106,10 +120,19 @@ export class RecordingsView {
   }
 
   private onSelect(id: string) {
-    // Single-click navigates to the detail pane; does NOT clear multi-selection
-    // (so users can single-click to preview while still having checkboxes ticked).
     this.state.set({ ...this.state.get(), selectedId: id });
-    void this.detail.show(id);
+    const singleContainer = this.container.querySelector<HTMLElement>("#rv-single-detail")!;
+    if (id.startsWith("session:")) {
+      singleContainer.style.display = "none";
+      this.mergedDetail.style.display = "block";
+      this.detail.clear();
+      this.mergedDetail.sessionId = id.substring(8);
+    } else {
+      this.mergedDetail.style.display = "none";
+      singleContainer.style.display = "block";
+      this.mergedDetail.sessionId = "";
+      void this.detail.show(id);
+    }
   }
 
   private onSelectionChange(ids: Set<string>) {

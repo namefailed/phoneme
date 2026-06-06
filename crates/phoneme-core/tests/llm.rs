@@ -14,7 +14,7 @@ fn cfg(provider: &str, api_url: &str, api_key: &str, model: &str) -> LlmPostProc
     LlmPostProcessConfig {
         enabled: true,
         provider: provider.to_string(),
-        api_key: api_key.to_string(),
+        api_key: secrecy::SecretString::from(api_key.to_string()),
         api_url: api_url.to_string(),
         model: model.to_string(),
         prompt: "Clean this up".to_string(),

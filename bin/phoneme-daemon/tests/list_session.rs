@@ -17,6 +17,7 @@ fn meeting_track(session_id: &str, track: &str) -> Recording {
         started_at: started,
         duration_ms: 1000,
         audio_path: format!("/tmp/{session_id}-{track}.wav"),
+        in_place: false,
         transcript: None,
         model: None,
         status: RecordingStatus::Done,

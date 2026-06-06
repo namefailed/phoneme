@@ -220,7 +220,7 @@ async fn factory_builds_openai_provider_with_auth_and_model() {
 
     let mut whisper = phoneme_core::Config::default().whisper;
     whisper.provider = phoneme_core::config::TranscriptionBackend::Openai;
-    whisper.api_key = "sk-test".into();
+    whisper.api_key = secrecy::SecretString::from("sk-test".to_string());
     whisper.model = "whisper-1".into();
     whisper.api_url = server.uri();
 
@@ -254,7 +254,7 @@ async fn factory_builds_deepgram_provider_with_token_auth() {
 
     let mut whisper = phoneme_core::Config::default().whisper;
     whisper.provider = phoneme_core::config::TranscriptionBackend::Deepgram;
-    whisper.api_key = "dg-test".into();
+    whisper.api_key = secrecy::SecretString::from("dg-test".to_string());
     whisper.api_url = server.uri();
 
     let provider = Transcriber::new().unwrap().provider(&whisper);
@@ -297,7 +297,7 @@ async fn factory_builds_assemblyai_provider_upload_create_poll() {
 
     let mut whisper = phoneme_core::Config::default().whisper;
     whisper.provider = phoneme_core::config::TranscriptionBackend::Assemblyai;
-    whisper.api_key = "aai-test".into();
+    whisper.api_key = secrecy::SecretString::from("aai-test".to_string());
     whisper.api_url = server.uri();
 
     let provider = Transcriber::new().unwrap().provider(&whisper);
@@ -328,7 +328,7 @@ async fn factory_builds_elevenlabs_provider_with_xi_api_key() {
 
     let mut whisper = phoneme_core::Config::default().whisper;
     whisper.provider = phoneme_core::config::TranscriptionBackend::Elevenlabs;
-    whisper.api_key = "el-test".into();
+    whisper.api_key = secrecy::SecretString::from("el-test".to_string());
     whisper.api_url = server.uri();
 
     let provider = Transcriber::new().unwrap().provider(&whisper);

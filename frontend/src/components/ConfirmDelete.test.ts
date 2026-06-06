@@ -8,16 +8,20 @@ vi.mock("./modal.css", () => ({}));
 const { confirmDelete } = await import("./ConfirmDelete");
 
 function getOverlay() {
-  return document.querySelector(".modal-overlay");
+  return document.querySelector("ph-confirm-delete")?.shadowRoot?.querySelector(".modal-overlay") || null;
+}
+
+function queryEl<T extends HTMLElement>(selector: string): T | null {
+  return document.querySelector("ph-confirm-delete")?.shadowRoot?.querySelector<T>(selector) || null;
 }
 
 beforeEach(() => {
   localStorage.clear();
-  document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  document.querySelectorAll("ph-confirm-delete").forEach((el) => el.remove());
 });
 
 afterEach(() => {
-  document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  document.querySelectorAll("ph-confirm-delete").forEach((el) => el.remove());
 });
 
 describe("confirmDelete", () => {
@@ -30,43 +34,49 @@ describe("confirmDelete", () => {
 
   it("shows a modal when pref is not set", async () => {
     const promise = confirmDelete();
+    await new Promise(r => setTimeout(r, 0));
     expect(getOverlay()).not.toBeNull();
-    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
     await promise;
   });
 
   it("resolves false when Cancel is clicked", async () => {
     const promise = confirmDelete();
-    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    await new Promise(r => setTimeout(r, 0));
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
     expect(await promise).toBe(false);
     expect(getOverlay()).toBeNull();
   });
 
   it("resolves true when Delete is clicked", async () => {
     const promise = confirmDelete();
-    (document.querySelector("#btn-confirm") as HTMLButtonElement)?.click();
+    await new Promise(r => setTimeout(r, 0));
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
     expect(await promise).toBe(true);
     expect(getOverlay()).toBeNull();
   });
 
   it("sets skip pref when 'Don't ask again' is checked before confirming", async () => {
     const promise = confirmDelete();
-    const cb = document.querySelector<HTMLInputElement>("#dont-ask-again")!;
+    await new Promise(r => setTimeout(r, 0));
+    const cb = queryEl<HTMLInputElement>("#dont-ask-again")!;
     cb.checked = true;
-    (document.querySelector("#btn-confirm") as HTMLButtonElement)?.click();
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
     await promise;
     expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBe("true");
   });
 
   it("does NOT set skip pref when checkbox is unchecked", async () => {
     const promise = confirmDelete();
-    (document.querySelector("#btn-confirm") as HTMLButtonElement)?.click();
+    await new Promise(r => setTimeout(r, 0));
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
     await promise;
     expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBeNull();
   });
 
   it("resolves false when Escape key is pressed", async () => {
     const promise = confirmDelete();
+    await new Promise(r => setTimeout(r, 0));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(await promise).toBe(false);
     expect(getOverlay()).toBeNull();
@@ -74,6 +84,7 @@ describe("confirmDelete", () => {
 
   it("resolves false when clicking the overlay backdrop directly", async () => {
     const promise = confirmDelete();
+    await new Promise(r => setTimeout(r, 0));
     const overlay = getOverlay() as HTMLElement;
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(await promise).toBe(false);
@@ -83,23 +94,26 @@ describe("confirmDelete", () => {
 describe("confirmDelete — ConfirmDeleteOpts customisation", () => {
   it("shows a custom title in the modal header", async () => {
     const promise = confirmDelete({ title: 'Delete this tag?' });
-    expect(document.querySelector(".modal-title")?.textContent).toContain("Delete this tag?");
-    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    await new Promise(r => setTimeout(r, 0));
+    expect(queryEl(".modal-title")?.textContent).toContain("Delete this tag?");
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
     await promise;
   });
 
   it("shows custom body text", async () => {
     const promise = confirmDelete({ body: 'This will remove it from all recordings.' });
-    expect(document.querySelector(".modal-body")?.textContent).toContain(
+    await new Promise(r => setTimeout(r, 0));
+    expect(queryEl(".modal-body")?.textContent).toContain(
       "This will remove it from all recordings."
     );
-    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
     await promise;
   });
 
   it("shows a custom confirm button label", async () => {
     const promise = confirmDelete({ confirmLabel: 'Delete Tag' });
-    const btn = document.querySelector<HTMLButtonElement>("#btn-confirm");
+    await new Promise(r => setTimeout(r, 0));
+    const btn = queryEl<HTMLButtonElement>("#btn-confirm");
     expect(btn?.textContent?.trim()).toBe("Delete Tag");
     btn?.click();
     await promise;
@@ -107,9 +121,10 @@ describe("confirmDelete — ConfirmDeleteOpts customisation", () => {
 
   it("stores 'don't ask again' under the custom skipKey, not the default key", async () => {
     const promise = confirmDelete({ skipKey: 'phoneme_skip_tag_delete_confirm' });
-    const cb = document.querySelector<HTMLInputElement>("#dont-ask-again")!;
+    await new Promise(r => setTimeout(r, 0));
+    const cb = queryEl<HTMLInputElement>("#dont-ask-again")!;
     cb.checked = true;
-    (document.querySelector("#btn-confirm") as HTMLButtonElement)?.click();
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
     await promise;
     expect(localStorage.getItem("phoneme_skip_tag_delete_confirm")).toBe("true");
     expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBeNull();
@@ -119,8 +134,9 @@ describe("confirmDelete — ConfirmDeleteOpts customisation", () => {
     localStorage.setItem("phoneme_skip_tag_delete_confirm", "true");
     // Default skipKey ('phoneme_skip_delete_confirm') is not set, so the modal must appear.
     const promise = confirmDelete();
+    await new Promise(r => setTimeout(r, 0));
     expect(getOverlay()).not.toBeNull();
-    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
     await promise;
   });
 
@@ -133,10 +149,11 @@ describe("confirmDelete — ConfirmDeleteOpts customisation", () => {
 
   it("uses default title/body/confirmLabel when opts are omitted", async () => {
     const promise = confirmDelete();
-    expect(document.querySelector(".modal-title")?.textContent).toContain("Delete Recording?");
-    expect(document.querySelector(".modal-body")?.textContent).toContain("permanently delete");
-    expect(document.querySelector<HTMLButtonElement>("#btn-confirm")?.textContent?.trim()).toBe("Delete");
-    (document.querySelector("#btn-cancel") as HTMLButtonElement)?.click();
+    await new Promise(r => setTimeout(r, 0));
+    expect(queryEl(".modal-title")?.textContent).toContain("Delete Recording?");
+    expect(queryEl(".modal-body")?.textContent).toContain("permanently delete");
+    expect(queryEl<HTMLButtonElement>("#btn-confirm")?.textContent?.trim()).toBe("Delete");
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
     await promise;
   });
 });
