@@ -1,8 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::queue_worker::emit_queue_depth;
     use crate::app_state::AppState;
+    use crate::queue_worker::emit_queue_depth;
     use phoneme_core::types::HookPayload;
     use phoneme_core::Config;
     use phoneme_ipc::DaemonEvent;
@@ -39,7 +38,12 @@ mod tests {
         let mut found = false;
         while let Ok(event) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
             let event = event.unwrap();
-            if let DaemonEvent::QueueDepthChanged { pending, processing, failed } = event {
+            if let DaemonEvent::QueueDepthChanged {
+                pending,
+                processing,
+                failed,
+            } = event
+            {
                 assert_eq!(pending, 1);
                 assert_eq!(processing, 0);
                 assert_eq!(failed, 0);

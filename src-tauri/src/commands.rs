@@ -666,26 +666,34 @@ pub async fn wizard_download_diarization_model(window: tauri::Window) -> Result<
     // Diarization uses speakrs which downloads models automatically via hf-hub
     // Since hf-hub blocks, we run it in a blocking task.
     // The UI handles this as an indeterminate progress bar (total = null).
-    
+
     let _ = window.emit(
         "diarization_download_progress",
-        DownloadProgress { downloaded: 0, total: None },
+        DownloadProgress {
+            downloaded: 0,
+            total: None,
+        },
     );
 
     tokio::task::spawn_blocking(move || {
         // Just instantiating the pipeline triggers the download of the 500MB ONNX models to the hf cache
-        let _pipeline = speakrs::OwnedDiarizationPipeline::from_pretrained(
-            speakrs::ExecutionMode::Cpu
-        ).map_err(|e| format!("failed to download diarization models: {}", e))?;
+        let _pipeline =
+            speakrs::OwnedDiarizationPipeline::from_pretrained(speakrs::ExecutionMode::Cpu)
+                .map_err(|e| format!("failed to download diarization models: {}", e))?;
         Ok::<(), String>(())
-    }).await.map_err(|e| format!("spawn_blocking error: {}", e))??;
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {}", e))??;
 
     // Emit 100% completion so the wizard knows it's done
     let _ = window.emit(
         "diarization_download_progress",
-        DownloadProgress { downloaded: 1, total: Some(1) },
+        DownloadProgress {
+            downloaded: 1,
+            total: Some(1),
+        },
     );
-    
+
     Ok(())
 }
 
@@ -706,11 +714,11 @@ pub fn wizard_get_system_info() -> SystemInfo {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        
+
         let mut cmd = std::process::Command::new("powershell");
         cmd.args(["-Command", "(Get-CimInstance Win32_VideoController | Measure-Object -Property AdapterRAM -Sum).Sum"])
            .creation_flags(CREATE_NO_WINDOW);
-           
+
         if let Ok(output) = cmd.output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -988,7 +996,10 @@ pub async fn wizard_detect_deps() -> Result<serde_json::Value, String> {
     let mut has_ollama = false;
 
     // Check if `ollama` CLI is in PATH
-    if let Ok(output) = std::process::Command::new("ollama").arg("--version").output() {
+    if let Ok(output) = std::process::Command::new("ollama")
+        .arg("--version")
+        .output()
+    {
         if output.status.success() {
             has_ollama = true;
         }
@@ -998,7 +1009,10 @@ pub async fn wizard_detect_deps() -> Result<serde_json::Value, String> {
     if !has_ollama {
         let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
         if !localappdata.is_empty() {
-            let ollama_path = std::path::Path::new(&localappdata).join("Programs").join("Ollama").join("ollama.exe");
+            let ollama_path = std::path::Path::new(&localappdata)
+                .join("Programs")
+                .join("Ollama")
+                .join("ollama.exe");
             if ollama_path.exists() {
                 has_ollama = true;
             }
