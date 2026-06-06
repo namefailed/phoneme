@@ -280,6 +280,7 @@ pub fn run() {
             commands::tags_for,
             commands::wizard_download_model,
             commands::wizard_download_semantic_model,
+            commands::wizard_download_diarization_model,
             commands::wizard_get_system_info,
             commands::wizard_list_downloaded_models,
             commands::wizard_download_server,

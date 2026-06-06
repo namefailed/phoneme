@@ -103,20 +103,26 @@ export class FirstRunWizardElement extends LitElement {
   }
 
   private renderModePicker() {
-    if (!this.config._setup_mode) {
-      // Hardware-aware detection for default
-      // 16GB+ RAM or 6GB+ VRAM = both
-      // 8GB+ RAM or 4GB+ VRAM = whisper
-      // less = none (they should use cloud)
+    // First run initializations
+    if (this.config._setup_whisper === undefined) {
       if (this.systemRamMb >= 16000 || this.systemVramMb >= 6000) {
-        this.config._setup_mode = "both";
+        this.config._setup_whisper = true;
+        this.config._setup_ollama = true;
+        this.config.semantic_search = { enabled: true };
+        this.config._setup_diarization = true;
       } else if (this.systemRamMb >= 8000 || this.systemVramMb >= 4000) {
-        this.config._setup_mode = "whisper";
+        this.config._setup_whisper = true;
+        this.config._setup_ollama = false;
+        this.config.semantic_search = { enabled: true };
+        this.config._setup_diarization = false;
       } else {
-        this.config._setup_mode = "none";
+        this.config._setup_whisper = true;
+        this.config._setup_ollama = false;
+        this.config.semantic_search = { enabled: false };
+        this.config._setup_diarization = false;
       }
     }
-    if (!this.config.semantic_search) this.config.semantic_search = { enabled: true };
+    
     if (!this.config._whisper_model_choice) {
       if (this.systemRamMb >= 32000 || this.systemVramMb >= 8000) this.config._whisper_model_choice = "ggml-large-v3-turbo.bin";
       else if (this.systemRamMb >= 16000 || this.systemVramMb >= 4000) this.config._whisper_model_choice = "ggml-medium.en.bin";
@@ -130,68 +136,68 @@ export class FirstRunWizardElement extends LitElement {
       else this.config._ollama_model_choice = "llama3.2:3b";
     }
 
-    const mode = this.config._setup_mode;
     return html`
       <div class="wizard-body">
-        <h2 class="wizard-title">What should Phoneme set up?</h2>
+        <h2 class="wizard-title">System Optimizer</h2>
         <p class="wizard-subtitle">
-          Based on your system hardware (${Math.round(this.systemRamMb / 1024)}GB RAM), we've pre-selected the best option for you. You can always change this later.
+          We detected ${Math.round(this.systemRamMb / 1024)}GB of RAM. We've pre-selected the best local AI features for your hardware, but you can customize everything below. Unchecked features can use Cloud APIs instead.
         </p>
-        <div class="mode-cards" style="grid-template-columns: 1fr 1fr;">
-          <div class="mode-card ${mode === 'none' ? 'selected' : ''}" @click=${() => { this.config._setup_mode = 'none'; this.requestUpdate(); }}>
-            <div class="mode-icon">⚡</div>
-            <div class="mode-name">Set it up yourself</div>
-            <div class="mode-desc">I already have my own Whisper and/or LLM endpoints. Don't download anything.</div>
-          </div>
-          <div class="mode-card ${mode === 'whisper' ? 'selected' : ''} ${this.systemRamMb < 8000 ? 'recommended' : ''}" @click=${() => { this.config._setup_mode = 'whisper'; this.requestUpdate(); }}>
-            ${this.systemRamMb < 8000 && this.systemRamMb > 0 ? html`<div class="mode-badge">RECOMMENDED</div>` : ''}
-            <div class="mode-icon">🎙️</div>
-            <div class="mode-name">Install just Whisper</div>
-            <div class="mode-desc">Download a local Whisper model (Speech-to-Text).</div>
-          </div>
-          <div class="mode-card ${mode === 'ollama' ? 'selected' : ''}" @click=${() => { this.config._setup_mode = 'ollama'; this.requestUpdate(); }}>
-            <div class="mode-icon">🧠</div>
-            <div class="mode-name">Install just Ollama</div>
-            <div class="mode-desc">Download Ollama and Llama 3.2 (LLM Post-processing).</div>
-          </div>
-          <div class="mode-card ${mode === 'both' ? 'selected' : ''} ${this.systemRamMb >= 16000 ? 'recommended' : ''}" @click=${() => { this.config._setup_mode = 'both'; this.requestUpdate(); }}>
-            ${this.systemRamMb >= 16000 ? html`<div class="mode-badge">RECOMMENDED</div>` : ''}
-            <div class="mode-icon">✨</div>
-            <div class="mode-name">Install both</div>
-            <div class="mode-desc">Get the complete local AI experience (requires ~5GB disk space).</div>
-          </div>
-        </div>
-        <div class="semantic-search-opt-in" style="margin-top: 1.5rem; display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
-          <input type="checkbox" id="semantic-search" .checked=${this.config.semantic_search.enabled} @change=${(e: Event) => this.config.semantic_search.enabled = (e.target as HTMLInputElement).checked}>
-          <label for="semantic-search" style="font-weight: 500; cursor: pointer;">Enable Semantic Search</label>
-          <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8;">(Downloads a ~90MB local ONNX embedding model)</div>
-        </div>
 
-        ${mode === 'whisper' || mode === 'both' ? html`
-          <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
-            <label style="font-weight: 500;">Whisper Model Selection</label>
-            <p class="wizard-subtitle" style="font-size: 0.85em; margin-bottom: 8px; margin-top: 4px;">We've pre-selected a model based on your system RAM, but you can override it if you prefer a smaller and faster model.</p>
-            <select .value=${this.config._whisper_model_choice} @change=${(e: Event) => { this.config._whisper_model_choice = (e.target as HTMLSelectElement).value; }}>
+        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <input type="checkbox" id="setup-whisper" .checked=${this.config._setup_whisper} @change=${(e: Event) => { this.config._setup_whisper = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
+            <label for="setup-whisper" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">🎙️ Local Speech-to-Text (Whisper)</label>
+          </div>
+          ${this.config._setup_whisper ? html`
+            <select style="width: 100%; margin-top: 0.5rem; padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: white;" .value=${this.config._whisper_model_choice} @change=${(e: Event) => { this.config._whisper_model_choice = (e.target as HTMLSelectElement).value; }}>
               <option value="ggml-base.en.bin">Base (Fastest, ~140MB, 4GB RAM)</option>
               <option value="ggml-small.en.bin">Small (Balanced, ~480MB, 8GB RAM)</option>
               <option value="ggml-medium.en.bin">Medium (Accurate, ~1.5GB, 16GB RAM)</option>
               <option value="ggml-large-v3-turbo.bin">Large v3 Turbo (Best, ~1.6GB, 32GB RAM)</option>
             </select>
-          </div>
-        ` : ''}
+          ` : html`
+            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud APIs (Deepgram/AssemblyAI/OpenAI).</div>
+          `}
+        </div>
 
-        ${mode === 'ollama' || mode === 'both' ? html`
-          <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
-            <label style="font-weight: 500;">LLM Model Selection</label>
-            <p class="wizard-subtitle" style="font-size: 0.85em; margin-bottom: 8px; margin-top: 4px;">We've pre-selected a model based on your system RAM, but you can override it if you prefer a smaller and faster model.</p>
-            <select .value=${this.config._ollama_model_choice} @change=${(e: Event) => { this.config._ollama_model_choice = (e.target as HTMLSelectElement).value; }}>
+        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <input type="checkbox" id="setup-diarization" .checked=${this.config._setup_diarization} @change=${(e: Event) => { this.config._setup_diarization = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
+            <label for="setup-diarization" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">👥 Local Speaker Diarization</label>
+          </div>
+          ${this.config._setup_diarization ? html`
+            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem; color: #ffb86c;">⚠️ Downloads a ~500MB Pyannote model. Requires 16GB+ RAM for stable transcription.</div>
+          ` : html`
+            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud APIs or disable speaker separation.</div>
+          `}
+        </div>
+
+        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <input type="checkbox" id="setup-ollama" .checked=${this.config._setup_ollama} @change=${(e: Event) => { this.config._setup_ollama = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
+            <label for="setup-ollama" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">🧠 Local LLM Post-processing (Ollama)</label>
+          </div>
+          ${this.config._setup_ollama ? html`
+            <select style="width: 100%; margin-top: 0.5rem; padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: white;" .value=${this.config._ollama_model_choice} @change=${(e: Event) => { this.config._ollama_model_choice = (e.target as HTMLSelectElement).value; }}>
               <option value="llama3.2:3b">Llama 3.2 3B (Fastest, 8GB RAM)</option>
               <option value="llama3.1:8b">Llama 3.1 8B (Balanced, 16GB RAM)</option>
               <option value="qwen2.5:32b">Qwen 2.5 32B (Accurate, 32GB RAM)</option>
               <option value="llama3.3:70b">Llama 3.3 70B (Best, 64GB RAM)</option>
             </select>
+          ` : html`
+            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud LLMs (OpenAI/Anthropic) for formatting.</div>
+          `}
+        </div>
+
+        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <input type="checkbox" id="semantic-search" .checked=${this.config.semantic_search?.enabled} @change=${(e: Event) => { this.config.semantic_search.enabled = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
+            <label for="semantic-search" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">🔍 Local Semantic Search</label>
           </div>
-        ` : ''}
+          ${this.config.semantic_search?.enabled ? html`
+            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Downloads a ~90MB ONNX embedding model to search your transcripts by meaning.</div>
+          ` : ''}
+        </div>
 
       </div>
       <div class="wizard-footer">
@@ -210,11 +216,13 @@ export class FirstRunWizardElement extends LitElement {
     this.downloadSubtitle = "Please wait.";
     
     try {
-      const mode = this.config._setup_mode;
-      if (mode === "whisper" || mode === "both") {
+      if (this.config._setup_whisper) {
         await this.doWhisper();
       }
-      if (mode === "ollama" || mode === "both") {
+      if (this.config._setup_diarization) {
+        await this.doDiarization();
+      }
+      if (this.config._setup_ollama) {
         await this.doOllama();
       }
       if (this.config.semantic_search?.enabled) {
@@ -380,8 +388,33 @@ export class FirstRunWizardElement extends LitElement {
     this.config.semantic_search.enabled = true;
   }
 
+  private async doDiarization() {
+    this.downloadTitle = "Diarization Setup";
+    this.downloadSubtitle = "Fetching the Pyannote ONNX models (~500MB)...";
+    this.progressValue = null;
+    this.downloadStatus = "Starting download...";
+
+    // We'll add the new tauri command wizard_download_diarization_model shortly
+    let unlisten = await listen<{ downloaded: number; total: number | null }>("diarization_download_progress", (e) => {
+      if (e.payload.total) {
+        this.progressMax = e.payload.total;
+        this.progressValue = e.payload.downloaded;
+        this.downloadStatus = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+      }
+    });
+
+    try {
+      await invoke("wizard_download_diarization_model");
+    } finally {
+      unlisten();
+    }
+
+    if (!this.config.diarization) this.config.diarization = {};
+    this.config.diarization.provider = "local";
+  }
+
   private renderConfigure() {
-    if (this.config._setup_mode === "none" && !this.config.semantic_search?.enabled) {
+    if (!this.config._setup_whisper && !this.config._setup_ollama && !this.config.semantic_search?.enabled && !this.config._setup_diarization) {
       setTimeout(() => this.go("next"), 0);
       return html`<div>Skipping downloads...</div>`;
     }

@@ -58,6 +58,9 @@ pub struct Config {
     /// Settings for the built-in transcript editor.
     #[serde(default)]
     pub editor: EditorConfig,
+    /// Settings for speaker diarization.
+    #[serde(default)]
+    pub diarization: DiarizationConfig,
     /// Background daemon runtime settings (e.g., logging verbosity).
     pub daemon: DaemonConfig,
     /// Frontend aesthetics and layout settings.
@@ -72,6 +75,32 @@ pub struct Config {
     /// Automatic cleanup policy — delete old recordings by age or count.
     #[serde(default)]
     pub retention: RetentionConfig,
+}
+
+/// Diarization providers supported by Phoneme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiarizationBackend {
+    /// Diarization disabled (default). Rely on meeting mode if needed.
+    #[default]
+    None,
+    /// Local Pyannote.audio ONNX segmentation model.
+    Local,
+    /// Cloud diarization via Deepgram API.
+    Deepgram,
+    /// Cloud diarization via AssemblyAI API.
+    Assemblyai,
+}
+
+/// Settings for speaker diarization.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct DiarizationConfig {
+    /// Which backend handles speaker diarization.
+    #[serde(default)]
+    pub provider: DiarizationBackend,
+    /// Absolute path to the local Pyannote ONNX model file.
+    #[serde(default)]
+    pub local_model_path: String,
 }
 
 /// Settings for local semantic search via ONNX embeddings.
@@ -631,6 +660,7 @@ impl Default for Config {
                 vimrc: String::new(),
                 vimrc_path: String::new(),
             },
+            diarization: DiarizationConfig::default(),
             daemon: DaemonConfig {
                 log_level: "info".into(),
                 log_max_size_mb: 10,

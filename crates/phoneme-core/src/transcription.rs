@@ -52,7 +52,7 @@ impl Transcriber {
     ///
     /// `server_base_url()` resolves the correct endpoint for both external and
     /// bundled whisper-server modes.
-    pub fn provider(&self, whisper: &WhisperConfig) -> Box<dyn TranscriptionProvider> {
+    pub fn provider(&self, whisper: &WhisperConfig, diarization: &crate::config::DiarizationConfig) -> Box<dyn TranscriptionProvider> {
         let timeout = Duration::from_secs(whisper.timeout_secs);
         match whisper.provider {
             // Local whisper.cpp: no auth, no model field; endpoint resolved from
@@ -63,6 +63,7 @@ impl Transcriber {
                 None,
                 None,
                 timeout,
+                diarization.provider == crate::config::DiarizationBackend::Local,
             )),
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
@@ -70,6 +71,7 @@ impl Transcriber {
                 non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-1")),
                 timeout,
+                false, // OpenAI API doesn't support segment-level timestamp output out-of-box with audio/transcriptions without weird params
             )),
             TranscriptionBackend::Groq => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
@@ -77,6 +79,7 @@ impl Transcriber {
                 non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-large-v3")),
                 timeout,
+                false,
             )),
             TranscriptionBackend::Deepgram => Box::new(DeepgramProvider::new(
                 self.http.clone(),
@@ -84,6 +87,7 @@ impl Transcriber {
                 whisper.api_key.expose_secret().trim().to_string(),
                 model_or(&whisper.model, "nova-2"),
                 timeout,
+                diarization.provider == crate::config::DiarizationBackend::Deepgram,
             )),
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
                 self.http.clone(),
@@ -91,6 +95,7 @@ impl Transcriber {
                 whisper.api_key.expose_secret().trim().to_string(),
                 whisper.model.trim().to_string(),
                 timeout,
+                diarization.provider == crate::config::DiarizationBackend::Assemblyai,
             )),
             TranscriptionBackend::Elevenlabs => Box::new(ElevenLabsProvider::new(
                 self.http.clone(),
@@ -107,6 +112,7 @@ impl Transcriber {
                 non_empty(whisper.api_key.expose_secret()),
                 non_empty(&whisper.model),
                 timeout,
+                false,
             )),
         }
     }
@@ -146,6 +152,14 @@ fn model_or(model: &str, default: &str) -> String {
 #[derive(Debug, Deserialize)]
 struct OpenAiResponse {
     text: String,
+    segments: Option<Vec<OpenAiSegment>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiSegment {
+    start: f32,
+    end: f32,
+    text: String,
 }
 
 /// Cap a third-party error response body before it flows into an `Error` (and
@@ -175,6 +189,7 @@ pub struct OpenAiCompatProvider {
     api_key: Option<String>,
     model: Option<String>,
     timeout: Duration,
+    local_diarize: bool,
 }
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
@@ -200,6 +215,7 @@ impl OpenAiCompatProvider {
         api_key: Option<String>,
         model: Option<String>,
         timeout: Duration,
+        local_diarize: bool,
     ) -> Self {
         Self {
             http,
@@ -207,6 +223,7 @@ impl OpenAiCompatProvider {
             api_key,
             model,
             timeout,
+            local_diarize,
         }
     }
 }
@@ -239,7 +256,12 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         // OpenAI-compatible proxy may default to plain text or verbose_json,
         // which would fail the decode. whisper.cpp's server also accepts (and
         // defaults to) json, so this is a no-op for the local backend.
-        form = form.text("response_format", "json");
+        if self.local_diarize {
+            form = form.text("response_format", "verbose_json");
+            form = form.text("timestamp_granularities[]", "segment");
+        } else {
+            form = form.text("response_format", "json");
+        }
 
         // Accept `api_url` as either a host base (…/v1) or the full endpoint, so a
         // Custom/proxy URL already ending in the path isn't doubled into a 404.
@@ -278,6 +300,43 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .json()
             .await
             .map_err(|e| Error::Internal(format!("decoding transcription response: {e}")))?;
+            
+        if self.local_diarize {
+            if let Some(whisper_segments) = parsed.segments {
+                let pyannote_segs = crate::diarization::run_local_diarization(audio_path)?;
+                let mut final_transcript = String::new();
+                let mut current_speaker = None;
+                
+                for w_seg in whisper_segments {
+                    let midpoint = w_seg.start + (w_seg.end - w_seg.start) / 2.0;
+                    
+                    // Find which pyannote segment covers this midpoint
+                    let mut spk = 0;
+                    for p_seg in &pyannote_segs {
+                        if midpoint >= p_seg.start as f32 && midpoint <= p_seg.end as f32 {
+                            if let Ok(s) = p_seg.speaker.parse::<u8>() {
+                                spk = s;
+                            }
+                            break;
+                        }
+                    }
+                    
+                    if current_speaker != Some(spk) {
+                        if !final_transcript.is_empty() {
+                            final_transcript.push_str("\n\n");
+                        }
+                        final_transcript.push_str(&format!("[Speaker {}]: ", spk));
+                        current_speaker = Some(spk);
+                    } else {
+                        final_transcript.push(' ');
+                    }
+                    final_transcript.push_str(w_seg.text.trim());
+                }
+                
+                return Ok(final_transcript);
+            }
+        }
+            
         Ok(parsed.text)
     }
 }
@@ -294,6 +353,7 @@ pub struct DeepgramProvider {
     api_key: String,
     model: String,
     timeout: Duration,
+    diarize: bool,
 }
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
@@ -305,6 +365,7 @@ impl std::fmt::Debug for DeepgramProvider {
             .field("api_key", &crate::config::redact_key(&self.api_key))
             .field("model", &self.model)
             .field("timeout", &self.timeout)
+            .field("diarize", &self.diarize)
             .finish()
     }
 }
@@ -316,6 +377,7 @@ impl DeepgramProvider {
         api_key: impl Into<String>,
         model: impl Into<String>,
         timeout: Duration,
+        diarize: bool,
     ) -> Self {
         Self {
             http,
@@ -323,6 +385,7 @@ impl DeepgramProvider {
             api_key: api_key.into(),
             model: model.into(),
             timeout,
+            diarize,
         }
     }
 }
@@ -345,6 +408,13 @@ struct DeepgramChannel {
 #[derive(Debug, Deserialize)]
 struct DeepgramAlternative {
     transcript: String,
+    words: Option<Vec<DeepgramWord>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeepgramWord {
+    word: String,
+    speaker: Option<u32>,
 }
 
 #[async_trait]
@@ -354,6 +424,9 @@ impl TranscriptionProvider for DeepgramProvider {
         let url = format!("{}/v1/listen", self.base_url.trim_end_matches('/'));
         let mut query: Vec<(&str, &str)> =
             vec![("model", self.model.as_str()), ("smart_format", "true")];
+        if self.diarize {
+            query.push(("diarize", "true"));
+        }
         if let Some(lang) = language {
             query.push(("language", lang));
         } else {
@@ -394,14 +467,37 @@ impl TranscriptionProvider for DeepgramProvider {
             .json()
             .await
             .map_err(|e| Error::Internal(format!("decoding Deepgram response: {e}")))?;
-        parsed
+            
+        let alt = parsed
             .results
             .channels
             .into_iter()
             .next()
             .and_then(|c| c.alternatives.into_iter().next())
-            .map(|a| a.transcript)
-            .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))
+            .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))?;
+
+        if !self.diarize || alt.words.is_none() {
+            return Ok(alt.transcript);
+        }
+        
+        let words = alt.words.unwrap();
+        let mut final_transcript = String::new();
+        let mut current_speaker: Option<u32> = None;
+        
+        for w in words {
+            let spk = w.speaker.unwrap_or(0);
+            if current_speaker != Some(spk) {
+                if !final_transcript.is_empty() {
+                    final_transcript.push_str("\n\n");
+                }
+                final_transcript.push_str(&format!("[Speaker {}]: ", spk));
+                current_speaker = Some(spk);
+            } else {
+                final_transcript.push(' ');
+            }
+            final_transcript.push_str(&w.word);
+        }
+        Ok(final_transcript)
     }
 }
 
@@ -420,6 +516,7 @@ pub struct AssemblyAiProvider {
     /// Optional `speech_model` (e.g. "best", "nano"); empty = AssemblyAI default.
     model: String,
     timeout: Duration,
+    diarize: bool,
 }
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
@@ -431,6 +528,7 @@ impl std::fmt::Debug for AssemblyAiProvider {
             .field("api_key", &crate::config::redact_key(&self.api_key))
             .field("model", &self.model)
             .field("timeout", &self.timeout)
+            .field("diarize", &self.diarize)
             .finish()
     }
 }
@@ -503,6 +601,13 @@ struct AaiTranscript {
     status: String,
     text: Option<String>,
     error: Option<String>,
+    utterances: Option<Vec<AaiUtterance>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AaiUtterance {
+    speaker: String,
+    text: String,
 }
 
 /// Delay between AssemblyAI status polls.
@@ -539,6 +644,9 @@ impl TranscriptionProvider for AssemblyAiProvider {
         if !self.model.trim().is_empty() {
             req_body["speech_model"] = serde_json::Value::String(self.model.trim().to_string());
         }
+        if self.diarize {
+            req_body["speaker_labels"] = serde_json::Value::Bool(true);
+        }
         let created: AaiCreated = self
             .send_json(
                 self.http
@@ -564,9 +672,21 @@ impl TranscriptionProvider for AssemblyAiProvider {
                     .await?;
                 match t.status.as_str() {
                     "completed" => {
-                        return t.text.ok_or_else(|| {
-                            Error::Internal("AssemblyAI completed without text".into())
-                        })
+                        if !self.diarize || t.utterances.is_none() {
+                            return t.text.ok_or_else(|| {
+                                Error::Internal("AssemblyAI completed without text".into())
+                            });
+                        }
+                        
+                        let utterances = t.utterances.unwrap();
+                        let mut final_transcript = String::new();
+                        for u in utterances {
+                            if !final_transcript.is_empty() {
+                                final_transcript.push_str("\n\n");
+                            }
+                            final_transcript.push_str(&format!("[Speaker {}]: {}", u.speaker, u.text));
+                        }
+                        return Ok(final_transcript);
                     }
                     "error" => {
                         return Err(Error::WhisperError {

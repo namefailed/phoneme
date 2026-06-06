@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";
 
 import { SectionWhisper } from "./SectionWhisper";
+import { SectionDiarization } from "./SectionDiarization";
 import { SectionRecording } from "./SectionRecording";
 import { SectionHotkey } from "./SectionHotkey";
 import { SectionHook } from "./SectionHook";
@@ -106,6 +107,7 @@ export class SettingsViewElement extends LitElement {
 
     switch (this.activeTab) {
       case "whisper": new SectionWhisper(sectionHost, this.config); break;
+      case "diarization": new SectionDiarization(sectionHost, this.config); break;
       case "recording": new SectionRecording(sectionHost, this.config); break;
       case "hotkey": new SectionHotkey(sectionHost, this.config); break;
       case "hook": new SectionHook(sectionHost, this.config); break;
@@ -136,6 +138,7 @@ export class SettingsViewElement extends LitElement {
         <div class="settings-sidebar">
           <h2>Settings</h2>
           <div class="sv-tab ${this.activeTab === "whisper" ? "active" : ""}" @click=${() => this.switchTab('whisper')}>Whisper</div>
+          <div class="sv-tab ${this.activeTab === "diarization" ? "active" : ""}" @click=${() => this.switchTab('diarization')}>Diarization</div>
           <div class="sv-tab ${this.activeTab === "recording" ? "active" : ""}" @click=${() => this.switchTab('recording')}>Recording</div>
           <div class="sv-tab ${this.activeTab === "hotkey" ? "active" : ""}" @click=${() => this.switchTab('hotkey')}>Hotkey</div>
           <div class="sv-tab ${this.activeTab === "tray" ? "active" : ""}" @click=${() => this.switchTab('tray')}>System Tray</div>
