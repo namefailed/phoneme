@@ -23,7 +23,7 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
     // Filter empty string to None — frontend sends "" for "auto-detect"
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
-    let provider = state.transcription.provider(&cfg.whisper);
+    let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
     let transcript = match provider.transcribe(&audio_path, language.as_deref()).await {
         Ok(t) => t,
         Err(e) => {

@@ -1,6 +1,6 @@
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listRecordings, semanticSearch, type Recording } from "../../services/ipc";
+import { listRecordings, semanticSearch, updateSessionName, type Recording } from "../../services/ipc";
 import { Store } from "../../state/store";
 import { filterStore } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
@@ -172,6 +172,21 @@ export class RecordingsListElement extends LitElement {
     this.anchorIndex = to;
     this.onSelectionChangeCb(new Set(this.multiSelected));
     this.requestUpdate();
+  }
+
+  private async handleRenameSession(e: Event, sessionId: string, currentName: string | null) {
+    e.stopPropagation();
+    const newName = prompt("Enter a new name for this meeting session:", currentName || `Meeting — 2 tracks`);
+    if (newName !== null) {
+      const trimmed = newName.trim();
+      try {
+        await updateSessionName(sessionId, trimmed === "" ? null : trimmed);
+        await this.refresh();
+      } catch (err) {
+        console.error("Failed to rename session:", err);
+        alert("Failed to rename session.");
+      }
+    }
   }
 
   private handleKeyDown(e: KeyboardEvent, visibleRows: Recording[]) {
@@ -459,7 +474,7 @@ export class RecordingsListElement extends LitElement {
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
       tags: html`<span class="rec-tags" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(r as any).tags?.map((t: any) => t.name).join(", ") || ""}</span>`,
-      model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model_used || ""}</span>`,
+      model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,
       transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
@@ -530,8 +545,9 @@ export class RecordingsListElement extends LitElement {
         </span>
         <span class="rec-group-label">
           <span class="rec-group-chevron">${chevron}</span>
-          <span class="rec-group-title">🎙 Meeting — ${count} tracks</span>
-          <span class="rec-group-meta">${day} · ${time}</span>
+          <span class="rec-group-title">🎙 ${tracks[0].session_name ? tracks[0].session_name : `Meeting — ${count} tracks`}</span>
+          <button class="icon-btn" title="Rename Session" @click=${(e: Event) => this.handleRenameSession(e, sessionId, tracks[0].session_name ?? null)} style="padding: 2px; height: 20px; width: 20px; margin-left: 8px; font-size: 11px;">✏️</button>
+          <span class="rec-group-meta" style="margin-left: 8px;">${day} · ${time}</span>
         </span>
       </div>
     `;

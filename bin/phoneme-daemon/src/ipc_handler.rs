@@ -131,7 +131,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
-        Request::RecordToggle => {
+        Request::RecordToggle { in_place } => {
             if state.recorder.current().await.is_some() {
                 match state.recorder.stop(state).await {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
@@ -143,7 +143,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             } else {
                 match state
                     .recorder
-                    .start(state, phoneme_core::RecordMode::Oneshot.into(), false)
+                    .start(state, phoneme_core::RecordMode::Oneshot.into(), in_place)
                     .await
                 {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
@@ -281,6 +281,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     drop(embedder_guard);
 
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::UpdateSessionName { session_id, name } => {
+            match state.catalog.update_session_name(&session_id, name.as_deref()).await {
+                Ok(()) => {
+                    state.events.emit(DaemonEvent::SessionNameUpdated { session_id });
                     Response::Ok(serde_json::Value::Null)
                 }
                 Err(e) => Response::Err(IpcError {
@@ -773,6 +785,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         hook_ran_at: None,
         notes: None,
         session_id: None,
+        session_name: None,
         track: None,
     };
     if let Err(e) = state.catalog.insert(&row).await {

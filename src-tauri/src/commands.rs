@@ -674,8 +674,8 @@ pub async fn wizard_download_diarization_model(window: tauri::Window) -> Result<
 
     tokio::task::spawn_blocking(move || {
         // Just instantiating the pipeline triggers the download of the 500MB ONNX models to the hf cache
-        let _pipeline = speakrs::pipeline::OwnedDiarizationPipeline::from_pretrained(
-            speakrs::pipeline::ExecutionMode::Cpu
+        let _pipeline = speakrs::OwnedDiarizationPipeline::from_pretrained(
+            speakrs::ExecutionMode::Cpu
         ).map_err(|e| format!("failed to download diarization models: {}", e))?;
         Ok::<(), String>(())
     }).await.map_err(|e| format!("spawn_blocking error: {}", e))??;

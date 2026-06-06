@@ -38,12 +38,7 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
         };
         match claimed {
             Some(payload) => {
-                let counts = state.inbox.counts().await.unwrap_or_default();
-                state.events.emit(DaemonEvent::QueueDepthChanged {
-                    pending: counts.pending,
-                    processing: counts.processing,
-                    failed: counts.failed,
-                });
+                emit_queue_depth(&state).await;
                 match pipeline::run(&state, payload).await {
                     Ok(()) => {
                         backoff = Duration::from_secs(30); // reset on success
@@ -60,9 +55,10 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         backoff = (backoff * 2).min(max_backoff);
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, "pipeline error (non-transient)");
+                        tracing::error!(error = %e, "fatal pipeline error (failed)");
                     }
                 }
+                emit_queue_depth(&state).await;
             }
             None => {
                 tokio::select! {
@@ -73,3 +69,17 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
         }
     }
 }
+
+pub async fn emit_queue_depth(state: &AppState) {
+    if let Ok(counts) = state.inbox.counts().await {
+        state.events.emit(DaemonEvent::QueueDepthChanged {
+            pending: counts.pending,
+            processing: counts.processing,
+            failed: counts.failed,
+        });
+    }
+}
+
+#[cfg(test)]
+#[path = "queue_worker_test.rs"]
+mod tests;

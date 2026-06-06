@@ -16,7 +16,7 @@ async fn fake_wav(dir: &TempDir) -> std::path::PathBuf {
 /// Local whisper.cpp shape: no API key, no model field — identical wire
 /// behaviour to the pre-trait `TranscriptionClient`.
 fn local_provider(base_url: impl Into<String>, timeout: Duration) -> OpenAiCompatProvider {
-    OpenAiCompatProvider::new(reqwest::Client::new(), base_url, None, None, timeout)
+    OpenAiCompatProvider::new(reqwest::Client::new(), base_url, None, None, timeout, false)
 }
 
 #[tokio::test]
@@ -169,6 +169,7 @@ async fn sends_bearer_auth_when_api_key_set() {
         Some("test-key".into()),
         Some("whisper-1".into()),
         Duration::from_secs(5),
+        false,
     );
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "authed");
@@ -194,6 +195,7 @@ async fn sends_model_field_when_set() {
         None,
         Some("whisper-large-v3".into()),
         Duration::from_secs(5),
+        false,
     );
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "modeled");
@@ -225,7 +227,7 @@ async fn factory_builds_openai_provider_with_auth_and_model() {
     whisper.api_url = server.uri();
 
     let transcriber = Transcriber::new().unwrap();
-    let provider = transcriber.provider(&whisper);
+    let provider = transcriber.provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "cloud");
 }
@@ -257,7 +259,7 @@ async fn factory_builds_deepgram_provider_with_token_auth() {
     whisper.api_key = secrecy::SecretString::from("dg-test".to_string());
     whisper.api_url = server.uri();
 
-    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "deepgram text");
 }
@@ -300,7 +302,7 @@ async fn factory_builds_assemblyai_provider_upload_create_poll() {
     whisper.api_key = secrecy::SecretString::from("aai-test".to_string());
     whisper.api_url = server.uri();
 
-    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "assemblyai text");
 }
@@ -331,7 +333,7 @@ async fn factory_builds_elevenlabs_provider_with_xi_api_key() {
     whisper.api_key = secrecy::SecretString::from("el-test".to_string());
     whisper.api_url = server.uri();
 
-    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "elevenlabs text");
 }
@@ -356,7 +358,7 @@ async fn factory_builds_custom_openai_compatible_provider() {
     whisper.provider = phoneme_core::config::TranscriptionBackend::Custom;
     whisper.api_url = server.uri(); // user-supplied OpenAI-compatible base URL
 
-    let provider = Transcriber::new().unwrap().provider(&whisper);
+    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "custom");
 }

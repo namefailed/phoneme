@@ -88,8 +88,8 @@ struct PreRoll {
     /// Dropping/sending tells the idle task to stop pulling and exit.
     stop_tx: tokio::sync::oneshot::Sender<()>,
     /// The idle task handle — joined when stopping so the `CpalSource` is fully
-    /// torn down (mic released) before we proceed.
-    task: tokio::task::JoinHandle<()>,
+    /// torn down (mic released) before we proceed, or returned for reuse.
+    task: tokio::task::JoinHandle<Option<Box<dyn Source>>>,
 }
 
 /// A running streaming-preview loop: periodically transcribes the in-progress
@@ -173,8 +173,9 @@ impl DaemonRecorder {
                 return;
             }
         };
-        // Pre-roll is mic-only; open the microphone explicitly.
-        let source = match CpalSource::open_kind(device, CaptureSource::Microphone) {
+        // Pre-roll is mic-only; open the microphone explicitly. Use STOP_TAIL_GRACE
+        // so if we reuse this source for a recording, it doesn't clip when stopped.
+        let source = match CpalSource::open_kind_with_grace(device, CaptureSource::Microphone, STOP_TAIL_GRACE) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "pre-roll: could not open microphone; skipping");
@@ -206,10 +207,10 @@ impl DaemonRecorder {
                     }
                 }
             }
-            // Release the microphone cleanly.
-            let _ = source.stop().await;
+            // Return the source instead of dropping it, so it can be reused
+            // to completely eliminate the initialization gap.
+            Some(source)
         });
-
         *slot = Some(PreRoll {
             ring,
             stop_tx,
@@ -243,11 +244,11 @@ impl DaemonRecorder {
     }
 
     /// Stop idle pre-capture (if running), join its task so the microphone is
-    /// released, and return the buffered samples (oldest → newest). Returns an
-    /// empty Vec when no pre-capture was running.
-    async fn take_preroll_samples(&self) -> Vec<i16> {
+    /// released (or returned), and return the buffered samples (oldest → newest). Returns an
+    /// empty Vec and None when no pre-capture was running.
+    async fn take_preroll_samples(&self) -> (Vec<i16>, Option<Box<dyn Source>>) {
         let Some(pr) = self.preroll.lock().await.take() else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         let PreRoll {
             ring,
@@ -255,9 +256,10 @@ impl DaemonRecorder {
             task,
         } = pr;
         let _ = stop_tx.send(());
-        // Wait for the idle task to exit so the CpalSource (and the mic) is
-        // fully torn down before the recording opens its own source.
-        let _ = task.await;
+        // Wait for the idle task to exit and return the source it was using.
+        // This fully tears down the idle loop before the recording opens its own source,
+        // or allows us to reuse the already-running stream to avoid initialization gaps.
+        let source = task.await.unwrap_or(None);
         let samples = ring.lock().await.to_vec();
         if !samples.is_empty() {
             tracing::info!(
@@ -265,7 +267,7 @@ impl DaemonRecorder {
                 "pre-roll: prepending buffered audio"
             );
         }
-        samples
+        (samples, source)
     }
 
     /// Spawn the streaming-preview loop for `id`, if `recording.streaming_preview`
@@ -439,6 +441,7 @@ impl DaemonRecorder {
             notes: None,
             // A normal single-track recording is not part of a meeting.
             session_id: None,
+            session_name: None,
             track: None,
             in_place,
         };
@@ -448,27 +451,29 @@ impl DaemonRecorder {
         }
 
         // If idle pre-roll pre-capture is running, stop it and grab the buffered
-        // audio to prepend; this also releases the microphone before we reopen
+        // audio to prepend; this also releases the microphone (or returns it) before we reopen
         // it for the recording. Empty when pre-roll is disabled (default path).
-        let prepend = self.take_preroll_samples().await;
-
-        // Open the CPAL device and the audio Recorder.
+        let (prepend, preroll_source) = self.take_preroll_samples().await;
         let app_cfg = state.config.load();
         let kind = app_cfg.recording.source;
-        let source = match make_source(|| {
-            CpalSource::open_kind_with_grace(
-                resolve_input_device(&app_cfg.recording.input_device)?,
-                kind,
-                STOP_TAIL_GRACE,
-            )
-        }) {
-            Ok(s) => s,
-            Err(e) => {
-                *self.active.lock().await = None;
-                if let Err(err) = state.catalog.delete(&id).await {
-                    tracing::warn!("failed to rollback catalog row: {err}");
+        let source = if let Some(s) = preroll_source {
+            s
+        } else {
+            match make_source(|| {
+                CpalSource::open_kind_with_grace(
+                    resolve_input_device(&app_cfg.recording.input_device)?,
+                    kind,
+                    STOP_TAIL_GRACE,
+                )
+            }) {
+                Ok(s) => s,
+                Err(e) => {
+                    *self.active.lock().await = None;
+                    if let Err(err) = state.catalog.delete(&id).await {
+                        tracing::warn!("failed to rollback catalog row: {err}");
+                    }
+                    return Err(e);
                 }
-                return Err(e);
             }
         };
         let audio_mode = match mode {
@@ -552,6 +557,7 @@ impl DaemonRecorder {
             metadata: HookMetadata::current(),
         };
         state.inbox.enqueue(&payload).await?;
+        crate::queue_worker::emit_queue_depth(state).await;
 
         state.events.emit(DaemonEvent::RecordingStopped {
             id: active.id.clone(),
@@ -684,7 +690,13 @@ impl DaemonRecorder {
         // Stop idle pre-roll pre-capture so the microphone is free for the
         // meeting's own mic source. The buffered audio is discarded — meeting
         // tracks don't use pre-roll. No-op when pre-roll is disabled.
-        let _ = self.take_preroll_samples().await;
+        let (_, preroll_source) = self.take_preroll_samples().await;
+        // Since meeting needs two different sources (mic and system loopback)
+        // and we cannot safely assume the preroll source matches the mic one 
+        // without more work, we just drop it to release the microphone cleanly.
+        if let Some(mut s) = preroll_source {
+            let _ = s.stop().await;
+        }
 
         let cfg = state.config.load();
         let device = resolve_input_device(&cfg.recording.input_device)?;
@@ -779,6 +791,7 @@ impl DaemonRecorder {
                 hook_ran_at: None,
                 notes: None,
                 session_id: Some(session_id.clone()),
+                session_name: None,
                 track: Some(track.as_str().to_string()),
             };
             // Insert the catalog row. If it fails, roll back every track already
@@ -887,6 +900,7 @@ impl DaemonRecorder {
                 metadata: HookMetadata::current(),
             };
             state.inbox.enqueue(&payload).await?;
+            crate::queue_worker::emit_queue_depth(state).await;
 
             state.events.emit(DaemonEvent::RecordingStopped {
                 id: id.clone(),
@@ -1104,6 +1118,7 @@ mod tests {
             error_message: None,
             hook_command: None,
             hook_exit_code: None,
+            session_name: None,
             hook_duration_ms: None,
             transcribed_at: None,
             hook_ran_at: None,

@@ -31,6 +31,7 @@ fn meeting_track(session_id: &str, track: &str) -> Recording {
         notes: None,
         session_id: Some(session_id.to_string()),
         track: Some(track.to_string()),
+        session_name: None,
     }
 }
 

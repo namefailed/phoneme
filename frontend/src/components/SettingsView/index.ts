@@ -160,6 +160,8 @@ export class SettingsViewElement extends LitElement {
           new SectionInterface(sectionHost, this.config);
           new SectionEditor(sectionHost, this.config);
           new SectionTray(sectionHost, this.config);
+          break;
+        case "tags":
           new SectionTags(sectionHost, this.config);
           break;
         case "postprocessing":
@@ -202,11 +204,12 @@ export class SettingsViewElement extends LitElement {
           <input type="search" class="settings-search" placeholder="Search settings..." @input=${this.handleSearch} 
                  style="width: 100%; padding: 8px 12px; margin-bottom: 16px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--fg-default); font-size: 13px;" />
           
-          <div class="sv-tab ${this.activeTab === "transcription" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('transcription')}>Transcription</div>
-          <div class="sv-tab ${this.activeTab === "capture" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('capture')}>Capture & Audio</div>
-          <div class="sv-tab ${this.activeTab === "appearance" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('appearance')}>Appearance & UI</div>
-          <div class="sv-tab ${this.activeTab === "postprocessing" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('postprocessing')}>Post-Processing</div>
-          <div class="sv-tab ${this.activeTab === "system" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('system')}>System & Advanced</div>
+          <div class="sv-tab ${this.activeTab === "transcription" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('transcription')}>🗣️ Transcription</div>
+          <div class="sv-tab ${this.activeTab === "capture" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('capture')}>🎙️ Capture</div>
+          <div class="sv-tab ${this.activeTab === "appearance" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('appearance')}>🎨 Appearance</div>
+          <div class="sv-tab ${this.activeTab === "tags" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('tags')}>🏷️ Tags</div>
+          <div class="sv-tab ${this.activeTab === "postprocessing" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('postprocessing')}>✨ Post-Processing</div>
+          <div class="sv-tab ${this.activeTab === "system" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('system')}>⚙️ System</div>
           
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>

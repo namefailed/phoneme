@@ -191,6 +191,8 @@ fn default_llm_timeout_secs() -> u64 {
     30
 }
 
+
+
 /// Serde default for boolean fields that should default to `true` when absent
 /// from an older config file.
 fn default_true() -> bool {
@@ -618,7 +620,7 @@ impl Default for Config {
                 max_duration_secs: 300,
                 input_device: "default".into(),
                 source: CaptureSource::Microphone,
-                pre_roll_ms: 0,
+                pre_roll_ms: 1500,
                 streaming_preview: false,
             },
             hook: HookConfig {
@@ -894,14 +896,14 @@ mod tests {
     }
 
     #[test]
-    fn pre_roll_ms_defaults_to_zero() {
-        assert_eq!(Config::default().recording.pre_roll_ms, 0);
+    fn pre_roll_ms_defaults_to_1500() {
+        assert_eq!(Config::default().recording.pre_roll_ms, 1500);
     }
 
     #[test]
-    fn pre_roll_ms_absent_in_legacy_toml_defaults_to_zero() {
+    fn pre_roll_ms_absent_in_legacy_toml_defaults_to_1500() {
         // A config written before pre_roll_ms existed must still load and
-        // default to 0 (disabled), so existing users keep the historical
+        // default to 1500 (enabled), so existing users keep the historical
         // record-only-while-active behavior.
         let dir = TempDir::new().unwrap();
         let cfg = Config::default();

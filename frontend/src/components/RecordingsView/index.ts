@@ -7,6 +7,7 @@ import { RecordingDetail } from "./RecordingDetail";
 import { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
+import "./Sidebar";
 import "./styles.css";
 
 export class RecordingsView {
@@ -36,6 +37,7 @@ export class RecordingsView {
 
     this.container.innerHTML = `
       <div class="rv-shell" id="rv-shell">
+        <ph-sidebar></ph-sidebar>
         <div class="rv-list" id="rv-list">
           <div id="rv-list-inner" style="height:100%; overflow:hidden;"></div>
           <div id="rv-bulk-bar" style="display:none;"></div>
@@ -114,9 +116,9 @@ export class RecordingsView {
     const shell = this.container.querySelector<HTMLElement>("#rv-shell");
     if (!shell) return;
     if (this.detailVisible) {
-      shell.style.gridTemplateColumns = `${this.splitPercent}% 4px ${100 - this.splitPercent}%`;
+      shell.style.gridTemplateColumns = `200px ${this.splitPercent}% 4px minmax(0, 1fr)`;
     } else {
-      shell.style.gridTemplateColumns = `1fr 0 0`;
+      shell.style.gridTemplateColumns = `200px 1fr 0 0`;
     }
   }
 

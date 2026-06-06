@@ -93,6 +93,8 @@ pub struct Recording {
     /// leave this `None`.
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub session_name: Option<String>,
     /// Which track of a meeting session this recording is: `"mic"` (the user's
     /// microphone) or `"system"` (system/loopback audio). `None` for normal
     /// single-track recordings.
