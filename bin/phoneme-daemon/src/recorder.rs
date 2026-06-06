@@ -284,10 +284,21 @@ impl DaemonRecorder {
         let handle = self.handle.clone();
         let log_id = id.clone();
         let task = tokio::spawn(async move {
-            // Reuse a single temp WAV path for every tick; each write truncates.
+            let cfg = state.config.load();
+            let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
+            
+            // If the provider is native (running directly in our RAM), we can safely
+            // drop the interval to 500ms for true real-time word-by-word streaming
+            // without worrying about HTTP/file-write overhead.
+            let interval_duration = if provider.is_native() {
+                std::time::Duration::from_millis(500)
+            } else {
+                PREVIEW_INTERVAL
+            };
+
             let tmp_wav =
                 std::env::temp_dir().join(format!("phoneme-preview-{}.wav", id.file_stem()));
-            let mut interval = tokio::time::interval(PREVIEW_INTERVAL);
+            let mut interval = tokio::time::interval(interval_duration);
             // If a transcription overruns the interval, skip missed ticks rather
             // than firing a burst — this is the "never two at once" throttle.
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -327,7 +338,9 @@ impl DaemonRecorder {
                     continue;
                 }
                 let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
-                let provider = state.transcription.provider(&cfg.whisper);
+                // Note: we already resolved provider above to check if native,
+                // but we can just use that one or resolve it again if config changes during recording.
+                let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim().to_string();
