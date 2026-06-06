@@ -37,6 +37,7 @@ export class TagChips {
         ${chips}
         <input class="tag-add" placeholder="+ add tag" list="all-tags" />
         <datalist id="all-tags">${this.allTags.map((t) => `<option value="${escapeAttr(t.name)}">`).join("")}</datalist>
+        <button class="tag-manage" title="Create, rename, recolor, and delete tags">🏷 Manage tags</button>
       </div>
     `;
     this.container.querySelectorAll<HTMLButtonElement>(".tag-x").forEach((btn) => {
@@ -51,6 +52,13 @@ export class TagChips {
         const name = input.value.trim();
         if (name) void this.attachByName(name);
       }
+    });
+    const manageBtn = this.container.querySelector<HTMLButtonElement>(".tag-manage");
+    manageBtn?.addEventListener("click", async () => {
+      const { openTagManager } = await import("../TagManager");
+      await openTagManager();
+      // Tags may have been renamed/recolored/deleted — refresh chips + datalist.
+      await this.load();
     });
   }
 

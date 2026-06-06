@@ -30,6 +30,10 @@ pub enum Request {
     StartMeeting,
     /// Stop the active meeting: both tracks are finalized and enqueued.
     StopMeeting,
+    /// Toggle the meeting: start one if none is active, otherwise stop the
+    /// active one. Atomic equivalent of checking status then Start/StopMeeting —
+    /// used by the global meeting hotkey to avoid a check-then-act race.
+    MeetingToggle,
 
     // Catalog queries
     ListRecordings {

@@ -30,6 +30,11 @@ pub struct Config {
     pub hook: HookConfig,
     /// Global keyboard shortcut bindings for triggering push-to-talk.
     pub hotkey: HotkeyConfig,
+    /// Optional second global shortcut that toggles a multi-track "meeting"
+    /// recording (mic + system audio). The `mode` field is ignored — a meeting
+    /// always toggles (press to start, press again to stop).
+    #[serde(default = "default_meeting_hotkey")]
+    pub meeting_hotkey: HotkeyConfig,
     /// Frontend OS-level tray behavior.
     pub tray: TrayConfig,
     /// Settings for the built-in transcript editor.
@@ -335,6 +340,16 @@ pub struct HotkeyConfig {
     pub mode: HotkeyMode,
 }
 
+/// Default for the optional meeting hotkey: disabled, suggested `Ctrl+Alt+M`,
+/// toggle mode (the only mode that makes sense for a long-running meeting).
+fn default_meeting_hotkey() -> HotkeyConfig {
+    HotkeyConfig {
+        enabled: false,
+        combo: "Ctrl+Alt+M".into(),
+        mode: HotkeyMode::Toggle,
+    }
+}
+
 /// The behavioral mode of the global recording hotkey.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -506,6 +521,7 @@ impl Default for Config {
                 combo: "Ctrl+Alt+Space".into(),
                 mode: HotkeyMode::Hold,
             },
+            meeting_hotkey: default_meeting_hotkey(),
             tray: TrayConfig {
                 show_on_startup: true,
                 minimize_to_tray: true,
