@@ -108,7 +108,7 @@ on idle to bound WAL growth.
 
 - **`recordings`** — the central table: `id`, `started_at`, `duration_ms`,
   `audio_path`, `transcript`, `original_transcript`, `model`, `status`, hook
-  result columns, `notes`, and the meeting-link columns `session_id` + `track`.
+  result columns, `notes`, and the meeting-link columns `meeting_id` + `track`.
 - **FTS5** — a full-text index mirrors the transcript so `list` search is fast.
   It's kept in sync with the `recordings` table via triggers, so an insert /
   update / delete automatically updates the index. User search text is sanitised
@@ -125,7 +125,7 @@ SQLite file stays small and copyable.
   **newline-delimited JSON** (`JsonLineCodec`): one JSON value per line.
 - **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case):
   `record_start`, `start_meeting`, `list_recordings`, `get_recording`,
-  `list_session`, `retranscribe_recording`, `import_recording`, `update_notes`,
+  `list_meeting`, `retranscribe_recording`, `import_recording`, `update_notes`,
   `reload_config`, `shutdown`, … plus tag ops.
 - **`Response`** — daemon → client, tagged on `"status"`: `Ok(value)` or
   `Err(IpcError)`. `IpcError` carries a machine-readable `kind`

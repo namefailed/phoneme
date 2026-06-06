@@ -36,12 +36,12 @@ describe('IPC Services', () => {
     expect(res).toEqual([]);
   });
 
-  it('calls list_session with the camelCase sessionId arg', async () => {
+  it('calls list_meeting with the camelCase meetingId arg', async () => {
     vi.mocked(tauriCore.invoke).mockResolvedValueOnce([]);
 
     const res = await listSession('sess-1');
 
-    expect(tauriCore.invoke).toHaveBeenCalledWith('list_session', { sessionId: 'sess-1' });
+    expect(tauriCore.invoke).toHaveBeenCalledWith('list_meeting', { meetingId: 'sess-1' });
     expect(res).toEqual([]);
   });
 

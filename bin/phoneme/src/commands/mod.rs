@@ -10,7 +10,6 @@ pub mod meeting;
 pub mod profile_cmd;
 pub mod record;
 pub mod retranscribe;
-pub mod session;
 pub mod show;
 pub mod tag;
 pub mod watch;

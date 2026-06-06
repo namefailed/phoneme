@@ -257,7 +257,7 @@ pub fn run() {
             commands::list_recordings,
             commands::semantic_search,
             commands::get_recording,
-            commands::list_session,
+            commands::list_meeting,
             commands::delete_recording,
             commands::record_start,
             commands::record_stop,

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { groupRecordings, visibleRecordings, trackLabel } from "./grouping";
 import type { Recording } from "../../services/ipc";
 
-function rec(id: string, sessionId: string | null = null, track: string | null = null): Recording {
+function rec(id: string, meetingId: string | null = null, track: string | null = null): Recording {
   return {
     id,
     started_at: "2026-05-19T14:00:00Z",
@@ -11,7 +11,7 @@ function rec(id: string, sessionId: string | null = null, track: string | null =
     transcript: null,
     model: null,
     status: "done",
-    session_id: sessionId,
+    meeting_id: meetingId,
     track,
   };
 }
@@ -25,12 +25,12 @@ describe("groupRecordings", () => {
     ]);
   });
 
-  it("groups two tracks sharing a session_id into one group", () => {
+  it("groups two tracks sharing a meeting_id into one group", () => {
     const mic = rec("m", "s1", "mic");
     const sys = rec("y", "s1", "system");
     const out = groupRecordings([mic, sys]);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ kind: "group", sessionId: "s1" });
+    expect(out[0]).toMatchObject({ kind: "group", meetingId: "s1" });
     expect((out[0] as any).tracks.map((t: Recording) => t.id)).toEqual(["m", "y"]);
   });
 
@@ -42,7 +42,7 @@ describe("groupRecordings", () => {
     const out = groupRecordings([standalone, mic, sys, later]);
     expect(out.map((i) => i.kind)).toEqual(["single", "group", "single"]);
     expect((out[0] as any).recording.id).toBe("a");
-    expect((out[1] as any).sessionId).toBe("s1");
+    expect((out[1] as any).meetingId).toBe("s1");
     expect((out[2] as any).recording.id).toBe("z");
   });
 
@@ -71,10 +71,10 @@ describe("groupRecordings", () => {
       rec("b1", "B", "mic"),
       rec("b2", "B", "system"),
     ]);
-    expect(out.map((i) => (i as any).sessionId)).toEqual(["A", "B"]);
+    expect(out.map((i) => (i as any).meetingId)).toEqual(["A", "B"]);
   });
 
-  it("treats empty-string session_id as standalone", () => {
+  it("treats empty-string meeting_id as standalone", () => {
     const out = groupRecordings([rec("a", "")]);
     expect(out).toEqual([{ kind: "single", recording: rec("a", "") }]);
   });

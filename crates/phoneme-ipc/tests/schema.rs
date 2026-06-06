@@ -61,13 +61,13 @@ fn all_daemon_events_roundtrip() {
         DaemonEvent::RecordingStarted {
             id: id.clone(),
             started_at: chrono::Local::now(),
-            session_id: None,
+            meeting_id: None,
         },
         DaemonEvent::RecordingStopped {
             id: id.clone(),
             duration_ms: 1234,
             audio_path: "C:/tmp/x.wav".into(),
-            session_id: Some("meeting-abc".into()),
+            meeting_id: Some("meeting-abc".into()),
         },
         DaemonEvent::TranscriptionStarted { id: id.clone() },
         DaemonEvent::TranscriptionPartial {

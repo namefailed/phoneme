@@ -9,15 +9,15 @@ export class MergedConversationDetail extends LitElement {
     return this; // Light DOM for inherited CSS classes
   }
 
-  @property({ type: String }) sessionId = "";
+  @property({ type: String }) meetingId = "";
   @property({ type: Object }) onRefresh!: () => void;
 
   @state() private recordings: Recording[] = [];
   @state() private error: string | null = null;
 
   async updated(changedProperties: PropertyValues) {
-    if (changedProperties.has('sessionId')) {
-      if (this.sessionId) {
+    if (changedProperties.has('meetingId')) {
+      if (this.meetingId) {
         await this.loadSession();
       } else {
         this.recordings = [];
@@ -28,19 +28,19 @@ export class MergedConversationDetail extends LitElement {
   private async loadSession() {
     this.error = null;
     try {
-      this.recordings = await listSession(this.sessionId);
+      this.recordings = await listSession(this.meetingId);
     } catch (e) {
       this.error = String(e);
       this.recordings = [];
     }
   }
 
-  private async saveSessionName(newName: string) {
+  private async saveMeetingName(newName: string) {
     if (!newName.trim()) return;
     try {
-      // Need to import updateSessionName from ipc.ts
-      const { updateSessionName } = await import('../../services/ipc');
-      await updateSessionName(this.sessionId, newName.trim());
+      // Need to import updateMeetingName from ipc.ts
+      const { updateMeetingName } = await import('../../services/ipc');
+      await updateMeetingName(this.meetingId, newName.trim());
       await this.loadSession();
     } catch (e) {
       this.error = String(e);
@@ -63,8 +63,8 @@ export class MergedConversationDetail extends LitElement {
       return html`<div class="empty">Loading meeting session...</div>`;
     }
 
-    // Assuming both tracks have the same session_name, use the first one
-    const sessionName = this.recordings[0]?.session_name || this.sessionId;
+    // Assuming both tracks have the same meeting_name, use the first one
+    const meetingName = this.recordings[0]?.meeting_name || this.meetingId;
 
     return html`
       <div style="display: flex; flex-direction: column; gap: 1rem; padding: 1rem;">
@@ -74,12 +74,12 @@ export class MergedConversationDetail extends LitElement {
             <span 
               contenteditable="true"
               style="padding: 2px 6px; border-radius: 4px; border: 1px solid transparent; outline: none; transition: border 0.2s;"
-              @blur=${(e: Event) => this.saveSessionName((e.target as HTMLElement).innerText)}
+              @blur=${(e: Event) => this.saveMeetingName((e.target as HTMLElement).innerText)}
               @keydown=${this.handleKeyDown}
               @focus=${(e: Event) => (e.target as HTMLElement).style.border = '1px solid var(--accent, #89b4fa)'}
               @focusout=${(e: Event) => (e.target as HTMLElement).style.border = '1px solid transparent'}
               title="Click to rename this meeting"
-            >${sessionName}</span>
+            >${meetingName}</span>
           </h2>
         </div>
         ${this.recordings.map(

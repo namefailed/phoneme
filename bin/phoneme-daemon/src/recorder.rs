@@ -113,9 +113,9 @@ struct MeetingTrackHandle {
 }
 
 /// An in-flight meeting: the two concurrently-recording tracks (mic + system).
-/// Both share `session_id`; stopping the meeting finalizes both together.
+/// Both share `meeting_id`; stopping the meeting finalizes both together.
 struct ActiveMeeting {
-    session_id: String,
+    meeting_id: String,
     tracks: Vec<MeetingTrackHandle>,
 }
 
@@ -444,8 +444,8 @@ impl DaemonRecorder {
             hook_ran_at: None,
             notes: None,
             // A normal single-track recording is not part of a meeting.
-            session_id: None,
-            session_name: None,
+            meeting_id: None,
+            meeting_name: None,
             track: None,
             in_place,
         };
@@ -525,7 +525,7 @@ impl DaemonRecorder {
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
             started_at,
-            session_id: None,
+            meeting_id: None,
         });
         tracing::info!(id = %id, mode = ?mode, "recording started");
         Ok(id)
@@ -567,7 +567,7 @@ impl DaemonRecorder {
             id: active.id.clone(),
             duration_ms: result.duration_ms,
             audio_path: active.audio_path.to_string_lossy().into_owned(),
-            session_id: None,
+            meeting_id: None,
         });
         tracing::info!(id = %active.id, ms = result.duration_ms, "recording stopped");
 
@@ -675,7 +675,7 @@ impl DaemonRecorder {
     /// `SyntheticSource`s; this method is the production entry point that wires
     /// in the real hardware sources.
     ///
-    /// Returns the freshly-minted `session_id` shared by both tracks.
+    /// Returns the freshly-minted `meeting_id` shared by both tracks.
     pub async fn start_meeting(&self, state: &AppState) -> Result<String> {
         // Refuse to start a meeting while a normal recording is in flight, and
         // refuse to start a second meeting. This keeps the single-recording
@@ -747,7 +747,7 @@ impl DaemonRecorder {
     /// with `SyntheticSource`s.
     ///
     /// For each `(track, source)` it mints a `RecordingId`, inserts a catalog
-    /// row at `Recording` status carrying the shared `session_id` + track
+    /// row at `Recording` status carrying the shared `meeting_id` + track
     /// label, and starts an audio `Recorder` (always `Hold` mode — a meeting
     /// runs until explicitly stopped). All started recorders are tracked
     /// together so `stop_meeting` can finalize them as a unit. If any track
@@ -765,7 +765,7 @@ impl DaemonRecorder {
             });
         }
 
-        let session_id = format!("meeting-{}", RecordingId::new());
+        let meeting_id = format!("meeting-{}", RecordingId::new());
         let mut tracks = Vec::with_capacity(sources.len());
 
         for (track, source) in sources {
@@ -794,8 +794,8 @@ impl DaemonRecorder {
                 transcribed_at: None,
                 hook_ran_at: None,
                 notes: None,
-                session_id: Some(session_id.clone()),
-                session_name: None,
+                meeting_id: Some(meeting_id.clone()),
+                meeting_name: None,
                 track: Some(track.as_str().to_string()),
             };
             // Insert the catalog row. If it fails, roll back every track already
@@ -830,9 +830,9 @@ impl DaemonRecorder {
             state.events.emit(DaemonEvent::RecordingStarted {
                 id: id.clone(),
                 started_at,
-                session_id: Some(session_id.clone()),
+                meeting_id: Some(meeting_id.clone()),
             });
-            tracing::info!(id = %id, track = track.as_str(), session = %session_id, "meeting track started");
+            tracing::info!(id = %id, track = track.as_str(), session = %meeting_id, "meeting track started");
 
             tracks.push(MeetingTrackHandle {
                 id,
@@ -844,11 +844,11 @@ impl DaemonRecorder {
         }
 
         *meeting_lock = Some(ActiveMeeting {
-            session_id: session_id.clone(),
+            meeting_id: meeting_id.clone(),
             tracks,
         });
-        tracing::info!(session = %session_id, "meeting started");
-        Ok(session_id)
+        tracing::info!(session = %meeting_id, "meeting started");
+        Ok(meeting_id)
     }
 
     /// Stop the active meeting: finalize every track (write its WAV, mark the
@@ -861,7 +861,7 @@ impl DaemonRecorder {
             .await
             .take()
             .ok_or(Error::NotRecording)?;
-        let session_id = meeting.session_id.clone();
+        let meeting_id = meeting.meeting_id.clone();
 
         for handle in meeting.tracks {
             let MeetingTrackHandle {
@@ -910,17 +910,17 @@ impl DaemonRecorder {
                 id: id.clone(),
                 duration_ms: result.duration_ms,
                 audio_path: audio_path.to_string_lossy().into_owned(),
-                session_id: Some(session_id.clone()),
+                meeting_id: Some(meeting_id.clone()),
             });
             tracing::info!(id = %id, track = track.as_str(), ms = result.duration_ms, "meeting track stopped");
         }
 
-        tracing::info!(session = %session_id, "meeting stopped");
+        tracing::info!(session = %meeting_id, "meeting stopped");
 
         // Resume idle pre-capture now the meeting released the microphone.
         // No-op when pre-roll is disabled.
         self.ensure_preroll(state).await;
-        Ok(session_id)
+        Ok(meeting_id)
     }
 }
 
@@ -952,7 +952,7 @@ mod tests {
         let (mic_src, mic_sink) = SyntheticSource::new(audio_cfg);
         let (sys_src, sys_sink) = SyntheticSource::new(audio_cfg);
 
-        let session_id = state
+        let meeting_id = state
             .recorder
             .start_meeting_with_sources(
                 &state,
@@ -981,18 +981,18 @@ mod tests {
             .stop_meeting(&state)
             .await
             .expect("stop meeting");
-        assert_eq!(stopped, session_id);
+        assert_eq!(stopped, meeting_id);
         assert!(
             !state.recorder.meeting_active().await,
             "meeting should be cleared"
         );
 
-        // Two catalog rows exist, both carrying the shared session_id and the
+        // Two catalog rows exist, both carrying the shared meeting_id and the
         // two distinct track labels.
         let rows = state.catalog.list(&ListFilter::default()).await.unwrap();
         let meeting_rows: Vec<_> = rows
             .iter()
-            .filter(|r| r.session_id.as_deref() == Some(session_id.as_str()))
+            .filter(|r| r.meeting_id.as_deref() == Some(meeting_id.as_str()))
             .collect();
         assert_eq!(
             meeting_rows.len(),
@@ -1122,12 +1122,12 @@ mod tests {
             error_message: None,
             hook_command: None,
             hook_exit_code: None,
-            session_name: None,
+            meeting_name: None,
             hook_duration_ms: None,
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
-            session_id: Some("meeting-test".to_string()),
+            meeting_id: Some("meeting-test".to_string()),
             track: Some(MeetingTrack::Mic.as_str().to_string()),
         };
         state.catalog.insert(&row).await.unwrap();

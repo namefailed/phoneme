@@ -30,7 +30,7 @@ pub enum Request {
 
     /// Meeting Mode (v1.6): start a dual-track recording — the microphone and
     /// the system audio (WASAPI loopback) are captured concurrently as two
-    /// separate recordings linked by a shared `session_id`. Both are
+    /// separate recordings linked by a shared `meeting_id`. Both are
     /// transcribed independently through the normal pipeline.
     StartMeeting,
     /// Stop the active meeting: both tracks are finalized and enqueued.
@@ -48,11 +48,11 @@ pub enum Request {
         id: RecordingId,
     },
     /// Fetch all recordings belonging to a single meeting session (the two
-    /// tracks linked by a shared `session_id`), ordered by track then time.
+    /// tracks linked by a shared `meeting_id`), ordered by track then time.
     /// Additive to `ListRecordings` — grouping is a presentation concern, so
     /// the flat `ListRecordings` shape is unchanged.
-    ListSession {
-        session_id: String,
+    ListMeeting {
+        meeting_id: String,
     },
     DeleteRecording {
         id: RecordingId,
@@ -81,8 +81,8 @@ pub enum Request {
         id: RecordingId,
         text: String,
     },
-    UpdateSessionName {
-        session_id: String,
+    UpdateMeetingName {
+        meeting_id: String,
         name: Option<String>,
     },
     /// Fetch the preserved original (machine) transcript for a recording, if any.
@@ -187,19 +187,19 @@ pub enum DaemonEvent {
     RecordingStarted {
         id: RecordingId,
         started_at: DateTime<Local>,
-        /// `Some(session_id)` when this recording is one track of a meeting;
+        /// `Some(meeting_id)` when this recording is one track of a meeting;
         /// `None` for a normal single recording. Lets the UI tell meeting-track
         /// events apart from single-recording events without guessing.
         #[serde(default)]
-        session_id: Option<String>,
+        meeting_id: Option<String>,
     },
     RecordingStopped {
         id: RecordingId,
         duration_ms: i64,
         audio_path: String,
-        /// `Some(session_id)` when this was a meeting track; `None` otherwise.
+        /// `Some(meeting_id)` when this was a meeting track; `None` otherwise.
         #[serde(default)]
-        session_id: Option<String>,
+        meeting_id: Option<String>,
     },
     RecordingPaused {
         id: RecordingId,
@@ -263,8 +263,8 @@ pub enum DaemonEvent {
     NotesUpdated {
         id: RecordingId,
     },
-    SessionNameUpdated {
-        session_id: String,
+    MeetingNameUpdated {
+        meeting_id: String,
     },
     TagCreated {
         id: i64,

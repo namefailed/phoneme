@@ -22,10 +22,10 @@ export type Recording = {
   /** Free-form user notes, stored separately from the transcript. */
   notes?: string | null;
   /** Meeting-session link (v1.6). Two recordings of one meeting share this. */
-  session_id?: string | null;
+  meeting_id?: string | null;
   /** Which track of a meeting this is: "mic" or "system". Null otherwise. */
   track?: string | null;
-  session_name?: string | null;
+  meeting_name?: string | null;
 };
 
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
@@ -66,10 +66,10 @@ export async function semanticSearch(query: string, limit: number = 20): Promise
 
 /**
  * Fetch all recordings belonging to a single meeting session (the two tracks
- * sharing a `session_id`), ordered by track then start time.
+ * sharing a `meeting_id`), ordered by track then start time.
  */
-export async function listSession(sessionId: string): Promise<Recording[]> {
-  return await tauriInvoke<Recording[]>("list_session", { sessionId });
+export async function listSession(meetingId: string): Promise<Recording[]> {
+  return await tauriInvoke<Recording[]>("list_meeting", { meetingId });
 }
 
 /**
@@ -99,9 +99,9 @@ export async function recordResume(): Promise<void> {
   await tauriInvoke("record_resume");
 }
 
-export async function updateSessionName(sessionId: string, name: string | null): Promise<void> {
+export async function updateMeetingName(meetingId: string, name: string | null): Promise<void> {
   await tauriInvoke("ipc_request", {
-    req: { type: "update_session_name", session_id: sessionId, name },
+    req: { type: "update_meeting_name", meeting_id: meetingId, name },
   });
 }
 
@@ -116,15 +116,15 @@ export async function recordCancel(): Promise<void> {
 /**
  * Meeting Mode (v1.6): start a dual-track recording. The daemon captures the
  * microphone AND the system audio (WASAPI loopback) concurrently as two
- * separate recordings linked by a shared `session_id`. Returns the session id.
+ * separate recordings linked by a shared `meeting_id`. Returns the session id.
  */
-export async function startMeeting(): Promise<{ session_id: string }> {
-  return await tauriInvoke<{ session_id: string }>("start_meeting");
+export async function startMeeting(): Promise<{ meeting_id: string }> {
+  return await tauriInvoke<{ meeting_id: string }>("start_meeting");
 }
 
 /** Stop the active meeting. Both tracks are finalized and transcribed. */
-export async function stopMeeting(): Promise<{ session_id: string }> {
-  return await tauriInvoke<{ session_id: string }>("stop_meeting");
+export async function stopMeeting(): Promise<{ meeting_id: string }> {
+  return await tauriInvoke<{ meeting_id: string }>("stop_meeting");
 }
 
 export async function retranscribeRecording(id: string, model?: string): Promise<void> {

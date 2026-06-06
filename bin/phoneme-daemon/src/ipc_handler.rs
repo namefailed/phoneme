@@ -97,14 +97,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::StartMeeting => match state.recorder.start_meeting(state).await {
-            Ok(session_id) => Response::Ok(serde_json::json!({ "session_id": session_id })),
+            Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
                 message: e.to_string(),
             }),
         },
         Request::StopMeeting => match state.recorder.stop_meeting(state).await {
-            Ok(session_id) => Response::Ok(serde_json::json!({ "session_id": session_id })),
+            Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
             Err(e) => Response::Err(IpcError {
                 kind: error_to_kind(&e),
                 message: e.to_string(),
@@ -117,7 +117,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 state.recorder.start_meeting(state).await
             };
             match result {
-                Ok(session_id) => Response::Ok(serde_json::json!({ "session_id": session_id })),
+                Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
                     message: e.to_string(),
@@ -193,8 +193,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
-        Request::ListSession { session_id } => {
-            match state.catalog.list_by_session(&session_id).await {
+        Request::ListMeeting { meeting_id } => {
+            match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
@@ -289,16 +289,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
-        Request::UpdateSessionName { session_id, name } => {
+        Request::UpdateMeetingName { meeting_id, name } => {
             match state
                 .catalog
-                .update_session_name(&session_id, name.as_deref())
+                .update_meeting_name(&meeting_id, name.as_deref())
                 .await
             {
                 Ok(()) => {
                     state
                         .events
-                        .emit(DaemonEvent::SessionNameUpdated { session_id });
+                        .emit(DaemonEvent::MeetingNameUpdated { meeting_id });
                     Response::Ok(serde_json::Value::Null)
                 }
                 Err(e) => Response::Err(IpcError {
@@ -792,8 +792,8 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         transcribed_at: None,
         hook_ran_at: None,
         notes: None,
-        session_id: None,
-        session_name: None,
+        meeting_id: None,
+        meeting_name: None,
         track: None,
     };
     if let Err(e) = state.catalog.insert(&row).await {
@@ -825,7 +825,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         id: id.clone(),
         duration_ms,
         audio_path: audio_path.to_string_lossy().into_owned(),
-        session_id: None,
+        meeting_id: None,
     });
     tracing::info!(id = %id, source = %path, ms = duration_ms, "imported recording");
     Response::Ok(serde_json::json!({ "id": id.to_string() }))
