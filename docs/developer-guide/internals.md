@@ -158,19 +158,14 @@ left by a crash on startup.
 
 ## 🎨 Frontend (`frontend/`)
 
-Deliberately framework-less Vanilla TypeScript (Vite). Components are classes
-that build `innerHTML`.
+The frontend is intentionally built for performance and maintainability, leveraging web standards through **Lit** (TypeScript + Vite).
 
-- **`state/Store.ts`** — a tiny reactive store; components subscribe and re-render.
-- **`router.ts`** — switches between the main views.
+- **`state/Store.ts`** — a custom reactive store; components subscribe to state changes and trigger minimal DOM updates via Lit's decorators.
+- **`router.ts`** — simple hash-based router handling navigation between main views.
 - **`services/ipc.ts`** — the typed boundary to the Tauri commands.
-- **`services/events.ts`** — subscribes to `daemon-event` and dispatches to
-  handlers.
+- **`services/events.ts`** — subscribes to `daemon-event` streams and dispatches to handlers.
 
-> **Security invariant:** any dynamic / user-influenced string interpolated into
-> `innerHTML` **must** go through `escapeHtml` / `escapeAttr` (`utils/format.ts`).
-> Transcripts, notes, file paths, tag names, search terms, and session ids are
-> all attacker-influenced. `highlightMatch` escapes in every branch.
+> **Security invariant:** Lit's `html` tagged template literals provide automatic contextual escaping, protecting against XSS for most interpolations. However, when using `unsafeHTML` or manually manipulating the DOM, data must still go through `escapeHtml` / `escapeAttr` (`utils/format.ts`). Transcripts, notes, file paths, tag names, search terms, and meeting ids are all attacker-influenced. `highlightMatch` escapes in every branch.
 
 ## 🧪 Testing without hardware
 
