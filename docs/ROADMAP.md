@@ -157,6 +157,9 @@ clean base.*
 ### Data
 - [ ] **Cloud sync** (opt-in, user-controlled) — encrypted sync of the catalog to a user-owned S3/Backblaze bucket for multi-machine access; audio files excluded by default
 
+### Internal Quality
+- [ ] **Playwright E2E UI Coverage** — add a full End-to-End test suite using Playwright (or Tauri Webdriver) to interact with the frontend UI and exercise the actual Rust backend via IPC. To be implemented *after* the architecture stabilizes across macOS and Linux.
+
 ---
 
 ## 🌌 Long Term
