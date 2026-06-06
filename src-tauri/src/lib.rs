@@ -59,15 +59,42 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     use phoneme_core::RecordMode;
+                    use std::str::FromStr;
                     use tauri::Manager;
-                    use tauri_plugin_global_shortcut::ShortcutState;
+                    use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
                     let bridge = app.state::<Option<Bridge>>().inner().clone();
                     if let Some(bridge) = bridge {
-                        // Read live config to ensure toggle setting updates apply immediately
+                        // Read live config so toggle/combo changes apply immediately.
                         let current_config = phoneme_core::Config::read_or_default();
+
+                        // If the fired shortcut is the (enabled) meeting hotkey,
+                        // toggle a meeting on press and we're done. Meetings are
+                        // always toggle — Hold mode makes no sense for them.
+                        let meeting_combo = if current_config.meeting_hotkey.enabled {
+                            Shortcut::from_str(&current_config.meeting_hotkey.combo).ok()
+                        } else {
+                            None
+                        };
+                        if meeting_combo.as_ref() == Some(shortcut) {
+                            if event.state() == ShortcutState::Pressed {
+                                let bridge = bridge.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    if let Err(e) = bridge
+                                        .request(phoneme_ipc::Request::MeetingToggle)
+                                        .await
+                                    {
+                                        tracing::error!(
+                                            "failed to toggle meeting from hotkey: {e}"
+                                        );
+                                    }
+                                });
+                            }
+                            return;
+                        }
+
                         let mode = current_config.hotkey.mode;
 
                         match event.state() {
@@ -134,12 +161,22 @@ pub fn run() {
                     }
                 }
 
-                if bridge.config.hotkey.enabled {
+                if bridge.config.hotkey.enabled || bridge.config.meeting_hotkey.enabled {
                     use std::str::FromStr;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-                    if let Ok(shortcut) = Shortcut::from_str(&bridge.config.hotkey.combo) {
-                        if let Err(e) = app.handle().global_shortcut().register(shortcut) {
-                            tracing::error!("failed to register global hotkey: {e}");
+                    if bridge.config.hotkey.enabled {
+                        if let Ok(shortcut) = Shortcut::from_str(&bridge.config.hotkey.combo) {
+                            if let Err(e) = app.handle().global_shortcut().register(shortcut) {
+                                tracing::error!("failed to register record hotkey: {e}");
+                            }
+                        }
+                    }
+                    if bridge.config.meeting_hotkey.enabled {
+                        if let Ok(shortcut) = Shortcut::from_str(&bridge.config.meeting_hotkey.combo)
+                        {
+                            if let Err(e) = app.handle().global_shortcut().register(shortcut) {
+                                tracing::error!("failed to register meeting hotkey: {e}");
+                            }
                         }
                     }
                 }
@@ -158,6 +195,7 @@ pub fn run() {
             commands::stop_meeting,
             commands::record_pause,
             commands::record_resume,
+            commands::record_status,
             commands::retranscribe_recording,
             commands::import_recording,
             commands::refire_hook,
