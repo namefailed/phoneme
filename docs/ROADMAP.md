@@ -117,11 +117,12 @@ clean base.*
 
 *Focus: Completion of the v1.7.x milestone — CI quality, UX polish, and internal hardening.*
 
-- [x] **Synthetic audio CI backend** — full end-to-end CI test coverage via a `GeneratorSource` mock; drives CLI → daemon → capture → SQLite without hardware; closes the \"cpal device tests skipped in CI\" gap from v1.7.1.
+- [x] **Synthetic audio CI backend** — full end-to-end CI test coverage via a `GeneratorSource` mock; drives CLI → daemon → capture → SQLite without hardware; closes the "cpal device tests skipped in CI" gap from v1.7.1.
 - [x] **Meeting session indentation in recordings list** — expanded meeting groups visually indent their child tracks so standalone recordings are never confused with session members.
 - [x] **rustfmt / CI hygiene** — formatter enforced on all modified files; all branches merged to master; `v1.7.5` tagged clean.
-- [ ] **Local speaker diarization** — label Speaker A / Speaker B in Meeting Mode transcripts using a local diarization model alongside Whisper (moved to v2.0 backlog).
-- [ ] **Real-time word-by-word transcription** — upgrade the v1.6 streaming *preview* to true word-level streaming as you speak (moved to v2.0 backlog).
+- [x] **Lit web component migration** — removed all Shadow DOM styling isolation issues across all Modals and Views.
+
+*(Note: Local speaker diarization and real-time word-by-word transcription have been moved to the v2.0 backlog).*
 
 ---
 

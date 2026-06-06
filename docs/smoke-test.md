@@ -1,7 +1,7 @@
 # Manual smoke test (10 minutes)
 
-Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
-`%LOCALAPPDATA%\phoneme\`) before each release.
+> [!IMPORTANT]
+> Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and `%LOCALAPPDATA%\phoneme\`) before each release.
 
 ## Setup
 
@@ -60,9 +60,7 @@ Run this on a clean Windows VM (or fresh `%APPDATA%\phoneme\` and
   - [ ] Restart whisper-server. Within ~30 seconds the queue drains.
 - [ ] Disconnect microphone mid-recording. The daemon surfaces an error;
       tray shows red icon; Doctor view explains.
-- [ ] Edit `config.toml` with a bogus value (e.g., `recording.sample_rate = 7`)
-      and restart daemon. It refuses to start with a clear error pointing at
-      the offending key.
+- [ ] Edit `config.toml` with a bogus value (e.g., `recording.sample_rate = 7`) and restart daemon. It refuses to start with a clear error pointing at the offending key.
 
 ## Settings
 
