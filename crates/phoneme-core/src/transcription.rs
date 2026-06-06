@@ -100,10 +100,6 @@ impl Transcriber {
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.deepgram.com"),
                 whisper.api_key.expose_secret().trim().to_string(),
-                model_or(&whisper.model, "nova-2"),
-                timeout,
-                diarization.provider == crate::config::DiarizationBackend::Deepgram,
-            )),
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.assemblyai.com"),
@@ -111,6 +107,14 @@ impl Transcriber {
                 whisper.model.trim().to_string(),
                 timeout,
                 diarization.provider == crate::config::DiarizationBackend::Assemblyai,
+            )),
+            TranscriptionBackend::Deepgram => Box::new(DeepgramProvider::new(
+                self.http.clone(),
+                cloud_base_url(&whisper.api_url, "https://api.deepgram.com"),
+                whisper.api_key.expose_secret().trim().to_string(),
+                model_or(&whisper.model, "nova-2"),
+                timeout,
+                diarization.provider == crate::config::DiarizationBackend::Deepgram,
             )),
             TranscriptionBackend::Elevenlabs => Box::new(ElevenLabsProvider::new(
                 self.http.clone(),
@@ -318,7 +322,13 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             
         if self.local_diarize {
             if let Some(whisper_segments) = parsed.segments {
-                let pyannote_segs = crate::diarization::run_local_diarization(audio_path)?;
+                let pyannote_segs = if let Err(e) = crate::diarization::run_local_diarization(audio_path) {
+                    tracing::warn!("local diarization failed, falling back to raw whisper: {}", e);
+                    vec![]
+                } else {
+                    tracing::info!("local diarization completed");
+                    crate::diarization::run_local_diarization(audio_path).map_err(|e| crate::error::Error::Internal(e.to_string()))?
+                };
                 let mut final_transcript = String::new();
                 let mut current_speaker = None;
                 
@@ -555,6 +565,7 @@ impl AssemblyAiProvider {
         api_key: impl Into<String>,
         model: impl Into<String>,
         timeout: Duration,
+        diarize: bool,
     ) -> Self {
         Self {
             http,
@@ -562,6 +573,7 @@ impl AssemblyAiProvider {
             api_key: api_key.into(),
             model: model.into(),
             timeout,
+            diarize,
         }
     }
 
