@@ -70,6 +70,7 @@ async fn client_receives_err_response() {
     let resp = client
         .request(Request::RecordStart {
             mode: phoneme_core::RecordMode::Hold,
+            in_place: false,
         })
         .await
         .expect("request");

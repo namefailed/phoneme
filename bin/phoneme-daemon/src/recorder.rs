@@ -1010,7 +1010,7 @@ mod tests {
         // this is safe to assert without real hardware.
         let err = state
             .recorder
-            .start(&state, RecordMode::Hold)
+            .start(&state, RecordMode::Hold, false)
             .await
             .expect_err("recording must be rejected during a meeting");
         assert!(matches!(err, Error::AlreadyRecording { .. }));
@@ -1030,6 +1030,7 @@ mod tests {
             audio_path: tmp.path().join("x.wav"),
             started_at: Local::now(),
             paused: false,
+            in_place: false,
         });
 
         let err = state
@@ -1056,6 +1057,7 @@ mod tests {
             started_at: Local::now(),
             duration_ms: 0,
             audio_path: audio_path.to_string_lossy().into_owned(),
+            in_place: false,
             transcript: None,
             model: None,
             status: RecordingStatus::Recording,

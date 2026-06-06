@@ -20,30 +20,34 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+function queryEl<T extends HTMLElement>(selector: string): T | null | undefined {
+  return document.querySelector("ph-tag-manager")?.shadowRoot?.querySelector<T>(selector);
+}
+
 describe("openTagManager", () => {
   it("opens a centered modal with the tag manager body", async () => {
     const p = openTagManager();
     await vi.waitFor(() =>
-      expect(document.querySelector(".tag-mgr-dialog")).toBeTruthy(),
+      expect(queryEl(".tag-mgr-dialog")).toBeTruthy(),
     );
-    expect(document.querySelector("#tm-title")?.textContent).toContain("Manage Tags");
+    expect(queryEl("#tm-title")?.textContent).toContain("Manage Tags");
     // SectionTags rendered its add-tag control inside the modal body.
     await vi.waitFor(() =>
-      expect(document.querySelector("#new-tag-name")).toBeTruthy(),
+      expect(queryEl("#new-tag-name")).toBeTruthy(),
     );
 
-    (document.querySelector("#tm-close") as HTMLButtonElement).click();
+    queryEl<HTMLButtonElement>("#tm-close")!.click();
     await expect(p).resolves.toBeUndefined();
-    expect(document.querySelector(".modal-overlay")).toBeNull();
+    expect(queryEl(".modal-overlay")).toBeFalsy();
   });
 
   it("closes on Escape", async () => {
     const p = openTagManager();
     await vi.waitFor(() =>
-      expect(document.querySelector(".tag-mgr-dialog")).toBeTruthy(),
+      expect(queryEl(".tag-mgr-dialog")).toBeTruthy(),
     );
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await p;
-    expect(document.querySelector(".modal-overlay")).toBeNull();
+    expect(queryEl(".modal-overlay")).toBeFalsy();
   });
 });

@@ -172,7 +172,7 @@ mod tests {
         let mut cfg = Config::default();
         cfg.interface.theme = "tokyo-night".into();
         cfg.whisper.provider = crate::config::TranscriptionBackend::Openai;
-        cfg.whisper.api_key = "sk-test".into();
+        cfg.whisper.api_key = secrecy::SecretString::from("sk-test".to_string());
 
         save_profile_in(dir.path(), "work", &cfg).unwrap();
         let loaded = load_profile_in(dir.path(), "work").unwrap();

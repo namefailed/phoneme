@@ -95,23 +95,31 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 
 ---
 
-## 🔮 v1.7 — Local Intelligence & Internal Quality
+## ✅ v1.7.1 — Local Intelligence & Internal Quality (shipped)
 
 *Focus: solidify the full Windows feature set — especially local, on-device AI —
 and pay down internal debt, so the v2.0 cross-platform port inherits a complete,
 clean base.*
 
 ### Local AI (on-device, offline)
-- [ ] **Local semantic search** — bundle a local embedding model (e.g. all-MiniLM-L6-v2 via ONNX) + a vector index so you can search by *meaning* ("that idea about rust error handling last week"), not just exact text. Complements the existing FTS5 keyword search.
-- [ ] **Local speaker diarization** — label Speaker A / Speaker B in Meeting Mode transcripts using a local diarization model alongside Whisper (the offline equivalent of the AssemblyAI feature).
-- [ ] **Merged conversation view** — interleave a dual-track meeting's two transcripts by timestamp into one chronological "You:" / "Meeting:" conversation; exportable, and feedable to the LLM post-processor as a single context for summaries/action items. **Build this on Lit (below), not raw `innerHTML`** — interleaving two dynamic arrays while preserving interactive elements (play/edit state) is exactly the case manual DOM templating handles badly.
-- [ ] **Real-time word-by-word transcription** — upgrade the v1.6 streaming *preview* to true word-level streaming as you speak (`whisper-live` or a streaming-capable backend).
+- [x] **Local semantic search** — bundle a local embedding model (e.g. all-MiniLM-L6-v2 via ONNX) + a vector index so you can search by *meaning* ("that idea about rust error handling last week"), not just exact text. Complements the existing FTS5 keyword search.
+- [x] **Merged conversation view** — interleave a dual-track meeting's two transcripts by timestamp into one chronological "You:" / "Meeting:" conversation; exportable, and feedable to the LLM post-processor as a single context for summaries/action items. **Build this on Lit (below), not raw `innerHTML`** — interleaving two dynamic arrays while preserving interactive elements (play/edit state) is exactly the case manual DOM templating handles badly.
 
 ### Internal quality
-- [ ] **Frontend reactivity (Lit for complex views)** — the framework-less `Store.ts` pattern is great for flat lists/forms and stays. But adopt **Lit (Web Components)** for the complex, dynamically-reconciled views (the merged conversation timeline first) to get declarative rendering + automatic lifecycle/listener cleanup without a full React/Vue. Do this *before* the merged conversation view.
-- [ ] **Test audio backend for full CI E2E** — the `Source` trait already abstracts capture (`CpalSource` prod, `SyntheticSource` tests), and Meeting Mode is end-to-end testable via `start_meeting_with_sources`. Extend the same injection to the **single-recording** daemon path so a CI test can drive CLI → daemon → (mock sine/silence) capture → SQLite without hardware, closing the "cpal device tests skipped in CI" gap.
-- [ ] **Typed errors** — `thiserror` for the library crates, `anyhow` in the binaries, for clean `?` propagation and better traces.
-- [ ] **Paginated recordings list** — `ListFilter` has `limit` but no `offset`, and the GUI fetches the list unpaginated. At 5,000+ recordings that floods the named pipe and hydrates thousands of `RecordingsList` rows at once, locking the UI thread and ballooning memory. Add `offset` to `ListRecordings` + catalog `list()`, plus a "Load More" / `IntersectionObserver` infinite scroll in `RecordingsList.ts`. (Pairs with the Lit adoption above.)
+- [x] **Frontend reactivity (Lit for complex views)** — the framework-less `Store.ts` pattern is great for flat lists/forms and stays. But adopt **Lit (Web Components)** for the complex, dynamically-reconciled views (the merged conversation timeline first) to get declarative rendering + automatic lifecycle/listener cleanup without a full React/Vue. Do this *before* the merged conversation view.
+- [x] **Test audio backend for full CI E2E** — the `Source` trait already abstracts capture (`CpalSource` prod, `SyntheticSource` tests), and Meeting Mode is end-to-end testable via `start_meeting_with_sources`. Extend the same injection to the **single-recording** daemon path so a CI test can drive CLI → daemon → (mock sine/silence) capture → SQLite without hardware, closing the "cpal device tests skipped in CI" gap.
+- [x] **Typed errors** — `thiserror` for the library crates, `anyhow` in the binaries, for clean `?` propagation and better traces.
+- [x] **Paginated recordings list** — `ListFilter` has `limit` but no `offset`, and the GUI fetches the list unpaginated. At 5,000+ recordings that floods the named pipe and hydrates thousands of `RecordingsList` rows at once, locking the UI thread and ballooning memory. Add `offset` to `ListRecordings` + catalog `list()`, plus a "Load More" / `IntersectionObserver` infinite scroll in `RecordingsList.ts`. (Pairs with the Lit adoption above.)
+
+---
+
+## 🔮 v1.7.5 — Advanced Streaming & Diarization
+
+*Focus: Completion of the v1.7.x milestone with advanced models.*
+
+- [ ] **Local speaker diarization** — label Speaker A / Speaker B in Meeting Mode transcripts using a local diarization model alongside Whisper (the offline equivalent of the AssemblyAI feature).
+- [ ] **Real-time word-by-word transcription** — upgrade the v1.6 streaming *preview* to true word-level streaming as you speak (`whisper-live` or a streaming-capable backend).
+- [ ] **Hardware Detection & Toggles** — graceful degradation for power-intensive local ML models.
 
 ---
 

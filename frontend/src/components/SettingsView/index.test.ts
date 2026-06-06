@@ -7,8 +7,8 @@ describe("SettingsView", () => {
     const view = new SettingsView(container, vi.fn());
     
     // Manually inject a fake config string simulating a loaded config
-    (view as any).originalConfigStr = JSON.stringify({ test: "value" });
-    (view as any).config = { test: "value" };
+    (view as any).element.originalConfigStr = JSON.stringify({ test: "value" });
+    (view as any).element.config = { test: "value" };
     
     expect(view.canClose()).toBe(true);
   });
@@ -20,8 +20,8 @@ describe("SettingsView", () => {
     // Inject mock confirm function
     window.confirm = vi.fn(() => false);
 
-    (view as any).originalConfigStr = JSON.stringify({ test: "value" });
-    (view as any).config = { test: "modified" };
+    (view as any).element.originalConfigStr = JSON.stringify({ test: "value" });
+    (view as any).element.config = { test: "modified" };
     
     expect(view.canClose()).toBe(false);
     expect(window.confirm).toHaveBeenCalled();
@@ -34,8 +34,8 @@ describe("SettingsView", () => {
     // Inject mock confirm function returning true
     window.confirm = vi.fn(() => true);
 
-    (view as any).originalConfigStr = JSON.stringify({ test: "value" });
-    (view as any).config = { test: "modified" };
+    (view as any).element.originalConfigStr = JSON.stringify({ test: "value" });
+    (view as any).element.config = { test: "modified" };
     
     expect(view.canClose()).toBe(true);
     expect(window.confirm).toHaveBeenCalled();

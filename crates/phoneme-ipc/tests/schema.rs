@@ -14,12 +14,15 @@ where
 fn record_start_request_roundtrips() {
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Hold,
+        in_place: false,
     });
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Oneshot,
+        in_place: false,
     });
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Duration { secs: 30 },
+        in_place: false,
     });
 }
 

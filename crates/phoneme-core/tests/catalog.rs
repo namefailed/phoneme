@@ -10,6 +10,7 @@ fn sample_recording(id: RecordingId) -> Recording {
         started_at: Local.with_ymd_and_hms(2026, 5, 19, 14, 35, 0).unwrap(),
         duration_ms: 8470,
         audio_path: "C:/tmp/x.wav".into(),
+        in_place: false,
         transcript: None,
         model: None,
         status: RecordingStatus::Recording,

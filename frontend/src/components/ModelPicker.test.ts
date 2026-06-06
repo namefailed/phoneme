@@ -22,27 +22,31 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+function queryEl<T extends HTMLElement>(selector: string): T | null | undefined {
+  return document.querySelector("ph-model-picker")?.shadowRoot?.querySelector<T>(selector);
+}
+
 /** Cancel an open picker so its promise resolves and the DOM is cleaned up. */
 function cancel() {
-  document.querySelector<HTMLButtonElement>("#mp-cancel")!.click();
+  queryEl<HTMLButtonElement>("#mp-cancel")!.click();
 }
 
 describe("openModelPicker", () => {
   it("renders a centered modal (not anchored) when no anchor is given", async () => {
     const p = openModelPicker("transcription");
     await vi.waitFor(() =>
-      expect(document.querySelector(".modal-overlay")).toBeTruthy(),
+      expect(queryEl(".modal-overlay")).toBeTruthy(),
     );
 
-    const overlay = document.querySelector(".modal-overlay")!;
+    const overlay = queryEl(".modal-overlay")!;
     expect(overlay.classList.contains("mp-anchored")).toBe(false);
     // A centered modal does not get inline positioning.
-    const dialog = overlay.querySelector<HTMLElement>(".mp-dialog")!;
+    const dialog = queryEl<HTMLElement>(".mp-dialog")!;
     expect(dialog.style.top).toBe("");
 
     cancel();
     await expect(p).resolves.toBe(false);
-    expect(document.querySelector(".modal-overlay")).toBeNull();
+    expect(queryEl(".modal-overlay")).toBeFalsy();
   });
 
   it("renders as an anchored dropdown when an anchor element is given", async () => {
@@ -51,13 +55,13 @@ describe("openModelPicker", () => {
 
     const p = openModelPicker("transcription", anchor);
     await vi.waitFor(() =>
-      expect(document.querySelector(".modal-overlay")).toBeTruthy(),
+      expect(queryEl(".modal-overlay")).toBeTruthy(),
     );
 
-    const overlay = document.querySelector(".modal-overlay")!;
+    const overlay = queryEl(".modal-overlay")!;
     expect(overlay.classList.contains("mp-anchored")).toBe(true);
     // Anchored mode positions the dialog beneath the trigger via inline styles.
-    const dialog = overlay.querySelector<HTMLElement>(".mp-dialog")!;
+    const dialog = queryEl<HTMLElement>(".mp-dialog")!;
     expect(dialog.style.top).not.toBe("");
     expect(dialog.style.left).not.toBe("");
 
@@ -68,11 +72,11 @@ describe("openModelPicker", () => {
   it("opens on the requested tab", async () => {
     const p = openModelPicker("postprocessing");
     await vi.waitFor(() =>
-      expect(document.querySelector(".mp-tab.active")).toBeTruthy(),
+      expect(queryEl(".mp-tab.active")).toBeTruthy(),
     );
 
-    const active = document.querySelector(".mp-tab.active")!;
-    expect(active.getAttribute("data-tab")).toBe("postprocessing");
+    const active = queryEl(".mp-tab.active")!;
+    expect(active.textContent).toContain("Post-processing");
 
     cancel();
     await p;
