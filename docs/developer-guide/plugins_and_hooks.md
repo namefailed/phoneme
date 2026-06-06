@@ -1,10 +1,10 @@
-# Plugins and Hooks (Extensibility)
+# 🔌 Plugins and Hooks (Extensibility)
 
 Phoneme's philosophy is simple: **we transcribe your voice, you decide exactly where it goes.** 
 
 To achieve this, Phoneme is built around an extensible, script-based Hook system. While Phoneme v2.0 will introduce a formalized JSON Plugin Registry, the current architecture allows limitless integration by piping JSON directly to user-owned subprocesses.
 
-## The Hook Contract
+## 📜 The Hook Contract
 
 A "Hook" in Phoneme is simply an executable script (PowerShell, Python, Bash, Node, etc.). Phoneme commits to a single, dead-simple delivery mechanism: **the daemon executes your script and pipes the final transcript as JSON into `stdin`**.
 
@@ -15,7 +15,7 @@ A "Hook" in Phoneme is simply an executable script (PowerShell, Python, Bash, No
 | `stderr` | hook → daemon | Captured to `hook.log`; last 4 KB stored in catalog on failure |
 | exit code | hook → daemon | `0` = success; non-zero = failure |
 
-### Architecture Flow
+### 🏛️ Architecture Flow
 
 ```mermaid
 sequenceDiagram
@@ -32,7 +32,7 @@ sequenceDiagram
     deactivate H
 ```
 
-## The JSON Payload
+## 📦 The JSON Payload
 
 Every hook receives a JSON payload that looks like this:
 
@@ -52,11 +52,11 @@ Every hook receives a JSON payload that looks like this:
 }
 ```
 
-## Included Reference Hooks
+## 🎁 Included Reference Hooks
 
 Phoneme ships with several reference hooks out-of-the-box. On first run, they are copied to `%APPDATA%\phoneme\hooks\`. **The installer never overwrites them**, so feel free to edit them to learn how they work.
 
-### General-purpose
+### 🛠️ General-purpose
 
 | Hook | What it does |
 |---|---|
@@ -65,7 +65,7 @@ Phoneme ships with several reference hooks out-of-the-box. On first run, they ar
 | `to-file.ps1` | Appends every transcript to one running Markdown file. |
 | `to-markdown-daily.ps1` | Obsidian-style daily note format. |
 
-### Integrations
+### 🔗 Integrations
 
 | Hook | What it does |
 |---|---|
@@ -73,7 +73,7 @@ Phoneme ships with several reference hooks out-of-the-box. On first run, they ar
 | `summarize-with-ollama.ps1` | Uses a local Ollama model to summarize the transcript entirely offline. |
 | `to-todoist.ps1` | Creates a Todoist task from the note. Designed to be **keyword-triggered** on `"action item:"`. |
 
-## Keyword-Triggered Hooks
+## ⚡ Keyword-Triggered Hooks
 
 You can run specific plugins **only when the transcript matches a phrase**. Configure them in **Settings → Action Hook**, or directly in your `config.toml`:
 
@@ -90,7 +90,7 @@ case_sensitive = true
 
 Now, saying *"…action item: send Sarah the contract"* runs the Todoist plugin (which files the task), while ordinary notes are ignored. 
 
-## Writing Your Own Plugin
+## ⌨️ Writing Your Own Plugin
 
 Writing a plugin is trivial. Because Phoneme handles the audio capture, transcription, and LLM cleanup, your plugin only has to parse a JSON string from stdin.
 
@@ -122,7 +122,7 @@ phoneme hook test
 
 This runs your configured hook with a sample payload and prints the exit code, duration, stdout, and stderr.
 
-## Future Roadmap: The Plugin Marketplace
+## 🔮 Future Roadmap: The Plugin Marketplace
 
 While shell scripts offer incredible power, our v2.0 roadmap includes a formalized **Plugin Marketplace**. 
 
