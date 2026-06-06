@@ -285,6 +285,7 @@ pub fn run() {
             commands::wizard_list_downloaded_models,
             commands::wizard_download_server,
             commands::wizard_ping_ollama,
+            commands::wizard_detect_deps,
             commands::wizard_pull_ollama_model,
             commands::wizard_download_file,
             commands::wizard_run_installer,

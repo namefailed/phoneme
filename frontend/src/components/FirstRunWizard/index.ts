@@ -328,38 +328,53 @@ export class FirstRunWizardElement extends LitElement {
     const isRunning = await invoke<boolean>("wizard_ping_ollama");
 
     if (!isRunning) {
-      this.downloadSubtitle = "Downloading Ollama installer...";
-      this.progressValue = 0;
-      
-      let unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
-        if (e.payload.total) {
-          this.progressMax = e.payload.total;
-          this.progressValue = e.payload.downloaded;
-          this.downloadStatus = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+      const deps = await invoke<{ ollama: boolean }>("wizard_detect_deps").catch(() => ({ ollama: false }));
+
+      if (deps.ollama) {
+        this.downloadSubtitle = "Ollama is installed but not running. Please start Ollama manually!";
+        this.progressValue = null;
+        this.downloadStatus = "Waiting for Ollama to start...";
+
+        // Poll until ping succeeds
+        while (true) {
+          await new Promise(r => setTimeout(r, 2000));
+          const ok = await invoke<boolean>("wizard_ping_ollama");
+          if (ok) break;
         }
-      });
-
-      let installerPath: string;
-      try {
-        installerPath = await invoke<string>("wizard_download_file", {
-          url: "https://ollama.com/download/OllamaSetup.exe",
-          filename: "OllamaSetup.exe",
+      } else {
+        this.downloadSubtitle = "Downloading Ollama installer...";
+        this.progressValue = 0;
+        
+        let unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
+          if (e.payload.total) {
+            this.progressMax = e.payload.total;
+            this.progressValue = e.payload.downloaded;
+            this.downloadStatus = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+          }
         });
-      } finally {
-        unlisten();
-      }
 
-      this.downloadSubtitle = "Running Ollama installer. Please complete the setup window!";
-      this.progressValue = null;
-      this.downloadStatus = "Waiting for Ollama to start...";
+        let installerPath: string;
+        try {
+          installerPath = await invoke<string>("wizard_download_file", {
+            url: "https://ollama.com/download/OllamaSetup.exe",
+            filename: "OllamaSetup.exe",
+          });
+        } finally {
+          unlisten();
+        }
 
-      await invoke("wizard_run_installer", { path: installerPath });
+        this.downloadSubtitle = "Running Ollama installer. Please complete the setup window!";
+        this.progressValue = null;
+        this.downloadStatus = "Waiting for Ollama to start...";
 
-      // Poll until ping succeeds
-      while (true) {
-        await new Promise(r => setTimeout(r, 2000));
-        const ok = await invoke<boolean>("wizard_ping_ollama");
-        if (ok) break;
+        await invoke("wizard_run_installer", { path: installerPath });
+
+        // Poll until ping succeeds
+        while (true) {
+          await new Promise(r => setTimeout(r, 2000));
+          const ok = await invoke<boolean>("wizard_ping_ollama");
+          if (ok) break;
+        }
       }
     }
 
