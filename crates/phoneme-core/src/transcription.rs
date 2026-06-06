@@ -24,9 +24,13 @@ use tokio::fs;
 /// A transcription backend: turns an audio file into text.
 #[async_trait]
 pub trait TranscriptionProvider: Send + Sync {
-    /// Transcribe the audio at `audio_path`. `language` is an optional BCP-47
-    /// hint (`None` = auto-detect). Returns the transcript text.
+    /// Perform transcription on the target audio file, returning the text
+    /// string. This blocking/async method should return only when complete or
+    /// on failure.
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String>;
+
+    /// Returns true if the provider runs directly within the current process (i.e. whisper-rs).
+    fn is_native(&self) -> bool { false }
 }
 
 /// Owns the process-wide HTTP client and builds a [`TranscriptionProvider`]
@@ -55,16 +59,27 @@ impl Transcriber {
     pub fn provider(&self, whisper: &WhisperConfig, diarization: &crate::config::DiarizationConfig) -> Box<dyn TranscriptionProvider> {
         let timeout = Duration::from_secs(whisper.timeout_secs);
         match whisper.provider {
-            // Local whisper.cpp: no auth, no model field; endpoint resolved from
-            // mode / external_url / bundled settings.
-            TranscriptionBackend::Local => Box::new(OpenAiCompatProvider::new(
-                self.http.clone(),
-                whisper.server_base_url(),
-                None,
-                None,
-                timeout,
-                diarization.provider == crate::config::DiarizationBackend::Local,
-            )),
+            TranscriptionBackend::Local => {
+                #[cfg(feature = "native-whisper")]
+                {
+                    if let Some(path) = &whisper.model_path {
+                        if !path.trim().is_empty() {
+                            if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(std::path::Path::new(path)) {
+                                return Box::new(provider);
+                            }
+                        }
+                    }
+                }
+                
+                Box::new(OpenAiCompatProvider::new(
+                    self.http.clone(),
+                    whisper.server_base_url(),
+                    None,
+                    None,
+                    timeout,
+                    diarization.provider == crate::config::DiarizationBackend::Local,
+                ))
+            },
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.openai.com"),

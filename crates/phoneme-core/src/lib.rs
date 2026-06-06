@@ -8,6 +8,8 @@ pub mod error;
 pub mod hook;
 pub mod id;
 pub mod llm;
+#[cfg(feature = "native-whisper")]
+pub mod native_whisper;
 pub mod profiles;
 pub mod queue;
 pub mod tags;

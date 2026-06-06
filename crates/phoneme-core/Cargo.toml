@@ -25,6 +25,10 @@ ndarray = "0.17.2"
 secrecy.workspace = true
 speakrs = "0.4.2"
 hound.workspace = true
+whisper-rs = { version = "0.11", optional = true }
+
+[features]
+native-whisper = ["dep:whisper-rs"]
 
 [dev-dependencies]
 proptest.workspace = true

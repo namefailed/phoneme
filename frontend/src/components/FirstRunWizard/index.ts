@@ -110,16 +110,19 @@ export class FirstRunWizardElement extends LitElement {
         this.config._setup_ollama = true;
         this.config.semantic_search = { enabled: true };
         this.config._setup_diarization = true;
+        this.config._setup_native_streaming = true;
       } else if (this.systemRamMb >= 8000 || this.systemVramMb >= 4000) {
         this.config._setup_whisper = true;
         this.config._setup_ollama = false;
         this.config.semantic_search = { enabled: true };
         this.config._setup_diarization = false;
+        this.config._setup_native_streaming = false;
       } else {
         this.config._setup_whisper = true;
         this.config._setup_ollama = false;
         this.config.semantic_search = { enabled: false };
         this.config._setup_diarization = false;
+        this.config._setup_native_streaming = false;
       }
     }
     
@@ -155,6 +158,10 @@ export class FirstRunWizardElement extends LitElement {
               <option value="ggml-medium.en.bin">Medium (Accurate, ~1.5GB, 16GB RAM)</option>
               <option value="ggml-large-v3-turbo.bin">Large v3 Turbo (Best, ~1.6GB, 32GB RAM)</option>
             </select>
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
+              <input type="checkbox" id="setup-native-streaming" .checked=${this.config._setup_native_streaming} @change=${(e: Event) => { this.config._setup_native_streaming = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
+              <label for="setup-native-streaming" style="font-weight: 400; cursor: pointer; font-size: 0.9em;">Enable ultra-fast real-time streaming (Word-by-Word)</label>
+            </div>
           ` : html`
             <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud APIs (Deepgram/AssemblyAI/OpenAI).</div>
           `}
@@ -269,6 +276,8 @@ export class FirstRunWizardElement extends LitElement {
     }
 
     if (!this.config.whisper) this.config.whisper = {};
+    // If native streaming is selected, we could configure something specific.
+    // For now, it stays "local", the backend handles native streaming implicitly if the app is built with native-whisper.
     this.config.whisper.provider = "local";
     this.config.whisper.model_path = path;
     
