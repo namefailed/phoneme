@@ -353,7 +353,12 @@ impl DaemonRecorder {
     }
 
     /// Start a recording. Returns `AlreadyRecording` if one is in flight.
-    pub async fn start(&self, state: &AppState, mode: RecordMode, in_place: bool) -> Result<RecordingId> {
+    pub async fn start(
+        &self,
+        state: &AppState,
+        mode: RecordMode,
+        in_place: bool,
+    ) -> Result<RecordingId> {
         // A meeting owns both the microphone and the system-audio device. Refuse
         // to start a single-track recording while one is running — otherwise we
         // would open a second microphone stream concurrent with the meeting's
@@ -428,15 +433,23 @@ impl DaemonRecorder {
             Ok(d) => d,
             Err(e) => {
                 *self.active.lock().await = None;
-                if let Err(err) = state.catalog.delete(&id).await { tracing::warn!("failed to rollback catalog row: {err}"); }
+                if let Err(err) = state.catalog.delete(&id).await {
+                    tracing::warn!("failed to rollback catalog row: {err}");
+                }
                 return Err(e);
             }
         };
-        let source = match CpalSource::open_kind_with_grace(device, app_cfg.recording.source, STOP_TAIL_GRACE) {
+        let source = match CpalSource::open_kind_with_grace(
+            device,
+            app_cfg.recording.source,
+            STOP_TAIL_GRACE,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 *self.active.lock().await = None;
-                if let Err(err) = state.catalog.delete(&id).await { tracing::warn!("failed to rollback catalog row: {err}"); }
+                if let Err(err) = state.catalog.delete(&id).await {
+                    tracing::warn!("failed to rollback catalog row: {err}");
+                }
                 return Err(e);
             }
         };
@@ -452,14 +465,19 @@ impl DaemonRecorder {
             silence_window_ms: state.config.load().recording.silence_window_ms,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let recorder = match Recorder::start_with_prepend(Box::new(source), recorder_cfg, Some(tx), prepend).await {
-            Ok(r) => r,
-            Err(e) => {
-                *self.active.lock().await = None;
-                if let Err(err) = state.catalog.delete(&id).await { tracing::warn!("failed to rollback catalog row: {err}"); }
-                return Err(e);
-            }
-        };
+        let recorder =
+            match Recorder::start_with_prepend(Box::new(source), recorder_cfg, Some(tx), prepend)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    *self.active.lock().await = None;
+                    if let Err(err) = state.catalog.delete(&id).await {
+                        tracing::warn!("failed to rollback catalog row: {err}");
+                    }
+                    return Err(e);
+                }
+            };
         *self.handle.lock().await = Some(recorder);
 
         // If it's a self-terminating mode, spawn a task to auto-stop when the recorder task finishes natively.
@@ -501,7 +519,11 @@ impl DaemonRecorder {
 
         state
             .catalog
-            .update_status_and_duration(&active.id, RecordingStatus::Transcribing, result.duration_ms)
+            .update_status_and_duration(
+                &active.id,
+                RecordingStatus::Transcribing,
+                result.duration_ms,
+            )
             .await?;
 
         let payload = HookPayload {
@@ -826,7 +848,8 @@ impl DaemonRecorder {
                     if let Err(err) = state
                         .catalog
                         .update_status(&id, RecordingStatus::TranscribeFailed)
-                        .await {
+                        .await
+                    {
                         tracing::warn!(id = %id, error = %err, "failed to mark track as failed");
                     }
                     continue;

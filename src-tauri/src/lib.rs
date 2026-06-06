@@ -118,8 +118,13 @@ pub fn run() {
                                 ShortcutState::Released => {
                                     tauri::async_runtime::spawn(async move {
                                         if mode == phoneme_core::config::HotkeyMode::Hold {
-                                            if let Err(e) = bridge.request(phoneme_ipc::Request::RecordStop).await {
-                                                tracing::error!("failed to stop in-place record: {e}");
+                                            if let Err(e) = bridge
+                                                .request(phoneme_ipc::Request::RecordStop)
+                                                .await
+                                            {
+                                                tracing::error!(
+                                                    "failed to stop in-place record: {e}"
+                                                );
                                             }
                                         }
                                     });
@@ -195,7 +200,10 @@ pub fn run() {
                     }
                 }
 
-                if bridge.config.hotkey.enabled || bridge.config.meeting_hotkey.enabled || bridge.config.in_place_hotkey.enabled {
+                if bridge.config.hotkey.enabled
+                    || bridge.config.meeting_hotkey.enabled
+                    || bridge.config.in_place_hotkey.enabled
+                {
                     use std::str::FromStr;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
                     if bridge.config.hotkey.enabled {

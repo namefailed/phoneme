@@ -115,7 +115,12 @@ impl Catalog {
     }
 
     /// Update both status and duration in a single query.
-    pub async fn update_status_and_duration(&self, id: &RecordingId, status: RecordingStatus, duration_ms: i64) -> Result<()> {
+    pub async fn update_status_and_duration(
+        &self,
+        id: &RecordingId,
+        status: RecordingStatus,
+        duration_ms: i64,
+    ) -> Result<()> {
         sqlx::query(
             "UPDATE recordings SET status = ?, duration_ms = ?, updated_at = datetime('now') WHERE id = ?",
         )

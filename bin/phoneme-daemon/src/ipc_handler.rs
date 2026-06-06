@@ -87,13 +87,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 "meeting": meeting_active,
             }))
         }
-        Request::RecordStart { mode, in_place } => match state.recorder.start(state, mode.into(), in_place).await {
-            Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
-        },
+        Request::RecordStart { mode, in_place } => {
+            match state.recorder.start(state, mode.into(), in_place).await {
+                Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::StartMeeting => match state.recorder.start_meeting(state).await {
             Ok(session_id) => Response::Ok(serde_json::json!({ "session_id": session_id })),
             Err(e) => Response::Err(IpcError {
@@ -280,9 +282,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::GetOriginalTranscript { id } => {
             match state.catalog.get_original_transcript(&id).await {
-                Ok(original) => {
-                    serialize_response(original)
-                }
+                Ok(original) => serialize_response(original),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
                     message: e.to_string(),

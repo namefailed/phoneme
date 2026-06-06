@@ -3,7 +3,7 @@
 //! Production code uses [`CpalSource`] which wraps a CPAL input stream;
 //! tests use [`SyntheticSource`] which is hand-fed sample buffers.
 
-use crate::convert::{downmix_to_mono_f32, f32_to_i16, i16_to_f32};
+use crate::convert::{downmix_to_mono_f32, f32_to_i16};
 use crate::format::{AudioConfig, SampleRate};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat as CpalSampleFormat, StreamConfig};
@@ -235,7 +235,9 @@ impl CpalSource {
                             &stream_cfg,
                             move |data: &[f32], _| {
                                 // Use pre-allocated buffer if available, else allocate.
-                                let mut buf = pool_rx.try_recv().unwrap_or_else(|_| Vec::with_capacity(data.len()));
+                                let mut buf = pool_rx
+                                    .try_recv()
+                                    .unwrap_or_else(|_| Vec::with_capacity(data.len()));
                                 buf.clear();
                                 buf.extend_from_slice(data);
                                 let _ = raw_tx.try_send(buf);
@@ -249,7 +251,9 @@ impl CpalSource {
                         device.build_input_stream(
                             &stream_cfg,
                             move |data: &[i16], _| {
-                                let mut buf = pool_rx.try_recv().unwrap_or_else(|_| Vec::with_capacity(data.len()));
+                                let mut buf = pool_rx
+                                    .try_recv()
+                                    .unwrap_or_else(|_| Vec::with_capacity(data.len()));
                                 buf.clear();
                                 // Cheap i16→f32 normalize is fine on the audio
                                 // thread (one float multiply per sample).
@@ -338,11 +342,14 @@ impl CpalSource {
 
             while let Some(mut raw) = raw_rx.recv().await {
                 if accumulator.len() + raw.len() > max_accumulator_len {
-                    tracing::warn!("audio accumulator overflow ({} frames), dropping buffered audio!", accumulator.len());
+                    tracing::warn!(
+                        "audio accumulator overflow ({} frames), dropping buffered audio!",
+                        accumulator.len()
+                    );
                     accumulator.clear();
                 }
                 accumulator.extend_from_slice(&raw);
-                
+
                 // Recycle buffer
                 raw.clear();
                 let _ = pool_tx.try_send(raw);

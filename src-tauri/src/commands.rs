@@ -106,7 +106,14 @@ pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, String>
             }
         }
     };
-    forward(&bridge, Request::RecordStart { mode, in_place: false }).await
+    forward(
+        &bridge,
+        Request::RecordStart {
+            mode,
+            in_place: false,
+        },
+    )
+    .await
 }
 
 /// Signal the daemon to cleanly stop the current recording and begin transcription.
@@ -665,7 +672,7 @@ pub fn wizard_get_system_info() -> SystemInfo {
     let mut sys = sysinfo::System::new_all();
     sys.refresh_memory();
     let ram_mb = sys.total_memory() / 1024 / 1024;
-    
+
     let mut vram_mb = 0;
     #[cfg(target_os = "windows")]
     {
@@ -682,10 +689,7 @@ pub fn wizard_get_system_info() -> SystemInfo {
         }
     }
 
-    SystemInfo {
-        ram_mb,
-        vram_mb,
-    }
+    SystemInfo { ram_mb, vram_mb }
 }
 
 #[tauri::command]

@@ -1,22 +1,12 @@
 import { LitElement, html, css, unsafeCSS } from 'lit';
 import { customElement } from 'lit/decorators.js';
-import modalStyles from './modal.css?inline';
-import tagManagerStyles from './tag-manager.css?inline';
-import settingsStyles from './SettingsView/styles.css?inline';
+
+
+
 import './SettingsView/SectionTags'; // Make sure the custom element is registered
 
 @customElement('ph-tag-manager')
 export class TagManagerElement extends LitElement {
-  static styles = [
-    unsafeCSS(settingsStyles),
-    unsafeCSS(modalStyles),
-    unsafeCSS(tagManagerStyles),
-    css`
-      :host {
-        display: block;
-      }
-    `
-  ];
 
   private keyHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape") this.close();

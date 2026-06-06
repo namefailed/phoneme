@@ -19,7 +19,10 @@ fn default_secret_string() -> SecretString {
     SecretString::from(String::new())
 }
 
-fn serialize_secret_string<S>(secret: &SecretString, serializer: S) -> std::result::Result<S::Ok, S::Error>
+fn serialize_secret_string<S>(
+    secret: &SecretString,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
@@ -99,7 +102,10 @@ pub struct LlmPostProcessConfig {
     /// The provider type to use: `none`, `ollama`, `openai`, `groq`, or `anthropic`.
     pub provider: String,
     /// API key for authentication, if required by the chosen provider.
-    #[serde(default = "default_secret_string", serialize_with = "serialize_secret_string")]
+    #[serde(
+        default = "default_secret_string",
+        serialize_with = "serialize_secret_string"
+    )]
     pub api_key: SecretString,
     /// Base URL for the API. If empty, the provider's default is used.
     #[serde(default)]
@@ -225,7 +231,10 @@ pub struct WhisperConfig {
     #[serde(default)]
     pub provider: TranscriptionBackend,
     /// API key for a cloud transcription provider (OpenAI/Groq). Ignored for `local`.
-    #[serde(default = "default_secret_string", serialize_with = "serialize_secret_string")]
+    #[serde(
+        default = "default_secret_string",
+        serialize_with = "serialize_secret_string"
+    )]
     pub api_key: SecretString,
     /// Cloud model identifier (e.g. `whisper-1` for OpenAI, `whisper-large-v3`
     /// for Groq). Empty uses the provider's default. Ignored for `local`.
@@ -788,7 +797,7 @@ pub fn ensure_config_dir() -> Result<PathBuf> {
     let pdirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| Error::Internal("Could not resolve home directory".into()))?;
     let config_dir = pdirs.config_dir();
-    
+
     if !config_dir.exists() {
         let mut builder = std::fs::DirBuilder::new();
         builder.recursive(true);
@@ -801,7 +810,7 @@ pub fn ensure_config_dir() -> Result<PathBuf> {
             .create(config_dir)
             .map_err(|e| Error::Internal(format!("Failed to create config dir: {e}")))?;
     }
-    
+
     Ok(config_dir.to_path_buf())
 }
 

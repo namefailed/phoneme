@@ -4,8 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 // We import styles inline. Note that the original DoctorView shared SettingsView/styles.css.
 // We'll import them both to be used as Lit Element styles.
-import settingsStyles from "../SettingsView/styles.css?inline";
-import doctorStyles from "./styles.css?inline";
+
+
 
 type CheckResult = {
   name: string;
@@ -16,16 +16,6 @@ type CheckResult = {
 
 @customElement('ph-doctor-view')
 export class DoctorViewElement extends LitElement {
-  static styles = [
-    unsafeCSS(settingsStyles),
-    unsafeCSS(doctorStyles),
-    css`
-      :host {
-        display: block;
-        height: 100%;
-      }
-    `
-  ];
 
   @property({ type: Object }) onClose!: () => void;
 
