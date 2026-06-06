@@ -661,6 +661,34 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
     Ok(semantic_dir.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+pub async fn wizard_download_diarization_model(window: tauri::Window) -> Result<(), String> {
+    // Diarization uses speakrs which downloads models automatically via hf-hub
+    // Since hf-hub blocks, we run it in a blocking task.
+    // The UI handles this as an indeterminate progress bar (total = null).
+    
+    let _ = window.emit(
+        "diarization_download_progress",
+        DownloadProgress { downloaded: 0, total: None },
+    );
+
+    tokio::task::spawn_blocking(move || {
+        // Just instantiating the pipeline triggers the download of the 500MB ONNX models to the hf cache
+        let _pipeline = speakrs::pipeline::OwnedDiarizationPipeline::from_pretrained(
+            speakrs::pipeline::ExecutionMode::Cpu
+        ).map_err(|e| format!("failed to download diarization models: {}", e))?;
+        Ok::<(), String>(())
+    }).await.map_err(|e| format!("spawn_blocking error: {}", e))??;
+
+    // Emit 100% completion so the wizard knows it's done
+    let _ = window.emit(
+        "diarization_download_progress",
+        DownloadProgress { downloaded: 1, total: Some(1) },
+    );
+    
+    Ok(())
+}
+
 #[derive(serde::Serialize)]
 pub struct SystemInfo {
     pub ram_mb: u64,

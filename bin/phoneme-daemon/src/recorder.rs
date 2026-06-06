@@ -21,7 +21,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 /// How often the streaming-preview loop transcribes the in-progress recording.
-const PREVIEW_INTERVAL: Duration = Duration::from_millis(2500);
+const PREVIEW_INTERVAL: Duration = Duration::from_millis(1000);
 
 /// How long to keep a recording's capture stream alive after a stop is
 /// requested, so the OS can hand over audio it had already buffered at stop
