@@ -121,7 +121,9 @@ impl HookRunner {
 /// like an unterminated quote) — better than crashing.
 fn split_command(s: &str) -> (String, Vec<String>) {
     let parts: Vec<String> = shlex::split(s).unwrap_or_else(|| {
-        tracing::warn!("shlex failed to parse hook command, falling back to whitespace split: {s:?}");
+        tracing::warn!(
+            "shlex failed to parse hook command, falling back to whitespace split: {s:?}"
+        );
         s.split_whitespace().map(String::from).collect()
     });
     let mut iter = parts.into_iter();

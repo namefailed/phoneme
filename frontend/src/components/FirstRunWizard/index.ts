@@ -3,22 +3,13 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../../utils/toast";
-import wizardStyles from "./styles.css?inline";
+
 
 export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "hook" | "hotkey" | "done";
 const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "hook", "hotkey", "done"];
 
 @customElement('ph-first-run-wizard')
 export class FirstRunWizardElement extends LitElement {
-  static styles = [
-    unsafeCSS(wizardStyles),
-    css`
-      :host {
-        display: block;
-        height: 100%;
-      }
-    `
-  ];
 
   @property({ type: Object }) onComplete!: () => void;
   @property({ type: Object }) config: any = null;

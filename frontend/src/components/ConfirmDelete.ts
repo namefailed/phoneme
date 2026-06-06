@@ -1,6 +1,6 @@
 import { LitElement, html, css, unsafeCSS } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
-import modalStyles from './modal.css?inline';
+
 
 export type ConfirmDeleteOpts = {
   title?: string;
@@ -12,14 +12,6 @@ export type ConfirmDeleteOpts = {
 
 @customElement('ph-confirm-delete')
 export class ConfirmDeleteElement extends LitElement {
-  static styles = [
-    unsafeCSS(modalStyles),
-    css`
-      :host {
-        display: block;
-      }
-    `
-  ];
 
   @property({ type: String }) modalTitle = "Delete Recording?";
   @property({ type: String }) bodyText = "This will permanently delete the recording and its audio file. This action cannot be undone.";

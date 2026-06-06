@@ -1,7 +1,7 @@
 import { LitElement, html, css, unsafeCSS, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
-import modalStyles from './modal.css?inline';
-import modelPickerStyles from './model-picker.css?inline';
+
+
 import { invoke } from '@tauri-apps/api/core';
 import { showToast } from '../utils/toast';
 
@@ -62,15 +62,6 @@ function localModelLabel(path: string): string {
 
 @customElement('ph-model-picker')
 export class ModelPickerElement extends LitElement {
-  static styles = [
-    unsafeCSS(modalStyles),
-    unsafeCSS(modelPickerStyles),
-    css`
-      :host {
-        display: block;
-      }
-    `
-  ];
 
   @property({ type: String }) initialTab: "transcription" | "postprocessing" = "transcription";
   @property({ type: Object }) anchor?: HTMLElement;

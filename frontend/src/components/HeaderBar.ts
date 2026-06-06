@@ -1,6 +1,6 @@
 import { LitElement, html, css, unsafeCSS } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
-import sharedStyles from './shared/styles.css?inline';
+
 import { filterStore, type UiFilter } from '../state/filter';
 import { listTags, type Tag } from '../services/ipc';
 import { invoke } from '@tauri-apps/api/core';
@@ -13,15 +13,6 @@ export type HeaderBarCallbacks = {
 
 @customElement('ph-header-bar')
 export class HeaderBarElement extends LitElement {
-  static styles = [
-    unsafeCSS(sharedStyles),
-    css`
-      :host {
-        display: block;
-        flex-shrink: 0;
-      }
-    `
-  ];
 
   @property({ type: Object })
   callbacks!: HeaderBarCallbacks;
