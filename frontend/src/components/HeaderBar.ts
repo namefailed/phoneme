@@ -64,15 +64,19 @@ export class HeaderBar {
       const eventName = p.event;
 
       if (eventName === "recording_started") {
-        // A meeting emits recording_started for each of its two tracks; those
-        // must not flip the single-record button into "Stop". The meeting flag
-        // is driven by the Meeting button itself.
-        if (!this.isMeeting) {
+        // A meeting emits recording_started for each of its two tracks, tagged
+        // with a `session_id`. Those must not flip the single-record button into
+        // "Stop". Keying off the event's own `session_id` is authoritative — it
+        // doesn't depend on the optimistic `isMeeting` flag being set in time
+        // (the race that broke meeting controls before v1.6.2).
+        if (!p.session_id) {
           this.setRecordingState(true, false);
           this.setPreview(null);
         }
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
-        if (!this.isMeeting) {
+        // Ignore meeting-track stops (tagged with session_id); also fall back to
+        // the isMeeting flag for deleted/cancelled events, which carry no marker.
+        if (!p.session_id && !this.isMeeting) {
           this.setRecordingState(false, false);
           this.setPreview(null);
         }
