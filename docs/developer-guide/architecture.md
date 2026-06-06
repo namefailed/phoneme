@@ -24,7 +24,7 @@ Phoneme is built as a highly modular, decoupled system. It is composed of three 
 ### 👻 The Daemon (`phoneme-daemon`)
 The core engine of Phoneme. It runs in the background (completely headless) and is responsible for:
 - Managing audio capture (`cpal`) from the microphone or, on Windows, the system-audio loopback device.
-- Dual-track **Meeting Mode** — capturing the microphone and system audio simultaneously as two recordings linked by a shared `session_id`.
+- Dual-track **Meeting Mode** — capturing the microphone and system audio simultaneously as two recordings linked by a shared `meeting_id`.
 - The **pre-roll** ring buffer (idle pre-capture) so the first syllable isn't clipped, and the optional **streaming preview** loop that periodically re-transcribes the in-progress recording.
 - **Importing** existing audio files (`.wav`/`.mp3`/`.m4a`) by decoding them to the canonical format and running them through the same pipeline.
 - Maintaining the SQLite database catalog.
@@ -71,7 +71,7 @@ Imported files skip steps 1–4: the file is decoded to the canonical format, co
 All three binaries speak the same protocol defined in `phoneme-ipc`:
 
 - **Transport:** a Windows named pipe (`\\.\pipe\phoneme-daemon`), framed as **newline-delimited JSON** (`JsonLineCodec`). Each line is one complete message.
-- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case), e.g. `{"type":"record_start", ...}`. Covers recording control, meeting control, catalog queries (`list_recordings`, `get_recording`, `list_session`), editing (`update_transcript`, `update_notes`), import, tags, and lifecycle (`reload_config`, `shutdown`).
+- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case), e.g. `{"type":"record_start", ...}`. Covers recording control, meeting control, catalog queries (`list_recordings`, `get_recording`, `list_meeting`), editing (`update_transcript`, `update_notes`), import, tags, and lifecycle (`reload_config`, `shutdown`).
 - **`Response`** — daemon → client, tagged on `"status"` with a `value` payload: either `Ok(value)` or `Err(IpcError)`. `IpcError` carries a machine-readable `kind` (`already_recording`, `not_found`, `whisper_unreachable`, …) plus a human message.
 - **`DaemonEvent`** — daemon → all subscribers, tagged on `"event"`. Clients send `subscribe_events` and then receive the one-way stream (`recording_started`, `transcription_partial`, `queue_depth_changed`, `notes_updated`, …). This is how the GUI stays in sync when the CLI drives the daemon, and vice versa.
 
@@ -81,7 +81,7 @@ Because the schema lives in one shared crate, the CLI, GUI backend, and daemon c
 
 The catalog is a single SQLite database (WAL mode, with an FTS5 full-text index over transcripts), managed through `sqlx` with versioned migrations in `phoneme-core/migrations`.
 
-- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`, `audio_path`, `transcript`, `original_transcript`, `model`, `status`, hook result columns, `notes`, and the meeting-link columns `session_id` + `track`. Standalone recordings have a null `session_id`; the two tracks of a meeting share one non-null `session_id` and differ by `track` (`mic` / `system`).
+- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`, `audio_path`, `transcript`, `original_transcript`, `model`, `status`, hook result columns, `notes`, and the meeting-link columns `meeting_id` + `track`. Standalone recordings have a null `meeting_id`; the two tracks of a meeting share one non-null `meeting_id` and differ by `track` (`mic` / `system`).
 - **`tags`** and **`recording_tags`** — colour-coded tags and their many-to-many attachments.
 - **FTS5 mirror** — kept in sync via triggers so `list_recordings` can do prefix search safely (the query string is sanitised into a robust `term* AND term*` form before it ever reaches SQLite).
 

@@ -79,7 +79,7 @@ impl Catalog {
             "INSERT INTO recordings (
                  id, started_at, duration_ms, audio_path, transcript, model, status,
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
-                 transcribed_at, hook_ran_at, notes, session_id, session_name, track, in_place
+                 transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
@@ -97,8 +97,8 @@ impl Catalog {
         .bind(r.transcribed_at.map(|d| d.to_rfc3339()))
         .bind(r.hook_ran_at.map(|d| d.to_rfc3339()))
         .bind(r.notes.as_deref())
-        .bind(r.session_id.as_deref())
-        .bind(r.session_name.as_deref())
+        .bind(r.meeting_id.as_deref())
+        .bind(r.meeting_name.as_deref())
         .bind(r.track.as_deref())
         .bind(r.in_place)
         .execute(&self.pool)
@@ -106,10 +106,10 @@ impl Catalog {
         Ok(())
     }
 
-    pub async fn update_session_name(&self, session_id: &str, name: Option<&str>) -> Result<()> {
-        sqlx::query("UPDATE recordings SET session_name = ?, updated_at = datetime('now') WHERE session_id = ?")
+    pub async fn update_meeting_name(&self, meeting_id: &str, name: Option<&str>) -> Result<()> {
+        sqlx::query("UPDATE recordings SET meeting_name = ?, updated_at = datetime('now') WHERE meeting_id = ?")
             .bind(name)
-            .bind(session_id)
+            .bind(meeting_id)
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -411,17 +411,17 @@ impl Catalog {
 
     /// Fetch all recordings belonging to a single meeting session.
     ///
-    /// Returns the rows that share `session_id`, ordered by `track` then
+    /// Returns the rows that share `meeting_id`, ordered by `track` then
     /// `started_at` so the two tracks of a meeting come back in a stable order
     /// (e.g. "mic" before "system", since "mic" < "system" lexicographically).
-    /// A `session_id` with no rows yields an empty `Vec` (not an error) — the
+    /// A `meeting_id` with no rows yields an empty `Vec` (not an error) — the
     /// caller treats that as "no such session".
-    pub async fn list_by_session(&self, session_id: &str) -> Result<Vec<Recording>> {
+    pub async fn list_by_meeting(&self, meeting_id: &str) -> Result<Vec<Recording>> {
         let rows = sqlx::query(
-            "SELECT * FROM recordings WHERE session_id = ? \
+            "SELECT * FROM recordings WHERE meeting_id = ? \
              ORDER BY track ASC, started_at ASC, id ASC",
         )
-        .bind(session_id)
+        .bind(meeting_id)
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(row_to_recording).collect()
@@ -688,8 +688,8 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
             .map(|s| parse_dt(&s))
             .transpose()?,
         notes: row.try_get("notes")?,
-        session_id: row.try_get("session_id")?,
-        session_name: row.try_get("session_name")?,
+        meeting_id: row.try_get("meeting_id")?,
+        meeting_name: row.try_get("meeting_name")?,
         track: row.try_get("track")?,
         in_place: row.try_get("in_place").unwrap_or(false),
     })
@@ -785,8 +785,8 @@ mod tests {
             transcribed_at: Some(Local::now()),
             hook_ran_at: Some(Local::now()),
             notes: None,
-            session_id: None,
-            session_name: None,
+            meeting_id: None,
+            meeting_name: None,
             track: None,
             in_place: false,
         };
@@ -839,8 +839,8 @@ mod tests {
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
-            session_id: None,
-            session_name: None,
+            meeting_id: None,
+            meeting_name: None,
             track: None,
             in_place: false,
         };
@@ -889,8 +889,8 @@ mod tests {
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
-            session_id: None,
-            session_name: None,
+            meeting_id: None,
+            meeting_name: None,
             track: None,
             in_place: false,
         };
@@ -935,16 +935,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn meeting_session_two_tracks_share_session_id_and_round_trip() {
+    async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         // Meeting Mode (v1.6): a meeting produces TWO recordings that share a
-        // freshly-minted session_id and differ only by `track`. Both must
+        // freshly-minted meeting_id and differ only by `track`. Both must
         // round-trip through insert/get/list, and a fresh single-track
         // recording must leave both columns NULL.
         let db = Catalog::open(Path::new("sqlite::memory:"))
             .await
             .expect("open db");
 
-        let session_id = "meeting-abc123".to_string();
+        let meeting_id = "meeting-abc123".to_string();
         let make = |track: &str| Recording {
             id: RecordingId::new(),
             started_at: Local::now(),
@@ -961,8 +961,8 @@ mod tests {
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
-            session_id: Some(session_id.clone()),
-            session_name: None,
+            meeting_id: Some(meeting_id.clone()),
+            meeting_name: None,
             track: Some(track.to_string()),
             in_place: false,
         };
@@ -971,16 +971,16 @@ mod tests {
         db.insert(&mic).await.expect("insert mic");
         db.insert(&system).await.expect("insert system");
 
-        // Each row round-trips with its session_id + track intact.
+        // Each row round-trips with its meeting_id + track intact.
         let got_mic = db.get(&mic.id).await.unwrap().unwrap();
         let got_sys = db.get(&system.id).await.unwrap().unwrap();
-        assert_eq!(got_mic.session_id.as_deref(), Some("meeting-abc123"));
+        assert_eq!(got_mic.meeting_id.as_deref(), Some("meeting-abc123"));
         assert_eq!(got_mic.track.as_deref(), Some("mic"));
-        assert_eq!(got_sys.session_id.as_deref(), Some("meeting-abc123"));
+        assert_eq!(got_sys.meeting_id.as_deref(), Some("meeting-abc123"));
         assert_eq!(got_sys.track.as_deref(), Some("system"));
 
-        // The two recordings share one session_id.
-        assert_eq!(got_mic.session_id, got_sys.session_id);
+        // The two recordings share one meeting_id.
+        assert_eq!(got_mic.meeting_id, got_sys.meeting_id);
 
         // A normal single-track recording leaves both columns NULL.
         let solo = Recording {
@@ -999,21 +999,21 @@ mod tests {
             transcribed_at: None,
             hook_ran_at: None,
             notes: None,
-            session_id: None,
-            session_name: None,
+            meeting_id: None,
+            meeting_name: None,
             track: None,
             in_place: false,
         };
         db.insert(&solo).await.expect("insert solo");
         let got_solo = db.get(&solo.id).await.unwrap().unwrap();
-        assert_eq!(got_solo.session_id, None);
+        assert_eq!(got_solo.meeting_id, None);
         assert_eq!(got_solo.track, None);
 
         // Both meeting rows are visible via list().
         let all = db.list(&ListFilter::default()).await.unwrap();
         let with_session: Vec<_> = all
             .iter()
-            .filter(|r| r.session_id.as_deref() == Some("meeting-abc123"))
+            .filter(|r| r.meeting_id.as_deref() == Some("meeting-abc123"))
             .collect();
         assert_eq!(with_session.len(), 2, "both meeting tracks must be listed");
     }

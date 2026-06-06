@@ -83,13 +83,13 @@ export class RecordingsView {
     await this.list.refresh();
     const s = this.state.get();
     const selectedId = s.selectedId;
-    if (selectedId && !s.recordings.some(r => r.id === selectedId || r.session_id === selectedId.replace("session:", ""))) {
+    if (selectedId && !s.recordings.some(r => r.id === selectedId || r.meeting_id === selectedId.replace("session:", ""))) {
       this.state.set({ ...s, selectedId: null });
       this.detail.clear();
-      this.mergedDetail.sessionId = "";
+      this.mergedDetail.meetingId = "";
     } else if (selectedId && !this.detail.hasDirtyEdits()) {
       if (selectedId.startsWith("session:")) {
-        this.mergedDetail.sessionId = selectedId.substring(8);
+        this.mergedDetail.meetingId = selectedId.substring(8);
       } else {
         void this.detail.show(selectedId);
       }
@@ -129,11 +129,11 @@ export class RecordingsView {
       singleContainer.style.display = "none";
       this.mergedDetail.style.display = "block";
       this.detail.clear();
-      this.mergedDetail.sessionId = id.substring(8);
+      this.mergedDetail.meetingId = id.substring(8);
     } else {
       this.mergedDetail.style.display = "none";
       singleContainer.style.display = "block";
-      this.mergedDetail.sessionId = "";
+      this.mergedDetail.meetingId = "";
       void this.detail.show(id);
     }
   }

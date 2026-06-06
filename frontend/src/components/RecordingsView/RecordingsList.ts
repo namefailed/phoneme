@@ -1,6 +1,6 @@
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listRecordings, semanticSearch, updateSessionName, type Recording } from "../../services/ipc";
+import { listRecordings, semanticSearch, updateMeetingName, type Recording } from "../../services/ipc";
 import { Store } from "../../state/store";
 import { filterStore } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
@@ -174,13 +174,13 @@ export class RecordingsListElement extends LitElement {
     this.requestUpdate();
   }
 
-  private async handleRenameSession(e: Event, sessionId: string, currentName: string | null) {
+  private async handleRenameSession(e: Event, meetingId: string, currentName: string | null) {
     e.stopPropagation();
     const newName = prompt("Enter a new name for this meeting session:", currentName || `Meeting — 2 tracks`);
     if (newName !== null) {
       const trimmed = newName.trim();
       try {
-        await updateSessionName(sessionId, trimmed === "" ? null : trimmed);
+        await updateMeetingName(meetingId, trimmed === "" ? null : trimmed);
         await this.refresh();
       } catch (err) {
         console.error("Failed to rename session:", err);
@@ -276,7 +276,7 @@ export class RecordingsListElement extends LitElement {
 
   private handleGroupCheckbox(e: Event, sid: string) {
     const cb = e.target as HTMLInputElement;
-    const memberIds = this.listState.recordings.filter((r) => r.session_id === sid).map((r) => r.id);
+    const memberIds = this.listState.recordings.filter((r) => r.meeting_id === sid).map((r) => r.id);
     if (cb.checked) {
       memberIds.forEach((mid) => this.multiSelected.add(mid));
     } else {
@@ -416,8 +416,8 @@ export class RecordingsListElement extends LitElement {
         return htmlRow;
       }
 
-      const expanded = this.expandedSessions.has(item.sessionId);
-      const header = this.renderGroupHeader(item.sessionId, item.tracks, expanded, gridTemplate);
+      const expanded = this.expandedSessions.has(item.meetingId);
+      const header = this.renderGroupHeader(item.meetingId, item.tracks, expanded, gridTemplate);
       if (!expanded) return header;
       
       const memberRows = item.tracks.map((r) => {
@@ -507,7 +507,7 @@ export class RecordingsListElement extends LitElement {
   }
 
   private renderGroupHeader(
-    sessionId: string,
+    meetingId: string,
     tracks: Recording[],
     expanded: boolean,
     gridTemplate: string
@@ -523,15 +523,15 @@ export class RecordingsListElement extends LitElement {
     const someChecked = selectedCount > 0 && selectedCount < count;
     
     const chevron = expanded ? "▾" : "▸";
-    const isActive = this.listState.selectedId === "session:" + sessionId;
+    const isActive = this.listState.selectedId === "session:" + meetingId;
 
     return html`
       <div 
         class="rec-group-head ${isActive ? "active" : ""}" 
-        data-session="${sessionId}" 
+        data-session="${meetingId}" 
         role="group" 
         aria-expanded="${expanded}"
-        @click=${(e: MouseEvent) => this.handleGroupClick(e, sessionId)}
+        @click=${(e: MouseEvent) => this.handleGroupClick(e, meetingId)}
       >
         <span class="col-checkbox">
           <input
@@ -540,13 +540,13 @@ export class RecordingsListElement extends LitElement {
             .checked=${allChecked}
             .indeterminate=${someChecked}
             aria-label="Select all tracks in this meeting"
-            @change=${(e: Event) => this.handleGroupCheckbox(e, sessionId)}
+            @change=${(e: Event) => this.handleGroupCheckbox(e, meetingId)}
           />
         </span>
         <span class="rec-group-label">
           <span class="rec-group-chevron">${chevron}</span>
-          <span class="rec-group-title">🎙 ${tracks[0].session_name ? tracks[0].session_name : `Meeting — ${count} tracks`}</span>
-          <button class="icon-btn" title="Rename Session" @click=${(e: Event) => this.handleRenameSession(e, sessionId, tracks[0].session_name ?? null)} style="padding: 2px; height: 20px; width: 20px; margin-left: 8px; font-size: 11px;">✏️</button>
+          <span class="rec-group-title">🎙 ${tracks[0].meeting_name ? tracks[0].meeting_name : `Meeting — ${count} tracks`}</span>
+          <button class="icon-btn" title="Rename Session" @click=${(e: Event) => this.handleRenameSession(e, meetingId, tracks[0].meeting_name ?? null)} style="padding: 2px; height: 20px; width: 20px; margin-left: 8px; font-size: 11px;">✏️</button>
           <span class="rec-group-meta" style="margin-left: 8px;">${day} · ${time}</span>
         </span>
       </div>

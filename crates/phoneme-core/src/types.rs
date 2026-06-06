@@ -48,7 +48,7 @@ pub enum RecordMode {
 /// Which track of a meeting session a recording belongs to.
 ///
 /// Stored in the catalog `track` column as a stable lowercase string. Two
-/// recordings sharing a `session_id` — one `Mic`, one `System` — make up one
+/// recordings sharing a `meeting_id` — one `Mic`, one `System` — make up one
 /// meeting (v1.6 Meeting Mode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -89,12 +89,12 @@ pub struct Recording {
     /// touched by (re-)transcription or AI post-processing.
     pub notes: Option<String>,
     /// Meeting-session link (v1.6). Two recordings produced by a single
-    /// "meeting" share the same `session_id`; normal single-track recordings
+    /// "meeting" share the same `meeting_id`; normal single-track recordings
     /// leave this `None`.
     #[serde(default)]
-    pub session_id: Option<String>,
+    pub meeting_id: Option<String>,
     #[serde(default)]
-    pub session_name: Option<String>,
+    pub meeting_name: Option<String>,
     /// Which track of a meeting session this recording is: `"mic"` (the user's
     /// microphone) or `"system"` (system/loopback audio). `None` for normal
     /// single-track recordings.

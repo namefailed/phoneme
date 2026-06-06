@@ -63,13 +63,13 @@ export class HeaderBarElement extends LitElement {
       const eventName = p.event;
 
       if (eventName === "recording_started") {
-        if (!p.session_id) {
+        if (!p.meeting_id) {
           this.isRecording = true;
           this.isPaused = false;
           this.previewText = null;
         }
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
-        if (!p.session_id && !this.isMeeting) {
+        if (!p.meeting_id && !this.isMeeting) {
           this.isRecording = false;
           this.isPaused = false;
           this.previewText = null;

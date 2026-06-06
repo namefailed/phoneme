@@ -22,8 +22,8 @@ fn sample_recording(id: RecordingId) -> Recording {
         transcribed_at: None,
         hook_ran_at: None,
         notes: None,
-        session_id: None,
-        session_name: None,
+        meeting_id: None,
+        meeting_name: None,
         track: None,
     }
 }
@@ -820,17 +820,17 @@ async fn llm_post_processing_does_not_overwrite_original_transcript() {
 // ── Session grouping (Meeting Mode, v1.6) ─────────────────────────────────────
 
 /// Build a recording belonging to a meeting session/track at a given time.
-fn meeting_track(started: chrono::DateTime<Local>, session_id: &str, track: &str) -> Recording {
+fn meeting_track(started: chrono::DateTime<Local>, meeting_id: &str, track: &str) -> Recording {
     let mut rec = sample_recording(RecordingId::from_datetime(started));
     rec.started_at = started;
-    rec.session_id = Some(session_id.to_string());
+    rec.meeting_id = Some(meeting_id.to_string());
     rec.track = Some(track.to_string());
-    rec.audio_path = format!("/tmp/{}-{track}.wav", session_id);
+    rec.audio_path = format!("/tmp/{}-{track}.wav", meeting_id);
     rec
 }
 
 #[tokio::test]
-async fn list_by_session_returns_both_tracks_ordered_by_track() {
+async fn list_by_meeting_returns_both_tracks_ordered_by_track() {
     let (_dir, catalog) = fresh_catalog().await;
     let start = Local.with_ymd_and_hms(2026, 5, 19, 14, 0, 0).unwrap();
 
@@ -844,26 +844,26 @@ async fn list_by_session_returns_both_tracks_ordered_by_track() {
     let solo = sample_recording(RecordingId::new());
     catalog.insert(&solo).await.unwrap();
 
-    let rows = catalog.list_by_session("sess-1").await.unwrap();
+    let rows = catalog.list_by_meeting("sess-1").await.unwrap();
     assert_eq!(rows.len(), 2, "exactly the two meeting tracks come back");
     // "mic" < "system" lexicographically, so mic is first.
     assert_eq!(rows[0].track.as_deref(), Some("mic"));
     assert_eq!(rows[1].track.as_deref(), Some("system"));
     assert!(
         rows.iter()
-            .all(|r| r.session_id.as_deref() == Some("sess-1")),
+            .all(|r| r.meeting_id.as_deref() == Some("sess-1")),
         "every row must belong to the queried session"
     );
 }
 
 #[tokio::test]
-async fn list_by_session_unknown_session_returns_empty() {
+async fn list_by_meeting_unknown_session_returns_empty() {
     let (_dir, catalog) = fresh_catalog().await;
     // A standalone (NULL session) recording exists, but no meeting.
     let solo = sample_recording(RecordingId::new());
     catalog.insert(&solo).await.unwrap();
 
-    let rows = catalog.list_by_session("no-such-session").await.unwrap();
+    let rows = catalog.list_by_meeting("no-such-session").await.unwrap();
     assert!(
         rows.is_empty(),
         "querying a session id with no rows yields an empty vec, not an error"
@@ -871,7 +871,7 @@ async fn list_by_session_unknown_session_returns_empty() {
 }
 
 #[tokio::test]
-async fn list_by_session_isolates_distinct_sessions() {
+async fn list_by_meeting_isolates_distinct_sessions() {
     let (_dir, catalog) = fresh_catalog().await;
     let start = Local.with_ymd_and_hms(2026, 5, 19, 14, 0, 0).unwrap();
     for track in ["mic", "system"] {
@@ -885,10 +885,10 @@ async fn list_by_session_isolates_distinct_sessions() {
             .unwrap();
     }
 
-    let a = catalog.list_by_session("sess-A").await.unwrap();
-    let b = catalog.list_by_session("sess-B").await.unwrap();
+    let a = catalog.list_by_meeting("sess-A").await.unwrap();
+    let b = catalog.list_by_meeting("sess-B").await.unwrap();
     assert_eq!(a.len(), 2);
     assert_eq!(b.len(), 2);
-    assert!(a.iter().all(|r| r.session_id.as_deref() == Some("sess-A")));
-    assert!(b.iter().all(|r| r.session_id.as_deref() == Some("sess-B")));
+    assert!(a.iter().all(|r| r.meeting_id.as_deref() == Some("sess-A")));
+    assert!(b.iter().all(|r| r.meeting_id.as_deref() == Some("sess-B")));
 }

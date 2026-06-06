@@ -2,9 +2,9 @@
  * Pure grouping logic for the recordings list (v1.6 Session Grouping).
  *
  * Meeting Mode records two tracks (microphone + system audio) that share a
- * non-null `session_id`. In the list we want to show those two rows as a single
+ * non-null `meeting_id`. In the list we want to show those two rows as a single
  * collapsible group instead of two flat rows. Standalone recordings (null
- * `session_id`) stay exactly as they were.
+ * `meeting_id`) stay exactly as they were.
  *
  * This module is deliberately DOM-free so the grouping behaviour can be
  * unit-tested without a renderer.
@@ -14,18 +14,18 @@ import type { Recording } from "../../services/ipc";
 /** A single standalone recording (no meeting session). */
 export type SingleItem = { kind: "single"; recording: Recording };
 
-/** A meeting: two-or-more recordings sharing one `session_id`. */
+/** A meeting: two-or-more recordings sharing one `meeting_id`. */
 export type GroupItem = {
   kind: "group";
-  sessionId: string;
+  meetingId: string;
   tracks: Recording[];
 };
 
 export type GroupedItem = SingleItem | GroupItem;
 
 /**
- * Group recordings that share a `session_id` into one `GroupItem`, preserving
- * the input order. Standalone recordings (null/empty `session_id`) become
+ * Group recordings that share a `meeting_id` into one `GroupItem`, preserving
+ * the input order. Standalone recordings (null/empty `meeting_id`) become
  * `SingleItem`s in place.
  *
  * Order is preserved by first appearance of each session: the group lands where
@@ -45,7 +45,7 @@ export function groupRecordings(recordings: Recording[]): GroupedItem[] {
   const groupIndex = new Map<string, number>();
 
   for (const rec of recordings) {
-    const sid = rec.session_id;
+    const sid = rec.meeting_id;
     if (!sid) {
       items.push({ kind: "single", recording: rec });
       continue;
@@ -53,7 +53,7 @@ export function groupRecordings(recordings: Recording[]): GroupedItem[] {
     const existing = groupIndex.get(sid);
     if (existing === undefined) {
       groupIndex.set(sid, items.length);
-      items.push({ kind: "group", sessionId: sid, tracks: [rec] });
+      items.push({ kind: "group", meetingId: sid, tracks: [rec] });
     } else {
       (items[existing] as GroupItem).tracks.push(rec);
     }
@@ -79,13 +79,13 @@ export function groupRecordings(recordings: Recording[]): GroupedItem[] {
  */
 export function visibleRecordings(
   items: GroupedItem[],
-  isExpanded: (sessionId: string) => boolean,
+  isExpanded: (meetingId: string) => boolean,
 ): Recording[] {
   const out: Recording[] = [];
   for (const item of items) {
     if (item.kind === "single") {
       out.push(item.recording);
-    } else if (isExpanded(item.sessionId)) {
+    } else if (isExpanded(item.meetingId)) {
       out.push(...item.tracks);
     }
   }

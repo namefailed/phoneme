@@ -70,11 +70,11 @@ pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, String> 
 }
 
 /// Fetch all recordings belonging to a single meeting session (the two tracks
-/// linked by a shared `session_id`), ordered by track then start time. Used by
+/// linked by a shared `meeting_id`), ordered by track then start time. Used by
 /// the recordings list to render a meeting as one collapsible group.
 #[tauri::command]
-pub async fn list_session(bridge: Br<'_>, session_id: String) -> Result<Value, String> {
-    forward(&bridge, Request::ListSession { session_id }).await
+pub async fn list_meeting(bridge: Br<'_>, meeting_id: String) -> Result<Value, String> {
+    forward(&bridge, Request::ListMeeting { meeting_id }).await
 }
 
 /// Delete a recording from the catalog.
@@ -130,7 +130,7 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
 
 /// Meeting Mode (v1.6): start a dual-track recording. The daemon captures the
 /// microphone AND the system audio (WASAPI loopback) concurrently as two
-/// separate recordings linked by a shared `session_id`. Returns `{ session_id }`.
+/// separate recordings linked by a shared `meeting_id`. Returns `{ meeting_id }`.
 #[tauri::command]
 pub async fn start_meeting(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::StartMeeting).await

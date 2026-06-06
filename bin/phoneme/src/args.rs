@@ -93,7 +93,7 @@ pub enum MeetingAction {
     /// Stop the active meeting; both tracks are finalized and transcribed.
     Stop,
     /// Rename a meeting session.
-    Rename { session_id: String, name: String },
+    Rename { meeting_id: String, name: String },
 }
 
 #[derive(Debug, clap::Args)]
