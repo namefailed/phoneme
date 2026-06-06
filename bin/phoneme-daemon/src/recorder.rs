@@ -429,21 +429,14 @@ impl DaemonRecorder {
 
         // Open the CPAL device and the audio Recorder.
         let app_cfg = state.config.load();
-        let device = match resolve_input_device(&app_cfg.recording.input_device) {
-            Ok(d) => d,
-            Err(e) => {
-                *self.active.lock().await = None;
-                if let Err(err) = state.catalog.delete(&id).await {
-                    tracing::warn!("failed to rollback catalog row: {err}");
-                }
-                return Err(e);
-            }
-        };
-        let source = match CpalSource::open_kind_with_grace(
-            device,
-            app_cfg.recording.source,
-            STOP_TAIL_GRACE,
-        ) {
+        let kind = app_cfg.recording.source;
+        let source = match make_source(|| {
+            CpalSource::open_kind_with_grace(
+                resolve_input_device(&app_cfg.recording.input_device)?,
+                kind,
+                STOP_TAIL_GRACE,
+            )
+        }) {
             Ok(s) => s,
             Err(e) => {
                 *self.active.lock().await = None;
@@ -466,7 +459,7 @@ impl DaemonRecorder {
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let recorder =
-            match Recorder::start_with_prepend(Box::new(source), recorder_cfg, Some(tx), prepend)
+            match Recorder::start_with_prepend(source, recorder_cfg, Some(tx), prepend)
                 .await
             {
                 Ok(r) => r,
