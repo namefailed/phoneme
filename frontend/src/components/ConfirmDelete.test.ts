@@ -8,11 +8,13 @@ vi.mock("./modal.css", () => ({}));
 const { confirmDelete } = await import("./ConfirmDelete");
 
 function getOverlay() {
-  return document.querySelector("ph-confirm-delete")?.shadowRoot?.querySelector(".modal-overlay") || null;
+  // ConfirmDelete uses createRenderRoot() { return this; } so it renders to light DOM
+  return document.querySelector("ph-confirm-delete")?.querySelector(".modal-overlay") || null;
 }
 
 function queryEl<T extends HTMLElement>(selector: string): T | null {
-  return document.querySelector("ph-confirm-delete")?.shadowRoot?.querySelector<T>(selector) || null;
+  // ConfirmDelete uses createRenderRoot() { return this; } so it renders to light DOM
+  return document.querySelector("ph-confirm-delete")?.querySelector<T>(selector) || null;
 }
 
 beforeEach(() => {
