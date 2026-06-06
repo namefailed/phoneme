@@ -704,10 +704,14 @@ pub fn wizard_get_system_info() -> SystemInfo {
     let mut vram_mb = 0;
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = std::process::Command::new("powershell")
-            .args(["-Command", "(Get-CimInstance Win32_VideoController | Measure-Object -Property AdapterRAM -Sum).Sum"])
-            .output()
-        {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-Command", "(Get-CimInstance Win32_VideoController | Measure-Object -Property AdapterRAM -Sum).Sum"])
+           .creation_flags(CREATE_NO_WINDOW);
+           
+        if let Ok(output) = cmd.output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Ok(bytes) = stdout.trim().parse::<u64>() {
