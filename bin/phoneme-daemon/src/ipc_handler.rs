@@ -108,6 +108,20 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::MeetingToggle => {
+            let result = if state.recorder.meeting_active().await {
+                state.recorder.stop_meeting(state).await
+            } else {
+                state.recorder.start_meeting(state).await
+            };
+            match result {
+                Ok(session_id) => Response::Ok(serde_json::json!({ "session_id": session_id })),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::RecordStop => match state.recorder.stop(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
             Err(e) => Response::Err(IpcError {

@@ -194,6 +194,14 @@ pub async fn daemon_status(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::DaemonStatus).await
 }
 
+/// Current capture status: `{ recording: bool, id: Option<String>, meeting: bool }`.
+/// Lets the UI re-sync its record/meeting buttons after a reload, since the
+/// daemon outlives the app window and a meeting may already be in progress.
+#[tauri::command]
+pub async fn record_status(bridge: Br<'_>) -> Result<Value, String> {
+    forward(&bridge, Request::RecordStatus).await
+}
+
 /// Read the application configuration directly from the local `config.toml` file.
 #[tauri::command]
 pub fn read_config() -> Result<Config, String> {
@@ -287,7 +295,14 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
     if config.hotkey.enabled {
         if let Ok(shortcut) = Shortcut::from_str(&config.hotkey.combo) {
             if let Err(e) = app.global_shortcut().register(shortcut) {
-                tracing::warn!("failed to register shortcut: {e}");
+                tracing::warn!("failed to register record shortcut: {e}");
+            }
+        }
+    }
+    if config.meeting_hotkey.enabled {
+        if let Ok(shortcut) = Shortcut::from_str(&config.meeting_hotkey.combo) {
+            if let Err(e) = app.global_shortcut().register(shortcut) {
+                tracing::warn!("failed to register meeting shortcut: {e}");
             }
         }
     }

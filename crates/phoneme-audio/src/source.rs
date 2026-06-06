@@ -10,6 +10,7 @@ use cpal::{SampleFormat as CpalSampleFormat, StreamConfig};
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// One block of i16 samples (already converted to Phoneme's canonical format:
@@ -120,10 +121,19 @@ impl CpalSource {
     /// uses the device's default *input* config and builds a normal input
     /// stream.
     pub fn open(device: cpal::Device) -> Result<Self> {
+        Self::open_with_grace(device, Duration::ZERO)
+    }
+
+    /// Like [`open`], but tears the stream down `tail_grace` after a stop is
+    /// requested so the audio still sitting in the OS capture buffer at stop
+    /// time is delivered instead of being discarded (avoids clipping the final
+    /// fraction of a second). Use `Duration::ZERO` for sources where the tail
+    /// is irrelevant (e.g. the rolling pre-roll buffer).
+    pub fn open_with_grace(device: cpal::Device, tail_grace: Duration) -> Result<Self> {
         let supported = device
             .default_input_config()
             .map_err(|e| Error::Internal(format!("cpal default_input_config: {e}")))?;
-        Self::open_with_config(device, supported)
+        Self::open_with_config(device, supported, tail_grace)
     }
 
     /// Open a capture source for the requested [`CaptureSource`].
@@ -133,9 +143,20 @@ impl CpalSource {
     /// - [`CaptureSource::SystemAudio`] ignores `device` and captures the
     ///   default *output* device in WASAPI loopback mode.
     pub fn open_kind(device: cpal::Device, kind: CaptureSource) -> Result<Self> {
+        Self::open_kind_with_grace(device, kind, Duration::ZERO)
+    }
+
+    /// Like [`open_kind`], but applies a `tail_grace` teardown delay (see
+    /// [`open_with_grace`]) so a manually-stopped recording keeps the audio that
+    /// was still buffered in the OS at stop time.
+    pub fn open_kind_with_grace(
+        device: cpal::Device,
+        kind: CaptureSource,
+        tail_grace: Duration,
+    ) -> Result<Self> {
         match kind {
-            CaptureSource::Microphone => Self::open(device),
-            CaptureSource::SystemAudio => Self::system_audio(),
+            CaptureSource::Microphone => Self::open_with_grace(device, tail_grace),
+            CaptureSource::SystemAudio => Self::system_audio_with_grace(tail_grace),
         }
     }
 
@@ -150,6 +171,12 @@ impl CpalSource {
     /// Returns a clear error on platforms / hosts without a usable default
     /// output device or loopback support.
     pub fn system_audio() -> Result<Self> {
+        Self::system_audio_with_grace(Duration::ZERO)
+    }
+
+    /// [`system_audio`] with a `tail_grace` teardown delay (see
+    /// [`open_with_grace`]).
+    pub fn system_audio_with_grace(tail_grace: Duration) -> Result<Self> {
         if !cfg!(windows) {
             return Err(Error::Internal(
                 "system-audio capture (WASAPI loopback) is only available on Windows in this build"
@@ -167,12 +194,13 @@ impl CpalSource {
         let supported = device
             .default_output_config()
             .map_err(|e| Error::Internal(format!("cpal default_output_config (loopback): {e}")))?;
-        Self::open_with_config(device, supported)
+        Self::open_with_config(device, supported, tail_grace)
     }
 
     fn open_with_config(
         device: cpal::Device,
         supported: cpal::SupportedStreamConfig,
+        tail_grace: Duration,
     ) -> Result<Self> {
         let device_sample_rate = supported.sample_rate().0;
         let device_channels = supported.channels() as usize;
@@ -254,8 +282,16 @@ impl CpalSource {
 
                 let _ = ready_tx.send(Ok(()));
 
-                // Block until stop is requested, then drop the stream.
+                // Block until stop is requested. Then, before tearing the
+                // stream down, wait out `tail_grace` so CPAL/WASAPI can deliver
+                // the frames it had already captured into the OS buffer at stop
+                // time — otherwise that trailing fraction of a second is dropped
+                // when the stream is destroyed (the recording sounds clipped at
+                // the end). Zero for sources that don't care about the tail.
                 let _ = stop_rx.recv();
+                if !tail_grace.is_zero() {
+                    std::thread::sleep(tail_grace);
+                }
                 drop(stream);
             })
             .map_err(|e| Error::Internal(format!("spawn cpal stream thread: {e}")))?;

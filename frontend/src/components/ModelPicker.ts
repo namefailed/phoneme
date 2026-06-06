@@ -65,6 +65,20 @@ const LLM_PROVIDERS: ProviderOption[] = [
   { value: "anthropic", label: "Anthropic Claude (cloud)" },
 ];
 
+/** Friendly label for a downloaded whisper.cpp model file path. Falls back to
+ *  the bare filename for anything not in the known-bundled set. */
+function localModelLabel(path: string): string {
+  const file = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  const map: Record<string, string> = {
+    "ggml-tiny.en.bin": "Tiny (English) — fastest, least accurate",
+    "ggml-base.en.bin": "Base (English) — fast",
+    "ggml-small.en.bin": "Small (English) — balanced",
+    "ggml-medium.en.bin": "Medium (English) — accurate, slower",
+    "ggml-large-v3.bin": "Large v3 — most accurate, slowest",
+  };
+  return map[file] ?? file;
+}
+
 function buildProviderOptions(
   providers: ProviderOption[],
   presets: Preset[],
@@ -139,6 +153,14 @@ async function run(
           ${buildProviderOptions(STT_PROVIDERS, STT_PRESETS, String(w.provider ?? "local"))}
         </select>
 
+        <div class="mp-row" data-stt-local>
+          <label class="mp-label" for="mp-stt-local-model">Local model</label>
+          <select id="mp-stt-local-model" class="mp-input">
+            <option value="">Loading downloaded models…</option>
+          </select>
+          <p class="mp-hint">Pick which downloaded whisper.cpp model runs. Bigger = more accurate but slower. Download more sizes in <b>Settings → Whisper</b>.</p>
+        </div>
+
         <div class="mp-row" data-stt-cloud>
           <label class="mp-label" for="mp-stt-key">API key</label>
           <input id="mp-stt-key" class="mp-input" type="password" value="${escapeAttr(String(w.api_key ?? ""))}" />
@@ -207,6 +229,8 @@ async function run(
   const sttModel = overlay.querySelector<HTMLInputElement>("#mp-stt-model")!;
   const sttKey = overlay.querySelector<HTMLInputElement>("#mp-stt-key")!;
   const sttCloud = overlay.querySelector<HTMLElement>("[data-stt-cloud]")!;
+  const sttLocal = overlay.querySelector<HTMLElement>("[data-stt-local]")!;
+  const sttLocalModel = overlay.querySelector<HTMLSelectElement>("#mp-stt-local-model")!;
 
   const llmProvider = overlay.querySelector<HTMLSelectElement>("#mp-llm-provider")!;
   const llmUrl = overlay.querySelector<HTMLInputElement>("#mp-llm-url")!;
@@ -222,6 +246,40 @@ async function run(
   const updateSttCloud = () => {
     sttCloud.style.display = sttRealProvider === "local" ? "none" : "";
   };
+  // The local-model strength picker only applies to the offline whisper.cpp
+  // backend; cloud providers expose their model via the free-text field above.
+  const updateSttLocal = () => {
+    sttLocal.style.display = sttRealProvider === "local" ? "" : "none";
+  };
+
+  // Populate the local-model dropdown with whatever whisper.cpp models are
+  // downloaded, preselecting the one currently configured (model_path).
+  void (async () => {
+    try {
+      const paths = (await invoke("wizard_list_downloaded_models")) as string[];
+      const current = String(w.model_path ?? "");
+      if (paths.length === 0) {
+        sttLocalModel.innerHTML = `<option value="">No models downloaded — get one in Settings → Whisper</option>`;
+      } else {
+        sttLocalModel.innerHTML = paths
+          .map(
+            (p) =>
+              `<option value="${escapeAttr(p)}" ${p === current ? "selected" : ""}>${escapeAttr(localModelLabel(p))}</option>`,
+          )
+          .join("");
+        // If the configured model isn't among the downloaded ones, keep it
+        // visible/selected so saving doesn't silently switch the model.
+        if (current && !paths.includes(current)) {
+          sttLocalModel.insertAdjacentHTML(
+            "afterbegin",
+            `<option value="${escapeAttr(current)}" selected>${escapeAttr(localModelLabel(current))} (current)</option>`,
+          );
+        }
+      }
+    } catch {
+      sttLocalModel.innerHTML = `<option value="">Failed to list downloaded models</option>`;
+    }
+  })();
   const updateLlmCloud = () => {
     const isCloud =
       llmRealProvider === "openai" ||
@@ -241,6 +299,7 @@ async function run(
       sttRealProvider = v;
     }
     updateSttCloud();
+    updateSttLocal();
   });
 
   llmProvider.addEventListener("change", () => {
@@ -257,6 +316,7 @@ async function run(
   });
 
   updateSttCloud();
+  updateSttLocal();
   updateLlmCloud();
 
   // Tabs
@@ -292,6 +352,10 @@ async function run(
     config.whisper.model = sttModel.value.trim();
     config.whisper.api_key = sttKey.value;
     config.whisper.api_url = sttUrl.value.trim();
+    // For the local backend, the chosen "model strength" is the GGML file path.
+    if (sttRealProvider === "local" && sttLocalModel.value) {
+      config.whisper.model_path = sttLocalModel.value;
+    }
 
     config.llm_post_process.provider = llmRealProvider;
     config.llm_post_process.model = llmModel.value.trim();
