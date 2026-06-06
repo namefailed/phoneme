@@ -765,6 +765,7 @@ mod tests {
             notes: None,
             session_id: None,
             track: None,
+            in_place: false,
         };
         db.insert(&r).await.expect("insert");
 
@@ -817,6 +818,7 @@ mod tests {
             notes: None,
             session_id: None,
             track: None,
+            in_place: false,
         };
         db.insert(&r).await.expect("insert");
 
@@ -865,6 +867,7 @@ mod tests {
             notes: None,
             session_id: None,
             track: None,
+            in_place: false,
         };
         db.insert(&r).await.expect("insert");
 
@@ -935,6 +938,7 @@ mod tests {
             notes: None,
             session_id: Some(session_id.clone()),
             track: Some(track.to_string()),
+            in_place: false,
         };
         let mic = make("mic");
         let system = make("system");
@@ -971,6 +975,7 @@ mod tests {
             notes: None,
             session_id: None,
             track: None,
+            in_place: false,
         };
         db.insert(&solo).await.expect("insert solo");
         let got_solo = db.get(&solo.id).await.unwrap().unwrap();

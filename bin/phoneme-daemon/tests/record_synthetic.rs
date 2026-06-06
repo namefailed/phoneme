@@ -28,6 +28,7 @@ async fn record_start_stop_creates_row_and_transcribes() {
         .client
         .request(Request::RecordStart {
             mode: phoneme_core::RecordMode::Hold,
+            in_place: false,
         })
         .await
         .unwrap();
