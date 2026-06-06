@@ -1,7 +1,6 @@
 import {
   getRecording,
   updateTranscript,
-  updateNotes,
   getOriginalTranscript,
   type Recording,
 } from "../../services/ipc";
@@ -16,6 +15,7 @@ import { showToast } from "../../utils/toast";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptEditor } from "./TranscriptEditor";
+import { NotesEditor } from "./NotesEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
 
 export class RecordingDetail {
@@ -23,6 +23,7 @@ export class RecordingDetail {
   private recording: Recording | null = null;
   private player = new WaveformPlayer();
   private editor: TranscriptEditor | null = null;
+  private notesEditor: NotesEditor | null = null;
   private onRefresh: () => void;
   private dirty = false;
 
@@ -45,6 +46,8 @@ export class RecordingDetail {
     this.recording = null;
     this.editor?.dispose();
     this.editor = null;
+    this.notesEditor?.dispose();
+    this.notesEditor = null;
     this.player.destroy();
     this.renderEmpty();
   }
@@ -83,8 +86,7 @@ export class RecordingDetail {
           </div>
         </div>
         <div class="notes-block" style="margin-top: 12px;">
-          <label for="notes-field" style="display: block; font-size: 11px; color: var(--fg-muted); margin-bottom: 4px;">Notes</label>
-          <textarea id="notes-field" rows="3" placeholder="Add notes for this recording…" style="width: 100%; box-sizing: border-box; resize: vertical; font: inherit;">${escapeHtml(r.notes ?? "")}</textarea>
+          <div id="notes-editor"></div>
         </div>
         <div class="detail-footer">
           ${stats ? `<span>${stats}</span>` : ""}
@@ -149,32 +151,12 @@ export class RecordingDetail {
       });
     });
 
-    // Notes: a plain textarea, kept entirely separate from the transcript
-    // editor. Saves on blur (and debounced while typing). Notes are stored in
-    // their own column and survive re-transcription / AI post-processing.
-    const notesField = this.container.querySelector<HTMLTextAreaElement>("#notes-field");
-    if (notesField) {
-      let lastSaved = r.notes ?? "";
-      const saveNotes = async () => {
-        const value = notesField.value;
-        if (value === lastSaved) return;
-        try {
-          await updateNotes(r.id, value);
-          lastSaved = value;
-          if (this.recording) this.recording.notes = value;
-        } catch (e) {
-          showToast(`Failed to save notes: ${String(e)}`, "error");
-        }
-      };
-      let debounce: ReturnType<typeof setTimeout> | undefined;
-      notesField.addEventListener("input", () => {
-        if (debounce) clearTimeout(debounce);
-        debounce = setTimeout(() => void saveNotes(), 800);
-      });
-      notesField.addEventListener("blur", () => {
-        if (debounce) clearTimeout(debounce);
-        void saveNotes();
-      });
+    // Notes: CodeMirror editor (respects editor.vim_mode like the transcript
+    // editor). Auto-saves on change (debounced) and on blur.
+    const notesRoot = this.container.querySelector<HTMLElement>("#notes-editor");
+    if (notesRoot) {
+      this.notesEditor?.dispose();
+      this.notesEditor = new NotesEditor(notesRoot, r.id, r.notes ?? "");
     }
   }
 

@@ -7,7 +7,7 @@ use phoneme_audio::device::resolve_input_device;
 use phoneme_audio::format::SampleRate;
 use phoneme_audio::preroll::PreRollBuffer;
 use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
-use phoneme_audio::source::{CpalSource, Source};
+use phoneme_audio::source::{CpalSource, GeneratorSource, Source};
 use phoneme_audio::wav;
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
@@ -34,6 +34,21 @@ const STOP_TAIL_GRACE: Duration = Duration::from_millis(150);
 /// a transcription on a fresh tick. At 16 kHz this is ~0.5 s — below that a
 /// re-transcription rarely changes the text enough to be worth the round trip.
 const PREVIEW_MIN_NEW_SAMPLES: usize = 8_000;
+
+/// Open the configured capture source, or a self-driving [`GeneratorSource`]
+/// when `PHONEME_AUDIO_BACKEND=synthetic` is set.
+///
+/// `open_cpal` is a closure that opens the real hardware source — it is only
+/// called when the synthetic backend is not active. This avoids naming the
+/// `cpal::Device` type directly in the daemon (cpal is a transitive-only dep).
+fn make_source(open_cpal: impl FnOnce() -> Result<CpalSource>) -> Result<Box<dyn Source>> {
+    if std::env::var("PHONEME_AUDIO_BACKEND").as_deref() == Ok("synthetic") {
+        // 1 600 frames = 100 ms blocks at 16 kHz — enough resolution to respond
+        // to stop() promptly without the test-harness timing being too tight.
+        return Ok(Box::new(GeneratorSource::new(1_600)));
+    }
+    Ok(Box::new(open_cpal()?))
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum RecordMode {
@@ -406,11 +421,13 @@ impl DaemonRecorder {
         // it for the recording. Empty when pre-roll is disabled (default path).
         let prepend = self.take_preroll_samples().await;
 
-        // Open the CPAL device and the audio Recorder.
+        // Open the configured capture source (or a GeneratorSource when
+        // PHONEME_AUDIO_BACKEND=synthetic is set for headless CI testing).
         let app_cfg = state.config.load();
         let device = resolve_input_device(&app_cfg.recording.input_device)?;
+        let kind = app_cfg.recording.source;
         let source =
-            CpalSource::open_kind_with_grace(device, app_cfg.recording.source, STOP_TAIL_GRACE)?;
+            make_source(|| CpalSource::open_kind_with_grace(device, kind, STOP_TAIL_GRACE))?;
         let audio_mode = match mode {
             RecordMode::Hold => AudioMode::Hold,
             RecordMode::Oneshot => AudioMode::Oneshot,
@@ -424,7 +441,7 @@ impl DaemonRecorder {
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let recorder =
-            Recorder::start_with_prepend(Box::new(source), recorder_cfg, Some(tx), prepend).await?;
+            Recorder::start_with_prepend(source, recorder_cfg, Some(tx), prepend).await?;
         *self.handle.lock().await = Some(recorder);
 
         *active = Some(ActiveRecording {
@@ -624,24 +641,26 @@ impl DaemonRecorder {
         let cfg = state.config.load();
         let device = resolve_input_device(&cfg.recording.input_device)?;
 
-        // Open both capture sources up front. If either fails we abort before
-        // mutating any state, so a failed meeting leaves the daemon idle.
-        // `open_kind(.., SystemAudio)` ignores the passed device and opens the
-        // default output device in WASAPI loopback mode.
-        let mic_source =
-            CpalSource::open_kind_with_grace(device, CaptureSource::Microphone, STOP_TAIL_GRACE)
-                .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
+        // Open both capture sources up front (or GeneratorSources in CI).
+        // If either fails we abort before mutating any state.
+        let mic_device = device;
+        let mic_source = make_source(|| {
+            CpalSource::open_kind_with_grace(mic_device, CaptureSource::Microphone, STOP_TAIL_GRACE)
+        })
+        .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
         let system_device = resolve_input_device(&cfg.recording.input_device)?;
-        let system_source = CpalSource::open_kind_with_grace(
-            system_device,
-            CaptureSource::SystemAudio,
-            STOP_TAIL_GRACE,
-        )
+        let system_source = make_source(|| {
+            CpalSource::open_kind_with_grace(
+                system_device,
+                CaptureSource::SystemAudio,
+                STOP_TAIL_GRACE,
+            )
+        })
         .map_err(|e| Error::Internal(format!("meeting: open system audio (loopback): {e}")))?;
 
         let sources: Vec<(MeetingTrack, Box<dyn Source>)> = vec![
-            (MeetingTrack::Mic, Box::new(mic_source)),
-            (MeetingTrack::System, Box::new(system_source)),
+            (MeetingTrack::Mic, mic_source),
+            (MeetingTrack::System, system_source),
         ];
         self.start_meeting_with_sources(state, sources).await
     }

@@ -50,6 +50,63 @@ impl SyntheticSource {
     }
 }
 
+/// A self-driving synthetic source that generates silence at real-time pace.
+///
+/// Unlike [`SyntheticSource`] (which is sink-fed by tests), `GeneratorSource`
+/// needs no external controller — it produces blocks of i16 zeros and sleeps
+/// for the corresponding wall-clock duration between blocks to mimic a live
+/// hardware source.  Used by the daemon when `PHONEME_AUDIO_BACKEND=synthetic`
+/// is set (CI / headless tests) so the recorder lifecycle can be exercised
+/// without real audio hardware.
+pub struct GeneratorSource {
+    cfg: AudioConfig,
+    block_frames: usize,
+    stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl GeneratorSource {
+    /// Create a source that yields `block_frames` frames of silence per call.
+    ///
+    /// `block_frames = 1600` gives 100 ms blocks at 16 kHz — enough resolution
+    /// for the recorder to respond to stop() promptly without spinning.
+    pub fn new(block_frames: usize) -> Self {
+        Self {
+            cfg: AudioConfig::phoneme_default(),
+            block_frames,
+            stopped: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Source for GeneratorSource {
+    fn config(&self) -> AudioConfig {
+        self.cfg
+    }
+
+    async fn next_block(&mut self) -> Result<Option<SampleBlock>> {
+        if self.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(None);
+        }
+        // Sleep for the real-time duration of one block so the recorder's drain
+        // loop terminates at a sane pace and the WAV output has realistic length.
+        let block_dur = std::time::Duration::from_secs_f64(
+            self.block_frames as f64 / self.cfg.sample_rate.as_u32() as f64,
+        );
+        tokio::time::sleep(block_dur).await;
+        if self.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(None);
+        }
+        Ok(Some(vec![0i16; self.block_frames]))
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+}
+
 /// Companion handle that tests use to push samples and then close.
 #[derive(Clone)]
 pub struct SyntheticSink {
