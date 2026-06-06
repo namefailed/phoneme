@@ -13,42 +13,6 @@ import { invoke } from "@tauri-apps/api/core";
 export class TranscriptEditorElement extends LitElement {
   protected createRenderRoot() { return this; }
 
-  static styles = css`
-    :host {
-      display: block;
-    }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-    }
-    .title {
-      font-size: 11px;
-      font-weight: bold;
-      text-transform: uppercase;
-      color: var(--fg-muted);
-    }
-    .vim-badge {
-      color: var(--accent);
-      font-size: 9px;
-      margin-left: 6px;
-      border: 1px solid var(--accent);
-      padding: 1px 4px;
-      border-radius: 4px;
-    }
-    .btn-save {
-      background: var(--accent);
-      color: var(--accent-fg);
-      border: none;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 11px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-  `;
-
   @property({ type: String }) recordingId = "";
   @property({ type: String }) initialText = "";
 
@@ -216,6 +180,41 @@ export class TranscriptEditorElement extends LitElement {
 
   render() {
     return html`
+      <style>
+        ph-transcript-editor {
+          display: block;
+        }
+        ph-transcript-editor .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+        ph-transcript-editor .title {
+          font-size: 11px;
+          font-weight: bold;
+          text-transform: uppercase;
+          color: var(--fg-muted);
+        }
+        ph-transcript-editor .vim-badge {
+          color: var(--accent);
+          font-size: 9px;
+          margin-left: 6px;
+          border: 1px solid var(--accent);
+          padding: 1px 4px;
+          border-radius: 4px;
+        }
+        ph-transcript-editor .btn-save {
+          background: var(--accent);
+          color: var(--accent-fg);
+          border: none;
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 11px;
+          cursor: pointer;
+          font-weight: bold;
+        }
+      </style>
       <div class="header">
         <span class="title">
           Transcript ${this.vimMode ? html`<span class="vim-badge">Vim Mode</span>` : ""}
