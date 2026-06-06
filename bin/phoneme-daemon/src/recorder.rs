@@ -459,9 +459,7 @@ impl DaemonRecorder {
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let recorder =
-            match Recorder::start_with_prepend(source, recorder_cfg, Some(tx), prepend)
-                .await
-            {
+            match Recorder::start_with_prepend(source, recorder_cfg, Some(tx), prepend).await {
                 Ok(r) => r,
                 Err(e) => {
                     *self.active.lock().await = None;
