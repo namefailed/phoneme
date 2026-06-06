@@ -82,9 +82,8 @@ pub fn run() {
                             if event.state() == ShortcutState::Pressed {
                                 let bridge = bridge.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    if let Err(e) = bridge
-                                        .request(phoneme_ipc::Request::MeetingToggle)
-                                        .await
+                                    if let Err(e) =
+                                        bridge.request(phoneme_ipc::Request::MeetingToggle).await
                                     {
                                         tracing::error!(
                                             "failed to toggle meeting from hotkey: {e}"
@@ -172,7 +171,8 @@ pub fn run() {
                         }
                     }
                     if bridge.config.meeting_hotkey.enabled {
-                        if let Ok(shortcut) = Shortcut::from_str(&bridge.config.meeting_hotkey.combo)
+                        if let Ok(shortcut) =
+                            Shortcut::from_str(&bridge.config.meeting_hotkey.combo)
                         {
                             if let Err(e) = app.handle().global_shortcut().register(shortcut) {
                                 tracing::error!("failed to register meeting hotkey: {e}");
