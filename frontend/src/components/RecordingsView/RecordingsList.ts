@@ -1,4 +1,4 @@
-import { listRecordings, type Recording } from "../../services/ipc";
+import { listRecordings, semanticSearch, type Recording } from "../../services/ipc";
 import { Store } from "../../state/store";
 import { filterStore } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
@@ -95,8 +95,15 @@ export class RecordingsList {
       if (!this.config) {
         this.config = await invoke("read_config");
       }
-      const rows = await listRecordings({ ...f, limit: this.pageSize, offset: 0 });
-      this.reachedEnd = rows.length < this.pageSize;
+      let rows: Recording[] = [];
+      if (f.search && f.semantic) {
+        const results = await semanticSearch(f.search, this.pageSize);
+        rows = results.map(r => r.recording);
+        this.reachedEnd = true;
+      } else {
+        rows = await listRecordings({ ...f, limit: this.pageSize, offset: 0 });
+        this.reachedEnd = rows.length < this.pageSize;
+      }
       // Prune any multi-selected ids that are no longer in the list.
       const ids = new Set(rows.map((r) => r.id));
       this.multiSelected.forEach((id) => {

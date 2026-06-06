@@ -18,8 +18,10 @@ export class ConfigureMode {
     
     if (mode === "none") {
       this.config.whisper.mode = "external";
-      this.cbs.onNext();
-      return;
+      if (!this.config.semantic_search?.enabled) {
+        this.cbs.onNext();
+        return;
+      }
     }
 
     this.body.innerHTML = `
@@ -42,6 +44,9 @@ export class ConfigureMode {
       }
       if (mode === "ollama" || mode === "both") {
         await this.doOllama();
+      }
+      if (this.config.semantic_search?.enabled) {
+        await this.doSemanticSearch();
       }
 
       this.body.querySelector<HTMLElement>("#download-title")!.textContent = "Setup complete!";
@@ -197,5 +202,39 @@ export class ConfigureMode {
     this.config.llm_post_process.provider = "ollama";
     this.config.llm_post_process.model = "llama3.2:3b";
     this.config.llm_post_process.api_url = "http://127.0.0.1:11434/api/generate";
+  }
+
+  private async doSemanticSearch() {
+    this.body.querySelector<HTMLElement>("#download-title")!.textContent = "Semantic Search Setup";
+    this.body.querySelector<HTMLElement>("#download-subtitle")!.textContent = "Fetching the all-MiniLM-L6-v2 ONNX model (~90MB)...";
+    this.body.querySelector<HTMLProgressElement>("#progress")!.value = 0;
+    this.body.querySelector<HTMLElement>("#status")!.textContent = "Starting download...";
+
+    let unlisten: (() => void) | undefined;
+    unlisten = await listen<{ downloaded: number; total: number | null }>("semantic_download_progress", (e) => {
+      const p = this.body.querySelector<HTMLProgressElement>("#progress")!;
+      const s = this.body.querySelector<HTMLElement>("#status")!;
+      if (e.payload.total) {
+        p.max = e.payload.total;
+        p.value = e.payload.downloaded;
+        s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB / ${(e.payload.total / 1024 / 1024).toFixed(1)} MB`;
+      } else {
+        p.removeAttribute("value");
+        s.textContent = `${(e.payload.downloaded / 1024 / 1024).toFixed(1)} MB downloaded`;
+      }
+    });
+
+    let path: string;
+    try {
+      path = await invoke<string>("wizard_download_semantic_model");
+    } finally {
+      if (unlisten) unlisten();
+    }
+
+    if (!this.config.semantic_search) {
+      this.config.semantic_search = {};
+    }
+    this.config.semantic_search.model_dir = path;
+    this.config.semantic_search.enabled = true;
   }
 }

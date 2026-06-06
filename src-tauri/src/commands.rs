@@ -56,6 +56,12 @@ pub async fn list_recordings(bridge: Br<'_>, filter: Option<ListFilter>) -> Resu
     forward(&bridge, Request::ListRecordings { filter }).await
 }
 
+/// Perform a semantic search across transcripts.
+#[tauri::command]
+pub async fn semantic_search(bridge: Br<'_>, query: String, limit: usize) -> Result<Value, String> {
+    forward(&bridge, Request::SemanticSearch { query, limit }).await
+}
+
 /// Fetch the details, tags, and transcript for a specific recording by its ID.
 #[tauri::command]
 pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
@@ -567,6 +573,85 @@ pub async fn wizard_download_model(
     }
 
     Ok(dest_path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<String, String> {
+    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| "could not resolve project directories".to_string())?;
+    let semantic_dir = dirs.data_local_dir().join("models").join("semantic");
+    tokio::fs::create_dir_all(&semantic_dir)
+        .await
+        .map_err(|e| format!("failed to create semantic model dir: {}", e))?;
+
+    let files = [
+        (
+            "model.onnx",
+            "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+        ),
+        (
+            "tokenizer.json",
+            "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/tokenizer.json",
+        ),
+    ];
+
+    for (filename, url) in files {
+        let dest_path = semantic_dir.join(filename);
+        if tokio::fs::metadata(&dest_path).await.is_ok() {
+            // Already downloaded this file
+            let _ = window.emit(
+                "semantic_download_progress",
+                DownloadProgress {
+                    downloaded: 1,
+                    total: Some(1),
+                },
+            );
+            continue;
+        }
+
+        let mut file = tokio::fs::File::create(&dest_path)
+            .await
+            .map_err(|e| format!("failed to create file: {}", e))?;
+
+        let response = reqwest::get(url)
+            .await
+            .map_err(|e| format!("request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "download failed with status: {}",
+                response.status()
+            ));
+        }
+
+        let total = response.content_length();
+        let mut downloaded: u64 = 0;
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    drop(file);
+                    let _ = tokio::fs::remove_file(&dest_path).await;
+                    return Err(format!("stream error: {}", e));
+                }
+            };
+            if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
+                drop(file);
+                let _ = tokio::fs::remove_file(&dest_path).await;
+                return Err(format!("write error: {}", e));
+            }
+            downloaded += chunk.len() as u64;
+
+            let _ = window.emit(
+                "semantic_download_progress",
+                DownloadProgress { downloaded, total },
+            );
+        }
+    }
+
+    Ok(semantic_dir.to_string_lossy().into_owned())
 }
 
 #[derive(serde::Serialize)]

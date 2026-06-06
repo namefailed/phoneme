@@ -48,9 +48,32 @@ pub struct Config {
     /// Settings for the optional LLM-powered transcript cleanup/post-processing pipeline.
     #[serde(default = "default_llm_post_process")]
     pub llm_post_process: LlmPostProcessConfig,
+    /// Optional semantic search indexing and querying parameters.
+    #[serde(default)]
+    pub semantic_search: SemanticSearchConfig,
     /// Automatic cleanup policy — delete old recordings by age or count.
     #[serde(default)]
     pub retention: RetentionConfig,
+}
+
+/// Settings for local semantic search via ONNX embeddings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SemanticSearchConfig {
+    /// Whether semantic search indexing is enabled. If true, the daemon will load
+    /// the ONNX model into memory at startup and embed all new transcripts.
+    pub enabled: bool,
+    /// Absolute path to the directory containing the ONNX model and tokenizer.
+    /// Example: `C:\Users\Namef\AppData\Local\phoneme\models\all-MiniLM-L6-v2`
+    pub model_dir: PathBuf,
+}
+
+impl Default for SemanticSearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model_dir: PathBuf::new(),
+        }
+    }
 }
 
 /// Configures the optional accessibility layer for post-processing transcriptions using an LLM.
@@ -560,6 +583,7 @@ impl Default for Config {
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
                 timeout_secs: 30,
             },
+            semantic_search: SemanticSearchConfig::default(),
             retention: RetentionConfig::default(),
         }
     }

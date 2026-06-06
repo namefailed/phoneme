@@ -80,6 +80,21 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
 
+    if let Some(embedder) = state.embedder.as_ref() {
+        match embedder.embed(&transcript) {
+            Ok(vec) => {
+                if let Err(e) = state.catalog.upsert_embedding(&id, &vec).await {
+                    tracing::warn!(error = %e, "Failed to save embedding to catalog");
+                } else {
+                    tracing::info!("Saved semantic embedding for {}", id.as_str());
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to embed transcript");
+            }
+        }
+    }
+
     // Hooks are optional. When `run_on_transcribe` is off, finalize the
     // recording right after transcription without firing hooks or the webhook;
     // the user can run them on demand later via "Re-fire hook". This is what

@@ -2,6 +2,7 @@
 
 pub mod catalog;
 pub mod config;
+pub mod embed;
 pub mod error;
 pub mod hook;
 pub mod id;
@@ -15,6 +16,7 @@ pub mod webhook;
 
 pub use catalog::Catalog;
 pub use config::Config;
+pub use embed::Embedder;
 pub use error::{Error, Result};
 pub use hook::{HookResult, HookRunner};
 pub use id::RecordingId;

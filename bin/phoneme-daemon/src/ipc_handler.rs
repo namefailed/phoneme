@@ -202,6 +202,39 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::SemanticSearch { query, limit } => {
+            if let Some(embedder) = state.embedder.as_ref() {
+                match embedder.embed(&query) {
+                    Ok(query_vec) => match state.catalog.semantic_search(&query_vec, limit).await {
+                        Ok(results) => {
+                            let mut full_results = Vec::new();
+                            for (id, score) in results {
+                                if let Ok(Some(r)) = state.catalog.get(&id).await {
+                                    full_results.push(serde_json::json!({
+                                        "recording": r,
+                                        "score": score,
+                                    }));
+                                }
+                            }
+                            Response::Ok(serde_json::Value::Array(full_results))
+                        }
+                        Err(e) => Response::Err(IpcError {
+                            kind: error_to_kind(&e),
+                            message: e.to_string(),
+                        }),
+                    },
+                    Err(e) => Response::Err(IpcError {
+                        kind: IpcErrorKind::Internal,
+                        message: format!("embedding failed: {e}"),
+                    }),
+                }
+            } else {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: "Semantic search is not enabled or model is missing.".to_string(),
+                })
+            }
+        }
         Request::DeleteRecording { id, keep_audio } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 // Delete the catalog row first. If it fails, report the error

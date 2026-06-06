@@ -124,6 +124,12 @@ pub enum Request {
     TagsFor {
         recording_id: RecordingId,
     },
+
+    // Semantic Search
+    SemanticSearch {
+        query: String,
+        limit: usize,
+    },
 }
 
 /// Daemon response. For most requests, a single Response is returned.

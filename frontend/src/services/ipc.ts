@@ -54,6 +54,15 @@ export async function getRecording(id: string): Promise<Recording> {
   return await tauriInvoke<Recording>("get_recording", { id });
 }
 
+export interface SemanticSearchResult {
+  recording: Recording;
+  score: number;
+}
+
+export async function semanticSearch(query: string, limit: number = 20): Promise<SemanticSearchResult[]> {
+  return await tauriInvoke<SemanticSearchResult[]>("semantic_search", { query, limit });
+}
+
 /**
  * Fetch all recordings belonging to a single meeting session (the two tracks
  * sharing a `session_id`), ordered by track then start time.
