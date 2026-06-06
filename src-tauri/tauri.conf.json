@@ -54,6 +54,7 @@
     "resources": [],
     "windows": {
       "wix": {
+        "upgradeCode": "E5F8A2B4-7C1D-4F3E-9A8B-2C4D6E8F0A1C",
         "fragmentPaths": ["../installer/wix-fragment.wxs"],
         "componentRefs": ["PhonemeHooksTemplates", "PhonemeBinaries", "PhonemePathEntry"]
       }
