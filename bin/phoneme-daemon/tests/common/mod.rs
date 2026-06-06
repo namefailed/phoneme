@@ -53,6 +53,9 @@ impl DaemonHarness {
         cfg.whisper.mode = phoneme_core::config::WhisperMode::External;
         cfg.whisper.external_url = whisper.uri();
         cfg.recording.audio_dir = temp.path().join("audio").to_string_lossy().into_owned();
+        cfg.recording.silence_threshold_dbfs = -100.0;
+        cfg.recording.silence_window_ms = 100;
+        cfg.hook.commands.clear();
         cfg.daemon.pipe_name = pipe_name.clone();
         customize(&mut cfg);
         let cfg_path = temp.path().join("config.toml");
@@ -64,8 +67,6 @@ impl DaemonHarness {
             .arg("--foreground")
             .env("PHONEME_CONFIG", &cfg_path)
             .env("PHONEME_DATA_LOCAL", temp.path().join("data"))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
 

@@ -97,7 +97,7 @@ impl Source for GeneratorSource {
         if self.stopped.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(None);
         }
-        Ok(Some(vec![0i16; self.block_frames]))
+        Ok(Some(vec![1000i16; self.block_frames]))
     }
 
     async fn stop(&mut self) -> Result<()> {
