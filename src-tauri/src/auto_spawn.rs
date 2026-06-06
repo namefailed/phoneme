@@ -20,12 +20,15 @@ const POLL_INTERVAL: Duration = Duration::from_millis(150);
 /// allocating the new process and its pipe server handle.
 const SPAWN_SETTLE: Duration = Duration::from_millis(400);
 
+/// Bounded request: never let a wedged/non-responding daemon hang startup.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Whether the daemon reachable on `t` reports the same version as this build.
-/// A daemon that doesn't return a `version` (older than 1.6.1) counts as a
-/// mismatch and should be restarted.
+/// A daemon that doesn't return a `version` (older than 1.6.1) — or that doesn't
+/// answer within `PROBE_TIMEOUT` — counts as a mismatch and should be restarted.
 async fn daemon_version_matches(t: &mut NamedPipeTransport) -> bool {
-    match t.request(Request::DaemonStatus).await {
-        Ok(Response::Ok(v)) => {
+    match tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::DaemonStatus)).await {
+        Ok(Ok(Response::Ok(v))) => {
             v.get("version").and_then(|x| x.as_str()) == Some(env!("CARGO_PKG_VERSION"))
         }
         _ => false,
@@ -63,7 +66,7 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
             return Ok(());
         }
         tracing::warn!("running daemon is a different version; restarting it");
-        let _ = t.request(Request::Shutdown).await;
+        let _ = tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::Shutdown)).await;
         drop(t);
         wait_for_pipe_gone(&cfg.daemon.pipe_name).await;
     }
@@ -159,21 +162,42 @@ mod tests {
         format!("phoneme-autospawn-test-{label}-{pid}-{ns}")
     }
 
-    /// Fast path: if the pipe is already reachable, ensure_running returns Ok
-    /// immediately without trying to spawn anything.
+    /// Reuse path: a reachable daemon that reports a MATCHING version is reused —
+    /// ensure_running returns Ok without trying to spawn anything. The mock
+    /// daemon answers `DaemonStatus` with this build's version.
     #[tokio::test]
-    async fn fast_path_returns_ok_when_pipe_reachable() {
-        let name = unique_pipe("fast");
-        // Bind a listener so the pipe exists.
-        let _listener = NamedPipeListener::bind(&name).expect("bind");
+    async fn reuses_matching_version_daemon() {
+        let name = unique_pipe("match");
+        let mut listener = NamedPipeListener::bind(&name).expect("bind");
+
+        // Mock daemon: answer DaemonStatus with our own version so the version
+        // check passes and ensure_running takes the reuse fast path.
+        let responder = tokio::spawn(async move {
+            if let Ok(mut conn) = listener.accept().await {
+                while let Ok(Some(req)) = conn.recv().await {
+                    let res = match req {
+                        Request::DaemonStatus => Response::Ok(serde_json::json!({
+                            "running": true,
+                            "pid": 0,
+                            "version": env!("CARGO_PKG_VERSION"),
+                        })),
+                        _ => Response::Ok(serde_json::Value::Null),
+                    };
+                    if conn.send_response(res).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
 
         let mut cfg = phoneme_core::Config::default();
         cfg.daemon.pipe_name = name;
 
         let result = ensure_running(&cfg).await;
+        responder.abort();
         assert!(
             result.is_ok(),
-            "expected Ok when pipe is already up: {result:?}"
+            "a matching-version daemon should be reused: {result:?}"
         );
     }
 
