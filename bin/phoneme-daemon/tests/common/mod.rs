@@ -2,7 +2,6 @@
 
 use phoneme_ipc::NamedPipeTransport;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::process::{Child, Command};

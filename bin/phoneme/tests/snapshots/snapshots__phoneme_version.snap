@@ -2,4 +2,4 @@
 source: bin/phoneme/tests/snapshots.rs
 expression: stdout
 ---
-phoneme 1.7.1
+phoneme 1.7.5

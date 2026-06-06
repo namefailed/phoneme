@@ -7,7 +7,7 @@ use phoneme_audio::device::resolve_input_device;
 use phoneme_audio::format::SampleRate;
 use phoneme_audio::preroll::PreRollBuffer;
 use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
-use phoneme_audio::source::{CpalSource, Source};
+use phoneme_audio::source::{CpalSource, GeneratorSource, Source};
 use phoneme_audio::wav;
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
@@ -34,6 +34,18 @@ const STOP_TAIL_GRACE: Duration = Duration::from_millis(150);
 /// a transcription on a fresh tick. At 16 kHz this is ~0.5 s — below that a
 /// re-transcription rarely changes the text enough to be worth the round trip.
 const PREVIEW_MIN_NEW_SAMPLES: usize = 8_000;
+
+/// Open a [`Source`] for the current recording: returns a real CPAL source in
+/// production and a [`GeneratorSource`] when `PHONEME_AUDIO_BACKEND=synthetic`
+/// is set (CI / headless tests).
+fn make_source(open_cpal: impl FnOnce() -> Result<CpalSource>) -> Result<Box<dyn Source>> {
+    if std::env::var("PHONEME_AUDIO_BACKEND").as_deref() == Ok("synthetic") {
+        // 1 600 frames = 100 ms blocks at 16 kHz — enough resolution to respond
+        // to stop() promptly without the test-harness timing being too tight.
+        return Ok(Box::new(GeneratorSource::new(1_600)));
+    }
+    Ok(Box::new(open_cpal()?))
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum RecordMode {
@@ -419,7 +431,7 @@ impl DaemonRecorder {
         };
         if let Err(e) = state.catalog.insert(&row).await {
             *self.active.lock().await = None;
-            return Err(e.into());
+            return Err(e);
         }
 
         // If idle pre-roll pre-capture is running, stop it and grab the buffered
