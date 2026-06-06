@@ -7,12 +7,15 @@ use std::time::Duration;
 
 const POLL_TOTAL: Duration = Duration::from_secs(3);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Bounded request: never let a wedged/non-responding daemon hang the CLI.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Whether the reachable daemon reports the same version as this build. A daemon
-/// that returns no `version` (older than 1.6.1) counts as a mismatch.
+/// that returns no `version` (older than 1.6.1) — or doesn't answer within
+/// `PROBE_TIMEOUT` — counts as a mismatch.
 async fn daemon_version_matches(t: &mut NamedPipeTransport) -> bool {
-    match t.request(Request::DaemonStatus).await {
-        Ok(Response::Ok(v)) => {
+    match tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::DaemonStatus)).await {
+        Ok(Ok(Response::Ok(v))) => {
             v.get("version").and_then(|x| x.as_str()) == Some(env!("CARGO_PKG_VERSION"))
         }
         _ => false,
@@ -41,7 +44,7 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
         if daemon_version_matches(&mut t).await {
             return Ok(());
         }
-        let _ = t.request(Request::Shutdown).await;
+        let _ = tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::Shutdown)).await;
         drop(t);
         wait_for_pipe_gone(&cfg.daemon.pipe_name).await;
     }
