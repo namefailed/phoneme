@@ -22,6 +22,12 @@ phoneme record --oneshot
 # In-Place Mode: when used with --start, the transcript will be typed out
 # as simulated keystrokes into the currently focused application window.
 phoneme record --start --in-place
+
+# Discard the active recording without saving.
+phoneme record --cancel
+
+# Record exactly 10 seconds.
+phoneme record --duration 10
 ```
 
 ### 👥 `phoneme meeting`
@@ -29,7 +35,14 @@ phoneme record --start --in-place
 Start a dual-track Meeting Mode recording.
 
 ```bash
-phoneme meeting --start
+# Start capturing mic + system audio
+phoneme meeting start
+
+# Stop the meeting and transcribe both tracks
+phoneme meeting stop
+
+# Rename a meeting session
+phoneme meeting rename 20260519T143500823 "Q3 Planning Sync"
 ```
 
 ### 📥 `phoneme import <FILE>`
@@ -51,8 +64,15 @@ phoneme list
 # List recordings since a specific date
 phoneme list --since 2026-05-19
 
-# Limit the number of results returned
+# Filter by status (e.g., Recording, Transcribing, Done, Failed)
+phoneme list --status Done
+
+# Limit the number of results returned (with optional offset)
 phoneme list --limit 10
+phoneme list --limit 10 --offset 20
+
+# Full-Text Search via FTS5
+phoneme list --search "rust migration"
 ```
 
 ### 👁️ `phoneme show <ID>`
@@ -61,9 +81,12 @@ Display the details of a single recording by its ID.
 
 ```bash
 phoneme show 20260519T143500823
+
+# Print only the audio path (useful for shell piping)
+phoneme show 20260519T143500823 --audio-path-only
 ```
 
-### 🔁 `phoneme retranscribe <ID>`
+### 🔁 `phoneme retranscribe <ID>` (alias: `phoneme replay`)
 
 Re-transcribe a saved recording using your current model settings.
 
@@ -77,13 +100,17 @@ Delete a recording and its associated audio file.
 
 ```bash
 phoneme delete 20260519T143500823
+
+# Keep the original .wav file on disk, just remove the catalog entry
+phoneme delete 20260519T143500823 --keep-audio
 ```
 
-### 🪝 `phoneme hook test`
+### 🪝 `phoneme hook`
 
-Test hook execution.
+Test and manage your post-processing hooks.
 
 ```bash
+# Run the configured hook with a mock payload to test your script
 phoneme hook test
 ```
 
@@ -95,14 +122,6 @@ Bulk export all audio and metadata into a zip archive.
 phoneme export backup.zip
 ```
 
-### 📖 `phoneme session rename <SESSION_ID> <NAME>`
-
-Rename a meeting session. This name will appear in the UI instead of the default session ID.
-
-```bash
-phoneme session rename 20260519T143500823 "Q3 Planning Sync"
-```
-
 ### 🏷️ `phoneme tag`
 
 Manage recording tags.
@@ -110,6 +129,18 @@ Manage recording tags.
 ```bash
 # List all tags
 phoneme tag list
+
+# Add a new tag with an optional color
+phoneme tag add work --color "#ff0000"
+
+# Delete a tag by ID
+phoneme tag delete 1
+
+# Attach a tag to a recording
+phoneme tag attach 20260519T143500823 work
+
+# Detach a tag from a recording
+phoneme tag detach 20260519T143500823 work
 ```
 
 ### 🎭 `phoneme profile`
@@ -117,7 +148,11 @@ phoneme tag list
 Manage config profiles (named full-config snapshots).
 
 ```bash
-phoneme profile apply work_mode
+# List saved profiles
+phoneme profile list
+
+# Switch the active config to a saved profile and reload the daemon
+phoneme profile use work_mode
 ```
 
 ### 🩺 `phoneme doctor`
@@ -126,13 +161,23 @@ Run a health check on your system. Checks Whisper status, Diarization status, an
 
 ```bash
 phoneme doctor
+
+# Force the catalog to rebuild itself from orphan files on disk
+phoneme doctor --rebuild-catalog
 ```
 
-### ⚙️ `phoneme config reload`
+### ⚙️ `phoneme config`
 
-Hot-reload the configuration file from disk. The daemon will immediately apply changes (like hotkeys or models) without needing to be restarted.
+Manage configuration.
 
 ```bash
+# Print the path to the active config file
+phoneme config path
+
+# Set a config value
+phoneme config set whisper.mode external
+
+# Hot-reload the configuration file from disk. The daemon will immediately apply changes (like hotkeys or models) without needing to be restarted.
 phoneme config reload
 ```
 
@@ -149,13 +194,19 @@ phoneme watch
 Send daemon control commands.
 
 ```bash
-phoneme daemon ping
-phoneme daemon shutdown
+# Spawn the daemon in a detached background process
+phoneme daemon start
+
+# Print the daemon's status
+phoneme daemon status
+
+# Send shutdown IPC to politely kill the daemon
+phoneme daemon stop
 ```
 
 ## 🧠 Daemon Management
 
-While the daemon is usually auto-spawned by the System Tray application, you can run it directly:
+While the daemon is usually auto-spawned by the System Tray application or `phoneme daemon start`, you can run it directly:
 
 ```bash
 # Run the daemon in the foreground

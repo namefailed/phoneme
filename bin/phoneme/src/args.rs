@@ -54,8 +54,6 @@ pub enum Command {
     Profile(ProfileArgs),
     /// Export all recordings and metadata to a zip file.
     Export(ExportArgs),
-    /// Manage meeting sessions.
-    Session(SessionArgs),
     /// Print version + commit info.
     Version,
 }
@@ -94,6 +92,8 @@ pub enum MeetingAction {
     Start,
     /// Stop the active meeting; both tracks are finalized and transcribed.
     Stop,
+    /// Rename a meeting session.
+    Rename { session_id: String, name: String },
 }
 
 #[derive(Debug, clap::Args)]
@@ -238,13 +238,3 @@ pub struct ExportArgs {
     pub output: String,
 }
 
-#[derive(Debug, clap::Args)]
-pub struct SessionArgs {
-    #[command(subcommand)]
-    pub action: SessionAction,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum SessionAction {
-    Rename { session_id: String, name: String },
-}
