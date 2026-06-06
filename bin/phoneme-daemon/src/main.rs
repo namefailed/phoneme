@@ -57,13 +57,23 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         let embedder_guard = retroactive_state.embedder.read().await;
         if let Some(embedder) = embedder_guard.as_ref() {
-            if let Ok(records) = retroactive_state.catalog.list_recordings_without_embeddings().await {
+            if let Ok(records) = retroactive_state
+                .catalog
+                .list_recordings_without_embeddings()
+                .await
+            {
                 if !records.is_empty() {
-                    tracing::info!("Found {} recordings without semantic embeddings, generating...", records.len());
+                    tracing::info!(
+                        "Found {} recordings without semantic embeddings, generating...",
+                        records.len()
+                    );
                     for r in records {
                         if let Some(transcript) = r.transcript.as_ref() {
                             if let Ok(vec) = embedder.embed(transcript) {
-                                let _ = retroactive_state.catalog.upsert_embedding(&r.id, &vec).await;
+                                let _ = retroactive_state
+                                    .catalog
+                                    .upsert_embedding(&r.id, &vec)
+                                    .await;
                             }
                         }
                     }

@@ -259,7 +259,9 @@ async fn factory_builds_deepgram_provider_with_token_auth() {
     whisper.api_key = secrecy::SecretString::from("dg-test".to_string());
     whisper.api_url = server.uri();
 
-    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
+    let provider = Transcriber::new()
+        .unwrap()
+        .provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "deepgram text");
 }
@@ -302,7 +304,9 @@ async fn factory_builds_assemblyai_provider_upload_create_poll() {
     whisper.api_key = secrecy::SecretString::from("aai-test".to_string());
     whisper.api_url = server.uri();
 
-    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
+    let provider = Transcriber::new()
+        .unwrap()
+        .provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "assemblyai text");
 }
@@ -333,7 +337,9 @@ async fn factory_builds_elevenlabs_provider_with_xi_api_key() {
     whisper.api_key = secrecy::SecretString::from("el-test".to_string());
     whisper.api_url = server.uri();
 
-    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
+    let provider = Transcriber::new()
+        .unwrap()
+        .provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "elevenlabs text");
 }
@@ -358,7 +364,9 @@ async fn factory_builds_custom_openai_compatible_provider() {
     whisper.provider = phoneme_core::config::TranscriptionBackend::Custom;
     whisper.api_url = server.uri(); // user-supplied OpenAI-compatible base URL
 
-    let provider = Transcriber::new().unwrap().provider(&whisper, &Default::default());
+    let provider = Transcriber::new()
+        .unwrap()
+        .provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "custom");
 }

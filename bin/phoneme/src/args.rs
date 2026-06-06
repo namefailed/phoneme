@@ -246,8 +246,5 @@ pub struct SessionArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum SessionAction {
-    Rename {
-        session_id: String,
-        name: String,
-    },
+    Rename { session_id: String, name: String },
 }

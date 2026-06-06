@@ -191,8 +191,6 @@ fn default_llm_timeout_secs() -> u64 {
     30
 }
 
-
-
 /// Serde default for boolean fields that should default to `true` when absent
 /// from an older config file.
 fn default_true() -> bool {
