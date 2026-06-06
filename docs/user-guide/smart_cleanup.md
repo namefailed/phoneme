@@ -1,8 +1,8 @@
 # Smart Cleanup (LLM Post-Processing)
 
-Phoneme includes a built-in **Smart Cleanup** feature.
+Phoneme provides best-in-class transcription accuracy, but human speech is inherently messy. We stutter, we repeat ourselves, and we use filler words. 
 
-Instead of just getting raw, sometimes imperfect Whisper transcriptions, Phoneme can pipe your transcript through a Large Language Model (LLM) before saving it. This allows you to automatically remove stutters, fix phonetic misunderstandings, translate languages on-the-fly, or format your spoken thoughts into clean bullet points.
+**Smart Cleanup** solves this. Instead of just saving the raw Whisper transcription, Phoneme can automatically pipe your transcript through a Large Language Model (LLM) before saving it. This allows you to effortlessly remove dysfluency, fix phonetic misunderstandings, translate languages on-the-fly, or format your spoken thoughts into pristine bullet points.
 
 ## How it works
 
@@ -20,15 +20,19 @@ flowchart TD
 
 1. You finish speaking.
 2. Whisper transcribes the audio.
-3. If Local Diarization is enabled, Pyannote identifies who is speaking and adds `[Speaker 1]: ` tags.
+3. If Local Diarization is enabled (like in Meeting Mode), Phoneme identifies who is speaking and adds `[Speaker 1]: ` tags.
 4. **The LLM takes the raw transcript, follows your exact Prompt instructions, and rewrites it.**
-5. The finalized text is saved to your database and sent to your Hooks.
+5. The finalized, pristine text is saved to your database and forwarded to your automation hooks.
+
+*(Note: Phoneme always preserves the `original_transcript` in the database, so if the AI ever makes a mistake, your original words are perfectly safe).*
 
 ## Provider Options
 
-You can run your LLM locally or use a cloud provider for speed and convenience. Configure this under **Settings → Smart Cleanup (AI)**.
+In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. You can configure this under **Settings → Smart Cleanup (AI)**.
 
-### Local AI (Free & Offline)
+<!-- SCREENSHOT PLACEHOLDER: Settings -> Smart Cleanup showing the provider dropdown -->
+
+### Local AI (Free, Offline, Private)
 
 For the ultimate privacy-respecting, local-first experience, you can run the LLM locally on your own hardware using Ollama.
 
@@ -42,7 +46,7 @@ For the ultimate privacy-respecting, local-first experience, you can run the LLM
 
 ### Cloud Providers (OpenAI, Anthropic, Groq)
 
-If you don't have the hardware to run Ollama smoothly, or want the absolute best reasoning capabilities, use a cloud API:
+If you don't have the hardware to run Ollama smoothly, or want the absolute best reasoning capabilities (like Claude 3.5 Sonnet or GPT-4o), you can plug in your own API keys:
 
 1. Select your **AI Provider** (`OpenAI`, `Anthropic`, `Groq`, or `Custom OpenAI-Compatible`).
 2. Enter the Model Name (e.g., `gpt-4o`, `claude-3-5-sonnet-latest`, `llama-3.1-8b-instant`).
@@ -50,7 +54,9 @@ If you don't have the hardware to run Ollama smoothly, or want the absolute best
 
 ## Prompts & Presets
 
-The magic of the LLM is in the prompt. You can select one of our default presets, or write your own.
+The magic of the LLM is in the prompt. You can select one of our default presets, or write your own to teach the AI exactly how you want your notes formatted.
+
+<!-- SCREENSHOT PLACEHOLDER: Settings -> Smart Cleanup showing the prompt text area -->
 
 > [!WARNING]
 > You **must** instruct the AI to reply ONLY with the final text. Otherwise, the AI might add conversational filler like *"Here is your cleaned transcript:"* which will ruin your notes!
@@ -70,7 +76,7 @@ The magic of the LLM is in the prompt. You can select one of our default presets
 > Translate this transcript into perfect English. Keep the meaning exact and natural. Output ONLY the English translation and absolutely nothing else.
 
 > [!TIP]
-> **The Meeting Summarizer (Requires Diarization)**
+> **The Meeting Summarizer (Requires Meeting Mode)**
 > This is a multi-speaker transcript. Provide a concise summary of the decisions made, and list the action items assigned to each speaker. Output ONLY the summary and action items.
 
 Enjoy perfectly polished transcripts!
