@@ -185,6 +185,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_recordings,
+            commands::semantic_search,
             commands::get_recording,
             commands::list_session,
             commands::delete_recording,
@@ -226,6 +227,7 @@ pub fn run() {
             commands::detach_tag,
             commands::tags_for,
             commands::wizard_download_model,
+            commands::wizard_download_semantic_model,
             commands::wizard_get_system_info,
             commands::wizard_list_downloaded_models,
             commands::wizard_download_server,

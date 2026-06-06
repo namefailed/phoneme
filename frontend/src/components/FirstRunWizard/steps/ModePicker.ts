@@ -34,6 +34,11 @@ export class ModePicker {
           <div class="mode-desc">Get the complete local AI experience (requires ~5GB disk space).</div>
         </div>
       </div>
+      <div class="semantic-search-opt-in" style="margin-top: 1.5rem; display: flex; align-items: center; gap: 0.5rem; background: var(--bg-hover); padding: 1rem; border-radius: 8px;">
+        <input type="checkbox" id="semantic-search" ${config.semantic_search?.enabled ?? true ? "checked" : ""}>
+        <label for="semantic-search" style="font-weight: 500; cursor: pointer;">Enable Semantic Search</label>
+        <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8;">(Downloads a ~90MB local ONNX embedding model)</div>
+      </div>
     `;
     footer.innerHTML = `
       <button class="wizard-btn" id="back">← Back</button>
@@ -46,6 +51,16 @@ export class ModePicker {
     if (!config._setup_mode) {
       config._setup_mode = "both";
     }
+    
+    // Ensure semantic search config exists and sync checkbox to config
+    if (!config.semantic_search) {
+      config.semantic_search = { enabled: true };
+    }
+    const semanticCheckbox = body.querySelector<HTMLInputElement>("#semantic-search")!;
+    config.semantic_search.enabled = semanticCheckbox.checked;
+    semanticCheckbox.addEventListener("change", (e) => {
+      config.semantic_search.enabled = (e.target as HTMLInputElement).checked;
+    });
 
     const preselect = body.querySelector<HTMLElement>(
       `.mode-card[data-mode="${config._setup_mode}"]`,

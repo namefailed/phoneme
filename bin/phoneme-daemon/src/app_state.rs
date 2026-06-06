@@ -72,6 +72,7 @@ pub struct AppState {
     /// connection pool and mints an `LlmProvider` per run from the live config.
     pub llm: LlmPostProcessor,
     pub webhook: WebhookClient,
+    pub embedder: Option<Arc<phoneme_core::Embedder>>,
 }
 
 impl AppState {
@@ -90,6 +91,18 @@ impl AppState {
         let llm = LlmPostProcessor::new()?;
         let webhook = WebhookClient::new()?;
 
+        let embedder = if config.semantic_search.enabled {
+            match phoneme_core::Embedder::new(&config.semantic_search.model_dir) {
+                Ok(e) => Some(Arc::new(e)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to load semantic search model");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             config: Arc::new(ArcSwap::from_pointee(config)),
             paths: Arc::new(paths),
@@ -101,6 +114,7 @@ impl AppState {
             transcription,
             llm,
             webhook,
+            embedder,
         })
     }
 }

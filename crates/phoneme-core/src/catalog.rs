@@ -234,6 +234,82 @@ impl Catalog {
         row.map(row_to_recording).transpose()
     }
 
+    /// Upsert the semantic embedding vector for a recording.
+    pub async fn upsert_embedding(&self, id: &RecordingId, vector: &[f32]) -> Result<()> {
+        // Pack f32 array into little-endian bytes.
+        let mut bytes = Vec::with_capacity(vector.len() * 4);
+        for &v in vector {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+
+        sqlx::query(
+            "INSERT INTO embeddings (id, vector) VALUES (?, ?)
+             ON CONFLICT(id) DO UPDATE SET vector = excluded.vector",
+        )
+        .bind(id.as_str())
+        .bind(bytes)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Loads all embeddings into memory for brute-force cosine similarity.
+    pub async fn load_all_embeddings(&self) -> Result<Vec<(RecordingId, Vec<f32>)>> {
+        let rows = sqlx::query("SELECT id, vector FROM embeddings")
+            .fetch_all(&self.pool)
+            .await?;
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let bytes: Vec<u8> = row.try_get("vector")?;
+
+            if !bytes.len().is_multiple_of(4) {
+                tracing::warn!(
+                    "Embedding for {} has invalid byte length: {}",
+                    id,
+                    bytes.len()
+                );
+                continue;
+            }
+
+            let mut vec = Vec::with_capacity(bytes.len() / 4);
+            for chunk in bytes.chunks_exact(4) {
+                vec.push(f32::from_le_bytes(chunk.try_into().unwrap()));
+            }
+
+            if let Some(rec_id) = RecordingId::parse(id) {
+                results.push((rec_id, vec));
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Perform a semantic search across all embedded recordings, returning the top matches.
+    pub async fn semantic_search(
+        &self,
+        query_vec: &[f32],
+        limit: usize,
+    ) -> Result<Vec<(RecordingId, f32)>> {
+        let all_embeddings = self.load_all_embeddings().await?;
+
+        let mut scores: Vec<(RecordingId, f32)> = all_embeddings
+            .into_iter()
+            .map(|(id, vec)| {
+                let score = crate::embed::Embedder::cosine_similarity(query_vec, &vec);
+                (id, score)
+            })
+            .collect();
+
+        // Sort descending by score
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(limit);
+
+        Ok(scores)
+    }
+
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
         let mut sql = String::from("SELECT recordings.* FROM recordings");
 

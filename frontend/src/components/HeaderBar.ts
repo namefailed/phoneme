@@ -299,7 +299,10 @@ export class HeaderBar {
     this.container.innerHTML = `
       <div class="headerbar" data-tauri-drag-region>
         <button class="icon-btn hb-sort-btn" id="hb-sort" aria-label="Toggle sort order" title="${filterStore.get().sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}">${filterStore.get().sort_desc === false ? "↑ Oldest" : "↓ Newest"}</button>
-        <input type="search" class="search" placeholder="Search transcripts…" id="hb-search" value="${escapeAttr(f.search || "")}" title="Search through your transcripts by text" />
+        <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:1; max-width:300px;">
+          <input type="search" class="search" style="flex:1;" placeholder="Search transcripts…" id="hb-search" value="${escapeAttr(f.search || "")}" title="Search through your transcripts by text" />
+          <button id="hb-semantic-toggle" class="icon-btn ${f.semantic ? 'active' : ''}" style="${f.semantic ? 'background: var(--accent); color: var(--bg-default);' : ''}" title="Toggle Semantic Search (finds meaning, not exact words)">✨</button>
+        </div>
         <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">
           <input type="date" class="filter-pill hb-date-since" title="Start date (from)" value="${f.since ? f.since.split('T')[0] : ''}">
           <span style="color: var(--fg-muted)">-</span>
@@ -348,6 +351,13 @@ export class HeaderBar {
       search.addEventListener("input", (e) => {
         const q = (e.target as HTMLInputElement).value;
         filterStore.set({ ...filterStore.get(), search: q || null });
+      });
+    }
+    const semanticToggle = this.container.querySelector<HTMLButtonElement>("#hb-semantic-toggle");
+    if (semanticToggle) {
+      semanticToggle.addEventListener("click", () => {
+        const f = filterStore.get();
+        filterStore.set({ ...f, semantic: !f.semantic });
       });
     }
     const dateSince = this.container.querySelector<HTMLInputElement>(".hb-date-since");
