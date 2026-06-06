@@ -23,7 +23,8 @@ afterEach(() => {
 });
 
 function queryEl<T extends HTMLElement>(selector: string): T | null | undefined {
-  return document.querySelector("ph-model-picker")?.shadowRoot?.querySelector<T>(selector);
+  // ModelPicker uses createRenderRoot() { return this; } so it renders to light DOM
+  return document.querySelector("ph-model-picker")?.querySelector<T>(selector);
 }
 
 /** Cancel an open picker so its promise resolves and the DOM is cleaned up. */
