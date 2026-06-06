@@ -80,15 +80,16 @@ export class RecordingsView {
   async refresh() {
     await this.list.refresh();
     const s = this.state.get();
-    if (s.selectedId && !s.recordings.some(r => r.id === s.selectedId || r.session_id === s.selectedId.replace("session:", ""))) {
+    const selectedId = s.selectedId;
+    if (selectedId && !s.recordings.some(r => r.id === selectedId || r.session_id === selectedId.replace("session:", ""))) {
       this.state.set({ ...s, selectedId: null });
       this.detail.clear();
       this.mergedDetail.sessionId = "";
-    } else if (s.selectedId && !this.detail.hasDirtyEdits()) {
-      if (s.selectedId.startsWith("session:")) {
-        this.mergedDetail.sessionId = s.selectedId.substring(8);
+    } else if (selectedId && !this.detail.hasDirtyEdits()) {
+      if (selectedId.startsWith("session:")) {
+        this.mergedDetail.sessionId = selectedId.substring(8);
       } else {
-        void this.detail.show(s.selectedId);
+        void this.detail.show(selectedId);
       }
     }
   }
