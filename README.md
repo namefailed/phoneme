@@ -23,11 +23,20 @@ When you press your global hotkey (e.g., `Ctrl+Alt+Space`), Phoneme records your
 
 The app does not force you into a specific ecosystem. It transcribes. You decide where it goes.
 
-## 🚀 What's in v1.6
+## 🚀 What's in v1.7.5
 
-This is the stable public release. Everything in this list is available today.
+This is the current stable release. Everything in this list is available today.
 
-**New in v1.6:**
+**New in v1.7.x:**
+
+- **Local semantic search** — search your recordings by *meaning*, not just keywords. Uses a bundled ONNX embedding model (all-MiniLM-L6-v2) and a local vector index — fully offline.
+- **Paginated recordings list** — infinite-scroll with `IntersectionObserver`; handles thousands of recordings without locking the UI.
+- **Lit Web Components** — complex views (recording detail, transcript editor, notes editor, waveform player) migrated to Lit for clean declarative rendering and automatic lifecycle cleanup.
+- **In-place re-transcription** — queue a recording for re-transcription without navigating away; the detail pane updates live.
+- **Synthetic audio CI backend** — full end-to-end CI test coverage via a `GeneratorSource` mock that drives CLI → daemon → capture → SQLite without any hardware.
+- **Meeting session indentation** — expanded meeting groups indent their child tracks visually so it's always clear which recordings belong to a session vs. which are standalone.
+
+**Also available from v1.6:**
 
 - **System-audio capture** — record what's playing through your speakers (WASAPI loopback), not just your microphone. Switch the capture source in Recording settings.
 - **Meeting Mode** — capture your microphone *and* system audio at the same time as two linked tracks, so you get both sides of a call. Start it from the toolbar or `phoneme meeting start`.
