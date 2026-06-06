@@ -10,41 +10,53 @@
 
 # 🎙️ Phoneme
 
-Phoneme bridges the gap between quick voice dictation and your personal knowledge management systems. It is designed for power users who want the friction-free experience of hitting a hotkey to capture a thought, but without the privacy concerns, subscription fees, or cloud lock-in of modern AI tools.
+**Local-first voice transcription for power users.**
 
-By default, everything runs **100% locally** on your machine.
+Hit a hotkey. Speak. Get text anywhere.
 
-When you press your global hotkey (e.g., `Ctrl+Alt+Space`), Phoneme records your voice. When you stop, it leverages a highly optimized local [whisper.cpp](https://github.com/ggerganov/whisper.cpp) instance to transcribe your speech into text. Finally, it pipes that text through **your own scripts (hooks)** or into an LLM (like Ollama) for cleanup, formatting, or translation.
-
-The app does not force you into a specific ecosystem. It transcribes. You decide where it goes.
+Phoneme runs **100% offline** by default. No cloud required, no subscriptions, no telemetry.
 
 ---
 
-## 🧠 The Phoneme Philosophy
+## 🧠 Philosophy
 
-1. **🔒 Privacy First, Offline Native**: Your voice never leaves your device unless you explicitly want it to. No telemetry, no forced update pings.
-2. **🍔 Build It Your Own Way**: We provide the tools. You choose the stack. Want absolute privacy? Run our hardware-aware setup wizard to download the perfect Whisper model for your GPU. Want absolute speed? Plug in your OpenAI or Groq API key to leverage the cloud instantly.
-3. **🔌 Infinite Extensibility**: Phoneme isn't a walled-garden notes app. We transcribe your voice and pipe the resulting JSON to standard scripts (Hooks). Route your notes to Obsidian, Notion, Jira, Discord, or run local Python automation on your words.
+| Principle | What It Means |
+|-----------|---------------|
+| **🔒 Privacy First** | Voice never leaves your machine. No forced updates, no tracking. |
+| **⚡ Flexible** | Local Whisper for privacy, or cloud APIs (OpenAI/Groq) for speed. Your choice. |
+| **🔌 Extensible** | JSON output → your scripts. Obsidian, Notion, Jira, Discord, Python—wherever you want. |
 
 ## ⚙️ How It Works
 
 Phoneme uses a decoupled, pipeline-driven architecture. 
 
 ```mermaid
-flowchart LR
-    A[🎤 Voice / System Audio] -->|Hotkey| B(Phoneme Daemon)
-    B --> C{Whisper Engine}
+flowchart TD
+    Input[🎤 Voice / System Audio] -->|Hotkey| Daemon[Phoneme Daemon]
     
-    C -->|Native / Cloud| D[Raw Transcript]
-    D --> E{Pyannote Diarization}
-    E -->|Optional| F[Speaker-Tagged Transcript]
+    subgraph Transcribe
+        Daemon --> Whisper{Whisper}
+        Whisper -->|Local or Cloud| Raw[Raw Transcript]
+    end
     
-    F --> G{Smart Cleanup LLM}
-    G -->|Polished| H[Final Transcript]
+    subgraph Enrich
+        Raw --> Diarize{Diarization}
+        Diarize -->|Optional| Tagged[Tagged Transcript]
+    end
     
-    H --> I[(SQLite Catalog)]
-    H --> J[[Custom Hooks]]
-    J --> K(Obsidian / Webhooks / In-Place Typing)
+    subgraph Process
+        Tagged --> LLM{LLM Cleanup}
+        LLM -->|Optional| Final[Final Transcript]
+    end
+    
+    subgraph Store
+        Final --> Catalog[(SQLite Catalog)]
+    end
+    
+    subgraph Export
+        Final --> Hooks[[Hooks]]
+        Hooks --> Dest[Obsidian / Webhooks / Type Anywhere]
+    end
 ```
 
 ## ✨ Core Features
