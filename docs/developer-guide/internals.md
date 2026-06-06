@@ -6,7 +6,7 @@ goes a layer deeper into the async task topology, the audio path, the SQLite
 catalog, the IPC wire protocol, and the filesystem queue.
 
 > Audience: contributors. If you just want to *use* Phoneme, see the
-> [README](../README.md).
+> [README](../../README.md).
 
 ## 🗂️ Workspace layout
 
@@ -165,7 +165,9 @@ The frontend is intentionally built for performance and maintainability, leverag
 - **`services/ipc.ts`** — the typed boundary to the Tauri commands.
 - **`services/events.ts`** — subscribes to `daemon-event` streams and dispatches to handlers.
 
+> [!IMPORTANT]
 > **Security invariant:** Lit's `html` tagged template literals provide automatic contextual escaping, protecting against XSS for most interpolations. However, when using `unsafeHTML` or manually manipulating the DOM, data must still go through `escapeHtml` / `escapeAttr` (`utils/format.ts`). Transcripts, notes, file paths, tag names, search terms, and meeting ids are all attacker-influenced. `highlightMatch` escapes in every branch.
+<!-- -->
 
 ## 🧪 Testing without hardware
 
