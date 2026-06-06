@@ -15,6 +15,23 @@ JSON on stdin**.
 | timeout | daemon enforces | `hook.timeout_secs` (default 30) |
 | env vars | daemon sets | `PHONEME_ID`, `PHONEME_AUDIO_PATH`, `PHONEME_TRANSCRIPT` |
 
+### Architecture Flow
+
+```mermaid
+sequenceDiagram
+    participant D as Phoneme Daemon
+    participant H as Your Hook (Script)
+    participant E as External Service (Obsidian/API)
+    
+    D->>H: Execute Hook Command
+    D->>H: Pipe JSON Payload via STDIN
+    activate H
+    H->>E: Process Data & Forward
+    E-->>H: Response
+    H-->>D: Exit Code (0 for Success)
+    deactivate H
+```
+
 > [!WARNING]
 > Security Risk: The `PHONEME_TRANSCRIPT` environment variable contains raw, unsanitized user voice-to-text. While environment variables are generally safe, using `$env:PHONEME_TRANSCRIPT` inside `Invoke-Expression` or similar shell eval wrappers exposes your hook to command injection. **Always prefer parsing the JSON payload via stdin (`$payload.transcript`) instead of relying on the environment variable.**
 
