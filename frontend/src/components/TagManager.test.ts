@@ -21,7 +21,8 @@ afterEach(() => {
 });
 
 function queryEl<T extends HTMLElement>(selector: string): T | null | undefined {
-  return document.querySelector("ph-tag-manager")?.shadowRoot?.querySelector<T>(selector);
+  // TagManager uses createRenderRoot() { return this; } so it renders to light DOM
+  return document.querySelector("ph-tag-manager")?.querySelector<T>(selector);
 }
 
 describe("openTagManager", () => {
