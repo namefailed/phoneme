@@ -72,7 +72,7 @@ pub struct AppState {
     /// connection pool and mints an `LlmProvider` per run from the live config.
     pub llm: LlmPostProcessor,
     pub webhook: WebhookClient,
-    pub embedder: Option<Arc<phoneme_core::Embedder>>,
+    pub embedder: Arc<tokio::sync::RwLock<Option<Arc<phoneme_core::Embedder>>>>,
 }
 
 impl AppState {
@@ -114,7 +114,7 @@ impl AppState {
             transcription,
             llm,
             webhook,
-            embedder,
+            embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
         })
     }
 }

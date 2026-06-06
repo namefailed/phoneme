@@ -17,6 +17,8 @@ export class SectionInterface {
       { value: "time", label: "Time" },
       { value: "duration", label: "Duration" },
       { value: "status", label: "Status" },
+      { value: "tags", label: "Tags" },
+      { value: "model", label: "Model Used" },
       { value: "transcript", label: "Transcript Snippet" }
     ];
 

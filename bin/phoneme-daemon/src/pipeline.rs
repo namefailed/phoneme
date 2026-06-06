@@ -93,7 +93,8 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         }
     }
 
-    if let Some(embedder) = state.embedder.as_ref() {
+    let embedder_guard = state.embedder.read().await;
+    if let Some(embedder) = embedder_guard.as_ref() {
         match embedder.embed(&transcript) {
             Ok(vec) => {
                 if let Err(e) = state.catalog.upsert_embedding(&id, &vec).await {
@@ -107,6 +108,7 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
             }
         }
     }
+    drop(embedder_guard);
 
     // Hooks are optional. When `run_on_transcribe` is off, finalize the
     // recording right after transcription without firing hooks or the webhook;
