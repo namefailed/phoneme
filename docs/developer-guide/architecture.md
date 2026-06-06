@@ -1,4 +1,4 @@
-# Architecture
+# 🏗️ Architecture
 
 Phoneme is built as a highly modular, decoupled system. It is composed of three main parts: a headless background daemon, a GUI system tray application, and a command-line interface.
 
@@ -21,7 +21,7 @@ Phoneme is built as a highly modular, decoupled system. It is composed of three 
     └─────────────────┘                                           └─────────────────┘
 ```
 
-### 1. The Daemon (`phoneme-daemon`)
+### 👻 The Daemon (`phoneme-daemon`)
 The core engine of Phoneme. It runs in the background (completely headless) and is responsible for:
 - Managing audio capture (`cpal`) from the microphone or, on Windows, the system-audio loopback device.
 - Dual-track **Meeting Mode** — capturing the microphone and system audio simultaneously as two recordings linked by a shared `session_id`.
@@ -34,13 +34,13 @@ The core engine of Phoneme. It runs in the background (completely headless) and 
 - Enforcing the auto-delete retention policy.
 - Broadcasting state changes over named pipes.
 
-### 2. The CLI (`phoneme`)
+### 🖥️ The CLI (`phoneme`)
 A lightweight, fast Rust binary that sends JSON commands to the Daemon over the named pipe. Since the Daemon manages all state, you can invoke the CLI from any external script or hotkey daemon to immediately control the app (e.g. `phoneme record --start`).
 
-### 3. The GUI (`phoneme-tray`)
+### 🎨 The GUI (`phoneme-tray`)
 A Tauri 2 application (Rust + TypeScript/Vite) that acts as a polished interface over the CLI. It communicates directly with the Daemon over the same named pipe, allowing it to instantly reflect state changes (like when you start a recording via the CLI).
 
-## Crates & Directories
+## 📂 Crates & Directories
 
 To enforce boundaries, the repository is split into several workspaces and directories:
 - `phoneme-core`: Shared models, settings, configurations, and database migrations.
@@ -51,7 +51,7 @@ To enforce boundaries, the repository is split into several workspaces and direc
 - `src-tauri`: The GUI backend.
 - `frontend`: The GUI frontend (TypeScript/Vite/HTML/CSS).
 
-## Lifecycle of a Recording
+## ⏱️ Lifecycle of a Recording
 
 Understanding one recording's journey explains most of the daemon:
 
@@ -66,7 +66,7 @@ Understanding one recording's journey explains most of the daemon:
 
 Imported files skip steps 1–4: the file is decoded to the canonical format, copied into the audio directory, and enters the pipeline at step 5.
 
-## IPC Protocol
+## 🌐 Communication Protocols
 
 All three binaries speak the same protocol defined in `phoneme-ipc`:
 
@@ -77,7 +77,7 @@ All three binaries speak the same protocol defined in `phoneme-ipc`:
 
 Because the schema lives in one shared crate, the CLI, GUI backend, and daemon can never drift out of sync — adding a request variant is a compile error until every match arm handles it.
 
-## Data Model
+## 🔄 Data Model
 
 The catalog is a single SQLite database (WAL mode, with an FTS5 full-text index over transcripts), managed through `sqlx` with versioned migrations in `phoneme-core/migrations`.
 
@@ -87,12 +87,12 @@ The catalog is a single SQLite database (WAL mode, with an FTS5 full-text index 
 
 Audio is stored on disk under a date-foldered directory, not in the database — the SQLite file stays small and copyable.
 
-### Frontend Architecture
+### 🎨 The Frontend (Vite + Lit)
 
 The frontend is intentionally built for performance and maintainability, leveraging web standards through **Lit**.
 
 1. **Lit Components (`LitElement`)**: Instead of heavy virtual DOM frameworks like React, Phoneme uses Lit for reactive, lightweight web components. All UI elements (e.g., `RecordingDetail`, `ModelPicker`, `FirstRunWizard`) extend `LitElement`. 
    > **Note**: To ensure global CSS styling works (like `.record-btn` classes), most components override `createRenderRoot() { return this; }` to render into the Light DOM rather than the Shadow DOM.
-2. **State Management (`Store<T>`)**: A custom reactive store implementation in `src/state/Store.ts` allows components to subscribe to state changes (e.g., config updates, recording lists) and trigger minimal DOM updates via Lit's `@state()` decorators.
-3. **Routing**: A simple hash-based router handles navigation between the main views (`RecordingsView`, `SettingsView`, `DoctorView`, etc.).
-4. **IPC / Tauri API**: The frontend uses Tauri's `@tauri-apps/api/core` (`invoke`) to communicate with the Rust backend, and listens to event streams for real-time UI updates (like live transcription streaming!).
+2. **📦 The Store (State Management) (`Store<T>`)**: A custom reactive store implementation in `src/state/Store.ts` allows components to subscribe to state changes (e.g., config updates, recording lists) and trigger minimal DOM updates via Lit's `@state()` decorators.
+3. **🗺️ Routing**: A simple hash-based router handles navigation between the main views (`RecordingsView`, `SettingsView`, `DoctorView`, etc.).
+4. **🔌 IPC / Tauri API**: The frontend uses Tauri's `@tauri-apps/api/core` (`invoke`) to communicate with the Rust backend, and listens to event streams for real-time UI updates (like live transcription streaming!).

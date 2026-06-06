@@ -1,10 +1,10 @@
-# Phoneme CLI Reference
+# 💻 Phoneme CLI Reference
 
 Every core action in Phoneme is fully accessible from the command line interface via `phoneme.exe` or `phoneme-daemon.exe`.
 
-## Core Commands
+## ⚙️ Core Commands
 
-### `phoneme record`
+### 🎤 `phoneme record`
 
 Start, stop, or run a one-shot recording.
 
@@ -24,7 +24,7 @@ phoneme record --oneshot
 phoneme record --start --in-place
 ```
 
-### `phoneme list`
+### 📋 `phoneme list`
 
 Query the local SQLite recording catalog.
 
@@ -39,7 +39,7 @@ phoneme list --since 2026-05-19
 phoneme list --limit 10
 ```
 
-### `phoneme show <ID>`
+### 👁️ `phoneme show <ID>`
 
 Display the details of a single recording by its ID.
 
@@ -47,7 +47,15 @@ Display the details of a single recording by its ID.
 phoneme show 20260519T143500823
 ```
 
-### `phoneme export <FILE>`
+### 🪝 `phoneme hook test`
+
+Test hook execution.
+
+```bash
+phoneme hook test
+```
+
+### 🔄 `phoneme export <FILE>`
 
 Bulk export all audio and metadata into a zip archive.
 
@@ -55,7 +63,7 @@ Bulk export all audio and metadata into a zip archive.
 phoneme export backup.zip
 ```
 
-### `phoneme session rename <SESSION_ID> <NAME>`
+### 📖 `phoneme session rename <SESSION_ID> <NAME>`
 
 Rename a meeting session. This name will appear in the UI instead of the default session ID.
 
@@ -63,7 +71,7 @@ Rename a meeting session. This name will appear in the UI instead of the default
 phoneme session rename 20260519T143500823 "Q3 Planning Sync"
 ```
 
-### `phoneme doctor`
+### 🩺 `phoneme doctor`
 
 Run a health check on your system. Checks Whisper status, Diarization status, and hook executability.
 

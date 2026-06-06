@@ -1,6 +1,6 @@
-# Troubleshooting
+# 🛠️ Troubleshooting
 
-## "Daemon not reachable" from the CLI
+## 🔌 "Daemon not reachable" from the CLI
 
 ```
 $ phoneme list
@@ -13,7 +13,7 @@ On very slow machines the first cold start may exceed this.
 > [!TIP]
 > **Fix:** Start the daemon explicitly via `phoneme daemon start`. Then try again.
 
-## "Pipe in use" when starting the daemon
+## 🚫 "Pipe in use" when starting the daemon
 
 ```
 $ phoneme daemon start
@@ -34,13 +34,13 @@ Or kill the process:
 Stop-Process -Name phoneme-daemon
 ```
 
-## Tray icon doesn't appear
+## 👻 Tray icon doesn't appear
 
 Windows sometimes hides tray icons by default. Right-click the taskbar →
 Taskbar settings → "Select which icons appear on the taskbar" and enable
 Phoneme.
 
-## "Whisper unreachable" — recordings pile up
+## ⏳ "Whisper unreachable" — recordings pile up
 
 The configured `whisper.external_url` is not responding. Either the server is
 down, the URL is wrong, or your `whisper.timeout_secs` is too low.
@@ -55,7 +55,7 @@ The recordings stay in `%LOCALAPPDATA%\phoneme\inbox\pending\`. Once
 whisper-server is reachable, the daemon retries automatically (exponential
 backoff, capped at 5 minutes between attempts).
 
-## Hook fails or times out
+## ⚠️ Hook fails or times out
 
 Check the hook log:
 ```
@@ -72,7 +72,7 @@ Common causes:
 - Script needs `-ExecutionPolicy Bypass` (we set this for `.ps1` automatically)
 - Script does network I/O exceeding `hook.timeout_secs` — bump the timeout
 
-## Model Download Wizard Fails Mid-Stream
+## 🛑 Model Download Wizard Fails Mid-Stream
 
 If you were downloading the default model inside the First Run Wizard and the application crashed or the network dropped, you might be left with a corrupted, partially downloaded `.gguf` file.
 
@@ -83,7 +83,7 @@ If you were downloading the default model inside the First Run Wizard and the ap
 > ```
 Then restart Phoneme to try the download again.
 
-## Catalog corruption
+## 💥 Catalog corruption
 
 If the recordings list is empty or wrong but you have audio files on disk:
 
@@ -94,7 +94,7 @@ phoneme doctor --rebuild-catalog
 This walks `audio_dir/` and `inbox/done/` and reconstructs the catalog
 database from disk.
 
-## Where is everything?
+## 🗺️ Where is everything?
 
 | What | Where |
 |---|---|
@@ -106,7 +106,7 @@ database from disk.
 | Logs | `%LOCALAPPDATA%\phoneme\logs\` |
 | Audio files | (configurable) — default `%USERPROFILE%\Documents\phoneme\audio\` |
 
-## Doctor "Fix" works but the UI still shows errors after restart
+## 🩺 Doctor "Fix" works but the UI still shows errors after restart
 
 If the tray app was launched while the daemon was already down (rare — usually happens if you quit the daemon manually), clicking **Fix** in the Doctor will successfully start the daemon. However, the GUI may still show stale error states until you close and reopen the main window.
 
