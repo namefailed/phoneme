@@ -23,6 +23,13 @@ use tokio::sync::Mutex;
 /// How often the streaming-preview loop transcribes the in-progress recording.
 const PREVIEW_INTERVAL: Duration = Duration::from_millis(2500);
 
+/// How long to keep a recording's capture stream alive after a stop is
+/// requested, so the OS can hand over audio it had already buffered at stop
+/// time instead of discarding it. Without this, manually-stopped recordings can
+/// lose the final ~tens-of-milliseconds and sound clipped at the end. Applied
+/// only to real recording/meeting sources — not the rolling pre-roll buffer.
+const STOP_TAIL_GRACE: Duration = Duration::from_millis(150);
+
 /// Minimum number of *new* samples (beyond the previous preview) before we spend
 /// a transcription on a fresh tick. At 16 kHz this is ~0.5 s — below that a
 /// re-transcription rarely changes the text enough to be worth the round trip.
@@ -402,7 +409,11 @@ impl DaemonRecorder {
         // Open the CPAL device and the audio Recorder.
         let app_cfg = state.config.load();
         let device = resolve_input_device(&app_cfg.recording.input_device)?;
-        let source = CpalSource::open_kind(device, app_cfg.recording.source)?;
+        let source = CpalSource::open_kind_with_grace(
+            device,
+            app_cfg.recording.source,
+            STOP_TAIL_GRACE,
+        )?;
         let audio_mode = match mode {
             RecordMode::Hold => AudioMode::Hold,
             RecordMode::Oneshot => AudioMode::Oneshot,
@@ -618,11 +629,16 @@ impl DaemonRecorder {
         // mutating any state, so a failed meeting leaves the daemon idle.
         // `open_kind(.., SystemAudio)` ignores the passed device and opens the
         // default output device in WASAPI loopback mode.
-        let mic_source = CpalSource::open_kind(device, CaptureSource::Microphone)
-            .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
+        let mic_source =
+            CpalSource::open_kind_with_grace(device, CaptureSource::Microphone, STOP_TAIL_GRACE)
+                .map_err(|e| Error::Internal(format!("meeting: open microphone: {e}")))?;
         let system_device = resolve_input_device(&cfg.recording.input_device)?;
-        let system_source = CpalSource::open_kind(system_device, CaptureSource::SystemAudio)
-            .map_err(|e| Error::Internal(format!("meeting: open system audio (loopback): {e}")))?;
+        let system_source = CpalSource::open_kind_with_grace(
+            system_device,
+            CaptureSource::SystemAudio,
+            STOP_TAIL_GRACE,
+        )
+        .map_err(|e| Error::Internal(format!("meeting: open system audio (loopback): {e}")))?;
 
         let sources: Vec<(MeetingTrack, Box<dyn Source>)> = vec![
             (MeetingTrack::Mic, Box::new(mic_source)),
