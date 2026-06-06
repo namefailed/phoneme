@@ -63,6 +63,7 @@ pub struct ActiveRecording {
     pub audio_path: PathBuf,
     pub started_at: chrono::DateTime<Local>,
     pub paused: bool,
+    pub in_place: bool,
 }
 
 /// A running idle pre-roll pre-capture: a background task pulls canonical
@@ -352,7 +353,7 @@ impl DaemonRecorder {
     }
 
     /// Start a recording. Returns `AlreadyRecording` if one is in flight.
-    pub async fn start(&self, state: &AppState, mode: RecordMode) -> Result<RecordingId> {
+    pub async fn start(&self, state: &AppState, mode: RecordMode, in_place: bool) -> Result<RecordingId> {
         // A meeting owns both the microphone and the system-audio device. Refuse
         // to start a single-track recording while one is running — otherwise we
         // would open a second microphone stream concurrent with the meeting's
@@ -378,6 +379,17 @@ impl DaemonRecorder {
             .join(id.day_folder())
             .join(format!("{}.wav", id.file_stem()));
 
+        // Reserve the active slot immediately so concurrent starts fail.
+        *active = Some(ActiveRecording {
+            id: id.clone(),
+            mode,
+            audio_path: audio_path.clone(),
+            started_at,
+            paused: false,
+            in_place,
+        });
+        drop(active);
+
         // Insert the catalog row at status=recording.
         let row = Recording {
             id: id.clone(),
@@ -398,8 +410,12 @@ impl DaemonRecorder {
             // A normal single-track recording is not part of a meeting.
             session_id: None,
             track: None,
+            in_place,
         };
-        state.catalog.insert(&row).await?;
+        if let Err(e) = state.catalog.insert(&row).await {
+            *self.active.lock().await = None;
+            return Err(e.into());
+        }
 
         // If idle pre-roll pre-capture is running, stop it and grab the buffered
         // audio to prepend; this also releases the microphone before we reopen
@@ -408,9 +424,22 @@ impl DaemonRecorder {
 
         // Open the CPAL device and the audio Recorder.
         let app_cfg = state.config.load();
-        let device = resolve_input_device(&app_cfg.recording.input_device)?;
-        let source =
-            CpalSource::open_kind_with_grace(device, app_cfg.recording.source, STOP_TAIL_GRACE)?;
+        let device = match resolve_input_device(&app_cfg.recording.input_device) {
+            Ok(d) => d,
+            Err(e) => {
+                *self.active.lock().await = None;
+                if let Err(err) = state.catalog.delete(&id).await { tracing::warn!("failed to rollback catalog row: {err}"); }
+                return Err(e);
+            }
+        };
+        let source = match CpalSource::open_kind_with_grace(device, app_cfg.recording.source, STOP_TAIL_GRACE) {
+            Ok(s) => s,
+            Err(e) => {
+                *self.active.lock().await = None;
+                if let Err(err) = state.catalog.delete(&id).await { tracing::warn!("failed to rollback catalog row: {err}"); }
+                return Err(e);
+            }
+        };
         let audio_mode = match mode {
             RecordMode::Hold => AudioMode::Hold,
             RecordMode::Oneshot => AudioMode::Oneshot,
@@ -423,17 +452,15 @@ impl DaemonRecorder {
             silence_window_ms: state.config.load().recording.silence_window_ms,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let recorder =
-            Recorder::start_with_prepend(Box::new(source), recorder_cfg, Some(tx), prepend).await?;
+        let recorder = match Recorder::start_with_prepend(Box::new(source), recorder_cfg, Some(tx), prepend).await {
+            Ok(r) => r,
+            Err(e) => {
+                *self.active.lock().await = None;
+                if let Err(err) = state.catalog.delete(&id).await { tracing::warn!("failed to rollback catalog row: {err}"); }
+                return Err(e);
+            }
+        };
         *self.handle.lock().await = Some(recorder);
-
-        *active = Some(ActiveRecording {
-            id: id.clone(),
-            mode,
-            audio_path,
-            started_at,
-            paused: false,
-        });
 
         // If it's a self-terminating mode, spawn a task to auto-stop when the recorder task finishes natively.
         if !matches!(mode, RecordMode::Hold) {
@@ -441,7 +468,9 @@ impl DaemonRecorder {
             let state_clone = state.clone();
             tokio::spawn(async move {
                 if rx.await.is_ok() {
-                    let _ = daemon_recorder.stop(&state_clone).await;
+                    if let Err(e) = daemon_recorder.stop(&state_clone).await {
+                        tracing::warn!("auto-stop failed: {e}");
+                    }
                 }
             });
         }
@@ -472,11 +501,7 @@ impl DaemonRecorder {
 
         state
             .catalog
-            .update_status(&active.id, RecordingStatus::Transcribing)
-            .await?;
-        state
-            .catalog
-            .update_duration(&active.id, result.duration_ms)
+            .update_status_and_duration(&active.id, RecordingStatus::Transcribing, result.duration_ms)
             .await?;
 
         let payload = HookPayload {
@@ -514,7 +539,9 @@ impl DaemonRecorder {
         // Stop the preview loop before tearing down the recorder. No-op when off.
         self.stop_preview().await;
         if let Some(recorder) = self.handle.lock().await.take() {
-            let _ = recorder.cancel().await;
+            if let Err(e) = recorder.cancel().await {
+                tracing::warn!("failed to cancel recorder: {e}");
+            }
         }
         state.catalog.delete(&active.id).await?;
         state.events.emit(DaemonEvent::RecordingCancelled {
@@ -701,6 +728,7 @@ impl DaemonRecorder {
                 started_at,
                 duration_ms: 0,
                 audio_path: audio_path.to_string_lossy().into_owned(),
+                in_place: false,
                 transcript: None,
                 model: None,
                 status: RecordingStatus::Recording,
@@ -795,21 +823,19 @@ impl DaemonRecorder {
                     // One track failing to finalize shouldn't abort the others.
                     // Mark it failed and continue stopping the rest.
                     tracing::error!(id = %id, track = track.as_str(), error = %e, "meeting track finalize failed");
-                    let _ = state
+                    if let Err(err) = state
                         .catalog
                         .update_status(&id, RecordingStatus::TranscribeFailed)
-                        .await;
+                        .await {
+                        tracing::warn!(id = %id, error = %err, "failed to mark track as failed");
+                    }
                     continue;
                 }
             };
 
             state
                 .catalog
-                .update_status(&id, RecordingStatus::Transcribing)
-                .await?;
-            state
-                .catalog
-                .update_duration(&id, result.duration_ms)
+                .update_status_and_duration(&id, RecordingStatus::Transcribing, result.duration_ms)
                 .await?;
 
             let payload = HookPayload {

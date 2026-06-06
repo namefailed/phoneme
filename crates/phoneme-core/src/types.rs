@@ -98,6 +98,9 @@ pub struct Recording {
     /// single-track recordings.
     #[serde(default)]
     pub track: Option<String>,
+    /// Whether this recording should be typed in-place when transcribed.
+    #[serde(default)]
+    pub in_place: bool,
 }
 
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.

@@ -80,6 +80,16 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
 
+    let recording = state.catalog.get(&id).await?;
+    if let Some(rec) = recording {
+        if rec.in_place && !transcript.is_empty() {
+            tracing::info!("In-place transcription enabled, typing transcript for {}", id.as_str());
+            let mut enigo = enigo::Enigo::new(&enigo::Settings::default()).unwrap();
+            use enigo::Keyboard;
+            let _ = enigo.text(&transcript);
+        }
+    }
+
     if let Some(embedder) = state.embedder.as_ref() {
         match embedder.embed(&transcript) {
             Ok(vec) => {

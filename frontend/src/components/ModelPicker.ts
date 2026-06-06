@@ -1,35 +1,20 @@
-import "./modal.css";
-import "./model-picker.css";
-import { invoke } from "@tauri-apps/api/core";
-import { showToast } from "../utils/toast";
-import { escapeAttr } from "../utils/format";
-
-/**
- * Model-picker modal — lets the user quickly switch the transcription provider
- * /model and the AI post-processing provider/model without diving into the full
- * Settings screen. Loads the current config via `read_config` and persists via
- * `write_config`, mirroring the Settings sections.
- *
- * Reachable from a button in Settings and from the Re-transcribe caret.
- */
+import { LitElement, html, css, unsafeCSS, PropertyValues } from 'lit';
+import { customElement, property, state, query } from 'lit/decorators.js';
+import modalStyles from './modal.css?inline';
+import modelPickerStyles from './model-picker.css?inline';
+import { invoke } from '@tauri-apps/api/core';
+import { showToast } from '../utils/toast';
 
 type ProviderOption = { value: string; label: string };
 
-/** Named presets that map onto an existing OpenAI-compatible provider and
- *  prefill the endpoint + a sensible default model. Frontend-only — the Rust
- *  backend already speaks OpenAI-compatible endpoints. */
 type Preset = {
-  /** dropdown id, e.g. "preset:gemini" */
   id: string;
   label: string;
-  /** underlying real provider the backend understands */
   provider: string;
   apiUrl: string;
   model: string;
 };
 
-// Post-processing (LLM) presets → the existing "openai" (OpenAI-Compatible
-// Endpoint) provider, full chat-completions URL.
 const LLM_PRESETS: Preset[] = [
   { id: "preset:gemini", label: "Google Gemini", provider: "openai", apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-flash-latest" },
   { id: "preset:mistral", label: "Mistral", provider: "openai", apiUrl: "https://api.mistral.ai/v1/chat/completions", model: "mistral-small-latest" },
@@ -41,8 +26,6 @@ const LLM_PRESETS: Preset[] = [
   { id: "preset:lmstudio", label: "LM Studio (local)", provider: "openai", apiUrl: "http://localhost:1234/v1/chat/completions", model: "" },
 ];
 
-// Transcription presets → the existing "custom" (OpenAI-compatible endpoint)
-// provider, base URL (the backend appends /v1/audio/transcriptions).
 const STT_PRESETS: Preset[] = [
   { id: "preset:fireworks", label: "Fireworks", provider: "custom", apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
 ];
@@ -65,8 +48,6 @@ const LLM_PROVIDERS: ProviderOption[] = [
   { value: "anthropic", label: "Anthropic Claude (cloud)" },
 ];
 
-/** Friendly label for a downloaded whisper.cpp model file path. Falls back to
- *  the bare filename for anything not in the known-bundled set. */
 function localModelLabel(path: string): string {
   const file = path.replace(/\\/g, "/").split("/").pop() ?? path;
   const map: Record<string, string> = {
@@ -79,44 +60,257 @@ function localModelLabel(path: string): string {
   return map[file] ?? file;
 }
 
-function buildProviderOptions(
-  providers: ProviderOption[],
-  presets: Preset[],
-  selected: string,
-): string {
-  const real = providers
-    .map(
-      (p) =>
-        `<option value="${escapeAttr(p.value)}" ${p.value === selected ? "selected" : ""}>${p.label}</option>`,
-    )
-    .join("");
-  const presetOpts = presets
-    .map((p) => `<option value="${escapeAttr(p.id)}">${p.label}</option>`)
-    .join("");
-  return `${real}<optgroup label="Presets">${presetOpts}</optgroup>`;
+@customElement('ph-model-picker')
+export class ModelPickerElement extends LitElement {
+  static styles = [
+    unsafeCSS(modalStyles),
+    unsafeCSS(modelPickerStyles),
+    css`
+      :host {
+        display: block;
+      }
+    `
+  ];
+
+  @property({ type: String }) initialTab: "transcription" | "postprocessing" = "transcription";
+  @property({ type: Object }) anchor?: HTMLElement;
+  @property({ type: Object }) config: any = null;
+
+  @state() private activeTab: "transcription" | "postprocessing" = "transcription";
+  @state() private downloadedModels: string[] = [];
+  @state() private sttRealProvider = "local";
+  @state() private sttUrl = "";
+  @state() private sttModel = "";
+  @state() private sttKey = "";
+  @state() private sttLocalModel = "";
+
+  @state() private llmRealProvider = "none";
+  @state() private llmUrl = "";
+  @state() private llmModel = "";
+  @state() private llmKey = "";
+
+  @query('.mp-dialog') dialog!: HTMLElement;
+  @query('#mp-stt-provider') sttProviderSelect!: HTMLSelectElement;
+  @query('#mp-llm-provider') llmProviderSelect!: HTMLSelectElement;
+
+  private keyHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") this.close(false);
+  };
+
+  connectedCallback() {
+    super.connectedCallback();
+    document.addEventListener("keydown", this.keyHandler);
+    this.activeTab = this.initialTab;
+    this.initFromConfig();
+    this.loadDownloadedModels();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    document.removeEventListener("keydown", this.keyHandler);
+  }
+
+  protected firstUpdated(_changedProperties: PropertyValues) {
+    if (this.anchor) {
+      const rect = this.anchor.getBoundingClientRect();
+      const width = this.dialog.offsetWidth;
+      const margin = 8;
+      let left = rect.left;
+      if (left + width + margin > window.innerWidth) {
+        left = Math.max(margin, window.innerWidth - width - margin);
+      }
+      let top = rect.bottom + 4;
+      const height = this.dialog.offsetHeight;
+      if (top + height + margin > window.innerHeight && rect.top - height - 4 > margin) {
+        top = rect.top - height - 4;
+      }
+      this.dialog.style.top = `${Math.max(margin, top)}px`;
+      this.dialog.style.left = `${left}px`;
+    }
+    
+    const cancelBtn = this.shadowRoot?.querySelector('#mp-cancel') as HTMLButtonElement | null;
+    cancelBtn?.focus();
+  }
+
+  private initFromConfig() {
+    if (!this.config) return;
+    const w = this.config.whisper || {};
+    const l = this.config.llm_post_process || {};
+
+    this.sttRealProvider = String(w.provider ?? "local");
+    this.sttUrl = String(w.api_url ?? "");
+    this.sttModel = String(w.model ?? "");
+    this.sttKey = String(w.api_key ?? "");
+    this.sttLocalModel = String(w.model_path ?? "");
+
+    this.llmRealProvider = String(l.provider ?? "none");
+    this.llmUrl = String(l.api_url ?? "");
+    this.llmModel = String(l.model ?? "");
+    this.llmKey = String(l.api_key ?? "");
+  }
+
+  private async loadDownloadedModels() {
+    try {
+      this.downloadedModels = await invoke("wizard_list_downloaded_models");
+    } catch {
+      this.downloadedModels = [];
+    }
+  }
+
+  private handleOverlayClick(e: MouseEvent) {
+    if (e.target === e.currentTarget) {
+      this.close(false);
+    }
+  }
+
+  private close(saved: boolean) {
+    this.dispatchEvent(new CustomEvent('resolved', { detail: saved }));
+  }
+
+  private async save() {
+    if (!this.config) return;
+    if (!this.config.whisper) this.config.whisper = {};
+    if (!this.config.llm_post_process) this.config.llm_post_process = {};
+
+    this.config.whisper.provider = this.sttRealProvider;
+    this.config.whisper.model = this.sttModel.trim();
+    this.config.whisper.api_key = this.sttKey;
+    this.config.whisper.api_url = this.sttUrl.trim();
+    if (this.sttRealProvider === "local" && this.sttLocalModel) {
+      this.config.whisper.model_path = this.sttLocalModel;
+    }
+
+    this.config.llm_post_process.provider = this.llmRealProvider;
+    this.config.llm_post_process.model = this.llmModel.trim();
+    this.config.llm_post_process.api_key = this.llmKey;
+    this.config.llm_post_process.api_url = this.llmUrl.trim();
+    this.config.llm_post_process.enabled = this.llmRealProvider !== "none";
+
+    try {
+      await invoke("write_config", { config: this.config });
+      window.dispatchEvent(new CustomEvent("config:saved", { detail: this.config }));
+      showToast("Models saved", "success");
+      this.close(true);
+    } catch (e) {
+      showToast(`Save failed: ${e}`, "error");
+    }
+  }
+
+  private onSttProviderChange() {
+    const v = this.sttProviderSelect.value;
+    const preset = STT_PRESETS.find((p) => p.id === v);
+    if (preset) {
+      this.sttRealProvider = preset.provider;
+      this.sttUrl = preset.apiUrl;
+      this.sttModel = preset.model;
+    } else {
+      this.sttRealProvider = v;
+    }
+  }
+
+  private onLlmProviderChange() {
+    const v = this.llmProviderSelect.value;
+    const preset = LLM_PRESETS.find((p) => p.id === v);
+    if (preset) {
+      this.llmRealProvider = preset.provider;
+      this.llmUrl = preset.apiUrl;
+      this.llmModel = preset.model;
+    } else {
+      this.llmRealProvider = v;
+    }
+  }
+
+  render() {
+    const isSttLocal = this.sttRealProvider === "local";
+    const isLlmCloud = this.llmRealProvider === "openai" || this.llmRealProvider === "groq" || this.llmRealProvider === "anthropic";
+
+    const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
+    const sttPresetOpts = STT_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
+    const llmRealOpts = LLM_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.llmRealProvider}>${p.label}</option>`);
+    const llmPresetOpts = LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
+
+    const hasDownloaded = this.downloadedModels.length > 0;
+    const currentDownloadedOpts = hasDownloaded ? this.downloadedModels.map(p => html`<option value=${p} ?selected=${p === this.sttLocalModel}>${localModelLabel(p)}</option>`) : html`<option value="">No models downloaded — get one in Settings → Whisper</option>`;
+    
+    // Ensure the selected model is shown even if not in downloaded models list
+    const needsCurrentModelOpt = this.sttLocalModel && !this.downloadedModels.includes(this.sttLocalModel);
+
+    return html`
+      <div class=${"modal-overlay " + (this.anchor ? "mp-anchored" : "")} @click=${this.handleOverlayClick}>
+        <div class="modal-dialog mp-dialog" role="dialog" aria-modal="true" aria-labelledby="mp-title">
+          <div class="modal-header">
+            <h3 class="modal-title" id="mp-title">Choose Models</h3>
+          </div>
+
+          <div class="mp-tabs" role="tablist">
+            <button class="mp-tab ${this.activeTab === 'transcription' ? 'active' : ''}" @click=${() => this.activeTab = 'transcription'} role="tab">Transcription</button>
+            <button class="mp-tab ${this.activeTab === 'postprocessing' ? 'active' : ''}" @click=${() => this.activeTab = 'postprocessing'} role="tab">Post-processing</button>
+          </div>
+
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'transcription'}>
+            <label class="mp-label" for="mp-stt-provider">Provider</label>
+            <select id="mp-stt-provider" class="mp-input" @change=${this.onSttProviderChange}>
+              ${sttRealOpts}
+              <optgroup label="Presets">${sttPresetOpts}</optgroup>
+            </select>
+
+            <div class="mp-row" style="display:${isSttLocal ? '' : 'none'}">
+              <label class="mp-label" for="mp-stt-local-model">Local model</label>
+              <select id="mp-stt-local-model" class="mp-input" .value=${this.sttLocalModel} @change=${(e: Event) => this.sttLocalModel = (e.target as HTMLSelectElement).value}>
+                ${needsCurrentModelOpt ? html`<option value=${this.sttLocalModel} selected>${localModelLabel(this.sttLocalModel)} (current)</option>` : ''}
+                ${currentDownloadedOpts}
+              </select>
+              <p class="mp-hint">Pick which downloaded whisper.cpp model runs. Bigger = more accurate but slower. Download more sizes in <b>Settings → Whisper</b>.</p>
+            </div>
+
+            <div class="mp-row" style="display:${!isSttLocal ? '' : 'none'}">
+              <label class="mp-label" for="mp-stt-key">API key</label>
+              <input id="mp-stt-key" class="mp-input" type="password" .value=${this.sttKey} @input=${(e: Event) => this.sttKey = (e.target as HTMLInputElement).value} />
+
+              <label class="mp-label" for="mp-stt-url">API URL (optional)</label>
+              <input id="mp-stt-url" class="mp-input" type="text" .value=${this.sttUrl} @input=${(e: Event) => this.sttUrl = (e.target as HTMLInputElement).value} />
+
+              <label class="mp-label" for="mp-stt-model">Model</label>
+              <input id="mp-stt-model" class="mp-input" type="text" .value=${this.sttModel} placeholder="Leave blank for provider default" @input=${(e: Event) => this.sttModel = (e.target as HTMLInputElement).value} />
+            </div>
+
+            <p class="mp-hint">Where your audio is transcribed. <b>Local</b> stays on your machine and uses the bundled model from full Settings; cloud options upload audio to a third-party API.</p>
+          </div>
+
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'postprocessing'}>
+            <label class="mp-label" for="mp-llm-provider">Provider</label>
+            <select id="mp-llm-provider" class="mp-input" @change=${this.onLlmProviderChange}>
+              ${llmRealOpts}
+              <optgroup label="Presets">${llmPresetOpts}</optgroup>
+            </select>
+
+            <div class="mp-row" style="display:${isLlmCloud ? '' : 'none'}">
+              <label class="mp-label" for="mp-llm-key">API key</label>
+              <input id="mp-llm-key" class="mp-input" type="password" .value=${this.llmKey} @input=${(e: Event) => this.llmKey = (e.target as HTMLInputElement).value} />
+
+              <label class="mp-label" for="mp-llm-url">API URL (optional)</label>
+              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} @input=${(e: Event) => this.llmUrl = (e.target as HTMLInputElement).value} />
+            </div>
+
+            <label class="mp-label" for="mp-llm-model">Model</label>
+            <input id="mp-llm-model" class="mp-input" type="text" .value=${this.llmModel} placeholder="e.g. llama3.2:3b" @input=${(e: Event) => this.llmModel = (e.target as HTMLInputElement).value} />
+            <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Local Ollama</b> keeps everything offline.</p>
+          </div>
+
+          <div class="modal-actions">
+            <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
+            <button id="mp-save" class="modal-btn modal-btn-primary" @click=${this.save}>Save</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 }
 
-/**
- * Opens the model picker. Resolves `true` if the user saved, `false` if
- * cancelled.
- *
- * When `anchor` is supplied (e.g. the "Re-transcribe ▾" caret) the picker is
- * rendered as a dropdown positioned directly beneath that element instead of a
- * centered modal. Without an anchor (e.g. the Settings button) it stays a
- * centered modal.
- */
-export function openModelPicker(
+export async function openModelPicker(
   initialTab: "transcription" | "postprocessing" = "transcription",
   anchor?: HTMLElement,
 ): Promise<boolean> {
-  return run(initialTab, anchor);
-}
-
-async function run(
-  initialTab: "transcription" | "postprocessing",
-  anchor?: HTMLElement,
-): Promise<boolean> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let config: any;
   try {
     config = await invoke("read_config");
@@ -125,255 +319,18 @@ async function run(
     return false;
   }
 
-  // Ensure the nested objects exist so reads/writes don't throw.
-  if (!config.whisper) config.whisper = {};
-  if (!config.llm_post_process) config.llm_post_process = {};
+  return new Promise((resolve) => {
+    const el = document.createElement('ph-model-picker') as ModelPickerElement;
+    el.initialTab = initialTab;
+    if (anchor) el.anchor = anchor;
+    el.config = config;
 
-  const w = config.whisper;
-  const l = config.llm_post_process;
-
-  return await new Promise<boolean>((resolve) => {
-
-  const overlay = document.createElement("div");
-  overlay.className = anchor ? "modal-overlay mp-anchored" : "modal-overlay";
-  overlay.innerHTML = `
-    <div class="modal-dialog mp-dialog" role="dialog" aria-modal="true" aria-labelledby="mp-title">
-      <div class="modal-header">
-        <h3 class="modal-title" id="mp-title">Choose Models</h3>
-      </div>
-
-      <div class="mp-tabs" role="tablist">
-        <button class="mp-tab" data-tab="transcription" role="tab">Transcription</button>
-        <button class="mp-tab" data-tab="postprocessing" role="tab">Post-processing</button>
-      </div>
-
-      <div class="mp-panel" data-panel="transcription">
-        <label class="mp-label" for="mp-stt-provider">Provider</label>
-        <select id="mp-stt-provider" class="mp-input">
-          ${buildProviderOptions(STT_PROVIDERS, STT_PRESETS, String(w.provider ?? "local"))}
-        </select>
-
-        <div class="mp-row" data-stt-local>
-          <label class="mp-label" for="mp-stt-local-model">Local model</label>
-          <select id="mp-stt-local-model" class="mp-input">
-            <option value="">Loading downloaded models…</option>
-          </select>
-          <p class="mp-hint">Pick which downloaded whisper.cpp model runs. Bigger = more accurate but slower. Download more sizes in <b>Settings → Whisper</b>.</p>
-        </div>
-
-        <div class="mp-row" data-stt-cloud>
-          <label class="mp-label" for="mp-stt-key">API key</label>
-          <input id="mp-stt-key" class="mp-input" type="password" value="${escapeAttr(String(w.api_key ?? ""))}" />
-
-          <label class="mp-label" for="mp-stt-url">API URL (optional)</label>
-          <input id="mp-stt-url" class="mp-input" type="text" value="${escapeAttr(String(w.api_url ?? ""))}" />
-
-          <label class="mp-label" for="mp-stt-model">Model</label>
-          <input id="mp-stt-model" class="mp-input" type="text" value="${escapeAttr(String(w.model ?? ""))}" placeholder="Leave blank for provider default" />
-        </div>
-
-        <p class="mp-hint" data-stt-local-hint>Where your audio is transcribed. <b>Local</b> stays on your machine and uses the bundled model from full Settings; cloud options upload audio to a third-party API.</p>
-      </div>
-
-      <div class="mp-panel" data-panel="postprocessing" hidden>
-        <label class="mp-label" for="mp-llm-provider">Provider</label>
-        <select id="mp-llm-provider" class="mp-input">
-          ${buildProviderOptions(LLM_PROVIDERS, LLM_PRESETS, String(l.provider ?? "none"))}
-        </select>
-
-        <div class="mp-row" data-llm-cloud>
-          <label class="mp-label" for="mp-llm-key">API key</label>
-          <input id="mp-llm-key" class="mp-input" type="password" value="${escapeAttr(String(l.api_key ?? ""))}" />
-
-          <label class="mp-label" for="mp-llm-url">API URL (optional)</label>
-          <input id="mp-llm-url" class="mp-input" type="text" value="${escapeAttr(String(l.api_url ?? ""))}" />
-        </div>
-
-        <label class="mp-label" for="mp-llm-model">Model</label>
-        <input id="mp-llm-model" class="mp-input" type="text" value="${escapeAttr(String(l.model ?? ""))}" placeholder="e.g. llama3.2:3b" />
-        <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Local Ollama</b> keeps everything offline.</p>
-      </div>
-
-      <div class="modal-actions">
-        <button id="mp-cancel" class="modal-btn">Cancel</button>
-        <button id="mp-save" class="modal-btn modal-btn-primary">Save</button>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-
-  // When anchored to a trigger (the Re-transcribe caret), position the dialog
-  // as a dropdown directly beneath it, clamped to stay within the viewport.
-  if (anchor) {
-    const dialog = overlay.querySelector<HTMLElement>(".mp-dialog")!;
-    const rect = anchor.getBoundingClientRect();
-    const width = dialog.offsetWidth;
-    const margin = 8;
-    let left = rect.left;
-    if (left + width + margin > window.innerWidth) {
-      left = Math.max(margin, window.innerWidth - width - margin);
-    }
-    let top = rect.bottom + 4;
-    const height = dialog.offsetHeight;
-    // If it would overflow the bottom, flip above the anchor when there's room.
-    if (top + height + margin > window.innerHeight && rect.top - height - 4 > margin) {
-      top = rect.top - height - 4;
-    }
-    dialog.style.top = `${Math.max(margin, top)}px`;
-    dialog.style.left = `${left}px`;
-  }
-
-  const sttProvider = overlay.querySelector<HTMLSelectElement>("#mp-stt-provider")!;
-  const sttUrl = overlay.querySelector<HTMLInputElement>("#mp-stt-url")!;
-  const sttModel = overlay.querySelector<HTMLInputElement>("#mp-stt-model")!;
-  const sttKey = overlay.querySelector<HTMLInputElement>("#mp-stt-key")!;
-  const sttCloud = overlay.querySelector<HTMLElement>("[data-stt-cloud]")!;
-  const sttLocal = overlay.querySelector<HTMLElement>("[data-stt-local]")!;
-  const sttLocalModel = overlay.querySelector<HTMLSelectElement>("#mp-stt-local-model")!;
-
-  const llmProvider = overlay.querySelector<HTMLSelectElement>("#mp-llm-provider")!;
-  const llmUrl = overlay.querySelector<HTMLInputElement>("#mp-llm-url")!;
-  const llmModel = overlay.querySelector<HTMLInputElement>("#mp-llm-model")!;
-  const llmKey = overlay.querySelector<HTMLInputElement>("#mp-llm-key")!;
-  const llmCloud = overlay.querySelector<HTMLElement>("[data-llm-cloud]")!;
-
-  // Track the real provider chosen so a preset selection resolves to a backend
-  // provider while leaving the dropdown showing the preset label was applied.
-  let sttRealProvider = String(w.provider ?? "local");
-  let llmRealProvider = String(l.provider ?? "none");
-
-  const updateSttCloud = () => {
-    sttCloud.style.display = sttRealProvider === "local" ? "none" : "";
-  };
-  // The local-model strength picker only applies to the offline whisper.cpp
-  // backend; cloud providers expose their model via the free-text field above.
-  const updateSttLocal = () => {
-    sttLocal.style.display = sttRealProvider === "local" ? "" : "none";
-  };
-
-  // Populate the local-model dropdown with whatever whisper.cpp models are
-  // downloaded, preselecting the one currently configured (model_path).
-  void (async () => {
-    try {
-      const paths = (await invoke("wizard_list_downloaded_models")) as string[];
-      const current = String(w.model_path ?? "");
-      if (paths.length === 0) {
-        sttLocalModel.innerHTML = `<option value="">No models downloaded — get one in Settings → Whisper</option>`;
-      } else {
-        sttLocalModel.innerHTML = paths
-          .map(
-            (p) =>
-              `<option value="${escapeAttr(p)}" ${p === current ? "selected" : ""}>${escapeAttr(localModelLabel(p))}</option>`,
-          )
-          .join("");
-        // If the configured model isn't among the downloaded ones, keep it
-        // visible/selected so saving doesn't silently switch the model.
-        if (current && !paths.includes(current)) {
-          sttLocalModel.insertAdjacentHTML(
-            "afterbegin",
-            `<option value="${escapeAttr(current)}" selected>${escapeAttr(localModelLabel(current))} (current)</option>`,
-          );
-        }
-      }
-    } catch {
-      sttLocalModel.innerHTML = `<option value="">Failed to list downloaded models</option>`;
-    }
-  })();
-  const updateLlmCloud = () => {
-    const isCloud =
-      llmRealProvider === "openai" ||
-      llmRealProvider === "groq" ||
-      llmRealProvider === "anthropic";
-    llmCloud.style.display = isCloud ? "" : "none";
-  };
-
-  sttProvider.addEventListener("change", () => {
-    const v = sttProvider.value;
-    const preset = STT_PRESETS.find((p) => p.id === v);
-    if (preset) {
-      sttRealProvider = preset.provider;
-      sttUrl.value = preset.apiUrl;
-      sttModel.value = preset.model;
-    } else {
-      sttRealProvider = v;
-    }
-    updateSttCloud();
-    updateSttLocal();
-  });
-
-  llmProvider.addEventListener("change", () => {
-    const v = llmProvider.value;
-    const preset = LLM_PRESETS.find((p) => p.id === v);
-    if (preset) {
-      llmRealProvider = preset.provider;
-      llmUrl.value = preset.apiUrl;
-      llmModel.value = preset.model;
-    } else {
-      llmRealProvider = v;
-    }
-    updateLlmCloud();
-  });
-
-  updateSttCloud();
-  updateSttLocal();
-  updateLlmCloud();
-
-  // Tabs
-  const tabs = overlay.querySelectorAll<HTMLButtonElement>(".mp-tab");
-  const panels = overlay.querySelectorAll<HTMLElement>(".mp-panel");
-  const activateTab = (name: string) => {
-    tabs.forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
-    panels.forEach((p) => {
-      p.hidden = p.dataset.panel !== name;
+    el.addEventListener('resolved', (e: Event) => {
+      const customEvent = e as CustomEvent<boolean>;
+      el.remove();
+      resolve(customEvent.detail);
     });
-  };
-  tabs.forEach((t) =>
-    t.addEventListener("click", () => activateTab(t.dataset.tab!)),
-  );
-  activateTab(initialTab);
 
-  const close = (saved: boolean) => {
-    overlay.remove();
-    document.removeEventListener("keydown", keyHandler);
-    resolve(saved);
-  };
-  const keyHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") close(false);
-  };
-  document.addEventListener("keydown", keyHandler);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close(false);
-  });
-  overlay.querySelector("#mp-cancel")!.addEventListener("click", () => close(false));
-
-  overlay.querySelector("#mp-save")!.addEventListener("click", async () => {
-    config.whisper.provider = sttRealProvider;
-    config.whisper.model = sttModel.value.trim();
-    config.whisper.api_key = sttKey.value;
-    config.whisper.api_url = sttUrl.value.trim();
-    // For the local backend, the chosen "model strength" is the GGML file path.
-    if (sttRealProvider === "local" && sttLocalModel.value) {
-      config.whisper.model_path = sttLocalModel.value;
-    }
-
-    config.llm_post_process.provider = llmRealProvider;
-    config.llm_post_process.model = llmModel.value.trim();
-    config.llm_post_process.api_key = llmKey.value;
-    config.llm_post_process.api_url = llmUrl.value.trim();
-    // Keep the enabled flag in sync: a real LLM provider means it's on.
-    config.llm_post_process.enabled = llmRealProvider !== "none";
-
-    try {
-      await invoke("write_config", { config });
-      window.dispatchEvent(new CustomEvent("config:saved", { detail: config }));
-      showToast("Models saved", "success");
-      close(true);
-    } catch (e) {
-      showToast(`Save failed: ${e}`, "error");
-    }
-  });
-
-    (overlay.querySelector("#mp-cancel") as HTMLButtonElement)?.focus();
+    document.body.appendChild(el);
   });
 }

@@ -76,12 +76,11 @@ impl Catalog {
 
     pub async fn insert(&self, r: &Recording) -> Result<()> {
         sqlx::query(
-            r#"INSERT INTO recordings
-                 (id, started_at, duration_ms, audio_path, transcript, model, status,
-                  error_kind, error_message, hook_command, hook_exit_code,
-                  hook_duration_ms, transcribed_at, hook_ran_at, notes,
-                  session_id, track)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            "INSERT INTO recordings (
+                 id, started_at, duration_ms, audio_path, transcript, model, status,
+                 error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
+                 transcribed_at, hook_ran_at, notes, session_id, track, in_place
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -95,11 +94,12 @@ impl Catalog {
         .bind(r.hook_command.as_deref())
         .bind(r.hook_exit_code)
         .bind(r.hook_duration_ms)
-        .bind(r.transcribed_at.map(|t| t.to_rfc3339()))
-        .bind(r.hook_ran_at.map(|t| t.to_rfc3339()))
+        .bind(r.transcribed_at.map(|d| d.to_rfc3339()))
+        .bind(r.hook_ran_at.map(|d| d.to_rfc3339()))
         .bind(r.notes.as_deref())
         .bind(r.session_id.as_deref())
         .bind(r.track.as_deref())
+        .bind(r.in_place)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -114,12 +114,12 @@ impl Catalog {
         Ok(())
     }
 
-    /// Update just the duration column. Used when the recorder finalizes a
-    /// WAV and we know the captured length.
-    pub async fn update_duration(&self, id: &RecordingId, duration_ms: i64) -> Result<()> {
+    /// Update both status and duration in a single query.
+    pub async fn update_status_and_duration(&self, id: &RecordingId, status: RecordingStatus, duration_ms: i64) -> Result<()> {
         sqlx::query(
-            "UPDATE recordings SET duration_ms = ?, updated_at = datetime('now') WHERE id = ?",
+            "UPDATE recordings SET status = ?, duration_ms = ?, updated_at = datetime('now') WHERE id = ?",
         )
+        .bind(status.as_str())
         .bind(duration_ms)
         .bind(id.as_str())
         .execute(&self.pool)
@@ -664,6 +664,7 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         notes: row.try_get("notes")?,
         session_id: row.try_get("session_id")?,
         track: row.try_get("track")?,
+        in_place: row.try_get("in_place").unwrap_or(false),
     })
 }
 

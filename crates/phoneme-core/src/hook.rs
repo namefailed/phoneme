@@ -120,8 +120,10 @@ impl HookRunner {
 /// Falls back to whitespace splitting if shlex returns `None` (malformed input
 /// like an unterminated quote) — better than crashing.
 fn split_command(s: &str) -> (String, Vec<String>) {
-    let parts: Vec<String> =
-        shlex::split(s).unwrap_or_else(|| s.split_whitespace().map(String::from).collect());
+    let parts: Vec<String> = shlex::split(s).unwrap_or_else(|| {
+        tracing::warn!("shlex failed to parse hook command, falling back to whitespace split: {s:?}");
+        s.split_whitespace().map(String::from).collect()
+    });
     let mut iter = parts.into_iter();
     let program = iter.next().unwrap_or_default();
     let args: Vec<String> = iter.collect();

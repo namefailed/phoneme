@@ -1,96 +1,41 @@
-/**
- * BulkActionBar — floating action bar that appears when ≥1 recordings are
- * multi-selected in the recordings list.
- *
- * It mounts itself into the given `container` and triggers the provided
- * callbacks. The parent is responsible for clearing selection on success.
- */
-import {
-  deleteRecording,
-  retranscribeRecording,
-  type Recording,
-} from "../../services/ipc";
+import { LitElement, html, css, PropertyValues } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import { deleteRecording, retranscribeRecording, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 
 export type BulkActionCallbacks = {
-  /** Called after any operation that requires a list refresh. */
   onRefresh: () => void;
-  /** Called when the user clicks "Deselect all". */
   onClear: () => void;
 };
 
-export class BulkActionBar {
-  private container: HTMLElement;
-  private selected: ReadonlySet<string>;
-  private recordings: ReadonlyArray<Recording>;
-  private callbacks: BulkActionCallbacks;
-  private busy = false;
-
-  constructor(
-    container: HTMLElement,
-    selected: ReadonlySet<string>,
-    recordings: ReadonlyArray<Recording>,
-    callbacks: BulkActionCallbacks,
-  ) {
-    this.container = container;
-    this.selected = selected;
-    this.recordings = recordings;
-    this.callbacks = callbacks;
-    this.render();
+@customElement('ph-bulk-action-bar')
+export class BulkActionBarElement extends LitElement {
+  protected createRenderRoot() {
+    return this; // Use light DOM to inherit global styling like .bulk-bar
   }
+
+  @property({ type: Object }) selected: ReadonlySet<string> = new Set();
+  @property({ type: Array }) recordings: ReadonlyArray<Recording> = [];
+  @property({ type: Object }) callbacks!: BulkActionCallbacks;
+
+  @state() private busy = false;
 
   private selectedRecordings(): Recording[] {
     return this.recordings.filter((r) => this.selected.has(r.id));
   }
 
-  private render() {
-    const n = this.selected.size;
-    if (n === 0) {
-      this.container.innerHTML = "";
-      this.container.style.display = "none";
-      return;
+  updated(changedProperties: PropertyValues) {
+    if (changedProperties.has('selected')) {
+      const display = this.selected.size > 0 ? "flex" : "none";
+      if (this.style.display !== display) {
+        this.style.display = display;
+      }
     }
-
-    this.container.style.display = "flex";
-    const label = n === 1 ? "1 recording selected" : `${n} recordings selected`;
-
-    this.container.innerHTML = `
-      <div class="bulk-bar">
-        <span class="bulk-count">${label}</span>
-        <div class="bulk-actions">
-          <button id="bulk-retranscribe" class="bulk-btn" title="Re-transcribe selected recordings">
-            ↺ Re-transcribe
-          </button>
-          <button id="bulk-export" class="bulk-btn" title="Export transcripts as plain text">
-            ↓ Export
-          </button>
-          <button id="bulk-delete" class="bulk-btn bulk-btn--danger" title="Delete selected recordings">
-            🗑 Delete
-          </button>
-          <button id="bulk-clear" class="bulk-btn bulk-btn--muted" title="Deselect all">
-            ✕ Deselect
-          </button>
-        </div>
-      </div>
-    `;
-
-    this.container.querySelector("#bulk-retranscribe")?.addEventListener("click", () => {
-      void this.handleRetranscribe();
-    });
-    this.container.querySelector("#bulk-export")?.addEventListener("click", () => {
-      void this.handleExport();
-    });
-    this.container.querySelector("#bulk-delete")?.addEventListener("click", () => {
-      void this.handleDelete();
-    });
-    this.container.querySelector("#bulk-clear")?.addEventListener("click", () => {
-      this.callbacks.onClear();
-    });
   }
 
   private async handleRetranscribe() {
     if (this.busy) return;
-    this.setBusy(true);
+    this.busy = true;
     const recs = this.selectedRecordings();
     let ok = 0;
     let failed = 0;
@@ -102,62 +47,11 @@ export class BulkActionBar {
         failed++;
       }
     }
-    this.setBusy(false);
+    this.busy = false;
     if (failed === 0) {
-      showToast(
-        `Queued ${ok} recording${ok !== 1 ? "s" : ""} for re-transcription.`,
-        "success",
-      );
+      showToast(`Queued ${ok} recording${ok !== 1 ? "s" : ""} for re-transcription.`, "success");
     } else {
-      showToast(
-        `${ok} queued, ${failed} failed.`,
-        "error",
-      );
-    }
-    this.callbacks.onClear();
-    this.callbacks.onRefresh();
-  }
-
-  private async handleDelete() {
-    if (this.busy) return;
-    const recs = this.selectedRecordings();
-    const n = recs.length;
-    const confirmed = await import("../ConfirmDelete").then(
-      ({ confirmDelete }) =>
-        confirmDelete({
-          title: n === 1 ? "Delete Recording?" : `Delete ${n} Recordings?`,
-          body:
-            n === 1
-              ? "This will permanently delete the recording and its audio file. This action cannot be undone."
-              : `This will permanently delete ${n} recordings and their audio files. This action cannot be undone.`,
-          confirmLabel: n === 1 ? "Delete" : `Delete ${n} Recordings`,
-          skipKey: "phoneme_skip_bulk_delete_confirm",
-        }),
-    );
-    if (!confirmed) return;
-
-    this.setBusy(true);
-    let ok = 0;
-    let failed = 0;
-    for (const r of recs) {
-      try {
-        await deleteRecording(r.id, false);
-        ok++;
-      } catch {
-        failed++;
-      }
-    }
-    this.setBusy(false);
-    if (failed === 0) {
-      showToast(
-        `Deleted ${ok} recording${ok !== 1 ? "s" : ""}.`,
-        "success",
-      );
-    } else {
-      showToast(
-        `${ok} deleted, ${failed} failed.`,
-        "error",
-      );
+      showToast(`${ok} queued, ${failed} failed.`, "error");
     }
     this.callbacks.onClear();
     this.callbacks.onRefresh();
@@ -191,16 +85,95 @@ export class BulkActionBar {
     showToast(`Exported ${recs.filter((r) => r.transcript).length} transcript(s).`, "success");
   }
 
-  private setBusy(busy: boolean) {
-    this.busy = busy;
-    this.container.querySelectorAll<HTMLButtonElement>(".bulk-btn").forEach((btn) => {
-      btn.disabled = busy;
+  private async handleDelete() {
+    if (this.busy) return;
+    const recs = this.selectedRecordings();
+    const n = recs.length;
+    
+    const { confirmDelete } = await import("../ConfirmDelete");
+    const confirmed = await confirmDelete({
+      title: n === 1 ? "Delete Recording?" : `Delete ${n} Recordings?`,
+      body: n === 1
+          ? "This will permanently delete the recording and its audio file. This action cannot be undone."
+          : `This will permanently delete ${n} recordings and their audio files. This action cannot be undone.`,
+      confirmLabel: n === 1 ? "Delete" : `Delete ${n} Recordings`,
+      skipKey: "phoneme_skip_bulk_delete_confirm",
     });
-    const countEl = this.container.querySelector<HTMLElement>(".bulk-count");
-    if (countEl) {
-      countEl.textContent = busy
-        ? "Working…"
-        : `${this.selected.size} recording${this.selected.size !== 1 ? "s" : ""} selected`;
+    if (!confirmed) return;
+
+    this.busy = true;
+    let ok = 0;
+    let failed = 0;
+    for (const r of recs) {
+      try {
+        await deleteRecording(r.id, false);
+        ok++;
+      } catch {
+        failed++;
+      }
     }
+    this.busy = false;
+    
+    if (failed === 0) {
+      showToast(`Deleted ${ok} recording${ok !== 1 ? "s" : ""}.`, "success");
+    } else {
+      showToast(`${ok} deleted, ${failed} failed.`, "error");
+    }
+    this.callbacks.onClear();
+    this.callbacks.onRefresh();
+  }
+
+  private handleClear() {
+    this.callbacks.onClear();
+  }
+
+  render() {
+    const n = this.selected.size;
+    if (n === 0) return html``;
+
+    const label = n === 1 ? "1 recording selected" : `${n} recordings selected`;
+
+    return html`
+      <div class="bulk-bar">
+        <span class="bulk-count">${this.busy ? "Working…" : label}</span>
+        <div class="bulk-actions">
+          <button class="bulk-btn" title="Re-transcribe selected recordings" .disabled=${this.busy} @click=${this.handleRetranscribe}>
+            ↺ Re-transcribe
+          </button>
+          <button class="bulk-btn" title="Export transcripts as plain text" .disabled=${this.busy} @click=${this.handleExport}>
+            ↓ Export
+          </button>
+          <button class="bulk-btn bulk-btn--danger" title="Delete selected recordings" .disabled=${this.busy} @click=${this.handleDelete}>
+            🗑 Delete
+          </button>
+          <button class="bulk-btn bulk-btn--muted" title="Deselect all" .disabled=${this.busy} @click=${this.handleClear}>
+            ✕ Deselect
+          </button>
+        </div>
+      </div>
+    `;
+  }
+}
+
+// Temporary vanilla wrapper
+export class BulkActionBar {
+  private element: BulkActionBarElement;
+  constructor(
+    container: HTMLElement,
+    selected: ReadonlySet<string>,
+    recordings: ReadonlyArray<Recording>,
+    callbacks: BulkActionCallbacks,
+  ) {
+    this.element = document.createElement('ph-bulk-action-bar') as BulkActionBarElement;
+    this.element.selected = selected;
+    this.element.recordings = recordings;
+    this.element.callbacks = callbacks;
+    container.appendChild(this.element);
+  }
+
+  // Called manually by parent right now
+  update(selected: ReadonlySet<string>, recordings: ReadonlyArray<Recording>) {
+    this.element.selected = selected;
+    this.element.recordings = recordings;
   }
 }

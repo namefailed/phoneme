@@ -106,7 +106,7 @@ pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, String>
             }
         }
     };
-    forward(&bridge, Request::RecordStart { mode }).await
+    forward(&bridge, Request::RecordStart { mode, in_place: false }).await
 }
 
 /// Signal the daemon to cleanly stop the current recording and begin transcription.
@@ -657,14 +657,34 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
 #[derive(serde::Serialize)]
 pub struct SystemInfo {
     pub ram_mb: u64,
+    pub vram_mb: u64,
 }
 
 #[tauri::command]
 pub fn wizard_get_system_info() -> SystemInfo {
     let mut sys = sysinfo::System::new_all();
     sys.refresh_memory();
+    let ram_mb = sys.total_memory() / 1024 / 1024;
+    
+    let mut vram_mb = 0;
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("powershell")
+            .args(&["-Command", "(Get-CimInstance Win32_VideoController | Measure-Object -Property AdapterRAM -Sum).Sum"])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Ok(bytes) = stdout.trim().parse::<u64>() {
+                    vram_mb = bytes / 1024 / 1024;
+                }
+            }
+        }
+    }
+
     SystemInfo {
-        ram_mb: sys.total_memory() / 1024 / 1024,
+        ram_mb,
+        vram_mb,
     }
 }
 

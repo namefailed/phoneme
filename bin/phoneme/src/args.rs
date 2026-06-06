@@ -75,6 +75,9 @@ pub struct RecordArgs {
     /// Discard the active recording without saving.
     #[arg(long, conflicts_with_all = ["start", "stop", "oneshot", "duration"])]
     pub cancel: bool,
+    /// In-place transcription: type the transcript into the focused window using simulated keystrokes.
+    #[arg(long, short = 'i')]
+    pub in_place: bool,
 }
 
 #[derive(Debug, clap::Args)]

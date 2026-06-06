@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 use async_trait::async_trait;
 use reqwest::multipart;
 use serde::Deserialize;
+use secrecy::ExposeSecret;
 use std::path::Path;
 use std::time::Duration;
 use tokio::fs;
@@ -66,35 +67,35 @@ impl Transcriber {
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.openai.com"),
-                non_empty(&whisper.api_key),
+                non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-1")),
                 timeout,
             )),
             TranscriptionBackend::Groq => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.groq.com/openai"),
-                non_empty(&whisper.api_key),
+                non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-large-v3")),
                 timeout,
             )),
             TranscriptionBackend::Deepgram => Box::new(DeepgramProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.deepgram.com"),
-                whisper.api_key.trim().to_string(),
+                whisper.api_key.expose_secret().trim().to_string(),
                 model_or(&whisper.model, "nova-2"),
                 timeout,
             )),
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.assemblyai.com"),
-                whisper.api_key.trim().to_string(),
+                whisper.api_key.expose_secret().trim().to_string(),
                 whisper.model.trim().to_string(),
                 timeout,
             )),
             TranscriptionBackend::Elevenlabs => Box::new(ElevenLabsProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, "https://api.elevenlabs.io"),
-                whisper.api_key.trim().to_string(),
+                whisper.api_key.expose_secret().trim().to_string(),
                 model_or(&whisper.model, "scribe_v1"),
                 timeout,
             )),
@@ -103,7 +104,7 @@ impl Transcriber {
             TranscriptionBackend::Custom => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
                 whisper.api_url.trim().to_string(),
-                non_empty(&whisper.api_key),
+                non_empty(whisper.api_key.expose_secret()),
                 non_empty(&whisper.model),
                 timeout,
             )),

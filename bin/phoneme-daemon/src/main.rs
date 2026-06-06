@@ -34,6 +34,22 @@ async fn main() -> Result<()> {
     let state = AppState::new(cfg).await?;
     let _guard = logging::init(&state.config.load(), &state.paths.log_dir, args.foreground)?;
 
+    std::panic::set_hook(Box::new(|info| {
+        let payload = info.payload();
+        let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+            *s
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            "Box<dyn Any>"
+        };
+        let location = info
+            .location()
+            .map(|loc| format!("{loc}"))
+            .unwrap_or_else(|| "unknown".into());
+        tracing::error!(panic = true, location = %location, "Thread panicked: {}", msg);
+    }));
+
     reconcile::run(&state).await?;
 
     // Start idle pre-roll pre-capture if enabled (opt-in; no-op by default).

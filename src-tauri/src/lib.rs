@@ -94,6 +94,40 @@ pub fn run() {
                             return;
                         }
 
+                        let in_place_combo = if current_config.in_place_hotkey.enabled {
+                            Shortcut::from_str(&current_config.in_place_hotkey.combo).ok()
+                        } else {
+                            None
+                        };
+                        if in_place_combo.as_ref() == Some(shortcut) {
+                            let mode = current_config.in_place_hotkey.mode;
+                            match event.state() {
+                                ShortcutState::Pressed => {
+                                    tauri::async_runtime::spawn(async move {
+                                        if let Err(e) = bridge
+                                            .request(phoneme_ipc::Request::RecordStart {
+                                                mode: RecordMode::Hold,
+                                                in_place: true,
+                                            })
+                                            .await
+                                        {
+                                            tracing::error!("failed to start in-place record: {e}");
+                                        }
+                                    });
+                                }
+                                ShortcutState::Released => {
+                                    tauri::async_runtime::spawn(async move {
+                                        if mode == phoneme_core::config::HotkeyMode::Hold {
+                                            if let Err(e) = bridge.request(phoneme_ipc::Request::RecordStop).await {
+                                                tracing::error!("failed to stop in-place record: {e}");
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                            return;
+                        }
+
                         let mode = current_config.hotkey.mode;
 
                         match event.state() {
@@ -111,6 +145,7 @@ pub fn run() {
                                         if let Err(e) = bridge
                                             .request(phoneme_ipc::Request::RecordStart {
                                                 mode: RecordMode::Hold,
+                                                in_place: false,
                                             })
                                             .await
                                         {
@@ -160,7 +195,7 @@ pub fn run() {
                     }
                 }
 
-                if bridge.config.hotkey.enabled || bridge.config.meeting_hotkey.enabled {
+                if bridge.config.hotkey.enabled || bridge.config.meeting_hotkey.enabled || bridge.config.in_place_hotkey.enabled {
                     use std::str::FromStr;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
                     if bridge.config.hotkey.enabled {
@@ -176,6 +211,15 @@ pub fn run() {
                         {
                             if let Err(e) = app.handle().global_shortcut().register(shortcut) {
                                 tracing::error!("failed to register meeting hotkey: {e}");
+                            }
+                        }
+                    }
+                    if bridge.config.in_place_hotkey.enabled {
+                        if let Ok(shortcut) =
+                            Shortcut::from_str(&bridge.config.in_place_hotkey.combo)
+                        {
+                            if let Err(e) = app.handle().global_shortcut().register(shortcut) {
+                                tracing::error!("failed to register in_place hotkey: {e}");
                             }
                         }
                     }
