@@ -16,4 +16,4 @@ pub use format::{AudioConfig, Channels, SampleRate};
 pub use preroll::PreRollBuffer;
 pub use recorder::{Recorder, RecorderConfig, RecordingMode, RecordingResult};
 pub use silence::SilenceDetector;
-pub use source::{SampleBlock, Source, SyntheticSink, SyntheticSource};
+pub use source::{GeneratorSource, SampleBlock, Source, SyntheticSink, SyntheticSource};
