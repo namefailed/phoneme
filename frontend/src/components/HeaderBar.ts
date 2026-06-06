@@ -341,7 +341,7 @@ export class HeaderBarElement extends LitElement {
           <div class="hb-rec-group" style="position:relative; display:flex; align-items:stretch;">
             <button class="record-btn ${isCapturing ? 'recording-active' : ''}" title=${actionTitle} 
               style="border-top-right-radius:0; border-bottom-right-radius:0;" @click=${this.handleActionClick}>${actionLabel}</button>
-            <button class="record-btn hb-mode-caret" aria-haspopup="menu" aria-expanded=${this.modeMenuOpen} 
+            <button class="record-btn hb-mode-caret ${isCapturing ? 'recording-active' : ''}" aria-haspopup="menu" aria-expanded=${this.modeMenuOpen} 
               title="Switch capture mode (single recording or meeting)" ?disabled=${isCapturing} 
               style="padding:6px 8px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid rgba(0,0,0,0.25);"
               @click=${this.toggleModeMenu}>▾</button>

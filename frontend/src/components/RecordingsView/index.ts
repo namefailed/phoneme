@@ -150,6 +150,8 @@ export class RecordingsView {
       root.style.display = "none";
       return;
     }
+    
+    root.style.display = "";
 
     // Re-mount the BulkActionBar into the root element.
     new BulkActionBar(root, this.multiSelected, this.state.get().recordings, {

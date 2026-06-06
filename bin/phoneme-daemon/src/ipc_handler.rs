@@ -203,7 +203,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::SemanticSearch { query, limit } => {
-            if let Some(embedder) = state.embedder.as_ref() {
+            let embedder_guard = state.embedder.read().await;
+            if let Some(embedder) = embedder_guard.as_ref() {
                 match embedder.embed(&query) {
                     Ok(query_vec) => match state.catalog.semantic_search(&query_vec, limit).await {
                         Ok(results) => {
@@ -271,6 +272,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::UpdateTranscript { id, text } => {
             match state.catalog.update_user_transcript(&id, &text).await {
                 Ok(()) => {
+                    let embedder_guard = state.embedder.read().await;
+                    if let Some(embedder) = embedder_guard.as_ref() {
+                        if let Ok(vec) = embedder.embed(&text) {
+                            let _ = state.catalog.upsert_embedding(&id, &vec).await;
+                        }
+                    }
+                    drop(embedder_guard);
+
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
                     Response::Ok(serde_json::Value::Null)
                 }
@@ -603,6 +612,20 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             match crate::load_config() {
                 Ok(cfg) => {
                     state.config.store(std::sync::Arc::new(cfg));
+                    
+                    let cfg_arc = state.config.load();
+                    let mut embedder_guard = state.embedder.write().await;
+                    if cfg_arc.semantic_search.enabled && embedder_guard.is_none() {
+                        match phoneme_core::Embedder::new(&cfg_arc.semantic_search.model_dir) {
+                            Ok(e) => *embedder_guard = Some(std::sync::Arc::new(e)),
+                            Err(e) => tracing::warn!(error = %e, "Failed to load semantic search model on reload"),
+                        }
+                    } else if !cfg_arc.semantic_search.enabled {
+                        *embedder_guard = None;
+                    }
+                    drop(cfg_arc);
+                    drop(embedder_guard);
+
                     // Start/stop idle pre-roll pre-capture to match the new
                     // config (e.g. user just toggled pre_roll_ms).
                     state.recorder.sync_preroll(state).await;

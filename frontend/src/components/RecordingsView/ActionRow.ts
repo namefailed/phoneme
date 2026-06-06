@@ -62,6 +62,21 @@ export class ActionRowElement extends LitElement {
     }
   }
 
+  private async handleRefireWith(e: MouseEvent) {
+    const btn = e.currentTarget as HTMLElement;
+    const { openModelPicker } = await import("../ModelPicker");
+    const saved = await openModelPicker("postprocessing", btn);
+    if (saved) {
+      try {
+        await refireHook(this.recordingId);
+        showToast("Hook queued", "info");
+        this.cbs.onRefresh();
+      } catch (err) {
+        showToast(`Re-fire hook failed: ${err}`, "error");
+      }
+    }
+  }
+
   private async handleCopy() {
     try {
       await navigator.clipboard.writeText(this.cbs.getTranscript());
@@ -121,7 +136,10 @@ export class ActionRowElement extends LitElement {
           <button @click=${this.handleRetranscribe}>↻ Re-transcribe</button>
           <button class="split-caret" title="Re-transcribe with…" aria-label="Re-transcribe with…" @click=${this.handleRetranscribeWith}>▾</button>
         </div>
-        <button @click=${this.handleRefire}>⚡ Re-fire hook</button>
+        <div class="split-btn">
+          <button @click=${this.handleRefire}>⚡ Re-fire hook</button>
+          <button class="split-caret" title="Re-fire hook with…" aria-label="Re-fire hook with…" @click=${this.handleRefireWith}>▾</button>
+        </div>
         <button @click=${this.handleCopy}>${this.copyText}</button>
         <button @click=${this.handleExport}>⬇ Export</button>
         <button @click=${this.handleReveal}>📂 Reveal</button>

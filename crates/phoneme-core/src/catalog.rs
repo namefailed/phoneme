@@ -259,6 +259,17 @@ impl Catalog {
         Ok(())
     }
 
+    pub async fn list_recordings_without_embeddings(&self) -> Result<Vec<Recording>> {
+        let rows = sqlx::query(
+            "SELECT * FROM recordings \
+             WHERE id NOT IN (SELECT id FROM embeddings) \
+             AND transcript IS NOT NULL AND transcript != ''"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(row_to_recording).collect()
+    }
+
     /// Loads all embeddings into memory for brute-force cosine similarity.
     pub async fn load_all_embeddings(&self) -> Result<Vec<(RecordingId, Vec<f32>)>> {
         let rows = sqlx::query("SELECT id, vector FROM embeddings")

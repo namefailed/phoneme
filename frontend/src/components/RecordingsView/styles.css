@@ -590,9 +590,6 @@ mark.search-hit {
   background: color-mix(in srgb, var(--accent) 4%, transparent);
   border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
-.rec-row--track > span:first-child {
-  padding-left: 18px !important;
-}
 .rec-row--track > span:nth-child(2) {
   padding-left: 20px;
 }

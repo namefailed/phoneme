@@ -84,13 +84,13 @@ export class NotesEditor {
         minHeight: "72px",
         fontFamily: "inherit",
         fontSize: "13px",
-        borderRadius: "6px",
+        borderRadius: "8px",
         border: "1px solid var(--border-subtle)",
-        padding: "4px 2px",
+        padding: "8px 6px",
       },
       ".cm-content": {
         caretColor: "var(--accent)",
-        padding: "4px 8px",
+        padding: "6px 12px",
       },
       ".cm-cursor": {
         borderLeftColor: "var(--accent)",
