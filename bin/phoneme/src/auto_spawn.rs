@@ -1,22 +1,52 @@
 //! Auto-spawn the daemon when the CLI can't reach it.
 
 use phoneme_core::Config;
-use phoneme_ipc::NamedPipeTransport;
+use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};
 use std::process::Stdio;
 use std::time::Duration;
 
 const POLL_TOTAL: Duration = Duration::from_secs(3);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Bounded request: never let a wedged/non-responding daemon hang the CLI.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Whether the reachable daemon reports the same version as this build. A daemon
+/// that returns no `version` (older than 1.6.1) — or doesn't answer within
+/// `PROBE_TIMEOUT` — counts as a mismatch.
+async fn daemon_version_matches(t: &mut NamedPipeTransport) -> bool {
+    match tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::DaemonStatus)).await {
+        Ok(Ok(Response::Ok(v))) => {
+            v.get("version").and_then(|x| x.as_str()) == Some(env!("CARGO_PKG_VERSION"))
+        }
+        _ => false,
+    }
+}
+
+/// Poll until the named pipe is no longer reachable (the old daemon exited).
+async fn wait_for_pipe_gone(pipe_name: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if NamedPipeTransport::connect(pipe_name).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
 
 /// Ensure the daemon is reachable. If not, spawn it detached and poll the
 /// pipe for `POLL_TOTAL` before giving up.
 #[allow(dead_code)] // wired up by Client::connect in Task 5+
 pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
-    if NamedPipeTransport::connect(&cfg.daemon.pipe_name)
-        .await
-        .is_ok()
-    {
-        return Ok(());
+    // Reuse a running daemon only if it matches our version; otherwise a stale
+    // daemon would fail to deserialize newer requests and drop the pipe
+    // ("connection closed by peer"). Restart it if mismatched.
+    if let Ok(mut t) = NamedPipeTransport::connect(&cfg.daemon.pipe_name).await {
+        if daemon_version_matches(&mut t).await {
+            return Ok(());
+        }
+        let _ = tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::Shutdown)).await;
+        drop(t);
+        wait_for_pipe_gone(&cfg.daemon.pipe_name).await;
     }
 
     // Spawn detached.
