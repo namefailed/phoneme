@@ -9,16 +9,6 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 export class WaveformPlayerElement extends LitElement {
   protected createRenderRoot() { return this; }
 
-  static styles = css`
-    :host {
-      display: block;
-      width: 100%;
-    }
-    #container {
-      width: 100%;
-    }
-  `;
-
   @property({ type: String }) audioPath = "";
 
   @query('#container') container!: HTMLElement;
@@ -93,7 +83,18 @@ export class WaveformPlayerElement extends LitElement {
   }
 
   render() {
-    return html`<div id="container"></div>`;
+    return html`
+      <style>
+        ph-waveform-player {
+          display: block;
+          width: 100%;
+        }
+        ph-waveform-player #container {
+          width: 100%;
+        }
+      </style>
+      <div id="container"></div>
+    `;
   }
 }
 

@@ -5,28 +5,6 @@ import { customElement, property } from 'lit/decorators.js';
 export class SplitterElement extends LitElement {
   protected createRenderRoot() { return this; }
 
-  static styles = css`
-    :host {
-      display: block;
-      width: 8px;
-      cursor: col-resize;
-      background: var(--bg-deep);
-      position: relative;
-      flex-shrink: 0;
-      z-index: 10;
-    }
-    .splitter-handle {
-      position: absolute;
-      inset: 0;
-      transition: background 0.15s ease;
-    }
-    :host(:hover) .splitter-handle,
-    .splitter-handle.dragging {
-      background: var(--accent);
-      opacity: 0.5;
-    }
-  `;
-
   @property({ type: Number }) leftPercent = 50;
 
   private dragging = false;
@@ -69,7 +47,30 @@ export class SplitterElement extends LitElement {
   }
 
   render() {
-    return html`<div class="splitter-handle" @mousedown=${this.onMouseDown}></div>`;
+    return html`
+      <style>
+        ph-splitter {
+          display: block;
+          width: 8px;
+          cursor: col-resize;
+          background: var(--bg-deep);
+          position: relative;
+          flex-shrink: 0;
+          z-index: 10;
+        }
+        .splitter-handle {
+          position: absolute;
+          inset: 0;
+          transition: background 0.15s ease;
+        }
+        ph-splitter:hover .splitter-handle,
+        .splitter-handle.dragging {
+          background: var(--accent);
+          opacity: 0.5;
+        }
+      </style>
+      <div class="splitter-handle" @mousedown=${this.onMouseDown}></div>
+    `;
   }
 }
 
