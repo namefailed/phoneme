@@ -7,7 +7,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../utils/toast";
 import { escapeHtml, escapeAttr } from "../utils/format";
-import { pickAndImportAudio } from "../utils/import";
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
@@ -21,14 +20,33 @@ export class HeaderBar {
   private isRecording = false;
   private isPaused = false;
   private isMeeting = false;
+  /** Which capture the combined action button drives: a single recording or a
+   *  meeting. Persisted so the choice survives reloads. */
+  private recordMode: "recording" | "meeting" =
+    (localStorage.getItem("phoneme.recordMode") as "recording" | "meeting") ||
+    "recording";
+  /** Whether the mode-switch dropdown is open. */
+  private modeMenuOpen = false;
   private previewText: string | null = null;
   private whisperReachable: boolean | null = null; // null = status unknown
   private queuePending = 0;
   private queueProcessing = 0;
 
+  private docClickHandler: ((e: MouseEvent) => void) | null = null;
+
   constructor(container: HTMLElement, callbacks: HeaderBarCallbacks) {
     this.container = container;
     this.callbacks = callbacks;
+    // Close the mode-switch menu on any click outside the record button group.
+    this.docClickHandler = (e: MouseEvent) => {
+      if (!this.modeMenuOpen) return;
+      const group = this.container.querySelector(".hb-rec-group");
+      if (group && !group.contains(e.target as Node)) {
+        this.modeMenuOpen = false;
+        this.render();
+      }
+    };
+    document.addEventListener("click", this.docClickHandler);
     void this.loadTags();
   }
 
@@ -107,6 +125,26 @@ export class HeaderBar {
         } catch {}
       }
     });
+
+    // The daemon outlives the app window: a recording or meeting may already be
+    // in progress when the UI (re)loads. Sync the button state from it so, e.g.,
+    // an in-progress meeting shows "End Meeting" instead of a fresh "Meeting".
+    void this.syncStatusFromDaemon();
+  }
+
+  /** Pull the live capture status from the daemon and reconcile the buttons. */
+  private async syncStatusFromDaemon() {
+    try {
+      const s = await invoke<{ recording: boolean; meeting: boolean }>(
+        "record_status",
+      );
+      this.isMeeting = !!s.meeting;
+      this.isRecording = !s.meeting && !!s.recording;
+      if (this.isMeeting) this.recordMode = "meeting";
+      this.render();
+    } catch {
+      // Daemon not reachable yet — keep optimistic defaults; events will catch us up.
+    }
   }
 
   dispose() {
@@ -114,43 +152,70 @@ export class HeaderBar {
       this.unsubEvent();
       this.unsubEvent = null;
     }
+    if (this.docClickHandler) {
+      document.removeEventListener("click", this.docClickHandler);
+      this.docClickHandler = null;
+    }
   }
 
   private setRecordingState(recording: boolean, paused: boolean = false) {
     this.isRecording = recording;
     this.isPaused = paused;
-    const stopBtn = this.container.querySelector<HTMLButtonElement>("#hb-record");
-    const cancelBtn = this.container.querySelector<HTMLButtonElement>("#hb-cancel");
-    const pauseBtn = this.container.querySelector<HTMLButtonElement>("#hb-pause");
-    
-    if (stopBtn) {
-      if (recording) {
-        stopBtn.innerHTML = "⏹ Stop";
-        stopBtn.classList.add("recording-active");
-        if (paused) {
-          stopBtn.classList.add("recording-paused");
-        } else {
-          stopBtn.classList.remove("recording-paused");
-        }
-      } else {
-        stopBtn.innerHTML = "🔴 Record";
-        stopBtn.classList.remove("recording-active");
-        stopBtn.classList.remove("recording-paused");
+    // Re-render so the combined action button, pause/cancel visibility and the
+    // recording-active styling all follow from a single source of truth. These
+    // transitions are infrequent (start/stop/pause/resume), so a full re-render
+    // is cheap and avoids per-element DOM bookkeeping drifting out of sync.
+    this.render();
+  }
+
+  /** Start or stop a meeting. Public so the global meeting hotkey can call it. */
+  async toggleMeeting() {
+    if (this.isMeeting) {
+      // Keep `isMeeting` true across the await: the daemon emits a
+      // recording_stopped for each meeting track and the event handler must
+      // ignore those (it keys off `isMeeting`). Clear it only once stop is
+      // confirmed, along with any stray single-record state.
+      try {
+        await invoke("stop_meeting");
+        this.isMeeting = false;
+        this.isRecording = false;
+        this.isPaused = false;
+        this.setPreview(null);
+        this.render();
+        showToast("Meeting stopped — both tracks are transcribing", "info");
+      } catch (e) {
+        showToast(`Meeting toggle failed: ${e}`, "error");
       }
-      stopBtn.style.color = "";
-      stopBtn.style.borderColor = "";
-      stopBtn.style.background = "";
-    }
-    if (cancelBtn) {
-      cancelBtn.style.display = recording ? "flex" : "none";
-    }
-    if (pauseBtn) {
-      pauseBtn.style.display = recording ? "flex" : "none";
-      if (paused) {
-        pauseBtn.innerHTML = "▶ Resume";
-      } else {
-        pauseBtn.innerHTML = "⏸ Pause";
+    } else {
+      // Set `isMeeting` BEFORE awaiting start_meeting. The daemon emits a
+      // recording_started for each track *during* that call, which can arrive
+      // before the await resolves; if `isMeeting` were still false the event
+      // handler would flip `isRecording` true and disable the "End Meeting"
+      // button — leaving a meeting that can't be stopped. Revert on failure.
+      this.isMeeting = true;
+      this.recordMode = "meeting";
+      this.render();
+      try {
+        await invoke("start_meeting");
+        showToast("Meeting started — recording mic + system audio", "info");
+      } catch (e) {
+        this.isMeeting = false;
+        this.render();
+        showToast(`Meeting toggle failed: ${e}`, "error");
       }
+    }
+  }
+
+  /** Start or stop a single recording. Public for the global record hotkey. */
+  async toggleRecording() {
+    try {
+      if (this.isRecording) {
+        await invoke("record_stop");
+      } else {
+        await invoke("record_start", { mode: "oneshot" });
+      }
+    } catch (e) {
+      showToast(`Recording toggle failed: ${e}`, "error");
     }
   }
 
@@ -205,6 +270,28 @@ export class HeaderBar {
   render() {
     const f = filterStore.get();
     const tagOptions = this.tags.map(t => `<option value="${t.id}" ${f.tag_id === t.id ? "selected" : ""}>${escapeHtml(t.name)}</option>`).join("");
+
+    // Combined record/meeting action button: one primary button whose label and
+    // behavior follow the selected `recordMode`, plus a caret that opens a small
+    // menu to switch modes (only while idle).
+    const isCapturing = this.isRecording || this.isMeeting;
+    // Label reflects the *actual* capture in flight (so a hotkey-started capture
+    // shows the right Stop label regardless of the selected mode); when idle it
+    // reflects the selected mode.
+    const actionLabel = this.isMeeting
+      ? "⏹ End Meeting"
+      : this.isRecording
+        ? "⏹ Stop"
+        : this.recordMode === "meeting"
+          ? "👥 Meeting"
+          : "🔴 Record";
+    const actionTitle =
+      this.recordMode === "meeting"
+        ? "Meeting Mode: record your mic and the system audio as two linked tracks"
+        : "Start/Stop a single recording (or use your global hotkey)";
+    const menuItem = (mode: "recording" | "meeting", label: string) =>
+      `<button class="hb-mode-item" data-mode="${mode}" role="menuitem" style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--fg); padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px;">${label}<span style="opacity:${this.recordMode === mode ? 1 : 0}">✓</span></button>`;
+
     this.container.innerHTML = `
       <div class="headerbar" data-tauri-drag-region>
         <button class="icon-btn hb-sort-btn" id="hb-sort" aria-label="Toggle sort order" title="${filterStore.get().sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}">${filterStore.get().sort_desc === false ? "↑ Oldest" : "↓ Newest"}</button>
@@ -234,21 +321,21 @@ export class HeaderBar {
             title="${this.queueProcessing} processing, ${this.queuePending} queued">${this.queuePending + this.queueProcessing || ""}</span>
           <button class="record-btn" id="hb-pause" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" title="Pause / Resume recording">${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
           <button class="record-btn" id="hb-cancel" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" title="Cancel recording and discard audio">✕ Cancel</button>
-          <button class="record-btn" id="hb-record" title="Start/Stop recording manually (or use your global hotkey)" ${this.isMeeting ? "disabled" : ""}>${this.isRecording ? "⏹ Stop" : "🔴 Record"}</button>
-          <button class="record-btn" id="hb-meeting" title="Meeting Mode: record your mic and the system audio (the meeting) as two linked recordings" ${this.isRecording ? "disabled" : ""}>${this.isMeeting ? "⏹ End Meeting" : "👥 Meeting"}</button>
+          <div class="hb-rec-group" style="position:relative; display:flex; align-items:stretch;">
+            <button class="record-btn${isCapturing ? " recording-active" : ""}" id="hb-action" title="${escapeAttr(actionTitle)}" style="border-top-right-radius:0; border-bottom-right-radius:0;">${actionLabel}</button>
+            <button class="record-btn hb-mode-caret" id="hb-action-mode" aria-haspopup="menu" aria-expanded="${this.modeMenuOpen}" title="Switch capture mode (single recording or meeting)" ${isCapturing ? "disabled" : ""} style="padding:6px 8px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid rgba(0,0,0,0.25);">▾</button>
+            <div id="hb-mode-menu" class="hb-mode-menu" role="menu" ${this.modeMenuOpen ? "" : "hidden"} style="position:absolute; top:calc(100% + 4px); right:0; z-index:60; min-width:220px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border, rgba(255,255,255,0.12)); border-radius:8px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.45);">
+              ${menuItem("recording", "🔴 Single recording")}
+              ${menuItem("meeting", "👥 Meeting (mic + system)")}
+            </div>
+          </div>
         </div>
-        <button class="icon-btn" id="hb-import" aria-label="Import audio file" title="Import an audio file (wav/mp3/m4a) to transcribe">⬇ Import</button>
         <button class="icon-btn" id="hb-models" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models">🎛 Models</button>
-        <button class="icon-btn" id="hb-tags" aria-label="Manage tags" title="Create, rename, recolor, and delete tags">🏷 Tags</button>
         <button class="icon-btn" id="hb-settings" aria-label="Settings" title="Open application settings">⚙</button>
       </div>
       <div id="hb-preview" class="hb-preview" style="display:none" title="Live transcription preview (updates while recording)"></div>
     `;
 
-    // Restore recording-active class if we were recording before re-render
-    if (this.isRecording) {
-      this.container.querySelector("#hb-record")?.classList.add("recording-active");
-    }
     // Restore the live preview line if one was showing before this re-render.
     this.setPreview(this.previewText);
 
@@ -310,12 +397,6 @@ export class HeaderBar {
         sortBtn.title = newDesc ? "Sort: newest first — click for oldest first" : "Sort: oldest first — click for newest first";
       });
     }
-    const importBtn = this.container.querySelector<HTMLButtonElement>("#hb-import");
-    if (importBtn) {
-      importBtn.addEventListener("click", () => {
-        void pickAndImportAudio();
-      });
-    }
     const modelsBtn = this.container.querySelector<HTMLButtonElement>("#hb-models");
     if (modelsBtn) {
       modelsBtn.addEventListener("click", async () => {
@@ -325,46 +406,41 @@ export class HeaderBar {
         await openModelPicker("transcription", modelsBtn);
       });
     }
-    const tagsBtn = this.container.querySelector<HTMLButtonElement>("#hb-tags");
-    if (tagsBtn) {
-      tagsBtn.addEventListener("click", async () => {
-        const { openTagManager } = await import("./TagManager");
-        await openTagManager();
-      });
-    }
     const settings = this.container.querySelector("#hb-settings");
     if (settings) {
       settings.addEventListener("click", () => this.callbacks.onOpenSettings());
     }
-    const recordBtn = this.container.querySelector<HTMLButtonElement>("#hb-record");
-    if (recordBtn) {
-      recordBtn.addEventListener("click", async () => {
-        if (this.isRecording) {
-          await invoke("record_stop");
+    // Combined action button: drives the selected mode (or the in-flight one).
+    const actionBtn = this.container.querySelector<HTMLButtonElement>("#hb-action");
+    if (actionBtn) {
+      actionBtn.addEventListener("click", async () => {
+        if (this.isMeeting || (!this.isRecording && this.recordMode === "meeting")) {
+          await this.toggleMeeting();
         } else {
-          await invoke("record_start", { mode: "oneshot" });
+          await this.toggleRecording();
         }
       });
     }
-    const meetingBtn = this.container.querySelector<HTMLButtonElement>("#hb-meeting");
-    if (meetingBtn) {
-      meetingBtn.addEventListener("click", async () => {
-        try {
-          if (this.isMeeting) {
-            await invoke("stop_meeting");
-            this.isMeeting = false;
-            showToast("Meeting stopped — both tracks are transcribing", "info");
-          } else {
-            await invoke("start_meeting");
-            this.isMeeting = true;
-            showToast("Meeting started — recording mic + system audio", "info");
-          }
-          this.render();
-        } catch (e) {
-          showToast(`Meeting toggle failed: ${e}`, "error");
-        }
+    // Caret: open/close the mode-switch menu (disabled while capturing).
+    const modeBtn = this.container.querySelector<HTMLButtonElement>("#hb-action-mode");
+    if (modeBtn) {
+      modeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (this.isRecording || this.isMeeting) return;
+        this.modeMenuOpen = !this.modeMenuOpen;
+        this.render();
       });
     }
+    this.container.querySelectorAll<HTMLButtonElement>(".hb-mode-item").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const mode = item.dataset.mode === "meeting" ? "meeting" : "recording";
+        this.recordMode = mode;
+        localStorage.setItem("phoneme.recordMode", mode);
+        this.modeMenuOpen = false;
+        this.render();
+      });
+    });
     const cancelBtn = this.container.querySelector<HTMLButtonElement>("#hb-cancel");
     if (cancelBtn) {
       cancelBtn.addEventListener("click", async () => {
