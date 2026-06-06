@@ -31,6 +31,7 @@ Phoneme runs **100% offline** by default. No cloud required, no subscriptions, n
 Phoneme uses a decoupled, pipeline-driven architecture. 
 
 ```mermaid
+%%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': true}, 'theme': 'dark', 'themeVariables': { 'fontSize': '14px' }}}%%
 flowchart TD
     Input[🎤 Voice / System Audio] -->|Hotkey| Daemon[Phoneme Daemon]
     
