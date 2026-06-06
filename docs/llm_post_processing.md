@@ -10,17 +10,19 @@ When Smart Cleanup is enabled, the pipeline looks like this:
 
 ```mermaid
 flowchart TD
-    A[Raw Whisper Transcript] --> B(LLM Post-Processor)
+    A[Raw Whisper Transcript] --> D{Diarization}
+    D --> |Tags Added| B(LLM Post-Processor)
     P[\Your Custom Prompt\] --> B
     B --> C[Polished Transcript]
-    C --> D[(SQLite Catalog)]
+    C --> DB[(SQLite Catalog)]
     C --> E[Your Hooks]
 ```
 
 1. You finish speaking.
 2. Whisper transcribes the audio.
-3. **The LLM takes the raw transcript, follows your exact Prompt instructions, and rewrites it.**
-4. The finalized text is saved to your database and sent to your Hooks.
+3. If Local Diarization is enabled, Pyannote identifies who is speaking and adds `[Speaker 1]: ` tags.
+4. **The LLM takes the raw transcript, follows your exact Prompt instructions, and rewrites it.**
+5. The finalized text is saved to your database and sent to your Hooks.
 
 ## Provider Options
 
@@ -43,7 +45,7 @@ For the ultimate privacy-respecting, local-first experience, you can run the LLM
 If you don't have the hardware to run Ollama smoothly, or want the absolute best reasoning capabilities, use a cloud API:
 
 1. Select your **AI Provider** (`OpenAI`, `Anthropic`, `Groq`, or `Custom OpenAI-Compatible`).
-2. Enter the Model Name (e.g., `gpt-4o-mini`, `claude-3-5-haiku-latest`, `llama-3.1-8b-instant`).
+2. Enter the Model Name (e.g., `gpt-4o`, `claude-3-5-sonnet-latest`, `llama-3.1-8b-instant`).
 3. Enter your API Key.
 
 ## Prompts & Presets
@@ -66,5 +68,9 @@ The magic of the LLM is in the prompt. You can select one of our default presets
 > [!TIP]
 > **The Universal Translator**
 > Translate this transcript into perfect English. Keep the meaning exact and natural. Output ONLY the English translation and absolutely nothing else.
+
+> [!TIP]
+> **The Meeting Summarizer (Requires Diarization)**
+> This is a multi-speaker transcript. Provide a concise summary of the decisions made, and list the action items assigned to each speaker. Output ONLY the summary and action items.
 
 Enjoy perfectly polished transcripts!
