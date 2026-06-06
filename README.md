@@ -31,7 +31,7 @@ The app does not force you into a specific ecosystem. It transcribes. You decide
 Phoneme uses a decoupled, pipeline-driven architecture. 
 
 ```mermaid
-flowchart TD
+flowchart LR
     A[🎤 Voice / System Audio] -->|Hotkey| B(Phoneme Daemon)
     B --> C{Whisper Engine}
     

@@ -1,9 +1,8 @@
-# phoneme frontend
+# 🎨 Phoneme Frontend
 
-Vite + vanilla TypeScript frontend for the [Phoneme](../README.md) Tauri shell
-(`phoneme-tray`). Catppuccin Mocha theme.
+Vite + TypeScript + Lit frontend for the [Phoneme](../README.md) Tauri shell (`phoneme-tray`). Beautifully styled with the Catppuccin Mocha theme.
 
-## Layout
+## 🗂️ Layout
 
 ```
 src/
@@ -31,7 +30,7 @@ src/
         └── styles.css           # RecordingsView CSS
 ```
 
-## Dev
+## 💻 Dev
 
 ```bash
 # Direct (browser, no Tauri bridge — invoke() calls won't work)
@@ -45,7 +44,7 @@ cd .. && cargo tauri dev
 runtime. Standalone Vite dev is useful for layout/styling work; functionality
 testing needs `cargo tauri dev`.
 
-## Build
+## 🏗️ Build
 
 ```bash
 pnpm build   # produces dist/, which Tauri then packages
@@ -54,7 +53,7 @@ pnpm build   # produces dist/, which Tauri then packages
 The Tauri config (`../src-tauri/tauri.conf.json`) points
 `frontendDist` at `../frontend/dist`. Don't move it without updating that.
 
-## Type-check
+## 🧪 Type-check
 
 ```bash
 pnpm type-check
@@ -62,7 +61,7 @@ pnpm type-check
 
 `tsc --noEmit` runs over `src/` and `vite.config.ts`. CI should gate on this.
 
-## Catppuccin Mocha
+## ☕ Catppuccin Mocha
 
 `styles/theme.css` defines the CSS variables every component uses
 (`--bg-deep`, `--accent`, `--fg-default`, `--ok`/`--warn`/`--err`, etc.).
