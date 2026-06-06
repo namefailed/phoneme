@@ -453,6 +453,7 @@ impl DaemonRecorder {
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
             started_at,
+            session_id: None,
         });
         tracing::info!(id = %id, mode = ?mode, "recording started");
         Ok(id)
@@ -493,6 +494,7 @@ impl DaemonRecorder {
             id: active.id.clone(),
             duration_ms: result.duration_ms,
             audio_path: active.audio_path.to_string_lossy().into_owned(),
+            session_id: None,
         });
         tracing::info!(id = %active.id, ms = result.duration_ms, "recording stopped");
 
@@ -745,6 +747,7 @@ impl DaemonRecorder {
             state.events.emit(DaemonEvent::RecordingStarted {
                 id: id.clone(),
                 started_at,
+                session_id: Some(session_id.clone()),
             });
             tracing::info!(id = %id, track = track.as_str(), session = %session_id, "meeting track started");
 
@@ -824,6 +827,7 @@ impl DaemonRecorder {
                 id: id.clone(),
                 duration_ms: result.duration_ms,
                 audio_path: audio_path.to_string_lossy().into_owned(),
+                session_id: Some(session_id.clone()),
             });
             tracing::info!(id = %id, track = track.as_str(), ms = result.duration_ms, "meeting track stopped");
         }

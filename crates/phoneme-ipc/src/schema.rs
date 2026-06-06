@@ -172,11 +172,19 @@ pub enum DaemonEvent {
     RecordingStarted {
         id: RecordingId,
         started_at: DateTime<Local>,
+        /// `Some(session_id)` when this recording is one track of a meeting;
+        /// `None` for a normal single recording. Lets the UI tell meeting-track
+        /// events apart from single-recording events without guessing.
+        #[serde(default)]
+        session_id: Option<String>,
     },
     RecordingStopped {
         id: RecordingId,
         duration_ms: i64,
         audio_path: String,
+        /// `Some(session_id)` when this was a meeting track; `None` otherwise.
+        #[serde(default)]
+        session_id: Option<String>,
     },
     RecordingPaused {
         id: RecordingId,
