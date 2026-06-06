@@ -6,23 +6,16 @@ Phoneme provides best-in-class transcription accuracy, but human speech is inher
 
 ## ⚙️ How it works
 
-When Smart Cleanup is enabled, the pipeline looks like this:
+When Smart Cleanup is enabled, the pipeline intercepts your raw transcript right before it hits the database:
 
 ```mermaid
 flowchart TD
-    A[Raw Whisper Transcript] --> D{Diarization}
-    D --> |Tags Added| B(LLM Post-Processor)
-    P[\Your Custom Prompt\] --> B
-    B --> C[Polished Transcript]
-    C --> DB[(SQLite Catalog)]
-    C --> E[Your Hooks]
+    A[🎤 You Speak] --> B{Whisper}
+    B -->|Raw Text with Stutters| C(LLM: Ollama/OpenAI)
+    C -->|Prompt: 'Fix grammar, remove filler words'| D[Polished Text]
+    D --> E[(SQLite Catalog)]
+    D --> F[[Hooks / Obsidian]]
 ```
-
-1. You finish speaking.
-2. Whisper transcribes the audio.
-3. If Local Diarization is enabled (like in Meeting Mode), Phoneme identifies who is speaking and adds `[Speaker 1]: ` tags.
-4. **The LLM takes the raw transcript, follows your exact Prompt instructions, and rewrites it.**
-5. The finalized, pristine text is saved to your database and forwarded to your automation hooks.
 
 *(Note: Phoneme always preserves the `original_transcript` in the database, so if the AI ever makes a mistake, your original words are perfectly safe).*
 

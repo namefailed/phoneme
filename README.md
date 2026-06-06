@@ -31,19 +31,20 @@ The app does not force you into a specific ecosystem. It transcribes. You decide
 Phoneme uses a decoupled, pipeline-driven architecture. 
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[🎤 Voice / System Audio] -->|Hotkey| B(Phoneme Daemon)
-    B --> C{Whisper}
-    C -->|Native Word-by-Word| D[Raw Transcript]
-    C -->|Cloud API| D
+    B --> C{Whisper Engine}
+    
+    C -->|Native / Cloud| D[Raw Transcript]
     D --> E{Pyannote Diarization}
-    E -->|Speaker Separation| F[Speaker-Tagged Transcript]
-    F --> G{Smart Cleanup}
-    G -->|Ollama / OpenAI / Claude| H[Polished Transcript]
-    G -.->|Skipped| H
-    H --> I(Local SQLite Catalog)
-    H --> J[[Your Hooks]]
-    J --> K(Obsidian / Webhooks / API / Clipboard / In-Place Typing)
+    E -->|Optional| F[Speaker-Tagged Transcript]
+    
+    F --> G{Smart Cleanup LLM}
+    G -->|Polished| H[Final Transcript]
+    
+    H --> I[(SQLite Catalog)]
+    H --> J[[Custom Hooks]]
+    J --> K(Obsidian / Webhooks / In-Place Typing)
 ```
 
 ## ✨ Core Features

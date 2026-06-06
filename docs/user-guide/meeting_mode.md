@@ -20,6 +20,30 @@ When the meeting ends, Phoneme transcribes both tracks independently. Because th
 
 This leads to the **Merged Conversation View**.
 
+```mermaid
+flowchart LR
+    subgraph Audio Capture
+        A[🎤 Your Mic] --> C(Track 1: You)
+        B[🔊 System Audio] --> D(Track 2: The Meeting)
+    end
+    
+    subgraph Transcription
+        C --> E{Whisper}
+        D --> E
+        E --> F[Raw Transcript 1]
+        E --> G[Raw Transcript 2]
+    end
+    
+    subgraph Diarization & Merge
+        G --> H{Pyannote}
+        H --> I[Speaker 1 / Speaker 2]
+        F --> J{Timeline Merge}
+        I --> J
+    end
+    
+    J --> K[Beautiful Interleaved UI]
+```
+
 Instead of a giant block of text, you get a beautiful, chronological timeline of the conversation, exactly as it happened:
 
 <!-- SCREENSHOT PLACEHOLDER: Merged Conversation View showing "You" and "System" interleaved -->
