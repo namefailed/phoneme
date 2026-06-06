@@ -31,6 +31,8 @@ export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
 
 export type ListFilter = {
   limit?: number | null;
+  /** Rows to skip before returning results (pagination; pairs with `limit`). */
+  offset?: number | null;
   since?: string | null;
   until?: string | null;
   status?: string | null;

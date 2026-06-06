@@ -122,6 +122,61 @@ async fn list_respects_limit() {
 }
 
 #[tokio::test]
+async fn list_offset_paginates_without_overlap() {
+    let (_dir, catalog) = fresh_catalog().await;
+    // Insert 5 recordings at hours 0..5; default order is newest-first, so the
+    // list is [h4, h3, h2, h1, h0].
+    for h in 0..5 {
+        let rec = sample_recording(RecordingId::from_datetime(
+            Local.with_ymd_and_hms(2026, 5, 19, h, 0, 0).unwrap(),
+        ));
+        catalog.insert(&rec).await.unwrap();
+    }
+    let page = |limit, offset| {
+        let catalog = &catalog;
+        async move {
+            catalog
+                .list(&ListFilter {
+                    limit: Some(limit),
+                    offset: Some(offset),
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+        }
+    };
+
+    let p1 = page(2, 0).await;
+    let p2 = page(2, 2).await;
+    let p3 = page(2, 4).await;
+    assert_eq!(p1.len(), 2, "first page");
+    assert_eq!(p2.len(), 2, "second page");
+    assert_eq!(p3.len(), 1, "last page has the remainder");
+
+    // Pages must be contiguous and non-overlapping (newest → oldest).
+    let ids: Vec<_> = p1
+        .iter()
+        .chain(&p2)
+        .chain(&p3)
+        .map(|r| r.id.clone())
+        .collect();
+    let full = catalog.list(&ListFilter::default()).await.unwrap();
+    let full_ids: Vec<_> = full.iter().map(|r| r.id.clone()).collect();
+    assert_eq!(ids, full_ids, "paged ids reconstruct the full ordered list");
+
+    // OFFSET without LIMIT skips the first N and returns the rest.
+    let skip_first = catalog
+        .list(&ListFilter {
+            offset: Some(1),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(skip_first.len(), 4);
+    assert_eq!(skip_first[0].id, full[1].id);
+}
+
+#[tokio::test]
 async fn list_filters_by_status() {
     let (_dir, catalog) = fresh_catalog().await;
     let r1 = sample_recording(RecordingId::new());

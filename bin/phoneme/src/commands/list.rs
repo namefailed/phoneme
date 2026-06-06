@@ -48,6 +48,7 @@ fn build_filter(args: ListArgs) -> ListFilter {
     });
     ListFilter {
         limit: args.limit,
+        offset: args.offset,
         since,
         status,
         search: args.search,

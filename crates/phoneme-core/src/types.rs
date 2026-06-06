@@ -104,6 +104,11 @@ pub struct Recording {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListFilter {
     pub limit: Option<u32>,
+    /// Number of rows to skip before returning results (for pagination). Applied
+    /// after ordering; pairs with `limit` to fetch successive pages. Serde-
+    /// defaulted so older clients/configs that omit it still deserialize.
+    #[serde(default)]
+    pub offset: Option<u32>,
     pub since: Option<DateTime<Local>>,
     pub until: Option<DateTime<Local>>,
     pub status: Option<RecordingStatus>,

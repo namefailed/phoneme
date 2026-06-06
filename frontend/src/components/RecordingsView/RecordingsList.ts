@@ -34,6 +34,16 @@ export class RecordingsList {
   /** Index of the keyboard-focused row (-1 = none). */
   private focusedIndex = -1;
 
+  // ── Pagination ───────────────────────────────────────────────────────────
+  /** How many rows to fetch per page. */
+  private readonly pageSize = 100;
+  /** Offset of the last page fetched (0 = first page). */
+  private offset = 0;
+  /** True once a page came back shorter than `pageSize` (no more rows). */
+  private reachedEnd = false;
+  /** True while a "load more" page request is in flight. */
+  private loadingMore = false;
+
   // ── Multi-selection state ────────────────────────────────────────────────
   /** IDs that are currently multi-selected (checkboxes). */
   private multiSelected = new Set<string>();
@@ -74,6 +84,10 @@ export class RecordingsList {
   }
 
   async refresh() {
+    // A refresh always restarts from the first page (filters changed, or an
+    // external reload), so reset pagination before fetching.
+    this.offset = 0;
+    this.reachedEnd = false;
     this.state.set({ ...this.state.get(), loading: true, error: null });
     try {
       const f = filterStore.get();
@@ -81,7 +95,8 @@ export class RecordingsList {
       if (!this.config) {
         this.config = await invoke("read_config");
       }
-      const rows = await listRecordings({ ...f, limit: 200 });
+      const rows = await listRecordings({ ...f, limit: this.pageSize, offset: 0 });
+      this.reachedEnd = rows.length < this.pageSize;
       // Prune any multi-selected ids that are no longer in the list.
       const ids = new Set(rows.map((r) => r.id));
       this.multiSelected.forEach((id) => {
@@ -90,6 +105,42 @@ export class RecordingsList {
       this.state.set({ ...this.state.get(), recordings: rows, loading: false });
     } catch (e) {
       this.state.set({ ...this.state.get(), error: String(e), loading: false });
+    }
+  }
+
+  /** Fetch the next page and append it to the list (pagination). */
+  async loadMore() {
+    if (this.reachedEnd || this.loadingMore) return;
+    this.loadingMore = true;
+    this.render(); // reflect the "Loading…" button label
+    try {
+      const f = filterStore.get();
+      const nextOffset = this.offset + this.pageSize;
+      const rows = await listRecordings({
+        ...f,
+        limit: this.pageSize,
+        offset: nextOffset,
+      });
+      this.offset = nextOffset;
+      if (rows.length < this.pageSize) this.reachedEnd = true;
+      if (rows.length > 0) {
+        const existing = this.state.get().recordings;
+        // Guard against overlap (a new recording arriving can shift offsets):
+        // only append rows we don't already have.
+        const have = new Set(existing.map((r) => r.id));
+        const fresh = rows.filter((r) => !have.has(r.id));
+        this.state.set({
+          ...this.state.get(),
+          recordings: [...existing, ...fresh],
+        });
+      } else {
+        this.render();
+      }
+    } catch (e) {
+      this.state.set({ ...this.state.get(), error: String(e) });
+    } finally {
+      this.loadingMore = false;
+      this.render();
     }
   }
 
@@ -253,7 +304,18 @@ export class RecordingsList {
       })
       .join("");
 
-    this.container.innerHTML = `<div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings">${head}${body}</div>`;
+    // "Load more" footer — shown until a short page proves we've hit the end.
+    const loadMore = this.reachedEnd
+      ? ""
+      : `<div class="rec-loadmore"><button id="rec-load-more" class="inline-button"${
+          this.loadingMore ? " disabled" : ""
+        }>${this.loadingMore ? "Loading…" : "Load more"}</button></div>`;
+
+    this.container.innerHTML = `<div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings">${head}${body}</div>${loadMore}`;
+
+    this.container
+      .querySelector<HTMLButtonElement>("#rec-load-more")
+      ?.addEventListener("click", () => void this.loadMore());
 
     // Restore indeterminate state on the select-all checkbox (can't be set via HTML attr).
     const selectAllCb = this.container.querySelector<HTMLInputElement>("#select-all-cb");
