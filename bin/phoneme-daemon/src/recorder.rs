@@ -464,6 +464,9 @@ impl DaemonRecorder {
             meeting_name: None,
             track: None,
             in_place,
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
         };
         if let Err(e) = state.catalog.insert(&row).await {
             *self.active.lock().await = None;
@@ -889,6 +892,9 @@ impl DaemonRecorder {
                 meeting_id: Some(meeting_id.clone()),
                 meeting_name: None,
                 track: Some(track.as_str().to_string()),
+                cleanup_model: None,
+                diarized: false,
+                tags: vec![],
             };
             // Insert the catalog row. If it fails, roll back every track already
             // started so we never leave orphaned `recording`-status rows or live
@@ -1222,6 +1228,9 @@ mod tests {
             notes: None,
             meeting_id: Some("meeting-test".to_string()),
             track: Some(MeetingTrack::Mic.as_str().to_string()),
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
         };
         state.catalog.insert(&row).await.unwrap();
 

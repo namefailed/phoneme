@@ -32,6 +32,9 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         meeting_id: Some(meeting_id.to_string()),
         track: Some(track.to_string()),
         meeting_name: None,
+        cleanup_model: None,
+        diarized: false,
+        tags: vec![],
     }
 }
 
