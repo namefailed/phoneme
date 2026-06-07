@@ -47,6 +47,11 @@ export class App {
           this.router.go("settings");
         }
       },
+      onToggleSidebar: () => {
+        if (this.current instanceof RecordingsView) {
+          this.current.toggleSidebar();
+        }
+      },
     });
 
     this.router.state.subscribe((s) => this.mount(s.current));

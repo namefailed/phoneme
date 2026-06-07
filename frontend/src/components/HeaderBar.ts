@@ -9,6 +9,7 @@ import { showToast } from '../utils/toast';
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
+  onToggleSidebar?: () => void;
 };
 
 @customElement('ph-header-bar')
@@ -297,6 +298,9 @@ export class HeaderBarElement extends LitElement {
 
     return html`
       <div class="headerbar" data-tauri-drag-region>
+        <button class="icon-btn" aria-label="Toggle Sidebar" title="Toggle Sidebar" @click=${() => this.callbacks?.onToggleSidebar?.()}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
         <button class="icon-btn hb-sort-btn" @click=${this.toggleSort}
           title=${f.sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}>
           ${f.sort_desc === false ? "↑ Oldest" : "↓ Newest"}

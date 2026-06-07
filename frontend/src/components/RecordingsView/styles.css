@@ -607,12 +607,17 @@ mark.search-hit {
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
+ph-sidebar {
+  display: block;
+  height: 100%;
+}
 .rv-sidebar {
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
 .sidebar-header {
   padding: 16px;

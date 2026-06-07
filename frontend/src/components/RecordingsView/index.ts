@@ -18,6 +18,7 @@ export class RecordingsView {
   private state: Store<RecordingsListState>;
   private splitPercent = 50;
   private detailVisible = true;
+  private sidebarVisible = true;
   private unsub: (() => void) | null = null;
   private keydownHandler: (e: KeyboardEvent) => void;
 
@@ -115,11 +116,25 @@ export class RecordingsView {
   private applyLayout() {
     const shell = this.container.querySelector<HTMLElement>("#rv-shell");
     if (!shell) return;
-    if (this.detailVisible) {
-      shell.style.gridTemplateColumns = `200px ${this.splitPercent}% 4px minmax(0, 1fr)`;
-    } else {
-      shell.style.gridTemplateColumns = `200px 1fr 0 0`;
+    
+    // Also toggle visibility class on sidebar for animation/display
+    const sidebar = this.container.querySelector<HTMLElement>("ph-sidebar");
+    if (sidebar) {
+      sidebar.style.display = this.sidebarVisible ? "block" : "none";
     }
+
+    const sidebarWidth = this.sidebarVisible ? "200px" : "0px";
+
+    if (this.detailVisible) {
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${this.splitPercent}% 4px minmax(0, 1fr)`;
+    } else {
+      shell.style.gridTemplateColumns = `${sidebarWidth} 1fr 0 0`;
+    }
+  }
+
+  toggleSidebar() {
+    this.sidebarVisible = !this.sidebarVisible;
+    this.applyLayout();
   }
 
   private onSelect(id: string) {
