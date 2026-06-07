@@ -84,5 +84,6 @@ jobs:
             target/release/bundle/msi/*.sig
             target/release/bundle/msi/updater.json
           generate_release_notes: true
+          append_body: false
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') }}
