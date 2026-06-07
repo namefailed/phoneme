@@ -23,6 +23,13 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 ### Doctor Improvements
 - [ ] Add disk space check to doctor (check available disk before recording)
 - [ ] Add model validation to doctor (validate model file existence and integrity)
+- [ ] Add Doctor to main navigation (not just tray icon right-click)
+- [ ] Add explanations for each check (what it means, why it matters)
+- [ ] Add detailed error messages with context and guidance
+- [ ] Add check categories (Critical, Warning, Info) with visual indicators
+- [ ] Add step-by-step fix guidance for failed checks
+- [ ] Add "Fix All" button for common auto-fixable issues
+- [ ] Add links to documentation for each check
 
 ---
 
