@@ -26,6 +26,7 @@ secrecy.workspace = true
 speakrs = "0.4.2"
 hound.workspace = true
 whisper-rs = { version = "0.11", optional = true }
+regex.workspace = true
 
 [features]
 native-whisper = ["dep:whisper-rs"]
