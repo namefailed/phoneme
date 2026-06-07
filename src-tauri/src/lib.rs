@@ -95,7 +95,11 @@ pub fn run() {
                         }
 
                         let in_place_combo = if current_config.in_place_hotkey.enabled {
-                            current_config.in_place_hotkey.combo.parse::<Shortcut>().ok()
+                            current_config
+                                .in_place_hotkey
+                                .combo
+                                .parse::<Shortcut>()
+                                .ok()
                         } else {
                             None
                         };
@@ -232,8 +236,7 @@ pub fn run() {
                         }
                     }
                     if bridge.config.meeting_hotkey.enabled {
-                        if let Ok(shortcut) =
-                            bridge.config.meeting_hotkey.combo.parse::<Shortcut>()
+                        if let Ok(shortcut) = bridge.config.meeting_hotkey.combo.parse::<Shortcut>()
                         {
                             if let Err(e) = app.handle().global_shortcut().register(shortcut) {
                                 tracing::error!("failed to register meeting hotkey: {e}");
