@@ -432,15 +432,6 @@ mark.search-hit {
   background: var(--accent);
   box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
-.splitter-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  right: -4px;
-  cursor: col-resize;
-  z-index: 11;
-}
 .rv-detail {
   height: 100%;
   overflow: hidden;

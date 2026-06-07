@@ -10,12 +10,11 @@ export class SplitterElement extends LitElement {
   private dragging = false;
 
   private onMouseDown = () => {
+    console.log("Splitter mousedown");
     this.dragging = true;
     document.body.style.cursor = "col-resize";
     const handle = this.querySelector('.splitter-handle');
     if (handle) handle.classList.add('dragging');
-    document.addEventListener("mousemove", this.onMouseMove);
-    document.addEventListener("mouseup", this.onMouseUp);
   };
 
   private onMouseUp = () => {
@@ -24,8 +23,6 @@ export class SplitterElement extends LitElement {
     document.body.style.cursor = "";
     const handle = this.querySelector('.splitter-handle');
     if (handle) handle.classList.remove('dragging');
-    document.removeEventListener("mousemove", this.onMouseMove);
-    document.removeEventListener("mouseup", this.onMouseUp);
   };
 
   private onMouseMove = (e: MouseEvent) => {
@@ -50,12 +47,14 @@ export class SplitterElement extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    document.addEventListener("mouseup", this.onMouseUp);
+    document.addEventListener("mousemove", this.onMouseMove);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener("mousemove", this.onMouseMove);
     document.removeEventListener("mouseup", this.onMouseUp);
+    document.removeEventListener("mousemove", this.onMouseMove);
   }
 
   render() {
@@ -68,12 +67,13 @@ export class SplitterElement extends LitElement {
           background: var(--bg-deep);
           position: relative;
           flex-shrink: 0;
-          z-index: 10;
+          z-index: 100;
         }
         .splitter-handle {
           position: absolute;
           inset: 0;
           transition: background 0.15s ease;
+          z-index: 101;
         }
         ph-splitter:hover .splitter-handle,
         .splitter-handle.dragging {
