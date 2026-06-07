@@ -18,7 +18,9 @@ export class SectionInterface {
       { value: "duration", label: "Duration" },
       { value: "status", label: "Status" },
       { value: "tags", label: "Tags" },
-      { value: "model", label: "Model Used" },
+      { value: "model", label: "Transcription Model" },
+      { value: "cleanup_model", label: "Post-Processing Model" },
+      { value: "diarized", label: "Diarized" },
       { value: "transcript", label: "Transcript Snippet" }
     ];
 

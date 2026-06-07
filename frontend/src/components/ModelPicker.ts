@@ -81,6 +81,7 @@ export class ModelPickerElement extends LitElement {
   @state() private llmUrl = "";
   @state() private llmModel = "";
   @state() private llmKey = "";
+  @state() private diarizationEnabled = false;
 
   @query('.mp-dialog') dialog!: HTMLElement;
   @query('#mp-stt-provider') sttProviderSelect!: HTMLSelectElement;
@@ -140,6 +141,9 @@ export class ModelPickerElement extends LitElement {
     this.llmUrl = String(l.api_url ?? "");
     this.llmModel = String(l.model ?? "");
     this.llmKey = String(l.api_key ?? "");
+
+    const d = this.config.diarization || {};
+    this.diarizationEnabled = d.provider !== "none";
   }
 
   private async loadDownloadedModels() {
@@ -178,6 +182,9 @@ export class ModelPickerElement extends LitElement {
     this.config.llm_post_process.api_key = this.llmKey;
     this.config.llm_post_process.api_url = this.llmUrl.trim();
     this.config.llm_post_process.enabled = this.llmRealProvider !== "none";
+
+    if (!this.config.diarization) this.config.diarization = {};
+    this.config.diarization.provider = this.diarizationEnabled ? "local" : "none";
 
     try {
       await invoke("write_config", { config: this.config });
@@ -265,6 +272,14 @@ export class ModelPickerElement extends LitElement {
 
               <label class="mp-label" for="mp-stt-model">Model</label>
               <input id="mp-stt-model" class="mp-input" type="text" .value=${this.sttModel} placeholder="Leave blank for provider default" @input=${(e: Event) => this.sttModel = (e.target as HTMLInputElement).value} />
+            </div>
+
+            <div class="mp-row">
+              <label class="mp-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" .checked=${this.diarizationEnabled} @change=${(e: Event) => this.diarizationEnabled = (e.target as HTMLInputElement).checked} />
+                Enable speaker diarization
+              </label>
+              <p class="mp-hint">Identifies who spoke when (e.g., [Speaker 0], [Speaker 1]). Requires additional model download in Settings if not already configured.</p>
             </div>
 
             <p class="mp-hint">Where your audio is transcribed. <b>Local</b> stays on your machine and uses the bundled model from full Settings; cloud options upload audio to a third-party API.</p>

@@ -386,6 +386,10 @@ export class RecordingsListElement extends LitElement {
         time: "94px",
         duration: "84px",
         status: "89px",
+        tags: "100px",
+        model: "120px",
+        cleanup_model: "120px",
+        diarized: "60px",
         transcript: "1fr",
       };
       if (!activeWidths || activeWidths.length !== visibleCols.length) {
@@ -406,7 +410,9 @@ export class RecordingsListElement extends LitElement {
       duration: "Dur",
       status: "Status",
       tags: "Tags",
-      model: "Model",
+      model: "Transcript Model",
+      cleanup_model: "Post-Process Model",
+      diarized: "Diarized",
       transcript: "Transcript",
     };
 
@@ -515,6 +521,8 @@ export class RecordingsListElement extends LitElement {
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
       tags: html`<span class="rec-tags" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(r as any).tags?.map((t: any) => t.name).join(", ") || ""}</span>`,
       model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,
+      cleanup_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(r as any).cleanup_model || ""}</span>`,
+      diarized: html`<span class="rec-diarized" style="color: var(--fg-muted);">${(r as any).diarized ? "✓" : ""}</span>`,
       transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
