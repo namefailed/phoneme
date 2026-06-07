@@ -519,10 +519,10 @@ export class RecordingsListElement extends LitElement {
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
-      tags: html`<span class="rec-tags" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(r as any).tags?.map((t: any) => t.name).join(", ") || ""}</span>`,
+      tags: html`<span class="rec-tags" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.tags?.map((t: any) => t.name).join(", ") || ""}</span>`,
       model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,
-      cleanup_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(r as any).cleanup_model || ""}</span>`,
-      diarized: html`<span class="rec-diarized" style="color: var(--fg-muted);">${(r as any).diarized ? "✓" : ""}</span>`,
+      cleanup_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.cleanup_model || ""}</span>`,
+      diarized: html`<span class="rec-diarized" style="color: var(--fg-muted);">${r.diarized ? "✓" : ""}</span>`,
       transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
