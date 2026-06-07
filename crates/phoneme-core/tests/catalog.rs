@@ -25,6 +25,9 @@ fn sample_recording(id: RecordingId) -> Recording {
         meeting_id: None,
         meeting_name: None,
         track: None,
+        cleanup_model: None,
+        diarized: false,
+        tags: vec![],
     }
 }
 
