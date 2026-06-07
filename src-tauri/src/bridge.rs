@@ -5,7 +5,6 @@ use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-#[allow(dead_code)] // request() lands in Task 3 (Tauri commands)
 #[derive(Clone)]
 pub struct Bridge {
     inner: Arc<Mutex<NamedPipeTransport>>,
@@ -13,7 +12,6 @@ pub struct Bridge {
     pub config: Arc<Config>,
 }
 
-#[allow(dead_code)]
 impl Bridge {
     pub async fn connect(config: Config) -> anyhow::Result<Self> {
         let pipe_name = config.daemon.pipe_name.clone();

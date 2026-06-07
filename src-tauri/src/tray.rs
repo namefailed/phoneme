@@ -12,7 +12,6 @@ use tauri::{
 /// Profiles submenu. The suffix after the colon is the profile name.
 const PROFILE_PREFIX: &str = "profile:";
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayState {
     Idle,
@@ -219,7 +218,6 @@ fn handle_tray_event(tray: &TrayIcon, event: TrayIconEvent) {
 }
 
 /// Switch the tray icon and tooltip to reflect a new state.
-#[allow(dead_code)] // wired up by the event-bridge in Task 5
 pub fn update_state(tray: &TrayIcon, state: TrayState) -> Result<()> {
     tray.set_icon(Some(Image::from_bytes(state.icon_bytes())?))?;
     tray.set_tooltip(Some(state.tooltip()))?;

@@ -8,11 +8,33 @@ use std::process::ExitCode;
 
 pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     if args.rebuild_catalog {
-        eprintln!(
-            "doctor --rebuild-catalog: use `phoneme daemon status` to confirm the daemon is \
-             running, then delete catalog.db from %LOCALAPPDATA%\\phoneme\\ and restart the daemon."
-        );
-        return ExitCode::from(exit::GENERIC_FAIL);
+        // Stop the daemon first to ensure clean catalog deletion
+        let mut client_result = Client::connect(cfg).await;
+        if let Ok(ref mut c) = client_result {
+            let _ = c.send(phoneme_ipc::Request::Shutdown).await;
+        }
+
+        // Delete the catalog database
+        let dirs = directories::ProjectDirs::from("", "", "phoneme")
+            .ok_or_else(|| anyhow::anyhow!("could not resolve project directories"));
+        if let Ok(dirs) = dirs {
+            let catalog_path = dirs.data_local_dir().join("catalog.db");
+            if catalog_path.exists() {
+                if let Err(e) = std::fs::remove_file(&catalog_path) {
+                    eprintln!("error: failed to delete catalog.db: {e}");
+                    return ExitCode::from(exit::GENERIC_FAIL);
+                }
+                println!("deleted catalog.db");
+            } else {
+                println!("catalog.db does not exist, nothing to rebuild");
+            }
+        } else {
+            eprintln!("error: could not resolve data directory");
+            return ExitCode::from(exit::GENERIC_FAIL);
+        }
+
+        println!("catalog rebuilt; restart the daemon with: phoneme daemon start");
+        return ExitCode::SUCCESS;
     }
 
     let mut checks = Vec::new();
