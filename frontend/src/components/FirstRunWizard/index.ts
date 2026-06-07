@@ -97,17 +97,26 @@ export class FirstRunWizardElement extends LitElement {
         <div style="margin-top: 1.5rem; padding: 1rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2);">
           <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">Interface Theme</label>
           <select style="width: 100%; padding: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer;"
-                  .value=${this.config?.theme || "system"} 
+                  .value=${this.config?.interface?.theme || "catppuccin-mocha"} 
                   @change=${(e: Event) => { 
                     if (this.config) {
-                      this.config.theme = (e.target as HTMLSelectElement).value; 
-                      document.documentElement.setAttribute('data-theme', this.config.theme);
+                      if (!this.config.interface) this.config.interface = {};
+                      this.config.interface.theme = (e.target as HTMLSelectElement).value; 
+                      document.documentElement.setAttribute('data-theme', this.config.interface.theme);
                       this.requestUpdate(); 
                     }
                   }}>
-            <option value="system">System Default</option>
-            <option value="dark">Dark Mode</option>
-            <option value="light">Light Mode</option>
+            <option value="catppuccin-mocha">Catppuccin Mocha (Default)</option>
+            <option value="catppuccin-macchiato">Catppuccin Macchiato</option>
+            <option value="dracula">Dracula</option>
+            <option value="everforest">Everforest</option>
+            <option value="gruvbox">Gruvbox</option>
+            <option value="nord">Nord</option>
+            <option value="one-dark">One Dark</option>
+            <option value="rose-pine">Rosé Pine</option>
+            <option value="tokyo-night">Tokyo Night</option>
+            <option value="catppuccin-latte">Catppuccin Latte (Light)</option>
+            <option value="solarized-light">Solarized Light</option>
           </select>
         </div>
         
