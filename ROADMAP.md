@@ -16,10 +16,8 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 
 ### High-Value Quick Wins
 - [ ] Add loading spinner to App.ts (show loading state during initial config load)
-- [ ] Add selection count badge (show multi-selection count in bulk action bar)
 - [ ] Add shell completion for CLI (bash, zsh, PowerShell completions)
 - [ ] Add progress reporting for transcriptions (progress callback for long operations)
-- [ ] Add cancellation support for transcriptions (cancellation token for stopping)
 - [ ] Add reconnection backoff/limit to bridge.rs (exponential backoff, max attempts)
 
 ### Doctor Improvements
