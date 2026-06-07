@@ -290,6 +290,15 @@ mark.search-hit {
   display: flex;
   flex-direction: column;
 }
+.notes-block {
+  margin: 0 18px 18px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+}
 .cm-editor-root, .cm-editor {
   flex: 1;
   height: 100%;
