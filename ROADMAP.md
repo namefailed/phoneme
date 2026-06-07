@@ -89,7 +89,7 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 - [ ] Add config.example.toml to document configuration options
 
 **Security & Reliability**
-- [ ] Verify innerHTML usage safety (SectionWhisper.ts provider metadata)
+- [ ] Verify innerHTML usage safety (SectionWhisper.ts provider metadata comment)
 - [ ] Add rate limiting for HTTP clients (prevent API overwhelm)
 - [ ] Add circuit breaker for external services (OpenAI, Ollama, webhooks)
 - [ ] Add request timeout configuration for all HTTP clients
@@ -98,12 +98,14 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 - [ ] Add graceful shutdown for in-progress operations
 
 **Performance**
-- [ ] Reduce unnecessary clones in transcription.rs (http.clone() called 7 times)
-- [ ] Reduce unnecessary clones in llm.rs and embed.rs (use Arc/borrowing)
+- [ ] Reduce unnecessary http.clone() calls in transcription.rs (7 times)
+- [ ] Reduce unnecessary http.clone() calls in llm.rs (4 times)
+- [ ] Reduce unnecessary clone() in embed.rs (attention_mask)
 
 **Code Quality**
-- [ ] Replace unwrap() in production code (whisper_supervisor.rs, pipeline.rs, doctor.rs)
-- [ ] Add integration tests for daemon components (recorder, pipeline, ipc_handler)
+- [ ] Replace unwrap() in pipeline.rs (enigo::Enigo::new() line 90)
+- [ ] Replace unwrap() in recorder.rs production code (lines 629, 680, 734)
+- [ ] Add integration tests for daemon components (tests/ directory is empty)
 
 ---
 
