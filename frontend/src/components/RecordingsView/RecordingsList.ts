@@ -594,6 +594,7 @@ export class RecordingsListElement extends LitElement {
         </span>
         <span class="rec-group-label">
           <span class="rec-group-chevron ${expanded ? "expanded" : ""}">▸</span>
+          <span class="rec-group-meta" style="margin-right: 8px;">${day} · ${time}</span>
           ${isEditing ? html`
             <input
               type="text"
@@ -615,7 +616,6 @@ export class RecordingsListElement extends LitElement {
               @click=${(e: MouseEvent) => this.startInlineRename(e, meetingId, tracks[0].meeting_name ?? "")}
             >✎</button>
           `}
-          <span class="rec-group-meta" style="margin-left: 8px;">${day} · ${time}</span>
         </span>
       </div>
     `;
