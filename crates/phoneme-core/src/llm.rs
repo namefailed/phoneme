@@ -104,7 +104,9 @@ fn combine(prompt: &str, text: &str) -> String {
 /// and trimming excessive whitespace while preserving paragraph structure.
 fn normalize_response(text: &str) -> String {
     // Replace 3+ consecutive newlines with exactly 2 newlines (preserve paragraph breaks)
-    let collapsed = regex::Regex::new(r"\n{3,}").unwrap().replace_all(text, "\n\n");
+    let collapsed = regex::Regex::new(r"\n{3,}")
+        .unwrap()
+        .replace_all(text, "\n\n");
     // Trim leading/trailing whitespace
     collapsed.trim().to_string()
 }
