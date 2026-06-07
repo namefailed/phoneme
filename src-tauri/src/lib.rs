@@ -61,7 +61,6 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     use phoneme_core::RecordMode;
-                    use std::str::FromStr;
                     use tauri::Manager;
                     use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
@@ -226,7 +225,6 @@ pub fn run() {
                     || bridge.config.meeting_hotkey.enabled
                     || bridge.config.in_place_hotkey.enabled
                 {
-                    use std::str::FromStr;
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
                     if bridge.config.hotkey.enabled {
                         if let Ok(shortcut) = bridge.config.hotkey.combo.parse::<Shortcut>() {
