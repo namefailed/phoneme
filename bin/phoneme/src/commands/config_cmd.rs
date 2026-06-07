@@ -52,19 +52,20 @@ pub async fn run(args: ConfigArgs, cfg: &Config) -> ExitCode {
 
 fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
     // Parse the config as a TOML value to handle different types
-    let mut toml_value = toml::to_string(cfg)
-        .map_err(|e| format!("failed to serialize current config: {e}"))?;
-    
+    let mut toml_value =
+        toml::to_string(cfg).map_err(|e| format!("failed to serialize current config: {e}"))?;
+
     // Parse as TOML document
-    let mut doc = toml_value.parse::<toml_edit::DocumentMut>()
+    let mut doc = toml_value
+        .parse::<toml_edit::DocumentMut>()
         .map_err(|e| format!("failed to parse config as TOML: {e}"))?;
-    
+
     // Split the key by dots and navigate the TOML structure
     let parts: Vec<&str> = key.split('.').collect();
     if parts.is_empty() {
         return Err("key cannot be empty".into());
     }
-    
+
     // Navigate to the parent of the target key
     let mut current = doc.as_table_mut();
     for (i, &part) in parts.iter().enumerate() {
@@ -80,7 +81,7 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
             } else {
                 toml_edit::Value::from(value)
             };
-            
+
             current[part] = toml_edit::Item::Value(toml_val);
         } else {
             // Navigate deeper
@@ -92,13 +93,13 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
                 .ok_or_else(|| format!("'{part}' is not a table in config"))?;
         }
     }
-    
+
     // Write the updated config back to file
     let config_path = phoneme_core::config::default_config_path()
         .ok_or_else(|| "could not resolve config path".to_string())?;
-    
+
     std::fs::write(&config_path, doc.to_string())
         .map_err(|e| format!("failed to write config: {e}"))?;
-    
+
     Ok(())
 }
