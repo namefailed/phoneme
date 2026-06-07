@@ -26,6 +26,12 @@ export type Recording = {
   /** Which track of a meeting this is: "mic" or "system". Null otherwise. */
   track?: string | null;
   meeting_name?: string | null;
+  /** LLM model used for post-processing cleanup */
+  cleanup_model?: string | null;
+  /** Whether speaker diarization was applied */
+  diarized?: boolean;
+  /** Tags associated with this recording */
+  tags?: Array<{ id: number; name: string; color?: string | null }>;
 };
 
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
