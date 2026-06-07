@@ -72,7 +72,6 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 ## 📋 v1.9.x (Following Sprint)
 
 **Frontend UX**
-- [ ] Add global search across all settings tabs (SettingsView)
 - [ ] Add folder import option (import.ts)
 - [ ] Add error toast for failed theme application (App.ts)
 
