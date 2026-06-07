@@ -62,13 +62,37 @@ export class FirstRunWizardElement extends LitElement {
   }
 
   private async skip() {
-    await invoke("write_config", { config: this.config });
-    this.onComplete();
+    try {
+      const cleanConfig = { ...this.config };
+      delete cleanConfig._setup_whisper;
+      delete cleanConfig._setup_ollama;
+      delete cleanConfig._setup_diarization;
+      delete cleanConfig._whisper_model_choice;
+      delete cleanConfig._ollama_model_choice;
+      delete cleanConfig._setup_native_streaming;
+      
+      await invoke("write_config", { config: cleanConfig });
+      this.onComplete();
+    } catch (e) {
+      showToast(`Failed to save setup: ${e}`, "error");
+    }
   }
 
   private async finish() {
-    await invoke("write_config", { config: this.config });
-    this.onComplete();
+    try {
+      const cleanConfig = { ...this.config };
+      delete cleanConfig._setup_whisper;
+      delete cleanConfig._setup_ollama;
+      delete cleanConfig._setup_diarization;
+      delete cleanConfig._whisper_model_choice;
+      delete cleanConfig._ollama_model_choice;
+      delete cleanConfig._setup_native_streaming;
+      
+      await invoke("write_config", { config: cleanConfig });
+      this.onComplete();
+    } catch (e) {
+      showToast(`Failed to save setup: ${e}`, "error");
+    }
   }
 
   private renderDots() {
@@ -183,7 +207,8 @@ export class FirstRunWizardElement extends LitElement {
               <option value="ggml-base.en.bin">Base (Fastest, ~140MB, 4GB RAM)</option>
               <option value="ggml-small.en.bin">Small (Balanced, ~480MB, 8GB RAM)</option>
               <option value="ggml-medium.en.bin">Medium (Accurate, ~1.5GB, 16GB RAM)</option>
-              <option value="ggml-large-v3-turbo.bin">Large v3 Turbo (Best, ~1.6GB, 32GB RAM)</option>
+              <option value="ggml-large-v3.bin">Large v3 (Best Accuracy, ~3.1GB, 32GB RAM)</option>
+              <option value="ggml-large-v3-turbo.bin">Large v3 Turbo (Fastest & Accurate, ~1.6GB, 16GB+ RAM)</option>
             </select>
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
               <input type="checkbox" id="setup-native-streaming" .checked=${this.config._setup_native_streaming} @change=${(e: Event) => { this.config._setup_native_streaming = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
@@ -279,6 +304,8 @@ export class FirstRunWizardElement extends LitElement {
     
     if (filename === "ggml-large-v3-turbo.bin") {
       this.downloadSubtitle = "Fetching the Whisper large-v3-turbo model (approx 1.6GB)...";
+    } else if (filename === "ggml-large-v3.bin") {
+      this.downloadSubtitle = "Fetching the Whisper large-v3 model (approx 3.1GB)...";
     } else if (filename === "ggml-medium.en.bin") {
       this.downloadSubtitle = "Fetching the Whisper medium.en model (approx 1.5GB)...";
     } else if (filename === "ggml-small.en.bin") {
