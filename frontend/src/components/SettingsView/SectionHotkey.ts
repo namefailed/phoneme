@@ -43,7 +43,7 @@ export class SectionHotkey {
 
         <h3 style="margin-top: 18px;">Meeting Hotkey</h3>
         <span style="font-size: 11px; color: var(--fg-faded); display: block; margin: -6px 0 8px;">
-          A separate shortcut that toggles a multi-track meeting recording (your mic + system audio). Always tap-to-start / tap-to-stop.
+          A separate shortcut that toggles a multi-track meeting recording (your mic + system audio).
         </span>
         <div class="settings-field">
           <label>Enable</label>
@@ -57,6 +57,21 @@ export class SectionHotkey {
           <div>${renderField(
             { key: "meeting_hotkey.combo", label: "", kind: "text" },
             config.meeting_hotkey?.combo ?? "Ctrl+Alt+M",
+          )}</div>
+        </div>
+        <div class="settings-field">
+          <label>Mode</label>
+          <div>${renderField(
+            {
+              key: "meeting_hotkey.mode",
+              label: "",
+              kind: "select",
+              options: [
+                { value: "hold", label: "Hold (push-to-talk)" },
+                { value: "toggle", label: "Toggle (tap to start, tap to stop)" },
+              ],
+            },
+            config.meeting_hotkey?.mode ?? "toggle",
           )}</div>
         </div>
 
