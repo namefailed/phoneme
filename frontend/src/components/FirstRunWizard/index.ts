@@ -31,7 +31,7 @@ export class FirstRunWizardElement extends LitElement {
   @state() private isDownloading = false;
 
   // Hotkey mode state
-  @state() private capturingHotkey = false;
+  @state() private capturingHotkeyFor: "general" | "meeting" | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -544,7 +544,7 @@ export class FirstRunWizardElement extends LitElement {
 
     // Reset escape to just cancel
     if (e.key === "Escape") {
-      this.capturingHotkey = false;
+      this.capturingHotkeyFor = null;
       document.removeEventListener("keydown", this.keydownHandler, { capture: true });
       return;
     }
@@ -565,19 +565,28 @@ export class FirstRunWizardElement extends LitElement {
     parts.push(keyName);
 
     const combo = parts.join("+");
-    if (!this.config.hotkey) this.config.hotkey = {};
-    this.config.hotkey.combo = combo;
     
-    this.capturingHotkey = false;
+    if (this.capturingHotkeyFor === "general") {
+      if (!this.config.hotkey) this.config.hotkey = {};
+      this.config.hotkey.combo = combo;
+      this.config.hotkey.enabled = true; // Auto-enable
+    } else if (this.capturingHotkeyFor === "meeting") {
+      if (!this.config.meeting_hotkey) this.config.meeting_hotkey = {};
+      this.config.meeting_hotkey.combo = combo;
+      this.config.meeting_hotkey.enabled = true; // Auto-enable
+    }
+    
+    this.capturingHotkeyFor = null;
     document.removeEventListener("keydown", this.keydownHandler, { capture: true });
   };
 
-  private toggleCapture() {
-    this.capturingHotkey = !this.capturingHotkey;
-    if (this.capturingHotkey) {
-      document.addEventListener("keydown", this.keydownHandler, { capture: true });
-    } else {
+  private toggleCapture(type: "general" | "meeting") {
+    if (this.capturingHotkeyFor === type) {
+      this.capturingHotkeyFor = null;
       document.removeEventListener("keydown", this.keydownHandler, { capture: true });
+    } else {
+      this.capturingHotkeyFor = type;
+      document.addEventListener("keydown", this.keydownHandler, { capture: true });
     }
   }
 
@@ -588,17 +597,41 @@ export class FirstRunWizardElement extends LitElement {
 
   private renderHotkey() {
     if (!this.config.hotkey) this.config.hotkey = {};
+    if (!this.config.meeting_hotkey) this.config.meeting_hotkey = {};
+    
+    // Auto-enable them by default if not set, so users don't have to go to settings
+    if (this.config.hotkey.enabled === undefined) this.config.hotkey.enabled = true;
+    if (this.config.meeting_hotkey.enabled === undefined) this.config.meeting_hotkey.enabled = true;
+
     return html`
       <div class="wizard-body">
-        <h2 class="wizard-title">Global Hotkey</h2>
-        <p class="wizard-subtitle">Press this combo from anywhere to start recording your voice note.</p>
-        <div style="margin-top: 32px; text-align: center;">
-          <button id="capture" class="combo-capture ${this.capturingHotkey ? 'capturing' : ''}" @click=${this.toggleCapture}>
-            ${this.config.hotkey.combo || "No Hotkey Set"}
-          </button>
-          <div id="capture-hint" style="margin-top: 12px; color: var(--fg-faded); font-size: 13px;">
-            ${this.capturingHotkey ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
+        <h2 class="wizard-title">Global Hotkeys</h2>
+        <p class="wizard-subtitle">Press these combos from anywhere to start recording your voice note.</p>
+        
+        <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 24px; align-items: flex-start;">
+          
+          <div style="display: flex; flex-direction: column; align-items: flex-start;">
+            <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">General Hotkey</h3>
+            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Transcribes and triggers your background hooks.</p>
+            <button id="capture-general" class="combo-capture ${this.capturingHotkeyFor === 'general' ? 'capturing' : ''}" @click=${() => this.toggleCapture('general')}>
+              ${this.config.hotkey.combo || "No Hotkey Set"}
+            </button>
+            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 12px;">
+              ${this.capturingHotkeyFor === 'general' ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
+            </div>
           </div>
+
+          <div style="display: flex; flex-direction: column; align-items: flex-start;">
+            <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">Meeting Hotkey</h3>
+            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Types the transcription directly into your currently active window (e.g. Zoom/Discord).</p>
+            <button id="capture-meeting" class="combo-capture ${this.capturingHotkeyFor === 'meeting' ? 'capturing' : ''}" @click=${() => this.toggleCapture('meeting')}>
+              ${this.config.meeting_hotkey.combo || "No Hotkey Set"}
+            </button>
+            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 12px;">
+              ${this.capturingHotkeyFor === 'meeting' ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="wizard-footer">
