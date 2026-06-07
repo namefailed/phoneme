@@ -359,7 +359,7 @@ impl DaemonRecorder {
                     continue;
                 }
                 let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
-                
+
                 // Use the cached provider to avoid re-resolving on every tick.
                 // Config changes during recording will take effect on the next recording.
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
