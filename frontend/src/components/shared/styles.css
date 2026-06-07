@@ -16,7 +16,8 @@
   border-radius: 6px;
   padding: 6px 12px 6px 32px;
   color: var(--fg-default);
-  flex: 1;
+  flex: 2;
+  max-width: 600px;
   font-size: 13px;
   transition: all 0.15s ease-out;
 }
