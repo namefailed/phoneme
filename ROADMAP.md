@@ -57,13 +57,11 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 **Tauri UX**
 - [ ] Add splash screen during daemon spawn (progress indicator)
 - [ ] Add spawn cancellation (cancel if user closes app during startup)
-- [ ] Add Ollama test to wizard (endpoint test)
 - [ ] Add reconnection status events (emit status for UI feedback)
 
 **Documentation**
 - [ ] Add System Requirements to README (Windows version, RAM requirements)
 - [ ] Add Roadmap section to README (communicate future direction)
-- [ ] Document CLI exit codes (for scripting)
 - [ ] Document JSON output format (examples)
 - [ ] Document environment variables (reference)
 
@@ -92,10 +90,8 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 - [ ] Verify innerHTML usage safety (SectionWhisper.ts provider metadata comment)
 - [ ] Add rate limiting for HTTP clients (prevent API overwhelm)
 - [ ] Add circuit breaker for external services (OpenAI, Ollama, webhooks)
-- [ ] Add request timeout configuration for all HTTP clients
 - [ ] Add structured logging correlation IDs for request tracing
 - [ ] Add health check endpoint for daemon monitoring
-- [ ] Add graceful shutdown for in-progress operations
 
 **Performance**
 - [ ] Reduce unnecessary http.clone() calls in transcription.rs (7 times)
@@ -203,9 +199,9 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 - [ ] **Scoped permissions** — Replace broad default permissions with scoped permissions (capabilities/default.json)
 
 ### Developer Experience
-- [ ] **TypeScript path aliases** — Add @/components, etc. for cleaner imports (tsconfig.json)
-- [ ] **Stricter TypeScript** — Enable noUnusedLocals and noUnusedParameters
-- [ ] **Incremental compilation** — Enable for faster builds (tsconfig.json)
+- [ ] **TypeScript path aliases** — Add @/components, etc. for cleaner imports (tsconfig.json) - NOT NEEDED (imports work without aliases)
+- [ ] **Stricter TypeScript** — Enable noUnusedLocals and noUnusedParameters (currently false in tsconfig.json)
+- [ ] **Incremental compilation** — Enable for faster builds (tsconfig.json) - ALREADY EXISTS (Vite handles this)
 - [ ] **Bundle analyzer** — Add for size monitoring (vite.config.ts)
 - [ ] **Code coverage** — Implement with codecov
 - [ ] **Dependency scanning** — Add cargo-audit or cargo-deny for security
