@@ -431,7 +431,10 @@ impl Catalog {
             q = q.bind(t.to_rfc3339());
         }
         let rows = q.fetch_all(&self.pool).await?;
-        let mut recs: Vec<Recording> = rows.into_iter().map(row_to_recording).collect::<Result<_>>()?;
+        let mut recs: Vec<Recording> = rows
+            .into_iter()
+            .map(row_to_recording)
+            .collect::<Result<_>>()?;
         // Populate tags for each recording (N+1 query; acceptable for desktop UI scale)
         for rec in &mut recs {
             rec.tags = self.tags_for(&rec.id).await.unwrap_or_default();
