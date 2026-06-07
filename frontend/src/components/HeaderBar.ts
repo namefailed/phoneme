@@ -293,12 +293,18 @@ export class HeaderBarElement extends LitElement {
 
   private async pauseRecording() {
     try {
-      if (this.isPaused) {
+      // Optimistically update state for immediate UI feedback
+      const wasPaused = this.isPaused;
+      this.isPaused = !wasPaused;
+      
+      if (wasPaused) {
         await invoke("record_resume");
       } else {
         await invoke("record_pause");
       }
     } catch (e) {
+      // Revert state on error
+      this.isPaused = !this.isPaused;
       showToast(`Toggle pause failed: ${e}`, "error");
     }
   }
