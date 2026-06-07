@@ -178,7 +178,7 @@ export class FirstRunWizardElement extends LitElement {
     }
     
     if (!this.config._whisper_model_choice) {
-      if (this.systemRamMb >= 32000 || this.systemVramMb >= 8000) this.config._whisper_model_choice = "ggml-large-v3-turbo.bin";
+      if (this.systemRamMb >= 32000 || this.systemVramMb >= 8000) this.config._whisper_model_choice = "ggml-large-v3-turbo-q5_0.bin";
       else if (this.systemRamMb >= 16000 || this.systemVramMb >= 4000) this.config._whisper_model_choice = "ggml-medium.en.bin";
       else if (this.systemRamMb >= 8000 || this.systemVramMb >= 2000) this.config._whisper_model_choice = "ggml-small.en.bin";
       else this.config._whisper_model_choice = "ggml-base.en.bin";
@@ -207,8 +207,8 @@ export class FirstRunWizardElement extends LitElement {
               <option value="ggml-base.en.bin">Base (Fastest, ~140MB, 4GB RAM)</option>
               <option value="ggml-small.en.bin">Small (Balanced, ~480MB, 8GB RAM)</option>
               <option value="ggml-medium.en.bin">Medium (Accurate, ~1.5GB, 16GB RAM)</option>
+              <option value="ggml-large-v3-turbo-q5_0.bin">Large v3 Turbo (Fastest & Accurate, ~1.1GB, 16GB+ RAM)</option>
               <option value="ggml-large-v3.bin">Large v3 (Best Accuracy, ~3.1GB, 32GB RAM)</option>
-              <option value="ggml-large-v3-turbo.bin">Large v3 Turbo (Fastest & Accurate, ~1.6GB, 16GB+ RAM)</option>
             </select>
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
               <input type="checkbox" id="setup-native-streaming" .checked=${this.config._setup_native_streaming} @change=${(e: Event) => { this.config._setup_native_streaming = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
@@ -302,8 +302,8 @@ export class FirstRunWizardElement extends LitElement {
     let filename = this.config._whisper_model_choice || "ggml-small.en.bin";
     let url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${filename}`;
     
-    if (filename === "ggml-large-v3-turbo.bin") {
-      this.downloadSubtitle = "Fetching the Whisper large-v3-turbo model (approx 1.6GB)...";
+    if (filename === "ggml-large-v3-turbo-q5_0.bin") {
+      this.downloadSubtitle = "Fetching the Whisper large-v3-turbo model (approx 1.1GB)...";
     } else if (filename === "ggml-large-v3.bin") {
       this.downloadSubtitle = "Fetching the Whisper large-v3 model (approx 3.1GB)...";
     } else if (filename === "ggml-medium.en.bin") {
