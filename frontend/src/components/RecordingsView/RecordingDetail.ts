@@ -26,6 +26,11 @@ export class RecordingDetail {
   private notesEditor: NotesEditor | null = null;
   private onRefresh: () => void;
   private dirty = false;
+  /** Identity of what is currently rendered, so refreshes that don't change the
+   *  recording or its audio file can update text in place instead of tearing
+   *  down and remounting the waveform (which caused it to flicker/clear). */
+  private renderedId: string | null = null;
+  private renderedAudioPath: string | null = null;
 
   constructor(container: HTMLElement, onRefresh: () => void) {
     this.container = container;
@@ -35,15 +40,63 @@ export class RecordingDetail {
 
   async show(id: string) {
     try {
-      this.recording = await getRecording(id);
-      this.renderRecording();
+      const rec = await getRecording(id);
+      this.recording = rec;
+      const sameView =
+        this.renderedId === id &&
+        this.renderedAudioPath === rec.audio_path &&
+        !!this.container.querySelector(".detail");
+      if (sameView) {
+        this.updateInPlace(rec);
+      } else {
+        this.renderRecording();
+        this.renderedId = id;
+        this.renderedAudioPath = rec.audio_path;
+      }
     } catch (e) {
+      this.renderedId = null;
+      this.renderedAudioPath = null;
       this.container.innerHTML = `<div class="empty error">Failed to load: ${String(e)}</div>`;
+    }
+  }
+
+  /** Lightweight refresh that keeps the waveform/player mounted and only updates
+   *  the status pill, footer, and transcript (when it actually changed and the
+   *  user isn't mid-edit). */
+  private updateInPlace(r: Recording) {
+    const statusEl = this.container.querySelector<HTMLElement>("#detail-status");
+    if (statusEl) {
+      statusEl.className = `status-pill ${statusToClass(r.status)}`;
+      statusEl.textContent = statusLabel(r.status);
+    }
+
+    const hookEl = this.container.querySelector<HTMLElement>("#detail-hook-exit");
+    if (hookEl) hookEl.textContent = `Hook exit: ${r.hook_exit_code ?? "—"}`;
+
+    const statsEl = this.container.querySelector<HTMLElement>("#detail-stats");
+    if (statsEl) statsEl.textContent = wordCountSummary(r.transcript ?? "");
+
+    // Only rebuild the transcript editor if the text changed and the user has
+    // no unsaved edits — avoids clobbering in-progress typing.
+    if (!this.dirty) {
+      const newText = r.transcript ?? "";
+      const currentText = this.editor?.getText() ?? "";
+      if (newText !== currentText) {
+        const editorRoot = this.container.querySelector<HTMLElement>("#editor");
+        if (editorRoot) {
+          this.editor?.dispose();
+          this.editor = new TranscriptEditor(editorRoot, r.id, newText, (d) => {
+            this.dirty = d;
+          });
+        }
+      }
     }
   }
 
   clear() {
     this.recording = null;
+    this.renderedId = null;
+    this.renderedAudioPath = null;
     this.editor?.dispose();
     this.editor = null;
     this.notesEditor?.dispose();
@@ -71,7 +124,7 @@ export class RecordingDetail {
             <div class="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">${formatDate(r.started_at)}</div>
             <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
               <span>${formatDuration(r.duration_ms)}</span>
-              <span class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
+              <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
             </div>
           </div>
         </div>
@@ -89,8 +142,8 @@ export class RecordingDetail {
           <div id="notes-editor"></div>
         </div>
         <div class="detail-footer">
-          ${stats ? `<span>${stats}</span>` : ""}
-          <span>Hook exit: ${r.hook_exit_code ?? "—"}</span>
+          <span id="detail-stats">${stats}</span>
+          <span id="detail-hook-exit">Hook exit: ${r.hook_exit_code ?? "—"}</span>
           <span>${escapeHtml(r.audio_path)}</span>
         </div>
       </div>

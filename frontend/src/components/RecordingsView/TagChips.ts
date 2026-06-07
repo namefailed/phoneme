@@ -28,6 +28,7 @@ export class TagChipsElement extends LitElement {
 
   @state() private attached: Tag[] = [];
   @state() private allTags: Tag[] = [];
+  @state() private _showDropdown = false;
 
   connectedCallback() {
     super.connectedCallback();
@@ -91,6 +92,9 @@ export class TagChipsElement extends LitElement {
   }
 
   render() {
+    const availableTags = this.allTags.filter((t) => !this.attached.map(a => a.id).includes(t.id));
+    const showDropdown = this._showDropdown && availableTags.length > 0;
+    
     return html`
       <div class="tags">
         ${this.attached.map((t) => {
@@ -102,10 +106,24 @@ export class TagChipsElement extends LitElement {
             </span>
           `;
         })}
-        <input class="tag-add" placeholder="+ add tag" list="all-tags-${this.recordingId}" @keydown=${this.onInputKeydown} />
-        <datalist id="all-tags-${this.recordingId}">
-          ${this.allTags.map((t) => html`<option value="${t.name}"></option>`)}
-        </datalist>
+        <div class="tag-input-wrapper">
+          <input 
+            class="tag-add" 
+            placeholder="+ add tag" 
+            @focus=${() => this._showDropdown = true}
+            @blur=${() => setTimeout(() => this._showDropdown = false, 150)}
+            @keydown=${this.onInputKeydown}
+          />
+          ${showDropdown ? html`
+            <div class="tag-dropdown">
+              ${availableTags.map((t) => html`
+                <div class="tag-dropdown-item" @mousedown=${(e: Event) => { e.preventDefault(); this.attachByName(t.name); this._showDropdown = false; }}>
+                  ${t.name}
+                </div>
+              `)}
+            </div>
+          ` : null}
+        </div>
         <button class="tag-manage" title="Create, rename, recolor, and delete tags" @click=${this.onManageClick}>🏷 Manage tags</button>
       </div>
     `;

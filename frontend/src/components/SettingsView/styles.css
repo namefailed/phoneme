@@ -313,6 +313,36 @@ select[data-key="daemon.log_level"] {
   width: 110px;
 }
 
+/* Bundled-model card action buttons (Select / Download / Selected). Without an
+   explicit style these inherit `align-items: stretch` from the stacked wrapper
+   and balloon to the full column width. Pin them to a compact, content-sized
+   pill that matches the rest of the settings buttons. */
+.model-actions {
+  flex-shrink: 0;
+}
+.model-actions button {
+  width: auto;
+  align-self: flex-end;
+  white-space: nowrap;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--fg-default);
+  cursor: pointer;
+  transition: all 0.15s ease-out;
+}
+.model-actions button:hover:not(:disabled) {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.model-actions button:disabled {
+  cursor: default;
+}
+
 /* AI prompt field — overrides the two-column grid to let the textarea
    span the full control column while keeping the label aligned left. */
 .settings-field.ai-prompt-field {

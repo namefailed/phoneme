@@ -26,10 +26,20 @@ export class SplitterElement extends LitElement {
 
   private onMouseMove = (e: MouseEvent) => {
     if (!this.dragging) return;
-    const parent = this.parentElement;
-    if (!parent) return;
-    const rect = parent.getBoundingClientRect();
-    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    // Measure against the whole grid shell, not the tiny splitter cell that is
+    // our direct parent — otherwise rect.width is ~4px and the math explodes.
+    const shell = (this.closest(".rv-shell") as HTMLElement | null)
+      ?? this.parentElement?.parentElement
+      ?? this.parentElement;
+    if (!shell) return;
+    const rect = shell.getBoundingClientRect();
+    // The grid has a fixed-width sidebar column before the list. The list
+    // column's percentage resolves against the full shell width, so offset the
+    // mouse position by the sidebar's current width to keep the handle under
+    // the cursor.
+    const sidebar = shell.querySelector("ph-sidebar") as HTMLElement | null;
+    const sidebarWidth = sidebar ? sidebar.getBoundingClientRect().width : 0;
+    const pct = ((e.clientX - rect.left - sidebarWidth) / rect.width) * 100;
     this.leftPercent = Math.max(20, Math.min(80, pct));
     this.dispatchEvent(new CustomEvent('change', { detail: this.leftPercent }));
   };
