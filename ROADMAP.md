@@ -88,6 +88,23 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 - [ ] Add .env.example file to document environment variables
 - [ ] Add config.example.toml to document configuration options
 
+**Security & Reliability**
+- [ ] Verify innerHTML usage safety (SectionWhisper.ts provider metadata)
+- [ ] Add rate limiting for HTTP clients (prevent API overwhelm)
+- [ ] Add circuit breaker for external services (OpenAI, Ollama, webhooks)
+- [ ] Add request timeout configuration for all HTTP clients
+- [ ] Add structured logging correlation IDs for request tracing
+- [ ] Add health check endpoint for daemon monitoring
+- [ ] Add graceful shutdown for in-progress operations
+
+**Performance**
+- [ ] Reduce unnecessary clones in transcription.rs (http.clone() called 7 times)
+- [ ] Reduce unnecessary clones in llm.rs and embed.rs (use Arc/borrowing)
+
+**Code Quality**
+- [ ] Replace unwrap() in production code (whisper_supervisor.rs, pipeline.rs, doctor.rs)
+- [ ] Add integration tests for daemon components (recorder, pipeline, ipc_handler)
+
 ---
 
 ## 📋 v1.9.x (Following Sprint)
