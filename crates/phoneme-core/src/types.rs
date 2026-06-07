@@ -103,6 +103,17 @@ pub struct Recording {
     /// Whether this recording should be typed in-place when transcribed.
     #[serde(default)]
     pub in_place: bool,
+    /// The LLM model used for post-processing/cleanup, if any ran. `None` when
+    /// post-processing was disabled or failed.
+    #[serde(default)]
+    pub cleanup_model: Option<String>,
+    /// Whether speaker diarization was applied to this recording.
+    #[serde(default)]
+    pub diarized: bool,
+    /// Tags attached to this recording. Populated by `Catalog::list`/`get`;
+    /// not a column on the recordings table (joined from `recording_tags`).
+    #[serde(default)]
+    pub tags: Vec<crate::tags::Tag>,
 }
 
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.

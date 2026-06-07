@@ -343,6 +343,13 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
             }
         }
     }
+    if config.in_place_hotkey.enabled {
+        if let Ok(shortcut) = Shortcut::from_str(&config.in_place_hotkey.combo) {
+            if let Err(e) = app.global_shortcut().register(shortcut) {
+                tracing::warn!("failed to register in-place shortcut: {e}");
+            }
+        }
+    }
 }
 
 /// List the names of all saved config profiles.

@@ -79,8 +79,9 @@ impl Catalog {
             "INSERT INTO recordings (
                  id, started_at, duration_ms, audio_path, transcript, model, status,
                  error_kind, error_message, hook_command, hook_exit_code, hook_duration_ms,
-                 transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 transcribed_at, hook_ran_at, notes, meeting_id, meeting_name, track, in_place,
+                 cleanup_model, diarized
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(r.id.as_str())
         .bind(r.started_at.to_rfc3339())
@@ -101,6 +102,8 @@ impl Catalog {
         .bind(r.meeting_name.as_deref())
         .bind(r.track.as_deref())
         .bind(r.in_place)
+        .bind(r.cleanup_model.as_deref())
+        .bind(r.diarized)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -166,6 +169,28 @@ impl Catalog {
         .bind(transcript)
         .bind(original_transcript)
         .bind(model)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Record which post-processing LLM model ran (if any) and whether speaker
+    /// diarization was applied. Called by the pipeline after transcription so
+    /// the list view can surface these as columns.
+    pub async fn update_processing_meta(
+        &self,
+        id: &RecordingId,
+        cleanup_model: Option<&str>,
+        diarized: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET cleanup_model = ?, diarized = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(cleanup_model)
+        .bind(diarized)
         .bind(id.as_str())
         .execute(&self.pool)
         .await?;
@@ -406,7 +431,12 @@ impl Catalog {
             q = q.bind(t.to_rfc3339());
         }
         let rows = q.fetch_all(&self.pool).await?;
-        rows.into_iter().map(row_to_recording).collect()
+        let mut recs: Vec<Recording> = rows.into_iter().map(row_to_recording).collect::<Result<_>>()?;
+        // Populate tags for each recording (N+1 query; acceptable for desktop UI scale)
+        for rec in &mut recs {
+            rec.tags = self.tags_for(&rec.id).await.unwrap_or_default();
+        }
+        Ok(recs)
     }
 
     /// Fetch all recordings belonging to a single meeting session.
@@ -692,6 +722,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         meeting_name: row.try_get("meeting_name")?,
         track: row.try_get("track")?,
         in_place: row.try_get("in_place").unwrap_or(false),
+        cleanup_model: row.try_get("cleanup_model").unwrap_or(None),
+        diarized: row.try_get("diarized").unwrap_or(false),
+        tags: Vec::new(),
     })
 }
 

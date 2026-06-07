@@ -84,7 +84,7 @@ export class HeaderBarElement extends LitElement {
           this.previewText = null;
         }
       } else if (eventName === "transcription_partial") {
-        if (this.isRecording) {
+        if (this.isRecording || this.isMeeting) {
           this.previewText = typeof p.text === "string" && p.text.trim() ? p.text.trim() : null;
         }
       } else if (eventName === "recording_paused") {
