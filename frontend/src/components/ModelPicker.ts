@@ -56,6 +56,7 @@ function localModelLabel(path: string): string {
     "ggml-small.en.bin": "Small (English) — balanced",
     "ggml-medium.en.bin": "Medium (English) — accurate, slower",
     "ggml-large-v3.bin": "Large v3 — most accurate, slowest",
+    "ggml-large-v3-turbo.bin": "Large v3 Turbo — fast and accurate",
   };
   return map[file] ?? file;
 }
