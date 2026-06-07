@@ -108,20 +108,26 @@ export class SettingsViewElement extends LitElement {
 
     const isSearching = this.searchQuery.trim().length > 0;
 
+    const createSubHost = () => {
+      const subHost = document.createElement("div");
+      sectionHost.appendChild(subHost);
+      return subHost;
+    };
+
     const mountAll = () => {
-      new SectionWhisper(sectionHost, this.config);
-      new SectionDiarization(sectionHost, this.config);
-      new SectionRecording(sectionHost, this.config);
-      new SectionHotkey(sectionHost, this.config);
-      new SectionInterface(sectionHost, this.config);
-      new SectionEditor(sectionHost, this.config);
-      new SectionTray(sectionHost, this.config);
-      new SectionTags(sectionHost, this.config);
-      new SectionPostProcessing(sectionHost, this.config);
-      new SectionHook(sectionHost, this.config);
-      new SectionStorage(sectionHost, this.config);
-      new SectionProfiles(sectionHost, this.config);
-      new SectionAdvanced(sectionHost, this.config);
+      new SectionWhisper(createSubHost(), this.config);
+      new SectionDiarization(createSubHost(), this.config);
+      new SectionRecording(createSubHost(), this.config);
+      new SectionHotkey(createSubHost(), this.config);
+      new SectionInterface(createSubHost(), this.config);
+      new SectionEditor(createSubHost(), this.config);
+      new SectionTray(createSubHost(), this.config);
+      new SectionTags(createSubHost(), this.config);
+      new SectionPostProcessing(createSubHost(), this.config);
+      new SectionHook(createSubHost(), this.config);
+      new SectionStorage(createSubHost(), this.config);
+      new SectionProfiles(createSubHost(), this.config);
+      new SectionAdvanced(createSubHost(), this.config);
     };
 
     if (isSearching) {
@@ -149,29 +155,29 @@ export class SettingsViewElement extends LitElement {
     } else {
       switch (this.activeTab) {
         case "transcription":
-          new SectionWhisper(sectionHost, this.config);
-          new SectionDiarization(sectionHost, this.config);
+          new SectionWhisper(createSubHost(), this.config);
+          new SectionDiarization(createSubHost(), this.config);
           break;
         case "capture":
-          new SectionRecording(sectionHost, this.config);
-          new SectionHotkey(sectionHost, this.config);
+          new SectionRecording(createSubHost(), this.config);
+          new SectionHotkey(createSubHost(), this.config);
           break;
         case "appearance":
-          new SectionInterface(sectionHost, this.config);
-          new SectionEditor(sectionHost, this.config);
-          new SectionTray(sectionHost, this.config);
+          new SectionInterface(createSubHost(), this.config);
+          new SectionEditor(createSubHost(), this.config);
+          new SectionTray(createSubHost(), this.config);
           break;
         case "tags":
-          new SectionTags(sectionHost, this.config);
+          new SectionTags(createSubHost(), this.config);
           break;
         case "postprocessing":
-          new SectionPostProcessing(sectionHost, this.config);
-          new SectionHook(sectionHost, this.config);
+          new SectionPostProcessing(createSubHost(), this.config);
+          new SectionHook(createSubHost(), this.config);
           break;
         case "system":
-          new SectionStorage(sectionHost, this.config);
-          new SectionProfiles(sectionHost, this.config);
-          new SectionAdvanced(sectionHost, this.config);
+          new SectionStorage(createSubHost(), this.config);
+          new SectionProfiles(createSubHost(), this.config);
+          new SectionAdvanced(createSubHost(), this.config);
           break;
       }
     }
