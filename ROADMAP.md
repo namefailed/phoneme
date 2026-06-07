@@ -43,9 +43,9 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 **Frontend Polish**
 - [ ] Add keyboard shortcuts (Ctrl+, for settings, Ctrl+A select all, Esc clear)
 - [ ] Add "Reset to Defaults" button per section (SettingsView)
-- [ ] Add config export/import for backup (SettingsView)
-- [ ] Add download progress with ETA for models (FirstRunWizard)
-- [ ] Add drag-drop visual feedback (import.ts)
+- [ ] Add config import for backup (SettingsView) - export already exists
+- [ ] Add ETA calculation for model downloads (FirstRunWizard) - progress exists
+- [ ] Add drag-drop visual feedback (import.ts) - handler exists
 - [ ] Add batch import progress (show total count for multiple files)
 
 **Backend Reliability**
