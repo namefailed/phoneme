@@ -327,18 +327,29 @@ impl TranscriptionProvider for OpenAiCompatProvider {
 
         if self.local_diarize {
             if let Some(whisper_segments) = parsed.segments {
-                let pyannote_segs =
-                    if let Err(e) = crate::diarization::run_local_diarization(audio_path) {
+                let pyannote_segs = match crate::diarization::run_local_diarization(audio_path) {
+                    Ok(segs) => {
+                        tracing::info!("local diarization completed");
+                        segs
+                    }
+                    Err(e) => {
                         tracing::warn!(
                             "local diarization failed, falling back to raw whisper: {}",
                             e
                         );
                         vec![]
-                    } else {
-                        tracing::info!("local diarization completed");
-                        crate::diarization::run_local_diarization(audio_path)
-                            .map_err(|e| crate::error::Error::Internal(e.to_string()))?
-                    };
+                    }
+                };
+
+                let mut unique_speakers = std::collections::HashSet::new();
+                for p_seg in &pyannote_segs {
+                    unique_speakers.insert(p_seg.speaker.clone());
+                }
+
+                if unique_speakers.len() <= 1 {
+                    return Ok(parsed.text);
+                }
+
                 let mut final_transcript = String::new();
                 let mut current_speaker = None;
 
@@ -516,6 +527,17 @@ impl TranscriptionProvider for DeepgramProvider {
         }
 
         let words = alt.words.unwrap();
+        let mut unique_speakers = std::collections::HashSet::new();
+        for w in &words {
+            if let Some(spk) = w.speaker {
+                unique_speakers.insert(spk);
+            }
+        }
+
+        if unique_speakers.len() <= 1 {
+            return Ok(alt.transcript);
+        }
+
         let mut final_transcript = String::new();
         let mut current_speaker: Option<u32> = None;
 
@@ -716,6 +738,17 @@ impl TranscriptionProvider for AssemblyAiProvider {
                         }
 
                         let utterances = t.utterances.unwrap();
+                        let mut unique_speakers = std::collections::HashSet::new();
+                        for u in &utterances {
+                            unique_speakers.insert(u.speaker.clone());
+                        }
+
+                        if unique_speakers.len() <= 1 {
+                            return t.text.ok_or_else(|| {
+                                Error::Internal("AssemblyAI completed without text".into())
+                            });
+                        }
+
                         let mut final_transcript = String::new();
                         for u in utterances {
                             if !final_transcript.is_empty() {

@@ -3,6 +3,21 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { addTag, attachTag, detachTag, listAllTags, tagsFor, type Tag } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 
+function getContrastColor(hexColor: string): string {
+  if (!hexColor || !hexColor.startsWith('#')) {
+    return '';
+  }
+  const hex = hexColor.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) {
+    return '';
+  }
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 128 ? '#11111b' : '#ffffff';
+}
+
 @customElement('ph-tag-chips')
 export class TagChipsElement extends LitElement {
   protected createRenderRoot() {
@@ -78,11 +93,15 @@ export class TagChipsElement extends LitElement {
   render() {
     return html`
       <div class="tags">
-        ${this.attached.map((t) => html`
-          <span class="tag-chip" data-tag-id="${t.id}" style="${t.color ? `--tag-color: ${t.color}` : ""}">
-            ${t.name} <button class="tag-x" @click=${() => this.detach(t.id)}>×</button>
-          </span>
-        `)}
+        ${this.attached.map((t) => {
+          const contrast = t.color ? getContrastColor(t.color) : '';
+          const style = t.color ? `--tag-color: ${t.color}; color: ${contrast};` : '';
+          return html`
+            <span class="tag-chip" data-tag-id="${t.id}" style="${style}">
+              ${t.name} <button class="tag-x" @click=${() => this.detach(t.id)}>×</button>
+            </span>
+          `;
+        })}
         <input class="tag-add" placeholder="+ add tag" list="all-tags-${this.recordingId}" @keydown=${this.onInputKeydown} />
         <datalist id="all-tags-${this.recordingId}">
           ${this.allTags.map((t) => html`<option value="${t.name}"></option>`)}

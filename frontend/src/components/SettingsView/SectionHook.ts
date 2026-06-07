@@ -49,7 +49,7 @@ export class SectionHook {
         </p>
         <div class="settings-field long-input" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Integration Scripts</label>
-          <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+          <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; align-items: stretch;">
             <div style="display: flex; gap: 8px; align-items: center; margin-right: auto;">
               <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
                 <option value="" disabled selected>Add a preset hook…</option>
@@ -73,13 +73,13 @@ export class SectionHook {
               </select>
               <span style="font-size: 11px; color: var(--fg-faded);">← adds a command below</span>
             </div>
-            <div id="hook-cmd-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+            <div id="hook-cmd-list" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch;"></div>
             <button class="inline-button" id="hook-add-cmd" style="align-self: flex-start;">+ Add command</button>
             <div class="test-result" id="hook-result" style="display:none; margin-top: 0;"></div>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); display: block;">
             Each command runs automatically (in order) after transcription. Phoneme pipes a JSON object with the recording's data to the command's standard input (<code>stdin</code>). <br/>
-            Example: <code>python process.py</code> (runs as <code>python process.py &lt; data.json</code>).
+            Example: <code>python process.py</code> (runs as <code>python pipes.py &lt; data.json</code>).
           </span>
         </div>
         <div class="settings-field">
@@ -104,7 +104,7 @@ export class SectionHook {
         </div>
         <div class="settings-field stacked">
           <label>Keyword-triggered hooks</label>
-          <div id="kw-rules-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+          <div id="kw-rules-list" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch;"></div>
           <button class="inline-button" id="kw-add-rule" style="margin-top: 8px; align-self: flex-start;">+ Add rule</button>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 6px; display: block;">
             Run an extra command <i>only</i> when the transcript contains a phrase — on top of the Integration Scripts above. Example: phrase <code>Action Item:</code> → a command that sends the note to your task manager. The command receives the same JSON on <code>stdin</code>.

@@ -155,12 +155,15 @@ pub async fn record_resume(bridge: Br<'_>) -> Result<Value, String> {
     forward(&bridge, Request::RecordResume).await
 }
 
-/// Request the daemon to re-transcribe an existing recording by its ID.
-/// This will push the recording back into the background queue.
 #[tauri::command]
-pub async fn retranscribe_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
+pub async fn retranscribe_recording(
+    bridge: Br<'_>,
+    id: String,
+    model: Option<String>,
+    run_hooks: Option<bool>,
+) -> Result<Value, String> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::RetranscribeRecording { id, model: None }).await
+    forward(&bridge, Request::RetranscribeRecording { id, model, run_hooks }).await
 }
 
 /// Import an existing audio file (wav/mp3/m4a) as a new recording. The daemon
@@ -173,9 +176,13 @@ pub async fn import_recording(bridge: Br<'_>, path: String) -> Result<Value, Str
 
 /// Force the daemon to re-execute the post-processing hook for a given recording ID.
 #[tauri::command]
-pub async fn refire_hook(bridge: Br<'_>, id: String) -> Result<Value, String> {
+pub async fn refire_hook(
+    bridge: Br<'_>,
+    id: String,
+    command: Option<String>,
+) -> Result<Value, String> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::RefireHook { id }).await
+    forward(&bridge, Request::RefireHook { id, command }).await
 }
 
 /// Manually update the transcript text for a specific recording.
@@ -183,6 +190,15 @@ pub async fn refire_hook(bridge: Br<'_>, id: String) -> Result<Value, String> {
 pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Result<Value, String> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::UpdateTranscript { id, text }).await
+}
+
+#[tauri::command]
+pub async fn update_meeting_name(
+    bridge: Br<'_>,
+    meeting_id: String,
+    name: Option<String>,
+) -> Result<Value, String> {
+    forward(&bridge, Request::UpdateMeetingName { meeting_id, name }).await
 }
 
 /// Fetch the preserved original (machine) transcript for a recording, if any.

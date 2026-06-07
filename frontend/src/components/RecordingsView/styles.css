@@ -571,6 +571,12 @@ mark.search-hit {
   font-size: 11px;
   width: 12px;
   flex-shrink: 0;
+  display: inline-block;
+  transition: transform 0.2s ease-in-out;
+  transform-origin: center;
+}
+.rec-group-chevron.expanded {
+  transform: rotate(90deg);
 }
 .rec-group-title {
   font-weight: 600;

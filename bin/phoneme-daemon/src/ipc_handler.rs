@@ -81,10 +81,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RecordStatus => {
             let active = state.recorder.current().await;
             let meeting_active = state.recorder.meeting_active().await;
+            let paused = state.recorder.is_paused().await;
             Response::Ok(serde_json::json!({
                 "recording": active.is_some(),
                 "id": active.as_ref().map(|a| a.id.to_string()),
                 "meeting": meeting_active,
+                "paused": paused,
             }))
         }
         Request::RecordStart { mode, in_place } => {
@@ -327,11 +329,23 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::ImportRecording { path } => import_recording(state, path).await,
-        Request::RetranscribeRecording { id, model } => match state.catalog.get(&id).await {
+        Request::RetranscribeRecording { id, model, run_hooks } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
+                let mut cfg = state.config.load().as_ref().clone();
+                let mut changed = false;
                 if let Some(m) = model {
-                    let mut cfg = state.config.load().as_ref().clone();
-                    cfg.whisper.model_path = m;
+                    if cfg.whisper.provider == phoneme_core::config::TranscriptionBackend::Local {
+                        cfg.whisper.model_path = m;
+                    } else {
+                        cfg.whisper.model = m;
+                    }
+                    changed = true;
+                }
+                if let Some(rh) = run_hooks {
+                    cfg.hook.run_on_transcribe = rh;
+                    changed = true;
+                }
+                if changed {
                     state.config.store(std::sync::Arc::new(cfg));
                     // Wait a moment for the supervisor to restart the server
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -371,7 +385,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
-        Request::RefireHook { id } => match state.catalog.get(&id).await {
+        Request::RefireHook { id, command } => match state.catalog.get(&id).await {
             Ok(Some(r)) if r.transcript.is_some() => {
                 let payload = HookPayload {
                     id: r.id,
@@ -382,16 +396,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     model: r.model.unwrap_or_default(),
                     metadata: HookMetadata::current(),
                 };
-                // Load config once and extract what we need before spawning
-                // the async task — avoids holding the Arc guard across await
-                // points and eliminates the previous triple load.
                 let cfg = state.config.load();
                 let timeout = std::time::Duration::from_secs(cfg.hook.timeout_secs);
-                // Expand path tokens (%APPDATA%, ~/) exactly as the queue
-                // pipeline does, so a refired hook resolves identically.
-                let commands = match cfg.expanded() {
-                    Ok(c) => c.hook.commands,
-                    Err(_) => cfg.hook.commands.clone(),
+                let commands = if let Some(cmd) = command {
+                    vec![cmd]
+                } else {
+                    match cfg.expanded() {
+                        Ok(c) => c.hook.commands,
+                        Err(_) => cfg.hook.commands.clone(),
+                    }
                 };
                 drop(cfg);
                 // Run the hook OFF the IPC connection. A hook can take up to

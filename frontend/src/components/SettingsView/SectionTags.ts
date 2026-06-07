@@ -23,6 +23,7 @@ export class SectionTagsElement extends LitElement {
 
   @state() private newTagName = "";
   @state() private newTagColor = "#cba6f7";
+  @state() private searchQuery = "";
 
   // Temporary state to hold color/name while editing a tag
   private editColor = "";
@@ -143,10 +144,31 @@ export class SectionTagsElement extends LitElement {
   }
 
   renderInner() {
-    const sorted = [...this.allTags].sort((a, b) => a.name.localeCompare(b.name));
+    let sorted = [...this.allTags].sort((a, b) => a.name.localeCompare(b.name));
+    const query = this.searchQuery.trim().toLowerCase();
+    if (query) {
+      sorted = sorted.filter((t) => t.name.toLowerCase().includes(query));
+    }
+
     return html`
+      ${this.allTags.length > 0 ? html`
+        <div class="tag-mgr-search" style="margin-bottom: 16px; position: relative; display: flex; align-items: center; border: 1px solid var(--border-subtle); border-radius: 6px; background: rgba(0,0,0,0.15); padding: 6px 12px; gap: 8px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--fg-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" placeholder="Search tags..." 
+            style="background: none; border: none; outline: none; width: 100%; color: var(--fg-default); font-size: 13px;"
+            .value=${this.searchQuery}
+            @input=${(e: Event) => { this.searchQuery = (e.target as HTMLInputElement).value; }} />
+          ${this.searchQuery ? html`
+            <button style="background: none; border: none; color: var(--fg-muted); cursor: pointer; padding: 0 4px; font-size: 14px;"
+              @click=${() => { this.searchQuery = ""; }}>×</button>
+          ` : ""}
+        </div>
+      ` : ""}
+
       <div id="tag-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 24px;">
-        ${sorted.length === 0
+        ${this.allTags.length === 0
           ? html`
             <div class="tag-mgr-empty">
               <div class="tag-mgr-empty-icon">🏷</div>
@@ -154,7 +176,14 @@ export class SectionTagsElement extends LitElement {
               <p class="tag-mgr-empty-hint">Create one below, then attach it to recordings from the detail panel.</p>
             </div>
           `
-          : sorted.map((t) => this.renderRow(t))
+          : (query && sorted.length === 0)
+            ? html`
+              <div class="tag-mgr-empty" style="padding: 24px 0;">
+                <div class="tag-mgr-empty-icon">🔍</div>
+                <p>No tags match "${this.searchQuery}"</p>
+              </div>
+            `
+            : sorted.map((t) => this.renderRow(t))
         }
       </div>
 

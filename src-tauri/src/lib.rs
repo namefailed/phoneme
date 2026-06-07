@@ -272,6 +272,7 @@ pub fn run() {
             commands::import_recording,
             commands::refire_hook,
             commands::update_transcript,
+            commands::update_meeting_name,
             commands::get_original_transcript,
             commands::update_notes,
             commands::daemon_status,
