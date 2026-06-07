@@ -825,6 +825,9 @@ mod tests {
             meeting_name: None,
             track: None,
             in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
         };
         db.insert(&r).await.expect("insert");
 
@@ -879,6 +882,9 @@ mod tests {
             meeting_name: None,
             track: None,
             in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
         };
         db.insert(&r).await.expect("insert");
 
@@ -929,6 +935,9 @@ mod tests {
             meeting_name: None,
             track: None,
             in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
         };
         db.insert(&r).await.expect("insert");
 
@@ -1001,6 +1010,9 @@ mod tests {
             meeting_name: None,
             track: Some(track.to_string()),
             in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
         };
         let mic = make("mic");
         let system = make("system");
@@ -1039,6 +1051,9 @@ mod tests {
             meeting_name: None,
             track: None,
             in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
         };
         db.insert(&solo).await.expect("insert solo");
         let got_solo = db.get(&solo.id).await.unwrap().unwrap();

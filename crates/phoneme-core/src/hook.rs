@@ -46,6 +46,7 @@ impl HookRunner {
         // subprocess is spawned. CREATE_NO_WINDOW = 0x08000000.
         #[cfg(windows)]
         {
+            #[allow(unused_imports)]
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000);
         }
