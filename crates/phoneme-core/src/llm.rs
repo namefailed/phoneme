@@ -100,6 +100,15 @@ fn combine(prompt: &str, text: &str) -> String {
     format!("{prompt}:\n{text}")
 }
 
+/// Normalize LLM response by collapsing multiple consecutive newlines into single newlines
+/// and trimming excessive whitespace while preserving paragraph structure.
+fn normalize_response(text: &str) -> String {
+    // Replace 3+ consecutive newlines with exactly 2 newlines (preserve paragraph breaks)
+    let collapsed = regex::Regex::new(r"\n{3,}").unwrap().replace_all(text, "\n\n");
+    // Trim leading/trailing whitespace
+    collapsed.trim().to_string()
+}
+
 /// Send a request and decode its JSON body. Every failure (transport, non-2xx,
 /// or decode) maps to `Error::Internal` with a `who`-prefixed message.
 async fn send_json<T: serde::de::DeserializeOwned>(
@@ -150,7 +159,7 @@ impl LlmProvider for OllamaProvider {
             "Ollama",
         )
         .await?;
-        Ok(parsed.response.trim().to_string())
+        Ok(normalize_response(&parsed.response))
     }
 }
 
@@ -210,7 +219,7 @@ impl LlmProvider for OpenAiChatProvider {
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message.content.trim().to_string())
+            .map(|c| normalize_response(&c.message.content))
             .ok_or_else(|| Error::Internal("OpenAI-compatible response had no choices".into()))
     }
 }
@@ -281,7 +290,7 @@ impl LlmProvider for AnthropicProvider {
             .content
             .into_iter()
             .find_map(|b| b.text)
-            .map(|t| t.trim().to_string())
+            .map(|t| normalize_response(&t))
             .ok_or_else(|| Error::Internal("Anthropic response had no text content".into()))
     }
 }
