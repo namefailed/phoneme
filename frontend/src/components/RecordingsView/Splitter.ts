@@ -90,11 +90,13 @@ export class SplitterElement extends LitElement {
 export class Splitter {
   private element: SplitterElement;
   constructor(container: HTMLElement, initial: number, onChange: (pct: number) => void) {
+    console.log("Splitter constructor called, container:", container);
     this.element = document.createElement('ph-splitter') as SplitterElement;
     this.element.leftPercent = initial;
     this.element.addEventListener('change', (e: Event) => {
       onChange((e as CustomEvent<number>).detail);
     });
     container.appendChild(this.element);
+    console.log("Splitter element appended");
   }
 }
