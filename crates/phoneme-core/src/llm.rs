@@ -346,4 +346,36 @@ mod tests {
     fn combine_joins_prompt_and_text() {
         assert_eq!(combine("Fix", "hello"), "Fix:\nhello");
     }
+
+    #[test]
+    fn normalize_response_collapses_excessive_newlines() {
+        assert_eq!(normalize_response("hello\n\n\nworld"), "hello\n\nworld");
+        assert_eq!(normalize_response("hello\n\n\n\n\nworld"), "hello\n\nworld");
+    }
+
+    #[test]
+    fn normalize_response_preserves_single_newlines() {
+        assert_eq!(normalize_response("hello\nworld"), "hello\nworld");
+    }
+
+    #[test]
+    fn normalize_response_preserves_double_newlines() {
+        assert_eq!(normalize_response("hello\n\nworld"), "hello\n\nworld");
+    }
+
+    #[test]
+    fn normalize_response_trims_whitespace() {
+        assert_eq!(normalize_response("  hello  "), "hello");
+        assert_eq!(normalize_response("\n\nhello\n\n"), "hello");
+    }
+
+    #[test]
+    fn normalize_response_handles_empty_string() {
+        assert_eq!(normalize_response(""), "");
+    }
+
+    #[test]
+    fn normalize_response_handles_only_newlines() {
+        assert_eq!(normalize_response("\n\n\n"), "");
+    }
 }
