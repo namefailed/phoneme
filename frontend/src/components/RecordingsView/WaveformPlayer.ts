@@ -112,10 +112,13 @@ export class WaveformPlayer {
   }
 
   mount(container: HTMLElement, audioPath: string) {
-    this.element.audioPath = audioPath;
+    // Attach first so the element is connected and laid out before WaveSurfer
+    // creates its canvas — otherwise it can render into a detached/zero-width
+    // node and the waveform intermittently fails to appear.
     if (this.element.parentElement !== container) {
       container.appendChild(this.element);
     }
+    this.element.audioPath = audioPath;
   }
 
   togglePlay() {

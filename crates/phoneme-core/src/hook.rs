@@ -42,6 +42,14 @@ impl HookRunner {
             cmd.current_dir(home);
         }
 
+        // On Windows, prevent a console window from flashing up when the hook
+        // subprocess is spawned. CREATE_NO_WINDOW = 0x08000000.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+
         let started = Instant::now();
         let mut child = cmd.spawn()?;
         if let Some(mut stdin) = child.stdin.take() {

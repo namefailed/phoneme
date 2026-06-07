@@ -171,6 +171,10 @@ export class RecordingsView {
     
     root.style.display = "";
 
+    // Clear any previously-mounted bar so selection changes don't stack
+    // multiple <ph-bulk-action-bar> elements on top of each other.
+    root.innerHTML = "";
+
     // Re-mount the BulkActionBar into the root element.
     new BulkActionBar(root, this.multiSelected, this.state.get().recordings, {
       onRefresh: () => { void this.refresh(); },

@@ -217,7 +217,10 @@ mark.search-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-radius: 6px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  overflow: hidden;
+  /* NOTE: must stay `visible` so the absolutely-positioned options dropdown
+     (Re-transcribe / Re-fire) can escape this container instead of being
+     clipped. Inner button corners are rounded individually below. */
+  overflow: visible;
   transition: border-color 0.15s ease-out;
 }
 .action-row .split-btn:hover {
@@ -228,6 +231,14 @@ mark.search-hit {
   border: none;
   box-shadow: none;
   border-radius: 0;
+}
+.action-row .split-btn button:first-of-type {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+.action-row .split-btn .split-caret {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
 }
 .action-row .split-btn button:hover {
   background: var(--bg-surface);

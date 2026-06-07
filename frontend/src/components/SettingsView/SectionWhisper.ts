@@ -60,12 +60,12 @@ export class SectionWhisper {
       const btnArea = card.querySelector(".model-actions");
       if (btnArea) {
         if (isSelected) {
-          btnArea.innerHTML = `<button disabled style="background: var(--accent); color: var(--bg-surface); border-color: var(--accent);">✅ Selected</button>`;
+          btnArea.innerHTML = `<button disabled style="background: var(--accent); color: var(--bg-surface); border-color: var(--accent); border-radius: 6px;">✅ Selected</button>`;
         } else if (isDownloaded) {
-          btnArea.innerHTML = `<button class="select-btn" data-id="${escapeAttr(m.id)}" data-path="${escapeAttr(downloadedPath ?? "")}">Select</button>`;
+          btnArea.innerHTML = `<button class="select-btn" data-id="${escapeAttr(m.id)}" data-path="${escapeAttr(downloadedPath ?? "")}" style="border-radius: 6px;">Select</button>`;
         } else {
           btnArea.innerHTML = `
-            <button class="download-btn" data-id="${m.id}" data-url="${m.url}" data-filename="${m.filename}">
+            <button class="download-btn" data-id="${m.id}" data-url="${m.url}" data-filename="${m.filename}" style="border-radius: 6px;">
               Download
             </button>
             <div class="progress-text" style="display:none; font-size: 10px; color: var(--fg-muted); margin-top: 4px;"></div>
