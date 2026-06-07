@@ -11,7 +11,7 @@ export class SectionTray {
   private render(container: HTMLElement) {
     container.innerHTML = `
       <div class="settings-section">
-        <h3>System Tray</h3>
+        <h3>System</h3>
         
         <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);">
           <label>Software Updates</label>

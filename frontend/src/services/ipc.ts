@@ -100,9 +100,7 @@ export async function recordResume(): Promise<void> {
 }
 
 export async function updateMeetingName(meetingId: string, name: string | null): Promise<void> {
-  await tauriInvoke("ipc_request", {
-    req: { type: "update_meeting_name", meeting_id: meetingId, name },
-  });
+  await tauriInvoke("update_meeting_name", { meetingId, name });
 }
 
 export async function checkMicrophoneAccess(): Promise<boolean> {
@@ -127,8 +125,8 @@ export async function stopMeeting(): Promise<{ meeting_id: string }> {
   return await tauriInvoke<{ meeting_id: string }>("stop_meeting");
 }
 
-export async function retranscribeRecording(id: string, model?: string): Promise<void> {
-  await tauriInvoke("retranscribe_recording", { id, model: model || null });
+export async function retranscribeRecording(id: string, model: string | null = null, runHooks: boolean | null = null): Promise<void> {
+  await tauriInvoke("retranscribe_recording", { id, model, runHooks });
 }
 
 /**
@@ -142,8 +140,8 @@ export async function importRecording(path: string): Promise<{ id: string }> {
 /** File extensions accepted by the import flow (no leading dot). */
 export const IMPORT_AUDIO_EXTENSIONS = ["wav", "mp3", "m4a"] as const;
 
-export async function refireHook(id: string): Promise<void> {
-  await tauriInvoke("refire_hook", { id });
+export async function refireHook(id: string, command: string | null = null): Promise<void> {
+  await tauriInvoke("refire_hook", { id, command });
 }
 
 /**

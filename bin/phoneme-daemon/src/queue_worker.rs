@@ -58,6 +58,16 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         tracing::error!(error = %e, "fatal pipeline error (failed)");
                     }
                 }
+
+                // Restore any temporarily overridden config settings (e.g. temporary model used for re-transcription).
+                match crate::load_config() {
+                    Ok(cfg) => {
+                        state.config.store(std::sync::Arc::new(cfg));
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to reload config after pipeline run");
+                    }
+                }
                 emit_queue_depth(&state).await;
             }
             None => {

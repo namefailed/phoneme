@@ -120,7 +120,8 @@ export class RecordingsView {
     // Also toggle visibility class on sidebar for animation/display
     const sidebar = this.container.querySelector<HTMLElement>("ph-sidebar");
     if (sidebar) {
-      sidebar.style.display = this.sidebarVisible ? "block" : "none";
+      sidebar.style.visibility = this.sidebarVisible ? "visible" : "hidden";
+      sidebar.style.overflow = this.sidebarVisible ? "" : "hidden";
     }
 
     const sidebarWidth = this.sidebarVisible ? "200px" : "0px";

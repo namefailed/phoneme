@@ -117,6 +117,7 @@ struct MeetingTrackHandle {
 struct ActiveMeeting {
     meeting_id: String,
     tracks: Vec<MeetingTrackHandle>,
+    paused: bool,
 }
 
 #[derive(Clone, Default)]
@@ -144,6 +145,16 @@ fn preroll_enabled(cfg: &phoneme_core::Config) -> bool {
 impl DaemonRecorder {
     pub async fn current(&self) -> Option<ActiveRecording> {
         self.active.lock().await.clone()
+    }
+
+    pub async fn is_paused(&self) -> bool {
+        if let Some(ref active) = *self.active.lock().await {
+            active.paused
+        } else if let Some(ref meeting) = *self.meeting.lock().await {
+            meeting.paused
+        } else {
+            false
+        }
     }
 
     /// Start idle pre-roll pre-capture if it's enabled for the current config
@@ -291,7 +302,7 @@ impl DaemonRecorder {
         let log_id = id.clone();
         let task = tokio::spawn(async move {
             let cfg = state.config.load();
-            let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
+            let provider = state.transcription.provider(&cfg.whisper, &phoneme_core::config::DiarizationConfig::default());
 
             // If the provider is native (running directly in our RAM), we can safely
             // drop the interval to 500ms for true real-time word-by-word streaming
@@ -346,7 +357,7 @@ impl DaemonRecorder {
                 let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
                 // Note: we already resolved provider above to check if native,
                 // but we can just use that one or resolve it again if config changes during recording.
-                let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
+                let provider = state.transcription.provider(&cfg.whisper, &phoneme_core::config::DiarizationConfig::default());
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim().to_string();
@@ -583,7 +594,31 @@ impl DaemonRecorder {
     /// WAV, no inbox.
     pub async fn cancel(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
-        let active = active_lock.take().ok_or(Error::NotRecording)?;
+        if active_lock.is_none() {
+            let mut meeting_lock = self.meeting.lock().await;
+            if let Some(meeting) = meeting_lock.take() {
+                let id = meeting.tracks[0].id.clone();
+                for track_handle in meeting.tracks {
+                    if let Err(e) = track_handle.recorder.cancel().await {
+                        tracing::warn!(id = %track_handle.id, "failed to cancel meeting track: {e}");
+                    }
+                    if let Err(e) = state.catalog.delete(&track_handle.id).await {
+                        tracing::warn!(id = %track_handle.id, "failed to delete meeting track from catalog: {e}");
+                    }
+                    state.events.emit(DaemonEvent::RecordingCancelled {
+                        id: track_handle.id.clone(),
+                    });
+                }
+                tracing::info!(session = %meeting.meeting_id, "meeting cancelled");
+                
+                drop(meeting_lock);
+                drop(active_lock);
+                self.ensure_preroll(state).await;
+                return Ok(id);
+            }
+            return Err(Error::NotRecording);
+        }
+        let active = active_lock.take().unwrap();
         // Stop the preview loop before tearing down the recorder. No-op when off.
         self.stop_preview().await;
         if let Some(recorder) = self.handle.lock().await.take() {
@@ -608,7 +643,33 @@ impl DaemonRecorder {
     /// Pause the active recording.
     pub async fn pause(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
-        let active = active_lock.as_mut().ok_or(Error::NotRecording)?;
+        if active_lock.is_none() {
+            let mut meeting_lock = self.meeting.lock().await;
+            if let Some(ref mut meeting) = *meeting_lock {
+                if meeting.paused {
+                    return Ok(meeting.tracks[0].id.clone());
+                }
+                for track_handle in &meeting.tracks {
+                    track_handle
+                        .recorder
+                        .pause()
+                        .await
+                        .map_err(|e| Error::Internal(e.to_string()))?;
+                    state
+                        .catalog
+                        .update_status(&track_handle.id, RecordingStatus::Paused)
+                        .await?;
+                    state.events.emit(DaemonEvent::RecordingPaused {
+                        id: track_handle.id.clone(),
+                    });
+                }
+                meeting.paused = true;
+                tracing::info!(session = %meeting.meeting_id, "meeting paused");
+                return Ok(meeting.tracks[0].id.clone());
+            }
+            return Err(Error::NotRecording);
+        }
+        let active = active_lock.as_mut().unwrap();
         if active.paused {
             return Ok(active.id.clone());
         }
@@ -636,7 +697,33 @@ impl DaemonRecorder {
     /// Resume the active recording.
     pub async fn resume(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
-        let active = active_lock.as_mut().ok_or(Error::NotRecording)?;
+        if active_lock.is_none() {
+            let mut meeting_lock = self.meeting.lock().await;
+            if let Some(ref mut meeting) = *meeting_lock {
+                if !meeting.paused {
+                    return Ok(meeting.tracks[0].id.clone());
+                }
+                for track_handle in &meeting.tracks {
+                    track_handle
+                        .recorder
+                        .resume()
+                        .await
+                        .map_err(|e| Error::Internal(e.to_string()))?;
+                    state
+                        .catalog
+                        .update_status(&track_handle.id, RecordingStatus::Recording)
+                        .await?;
+                    state.events.emit(DaemonEvent::RecordingResumed {
+                        id: track_handle.id.clone(),
+                    });
+                }
+                meeting.paused = false;
+                tracing::info!(session = %meeting.meeting_id, "meeting resumed");
+                return Ok(meeting.tracks[0].id.clone());
+            }
+            return Err(Error::NotRecording);
+        }
+        let active = active_lock.as_mut().unwrap();
         if !active.paused {
             return Ok(active.id.clone());
         }
@@ -846,6 +933,7 @@ impl DaemonRecorder {
         *meeting_lock = Some(ActiveMeeting {
             meeting_id: meeting_id.clone(),
             tracks,
+            paused: false,
         });
         tracing::info!(session = %meeting_id, "meeting started");
         Ok(meeting_id)

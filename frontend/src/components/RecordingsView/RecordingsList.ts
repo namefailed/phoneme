@@ -1,6 +1,7 @@
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { listRecordings, semanticSearch, updateMeetingName, type Recording } from "../../services/ipc";
+import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
 import { filterStore } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
@@ -39,6 +40,8 @@ export class RecordingsListElement extends LitElement {
   @state() private currentWidths: string[] | null = null;
   @state() private focusedIndex = -1;
   @state() private loadingMore = false;
+  @state() private editingMeetingId: string | null = null;
+  @state() private editingName = "";
   
   private offset = 0;
   private readonly pageSize = 100;
@@ -174,18 +177,44 @@ export class RecordingsListElement extends LitElement {
     this.requestUpdate();
   }
 
-  private async handleRenameSession(e: Event, meetingId: string, currentName: string | null) {
+  private startInlineRename(e: MouseEvent, meetingId: string, currentName: string) {
     e.stopPropagation();
-    const newName = prompt("Enter a new name for this meeting session:", currentName || `Meeting — 2 tracks`);
-    if (newName !== null) {
-      const trimmed = newName.trim();
-      try {
-        await updateMeetingName(meetingId, trimmed === "" ? null : trimmed);
-        await this.refresh();
-      } catch (err) {
-        console.error("Failed to rename session:", err);
-        alert("Failed to rename session.");
+    this.editingMeetingId = meetingId;
+    this.editingName = currentName;
+    this.updateComplete.then(() => {
+      const input = this.querySelector(`.rec-group-input[data-session="${meetingId}"]`) as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select();
       }
+    });
+  }
+
+  private handleRenameKeyDown(e: KeyboardEvent, meetingId: string) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const input = e.target as HTMLInputElement;
+      this.saveInlineRename(meetingId, input.value);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      this.editingMeetingId = null;
+      this.editingName = "";
+      this.requestUpdate();
+    }
+  }
+
+  private async saveInlineRename(meetingId: string, value: string) {
+    if (this.editingMeetingId !== meetingId) return;
+    this.editingMeetingId = null;
+    const trimmed = value.trim();
+    const finalValue = trimmed === "" ? null : trimmed;
+    try {
+      await updateMeetingName(meetingId, finalValue);
+      showToast("Meeting renamed", "success");
+      await this.refresh();
+    } catch (err) {
+      console.error("Failed to rename meeting:", err);
+      showToast("Failed to rename meeting", "error");
     }
   }
 
@@ -522,8 +551,9 @@ export class RecordingsListElement extends LitElement {
     const allChecked = selectedCount === count && count > 0;
     const someChecked = selectedCount > 0 && selectedCount < count;
     
-    const chevron = expanded ? "▾" : "▸";
     const isActive = this.listState.selectedId === "session:" + meetingId;
+    const isEditing = this.editingMeetingId === meetingId;
+    const meetingName = tracks[0].meeting_name ? tracks[0].meeting_name : `Meeting — ${count} tracks`;
 
     return html`
       <div 
@@ -543,10 +573,23 @@ export class RecordingsListElement extends LitElement {
             @change=${(e: Event) => this.handleGroupCheckbox(e, meetingId)}
           />
         </span>
-        <span class="rec-group-label">
-          <span class="rec-group-chevron">${chevron}</span>
-          <span class="rec-group-title">🎙 ${tracks[0].meeting_name ? tracks[0].meeting_name : `Meeting — ${count} tracks`}</span>
-          <button class="icon-btn" title="Rename Session" @click=${(e: Event) => this.handleRenameSession(e, meetingId, tracks[0].meeting_name ?? null)} style="padding: 2px; height: 20px; width: 20px; margin-left: 8px; font-size: 11px;">✏️</button>
+        <span class="rec-group-label" @dblclick=${(e: MouseEvent) => this.startInlineRename(e, meetingId, tracks[0].meeting_name ?? "")}>
+          <span class="rec-group-chevron ${expanded ? "expanded" : ""}">▸</span>
+          ${isEditing ? html`
+            <input
+              type="text"
+              class="rec-group-input"
+              data-session="${meetingId}"
+              style="background: var(--bg-deep, #11111b); color: var(--fg-default); border: 1px solid var(--accent, #89b4fa); border-radius: 4px; padding: 2px 6px; font-size: 13px; font-family: inherit; font-weight: 600; outline: none; margin-left: -4px; flex: 1; min-width: 120px;"
+              .value=${this.editingName}
+              @click=${(e: Event) => e.stopPropagation()}
+              @dblclick=${(e: Event) => e.stopPropagation()}
+              @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, meetingId)}
+              @blur=${(e: FocusEvent) => this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value)}
+            />
+          ` : html`
+            <span class="rec-group-title" title="Double-click to rename meeting">🎙 ${meetingName}</span>
+          `}
           <span class="rec-group-meta" style="margin-left: 8px;">${day} · ${time}</span>
         </span>
       </div>

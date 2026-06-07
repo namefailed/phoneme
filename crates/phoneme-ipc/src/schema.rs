@@ -73,9 +73,13 @@ pub enum Request {
     RetranscribeRecording {
         id: RecordingId,
         model: Option<String>,
+        #[serde(default)]
+        run_hooks: Option<bool>,
     },
     RefireHook {
         id: RecordingId,
+        #[serde(default)]
+        command: Option<String>,
     },
     UpdateTranscript {
         id: RecordingId,

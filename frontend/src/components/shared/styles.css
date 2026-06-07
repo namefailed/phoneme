@@ -70,6 +70,12 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
   color: var(--fg-default);
   border-color: var(--accent);
 }
+.headerbar .icon-btn.active {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent);
+}
 
 .status-pill {
   display: inline-flex;

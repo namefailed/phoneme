@@ -66,11 +66,19 @@ export class HeaderBarElement extends LitElement {
       if (eventName === "recording_started") {
         if (!p.meeting_id) {
           this.isRecording = true;
+          this.isMeeting = false;
+          this.isPaused = false;
+          this.previewText = null;
+        } else {
+          this.isRecording = false;
+          this.isMeeting = true;
           this.isPaused = false;
           this.previewText = null;
         }
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
-        if (!p.meeting_id && !this.isMeeting) {
+        if (p.meeting_id) {
+          void this.syncStatusFromDaemon();
+        } else if (!this.isMeeting) {
           this.isRecording = false;
           this.isPaused = false;
           this.previewText = null;
@@ -80,10 +88,8 @@ export class HeaderBarElement extends LitElement {
           this.previewText = typeof p.text === "string" && p.text.trim() ? p.text.trim() : null;
         }
       } else if (eventName === "recording_paused") {
-        this.isRecording = true;
         this.isPaused = true;
       } else if (eventName === "recording_resumed") {
-        this.isRecording = true;
         this.isPaused = false;
       } else if (eventName === "whisper_status_changed") {
         this.whisperReachable = p.reachable as boolean;
@@ -147,9 +153,10 @@ export class HeaderBarElement extends LitElement {
 
   private async syncStatusFromDaemon() {
     try {
-      const s = await invoke<{ recording: boolean; meeting: boolean }>("record_status");
+      const s = await invoke<{ recording: boolean; meeting: boolean; paused?: boolean }>("record_status");
       this.isMeeting = !!s.meeting;
       this.isRecording = !s.meeting && !!s.recording;
+      this.isPaused = !!s.paused;
       if (this.isMeeting) this.recordMode = "meeting";
     } catch {}
   }
@@ -309,7 +316,6 @@ export class HeaderBarElement extends LitElement {
           <input type="search" class="search" style="flex:1;" placeholder="Search transcripts…" 
             .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />
           <button class="icon-btn ${f.semantic ? 'active' : ''}" 
-            style=${f.semantic ? 'background: var(--accent); color: var(--bg-default);' : ''}
             title="Toggle Semantic Search (finds meaning, not exact words)"
             @click=${this.toggleSemantic}>✨</button>
         </div>
@@ -334,9 +340,9 @@ export class HeaderBarElement extends LitElement {
             title=${this.whisperReachable === true ? 'Whisper: connected' : this.whisperReachable === false ? 'Whisper: unreachable' : 'Whisper status unknown'}></span>
           <span class="hb-queue-badge" style="display:${totalQueue > 0 ? "inline-flex" : "none"}"
             title="${this.queueProcessing} processing, ${this.queuePending} queued">${totalQueue || ""}</span>
-          <button class="record-btn" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" 
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" 
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
-          <button class="record-btn" style="display:${this.isRecording ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" 
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" 
             title="Cancel recording and discard audio" @click=${this.cancelRecording}>✕ Cancel</button>
           <div class="hb-rec-group" style="position:relative; display:flex; align-items:stretch;">
             <button class="record-btn ${isCapturing ? 'recording-active' : ''}" title=${actionTitle} 

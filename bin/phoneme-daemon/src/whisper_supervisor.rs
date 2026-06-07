@@ -111,27 +111,46 @@ pub async fn run_with(
         };
         tracing::info!(pid = child.id().unwrap_or(0), "whisper-server spawned");
         let spawned_at = Instant::now();
+        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
+        check_interval.tick().await; // consume first tick
 
-        tokio::select! {
-            wait = child.wait() => {
-                match wait {
-                    Ok(status) => tracing::warn!(?status, "whisper-server exited"),
-                    Err(e) => tracing::warn!(error = %e, "wait on whisper-server failed"),
+        let mut exited = false;
+        loop {
+            tokio::select! {
+                wait = child.wait() => {
+                    match wait {
+                        Ok(status) => tracing::warn!(?status, "whisper-server exited"),
+                        Err(e) => tracing::warn!(error = %e, "wait on whisper-server failed"),
+                    }
+                    if spawned_at.elapsed() >= Duration::from_secs(60) {
+                        backoff = RESTART_BACKOFF_INITIAL;
+                    }
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
+                    exited = true;
+                    break;
                 }
-                // A crash after a long healthy run is a fresh incident, not a
-                // continuation of a crash loop — reset the backoff so we don't
-                // wait the full 60s max before the first restart attempt.
-                if spawned_at.elapsed() >= Duration::from_secs(60) {
-                    backoff = RESTART_BACKOFF_INITIAL;
+                _ = check_interval.tick() => {
+                    let current_cfg = state.config.load();
+                    if current_cfg.whisper.model_path != cfg.whisper.model_path
+                        || current_cfg.whisper.bundled_server_port != cfg.whisper.bundled_server_port
+                        || current_cfg.whisper.mode != cfg.whisper.mode
+                    {
+                        tracing::info!("whisper-server config changed; restarting");
+                        let _ = kill_gracefully(&mut child).await;
+                        backoff = RESTART_BACKOFF_INITIAL;
+                        break;
+                    }
                 }
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
+                _ = shutdown.wait() => {
+                    tracing::info!("shutdown — killing whisper-server");
+                    let _ = kill_gracefully(&mut child).await;
+                    return Ok(());
+                }
             }
-            _ = shutdown.wait() => {
-                tracing::info!("shutdown — killing whisper-server");
-                let _ = kill_gracefully(&mut child).await;
-                return Ok(());
-            }
+        }
+        if exited {
+            continue;
         }
     }
 }

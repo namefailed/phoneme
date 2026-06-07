@@ -17,7 +17,7 @@ pub async fn run(args: IdArgs, cfg: &Config) -> ExitCode {
         Err(code) => return code,
     };
     match client
-        .send(Request::RetranscribeRecording { id, model: None })
+        .send(Request::RetranscribeRecording { id, model: None, run_hooks: None })
         .await
     {
         Ok(_) => {
