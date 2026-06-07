@@ -24,6 +24,9 @@ export class NotesEditor {
   private lastSaved: string;
   private view: EditorView | null = null;
   private debounce: ReturnType<typeof setTimeout> | undefined;
+  private vimMode = false;
+  private vimCurrentMode = "NORMAL";
+  private vimBadgeElement: HTMLElement | null = null;
 
   constructor(container: HTMLElement, id: string, initial: string) {
     this.container = container;
@@ -34,12 +37,11 @@ export class NotesEditor {
   }
 
   private async init() {
-    let vimMode = false;
     let vimrc = "";
     let vimrcPath = "";
     try {
       const cfg = await invoke<any>("read_config");
-      vimMode = cfg?.editor?.vim_mode || false;
+      this.vimMode = cfg?.editor?.vim_mode || false;
       vimrc = cfg?.editor?.vimrc || "";
       vimrcPath = cfg?.editor?.vimrc_path || "";
     } catch (e) {
@@ -57,7 +59,7 @@ export class NotesEditor {
       }
     }
 
-    this.render(vimMode, vimrc);
+    this.render(this.vimMode, vimrc);
   }
 
   private render(vimMode: boolean, vimrc: string) {
@@ -66,7 +68,7 @@ export class NotesEditor {
         <label style="font-size: 11px; color: var(--fg-muted); font-weight: bold; text-transform: uppercase;">Notes</label>
         ${
           vimMode
-            ? `<span style="color: var(--accent); font-size: 9px; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">Vim Mode</span>`
+            ? `<span id="notes-vim-badge" style="color: var(--accent); font-size: 9px; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">NORMAL</span>`
             : ""
         }
       </div>
@@ -75,6 +77,8 @@ export class NotesEditor {
 
     const root = this.container.querySelector<HTMLElement>("#notes-cm-root");
     if (!root) return;
+
+    this.vimBadgeElement = this.container.querySelector<HTMLElement>("#notes-vim-badge");
 
     const theme = EditorView.theme({
       "&": {
@@ -132,6 +136,23 @@ export class NotesEditor {
       }
     });
 
+    // Track vim mode changes using a custom extension
+    const vimModeTracker = EditorView.domEventHandlers({
+      keydown: (e) => {
+        if (!this.vimMode) return;
+        // Simple heuristic: if typing a character, we're in insert mode
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          this.vimCurrentMode = "INSERT";
+        } else if (e.key === "Escape") {
+          this.vimCurrentMode = "NORMAL";
+        }
+        // Update badge
+        if (this.vimBadgeElement) {
+          this.vimBadgeElement.textContent = this.vimCurrentMode;
+        }
+      }
+    });
+
     // Blur-on-focusout: flush the debounce immediately.
     const blurListener = EditorView.domEventHandlers({
       blur: () => {
@@ -145,6 +166,7 @@ export class NotesEditor {
       theme,
       EditorView.lineWrapping,
       updateListener,
+      vimModeTracker,
       blurListener,
       drawSelection({ cursorBlinkRate: 1200 }),
       keymap.of(standardKeymap),

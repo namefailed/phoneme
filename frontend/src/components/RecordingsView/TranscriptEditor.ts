@@ -18,6 +18,7 @@ export class TranscriptEditorElement extends LitElement {
 
   @state() private currentText = "";
   @state() private vimMode = false;
+  @state() private vimCurrentMode = "NORMAL";
 
   @query('#cm-editor-root') editorRoot!: HTMLElement;
 
@@ -122,10 +123,24 @@ export class TranscriptEditorElement extends LitElement {
       }
     });
 
+    // Track vim mode changes using a custom extension
+    const vimModeTracker = EditorView.domEventHandlers({
+      keydown: (e) => {
+        if (!this.vimMode) return;
+        // Simple heuristic: if typing a character, we're in insert mode
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          this.vimCurrentMode = "INSERT";
+        } else if (e.key === "Escape") {
+          this.vimCurrentMode = "NORMAL";
+        }
+      }
+    });
+
     const extensions = [
       theme,
       EditorView.lineWrapping,
       updateListener,
+      vimModeTracker,
       drawSelection({ cursorBlinkRate: 1200 }),
       keymap.of(standardKeymap),
     ];
@@ -217,7 +232,7 @@ export class TranscriptEditorElement extends LitElement {
       </style>
       <div class="header">
         <span class="title">
-          Transcript ${this.vimMode ? html`<span class="vim-badge">Vim Mode</span>` : ""}
+          Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
         <button class="btn-save" style="display: ${this.isDirty() ? 'block' : 'none'};" @click=${this.save}>Save Changes</button>
       </div>
