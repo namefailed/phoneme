@@ -143,7 +143,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             } else {
                 match state
                     .recorder
-                    .start(state, phoneme_core::RecordMode::Oneshot.into(), in_place)
+                    .start(state, phoneme_core::RecordMode::Hold.into(), in_place)
                     .await
                 {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
