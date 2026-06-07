@@ -744,6 +744,7 @@ pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, String> {
         "ggml-small.en.bin",
         "ggml-medium.en.bin",
         "ggml-large-v3.bin",
+        "ggml-large-v3-turbo.bin",
     ];
     for model in models {
         let path = models_dir.join(model);
