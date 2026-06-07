@@ -165,7 +165,6 @@ export class SettingsViewElement extends LitElement {
         case "appearance":
           new SectionInterface(createSubHost(), this.config);
           new SectionEditor(createSubHost(), this.config);
-          new SectionTray(createSubHost(), this.config);
           break;
         case "tags":
           new SectionTags(createSubHost(), this.config);
@@ -177,6 +176,7 @@ export class SettingsViewElement extends LitElement {
         case "system":
           new SectionStorage(createSubHost(), this.config);
           new SectionProfiles(createSubHost(), this.config);
+          new SectionTray(createSubHost(), this.config);
           new SectionAdvanced(createSubHost(), this.config);
           break;
       }

@@ -9,6 +9,7 @@ export type Field = {
   help?: string;
   type?: string;
   list?: string;
+  placeholder?: string;
   options?: { value: string; label: string }[]; // for "select"
 };
 
@@ -29,7 +30,7 @@ export function setByPath(obj: any, path: string, value: any): void {
 export function renderField(field: Field, value: any): string {
   switch (field.kind) {
     case "text":
-      return `<input type="${field.type || "text"}" data-key="${field.key}" ${field.list ? `list="${field.list}"` : ""} value="${escapeAttr(
+      return `<input type="${field.type || "text"}" data-key="${field.key}" ${field.list ? `list="${field.list}"` : ""} ${field.placeholder ? `placeholder="${escapeAttr(field.placeholder)}"` : ""} value="${escapeAttr(
         String(value ?? ""),
       )}" />`;
     case "number":
