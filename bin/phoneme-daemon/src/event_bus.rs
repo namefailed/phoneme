@@ -5,9 +5,6 @@ use tokio::sync::broadcast;
 
 const BUS_CAPACITY: usize = 64;
 
-// `subscribe` / `emit` are wired up by IPC handlers (Task 10) and worker
-// tasks (Tasks 7-8). The allow silences dead_code until those tasks land.
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct EventBus {
     tx: broadcast::Sender<DaemonEvent>,
@@ -19,7 +16,6 @@ impl Default for EventBus {
     }
 }
 
-#[allow(dead_code)]
 impl EventBus {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(BUS_CAPACITY);
