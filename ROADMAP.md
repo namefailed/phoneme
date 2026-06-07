@@ -124,7 +124,6 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 - [ ] Add request size limits (prevent abuse)
 
 **Documentation**
-- [ ] Add Python IPC example (integration guide)
 - [ ] Document error handling patterns for IPC
 - [ ] Document reconnection strategy for IPC
 - [ ] Add semantic search documentation
