@@ -52,7 +52,7 @@ pub async fn run(args: ConfigArgs, cfg: &Config) -> ExitCode {
 
 fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
     // Parse the config as a TOML value to handle different types
-    let mut toml_value =
+    let toml_value =
         toml::to_string(cfg).map_err(|e| format!("failed to serialize current config: {e}"))?;
 
     // Parse as TOML document
