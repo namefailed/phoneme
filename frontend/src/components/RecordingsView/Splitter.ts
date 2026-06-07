@@ -14,6 +14,7 @@ export class SplitterElement extends LitElement {
     document.body.style.cursor = "col-resize";
     const handle = this.querySelector('.splitter-handle');
     if (handle) handle.classList.add('dragging');
+    document.addEventListener("mousemove", this.onMouseMove);
   };
 
   private onMouseUp = () => {
@@ -22,6 +23,7 @@ export class SplitterElement extends LitElement {
     document.body.style.cursor = "";
     const handle = this.querySelector('.splitter-handle');
     if (handle) handle.classList.remove('dragging');
+    document.removeEventListener("mousemove", this.onMouseMove);
   };
 
   private onMouseMove = (e: MouseEvent) => {
@@ -47,7 +49,6 @@ export class SplitterElement extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     document.addEventListener("mouseup", this.onMouseUp);
-    document.addEventListener("mousemove", this.onMouseMove);
   }
 
   disconnectedCallback() {
