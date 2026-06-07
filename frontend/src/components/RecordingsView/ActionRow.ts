@@ -272,12 +272,12 @@ export class ActionRowElement extends LitElement {
           <button class="split-caret" title="Re-transcribe with…" aria-label="Re-transcribe with…" @click=${this.toggleRetranscribeMenu}>▾</button>
           
           ${this.retranscribeMenuOpen ? html`
-            <div class="custom-dropdown" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; width: 260px; background: var(--bg-elevated, #1e1e2e); border: 1px solid var(--border, rgba(255,255,255,0.12)); border-radius: 8px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
+            <div class="custom-dropdown" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 260px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
               <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-transcribe Options</h4>
               
               <div style="display: flex; flex-direction: column; gap: 4px;">
                 <label style="font-size: 11px; color: var(--fg-muted);">Model</label>
-                <select style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-deep, #11111b); border: 1px solid var(--border, rgba(255,255,255,0.15)); color: var(--fg-default);" @change=${this.handleModelChange}>
+                <select style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
                   ${this.availableModels.map(m => html`
                     <option value=${m.value} ?selected=${m.value === this.selectedModel}>${m.label}</option>
                   `)}
@@ -290,8 +290,8 @@ export class ActionRowElement extends LitElement {
               </label>
 
               <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px;">
-                <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: none; border: 1px solid var(--border, rgba(255,255,255,0.15)); color: var(--fg-default);" @click=${this.closeRetranscribeMenu}>Cancel</button>
-                <button class="primary" style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--bg-default); border: none;" @click=${this.submitRetranscribe}>Run</button>
+                <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @click=${this.closeRetranscribeMenu}>Cancel</button>
+                <button class="primary" style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--accent-fg); border: none;" @click=${this.submitRetranscribe}>Run</button>
               </div>
             </div>
           ` : nothing}
@@ -302,12 +302,12 @@ export class ActionRowElement extends LitElement {
           <button class="split-caret" title="Re-fire hook with…" aria-label="Re-fire hook with…" @click=${this.toggleRefireMenu}>▾</button>
 
           ${this.refireMenuOpen ? html`
-            <div class="custom-dropdown" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; width: 280px; background: var(--bg-elevated, #1e1e2e); border: 1px solid var(--border, rgba(255,255,255,0.12)); border-radius: 8px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
+            <div class="custom-dropdown" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 280px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
               <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-fire Hook Options</h4>
               
               <div style="display: flex; flex-direction: column; gap: 4px;">
                 <label style="font-size: 11px; color: var(--fg-muted);">Run command</label>
-                <select style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-deep, #11111b); border: 1px solid var(--border, rgba(255,255,255,0.15)); color: var(--fg-default);" @change=${this.handleHookCommandSelect}>
+                <select style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleHookCommandSelect}>
                   <option value="">All configured commands</option>
                   ${this.configuredHookCommands.map(cmd => html`
                     <option value=${cmd} ?selected=${cmd === this.selectedHookCommand}>${cmd}</option>
@@ -319,14 +319,14 @@ export class ActionRowElement extends LitElement {
               ${this.customHookCommandSelected ? html`
                 <div style="display: flex; flex-direction: column; gap: 4px;">
                   <label style="font-size: 11px; color: var(--fg-muted);">Custom Command</label>
-                  <input type="text" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-deep, #11111b); border: 1px solid var(--border, rgba(255,255,255,0.15)); color: var(--fg-default);"
+                  <input type="text" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"
                     .value=${this.selectedHookCommand} @input=${this.handleCustomHookCommandInput} />
                 </div>
               ` : nothing}
 
               <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px;">
-                <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: none; border: 1px solid var(--border, rgba(255,255,255,0.15)); color: var(--fg-default);" @click=${this.closeRefireMenu}>Cancel</button>
-                <button class="primary" style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--bg-default); border: none;" @click=${this.submitRefire}>Run</button>
+                <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @click=${this.closeRefireMenu}>Cancel</button>
+                <button class="primary" style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--accent-fg); border: none;" @click=${this.submitRefire}>Run</button>
               </div>
             </div>
           ` : nothing}
