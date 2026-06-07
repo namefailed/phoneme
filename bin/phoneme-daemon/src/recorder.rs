@@ -21,7 +21,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 /// How often the streaming-preview loop transcribes the in-progress recording.
-const PREVIEW_INTERVAL: Duration = Duration::from_millis(1000);
+const PREVIEW_INTERVAL: Duration = Duration::from_millis(2000);
 
 /// How long to keep a recording's capture stream alive after a stop is
 /// requested, so the OS can hand over audio it had already buffered at stop
@@ -31,9 +31,9 @@ const PREVIEW_INTERVAL: Duration = Duration::from_millis(1000);
 const STOP_TAIL_GRACE: Duration = Duration::from_millis(150);
 
 /// Minimum number of *new* samples (beyond the previous preview) before we spend
-/// a transcription on a fresh tick. At 16 kHz this is ~0.5 s — below that a
+/// a transcription on a fresh tick. At 16 kHz this is ~1.0 s — below that a
 /// re-transcription rarely changes the text enough to be worth the round trip.
-const PREVIEW_MIN_NEW_SAMPLES: usize = 8_000;
+const PREVIEW_MIN_NEW_SAMPLES: usize = 16_000;
 
 /// Open a [`Source`] for the current recording: returns a real CPAL source in
 /// production and a [`GeneratorSource`] when `PHONEME_AUDIO_BACKEND=synthetic`
@@ -306,12 +306,14 @@ impl DaemonRecorder {
                 &cfg.whisper,
                 &phoneme_core::config::DiarizationConfig::default(),
             );
+            let is_native = provider.is_native();
 
             // If the provider is native (running directly in our RAM), we can safely
-            // drop the interval to 500ms for true real-time word-by-word streaming
-            // without worrying about HTTP/file-write overhead.
-            let interval_duration = if provider.is_native() {
-                std::time::Duration::from_millis(500)
+            // drop the interval to 1000ms for real-time streaming without worrying
+            // about HTTP/file-write overhead. Cloud providers get longer intervals
+            // to avoid overwhelming the API.
+            let interval_duration = if is_native {
+                std::time::Duration::from_millis(1000)
             } else {
                 PREVIEW_INTERVAL
             };
@@ -325,6 +327,7 @@ impl DaemonRecorder {
             // Burn the immediate first tick so we don't transcribe near-empty audio.
             interval.tick().await;
             let mut last_len = 0usize;
+            let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
 
             loop {
                 tokio::select! {
@@ -351,19 +354,14 @@ impl DaemonRecorder {
                 last_len = samples.len();
 
                 // Write a temp WAV and transcribe via the configured provider.
-                let cfg = state.config.load();
-                let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
                 if let Err(e) = wav::write_wav(&tmp_wav, &samples, audio_cfg) {
                     tracing::warn!(error = %e, "streaming preview: failed to write temp WAV; skipping tick");
                     continue;
                 }
                 let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
-                // Note: we already resolved provider above to check if native,
-                // but we can just use that one or resolve it again if config changes during recording.
-                let provider = state.transcription.provider(
-                    &cfg.whisper,
-                    &phoneme_core::config::DiarizationConfig::default(),
-                );
+                
+                // Use the cached provider to avoid re-resolving on every tick.
+                // Config changes during recording will take effect on the next recording.
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim().to_string();
@@ -383,6 +381,7 @@ impl DaemonRecorder {
                 }
             }
 
+            // Clean up temp file even if loop exits early
             let _ = tokio::fs::remove_file(&tmp_wav).await;
         });
 

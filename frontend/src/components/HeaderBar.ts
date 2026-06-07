@@ -31,6 +31,7 @@ export class HeaderBarElement extends LitElement {
   @state() private queuePending = 0;
   @state() private queueProcessing = 0;
   @state() private filterState: UiFilter = filterStore.get();
+  private previewDebounceTimer: number | null = null;
 
   private unsubEvent: UnlistenFn | null = null;
   private unsubFilter: (() => void) | null = null;
@@ -85,7 +86,14 @@ export class HeaderBarElement extends LitElement {
         }
       } else if (eventName === "transcription_partial") {
         if (this.isRecording || this.isMeeting) {
-          this.previewText = typeof p.text === "string" && p.text.trim() ? p.text.trim() : null;
+          // Debounce preview updates to avoid excessive re-renders
+          if (this.previewDebounceTimer !== null) {
+            clearTimeout(this.previewDebounceTimer);
+          }
+          this.previewDebounceTimer = window.setTimeout(() => {
+            this.previewText = typeof p.text === "string" && p.text.trim() ? p.text.trim() : null;
+            this.previewDebounceTimer = null;
+          }, 100);
         }
       } else if (eventName === "recording_paused") {
         this.isPaused = true;
@@ -139,6 +147,10 @@ export class HeaderBarElement extends LitElement {
     if (this.unsubFilter) {
       this.unsubFilter();
       this.unsubFilter = null;
+    }
+    if (this.previewDebounceTimer !== null) {
+      clearTimeout(this.previewDebounceTimer);
+      this.previewDebounceTimer = null;
     }
   }
 
