@@ -67,6 +67,27 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 - [ ] Document JSON output format (examples)
 - [ ] Document environment variables (reference)
 
+**Code Quality & Organization**
+- [ ] Standardize binary command file naming (remove _cmd suffix or add to all)
+- [ ] Rename summarize-with-ollama.ps1 to to-ollama-summary.ps1 for consistency
+- [ ] Standardize script naming (gen- vs generate- prefix)
+- [ ] Deduplicate auto_spawn.rs (share between CLI and Tauri)
+- [ ] Move queue_worker_test.rs to tests/ directory
+- [ ] Split config.rs into config/ subdirectory (54KB file)
+- [ ] Split catalog.rs into catalog/ subdirectory (38KB file)
+- [ ] Split recorder.rs into recorder/ subdirectory (51KB file)
+- [ ] Split commands.rs into commands/ subdirectory (41KB file)
+- [ ] Move grouping.ts from RecordingsView/ to utils/ or state/
+- [ ] Move form.ts from SettingsView/ to utils/
+- [ ] Remove or document replace_session.py at root
+- [ ] Consolidate release_notes.md and release_notes.txt (choose canonical)
+- [ ] Document or remove scratch/ directory
+- [ ] Document or remove archive_internal/ directory
+- [ ] Add types/ directory to frontend for TypeScript type definitions
+- [ ] Add constants/ directory to frontend for constants
+- [ ] Add .env.example file to document environment variables
+- [ ] Add config.example.toml to document configuration options
+
 ---
 
 ## 📋 v1.9.x (Following Sprint)
