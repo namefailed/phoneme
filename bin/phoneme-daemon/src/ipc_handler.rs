@@ -812,6 +812,9 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         meeting_id: None,
         meeting_name: None,
         track: None,
+        cleanup_model: None,
+        diarized: false,
+        tags: vec![],
     };
     if let Err(e) = state.catalog.insert(&row).await {
         // Clean up the WAV we just wrote — no row means it's orphaned.
