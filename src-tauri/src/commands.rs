@@ -163,7 +163,15 @@ pub async fn retranscribe_recording(
     run_hooks: Option<bool>,
 ) -> Result<Value, String> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::RetranscribeRecording { id, model, run_hooks }).await
+    forward(
+        &bridge,
+        Request::RetranscribeRecording {
+            id,
+            model,
+            run_hooks,
+        },
+    )
+    .await
 }
 
 /// Import an existing audio file (wav/mp3/m4a) as a new recording. The daemon

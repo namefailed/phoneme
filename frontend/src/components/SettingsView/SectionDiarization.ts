@@ -47,11 +47,11 @@ export class SectionDiarization {
           <div class="settings-field long-input">
             <label>Model Path</label>
             <div>${renderField(
-              { key: "diarization.local_model_path", label: "", kind: "text" },
+              { key: "diarization.local_model_path", label: "", kind: "text", placeholder: "Managed automatically by Hugging Face cache" },
               this.config.diarization?.local_model_path ?? "",
             )}</div>
             <span style="${HELP}">
-              Absolute path to the Pyannote ONNX model.
+              Optional. Leave blank to use the default Pyannote models automatically downloaded to the Hugging Face cache (located at %USERPROFILE%\\.cache\\huggingface\\hub).
             </span>
           </div>
         </div>

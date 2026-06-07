@@ -75,8 +75,11 @@ pub struct AppState {
     pub embedder: Arc<tokio::sync::RwLock<Option<Arc<phoneme_core::Embedder>>>>,
 }
 
+static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 impl AppState {
     pub async fn new(config: Config) -> anyhow::Result<Self> {
+        let _guard = INIT_LOCK.lock().unwrap();
         let paths = ResolvedPaths::from_config(&config)?;
         tokio::fs::create_dir_all(&paths.audio_dir).await?;
         tokio::fs::create_dir_all(&paths.inbox_dir).await?;

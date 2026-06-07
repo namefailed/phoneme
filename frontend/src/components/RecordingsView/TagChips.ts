@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { addTag, attachTag, detachTag, listAllTags, tagsFor, type Tag } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 
-function getContrastColor(hexColor: string): string {
+export function getContrastColor(hexColor: string): string {
   if (!hexColor || !hexColor.startsWith('#')) {
     return '';
   }

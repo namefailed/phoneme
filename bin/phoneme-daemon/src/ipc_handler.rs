@@ -329,7 +329,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::ImportRecording { path } => import_recording(state, path).await,
-        Request::RetranscribeRecording { id, model, run_hooks } => match state.catalog.get(&id).await {
+        Request::RetranscribeRecording {
+            id,
+            model,
+            run_hooks,
+        } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 let mut cfg = state.config.load().as_ref().clone();
                 let mut changed = false;

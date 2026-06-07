@@ -302,7 +302,10 @@ impl DaemonRecorder {
         let log_id = id.clone();
         let task = tokio::spawn(async move {
             let cfg = state.config.load();
-            let provider = state.transcription.provider(&cfg.whisper, &phoneme_core::config::DiarizationConfig::default());
+            let provider = state.transcription.provider(
+                &cfg.whisper,
+                &phoneme_core::config::DiarizationConfig::default(),
+            );
 
             // If the provider is native (running directly in our RAM), we can safely
             // drop the interval to 500ms for true real-time word-by-word streaming
@@ -357,7 +360,10 @@ impl DaemonRecorder {
                 let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
                 // Note: we already resolved provider above to check if native,
                 // but we can just use that one or resolve it again if config changes during recording.
-                let provider = state.transcription.provider(&cfg.whisper, &phoneme_core::config::DiarizationConfig::default());
+                let provider = state.transcription.provider(
+                    &cfg.whisper,
+                    &phoneme_core::config::DiarizationConfig::default(),
+                );
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim().to_string();
@@ -610,7 +616,7 @@ impl DaemonRecorder {
                     });
                 }
                 tracing::info!(session = %meeting.meeting_id, "meeting cancelled");
-                
+
                 drop(meeting_lock);
                 drop(active_lock);
                 self.ensure_preroll(state).await;
