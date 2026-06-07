@@ -191,6 +191,9 @@ export class RecordingsListElement extends LitElement {
   }
 
   private handleRenameKeyDown(e: KeyboardEvent, meetingId: string) {
+    // Keep all key events inside the rename input so the list's keyboard
+    // handler never sees them (Space toggling rows, arrows moving focus, etc).
+    e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
       const input = e.target as HTMLInputElement;
@@ -219,6 +222,14 @@ export class RecordingsListElement extends LitElement {
   }
 
   private handleKeyDown(e: KeyboardEvent, visibleRows: Recording[]) {
+    // Don't hijack keys (especially Space) while the user is typing in an
+    // input — e.g. renaming a meeting. Otherwise Space would toggle the
+    // focused row's checkbox instead of inserting a space in the name.
+    const tgt = e.target as HTMLElement | null;
+    if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) {
+      return;
+    }
+
     const recs = visibleRows;
     if (!recs.length) return;
 
@@ -573,7 +584,7 @@ export class RecordingsListElement extends LitElement {
             @change=${(e: Event) => this.handleGroupCheckbox(e, meetingId)}
           />
         </span>
-        <span class="rec-group-label" @dblclick=${(e: MouseEvent) => this.startInlineRename(e, meetingId, tracks[0].meeting_name ?? "")}>
+        <span class="rec-group-label">
           <span class="rec-group-chevron ${expanded ? "expanded" : ""}">▸</span>
           ${isEditing ? html`
             <input
@@ -588,7 +599,13 @@ export class RecordingsListElement extends LitElement {
               @blur=${(e: FocusEvent) => this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value)}
             />
           ` : html`
-            <span class="rec-group-title" title="Double-click to rename meeting">🎙 ${meetingName}</span>
+            <span class="rec-group-title">🎙 ${meetingName}</span>
+            <button
+              class="rec-group-rename"
+              title="Rename meeting"
+              aria-label="Rename meeting"
+              @click=${(e: MouseEvent) => this.startInlineRename(e, meetingId, tracks[0].meeting_name ?? "")}
+            >✎</button>
           `}
           <span class="rec-group-meta" style="margin-left: 8px;">${day} · ${time}</span>
         </span>

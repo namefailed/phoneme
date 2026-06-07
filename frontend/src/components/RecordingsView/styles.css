@@ -593,6 +593,28 @@ mark.search-hit {
   font-weight: 600;
   white-space: nowrap;
 }
+/* Explicit rename affordance — hidden until the group row is hovered so the
+   rename action is deliberate (replaces the too-easy double-click). */
+.rec-group-rename {
+  opacity: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: opacity 0.15s ease-out, color 0.15s ease-out, background 0.15s ease-out;
+}
+.rec-group-head:hover .rec-group-rename {
+  opacity: 0.7;
+}
+.rec-group-rename:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--bg-surface);
+}
 .rec-group-meta {
   color: var(--fg-muted);
   font-size: 12px;
