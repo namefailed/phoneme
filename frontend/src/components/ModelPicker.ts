@@ -82,6 +82,8 @@ export class ModelPickerElement extends LitElement {
   @state() private llmModel = "";
   @state() private llmKey = "";
   @state() private diarizationEnabled = false;
+  @state() private ollamaModels: string[] = [];
+  @state() private fetchingOllamaModels = false;
 
   @query('.mp-dialog') dialog!: HTMLElement;
   @query('#mp-stt-provider') sttProviderSelect!: HTMLSelectElement;
@@ -144,6 +146,27 @@ export class ModelPickerElement extends LitElement {
 
     const d = this.config.diarization || {};
     this.diarizationEnabled = d.provider !== "none";
+
+    // Fetch Ollama models if Ollama is selected
+    if (this.llmRealProvider === "ollama") {
+      void this.fetchOllamaModels();
+    }
+  }
+
+  private async fetchOllamaModels() {
+    this.fetchingOllamaModels = true;
+    try {
+      const apiUrl = this.llmUrl || "http://127.0.0.1:11434/api/tags";
+      const response = await fetch(apiUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      this.ollamaModels = data.models?.map((m: any) => m.name) || [];
+    } catch (e) {
+      console.warn("Failed to fetch Ollama models:", e);
+      this.ollamaModels = [];
+    } finally {
+      this.fetchingOllamaModels = false;
+    }
   }
 
   private async loadDownloadedModels() {
@@ -218,11 +241,16 @@ export class ModelPickerElement extends LitElement {
     } else {
       this.llmRealProvider = v;
     }
+    // Fetch Ollama models when Ollama is selected
+    if (this.llmRealProvider === "ollama") {
+      void this.fetchOllamaModels();
+    }
   }
 
   render() {
     const isSttLocal = this.sttRealProvider === "local";
     const isLlmCloud = this.llmRealProvider === "openai" || this.llmRealProvider === "groq" || this.llmRealProvider === "anthropic";
+    const isLlmOllama = this.llmRealProvider === "ollama";
 
     const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
     const sttPresetOpts = STT_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
@@ -300,8 +328,22 @@ export class ModelPickerElement extends LitElement {
               <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} @input=${(e: Event) => this.llmUrl = (e.target as HTMLInputElement).value} />
             </div>
 
+            <div class="mp-row" style="display:${isLlmOllama ? '' : 'none'}">
+              <label class="mp-label" for="mp-llm-url">Ollama API URL</label>
+              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} placeholder="http://127.0.0.1:11434/api/generate" @input=${(e: Event) => { this.llmUrl = (e.target as HTMLInputElement).value; void this.fetchOllamaModels(); }} />
+            </div>
+
             <label class="mp-label" for="mp-llm-model">Model</label>
-            <input id="mp-llm-model" class="mp-input" type="text" .value=${this.llmModel} placeholder="e.g. llama3.2:3b" @input=${(e: Event) => this.llmModel = (e.target as HTMLInputElement).value} />
+            ${isLlmOllama ? html`
+              <select id="mp-llm-model" class="mp-input" .value=${this.llmModel} @change=${(e: Event) => this.llmModel = (e.target as HTMLSelectElement).value}>
+                ${this.fetchingOllamaModels ? html`<option disabled>Loading models...</option>` : ''}
+                ${this.ollamaModels.length === 0 && !this.fetchingOllamaModels ? html`<option value="">No models found — make sure Ollama is running</option>` : ''}
+                ${this.ollamaModels.map(m => html`<option value=${m} ?selected=${m === this.llmModel}>${m}</option>`)}
+                ${this.llmModel && !this.ollamaModels.includes(this.llmModel) ? html`<option value=${this.llmModel} selected>${this.llmModel} (current)</option>` : ''}
+              </select>
+            ` : html`
+              <input id="mp-llm-model" class="mp-input" type="text" .value=${this.llmModel} placeholder="e.g. llama3.2:3b" @input=${(e: Event) => this.llmModel = (e.target as HTMLInputElement).value} />
+            `}
             <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Local Ollama</b> keeps everything offline.</p>
           </div>
 
