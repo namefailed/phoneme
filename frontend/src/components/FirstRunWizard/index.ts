@@ -31,7 +31,7 @@ export class FirstRunWizardElement extends LitElement {
   @state() private isDownloading = false;
 
   // Hotkey mode state
-  @state() private capturingHotkeyFor: "general" | "meeting" | null = null;
+  @state() private capturingHotkeyFor: "general" | "meeting" | "in_place" | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -592,7 +592,7 @@ export class FirstRunWizardElement extends LitElement {
     parts.push(keyName);
 
     const combo = parts.join("+");
-    
+
     if (this.capturingHotkeyFor === "general") {
       if (!this.config.hotkey) this.config.hotkey = {};
       this.config.hotkey.combo = combo;
@@ -601,13 +601,17 @@ export class FirstRunWizardElement extends LitElement {
       if (!this.config.meeting_hotkey) this.config.meeting_hotkey = {};
       this.config.meeting_hotkey.combo = combo;
       this.config.meeting_hotkey.enabled = true; // Auto-enable
+    } else if (this.capturingHotkeyFor === "in_place") {
+      if (!this.config.in_place_hotkey) this.config.in_place_hotkey = {};
+      this.config.in_place_hotkey.combo = combo;
+      this.config.in_place_hotkey.enabled = true; // Auto-enable
     }
-    
+
     this.capturingHotkeyFor = null;
     document.removeEventListener("keydown", this.keydownHandler, { capture: true });
   };
 
-  private toggleCapture(type: "general" | "meeting") {
+  private toggleCapture(type: "general" | "meeting" | "in_place") {
     if (this.capturingHotkeyFor === type) {
       this.capturingHotkeyFor = null;
       document.removeEventListener("keydown", this.keydownHandler, { capture: true });
@@ -625,18 +629,20 @@ export class FirstRunWizardElement extends LitElement {
   private renderHotkey() {
     if (!this.config.hotkey) this.config.hotkey = {};
     if (!this.config.meeting_hotkey) this.config.meeting_hotkey = {};
-    
+    if (!this.config.in_place_hotkey) this.config.in_place_hotkey = {};
+
     // Auto-enable them by default if not set, so users don't have to go to settings
     if (this.config.hotkey.enabled === undefined) this.config.hotkey.enabled = true;
     if (this.config.meeting_hotkey.enabled === undefined) this.config.meeting_hotkey.enabled = true;
+    if (this.config.in_place_hotkey.enabled === undefined) this.config.in_place_hotkey.enabled = true;
 
     return html`
       <div class="wizard-body">
         <h2 class="wizard-title">Global Hotkeys</h2>
         <p class="wizard-subtitle">Press these combos from anywhere to start recording your voice note.</p>
-        
+
         <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 24px; align-items: flex-start;">
-          
+
           <div style="display: flex; flex-direction: column; align-items: flex-start;">
             <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">General Hotkey</h3>
             <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Transcribes and triggers your background hooks.</p>
@@ -650,12 +656,23 @@ export class FirstRunWizardElement extends LitElement {
 
           <div style="display: flex; flex-direction: column; align-items: flex-start;">
             <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">Meeting Hotkey</h3>
-            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Types the transcription directly into your currently active window (e.g. Zoom/Discord).</p>
+            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Records your mic + system audio simultaneously for meetings.</p>
             <button id="capture-meeting" class="combo-capture ${this.capturingHotkeyFor === 'meeting' ? 'capturing' : ''}" @click=${() => this.toggleCapture('meeting')}>
               ${this.config.meeting_hotkey.combo || "No Hotkey Set"}
             </button>
             <div style="margin-top: 8px; color: var(--fg-faded); font-size: 12px;">
               ${this.capturingHotkeyFor === 'meeting' ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; align-items: flex-start;">
+            <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">In-place Transcription</h3>
+            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Types the transcription directly into your currently active window (e.g. Zoom/Discord).</p>
+            <button id="capture-in-place" class="combo-capture ${this.capturingHotkeyFor === 'in_place' ? 'capturing' : ''}" @click=${() => this.toggleCapture('in_place')}>
+              ${this.config.in_place_hotkey.combo || "No Hotkey Set"}
+            </button>
+            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 12px;">
+              ${this.capturingHotkeyFor === 'in_place' ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
             </div>
           </div>
 
