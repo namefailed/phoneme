@@ -147,6 +147,9 @@ impl Recorder {
                         match block? {
                             Some(b) => {
                                 if !is_paused {
+                                    // Silence detector is only used for Oneshot mode auto-stop.
+                                    // In Hold mode (meeting mode), it's called but never triggers
+                                    // a stop, so no audio is trimmed based on silence.
                                     detector.push(&b);
                                     samples.extend_from_slice(&b);
                                     if cfg.mode == RecordingMode::Oneshot && detector.is_silent() {
