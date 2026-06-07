@@ -136,3 +136,11 @@ phoneme list
 MIT OR Apache-2.0.
 
 Phoneme is built by [@namefailed](https://github.com/namefailed). It is not a commercial product, has no telemetry, and never will.
+
+## 💖 Support
+
+If you find Phoneme useful, please consider supporting my work:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q0X520YFU1)
+
+<script type='text/javascript' src='https://storage.ko-fi.com/cdn/widget/Widget_2.js'></script><script type='text/javascript'>kofiwidget2.init('Support me on Ko-fi', '#832cdb', 'Q0X520YFU1');kofiwidget2.draw();</script>
