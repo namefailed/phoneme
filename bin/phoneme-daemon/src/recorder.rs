@@ -862,7 +862,7 @@ impl DaemonRecorder {
 
         let meeting_id = format!("meeting-{}", RecordingId::new());
         let mut tracks = Vec::with_capacity(sources.len());
-        
+
         // Capture a single start time for all tracks so they stay synchronized
         let started_at = Local::now();
 
