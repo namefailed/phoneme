@@ -117,8 +117,10 @@ export class TagChipsElement extends LitElement {
           ${showDropdown ? html`
             <div class="tag-dropdown">
               ${availableTags.map((t) => {
+                const contrast = t.color ? getContrastColor(t.color) : '';
+                const style = t.color ? `background: ${t.color}; color: ${contrast};` : '';
                 return html`
-                  <div class="tag-dropdown-item" @mousedown=${(e: Event) => { e.preventDefault(); this.attachByName(t.name); this._showDropdown = false; }}>
+                  <div class="tag-dropdown-item" style="${style}" @mousedown=${(e: Event) => { e.preventDefault(); this.attachByName(t.name); this._showDropdown = false; }}>
                     <span class="tag-dropdown-dot" style="background: ${t.color || 'var(--accent)'}"></span>
                     ${t.name}
                   </div>
