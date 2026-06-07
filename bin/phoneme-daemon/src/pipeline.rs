@@ -51,11 +51,13 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     // Optional LLM post-processing. Non-fatal: on any failure we keep the raw
     // transcript. `provider()` returns None when disabled or provider = none.
     let mut transcript = transcript;
+    let mut cleanup_model: Option<String> = None;
     if let Some(llm) = state.llm.provider(&cfg.llm_post_process) {
         match llm.process(&cfg.llm_post_process.prompt, &transcript).await {
             Ok(processed) => {
                 tracing::info!("LLM post-processing succeeded");
                 transcript = processed;
+                cleanup_model = Some(cfg.llm_post_process.model.clone());
             }
             Err(e) => {
                 tracing::error!(error = %e, "LLM post-processing failed, falling back to raw transcript");
@@ -78,6 +80,13 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     state
         .catalog
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
+        .await?;
+
+    // Record which post-processing model was used and whether diarization was applied
+    let diarized = cfg.diarization.provider != phoneme_core::config::DiarizationBackend::None;
+    state
+        .catalog
+        .update_processing_meta(&id, cleanup_model.as_deref(), diarized)
         .await?;
 
     let recording = state.catalog.get(&id).await?;
