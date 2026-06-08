@@ -121,7 +121,8 @@ Phoneme isn't for everyone, and that's fine. If one of these fits your needs bet
 | [IPC Integration](docs/developer-guide/ipc_integration.md) | NDJSON named pipe |
 | [CLI Reference](docs/developer-guide/cli_reference.md) | All commands |
 | [Testing & CI](docs/developer-guide/testing_and_ci.md) | Local checks matching GitHub Actions |
-| [Roadmap](CHANGELOG.md) | Shipped features and v2.0 plans |
+| [Roadmap](ROADMAP.md) | Planned features & direction |
+| [Changelog](CHANGELOG.md) | Shipped releases |
 
 ---
 

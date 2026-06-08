@@ -1,142 +1,142 @@
 # 🗺️ Phoneme Roadmap
 
-This roadmap tracks planned features, improvements, and strategic initiatives for Phoneme.
+The single source of truth for **where Phoneme is going**. Shipped history lives in
+[`CHANGELOG.md`](CHANGELOG.md); speculative / unvetted ideas live in the
+[Idea Parking Lot](docs/IDEAS.md).
 
 ---
 
-## 🚀 Immediate (This Week)
+## Who we build for
 
-**High-impact, low-effort fixes and improvements**
+Phoneme isn't one app — it's four overlapping workflows. Every roadmap item should
+move at least one of these personas closer to "done":
 
-### Critical Fixes
-- [ ] Fix broken documentation references (docs/INTERNAL.md → internals.md in CONTRIBUTING.md)
-- [ ] Add error handling to to-clipboard.ps1 (try-catch for clipboard operations)
-- [ ] Add ESLint to frontend (package.json lint script)
-- [ ] Add Prettier to frontend (package.json format script)
+| Persona | Core job | "Done" feels like |
+|---|---|---|
+| **Dictator** | Hotkey → speak → text lands in Slack/Word/IDE | Zero friction, never think about modes |
+| **Meeting archivist** | Capture a call + your reactions → readable timeline → summary | One chronological story, not two blobs |
+| **Recall librarian** | Find "that thing I said about Rust errors last week" | Meaning-search + organization that scales past 5k rows |
+| **Automator** | Every recording fires Obsidian/Discord/scripts | Reliable, debuggable, configurable without editing TOML |
 
-### High-Value Quick Wins
-- [ ] Add loading spinner to App.ts (show loading state during initial config load)
-- [ ] Add shell completion for CLI (bash, zsh, PowerShell completions)
-- [ ] Add progress reporting for transcriptions (progress callback for long operations)
-- [ ] Add reconnection backoff/limit to bridge.rs (exponential backoff, max attempts)
+## Guiding principles
 
-### Doctor Improvements
-- [ ] Add disk space check to doctor (check available disk before recording)
-- [ ] Add model validation to doctor (validate model file existence and integrity)
-- [ ] Add Doctor to main navigation (not just tray icon right-click)
-- [ ] Add explanations for each check (what it means, why it matters)
-- [ ] Add detailed error messages with context and guidance
-- [ ] Add check categories (Critical, Warning, Info) with visual indicators
-- [ ] Add step-by-step fix guidance for failed checks
-- [ ] Add "Fix All" button for common auto-fixable issues
-- [ ] Add links to documentation for each check
-
----
-
-## 📋 v1.8.x (Next Sprint)
-
-**CLI Enhancements**
-- [ ] Add --config flag (override config file path via CLI)
-- [ ] Add --validate command (check config without applying)
-- [ ] Add --dry-run flag (preview config changes)
-
-**Frontend Polish**
-- [ ] Add keyboard shortcuts (Ctrl+, for settings, Ctrl+A select all, Esc clear)
-- [ ] Add "Reset to Defaults" button per section (SettingsView)
-- [ ] Add config import for backup (SettingsView) - export already exists
-- [ ] Add ETA calculation for model downloads (FirstRunWizard) - progress exists
-- [ ] Add drag-drop visual feedback (import.ts) - handler exists
-- [ ] Add batch import progress (show total count for multiple files)
-
-**Backend Reliability**
-- [ ] Add retry logic with exponential backoff for webhooks
-- [ ] Add token tracking for paid APIs (monitor costs)
-- [ ] Add batch embedding API (efficiency)
-- [ ] Add embedding cache (cache for repeated texts)
-
-**Tauri UX**
-- [ ] Add splash screen during daemon spawn (progress indicator)
-- [ ] Add spawn cancellation (cancel if user closes app during startup)
-- [ ] Add reconnection status events (emit status for UI feedback)
-
-**Documentation**
-- [ ] Add System Requirements to README (Windows version, RAM requirements)
-- [ ] Add Roadmap section to README (communicate future direction)
-- [ ] Document JSON output format (examples)
-- [ ] Document environment variables (reference)
-
-**Code Quality & Organization**
-- [ ] Standardize binary command file naming (remove _cmd suffix or add to all)
-- [ ] Rename summarize-with-ollama.ps1 to to-ollama-summary.ps1 for consistency
-- [ ] Standardize script naming (gen- vs generate- prefix)
-- [ ] Deduplicate auto_spawn.rs (share between CLI and Tauri)
-- [ ] Move queue_worker_test.rs to tests/ directory
-- [ ] Split config.rs into config/ subdirectory (54KB file)
-- [ ] Split catalog.rs into catalog/ subdirectory (38KB file)
-- [ ] Split recorder.rs into recorder/ subdirectory (51KB file)
-- [ ] Split commands.rs into commands/ subdirectory (41KB file)
-- [ ] Move grouping.ts from RecordingsView/ to utils/ or state/
-- [ ] Move form.ts from SettingsView/ to utils/
-- [ ] Remove or document replace_session.py at root
-- [ ] Consolidate release_notes.md and release_notes.txt (choose canonical)
-- [ ] Document or remove scratch/ directory
-- [ ] Document or remove archive_internal/ directory
-- [ ] Add types/ directory to frontend for TypeScript type definitions
-- [ ] Add constants/ directory to frontend for constants
-- [ ] Add .env.example file to document environment variables
-- [ ] Add config.example.toml to document configuration options
-
-**Security & Reliability**
-- [ ] Verify innerHTML usage safety (SectionWhisper.ts provider metadata comment)
-- [ ] Add rate limiting for HTTP clients (prevent API overwhelm)
-- [ ] Add circuit breaker for external services (OpenAI, Ollama, webhooks)
-- [ ] Add structured logging correlation IDs for request tracing
-- [ ] Add health check endpoint for daemon monitoring
-
-**Performance**
-- [ ] Reduce unnecessary http.clone() calls in transcription.rs (7 times)
-- [ ] Reduce unnecessary http.clone() calls in llm.rs (4 times)
-- [ ] Reduce unnecessary clone() in embed.rs (attention_mask)
-
-**Code Quality**
-- [ ] Replace unwrap() in pipeline.rs (enigo::Enigo::new() line 90)
-- [ ] Replace unwrap() in recorder.rs production code (lines 629, 680, 734)
-- [ ] Add integration tests for daemon components (tests/ directory is empty)
+1. **"Would a real user hit this friction?"** — features that duplicate existing
+   functionality or serve <~10% of users get cut or parked, not built.
+2. **Missing buttons, not missing features.** The backend + CLI are consistently
+   *ahead of the GUI*. A large share of high-value work is **wiring + polish**, not
+   greenfield engineering (webhook config, semantic scores, failed-queue, delete
+   modes, catalog rebuild all exist in the backend with no UI). Close that gap first.
+3. **Differentiation lives in Recall and Meetings**, not Dictation. Dictation is
+   table-stakes (keep it frictionless); the moat is "search/ask your own voice
+   archive" and "dual-track diarized meetings."
+4. **Respect dependencies.** Some "separate" features share one substrate — build
+   the substrate once (see the ⚠️ callouts below).
 
 ---
 
-## 📋 v1.9.x (Following Sprint)
+## 🔧 In flight — v1.8.x (correctness & performance)
 
-**Frontend UX**
-- [ ] Add folder import option (import.ts)
-- [ ] Add error toast for failed theme application (App.ts)
+Landing now as focused PRs (each tested, `clippy -D warnings` clean):
 
-**Backend Enhancements**
-- [ ] Add streaming LLM responses (real-time feedback)
-- [ ] Add webhook authentication (Bearer token/API key support)
-- [ ] Make diarization configurable (GPU support, configurable step/duration)
-- [ ] Add batch embedding API for efficiency
-- [ ] Add embedding cache for repeated texts
+- [ ] **Live preview no longer O(n²)** — the streaming preview re-transcribed the
+  *entire* growing buffer every tick; now bounded to a rolling 15 s window.
+- [ ] **Diarization speaker mapping fixed** — pyannote `"SPEAKER_00"` labels were
+  `parse::<u8>()`'d and collapsed everyone to one speaker; now mapped to stable
+  indices with gap handling, and run off the async runtime.
+- [ ] **Semantic search hardened** — dimension check, relevance floor (drop noise),
+  and meeting-track dedupe.
+- [ ] **Embedding input truncated** to the model's 256-token limit (long transcripts
+  silently failed to embed → became unsearchable).
+- [ ] **In-place dictation surfaces errors** instead of panicking / silently no-op'ing.
 
-**Security**
-- [ ] Add IPC rate limiting (prevent abuse)
-- [ ] Add IPC metrics/logging (request logging for debugging)
-- [ ] Add request size limits (prevent abuse)
+> These are the baseline for v1.9 — several items below build directly on them.
 
-**Documentation**
-- [ ] Document error handling patterns for IPC
-- [ ] Document reconnection strategy for IPC
-- [ ] Add semantic search documentation
-- [ ] Document advanced search syntax (quotes, operators)
-- [ ] Add keyboard shortcuts reference
-- [ ] Add performance troubleshooting section
-- [ ] Add audio device troubleshooting
-- [ ] Add network/cloud API troubleshooting
+---
 
-**Hooks UX**
-- [ ] Add character limit warning for large transcripts (to-clipboard.ps1)
-- [ ] Add file rotation for large files (to-file.ps1)
-- [ ] Add timeout configuration for webhooks (to-webhook.ps1)
+## 📋 v1.9 — Completeness & Recall
+
+**Theme: close the promise-vs-reality gaps and finish the attic.** Most of this is
+wiring features the backend already supports. Meetings-first, because the docs
+already advertise a merged timeline we don't ship yet (the biggest trust gap).
+
+### ⚠️ Prerequisites / shared infrastructure (do these first)
+
+- [ ] **Meeting-track alignment correctness** — the merged timeline is *not* pure UI
+  wiring; it depends on the two tracks being truly time-aligned. The current
+  `meeting_align.rs` heuristic is fragile (it can collapse internal silence when the
+  system-audio loopback drops gaps). An interleaved timeline built on mis-aligned
+  tracks is *worse* than two stacked panes. **Solidify alignment before the merged
+  view.**
+- [ ] **Word-level timestamps** — shared substrate for transcript↔waveform sync,
+  confidence highlighting, *and* tighter diarization boundaries. Do it once; it
+  unlocks three features.
+
+### 🏚️ Finish the attic (backend exists, GUI doesn't)
+
+- [ ] **Webhook URL field in Settings** — pipeline already POSTs `hook.webhook_url`; no UI field exists.
+- [ ] **Failed-queue visibility + retry** — inbox has a `failed/` state; the header badge only counts pending+processing. Surface failures with per-file error + one-click retry.
+- [ ] **Doctor: rebuild catalog** — `phoneme doctor --rebuild-catalog` is CLI-only.
+- [ ] **Delete modes (keep-audio / transcript-only)** — CLI supports it; the GUI always deletes both.
+- [ ] **Bulk tag from multi-select** — bulk bar only has re-transcribe / export / delete.
+- [ ] **Semantic search settings + re-index** — the wizard sets it up; there's no ongoing management (toggle, model dir, backfill/re-index button).
+- [ ] **IPC reconnect after Doctor "Fix"** — today users must close/reopen the window after a daemon restart.
+- [ ] **In-app hook log tail** — hook debugging means opening `%LOCALAPPDATA%\phoneme\logs\hook.log` by hand.
+- [ ] **Import file picker** — drag-drop works; the picker (`pickAndImportAudio`) needs verifying/wiring. *(Verify current state — may be "moved to Settings," not missing.)*
+- [ ] **FLAC import** — docs mention FLAC; the decoder only accepts wav/mp3/m4a.
+- [ ] **Recording mode on the main button** — hotkeys support hold/toggle/duration; the header Record button is always one-shot.
+
+### 🎙️ Meetings
+
+- [ ] **Chronological merged timeline** — interleave the two tracks into one "You / Meeting" story. *(Depends on alignment correctness above. Build it in Lit.)*
+- [ ] **Diarization quality** *(prereq for named speakers — don't build naming UX on wrong labels)*:
+  - [ ] Cache the diarization model in `AppState` (today it reloads the ~500 MB model every recording).
+  - [ ] Word-level alignment instead of 1 s segments.
+  - [ ] Speaker-count control + better clustering.
+- [ ] **Named speakers** — rename "Speaker 1" → "Sarah" once, persisted across exports. *(After diarization quality lands.)*
+- [ ] **Meeting capture profiles** — one click "Standup" (tag + summarize preset + Obsidian hook) vs "Interview" (diarize on, different prompt). Config profiles exist; tie them to capture intent.
+- [ ] **Post-meeting digest** — meeting ends → optional "Summarize now?" with a one-click LLM preset.
+
+### 🔎 Recall
+
+- [ ] **Show semantic relevance scores in the list** — the IPC already returns `score`; the UI discards it. Now that v1.8 added a relevance floor, showing "87% match" also *explains* why a vague query returns few results. (Easy.)
+- [ ] **"More like this"** — open a recording → find semantically similar ones. Nearly free: search by an existing recording's stored vector instead of a fresh query embedding. (Promoted from "medium" — embeddings already exist.)
+- [ ] **Saved searches / smart filters** — persist "meeting-tagged, last 30 days, contains 'action items'."
+
+### ✨ Small wins
+
+- [ ] **Auto-generated titles** — timestamped names don't scan. Ship the **first-line/keyword heuristic first** (no dependency); LLM-generated titles as an *optional* enhancement (requires a configured LLM + adds latency).
+- [ ] **SRT / VTT export** — captions for a Loom/YouTube clip from an imported file.
+
+---
+
+## 📋 v1.10 — Local Intelligence
+
+**Theme: make Recall a moat.** Bigger, model-touching work that builds on v1.9.
+
+- [ ] **Transcript chunking + hybrid search** — embed per-passage (schema migration:
+  the `embeddings` table is one-vector-per-recording today) and fuse FTS5 + vector
+  (RRF). This is the *real* recall win — it's what makes "find the brief moment in a
+  long recording" reliable. Add an in-memory embedding cache (today every query
+  re-reads all BLOBs). *(Ideally add a CI job that can run the ONNX model.)*
+- [ ] **"Ask my archive" (local RAG chat)** — "What did we decide about the API
+  redesign?" → answer with citations/links to recordings. Builds on chunking +
+  retrieval; needs a chat UI + citation UX. The headline differentiated feature.
+- [ ] **Transcript ↔ waveform sync** — click a paragraph → seek playback. *(Needs
+  word-level timestamps from v1.9.)*
+- [ ] **Compare transcript versions** — side-by-side diff: original Whisper vs LLM
+  cleanup vs manual edit. (`original_transcript` is already preserved.)
+- [ ] **Custom vocabulary / glossary** — names like "Phoneme", "pyannote", client
+  acronyms transcribed correctly via Whisper's `initial_prompt`. (Dictator persona,
+  Whisper-native.)
+- [ ] **Smart title + auto-tag suggestions** — after transcription, "Suggested tags:
+  #meeting #design." (The LLM pipeline already runs optionally.)
+- [ ] **Transcription queue dashboard** — pending / processing / failed with per-file
+  error + retry, in the GUI.
+- [ ] **Per-recording hook override** — this one goes to Discord, that one stays
+  local. (Today hook config is global; re-fire is manual.)
+- [ ] **Confidence highlighting** — low-confidence words underlined; click to fix.
+  *(Needs word-level probabilities + segment storage — pairs with v1.9 word-level
+  infra.)*
 
 ---
 
@@ -146,90 +146,112 @@ This roadmap tracks planned features, improvements, and strategic initiatives fo
 
 ### Platform
 - [ ] **macOS port** — Apple Silicon first; bundled whisper.cpp server. Ship microphone-only first; do NOT let Meeting Mode block the macOS launch. `cpal` has no system-audio loopback on macOS — it requires a virtual device (BlackHole / Loopback). So on macOS: mic capture works natively; system-audio capture is opt-in via an external loopback device the user installs. Treat full feature parity as a follow-up, not a launch gate.
-- [ ] **Linux port** — PipeWire / ALSA audio (PipeWire monitor sources give system-audio loopback natively, unlike macOS); X11 + Wayland global hotkey
-- [ ] **Windows ARM** — native ARM64 build for Snapdragon-based machines
+- [ ] **Linux port** — PipeWire / ALSA audio (PipeWire monitor sources give system-audio loopback natively, unlike macOS); X11 + Wayland global hotkey.
+- [ ] **Windows ARM** — native ARM64 build for Snapdragon-based machines.
 
 ### Integration
 
 > **Architecture decision (locked):** the daemon already speaks newline-delimited JSON over a named pipe behind the `phoneme-ipc` `Transport` trait. v2.0 adds an **HTTP front-end, not a new eventing model**: an `axum` server maps one-off `Request`s to REST endpoints (`POST /api/record/start`, `GET /api/recordings`) and streams `DaemonEvent`s as **Server-Sent Events** (`GET /api/events`, an `EventSource` in the frontend). REST API, browser extension, Raycast scripts, and the MCP server then all share one `fetch()`/`EventSource` surface.
 
 - [ ] **Local REST API** — `localhost:3737` `axum` server (off by default): REST endpoints over the existing `Request`/`Response` enums + an SSE `/api/events` stream over `DaemonEvent`. Add an `HttpTransport` impl of the `Transport` trait so clients reuse the same typed surface.
-- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). Implement it as a **thin translator over the existing `Transport` trait**: a `CallTool("start_recording")` just maps to `Request::RecordStart` and fires it at the daemon over the pipe/socket — near-zero business logic in the MCP crate. Exposes tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`.
-- [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers
-- [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
+- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). A **thin translator over the existing `Transport` trait**: `CallTool("start_recording")` maps to `Request::RecordStart` — near-zero business logic. Tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`.
+- [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers.
+- [ ] **Browser extension** — toolbar icon; one click starts a recording and pastes the finished transcript into the focused field or clipboard. Requires the v2.0 REST API as the bridge.
 
 ### Recording
-- [ ] **Multi-microphone** — capture from two input devices simultaneously; useful for two-person interviews
-- [ ] **Audio normalization** — normalize gain before sending to Whisper; improves accuracy on quiet voices
+- [ ] **Multi-microphone** — capture from two input devices simultaneously (two-person interviews).
+- [ ] **Audio normalization** — normalize gain before Whisper; improves accuracy on quiet voices.
 
 ### Data
-- [ ] **Cloud sync** (opt-in, user-controlled) — encrypted sync of the catalog to a user-owned S3/Backblaze bucket for multi-machine access; audio files excluded by default
+- [ ] **Cloud sync** (opt-in, user-controlled) — encrypted sync of the catalog to a user-owned S3/Backblaze bucket; audio files excluded by default.
 
 ### Internal Quality
-- [ ] **Playwright E2E UI Coverage** — add a full End-to-End test suite using Playwright (or Tauri WebDriver) to interact with the frontend UI and exercise the actual Rust backend via IPC. To be implemented *after* the architecture stabilizes across macOS and Linux.
+- [ ] **Playwright E2E UI coverage** — full E2E suite driving the frontend against the real Rust backend over IPC. After the architecture stabilizes across macOS/Linux.
 
 ---
 
 ## 🌌 Long Term
 
-*No fixed timeline. These require either significant platform work or community infrastructure.*
+*No fixed timeline. Require significant platform work or community infrastructure.*
 
-- [ ] **Mobile thin-client** — iOS/Android app that records locally and syncs to the desktop daemon over LAN; transcription runs on the desktop
-- [ ] **Plugin ecosystem** — standardized API for community hooks, themes, and post-processors; distributed via a JSON registry
-- [ ] **Phoneme Cloud** (optional, self-hostable) — shared catalogs and role-based access for teams; the desktop daemon remains fully offline-capable
-- [ ] **Accessibility pass** — full NVDA/JAWS screen reader support, ARIA labels, font-size scaling, high-contrast theme
+- [ ] **Mobile thin-client** — iOS/Android records locally, syncs to the desktop daemon over LAN; transcription runs on the desktop.
+- [ ] **Plugin ecosystem** — standardized API for community hooks/themes/post-processors via a JSON registry.
+- [ ] **Phoneme Cloud** (optional, self-hostable) — shared catalogs + role-based access for teams; the desktop daemon stays fully offline-capable.
+- [ ] **Accessibility pass** — full NVDA/JAWS support, ARIA labels, font scaling, high-contrast theme.
 
-### Architecture Evolution
-- [ ] **Protocol versioning** — Add version field to IPC Request/Response for future evolution
-- [ ] **Batch operations** — Implement batch delete, batch update tags for efficiency
-- [ ] **Priority queue** — Implement priority queue for urgent recordings
-- [ ] **Parallel processing** — Add configurable parallel processing for faster throughput
-- [ ] **Health endpoint** — Add HTTP /health endpoint for daemon monitoring
-- [ ] **Metrics export** — Add Prometheus metrics for monitoring performance
-- [ ] **Status command** — Add --status flag to show recording state without starting
+### Architecture evolution
+- [ ] **Protocol versioning** — version field on IPC Request/Response.
+- [ ] **Batch operations** — batch delete / batch tag update.
+- [ ] **Priority queue**, **parallel processing**, **health endpoint**, **metrics export**, **`--status` flag**.
 
-### Data Model
-- [ ] **Database maintenance** — Implement vacuum and maintenance strategy for long-running databases
-- [ ] **Indexing strategy** — Document indexing strategy for large catalogs (100k+ recordings)
-- [ ] **Phrase search** — Enhance FTS5 query sanitization to support quoted phrase search
+### Data model
+- [ ] **DB maintenance** (vacuum strategy), **indexing strategy** for 100k+ catalogs, **phrase search** (quoted FTS5).
 
 ### Security
-- [ ] **Content Security Policy** — Add CSP for better security (tauri.conf.json)
-- [ ] **Scoped permissions** — Replace broad default permissions with scoped permissions (capabilities/default.json)
-
-### Developer Experience
-- [ ] **TypeScript path aliases** — Add @/components, etc. for cleaner imports (tsconfig.json) - NOT NEEDED (imports work without aliases)
-- [ ] **Stricter TypeScript** — Enable noUnusedLocals and noUnusedParameters (currently false in tsconfig.json)
-- [ ] **Incremental compilation** — Enable for faster builds (tsconfig.json) - ALREADY EXISTS (Vite handles this)
-- [ ] **Bundle analyzer** — Add for size monitoring (vite.config.ts)
-- [ ] **Code coverage** — Implement with codecov
-- [ ] **Dependency scanning** — Add cargo-audit or cargo-deny for security
-- [ ] **Cross-platform CI** — Add Linux/macOS CI for validation
-- [ ] **Changelog generation** — Automate from commits
-- [ ] **Release notes** — Generate from conventional commits
+- [ ] **Content Security Policy** (tauri.conf.json), **scoped permissions** (capabilities/default.json).
 
 ---
 
 ## 💰 Sustainability & Monetization
 
-*Ideas for generating revenue while keeping the core desktop app 100% free, local, and open-source.*
+*Revenue ideas that keep the core desktop app 100% free, local, and open-source.*
 
-- [ ] **Paid Mobile Companion App** — a one-time fee (or micro-subscription) thin-client for iOS/Android that records audio on the go and syncs it securely back to the desktop daemon for processing.
-- [ ] **Phoneme Pro (Managed APIs)** — an optional $8-$10/mo subscription where users get instant, zero-config access to ultra-fast cloud Whisper transcription and premium LLM Smart Cleanup (e.g., Claude 3.5 Sonnet) without needing to manage their own developer accounts or API keys.
-- [ ] **Phoneme Sync** — a low-cost ($4-$5/mo) end-to-end encrypted cloud sync service for power users who want their SQLite catalog and audio files seamlessly synchronized across multiple machines (similar to Obsidian Sync).
-- [ ] **Phoneme for Teams** — a managed, per-seat enterprise backend where dual-track meeting notes are centralized, searchable by the whole team, and strictly governed by role-based access.
+- [ ] **Paid Mobile Companion App** — one-time fee / micro-subscription thin-client that records on the go and syncs back to the desktop daemon.
+- [ ] **Phoneme Pro (Managed APIs)** — optional $8–10/mo for zero-config cloud Whisper + premium LLM cleanup without managing API keys.
+- [ ] **Phoneme Sync** — $4–5/mo end-to-end-encrypted sync of the SQLite catalog + audio across machines (Obsidian-Sync-style).
+- [ ] **Phoneme for Teams** — per-seat managed backend; centralized, searchable, role-governed meeting notes.
 
 ---
 
 ## ❌ Explicitly Not Doing
 
-Things that were considered and rejected — so we don't revisit them:
+Considered and rejected — so we don't revisit them. (Speculative ideas that *might*
+graduate someday live in the [Idea Parking Lot](docs/IDEAS.md) instead.)
 
 | Idea | Reason |
 |------|--------|
-| Favorites / starring | Tags already do this — create a "⭐ Favorite" tag |
-| Duration filter | Niche; no user has asked; search + tags already narrow the list |
-| Backup/restore ZIP | Manual export covers this; SQLite DB is already a single copyable file |
-| Azure Speech / AWS Transcribe | Enterprise pricing; not the Phoneme target user; add if demand emerges |
-| Portable (unsigned) ZIP | Valid distribution target but a CI task, not a product feature; just ship it |
-| Winget / Scoop packages | Same — automation task for when v1.5 ships, not a roadmap feature |
+| Favorites / starring | Tags already do this — make a "⭐ Favorite" tag |
+| Duration filter | Niche; nobody asked; search + tags already narrow the list |
+| Backup/restore ZIP | Manual export covers it; the SQLite DB is a single copyable file |
+| Azure Speech / AWS Transcribe | Enterprise pricing; not the target user; add only on demand |
+| Portable (unsigned) ZIP | A CI task, not a product feature |
+| Winget / Scoop packages | Same — packaging automation, not a roadmap item |
+| Meeting-app awareness (auto-detect Zoom/Teams) | Brittle, false-positive-prone, and surveillance-y for a privacy-first app |
+| Voice commands / wake word | Push-to-talk already solves hands-free; wake-word is a false-trigger rabbit hole |
+| Transcript git-style version graph | YAGNI at this scale; original-vs-current diff covers ~95% |
+| Acoustic echo cancellation (speaker→mic bleed) | Genuinely hard research problem; honest answer is "wear headphones" |
+| Word-by-word streaming transcription | Moved to the v2.0 backlog; the bounded live preview covers the need for now |
+
+---
+
+## 🧰 Engineering & tech-debt backlog
+
+*Not user-facing features — internal quality work, pulled in opportunistically
+alongside the feature releases above.*
+
+**Reliability**
+- [ ] Retry/backoff for webhooks; rate limiting / circuit breakers for external services (OpenAI, Ollama, webhooks).
+- [ ] Reconnection backoff/limit in `bridge.rs`.
+- [ ] Replace remaining `unwrap()` in production paths (`recorder.rs` source opens; remaining hot paths).
+- [ ] Integration tests for daemon components; a synthetic-audio E2E covering the single-recording path.
+
+**Doctor**
+- [ ] Disk-space + model-integrity checks; check categories (Critical/Warning/Info); per-check explanations + fix guidance; "Fix All"; Doctor in main nav (not just tray).
+
+**Code organization**
+- [ ] Split the large files (`config.rs`, `catalog.rs`, `recorder.rs`, `commands.rs`) into modules; dedupe `auto_spawn.rs` (CLI + Tauri); move `grouping.ts`/`form.ts` to `utils/`.
+- [ ] Frontend: ESLint + Prettier; stricter TS (`noUnusedLocals`/`noUnusedParameters`); `types/` + `constants/` dirs.
+
+**Performance**
+- [ ] Trim redundant `http.clone()` (transcription.rs ×7, llm.rs ×4); avoid the `attention_mask` clone in `embed.rs`.
+
+**Docs / DX**
+- [ ] `config.example.toml` + `.env.example`; document JSON output + env vars; semantic-search + advanced-search-syntax docs; troubleshooting (audio devices, network/cloud, performance).
+- [ ] Shell completions (bash/zsh/PowerShell); `cargo-audit`/`cargo-deny`; code coverage; consolidate `release_notes.md`/`.txt`.
+
+---
+
+*Last reorganized around the four-persona model + a backend-ahead-of-GUI audit.
+Pick a target version, decide whether "finish the attic" is one release or
+background polish, and ship one medium feature (merged timeline or auto-titles)
+per cycle.*

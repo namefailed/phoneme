@@ -12,7 +12,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 | Fix something broken | [Troubleshooting](user-guide/troubleshooting.md) |
 | Automate with scripts | [CLI Reference](developer-guide/cli_reference.md) or [IPC Guide](developer-guide/ipc_integration.md) |
 | Contribute code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
-| See what's planned | [CHANGELOG.md / Roadmap](../CHANGELOG.md) |
+| See what's planned | [ROADMAP.md](../ROADMAP.md) |
 
 ---
 
