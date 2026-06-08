@@ -74,12 +74,11 @@ same-user malware or a malicious IPC client. Ordered by priority.*
 - [ ] **Hook execution allowlist over IPC** — `RefireHook`/`HookTest` accept
   arbitrary commands; restrict to the hooks already in config rather than
   running anything a caller sends. *(S-C2)*
-- [ ] **IPC frame size cap** (`codec.rs`) — bound NDJSON frames (~8 MiB) so a
-  client can't OOM the daemon. *(S-H6)*
-- [ ] **Path guards** — `reveal_file` and audio deletion must canonicalize and
-  verify the target is under `audio_dir`/hooks before acting. *(S-H3/S-H5)*
-- [ ] **`escapeHtml` the RecordingDetail error path** (`RecordingDetail.ts:59`,
-  `innerHTML` without escaping). *(S-medium)*
+- [x] **IPC frame size cap** (`codec.rs`) — NDJSON frames are bounded at 8 MiB;
+  an unterminated over-cap frame errors instead of growing the buffer. *(S-H6)*
+- [x] **Path guards** — `reveal_file` restricts the target to `audio_dir`;
+  audio deletion rejects `..` and paths outside `audio_dir`. *(S-H3/S-H5)*
+- [x] **`escapeHtml` the RecordingDetail error path** (`RecordingDetail.ts:59`). *(S-medium)*
 
 **Secrets & transport**
 - [ ] **Stop sending full API keys to the WebView** — `read_config` returns
@@ -295,19 +294,19 @@ alongside the feature releases above.*
 - [ ] Shell completions (bash/zsh/PowerShell); `cargo-audit`/`cargo-deny`; code coverage; consolidate `release_notes.md`/`.txt`.
 
 **Testing & CI** *(from June 2026 audit — ~6/10 maturity; strong Rust foundation, integration gaps)*
-- [ ] **Gate `release.yml` on `cargo test` + vitest** — releases currently ship without a test gate.
+- [x] **Gate `release.yml` on `cargo test` + vitest** — a `test` job (fmt + clippy + cargo test + vitest + type-check) now blocks the release job.
 - [ ] **Pipeline integration tests** — the full transcribe → LLM → hooks → webhook → catalog/inbox path is the biggest untested critical path (`pipeline.rs`).
 - [ ] **Webhook + embedding tests** — `webhook.rs` timeout/error contracts; embedding upsert/search round-trip + corrupt-BLOB handling.
 - [ ] **Meeting capture E2E** (synthetic backend, incl. a paused-video internal gap) and **retention daemon** + **export-zip** integrity tests.
 - [ ] Split CI: parallel `--lib`, serial `--test '*'` (today everything runs `--test-threads=1`); cache the `tauri-cli` binary.
 
 **Quick correctness wins** *(small, mostly isolated)*
-- [ ] `embed.rs` mutex-poison `unwrap()` → `map_err` (no daemon panic on a poisoned lock). *(audit A-C2)*
-- [ ] Atomic `toggle_meeting()` — the meeting toggle is check-then-act across two lock acquisitions. *(A-H11)*
+- [x] `embed.rs` mutex-poison `unwrap()` → `map_err` (no daemon panic on a poisoned lock). *(audit A-C2)*
+- [x] Atomic `toggle_meeting()` — holds a `toggle_guard` across the read+act so concurrent toggles serialize. *(A-H11)*
 - [ ] Shared `load_config()` so the CLI honors `PHONEME_CONFIG` like the daemon; shared `apply_hotkeys(cfg)` so a tray profile switch re-registers *all* hotkeys, not just the main one. *(A-H13/A-H14)*
 - [ ] Structured Tauri IPC errors (`{ kind, message }`) instead of flattened strings. *(A-H6)*
-- [ ] Align `zip` versions across workspace vs tray. *(A-H12)*
-- [ ] Delete or implement the orphaned `checkMicrophoneAccess()` (no Tauri handler). *(A-C3)*
+- [x] Align `zip` versions across workspace vs tray (tray now uses the workspace `zip`). *(A-H12)*
+- [x] Delete or implement the orphaned `checkMicrophoneAccess()` (no Tauri handler). *(A-C3)*
 - [ ] Consolidate the duplicated **Doctor** and triplicate **record-mode** enums into core. *(A-H3/A-H4)*
 
 **Docs accuracy** *(audit found drift — fix the user-facing claims)*
