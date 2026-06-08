@@ -17,6 +17,19 @@ use tokio::sync::mpsc;
 /// 16-bit mono PCM at 16 kHz).
 pub type SampleBlock = Vec<i16>;
 
+/// Number of silence samples to insert to fill a wall-clock gap: how many
+/// samples *should* have been produced by now (`expected`) minus how many
+/// actually were (`produced`) — but only once that difference exceeds
+/// `tolerance`, so normal scheduling jitter between capture callbacks isn't
+/// mistaken for a real silent gap. Saturating, so a momentarily-ahead
+/// `produced` (timing skew) yields 0 rather than underflowing.
+fn gap_fill_len(expected: usize, produced: usize, tolerance: usize) -> usize {
+    match expected.checked_sub(produced) {
+        Some(gap) if gap > tolerance => gap,
+        _ => 0,
+    }
+}
+
 /// An asynchronous source of audio sample blocks. Implementations must convert
 /// to Phoneme's canonical format (16-bit, 16 kHz, mono) before yielding.
 #[async_trait::async_trait]
@@ -191,7 +204,9 @@ impl CpalSource {
         let supported = device
             .default_input_config()
             .map_err(|e| Error::Internal(format!("cpal default_input_config: {e}")))?;
-        Self::open_with_config(device, supported, tail_grace)
+        // Microphone capture is continuous (the device always delivers), so it
+        // never needs wall-clock gap filling.
+        Self::open_with_config(device, supported, tail_grace, false)
     }
 
     /// Open a capture source for the requested [`CaptureSource`].
@@ -252,13 +267,18 @@ impl CpalSource {
         let supported = device
             .default_output_config()
             .map_err(|e| Error::Internal(format!("cpal default_output_config (loopback): {e}")))?;
-        Self::open_with_config(device, supported, tail_grace)
+        // WASAPI loopback delivers samples ONLY while something is playing — it
+        // hands back nothing during silence (e.g. a paused video), which would
+        // collapse silent gaps and desync the meeting's two tracks. Enable
+        // wall-clock gap filling so the loopback track stays continuous.
+        Self::open_with_config(device, supported, tail_grace, true)
     }
 
     fn open_with_config(
         device: cpal::Device,
         supported: cpal::SupportedStreamConfig,
         tail_grace: Duration,
+        fill_gaps: bool,
     ) -> Result<Self> {
         let device_sample_rate = supported.sample_rate().0;
         let device_channels = supported.channels() as usize;
@@ -398,7 +418,31 @@ impl CpalSource {
             // Max size: 10 seconds of raw float audio per channel. If we hit this, the consumer is dead.
             let max_accumulator_len = device_sample_rate as usize * device_channels * 10;
 
+            // Wall-clock gap filling (loopback only — see `fill_gaps`). `produced`
+            // counts canonical (16 kHz) samples emitted so far; `fill_start`
+            // marks stream start. When a block arrives after the device went
+            // quiet, the elapsed wall-clock implies more samples *should* exist
+            // than we've emitted, and we insert that much real silence first so
+            // the track stays continuous and time-aligned.
+            let fill_start = std::time::Instant::now();
+            let mut produced: usize = 0;
+            // 100 ms at 16 kHz — only fill gaps larger than this so ordinary
+            // scheduling jitter between callbacks is never mistaken for silence.
+            let fill_tolerance = target_rate as usize / 10;
+
             while let Some(mut raw) = raw_rx.recv().await {
+                if fill_gaps {
+                    let expected =
+                        (fill_start.elapsed().as_secs_f64() * target_rate as f64) as usize;
+                    let gap = gap_fill_len(expected, produced, fill_tolerance);
+                    if gap > 0 {
+                        if out_tx.send(vec![0i16; gap]).await.is_err() {
+                            return;
+                        }
+                        produced += gap;
+                    }
+                }
+
                 if accumulator.len() + raw.len() > max_accumulator_len {
                     tracing::warn!(
                         "audio accumulator overflow ({} frames), dropping buffered audio!",
@@ -431,9 +475,11 @@ impl CpalSource {
                     };
 
                     let i16s = f32_to_i16(&processed);
+                    let n = i16s.len();
                     if out_tx.send(i16s).await.is_err() {
                         return;
                     }
+                    produced += n;
                 }
             }
 
@@ -524,6 +570,21 @@ mod tests {
     #[test]
     fn capture_source_defaults_to_microphone() {
         assert_eq!(CaptureSource::default(), CaptureSource::Microphone);
+    }
+
+    #[test]
+    fn gap_fill_only_beyond_tolerance() {
+        let tol = 1600; // 100 ms at 16 kHz
+                        // No elapsed, nothing produced → nothing to fill.
+        assert_eq!(gap_fill_len(0, 0, tol), 0);
+        // Small gap within tolerance (jitter) → no fill.
+        assert_eq!(gap_fill_len(1000, 0, tol), 0);
+        // A 5-second pause (80 000 samples) → fill all of it.
+        assert_eq!(gap_fill_len(80_000, 0, tol), 80_000);
+        // Mid-stream gap: expected far ahead of produced → fill the difference.
+        assert_eq!(gap_fill_len(100_000, 20_000, tol), 80_000);
+        // Produced momentarily ahead of expected (timing skew) → saturate to 0.
+        assert_eq!(gap_fill_len(500, 1000, tol), 0);
     }
 
     #[cfg(not(windows))]
