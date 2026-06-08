@@ -254,15 +254,15 @@ export class SectionWhisper {
                 this.config.whisper.model_path,
               )}
             </div>
-            <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; flex-direction: column; gap: 4px; max-width: 800px; margin-left: 256px;">
               ${modelCardsHtml}
+              <div style="margin-top: 8px;">
+                 <button class="inline-button" id="pick-model" style="font-size: 11px;">Browse for custom .bin…</button>
+              </div>
+              <span style="${HELP}">
+                Models run locally via <code>whisper.cpp</code>. Larger models have higher accuracy but use more RAM and run slower.
+              </span>
             </div>
-            <div style="margin-top: 8px;">
-               <button class="inline-button" id="pick-model" style="font-size: 11px;">Browse for custom .bin…</button>
-            </div>
-            <span style="${HELP}">
-              Models run locally via <code>whisper.cpp</code>. Larger models have higher accuracy but use more RAM and run slower.
-            </span>
           </div>
         </div>
 

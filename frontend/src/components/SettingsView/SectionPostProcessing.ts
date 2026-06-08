@@ -16,6 +16,101 @@ export class SectionPostProcessing {
       };
     }
 
+    // State for provider models
+    const providerModels: Record<string, string[]> = { ollama: [], openai: [], groq: [], anthropic: [] };
+    const fetchingModels: Record<string, boolean> = { ollama: false, openai: false, groq: false, anthropic: false };
+
+    const fetchProviderModels = async (provider: string) => {
+      fetchingModels[provider] = true;
+      updateProviderSelect(provider);
+      try {
+        let urlStr = config.llm_post_process.api_url || "";
+        const apiKey = config.llm_post_process.api_key || "";
+        let endpoint = "";
+        let headers: Record<string, string> = {};
+        
+        if (provider === "ollama") {
+          if (!urlStr) urlStr = "http://127.0.0.1:11434/api/generate";
+          const url = new URL(urlStr);
+          endpoint = `${url.protocol}//${url.host}/api/tags`;
+        } else if (provider === "openai" || provider === "groq") {
+          if (!urlStr) {
+            urlStr = provider === "openai" 
+              ? "https://api.openai.com/v1/chat/completions" 
+              : "https://api.groq.com/openai/v1/chat/completions";
+          }
+          const url = new URL(urlStr);
+          let path = url.pathname;
+          if (path.endsWith("/chat/completions")) {
+            path = path.replace("/chat/completions", "/models");
+          } else if (!path.endsWith("/models")) {
+            path = path.endsWith("/") ? path + "models" : path + "/models";
+          }
+          endpoint = `${url.protocol}//${url.host}${path}`;
+          headers["Authorization"] = `Bearer ${apiKey}`;
+        } else if (provider === "anthropic") {
+          if (!urlStr) urlStr = "https://api.anthropic.com/v1/messages";
+          const url = new URL(urlStr);
+          endpoint = `${url.protocol}//${url.host}/v1/models`;
+          headers["x-api-key"] = apiKey;
+          headers["anthropic-version"] = "2023-06-01";
+        }
+
+        const res = await fetch(endpoint, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        if (provider === "ollama") {
+          providerModels[provider] = (data.models || []).map((m: any) => m.name);
+        } else if (provider === "openai" || provider === "groq" || provider === "anthropic") {
+          providerModels[provider] = (data.data || []).map((m: any) => m.id);
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch ${provider} models:`, e);
+        providerModels[provider] = [];
+      } finally {
+        fetchingModels[provider] = false;
+        updateProviderSelect(provider);
+      }
+    };
+
+    const updateProviderSelect = (provider: string) => {
+      const select = container.querySelector<HTMLSelectElement>(`#${provider}-model-select`);
+      if (!select) return;
+
+      const currentModel = config.llm_post_process.model || "";
+      select.innerHTML = "";
+      
+      if (fetchingModels[provider]) {
+        const option = document.createElement("option");
+        option.disabled = true;
+        option.textContent = "Loading models...";
+        select.appendChild(option);
+      } else if (providerModels[provider].length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No models found — click Refresh";
+        select.appendChild(option);
+      } else {
+        providerModels[provider].forEach(m => {
+          const option = document.createElement("option");
+          option.value = m;
+          option.textContent = m;
+          if (m === currentModel) option.selected = true;
+          select.appendChild(option);
+        });
+      }
+      
+      // Ensure current model is shown even if not in list
+      if (currentModel && !providerModels[provider].includes(currentModel)) {
+        const option = document.createElement("option");
+        option.value = currentModel;
+        option.textContent = `${currentModel} (current)`;
+        option.selected = true;
+        select.appendChild(option);
+      }
+    };
+
     container.innerHTML = `
       <div class="settings-section">
         <h3>AI Post-Processing</h3>
@@ -83,13 +178,11 @@ export class SectionPostProcessing {
           <label>Model Name</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">${renderField(
-                { key: "llm_post_process.model", label: "", kind: "text", list: "ollama-models" },
-                config.llm_post_process.model || "llama3.2:3b",
-              )}</div>
+              <div style="flex: 1;">
+                <select id="ollama-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
+              </div>
               <button class="inline-button fetch-models-btn" data-provider="ollama" type="button" style="padding: 4px 10px;">Refresh</button>
             </div>
-            <datalist id="ollama-models"></datalist>
           </div>
         </div>
 
@@ -105,13 +198,11 @@ export class SectionPostProcessing {
           <label>OpenAI Model</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">${renderField(
-                { key: "llm_post_process.model", label: "", kind: "text", list: "openai-models" },
-                config.llm_post_process.model || "gpt-4o",
-              )}</div>
+              <div style="flex: 1;">
+                <select id="openai-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
+              </div>
               <button class="inline-button fetch-models-btn" data-provider="openai" type="button" style="padding: 4px 10px;">Refresh</button>
             </div>
-            <datalist id="openai-models"></datalist>
           </div>
         </div>
 
@@ -135,13 +226,11 @@ export class SectionPostProcessing {
           <label>Groq Model</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">${renderField(
-                { key: "llm_post_process.model", label: "", kind: "text", list: "groq-models" },
-                config.llm_post_process.model || "llama-3.1-8b-instant",
-              )}</div>
+              <div style="flex: 1;">
+                <select id="groq-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
+              </div>
               <button class="inline-button fetch-models-btn" data-provider="groq" type="button" style="padding: 4px 10px;">Refresh</button>
             </div>
-            <datalist id="groq-models"></datalist>
           </div>
         </div>
         <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
@@ -163,13 +252,11 @@ export class SectionPostProcessing {
           <label>Claude Model</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">${renderField(
-                { key: "llm_post_process.model", label: "", kind: "text", list: "anthropic-models" },
-                config.llm_post_process.model || "claude-3-5-haiku-latest",
-              )}</div>
+              <div style="flex: 1;">
+                <select id="anthropic-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
+              </div>
               <button class="inline-button fetch-models-btn" data-provider="anthropic" type="button" style="padding: 4px 10px;">Refresh</button>
             </div>
-            <datalist id="anthropic-models"></datalist>
           </div>
         </div>
         <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
@@ -231,6 +318,19 @@ export class SectionPostProcessing {
 
     bindFieldEvents(container, config);
 
+    // Wire up provider model selects
+    ["ollama", "openai", "groq", "anthropic"].forEach(provider => {
+      const select = container.querySelector<HTMLSelectElement>(`#${provider}-model-select`);
+      select?.addEventListener("change", (e) => {
+        config.llm_post_process.model = (e.target as HTMLSelectElement).value;
+      });
+
+      const refreshBtn = container.querySelector<HTMLButtonElement>(`.fetch-models-btn[data-provider='${provider}']`);
+      refreshBtn?.addEventListener("click", () => {
+        void fetchProviderModels(provider);
+      });
+    });
+
     // Open the Ollama download page in the user's browser. (Was a broken inline
     // `onclick="require(...)"` — `require` doesn't exist in the Vite/ESM bundle,
     // so the link silently threw. Use the shell plugin like the rest of the app.)
@@ -272,6 +372,11 @@ export class SectionPostProcessing {
       if (timeoutEl) timeoutEl.style.display = provider === "none" ? "none" : "";
       const cloudNote = container.querySelector<HTMLElement>("#llm-cloud-note");
       if (cloudNote) cloudNote.style.display = isCloud ? "" : "none";
+      
+      // Fetch models when provider is selected
+      if (provider !== "none") {
+        void fetchProviderModels(provider);
+      }
     };
 
     if (providerSelect) {
@@ -316,83 +421,5 @@ export class SectionPostProcessing {
       llmPresetSelect.value = ""; // reset to placeholder after applying
     });
 
-    container.querySelectorAll<HTMLButtonElement>(".fetch-models-btn").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const provider = btn.dataset.provider;
-        if (!provider) return;
-        
-        btn.disabled = true;
-        const originalText = btn.textContent;
-        btn.textContent = "Loading...";
-
-        try {
-          const datalist = container.querySelector<HTMLDataListElement>(`#${provider}-models`);
-          if (!datalist) return;
-
-          let urlStr = config.llm_post_process.api_url || "";
-          const apiKey = config.llm_post_process.api_key || "";
-
-          let endpoint = "";
-          let headers: Record<string, string> = {};
-          
-          if (provider === "ollama") {
-            if (!urlStr) urlStr = "http://127.0.0.1:11434/api/generate";
-            const url = new URL(urlStr);
-            endpoint = `${url.protocol}//${url.host}/api/tags`;
-          } else if (provider === "openai" || provider === "groq") {
-            if (!urlStr) {
-              urlStr = provider === "openai" 
-                ? "https://api.openai.com/v1/chat/completions" 
-                : "https://api.groq.com/openai/v1/chat/completions";
-            }
-            const url = new URL(urlStr);
-            // Replace /chat/completions with /models
-            let path = url.pathname;
-            if (path.endsWith("/chat/completions")) {
-              path = path.replace("/chat/completions", "/models");
-            } else if (!path.endsWith("/models")) {
-              path = path.endsWith("/") ? path + "models" : path + "/models";
-            }
-            endpoint = `${url.protocol}//${url.host}${path}`;
-            headers["Authorization"] = `Bearer ${apiKey}`;
-          } else if (provider === "anthropic") {
-            if (!urlStr) urlStr = "https://api.anthropic.com/v1/messages";
-            const url = new URL(urlStr);
-            endpoint = `${url.protocol}//${url.host}/v1/models`;
-            headers["x-api-key"] = apiKey;
-            headers["anthropic-version"] = "2023-06-01";
-          }
-
-          const res = await fetch(endpoint, { headers });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          
-          const data = await res.json();
-          let models: string[] = [];
-          
-          if (provider === "ollama") {
-            models = (data.models || []).map((m: any) => m.name);
-          } else if (provider === "openai" || provider === "groq" || provider === "anthropic") {
-            models = (data.data || []).map((m: any) => m.id);
-          }
-
-          datalist.innerHTML = "";
-          models.forEach(model => {
-            const option = document.createElement("option");
-            option.value = model;
-            datalist.appendChild(option);
-          });
-          
-          btn.textContent = `Loaded ${models.length}`;
-        } catch (e) {
-          console.error(`Failed to fetch models for ${provider}:`, e);
-          btn.textContent = "Error";
-        } finally {
-          setTimeout(() => {
-            btn.textContent = originalText;
-            btn.disabled = false;
-          }, 2000);
-        }
-      });
-    });
   }
 }

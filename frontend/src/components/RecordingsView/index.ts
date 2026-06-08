@@ -16,7 +16,7 @@ export class RecordingsView {
   private detail: RecordingDetail;
   private mergedDetail: MergedConversationDetail;
   private state: Store<RecordingsListState>;
-  private splitPercent = 50;
+  private splitPercent = 61;
   private detailVisible = true;
   private sidebarVisible = true;
   private unsub: (() => void) | null = null;
@@ -43,7 +43,7 @@ export class RecordingsView {
           <div id="rv-list-inner" style="height:100%; overflow:hidden;"></div>
           <div id="rv-bulk-bar" style="display:none;"></div>
         </div>
-        <div id="rv-split"></div>
+        <div class="rv-splitter" id="rv-split"></div>
         <div class="rv-detail" id="rv-detail">
           <div id="rv-single-detail" style="height: 100%;"></div>
           <ph-merged-conversation-detail id="rv-merged-detail" style="display:none; height: 100%;"></ph-merged-conversation-detail>
@@ -127,7 +127,7 @@ export class RecordingsView {
     const sidebarWidth = this.sidebarVisible ? "200px" : "0px";
 
     if (this.detailVisible) {
-      shell.style.gridTemplateColumns = `${sidebarWidth} ${this.splitPercent}% 8px minmax(0, 1fr)`;
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${this.splitPercent}% 3px minmax(0, 1fr)`;
     } else {
       shell.style.gridTemplateColumns = `${sidebarWidth} 1fr 0 0`;
     }

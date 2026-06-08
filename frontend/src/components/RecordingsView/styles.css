@@ -419,6 +419,23 @@ mark.search-hit {
   height: 100%;
   overflow: hidden;
 }
+.rv-splitter {
+  background: var(--border-subtle);
+  position: relative;
+  cursor: col-resize;
+  width: 3px;
+  height: 100%;
+  z-index: 100;
+  transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+.rv-splitter:hover {
+  background: var(--accent);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+.splitter-handle {
+  position: absolute;
+  inset: 0;
+}
 .rv-detail {
   height: 100%;
   overflow: hidden;
@@ -726,4 +743,11 @@ ph-sidebar {
 }
 .sidebar-icon {
   font-size: 14px;
+}
+.sidebar-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
 }

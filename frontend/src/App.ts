@@ -142,7 +142,7 @@ export class App {
         this.current = new RecordingsView(this.mainEl);
         break;
       case "settings":
-        this.current = new SettingsView(this.mainEl, () => this.router.go("recordings"));
+        this.current = new SettingsView(this.mainEl, () => this.router.go("recordings"), () => this.router.go("wizard"));
         break;
       case "doctor":
         this.current = new DoctorView(this.mainEl, () => this.router.go("recordings"));

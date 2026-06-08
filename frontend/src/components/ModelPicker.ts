@@ -156,7 +156,9 @@ export class ModelPickerElement extends LitElement {
   private async fetchOllamaModels() {
     this.fetchingOllamaModels = true;
     try {
-      const apiUrl = this.llmUrl || "http://127.0.0.1:11434/api/tags";
+      const configuredUrl = this.llmUrl || "http://127.0.0.1:11434/api/generate";
+      const url = new URL(configuredUrl);
+      const apiUrl = `${url.protocol}//${url.host}/api/tags`;
       const response = await fetch(apiUrl);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
