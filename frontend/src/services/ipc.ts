@@ -109,10 +109,6 @@ export async function updateMeetingName(meetingId: string, name: string | null):
   await tauriInvoke("update_meeting_name", { meetingId, name });
 }
 
-export async function checkMicrophoneAccess(): Promise<boolean> {
-  return await tauriInvoke("check_microphone_access");
-}
-
 export async function recordCancel(): Promise<void> {
   await tauriInvoke("record_cancel");
 }
