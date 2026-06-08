@@ -8,7 +8,56 @@ permissions:
   contents: write
 
 jobs:
+  # Gate: a tag push doesn't trigger ci.yml (it only runs on master/PRs), so the
+  # release must re-run the full test suite itself before building/publishing —
+  # otherwise we could ship an MSI from a commit that never passed CI.
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Create dummy frontendDist for Tauri macro
+        run: mkdir -p frontend/dist
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test (Rust)
+        run: cargo test --workspace -- --test-threads=1
+
+      - name: Install frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Test (frontend)
+        working-directory: frontend
+        run: pnpm exec vitest run
+
+      - name: Type-check (frontend)
+        working-directory: frontend
+        run: pnpm type-check
+
   release:
+    needs: test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

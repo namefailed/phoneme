@@ -38,7 +38,7 @@ toml.workspace = true
 reqwest.workspace = true
 which = "6"
 futures = "0.3"
-zip = "0.6"
+zip = { workspace = true }
 tauri-plugin-notification = "2.3.3"
 speakrs = "0.4.2"
 
