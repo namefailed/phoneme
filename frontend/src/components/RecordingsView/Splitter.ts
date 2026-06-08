@@ -64,7 +64,7 @@ export class SplitterElement extends LitElement {
           display: block;
           width: 8px;
           cursor: col-resize;
-          background: var(--bg-deep);
+          background: #444;
           position: relative;
           flex-shrink: 0;
           z-index: 100;
