@@ -327,63 +327,59 @@ impl TranscriptionProvider for OpenAiCompatProvider {
 
         if self.local_diarize {
             if let Some(whisper_segments) = parsed.segments {
-                let pyannote_segs = match crate::diarization::run_local_diarization(audio_path) {
-                    Ok(segs) => {
-                        tracing::info!("local diarization completed");
-                        segs
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "local diarization failed, falling back to raw whisper: {}",
-                            e
-                        );
-                        vec![]
-                    }
-                };
-
-                let mut unique_speakers = std::collections::HashSet::new();
-                for p_seg in &pyannote_segs {
-                    unique_speakers.insert(p_seg.speaker.clone());
-                }
-
-                if unique_speakers.len() <= 1 {
-                    return Ok(parsed.text);
-                }
-
-                let mut final_transcript = String::new();
-                let mut current_speaker = None;
-
-                for w_seg in whisper_segments {
-                    let midpoint = w_seg.start + (w_seg.end - w_seg.start) / 2.0;
-
-                    // Find which pyannote segment covers this midpoint
-                    let mut spk = 0;
-                    for p_seg in &pyannote_segs {
-                        if midpoint >= p_seg.start as f32 && midpoint <= p_seg.end as f32 {
-                            if let Ok(s) = p_seg.speaker.parse::<u8>() {
-                                spk = s;
-                            }
-                            break;
-                        }
-                    }
-
-                    if current_speaker != Some(spk) {
-                        if !final_transcript.is_empty() {
-                            final_transcript.push_str("\n\n");
-                        }
-                        final_transcript.push_str(&format!("[Speaker {}]: ", spk));
-                        current_speaker = Some(spk);
-                    } else {
-                        final_transcript.push(' ');
-                    }
-                    final_transcript.push_str(w_seg.text.trim());
-                }
-
-                return Ok(final_transcript);
+                let segs = whisper_segments
+                    .into_iter()
+                    .map(|w| crate::diarization::TextSegment {
+                        start: w.start as f64,
+                        end: w.end as f64,
+                        text: w.text,
+                    })
+                    .collect();
+                return Ok(diarize_transcript(audio_path, segs, parsed.text).await);
             }
         }
 
         Ok(parsed.text)
+    }
+}
+
+/// Run local diarization for a transcript and return the speaker-labeled text,
+/// falling back to `plain_text` when diarization fails or finds ≤1 speaker.
+///
+/// The CPU-bound model inference is run on a blocking thread so it never stalls
+/// the async runtime. Shared by the local whisper-server and native-whisper
+/// providers so they label transcripts identically.
+pub(crate) async fn diarize_transcript(
+    audio_path: &std::path::Path,
+    segments: Vec<crate::diarization::TextSegment>,
+    plain_text: String,
+) -> String {
+    let path = audio_path.to_path_buf();
+    let speakers =
+        match tokio::task::spawn_blocking(move || crate::diarization::run_local_diarization(&path))
+            .await
+        {
+            Ok(Ok(s)) => {
+                tracing::info!(turns = s.len(), "local diarization completed");
+                s
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("local diarization failed, falling back to raw whisper: {e}");
+                return plain_text;
+            }
+            Err(e) => {
+                tracing::warn!("local diarization task panicked: {e}");
+                return plain_text;
+            }
+        };
+
+    let (labeled, num_speakers) = crate::diarization::assign_speakers(&segments, &speakers);
+    // Only present speaker labels when more than one speaker was actually found;
+    // a single-speaker recording reads better as plain prose.
+    if num_speakers <= 1 {
+        plain_text
+    } else {
+        labeled
     }
 }
 
