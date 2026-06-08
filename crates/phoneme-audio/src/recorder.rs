@@ -83,9 +83,16 @@ enum RecorderCommand {
     Cancel,
     Pause,
     Resume,
-    /// Reply with a clone of the samples captured so far, without disturbing
-    /// capture. Used by the streaming preview to transcribe audio mid-recording.
-    Snapshot(tokio::sync::oneshot::Sender<Vec<i16>>),
+    /// Reply with `(total_len, samples)` where `samples` is a clone of at most
+    /// the last `max_tail` captured samples (or all of them when `max_tail == 0`
+    /// or exceeds the buffer), and `total_len` is the full captured length so
+    /// far. Capture is never disturbed. Used by the streaming preview to
+    /// transcribe a bounded trailing window without copying the whole (growing)
+    /// buffer every tick.
+    Snapshot {
+        max_tail: usize,
+        reply: tokio::sync::oneshot::Sender<(usize, Vec<i16>)>,
+    },
 }
 
 struct TaskOutput {
@@ -158,12 +165,20 @@ impl Recorder {
                             Some(RecorderCommand::Cancel) => { cancelled = true; break; }
                             Some(RecorderCommand::Pause) => { is_paused = true; }
                             Some(RecorderCommand::Resume) => { is_paused = false; detector.reset(); }
-                            Some(RecorderCommand::Snapshot(reply)) => {
-                                // Hand back a clone of what we've captured so
-                                // far. Capture continues uninterrupted; if the
-                                // requester has already gone away the send fails
-                                // harmlessly.
-                                let _ = reply.send(samples.clone());
+                            Some(RecorderCommand::Snapshot { max_tail, reply }) => {
+                                // Hand back the full captured length plus a clone
+                                // of at most the last `max_tail` samples (all when
+                                // 0). Cloning only the tail keeps the per-tick cost
+                                // constant regardless of recording length. Capture
+                                // continues uninterrupted; a dropped receiver fails
+                                // the send harmlessly.
+                                let total = samples.len();
+                                let start = if max_tail == 0 || max_tail >= total {
+                                    0
+                                } else {
+                                    total - max_tail
+                                };
+                                let _ = reply.send((total, samples[start..].to_vec()));
                             }
                             None => break,
                         }
@@ -299,9 +314,23 @@ impl Recorder {
     /// capture task answers from its in-memory buffer, so calling this does not
     /// pause, stop, or otherwise change the recording in any way.
     pub async fn snapshot(&self) -> Result<Vec<i16>> {
+        // `max_tail = 0` => the full buffer.
+        let (_total, samples) = self.snapshot_tail(0).await?;
+        Ok(samples)
+    }
+
+    /// Like [`snapshot`], but clones at most the last `max_tail` samples and also
+    /// returns the full captured length so far as `(total_len, tail_samples)`.
+    /// The streaming preview uses this to transcribe a bounded trailing window
+    /// (constant per-tick cost) while still knowing how much total audio exists
+    /// so it can throttle on newly-accumulated samples.
+    pub async fn snapshot_tail(&self, max_tail: usize) -> Result<(usize, Vec<i16>)> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.cmd_tx
-            .send(RecorderCommand::Snapshot(tx))
+            .send(RecorderCommand::Snapshot {
+                max_tail,
+                reply: tx,
+            })
             .await
             .map_err(|_| Error::Internal("recorder task is gone".into()))?;
         rx.await

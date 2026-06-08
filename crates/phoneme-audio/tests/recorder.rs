@@ -324,6 +324,52 @@ async fn snapshot_returns_captured_samples_without_stopping() {
 }
 
 #[tokio::test]
+async fn snapshot_tail_bounds_clone_and_reports_total() {
+    // The streaming preview relies on `snapshot_tail` to clone only the last
+    // `max_tail` samples (constant per-tick cost) while still learning the full
+    // captured length so it can throttle on newly-accumulated audio.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("tail.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 30_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 10_000, // never auto-stop during this test
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+    let settle = || tokio::time::sleep(Duration::from_millis(100));
+
+    // Capture ~24000 samples (1.5s) total.
+    sink.push(loud_block(24_000)).await.unwrap();
+    settle().await;
+
+    // Ask for only the last 8000 samples.
+    let (total, tail) = recorder.snapshot_tail(8_000).await.unwrap();
+    assert!(
+        (total as i64 - 24_000).abs() < 400,
+        "total should reflect the full ~24000 captured, got {total}"
+    );
+    assert_eq!(
+        tail.len(),
+        8_000,
+        "tail must be bounded to max_tail when the buffer is larger"
+    );
+
+    // max_tail = 0 means "the whole buffer".
+    let (total_all, all) = recorder.snapshot_tail(0).await.unwrap();
+    assert_eq!(all.len(), total_all, "max_tail=0 returns the full buffer");
+    assert!(all.len() >= tail.len());
+
+    // A max_tail larger than the buffer returns everything (never panics).
+    let (_t, big) = recorder.snapshot_tail(10_000_000).await.unwrap();
+    assert_eq!(big.len(), total_all);
+
+    sink.close();
+    let _ = recorder.wait_for_finalize(&wav_path).await.unwrap();
+}
+
+#[tokio::test]
 async fn config_is_canonical_format() {
     let (source, _sink) = make_synthetic();
     let cfg = RecorderConfig::default();
