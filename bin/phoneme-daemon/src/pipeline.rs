@@ -92,13 +92,25 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {
         if rec.in_place && !transcript.is_empty() {
-            tracing::info!(
-                "In-place transcription enabled, typing transcript for {}",
-                id.as_str()
-            );
-            let mut enigo = enigo::Enigo::new(&enigo::Settings::default()).unwrap();
-            use enigo::Keyboard;
-            let _ = enigo.text(&transcript);
+            tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
+            // Surface failures instead of `unwrap()`-panicking the worker or
+            // silently dropping the typing result (the previous behavior, which
+            // made a failed in-place dictation look like nothing happened with
+            // no clue why). enigo can fail to initialize (e.g. no interactive
+            // input session) or to send input; we log either case at error
+            // level so the cause is visible in the daemon log. Typing is
+            // best-effort — a failure never fails the recording.
+            match enigo::Enigo::new(&enigo::Settings::default()) {
+                Ok(mut enigo) => {
+                    use enigo::Keyboard;
+                    if let Err(e) = enigo.text(&transcript) {
+                        tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to type transcript");
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to initialize input simulator");
+                }
+            }
         }
     }
 
