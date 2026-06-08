@@ -82,7 +82,7 @@ export class NotesEditor {
 
     const theme = EditorView.theme({
       "&": {
-        background: "var(--bg-input, var(--bg-subtle))",
+        background: "var(--bg-surface)",
         color: "var(--fg-default)",
         height: "auto",
         minHeight: "72px",

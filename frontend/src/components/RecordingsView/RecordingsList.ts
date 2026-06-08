@@ -326,7 +326,7 @@ export class RecordingsListElement extends LitElement {
     this.requestUpdate();
   }
 
-  private startResize(e: MouseEvent, colIdx: number, checkboxColWidth: string) {
+  private startResize(e: MouseEvent, colIdx: number) {
     e.preventDefault();
     e.stopPropagation();
 
@@ -419,7 +419,7 @@ export class RecordingsListElement extends LitElement {
     const headSpans = visibleCols.map((c, i) => html`
       <span class="col-head" data-col="${i + 1}">
         ${colLabels[c] || c}
-        ${i < visibleCols.length - 1 ? html`<div class="resizer" data-col="${i + 1}" @mousedown=${(e: MouseEvent) => this.startResize(e, i, checkboxColWidth)}></div>` : nothing}
+        ${i < visibleCols.length - 1 ? html`<div class="resizer" data-col="${i + 1}" @mousedown=${(e: MouseEvent) => this.startResize(e, i)}></div>` : nothing}
       </span>
     `);
 
@@ -543,10 +543,6 @@ export class RecordingsListElement extends LitElement {
             class="row-cb"
             .checked=${multiChecked}
             aria-label="Select recording from ${new Date(r.started_at).toLocaleString()}"
-            @change=${(e: Event) => {
-              // The click handler manages toggleId/range, but input change needs to be caught or default behavior might conflict.
-              // Actually row click handles it.
-            }}
           />
         </span>
         ${cells}

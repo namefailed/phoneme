@@ -20,6 +20,7 @@ export class RecordingsView {
   private detailVisible = true;
   private sidebarVisible = true;
   private unsub: (() => void) | null = null;
+  private splitter: Splitter;
   private keydownHandler: (e: KeyboardEvent) => void;
 
   /** Current multi-selection. Empty when no checkboxes are checked. */
@@ -68,7 +69,7 @@ export class RecordingsView {
     this.mergedDetail.onRefresh = () => {
       void this.refresh();
     };
-    new Splitter(splitRoot, this.splitPercent, (pct) => {
+    this.splitter = new Splitter(splitRoot, this.splitPercent, (pct) => {
       this.splitPercent = pct;
       this.applyLayout();
     });
@@ -110,6 +111,7 @@ export class RecordingsView {
       this.unsub();
       this.unsub = null;
     }
+    this.splitter.dispose();
     document.removeEventListener("keydown", this.keydownHandler);
   }
 

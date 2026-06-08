@@ -118,7 +118,7 @@ export class SectionPostProcessing {
           Automatically edit, reformat, and clean up your transcript using a local or remote LLM.
         </p>
 
-        <div style="background-color: var(--bg-inset); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 16px;">
+        <div style="background-color: var(--bg-deep); padding: 12px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 16px;">
           <strong style="display: block; font-size: 13px; margin-bottom: 6px; color: var(--fg-default);">How to use this for free (Offline):</strong>
           <ol style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--fg-muted); line-height: 1.5;">
             <li>Download and install <a href="#" id="ollama-download-link" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>

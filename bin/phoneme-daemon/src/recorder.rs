@@ -987,8 +987,8 @@ impl DaemonRecorder {
 
         // Stop every recorder at once so one track doesn't keep capturing while
         // the other is draining (which skews sample counts vs wall-clock time).
-        let stop_results = futures::future::join_all(meeting.tracks.into_iter().map(
-            |handle| async move {
+        let stop_results =
+            futures::future::join_all(meeting.tracks.into_iter().map(|handle| async move {
                 let MeetingTrackHandle {
                     id,
                     audio_path,
@@ -1008,9 +1008,8 @@ impl DaemonRecorder {
                     track_late_by_ms,
                     stop_result,
                 )
-            },
-        ))
-        .await;
+            }))
+            .await;
 
         struct StoppedTrack {
             id: RecordingId,
@@ -1027,9 +1026,8 @@ impl DaemonRecorder {
         for (id, audio_path, started_at, track, track_late_by_ms, stop_result) in stop_results {
             match stop_result {
                 Ok((raw_samples, _duration_ms, first_non_silent_at)) => {
-                    let first_content_from_wall_ms = first_non_silent_at.map(|t| {
-                        t.duration_since(wall_started).as_millis() as i64
-                    });
+                    let first_content_from_wall_ms = first_non_silent_at
+                        .map(|t| t.duration_since(wall_started).as_millis() as i64);
                     stopped.push(StoppedTrack {
                         id,
                         audio_path,
@@ -1066,14 +1064,16 @@ impl DaemonRecorder {
             .collect();
         let aligned = align_meeting_tracks(&align_inputs, target_duration_ms, sample_rate);
 
-        let mut track_data: Vec<(
-            RecordingId,
-            std::path::PathBuf,
-            chrono::DateTime<Local>,
-            MeetingTrack,
-            Vec<i16>,
-            i64,
-        )> = Vec::new();
+        struct FinalizedTrack {
+            id: RecordingId,
+            audio_path: std::path::PathBuf,
+            started_at: chrono::DateTime<Local>,
+            track: MeetingTrack,
+            samples: Vec<i16>,
+            duration_ms: i64,
+        }
+
+        let mut track_data: Vec<FinalizedTrack> = Vec::new();
 
         for (meta, aligned_track) in stopped.into_iter().zip(aligned) {
             let capture_window_ms = (target_duration_ms - meta.track_late_by_ms).max(0);
@@ -1093,17 +1093,25 @@ impl DaemonRecorder {
                 "aligned meeting track to wall-clock timeline"
             );
 
-            track_data.push((
-                meta.id,
-                meta.audio_path,
-                meta.started_at,
-                meta.track,
-                aligned_track.samples,
-                target_duration_ms,
-            ));
+            track_data.push(FinalizedTrack {
+                id: meta.id,
+                audio_path: meta.audio_path,
+                started_at: meta.started_at,
+                track: meta.track,
+                samples: aligned_track.samples,
+                duration_ms: target_duration_ms,
+            });
         }
 
-        for (id, audio_path, started_at, track, samples, final_duration_ms) in track_data {
+        for FinalizedTrack {
+            id,
+            audio_path,
+            started_at,
+            track,
+            samples,
+            duration_ms: final_duration_ms,
+        } in track_data
+        {
             // Write the timeline-aligned samples to WAV.
             let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
             if let Err(e) = phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg) {

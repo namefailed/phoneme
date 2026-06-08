@@ -108,12 +108,16 @@ fn normalize_response(text: &str) -> String {
         .unwrap()
         .replace_all(text, "\n\n");
 
-    // Then, collapse single newlines that break sentences
-    // We do this by replacing newlines followed by lowercase letters with a space
-    // This handles cases where LLMs put newlines in the middle of sentences
-    let sentence_normalized = regex::Regex::new(r"\n([a-z])")
+    // Then, collapse a *single* newline that merely wraps a sentence. The
+    // newline must be preceded by a non-newline, non-sentence-ending character
+    // and followed by a lowercase letter. Requiring a non-newline char before
+    // the newline leaves paragraph breaks (`\n\n`) intact (the previous
+    // `\n([a-z])` ate the second newline of a pair); excluding `.?!` preserves a
+    // newline that follows sentence-ending punctuation; the lowercase look-ahead
+    // preserves a newline before a capitalized word.
+    let sentence_normalized = regex::Regex::new(r"([^\n.!?])\n([a-z])")
         .unwrap()
-        .replace_all(&collapsed, " $1");
+        .replace_all(&collapsed, "${1} ${2}");
 
     // Trim leading/trailing whitespace
     sentence_normalized.trim().to_string()
