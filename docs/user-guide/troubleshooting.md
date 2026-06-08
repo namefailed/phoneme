@@ -1,5 +1,7 @@
 # 🛠️ Troubleshooting
 
+> See also the [FAQ](faq.md) for quick answers. Full path reference: [Storage, Paths & Retention](storage_paths_and_retention.md).
+
 ## 🔌 "Daemon not reachable" from the CLI
 
 ```

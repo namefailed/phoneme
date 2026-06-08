@@ -63,3 +63,6 @@ AGENTS.md
 # `packages:` field makes `pnpm install` fail on CI ("packages field missing"),
 # so this locally-regenerated stub must never be committed.
 frontend/pnpm-workspace.yaml
+
+# Local git worktrees (parallel branches)
+.worktrees/

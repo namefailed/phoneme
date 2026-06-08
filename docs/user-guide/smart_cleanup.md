@@ -24,7 +24,7 @@ flowchart TD
 
 In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. You can configure this under **Settings → Smart Cleanup (AI)**.
 
-<!-- SCREENSHOT PLACEHOLDER: Settings -> Smart Cleanup showing the provider dropdown -->
+![Smart Cleanup settings](../screenshots/settings-post-processing.png)
 
 ### 🏠 Local AI (Free, Offline, Private)
 

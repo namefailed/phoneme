@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Phoneme! This document outlines t
 
 > For a contributor's deep dive — the async task topology, the audio path, the
 > SQLite/FTS5 catalog, and the IPC wire protocol — see
-> [`docs/INTERNAL.md`](docs/INTERNAL.md).
+> [`docs/developer-guide/internals.md`](docs/developer-guide/internals.md).
 
 Phoneme is designed as a local-first voice transcription suite for Windows. The project is split into three main components within a single Cargo workspace:
 
@@ -103,7 +103,7 @@ cargo run -p phoneme-daemon -- --foreground &
 phoneme doctor
 ```
 
-Consult `docs/smoke-test.md` for a full end-to-end verification checklist.
+Consult [docs/smoke-test.md](docs/smoke-test.md) for a full end-to-end verification checklist. Full doc index: [docs/README.md](docs/README.md).
 
 ## Submitting Changes
 
