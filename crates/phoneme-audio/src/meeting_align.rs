@@ -51,9 +51,11 @@ mod tests {
         assert!(aligned[..ms_to_samples(10_000, sample_rate)]
             .iter()
             .all(|&s| s == 0));
-        assert!(aligned[ms_to_samples(10_000, sample_rate)..ms_to_samples(30_000, sample_rate)]
-            .iter()
-            .all(|&s| s == 500));
+        assert!(
+            aligned[ms_to_samples(10_000, sample_rate)..ms_to_samples(30_000, sample_rate)]
+                .iter()
+                .all(|&s| s == 500)
+        );
         assert!(aligned[ms_to_samples(30_000, sample_rate)..]
             .iter()
             .all(|&s| s == 0));
