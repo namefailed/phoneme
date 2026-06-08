@@ -156,6 +156,10 @@ impl Recorder {
             let mut is_paused = false;
             let mut should_drain = false;
             let mut first_non_silent_at: Option<Instant> = None;
+            // Set in the Pause/Resume arms; forwarded to the source after the
+            // select! (can't borrow `source` mutably inside it — it's already
+            // borrowed by `next_block`).
+            let mut pending_pause: Option<bool> = None;
 
             loop {
                 tokio::select! {
@@ -163,8 +167,8 @@ impl Recorder {
                         match cmd {
                             Some(RecorderCommand::Stop) => { should_drain = true; break; }
                             Some(RecorderCommand::Cancel) => { cancelled = true; break; }
-                            Some(RecorderCommand::Pause) => { is_paused = true; }
-                            Some(RecorderCommand::Resume) => { is_paused = false; detector.reset(); }
+                            Some(RecorderCommand::Pause) => { is_paused = true; pending_pause = Some(true); }
+                            Some(RecorderCommand::Resume) => { is_paused = false; detector.reset(); pending_pause = Some(false); }
                             Some(RecorderCommand::Snapshot { max_tail, reply }) => {
                                 // Hand back the full captured length plus a clone
                                 // of at most the last `max_tail` samples (all when
@@ -213,6 +217,14 @@ impl Recorder {
                             None => break,
                         }
                     }
+                }
+
+                // Forward a pause/resume to the source *after* the select! so we
+                // aren't holding the `next_block` borrow. Loopback uses resume to
+                // re-baseline its gap-fill clock so a paused span isn't filled
+                // with silence; dense sources (mic) no-op.
+                if let Some(paused) = pending_pause.take() {
+                    source.set_paused(paused).await;
                 }
             }
 
