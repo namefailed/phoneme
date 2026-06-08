@@ -892,6 +892,56 @@ mod tests {
     }
 
     #[test]
+    fn resolved_config_path_honors_env_override() {
+        // Save/restore so this doesn't leak into other tests in the binary.
+        let prev = std::env::var("PHONEME_CONFIG").ok();
+
+        std::env::set_var("PHONEME_CONFIG", "/explicit/override.toml");
+        assert_eq!(
+            resolved_config_path(),
+            Some(PathBuf::from("/explicit/override.toml")),
+            "an explicit PHONEME_CONFIG must win"
+        );
+
+        // An empty override is ignored — fall back to the per-user default.
+        std::env::set_var("PHONEME_CONFIG", "");
+        assert_eq!(
+            resolved_config_path(),
+            default_config_path(),
+            "an empty PHONEME_CONFIG must fall back to the default path"
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("PHONEME_CONFIG", v),
+            None => std::env::remove_var("PHONEME_CONFIG"),
+        }
+    }
+
+    #[test]
+    fn load_resolved_reads_the_env_override_file() {
+        let prev = std::env::var("PHONEME_CONFIG").ok();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("custom.toml");
+        // A complete, valid config with one easily-checked field overridden.
+        let mut base = Config::default();
+        base.recording.audio_dir = "~/from-override".into();
+        std::fs::write(&path, toml::to_string_pretty(&base).unwrap()).unwrap();
+
+        std::env::set_var("PHONEME_CONFIG", &path);
+        let cfg = Config::load_resolved().expect("loads the override file");
+        assert!(
+            cfg.recording.audio_dir.ends_with("from-override"),
+            "load_resolved must read the PHONEME_CONFIG file, got {:?}",
+            cfg.recording.audio_dir
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("PHONEME_CONFIG", v),
+            None => std::env::remove_var("PHONEME_CONFIG"),
+        }
+    }
+
+    #[test]
     fn capture_source_round_trips_through_toml() {
         // Default (Microphone) round-trips.
         let cfg = Config::default();
