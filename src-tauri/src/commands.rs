@@ -786,8 +786,33 @@ pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, String> {
     Ok(downloaded)
 }
 
+/// True iff `child`, once canonicalized, is `root` itself or lives under it.
+/// Both paths are canonicalized so `..` traversal and symlinks can't escape the
+/// allowed root. Returns `false` if either path can't be canonicalized (e.g.
+/// doesn't exist) — fail closed.
+fn path_within(child: &std::path::Path, root: &std::path::Path) -> bool {
+    match (
+        std::fs::canonicalize(child),
+        std::fs::canonicalize(root),
+    ) {
+        (Ok(c), Ok(r)) => c.starts_with(&r),
+        _ => false,
+    }
+}
+
 #[tauri::command]
 pub fn reveal_file(path: String) -> Result<(), String> {
+    // Security: the renderer can pass any string here and we hand it to
+    // `explorer /select`. Restrict the target to the configured audio directory
+    // (the only thing the UI ever reveals — a recording's WAV or the folder
+    // itself) so a compromised WebView can't pop Explorer onto arbitrary paths.
+    let cfg = config_io::read().map_err(|e| format!("config error: {e}"))?;
+    let audio_dir = std::path::PathBuf::from(&cfg.recording.audio_dir);
+    let requested = std::path::PathBuf::from(&path);
+    if requested != audio_dir && !path_within(&requested, &audio_dir) {
+        return Err("path not permitted".into());
+    }
+
     #[cfg(target_os = "windows")]
     {
         let path = path.replace("/", "\\");

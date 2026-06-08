@@ -262,12 +262,23 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     });
                 }
                 if !keep_audio {
-                    // Best-effort — the file may already be gone. Log, don't fail.
-                    if let Err(e) = tokio::fs::remove_file(&r.audio_path).await {
+                    // Defense-in-depth: only ever unlink files that live under
+                    // our own audio directory. The path comes from the catalog
+                    // (which we control), but guarding here means a poisoned or
+                    // hand-edited row can't turn a delete into "rm any file".
+                    if audio_path_is_ours(&r.audio_path, &state.paths.audio_dir) {
+                        // Best-effort — the file may already be gone. Log, don't fail.
+                        if let Err(e) = tokio::fs::remove_file(&r.audio_path).await {
+                            tracing::warn!(
+                                path = %r.audio_path,
+                                error = %e,
+                                "audio file removal failed"
+                            );
+                        }
+                    } else {
                         tracing::warn!(
                             path = %r.audio_path,
-                            error = %e,
-                            "audio file removal failed"
+                            "refusing to delete audio file outside the audio directory"
                         );
                     }
                 }
@@ -710,6 +721,22 @@ fn exceeds_import_size_cap(len: u64) -> bool {
     len > MAX_IMPORT_BYTES
 }
 
+/// Returns `true` if `audio_path` is a normal path located under `audio_dir`.
+///
+/// The path comes from our own catalog, so this is defense-in-depth: we reject
+/// any `..` component (which could climb out of the audio directory) and require
+/// the rest to be prefixed by `audio_dir` component-wise. Kept purely lexical so
+/// it is unit-testable without touching the filesystem and never deletes the
+/// wrong file just because canonicalization of an already-removed file failed.
+fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
+    use std::path::Component;
+    let p = std::path::Path::new(audio_path);
+    if p.components().any(|c| matches!(c, Component::ParentDir)) {
+        return false;
+    }
+    p.starts_with(audio_dir)
+}
+
 /// Import an existing audio file: decode it to a canonical WAV under the audio
 /// dir, insert a catalog row, and enqueue it for the normal transcription
 /// pipeline. Mirrors `DaemonRecorder::stop` (catalog row at `Transcribing` +
@@ -903,5 +930,28 @@ mod tests {
         assert!(exceeds_import_size_cap(MAX_IMPORT_BYTES + 1));
         // A clearly-oversized file (3 GiB) is rejected.
         assert!(exceeds_import_size_cap(3 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn audio_path_guard_only_accepts_paths_under_audio_dir() {
+        let dir = std::path::Path::new("/data/phoneme/audio");
+        // A normal recording path under the audio dir is accepted.
+        assert!(audio_path_is_ours(
+            "/data/phoneme/audio/2026-06-08/rec.wav",
+            dir
+        ));
+        // The audio dir itself is trivially "under" itself.
+        assert!(audio_path_is_ours("/data/phoneme/audio", dir));
+        // Paths outside the audio dir are rejected.
+        assert!(!audio_path_is_ours("/etc/passwd", dir));
+        // A sibling that merely shares a name prefix is rejected (component-wise
+        // starts_with, not a string prefix).
+        assert!(!audio_path_is_ours("/data/phoneme/audio-evil/x.wav", dir));
+        // `..` traversal that would climb out is rejected even if it textually
+        // begins under the audio dir.
+        assert!(!audio_path_is_ours(
+            "/data/phoneme/audio/../../etc/passwd",
+            dir
+        ));
     }
 }
