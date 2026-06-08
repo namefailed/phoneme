@@ -106,13 +106,12 @@ fn align_one_track(
     let missing_capture = deficit > ms_to_samples(SPARSE_DEFICIT_MS, sample_rate);
     // Sub-threshold noise at the buffer head must not disqualify sparse loopback.
     let content_at_buffer_start = skip < ms_to_samples(200, sample_rate);
-    let content_late_on_timeline = first_content_from_wall_ms
-        .is_some_and(|t| t > track_late_by_ms + SPARSE_DEFICIT_MS);
+    let content_late_on_timeline =
+        first_content_from_wall_ms.is_some_and(|t| t > track_late_by_ms + SPARSE_DEFICIT_MS);
     // Only loopback (non-dense) capture is eligible for sparse relocation; the
     // microphone is continuous and always stays at its recorder start, so it can
     // never be mis-detected as sparse no matter how it dropped blocks.
-    let sparse =
-        !dense && missing_capture && content_at_buffer_start && content_late_on_timeline;
+    let sparse = !dense && missing_capture && content_at_buffer_start && content_late_on_timeline;
 
     // Dense capture (mic): buffer spans the capture window, place at recorder start.
     // Sparse capture (loopback): only the audible segment arrived — place at the
@@ -225,7 +224,8 @@ mod tests {
         assert!(sys[..ms_to_samples(intro_ms, sample_rate)]
             .iter()
             .all(|&s| s == 0));
-        assert!(sys[ms_to_samples(intro_ms, sample_rate)..ms_to_samples(intro_ms + video_ms, sample_rate)]
+        assert!(sys[ms_to_samples(intro_ms, sample_rate)
+            ..ms_to_samples(intro_ms + video_ms, sample_rate)]
             .iter()
             .all(|&s| s == 700));
     }
@@ -260,7 +260,10 @@ mod tests {
 
         let sys = &aligned[1].samples;
         let video_start = ms_to_samples(video_start_ms, sample_rate);
-        assert!(sys[..video_start].iter().all(|&s| s == 0), "leading silence before video");
+        assert!(
+            sys[..video_start].iter().all(|&s| s == 0),
+            "leading silence before video"
+        );
         assert!(
             sys[video_start..video_start + 131_050]
                 .iter()
@@ -286,9 +289,11 @@ mod tests {
         assert!(aligned[..ms_to_samples(30_000, sample_rate)]
             .iter()
             .all(|&s| s == 0));
-        assert!(aligned[ms_to_samples(30_000, sample_rate)..ms_to_samples(60_000, sample_rate)]
-            .iter()
-            .all(|&s| s == 700));
+        assert!(
+            aligned[ms_to_samples(30_000, sample_rate)..ms_to_samples(60_000, sample_rate)]
+                .iter()
+                .all(|&s| s == 700)
+        );
         assert!(aligned[ms_to_samples(60_000, sample_rate)..]
             .iter()
             .all(|&s| s == 0));
@@ -324,12 +329,13 @@ mod tests {
             "leading silence before video"
         );
         assert!(
-            sys[video_start..video_start + 800]
-                .iter()
-                .any(|&s| s == 700),
+            sys[video_start..video_start + 800].contains(&700),
             "video audio at wall-clock start"
         );
-        let loud_before = sys[..video_start].iter().filter(|&&s| s.abs() > 100).count();
+        let loud_before = sys[..video_start]
+            .iter()
+            .filter(|&&s| s.abs() > 100)
+            .count();
         assert_eq!(loud_before, 0, "no audio before video start");
     }
 
@@ -399,9 +405,11 @@ mod tests {
         let mic_out = &aligned[0].samples;
         // Content sits at the recorder start (~t=0, offset by track_late=2ms),
         // not relocated to the 10s first-content instant.
-        assert!(mic_out[ms_to_samples(1_000, sample_rate)..ms_to_samples(5_000, sample_rate)]
-            .iter()
-            .all(|&s| s == 600));
+        assert!(
+            mic_out[ms_to_samples(1_000, sample_rate)..ms_to_samples(5_000, sample_rate)]
+                .iter()
+                .all(|&s| s == 600)
+        );
         assert!(mic_out[ms_to_samples(6_000, sample_rate)..]
             .iter()
             .all(|&s| s == 0));

@@ -29,16 +29,21 @@ impl<T: DeserializeOwned> Decoder for JsonLineCodec<T> {
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> io::Result<Option<T>> {
-        if let Some(pos) = src.iter().position(|b| *b == b'\n') {
+        // Scan for complete lines, skipping empty ones. Returning `Ok(None)` on
+        // a blank line (rather than continuing) would consume the newline but
+        // leave any already-buffered frame *after* it unparsed until the next
+        // read — stalling a request/response that arrives in the same buffer.
+        loop {
+            let Some(pos) = src.iter().position(|b| *b == b'\n') else {
+                return Ok(None);
+            };
             let line = src.split_to(pos);
             src.advance(1); // consume the newline
             if line.is_empty() {
-                return Ok(None);
+                continue; // blank line: keep scanning for the next frame
             }
             let parsed = serde_json::from_slice::<T>(&line).map_err(io::Error::other)?;
-            Ok(Some(parsed))
-        } else {
-            Ok(None)
+            return Ok(Some(parsed));
         }
     }
 }
