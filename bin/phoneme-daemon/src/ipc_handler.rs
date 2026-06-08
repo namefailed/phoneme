@@ -205,10 +205,22 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::SemanticSearch { query, limit } => {
+            // Cosine floor below which a match is treated as noise. Short
+            // queries (a single word like "memory") legitimately score lower
+            // against a recording's averaged embedding, so 0.2 was dropping
+            // genuinely-related hits. 0.1 keeps those loosely-related matches
+            // while still excluding the near-orthogonal (~0) noise. The deeper
+            // recall win — per-chunk embeddings so a phrase inside a long
+            // recording ranks on its own — is tracked as a follow-up.
+            const SEMANTIC_MIN_SCORE: f32 = 0.1;
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {
                 match embedder.embed(&query) {
-                    Ok(query_vec) => match state.catalog.semantic_search(&query_vec, limit).await {
+                    Ok(query_vec) => match state
+                        .catalog
+                        .semantic_search(&query_vec, limit, SEMANTIC_MIN_SCORE)
+                        .await
+                    {
                         Ok(results) => {
                             let mut full_results = Vec::new();
                             for (id, score) in results {

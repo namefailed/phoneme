@@ -895,3 +895,68 @@ async fn list_by_meeting_isolates_distinct_sessions() {
     assert!(a.iter().all(|r| r.meeting_id.as_deref() == Some("sess-A")));
     assert!(b.iter().all(|r| r.meeting_id.as_deref() == Some("sess-B")));
 }
+
+#[tokio::test]
+async fn semantic_search_thresholds_dim_checks_and_dedupes_meetings() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // Insert a recording (optionally part of a meeting) plus its embedding.
+    async fn add(catalog: &Catalog, id: &str, meeting: Option<&str>, vec: &[f32]) -> RecordingId {
+        let rid = RecordingId::parse(id).unwrap();
+        let mut rec = sample_recording(rid.clone());
+        rec.meeting_id = meeting.map(|m| m.to_string());
+        catalog.insert(&rec).await.unwrap();
+        catalog.upsert_embedding(&rid, vec).await.unwrap();
+        rid
+    }
+
+    // Query along the x-axis. `cosine_similarity` is a bare dot product (inputs
+    // are assumed L2-normalized in production), which is fine for these fixtures.
+    let q = [1.0f32, 0.0, 0.0];
+    let _standalone = add(&catalog, "20260519T100000001", None, &[0.99, 0.1, 0.0]).await; // ~0.99
+                                                                                          // Meeting: two tracks share a meeting_id; only the best should survive.
+    let _mic = add(
+        &catalog,
+        "20260519T100000002",
+        Some("meeting-x"),
+        &[0.90, 0.2, 0.0],
+    )
+    .await; // 0.90
+    let sys = add(
+        &catalog,
+        "20260519T100000003",
+        Some("meeting-x"),
+        &[0.95, 0.05, 0.0],
+    )
+    .await; // 0.95
+            // Orthogonal → below threshold, must be dropped.
+    let _ortho = add(&catalog, "20260519T100000004", None, &[0.0, 0.0, 1.0]).await; // 0.0
+                                                                                    // Wrong dimension → skipped, never panics.
+    let _baddim = add(&catalog, "20260519T100000005", None, &[1.0, 0.0]).await;
+
+    let results = catalog.semantic_search(&q, 10, 0.2).await.unwrap();
+
+    // Orthogonal (below floor) + wrong-dim excluded; meeting collapses to one.
+    assert_eq!(results.len(), 2, "results: {results:?}");
+
+    let ids: Vec<String> = results
+        .iter()
+        .map(|(id, _)| id.as_str().to_string())
+        .collect();
+    let meeting_hits = ids
+        .iter()
+        .filter(|i| i.as_str() == "20260519T100000002" || i.as_str() == "20260519T100000003")
+        .count();
+    assert_eq!(
+        meeting_hits, 1,
+        "meeting tracks must dedupe to a single result"
+    );
+    assert!(
+        ids.contains(&sys.as_str().to_string()),
+        "the better-scoring meeting track should win"
+    );
+    assert!(
+        results[0].1 >= results[1].1,
+        "results must be sorted descending"
+    );
+}
