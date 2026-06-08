@@ -205,10 +205,19 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::SemanticSearch { query, limit } => {
+            // Cosine floor below which a match is treated as noise. all-MiniLM
+            // related text typically scores ~0.3–0.7; 0.2 keeps loosely-related
+            // hits while dropping the near-orthogonal results that made a vague
+            // query return `limit` arbitrary recordings.
+            const SEMANTIC_MIN_SCORE: f32 = 0.2;
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {
                 match embedder.embed(&query) {
-                    Ok(query_vec) => match state.catalog.semantic_search(&query_vec, limit).await {
+                    Ok(query_vec) => match state
+                        .catalog
+                        .semantic_search(&query_vec, limit, SEMANTIC_MIN_SCORE)
+                        .await
+                    {
                         Ok(results) => {
                             let mut full_results = Vec::new();
                             for (id, score) in results {

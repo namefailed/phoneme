@@ -338,26 +338,76 @@ impl Catalog {
         Ok(results)
     }
 
-    /// Perform a semantic search across all embedded recordings, returning the top matches.
+    /// Semantic search across embedded recordings, returning the top matches as
+    /// `(id, cosine_score)` sorted high→low.
+    ///
+    /// - **Dimension safety:** an embedding whose length doesn't match the query
+    ///   vector is skipped (cosine over mismatched dimensions is meaningless and
+    ///   would otherwise score on a silently-truncated prefix).
+    /// - **Relevance floor:** results scoring below `min_score` are dropped, so a
+    ///   vague/garbage query returns *few or no* results instead of `limit`
+    ///   arbitrary ones.
+    /// - **Meeting dedupe:** a meeting's two tracks share a `meeting_id` and have
+    ///   near-identical transcripts; they collapse to a single best-scoring entry
+    ///   so they don't crowd out other recordings. Standalone recordings are keyed
+    ///   by their own id.
     pub async fn semantic_search(
         &self,
         query_vec: &[f32],
         limit: usize,
+        min_score: f32,
     ) -> Result<Vec<(RecordingId, f32)>> {
-        let all_embeddings = self.load_all_embeddings().await?;
+        let rows = sqlx::query(
+            "SELECT e.id AS id, e.vector AS vector, r.meeting_id AS meeting_id \
+             FROM embeddings e JOIN recordings r ON r.id = e.id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
-        let mut scores: Vec<(RecordingId, f32)> = all_embeddings
-            .into_iter()
-            .map(|(id, vec)| {
-                let score = crate::embed::Embedder::cosine_similarity(query_vec, &vec);
-                (id, score)
-            })
-            .collect();
+        let dim = query_vec.len();
+        // Best (id, score) per result key — meeting_id when present, else the
+        // recording id — so a meeting contributes at most one result.
+        let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
+            std::collections::HashMap::new();
 
-        // Sort descending by score
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let bytes: Vec<u8> = row.try_get("vector")?;
+            let meeting_id: Option<String> = row.try_get("meeting_id")?;
+
+            if !bytes.len().is_multiple_of(4) {
+                tracing::warn!(id = %id, len = bytes.len(), "skipping embedding: not 4-byte aligned");
+                continue;
+            }
+            let vec: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                .collect();
+            if vec.len() != dim {
+                tracing::warn!(id = %id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
+                continue;
+            }
+
+            let score = crate::embed::Embedder::cosine_similarity(query_vec, &vec);
+            if score < min_score {
+                continue;
+            }
+            let Some(rec_id) = RecordingId::parse(id.clone()) else {
+                continue;
+            };
+            let key = meeting_id.unwrap_or(id);
+            best.entry(key)
+                .and_modify(|e| {
+                    if score > e.1 {
+                        *e = (rec_id.clone(), score);
+                    }
+                })
+                .or_insert((rec_id, score));
+        }
+
+        let mut scores: Vec<(RecordingId, f32)> = best.into_values().collect();
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(limit);
-
         Ok(scores)
     }
 
