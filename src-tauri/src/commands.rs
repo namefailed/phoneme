@@ -267,6 +267,42 @@ pub async fn write_config(
     Ok(())
 }
 
+/// Register the (enabled) global hotkeys for `config` — record, meeting, and
+/// in-place. Shared by app startup and `apply_config` so every code path that
+/// (re-)registers hotkeys applies ALL three together; previously the logic was
+/// duplicated, risking a path that registered only the main hotkey on a profile
+/// switch. Does not unregister first — callers re-applying must `unregister_all`.
+pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    let entries = [
+        ("record", config.hotkey.enabled, &config.hotkey.combo),
+        (
+            "meeting",
+            config.meeting_hotkey.enabled,
+            &config.meeting_hotkey.combo,
+        ),
+        (
+            "in-place",
+            config.in_place_hotkey.enabled,
+            &config.in_place_hotkey.combo,
+        ),
+    ];
+    for (label, enabled, combo) in entries {
+        if !enabled {
+            continue;
+        }
+        match Shortcut::from_str(combo) {
+            Ok(shortcut) => {
+                if let Err(e) = app.global_shortcut().register(shortcut) {
+                    tracing::warn!("failed to register {label} hotkey: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("invalid {label} hotkey combo {combo:?}: {e}"),
+        }
+    }
+}
+
 /// Apply the side effects of a config that has just been written to
 /// `config.toml`: refresh the "start at login" registry key, tell the daemon
 /// to reload, and re-register the global hotkey. Shared by `write_config` and
@@ -323,33 +359,14 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
         tracing::warn!("failed to reload daemon config: {e}");
     }
 
-    // Dynamically reload hotkey in the frontend
-    use std::str::FromStr;
-    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    // Dynamically reload hotkeys in the frontend: drop the old set, then
+    // register the new config's hotkeys via the shared helper so all three
+    // (record, meeting, in-place) are always re-applied together.
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
     if let Err(e) = app.global_shortcut().unregister_all() {
         tracing::warn!("failed to unregister shortcuts: {e}");
     }
-    if config.hotkey.enabled {
-        if let Ok(shortcut) = Shortcut::from_str(&config.hotkey.combo) {
-            if let Err(e) = app.global_shortcut().register(shortcut) {
-                tracing::warn!("failed to register record shortcut: {e}");
-            }
-        }
-    }
-    if config.meeting_hotkey.enabled {
-        if let Ok(shortcut) = Shortcut::from_str(&config.meeting_hotkey.combo) {
-            if let Err(e) = app.global_shortcut().register(shortcut) {
-                tracing::warn!("failed to register meeting shortcut: {e}");
-            }
-        }
-    }
-    if config.in_place_hotkey.enabled {
-        if let Ok(shortcut) = Shortcut::from_str(&config.in_place_hotkey.combo) {
-            if let Err(e) = app.global_shortcut().register(shortcut) {
-                tracing::warn!("failed to register in-place shortcut: {e}");
-            }
-        }
-    }
+    register_hotkeys(app, config);
 }
 
 /// List the names of all saved config profiles.

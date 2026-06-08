@@ -586,10 +586,30 @@ impl Default for TrayConfig {
 }
 
 impl Config {
+    /// Best-effort load of the active config (honors `PHONEME_CONFIG`), falling
+    /// back to defaults on any error. Use when a missing/broken config should
+    /// degrade gracefully rather than abort (e.g. the tray reading hotkeys).
     pub fn read_or_default() -> Self {
-        default_config_path()
+        resolved_config_path()
             .and_then(|p| Self::load(&p).ok())
             .unwrap_or_default()
+    }
+
+    /// Load the active config, resolving `PHONEME_CONFIG` first then the per-user
+    /// default. An explicit `PHONEME_CONFIG` override must exist and parse —
+    /// errors are surfaced rather than silently defaulted, so a typo'd path
+    /// fails loudly. A missing default config falls back to `Config::default()`.
+    /// This is the canonical loader shared by the daemon and the CLI.
+    pub fn load_resolved() -> Result<Self> {
+        if let Ok(p) = std::env::var("PHONEME_CONFIG") {
+            if !p.is_empty() {
+                return Self::load(std::path::Path::new(&p));
+            }
+        }
+        match default_config_path() {
+            Some(p) if p.exists() => Self::load(&p),
+            _ => Ok(Self::default()),
+        }
     }
 }
 
@@ -822,6 +842,20 @@ pub fn default_config_path() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", "phoneme").map(|p| p.config_dir().join("config.toml"))
 }
 
+/// Resolve the *active* config path: the `PHONEME_CONFIG` env override if set
+/// (and non-empty), otherwise the per-user default. This is the single source of
+/// truth so the daemon, the CLI, and the tray all agree on which file is live —
+/// previously only the daemon honored `PHONEME_CONFIG`, so a `phoneme` CLI
+/// invocation could read a different config than the daemon it talks to.
+pub fn resolved_config_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("PHONEME_CONFIG") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    default_config_path()
+}
+
 /// Ensure the default config directory exists with secure (0o700) permissions.
 pub fn ensure_config_dir() -> Result<PathBuf> {
     let pdirs = directories::ProjectDirs::from("", "", "phoneme")
@@ -855,6 +889,56 @@ mod tests {
             Config::default().recording.source,
             CaptureSource::Microphone
         );
+    }
+
+    #[test]
+    fn resolved_config_path_honors_env_override() {
+        // Save/restore so this doesn't leak into other tests in the binary.
+        let prev = std::env::var("PHONEME_CONFIG").ok();
+
+        std::env::set_var("PHONEME_CONFIG", "/explicit/override.toml");
+        assert_eq!(
+            resolved_config_path(),
+            Some(PathBuf::from("/explicit/override.toml")),
+            "an explicit PHONEME_CONFIG must win"
+        );
+
+        // An empty override is ignored — fall back to the per-user default.
+        std::env::set_var("PHONEME_CONFIG", "");
+        assert_eq!(
+            resolved_config_path(),
+            default_config_path(),
+            "an empty PHONEME_CONFIG must fall back to the default path"
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("PHONEME_CONFIG", v),
+            None => std::env::remove_var("PHONEME_CONFIG"),
+        }
+    }
+
+    #[test]
+    fn load_resolved_reads_the_env_override_file() {
+        let prev = std::env::var("PHONEME_CONFIG").ok();
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("custom.toml");
+        // A complete, valid config with one easily-checked field overridden.
+        let mut base = Config::default();
+        base.recording.audio_dir = "~/from-override".into();
+        std::fs::write(&path, toml::to_string_pretty(&base).unwrap()).unwrap();
+
+        std::env::set_var("PHONEME_CONFIG", &path);
+        let cfg = Config::load_resolved().expect("loads the override file");
+        assert!(
+            cfg.recording.audio_dir.ends_with("from-override"),
+            "load_resolved must read the PHONEME_CONFIG file, got {:?}",
+            cfg.recording.audio_dir
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("PHONEME_CONFIG", v),
+            None => std::env::remove_var("PHONEME_CONFIG"),
+        }
     }
 
     #[test]
