@@ -44,18 +44,44 @@ git clone https://github.com/namefailed/phoneme.git
 cd phoneme
 ```
 
-Install the frontend dependencies:
+Install the frontend dependencies (one time):
 ```bash
 cd frontend
-npm install
+pnpm install
 cd ..
 ```
 
-To build and run the entire application (Daemon + Frontend + Tray) in development mode:
+### Development mode (hot reload)
+
+Use **three terminals**. Vite must be running before `cargo tauri dev` — Tauri
+loads `http://localhost:5173` but does not start the dev server for you.
+
+**Terminal 1 — daemon** (recommended for backend debugging):
 ```bash
+cargo run -p phoneme-daemon -- --foreground
+```
+
+**Terminal 2 — Vite**:
+```bash
+cd frontend
+pnpm dev
+```
+
+**Terminal 3 — Tauri shell** (from the repo root):
+```bash
+cargo tauri dev
+```
+
+If you skip Terminal 1, the tray auto-spawns a background daemon when it starts.
+
+### Quick run (no hot reload)
+
+Build the frontend once, then run the tray binary. It serves `frontend/dist`
+and auto-spawns the daemon if needed:
+```bash
+cd frontend && pnpm build && cd ..
 cargo run --bin phoneme-tray
 ```
-*(Note: Tauri handles spinning up the Vite dev server for the frontend automatically).*
 
 ## 🧪 Testing
 
@@ -69,7 +95,7 @@ cargo test --workspace
 To run the frontend tests:
 ```bash
 cd frontend
-npm test
+pnpm test
 ```
 
 ## 🚑 Troubleshooting Build Errors

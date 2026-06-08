@@ -967,7 +967,7 @@ impl DaemonRecorder {
     /// catalog row `Transcribing`, enqueue it for the normal pipeline) and emit
     /// a `RecordingStopped` for each. Returns the session id that was stopped.
     pub async fn stop_meeting(&self, state: &AppState) -> Result<String> {
-        let mut meeting = self
+        let meeting = self
             .meeting
             .lock()
             .await

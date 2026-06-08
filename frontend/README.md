@@ -32,17 +32,23 @@ src/
 
 ## 💻 Dev
 
+Full-stack development needs **three terminals** (see
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) for details):
+
 ```bash
-# Direct (browser, no Tauri bridge — invoke() calls won't work)
+# Terminal 1 (repo root) — daemon logs in the foreground
+cargo run -p phoneme-daemon -- --foreground
+
+# Terminal 2 (this directory) — Vite hot reload on :5173
 pnpm dev
 
-# With Tauri (the only real way to run end-to-end)
-cd .. && cargo tauri dev
+# Terminal 3 (repo root) — Tauri window; start after Vite is up
+cargo tauri dev
 ```
 
 `@tauri-apps/api` calls (`invoke`, `listen`) only work inside the Tauri
-runtime. Standalone Vite dev is useful for layout/styling work; functionality
-testing needs `cargo tauri dev`.
+runtime. Standalone `pnpm dev` is useful for layout/styling work; end-to-end
+testing needs `cargo tauri dev` with Vite already running.
 
 ## 🏗️ Build
 

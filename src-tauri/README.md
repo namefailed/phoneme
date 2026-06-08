@@ -17,16 +17,32 @@ that talks to `phoneme-daemon` over the same named-pipe IPC as the CLI.
 ```bash
 # One-time install of Tauri CLI
 cargo install tauri-cli --version ^2
+```
 
-# Dev (hot-reload frontend, native window)
+### Dev (hot reload)
+
+Three terminals — see [`CONTRIBUTING.md`](../CONTRIBUTING.md):
+
+```bash
+# Terminal 1 (repo root)
+cargo run -p phoneme-daemon -- --foreground
+
+# Terminal 2
+cd frontend && pnpm dev
+
+# Terminal 3 (repo root, after Vite is on :5173)
 cargo tauri dev
+```
 
-# Release MSI
+### Release MSI
+
+```bash
 cargo tauri build
 ```
 
-The frontend lives in `../frontend/` (Vite + vanilla TS). Tauri's
-`beforeDevCommand` / `beforeBuildCommand` invoke `pnpm` there.
+The frontend lives in `../frontend/` (Vite + vanilla TS). `tauri.conf.json`
+points `devUrl` at `http://localhost:5173` and `frontendDist` at
+`../frontend/dist` — run `pnpm dev` separately; there is no `beforeDevCommand`.
 
 ## Tray menu
 

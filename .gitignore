@@ -1,4 +1,18 @@
-archive_internal/
+# ---------------------------------------------------------------------------
+# Local agent / assistant workspace — never part of the public repo.
+# Put plans, handoffs, and scratch notes here; only this README is tracked
+# via archive_internal/README.md if you choose to keep the folder marker.
+# ---------------------------------------------------------------------------
+archive_internal/*
+!archive_internal/README.md
+
+scratch/
+replace_session.py
+.dev-data/
+
+# ---------------------------------------------------------------------------
+# Build / runtime artifacts
+# ---------------------------------------------------------------------------
 target/
 node_modules/
 dist/
@@ -24,14 +38,23 @@ src-tauri/gen/
 *.wav
 whisper-bin/
 
-# Local developer tooling / assistant scratch files — never part of the project.
+# ---------------------------------------------------------------------------
+# AI / editor assistant configs — use docs/ and CONTRIBUTING.md instead.
+# Never commit tool-specific instruction files or attribution stubs.
+# ---------------------------------------------------------------------------
 .claude/
+.claude-worktrees/
 CLAUDE.md
 AGENTS.md
 .cursor/
 .cursorrules
+.cursorignore
 .aider*
+.agent/
+.windsurf/
+.continue/
 .github/copilot-instructions.md
+**/.cursor/
 
 # pnpm 10 auto-generates frontend/pnpm-workspace.yaml as a placeholder stub
 # ("allowBuilds: esbuild: set this to true or false") whenever it approves a

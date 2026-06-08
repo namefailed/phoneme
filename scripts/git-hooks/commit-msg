@@ -1,0 +1,17 @@
+#!/bin/sh
+# Reject commit messages that attribute work to AI coding tools.
+# Install: ./scripts/install-git-hooks.ps1  (or set core.hooksPath manually)
+
+COMMIT_MSG_FILE=$1
+
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+  exit 0
+fi
+
+if grep -qiE 'Co-authored-by:.*cursor|Made-with:.*cursor|cursoragent|cursor\.com' "$COMMIT_MSG_FILE"; then
+  echo "error: commit message contains AI-tool attribution (Cursor)." >&2
+  echo "Remove Co-authored-by / Made-with lines before committing." >&2
+  exit 1
+fi
+
+exit 0
