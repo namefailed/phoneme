@@ -1,8 +1,6 @@
-# Phoneme Roadmap
+# 📦 Phoneme Changelog
 
-This document tracks the full vision for Phoneme. Items are ordered by impact within each version.
-
-**Design principle:** every item must pass the "would a real user hit this friction?" test. Features that duplicate existing functionality (e.g., "favorites" when tags exist) or serve fewer than ~10% of users are cut or moved to Long Term.
+Shipped releases — what landed in each. **Forward-looking plans live in [`ROADMAP.md`](ROADMAP.md)**; unvetted/parked ideas live in [`docs/IDEAS.md`](docs/IDEAS.md).
 
 ---
 
@@ -130,80 +128,6 @@ clean base.*
 
 ---
 
-## 🔮 v2.0 — Platform & Integration
-
-*Focus: cross-platform availability and opening Phoneme to external tools.*
-
-### Platform
-
-- [ ] **macOS port** — Apple Silicon first; bundled whisper.cpp server. **Ship microphone-only first; do NOT let Meeting Mode block the macOS launch.** `cpal` has no system-audio loopback on macOS — it requires a virtual device (BlackHole / Loopback). So on macOS: mic capture works natively; system-audio capture is opt-in via an external loopback device the user installs. Treat full feature parity as a follow-up, not a launch gate.
-- [ ] **Linux port** — PipeWire / ALSA audio (PipeWire monitor sources give system-audio loopback natively, unlike macOS); X11 + Wayland global hotkey
-- [ ] **Windows ARM** — native ARM64 build for Snapdragon-based machines
-
-### Integration
-
-> **Architecture decision (locked):** the daemon already speaks newline-delimited
-> JSON over a named pipe behind the `phoneme-ipc` `Transport` trait. v2.0 adds an
-> **HTTP front-end, not a new eventing model**: an `axum` server maps one-off
-> `Request`s to REST endpoints (`POST /api/record/start`, `GET /api/recordings`)
-> and streams `DaemonEvent`s as **Server-Sent Events** (`GET /api/events`, an
-> `EventSource` in the frontend). REST API, browser extension, Raycast scripts,
-> and the MCP server then all share one `fetch()`/`EventSource` surface.
-
-- [ ] **Local REST API** — `localhost:3737` `axum` server (off by default): REST endpoints over the existing `Request`/`Response` enums + an SSE `/api/events` stream over `DaemonEvent`. Add an `HttpTransport` impl of the `Transport` trait so clients reuse the same typed surface.
-- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). Implement it as a **thin translator over the existing `Transport` trait**: a `CallTool("start_recording")` just maps to `Request::RecordStart` and fires it at the daemon over the pipe/socket — near-zero business logic in the MCP crate. Exposes tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`.
-- [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers
-- [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
-
-### Recording
-
-- [ ] **Multi-microphone** — capture from two input devices simultaneously; useful for two-person interviews
-- [ ] **Audio normalization** — normalize gain before sending to Whisper; improves accuracy on quiet voices
-
-### Data
-
-- [ ] **Cloud sync** (opt-in, user-controlled) — encrypted sync of the catalog to a user-owned S3/Backblaze bucket for multi-machine access; audio files excluded by default
-
-### Internal Quality
-
-- [ ] **Playwright E2E UI Coverage** — add a full End-to-End test suite using Playwright (or Tauri Webdriver) to interact with the frontend UI and exercise the actual Rust backend via IPC. To be implemented *after* the architecture stabilizes across macOS and Linux.
-
 ---
 
-## 🌌 Long Term
-
-*No fixed timeline. These require either significant platform work or community infrastructure.*
-
-- [ ] **Mobile thin-client** — iOS/Android app that records locally and syncs to the desktop daemon over LAN; transcription runs on the desktop
-- [ ] **Plugin ecosystem** — standardized API for community hooks, themes, and post-processors; distributed via a JSON registry
-- [ ] **Phoneme Cloud** (optional, self-hostable) — shared catalogs and role-based access for teams; the desktop daemon remains fully offline-capable
-- [ ] **Accessibility pass** — full NVDA/JAWS screen reader support, ARIA labels, font-size scaling, high-contrast theme
-
----
-
-## 💰 Sustainability & Monetization
-
-*Ideas for generating revenue while keeping the core desktop app 100% free, local, and open-source.*
-
-- [ ] **Paid Mobile Companion App** — a one-time fee (or micro-subscription) thin-client for iOS/Android that records audio on the go and syncs it securely back to the desktop daemon for processing.
-- [ ] **Phoneme Pro (Managed APIs)** — an optional $8-$10/mo subscription where users get instant, zero-config access to ultra-fast cloud Whisper transcription and premium LLM Smart Cleanup (e.g., Claude 3.5 Sonnet) without needing to manage their own developer accounts or API keys.
-- [ ] **Phoneme Sync** — a low-cost ($4-$5/mo) end-to-end encrypted cloud sync service for power users who want their SQLite catalog and audio files seamlessly synchronized across multiple machines (similar to Obsidian Sync).
-- [ ] **Phoneme for Teams** — a managed, per-seat enterprise backend where dual-track meeting notes are centralized, searchable by the whole team, and strictly governed by role-based access.
-
----
-
-## ❌ Explicitly Not Doing
-
-Things that were considered and rejected — so we don't revisit them:
-
-
-| Idea                          | Reason                                                                       |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| Favorites / starring          | Tags already do this — create a "⭐ Favorite" tag                             |
-| Duration filter               | Niche; no user has asked; search + tags already narrow the list              |
-| Backup/restore ZIP            | Manual export covers this; SQLite DB is already a single copyable file       |
-| Azure Speech / AWS Transcribe | Enterprise pricing; not the Phoneme target user; add if demand emerges       |
-| Portable (unsigned) ZIP       | Valid distribution target but a CI task, not a product feature; just ship it |
-| Winget / Scoop packages       | Same — automation task for when v1.5 ships, not a roadmap feature            |
-
-
+*Planned work, v2.0, Long Term, Sustainability, and "Explicitly Not Doing" now live in [`ROADMAP.md`](ROADMAP.md).*
