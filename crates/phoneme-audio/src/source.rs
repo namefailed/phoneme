@@ -46,6 +46,11 @@ pub trait Source: Send {
     /// Stop the underlying capture. After calling, `next_block` should return
     /// `Ok(None)` shortly.
     async fn stop(&mut self) -> Result<()>;
+
+    /// Notify the source that recording was paused (`true`) or resumed
+    /// (`false`). Used by gap-filling sources (loopback) to avoid back-filling a
+    /// paused span as silence. Default: no-op (dense sources need nothing).
+    async fn set_paused(&mut self, _paused: bool) {}
 }
 
 /// A synthetic source: backed by an mpsc channel that tests push samples into.
@@ -183,6 +188,10 @@ pub struct CpalSource {
     stop_tx: Option<std::sync::mpsc::Sender<()>>,
     _stream_thread: Option<std::thread::JoinHandle<()>>,
     _worker: tokio::task::JoinHandle<()>,
+    /// Set true on resume so the gap-fill worker re-baselines its wall clock and
+    /// doesn't back-fill a paused span as silence. Only meaningful when the
+    /// source was opened with gap filling (loopback).
+    rebaseline_fill_clock: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CpalSource {
@@ -393,6 +402,11 @@ impl CpalSource {
 
         // Background worker — does all the heavy lifting off the audio thread.
         let target_rate = SampleRate::HZ_16K.as_u32();
+        // Flipped true by `set_paused(false)` (resume) so the fill worker forgets
+        // wall-clock that elapsed during a pause instead of back-filling it as
+        // silence (which would desync a meeting's tracks across a pause).
+        let rebaseline_fill_clock = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let rebaseline_worker = rebaseline_fill_clock.clone();
         let worker = tokio::spawn(async move {
             use rubato::{
                 Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
@@ -424,7 +438,7 @@ impl CpalSource {
             // quiet, the elapsed wall-clock implies more samples *should* exist
             // than we've emitted, and we insert that much real silence first so
             // the track stays continuous and time-aligned.
-            let fill_start = std::time::Instant::now();
+            let mut fill_start = std::time::Instant::now();
             let mut produced: usize = 0;
             // 100 ms at 16 kHz — only fill gaps larger than this so ordinary
             // scheduling jitter between callbacks is never mistaken for silence.
@@ -432,6 +446,18 @@ impl CpalSource {
 
             while let Some(mut raw) = raw_rx.recv().await {
                 if fill_gaps {
+                    // On resume, re-baseline so wall-clock that elapsed during a
+                    // (meeting) pause is forgotten — otherwise we'd insert the
+                    // whole paused span as silence here and desync the tracks.
+                    // After this, `expected == produced`, so no gap is filled for
+                    // the pause; the post-resume timeline starts fresh in step
+                    // with the mic track (which also resumed at the same instant).
+                    if rebaseline_worker.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                        fill_start = std::time::Instant::now()
+                            - std::time::Duration::from_secs_f64(
+                                produced as f64 / target_rate as f64,
+                            );
+                    }
                     let expected =
                         (fill_start.elapsed().as_secs_f64() * target_rate as f64) as usize;
                     let gap = gap_fill_len(expected, produced, fill_tolerance);
@@ -507,6 +533,7 @@ impl CpalSource {
             stop_tx: Some(stop_tx),
             _stream_thread: Some(stream_thread),
             _worker: worker,
+            rebaseline_fill_clock,
         })
     }
 }
@@ -530,6 +557,18 @@ impl Source for CpalSource {
             let _ = tx.send(());
         }
         Ok(())
+    }
+
+    async fn set_paused(&mut self, paused: bool) {
+        // On resume, tell the fill worker to re-baseline its wall clock so the
+        // paused span isn't back-filled with silence (which would lengthen the
+        // loopback track past the mic and desync the meeting). Nothing to do on
+        // pause: the recorder discards captured audio while paused, and any fill
+        // silence emitted meanwhile is discarded with it.
+        if !paused {
+            self.rebaseline_fill_clock
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
