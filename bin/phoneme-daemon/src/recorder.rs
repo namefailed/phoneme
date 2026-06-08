@@ -5,10 +5,10 @@ use crate::app_state::AppState;
 use chrono::Local;
 use phoneme_audio::device::resolve_input_device;
 use phoneme_audio::format::SampleRate;
+use phoneme_audio::meeting_align::align_meeting_track_samples;
 use phoneme_audio::preroll::PreRollBuffer;
 use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
 use phoneme_audio::source::{CpalSource, GeneratorSource, Source};
-use phoneme_audio::meeting_align::align_meeting_track_samples;
 use phoneme_audio::wav;
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
@@ -977,9 +977,7 @@ impl DaemonRecorder {
         let wall_started = meeting.wall_started;
         // Snapshot meeting wall-clock length before stopping recorders (stop/drain can take time).
         let stop_at = Instant::now();
-        let target_duration_ms = stop_at
-            .duration_since(wall_started)
-            .as_millis() as i64;
+        let target_duration_ms = stop_at.duration_since(wall_started).as_millis() as i64;
         let sample_rate = phoneme_audio::format::SampleRate::HZ_16K.as_u32();
 
         tracing::info!(
@@ -1007,9 +1005,7 @@ impl DaemonRecorder {
                 capture_started,
             } = handle;
 
-            let track_late_by_ms = capture_started
-                .duration_since(wall_started)
-                .as_millis() as i64;
+            let track_late_by_ms = capture_started.duration_since(wall_started).as_millis() as i64;
 
             let (raw_samples, _duration_ms) = match recorder.stop_and_get_samples().await {
                 Ok(r) => r,
@@ -1043,11 +1039,17 @@ impl DaemonRecorder {
                 "aligned meeting track to wall-clock timeline"
             );
 
-            track_data.push((id, audio_path, started_at, track, samples, target_duration_ms));
+            track_data.push((
+                id,
+                audio_path,
+                started_at,
+                track,
+                samples,
+                target_duration_ms,
+            ));
         }
 
         for (id, audio_path, started_at, track, samples, final_duration_ms) in track_data {
-            
             // Write the timeline-aligned samples to WAV.
             let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
             if let Err(e) = phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg) {
@@ -1061,7 +1063,7 @@ impl DaemonRecorder {
                 }
                 continue;
             }
-            
+
             // Update catalog with the (possibly padded) duration
             state
                 .catalog
