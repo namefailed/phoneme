@@ -30,8 +30,6 @@ pub struct RecorderConfig {
     pub max_duration_ms: u64,
     pub silence_threshold_dbfs: f32,
     pub silence_window_ms: u32,
-    /// Optional callback that receives the sample count when first non-silent audio is detected
-    pub on_first_audio: Option<tokio::sync::mpsc::Sender<usize>>,
 }
 
 impl Default for RecorderConfig {
@@ -41,7 +39,6 @@ impl Default for RecorderConfig {
             max_duration_ms: 300_000,
             silence_threshold_dbfs: -45.0,
             silence_window_ms: 3000,
-            on_first_audio: None,
         }
     }
 }
@@ -127,7 +124,6 @@ impl Recorder {
             let mut cancelled = false;
             let mut is_paused = false;
             let mut should_drain = false;
-            let mut first_audio_sent = false;
 
             loop {
                 tokio::select! {
@@ -151,14 +147,6 @@ impl Recorder {
                         match block? {
                             Some(b) => {
                                 if !is_paused {
-                                    // Check if this is the first non-silent audio
-                                    if !first_audio_sent && b.iter().any(|&s| s.abs() > 100) {
-                                        if let Some(ref tx) = cfg.on_first_audio {
-                                            let _ = tx.try_send(samples.len());
-                                        }
-                                        first_audio_sent = true;
-                                    }
-                                    
                                     // Silence detector is only used for Oneshot mode auto-stop.
                                     // In Hold mode (meeting mode), it's called but never triggers
                                     // a stop, so no audio is trimmed based on silence.
