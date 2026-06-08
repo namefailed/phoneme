@@ -73,6 +73,14 @@ pub struct AppState {
     pub llm: LlmPostProcessor,
     pub webhook: WebhookClient,
     pub embedder: Arc<tokio::sync::RwLock<Option<Arc<phoneme_core::Embedder>>>>,
+    /// Serializes access to the single (serial) whisper-server. The final
+    /// transcription pipeline acquires this permit (waiting if needed); the
+    /// streaming preview only runs a tick if it can acquire it *without*
+    /// waiting, and otherwise skips. This guarantees the heavy final
+    /// transcription is never starved by a flood of preview requests — the bug
+    /// that caused "Whisper timed out after 60s" on long recordings while the
+    /// preview hammered the server with a big model.
+    pub whisper_sem: Arc<tokio::sync::Semaphore>,
 }
 
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -120,6 +128,7 @@ impl AppState {
             llm,
             webhook,
             embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
+            whisper_sem: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
 }
