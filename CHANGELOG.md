@@ -68,6 +68,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [x] **Ollama setup wizard** — guided in-app flow that downloads and configures Ollama (not bundled in the installer); detects whether Ollama is already running, pulls the selected model, wires up the endpoint and model name automatically; users who already have Ollama just skip to the model-select step.
 
 ### UX
+
 - [x] **Waveform visualization** — interactive waveform in the detail pane via wavesurfer.js: timeline, hover-seek, click-to-play, theme-aware colors
 - [x] **Pause / resume recording** — ⏸ button during active recording; resumes without creating a new entry; essential for meeting notes
 - [x] **Transcript history** — preserve the original Whisper output when a user manually edits; "View original" toggle + "Restore" button in the detail pane
@@ -75,6 +76,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [x] **Bulk actions** — Shift+Click and Ctrl+A to multi-select recordings; batch delete, re-transcribe, or export
 
 ### Data
+
 - [x] **Custom date range filter** — date picker replacing the preset-only time dropdown
 - [x] **Pre-deletion notification** — Windows toast before the retention cleanup runs: "3 recordings will be deleted in 24 hours per your retention policy"
 
@@ -102,10 +104,12 @@ and pay down internal debt, so the v2.0 cross-platform port inherits a complete,
 clean base.*
 
 ### Local AI (on-device, offline)
+
 - [x] **Local semantic search** — bundle a local embedding model (e.g. all-MiniLM-L6-v2 via ONNX) + a vector index so you can search by *meaning* ("that idea about rust error handling last week"), not just exact text. Complements the existing FTS5 keyword search.
 - [x] **Merged conversation view** — interleave a dual-track meeting's two transcripts by timestamp into one chronological "You:" / "Meeting:" conversation; exportable, and feedable to the LLM post-processor as a single context for summaries/action items. **Build this on Lit (below), not raw `innerHTML`** — interleaving two dynamic arrays while preserving interactive elements (play/edit state) is exactly the case manual DOM templating handles badly.
 
 ### Internal quality
+
 - [x] **Frontend reactivity (Lit for complex views)** — the framework-less `Store.ts` pattern is great for flat lists/forms and stays. But adopt **Lit (Web Components)** for the complex, dynamically-reconciled views (the merged conversation timeline first) to get declarative rendering + automatic lifecycle/listener cleanup without a full React/Vue. Do this *before* the merged conversation view.
 - [x] **Test audio backend for full CI E2E** — the `Source` trait already abstracts capture (`CpalSource` prod, `SyntheticSource` tests), and Meeting Mode is end-to-end testable via `start_meeting_with_sources`. Extend the same injection to the **single-recording** daemon path so a CI test can drive CLI → daemon → (mock sine/silence) capture → SQLite without hardware, closing the "cpal device tests skipped in CI" gap.
 - [x] **Typed errors** — `thiserror` for the library crates, `anyhow` in the binaries, for clean `?` propagation and better traces.
@@ -131,6 +135,7 @@ clean base.*
 *Focus: cross-platform availability and opening Phoneme to external tools.*
 
 ### Platform
+
 - [ ] **macOS port** — Apple Silicon first; bundled whisper.cpp server. **Ship microphone-only first; do NOT let Meeting Mode block the macOS launch.** `cpal` has no system-audio loopback on macOS — it requires a virtual device (BlackHole / Loopback). So on macOS: mic capture works natively; system-audio capture is opt-in via an external loopback device the user installs. Treat full feature parity as a follow-up, not a launch gate.
 - [ ] **Linux port** — PipeWire / ALSA audio (PipeWire monitor sources give system-audio loopback natively, unlike macOS); X11 + Wayland global hotkey
 - [ ] **Windows ARM** — native ARM64 build for Snapdragon-based machines
@@ -151,18 +156,22 @@ clean base.*
 - [ ] **Browser extension** — Chrome/Firefox extension that adds a Phoneme icon to the toolbar; one click starts a recording and pastes the finished transcript into the focused input field or copies it to the clipboard; requires the v2.0 local REST API as the bridge
 
 ### Recording
+
 - [ ] **Multi-microphone** — capture from two input devices simultaneously; useful for two-person interviews
 - [ ] **Audio normalization** — normalize gain before sending to Whisper; improves accuracy on quiet voices
 
 ### Data
+
 - [ ] **Cloud sync** (opt-in, user-controlled) — encrypted sync of the catalog to a user-owned S3/Backblaze bucket for multi-machine access; audio files excluded by default
 
 ### Internal Quality
+
 - [ ] **Playwright E2E UI Coverage** — add a full End-to-End test suite using Playwright (or Tauri Webdriver) to interact with the frontend UI and exercise the actual Rust backend via IPC. To be implemented *after* the architecture stabilizes across macOS and Linux.
 
 ---
 
 ## 🌌 Long Term
+
 *No fixed timeline. These require either significant platform work or community infrastructure.*
 
 - [ ] **Mobile thin-client** — iOS/Android app that records locally and syncs to the desktop daemon over LAN; transcription runs on the desktop
@@ -173,6 +182,7 @@ clean base.*
 ---
 
 ## 💰 Sustainability & Monetization
+
 *Ideas for generating revenue while keeping the core desktop app 100% free, local, and open-source.*
 
 - [ ] **Paid Mobile Companion App** — a one-time fee (or micro-subscription) thin-client for iOS/Android that records audio on the go and syncs it securely back to the desktop daemon for processing.
@@ -186,11 +196,14 @@ clean base.*
 
 Things that were considered and rejected — so we don't revisit them:
 
-| Idea | Reason |
-|------|--------|
-| Favorites / starring | Tags already do this — create a "⭐ Favorite" tag |
-| Duration filter | Niche; no user has asked; search + tags already narrow the list |
-| Backup/restore ZIP | Manual export covers this; SQLite DB is already a single copyable file |
-| Azure Speech / AWS Transcribe | Enterprise pricing; not the Phoneme target user; add if demand emerges |
-| Portable (unsigned) ZIP | Valid distribution target but a CI task, not a product feature; just ship it |
-| Winget / Scoop packages | Same — automation task for when v1.5 ships, not a roadmap feature |
+
+| Idea                          | Reason                                                                       |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| Favorites / starring          | Tags already do this — create a "⭐ Favorite" tag                             |
+| Duration filter               | Niche; no user has asked; search + tags already narrow the list              |
+| Backup/restore ZIP            | Manual export covers this; SQLite DB is already a single copyable file       |
+| Azure Speech / AWS Transcribe | Enterprise pricing; not the Phoneme target user; add if demand emerges       |
+| Portable (unsigned) ZIP       | Valid distribution target but a CI task, not a product feature; just ship it |
+| Winget / Scoop packages       | Same — automation task for when v1.5 ships, not a roadmap feature            |
+
+

@@ -2,6 +2,8 @@
 
 Vite + TypeScript + Lit frontend for the [Phoneme](../README.md) Tauri shell (`phoneme-tray`). Beautifully styled with the Catppuccin Mocha theme.
 
+Full documentation: [docs/README.md](../docs/README.md).
+
 ## 🗂️ Layout
 
 ```

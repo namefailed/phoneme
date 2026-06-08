@@ -8,7 +8,7 @@ Whether you want a 100% offline, privacy-first setup that runs entirely on your 
 
 When you launch Phoneme for the first time, you will be greeted by the First Run Wizard. This wizard is designed to get you up and running with the best possible configuration for your specific hardware.
 
-<!-- SCREENSHOT PLACEHOLDER: First Run Wizard Intro Screen -->
+The wizard walks through mode selection, hardware detection, microphone, hooks, and hotkeys. Screenshots of each settings area live in [Settings Overview](settings_overview.md).
 
 ### Step 1: Choosing Your Mode
 
@@ -21,7 +21,6 @@ Phoneme will ask you how you intend to use the application. You can choose from:
 
 If you chose the Local & Private route, Phoneme will analyze your system's RAM and VRAM (Video RAM). 
 
-<!-- SCREENSHOT PLACEHOLDER: Wizard Hardware Detection Screen -->
 
 Because AI models require memory to run efficiently, Phoneme uses this data to automatically recommend the optimal Whisper model size for your machine:
 - **Tiny / Base**: Best for older laptops or systems with less than 8GB of RAM. Extremely fast, but slightly less accurate.
@@ -34,9 +33,9 @@ You can accept the recommendation, or manually choose a different model. Phoneme
 
 Once the wizard completes, you'll land on the main Recordings View.
 
-<!-- SCREENSHOT PLACEHOLDER: Main UI Empty State with big Record button -->
+![Main recordings view](../screenshots/main.png)
 
-1. Click the large **Record** button at the top of the window, or press the global hotkey (default is `Ctrl+Alt+R`, though you can change this in **Settings → Hotkeys**).
+1. Click the large **Record** button at the top of the window, or press the global hotkey (default **`Ctrl+Alt+Space`**, disabled until you enable it in **Settings → Hotkeys**).
 2. Speak clearly into your microphone.
 3. You will see your words appear on the screen in real-time as Phoneme's native streaming engine processes the audio.
 4. Click **Stop** (or press the hotkey again).
@@ -47,7 +46,7 @@ Phoneme will finalize the recording, apply any Smart Cleanup you have configured
 
 Clicking on any recording in your list will open the **Detail Pane**.
 
-<!-- SCREENSHOT PLACEHOLDER: Detail pane showing waveform, transcript, and notes -->
+The detail pane includes an interactive waveform (wavesurfer.js), transcript editor, notes field, and action buttons.
 
 Here you can:
 - **Listen Back**: Click the play button on the interactive waveform to hear your original audio.
@@ -60,4 +59,6 @@ Now that you've mastered the basics, explore Phoneme's power-user features:
 - **[👥 Meeting Mode (Dual-Track)](meeting_mode.md)**: Record both sides of a conversation and let AI separate the speakers.
 - **[✨ Smart Cleanup (LLM Post-Processing)](smart_cleanup.md)**: Automatically remove stutters, format notes, or translate your voice.
 - **[⌨️ Transcribe-in-Place](transcribe_in_place.md)**: Dictate directly into any application on your computer.
-- **[🔍 Search & Organization](search_and_organization.md)**: Master tags and full-text search.
+- **[🔍 Search & Organization](search_and_organization.md)**: Master tags, keyword search, and semantic search.
+- **[⌨️ Hotkeys & Recording Modes](hotkeys_and_recording_modes.md)**: Hold, toggle, meeting hotkey, CLI equivalents.
+- **[❓ FAQ](faq.md)**: Quick answers to common questions.

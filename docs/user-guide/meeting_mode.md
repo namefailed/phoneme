@@ -12,13 +12,27 @@ Instead of just recording your microphone, Meeting Mode captures *both* your mic
    - **Mic Track**: Your own voice.
    - **System Track**: The voices of everyone else on the call (Zoom, Teams, Google Meet, etc.).
 
-<!-- SCREENSHOT PLACEHOLDER: Main UI showing the Meeting Mode toggle activated -->
+![Main recordings view with Meeting Mode](../screenshots/main.png)
+
+## Shared wall-clock timeline
+
+Both tracks are saved as WAV files of the **same total duration** — the wall-clock time from meeting start to stop. That lets you scrub either waveform to the same second and hear what was happening at that moment in the meeting.
+
+| Track | What it captures | Timeline behavior |
+|-------|------------------|-------------------|
+| **Mic** | Your voice from meeting start | Continuous — speech from t=0 |
+| **System** | WASAPI loopback (call/video audio) | Often **sparse** — Windows may only deliver samples when something is actually playing |
+
+When system audio starts late (you speak first, then share a video at 5 s), Phoneme **places** the system segment at the wall-clock instant it began — not at t=0. You should see leading silence on the system waveform, then call audio, then trailing silence.
+
+**Example:** You talk for 5 s, start a 15 s video, wrap up for 5 s → ~25 s meeting. System WAV: ~5 s flat, ~15 s video audio, ~5 s flat. Mic WAV: your voice across the full 25 s. Scrubbing both to 10 s should match what you heard live.
+
+> [!TIP]
+> Daemon logs on stop include `sparse`, `placement_ms`, and `first_content_from_wall_ms` for the system track — useful when verifying alignment.
 
 ## ✨ Why Dual-Track is Magic
 
-When the meeting ends, Phoneme transcribes both tracks independently. Because they were recorded at the exact same time, Phoneme knows precisely when each track was speaking.
-
-This leads to the **Merged Conversation View**.
+When the meeting ends, Phoneme transcribes both tracks independently. Because they share a wall-clock timeline, the **Merged Conversation View** can interleave them chronologically.
 
 ```mermaid
 %%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': false}, 'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
@@ -47,7 +61,7 @@ flowchart LR
 
 Instead of a giant block of text, you get a beautiful, chronological timeline of the conversation, exactly as it happened:
 
-<!-- SCREENSHOT PLACEHOLDER: Merged Conversation View showing "You" and "System" interleaved -->
+Expand a meeting group in the recordings list, then open the **merged conversation** view to see mic and system lines interleaved by timestamp.
 
 ### 🗣️ Adding Speaker Diarization
 

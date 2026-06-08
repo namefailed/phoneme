@@ -169,6 +169,21 @@ The frontend is intentionally built for performance and maintainability, leverag
 > **Security invariant:** Lit's `html` tagged template literals provide automatic contextual escaping, protecting against XSS for most interpolations. However, when using `unsafeHTML` or manually manipulating the DOM, data must still go through `escapeHtml` / `escapeAttr` (`utils/format.ts`). Transcripts, notes, file paths, tag names, search terms, and meeting ids are all attacker-influenced. `highlightMatch` escapes in every branch.
 <!-- -->
 
+## 👥 Meeting alignment (`phoneme-audio::meeting_align`)
+
+On `stop_meeting`, the daemon:
+
+1. Snapshots `target_duration_ms` from `wall_started` → stop instant.
+2. Stops mic and system recorders in parallel (`join_all`).
+3. Collects per-track `track_late_by_ms` and `first_non_silent_at` (wall-clock).
+4. Calls `align_meeting_tracks()` → writes timeline-aligned WAVs.
+
+**Mic (dense):** buffer spans the capture window → placed at `track_late_by_ms`.
+
+**System (sparse loopback):** WASAPI often returns only the audible segment. When the buffer is much shorter than expected *and* first content arrived late on the wall clock, samples are copied to `first_content_from_wall_ms` — not t=0. Sub-threshold noise at the buffer head must not disable sparse detection.
+
+See `crates/phoneme-audio/src/meeting_align.rs` and [Meeting Mode](../user-guide/meeting_mode.md).
+
 ## 🧪 Testing without hardware
 
 - **`SyntheticSource`** feeds canned PCM, so recorder/pipeline tests run with no

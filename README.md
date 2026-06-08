@@ -95,28 +95,33 @@ Phoneme isn't for everyone, and that's fine. If one of these fits your needs bet
 
 ---
 
-## 📚 Supreme Documentation
+## 📚 Documentation
 
-We believe that exceptional software requires exceptional documentation. Whether you're an end-user learning the ropes or a developer looking to integrate via our named pipes, everything you need is here.
+**[Full documentation index →](docs/README.md)**
 
-### For Users (Using Phoneme)
-- **[Getting Started](docs/user-guide/getting_started.md)**: A walkthrough of the hardware-aware First Run Wizard.
-- **[Meeting Mode & Dual-Track](docs/user-guide/meeting_mode.md)**: How to capture and separate multi-speaker calls.
-- **[Transcribe-in-Place](docs/user-guide/transcribe_in_place.md)**: Use Phoneme as a system-wide dictation engine.
-- **[Diarization & Whisper](docs/user-guide/diarization_and_whisper.md)**: How local Pyannote speaker tagging works.
-- **[Smart Cleanup (LLM Integration)](docs/user-guide/smart_cleanup.md)**: Using AI to polish, format, and translate your transcripts.
-- **[Search & Organization](docs/user-guide/search_and_organization.md)**: Mastering Tags and Full-Text Search.
-- **[Config Profiles](docs/user-guide/config_profiles.md)**: Snapshots for multiple environments.
-- **[Importing Audio](docs/user-guide/importing_audio.md)**: Process pre-recorded files through the pipeline.
-- **[Exporting & Backup](docs/user-guide/exporting_and_backup.md)**: Taking your data with you.
-- **[Troubleshooting & FAQ](docs/user-guide/troubleshooting.md)**
+### Users
+| Guide | Topic |
+|-------|--------|
+| [Getting Started](docs/user-guide/getting_started.md) | Install, wizard, first recording |
+| [Meeting Mode](docs/user-guide/meeting_mode.md) | Dual-track capture + wall-clock sync |
+| [Hotkeys & Recording Modes](docs/user-guide/hotkeys_and_recording_modes.md) | Hold, toggle, CLI bindings |
+| [Settings Overview](docs/user-guide/settings_overview.md) | Every settings screen (with screenshots) |
+| [Smart Cleanup](docs/user-guide/smart_cleanup.md) | LLM post-processing |
+| [Semantic Search](docs/user-guide/semantic_search.md) | Meaning-based recall |
+| [FAQ](docs/user-guide/faq.md) | Common questions |
+| [Troubleshooting](docs/user-guide/troubleshooting.md) | Fixes and diagnostics |
 
-### For Developers (Building on Phoneme)
-- **[Plugins and Hooks Ecosystem](docs/developer-guide/plugins_and_hooks.md)**: How to write scripts to receive Phoneme data, and our vision for the Plugin Marketplace.
-- **[IPC Integration Guide](docs/developer-guide/ipc_integration.md)**: Build advanced automation by communicating directly with the `\\.\pipe\phoneme-daemon` named pipe via Node.js, Python, or AutoHotkey.
-- **[Architecture & Internals](docs/developer-guide/internals.md)**: A deep-dive into the async task topology, `cpal` audio routing, and SQLite catalog.
-- **[CLI Reference](docs/developer-guide/cli_reference.md)**: Full command-line automation guide.
-- **[Building from Source](docs/developer-guide/building_from_source.md)**: Compiling the Rust and Tauri stack from scratch.
+### Developers
+| Guide | Topic |
+|-------|--------|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, IPC workflow, PR checklist |
+| [Architecture](docs/developer-guide/architecture.md) | Daemon / CLI / tray |
+| [Internals](docs/developer-guide/internals.md) | Pipeline, audio, meeting alignment |
+| [Config Reference](docs/developer-guide/config_reference.md) | Full `config.toml` schema |
+| [IPC Integration](docs/developer-guide/ipc_integration.md) | NDJSON named pipe |
+| [CLI Reference](docs/developer-guide/cli_reference.md) | All commands |
+| [Testing & CI](docs/developer-guide/testing_and_ci.md) | Local checks matching GitHub Actions |
+| [Roadmap](CHANGELOG.md) | Shipped features and v2.0 plans |
 
 ---
 
