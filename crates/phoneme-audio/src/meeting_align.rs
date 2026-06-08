@@ -66,10 +66,11 @@ mod tests {
         let sample_rate = 16_000;
         let target_ms = 40_000;
         let content = vec![0i16; ms_to_samples(target_ms, sample_rate)];
+        let len = content.len();
 
         let aligned = align_meeting_track_samples(content, 0, target_ms, sample_rate);
 
-        assert_eq!(aligned.len(), content.len());
-        assert_eq!(aligned, content);
+        assert_eq!(aligned.len(), len);
+        assert!(aligned.iter().all(|&s| s == 0));
     }
 }

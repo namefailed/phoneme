@@ -31,20 +31,44 @@ All IPC communication happens over a newline-delimited JSON protocol defined in 
 
 ### Running the App Locally
 
-To develop the app with live hot-reloading for the frontend, you need two terminal windows.
+To develop the app with live hot-reloading for the frontend, use **three terminal
+windows**. The daemon, Vite dev server, and Tauri shell are separate processes —
+`cargo tauri dev` loads the UI from `http://localhost:5173` but does **not** start
+Vite for you (there is no `beforeDevCommand` in `tauri.conf.json`).
 
-**Terminal 1: Start the backend daemon**
-```powershell
-cargo run -p phoneme-daemon -- --foreground
-```
-
-**Terminal 2: Start the Tauri dev server**
+**One-time setup** (from the repo root):
 ```powershell
 cd frontend
 pnpm install
 cd ..
+```
+
+**Terminal 1 — backend daemon** (logs to this terminal; optional but recommended
+when debugging recording/IPC):
+```powershell
+cargo run -p phoneme-daemon -- --foreground
+```
+
+**Terminal 2 — Vite dev server** (frontend hot reload):
+```powershell
+cd frontend
+pnpm dev
+```
+
+**Terminal 3 — Tauri desktop shell** (from the repo root, after Vite is up):
+```powershell
 cargo tauri dev
 ```
+
+If you skip Terminal 1, `phoneme-tray` will auto-spawn a background daemon on
+startup — fine for UI work, less ideal when you want daemon logs in the foreground.
+
+**Quick run without hot reload** (uses the built `frontend/dist`, not Vite):
+```powershell
+cd frontend && pnpm build && cd ..
+cargo run --bin phoneme-tray
+```
+The tray auto-spawns the daemon if none is running.
 
 ### Running the Tests
 
@@ -87,6 +111,13 @@ Consult `docs/smoke-test.md` for a full end-to-end verification checklist.
 2. **Write tests** for any new features or bug fixes.
 3. **Ensure CI passes**. Our GitHub Actions workflow will automatically run the test suite on all PRs.
 4. **Commit messages**: We prefer imperative commit messages (e.g., "Add feature X", not "Added feature X"). If your change is significant, please explain the *why* in the commit body.
+5. **No AI-tool attribution**: Do not add `Co-authored-by`, `Made-with`, or similar lines naming Cursor or other coding assistants. Commits and PRs should read as human-authored project work. Run `./scripts/install-git-hooks.ps1` once per clone to enforce this locally.
+
+### Local agent scratch space
+
+Assistant plans, handoffs, and one-off scripts belong in **`archive_internal/`**
+(gitignored) or **`scratch/`** (gitignored) — never in tracked paths. The
+public repo uses `docs/` and this file for contributor-facing documentation.
 
 ## Code of Conduct
 
