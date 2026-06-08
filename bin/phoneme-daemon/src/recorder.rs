@@ -103,13 +103,15 @@ struct PreviewTask {
 }
 
 /// One track of an in-flight meeting: its catalog id, where the WAV will be
-/// written, when it started, the track label, and the live recorder handle.
+/// written, when it started, the track label, the live recorder handle, and
+/// the sample count when audio first started (for alignment).
 struct MeetingTrackHandle {
     id: RecordingId,
     audio_path: PathBuf,
     started_at: chrono::DateTime<Local>,
     track: MeetingTrack,
     recorder: Recorder,
+    first_audio_at: Option<tokio::sync::mpsc::Receiver<usize>>,
 }
 
 /// An in-flight meeting: the two concurrently-recording tracks (mic + system).
@@ -509,6 +511,7 @@ impl DaemonRecorder {
             max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,
+            on_first_audio: None,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let recorder =
@@ -874,6 +877,9 @@ impl DaemonRecorder {
                 .join(id.day_folder())
                 .join(format!("{}.wav", id.file_stem()));
 
+            // Create a channel to receive the first audio sample count
+            let (first_audio_tx, first_audio_rx) = tokio::sync::mpsc::channel::<usize>(1);
+
             let row = Recording {
                 id: id.clone(),
                 started_at,
@@ -913,6 +919,7 @@ impl DaemonRecorder {
                 max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
                 silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
                 silence_window_ms: state.config.load().recording.silence_window_ms,
+                on_first_audio: Some(first_audio_tx),
             };
             // Start the audio recorder. If it fails, delete the row we just
             // inserted *and* roll back the earlier tracks before bailing out.
@@ -940,6 +947,7 @@ impl DaemonRecorder {
                 started_at,
                 track,
                 recorder,
+                first_audio_at: Some(first_audio_rx),
             });
         }
 
@@ -956,7 +964,7 @@ impl DaemonRecorder {
     /// catalog row `Transcribing`, enqueue it for the normal pipeline) and emit
     /// a `RecordingStopped` for each. Returns the session id that was stopped.
     pub async fn stop_meeting(&self, state: &AppState) -> Result<String> {
-        let meeting = self
+        let mut meeting = self
             .meeting
             .lock()
             .await
@@ -964,20 +972,45 @@ impl DaemonRecorder {
             .ok_or(Error::NotRecording)?;
         let meeting_id = meeting.meeting_id.clone();
 
-        for handle in meeting.tracks {
+        // First, collect first audio sample counts from all tracks
+        let mut track_first_audio: Vec<(RecordingId, Option<usize>)> = Vec::new();
+        for handle in &mut meeting.tracks {
+            let first_audio_at = if let Some(ref mut rx) = handle.first_audio_at {
+                // Try to receive the first audio sample count with a timeout
+                match tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await {
+                    Ok(Some(count)) => Some(count),
+                    _ => None, // Timeout or error - no audio detected
+                }
+            } else {
+                None
+            };
+            track_first_audio.push((handle.id.clone(), first_audio_at));
+        }
+
+        // Find the minimum first audio sample count (the track that started audio first)
+        let min_first_audio = track_first_audio.iter()
+            .filter_map(|(_, count)| *count)
+            .min()
+            .unwrap_or(0);
+
+        tracing::info!(min_first_audio = min_first_audio, "earliest first audio sample count");
+
+        // First, stop all recorders and collect their samples
+        let mut track_data: Vec<(RecordingId, std::path::PathBuf, chrono::DateTime<Local>, MeetingTrack, Vec<i16>, i64, Option<usize>)> = Vec::new();
+        
+        for (i, handle) in meeting.tracks.into_iter().enumerate() {
             let MeetingTrackHandle {
                 id,
                 audio_path,
                 started_at,
                 track,
                 recorder,
+                first_audio_at: _,
             } = handle;
 
-            let result = match recorder.stop_and_finalize(&audio_path).await {
+            let (samples, duration_ms) = match recorder.stop_and_get_samples().await {
                 Ok(r) => r,
                 Err(e) => {
-                    // One track failing to finalize shouldn't abort the others.
-                    // Mark it failed and continue stopping the rest.
                     tracing::error!(id = %id, track = track.as_str(), error = %e, "meeting track finalize failed");
                     if let Err(err) = state
                         .catalog
@@ -989,10 +1022,68 @@ impl DaemonRecorder {
                     continue;
                 }
             };
+            
+            let first_audio_count = track_first_audio[i].1;
+            track_data.push((id, audio_path, started_at, track, samples, duration_ms, first_audio_count));
+        }
 
+        // Find the maximum duration among all tracks (to ensure they all end at the same time)
+        let max_duration_ms = track_data.iter().map(|(_, _, _, _, _, duration, _)| *duration).max().unwrap_or(0);
+        
+        tracing::info!(max_duration_ms = max_duration_ms, "maximum duration across all tracks");
+        
+        // Pad tracks: at the beginning to align audio content based on first audio sample counts, and at the end to match duration
+        for (id, audio_path, started_at, track, mut samples, _duration_ms, first_audio_count) in track_data {
+            // Calculate beginning padding based on first audio sample count
+            let beginning_padding_samples = if let Some(count) = first_audio_count {
+                count.saturating_sub(min_first_audio)
+            } else {
+                0
+            };
+            
+            if beginning_padding_samples > 0 {
+                let mut padded = vec![0i16; beginning_padding_samples];
+                padded.extend(samples);
+                samples = padded;
+                tracing::info!(id = %id, track = track.as_str(), padding_samples = beginning_padding_samples, "padded track at beginning to align audio timing");
+            }
+            
+            // Pad at the end to match the maximum duration
+            let sample_rate = 16000;
+            let current_duration_ms = (samples.len() as u64 * 1000 / sample_rate) as i64;
+            let end_padding_samples = if current_duration_ms < max_duration_ms {
+                let needed_ms = (max_duration_ms - current_duration_ms) as u64;
+                (needed_ms * sample_rate / 1000) as usize
+            } else {
+                0
+            };
+            
+            if end_padding_samples > 0 {
+                samples.extend(vec![0i16; end_padding_samples]);
+                tracing::info!(id = %id, track = track.as_str(), padding_samples = end_padding_samples, "padded track at end to match duration");
+            }
+            
+            // Calculate final duration based on the padded samples
+            let final_duration_ms = (samples.len() as u64 * 1000 / sample_rate) as i64;
+            
+            // Write the (possibly padded) samples to WAV
+            let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
+            if let Err(e) = phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg) {
+                tracing::error!(id = %id, track = track.as_str(), error = %e, "failed to write WAV");
+                if let Err(err) = state
+                    .catalog
+                    .update_status(&id, RecordingStatus::TranscribeFailed)
+                    .await
+                {
+                    tracing::warn!(id = %id, error = %err, "failed to mark track as failed");
+                }
+                continue;
+            }
+            
+            // Update catalog with the (possibly padded) duration
             state
                 .catalog
-                .update_status_and_duration(&id, RecordingStatus::Transcribing, result.duration_ms)
+                .update_status_and_duration(&id, RecordingStatus::Transcribing, final_duration_ms)
                 .await?;
 
             let payload = HookPayload {
@@ -1000,7 +1091,7 @@ impl DaemonRecorder {
                 timestamp: started_at,
                 transcript: String::new(),
                 audio_path: audio_path.to_string_lossy().into_owned(),
-                duration_ms: result.duration_ms,
+                duration_ms: final_duration_ms,
                 model: String::new(),
                 metadata: HookMetadata::current(),
             };
@@ -1009,11 +1100,11 @@ impl DaemonRecorder {
 
             state.events.emit(DaemonEvent::RecordingStopped {
                 id: id.clone(),
-                duration_ms: result.duration_ms,
+                duration_ms: final_duration_ms,
                 audio_path: audio_path.to_string_lossy().into_owned(),
                 meeting_id: Some(meeting_id.clone()),
             });
-            tracing::info!(id = %id, track = track.as_str(), ms = result.duration_ms, "meeting track stopped");
+            tracing::info!(id = %id, track = track.as_str(), ms = final_duration_ms, "meeting track stopped");
         }
 
         tracing::info!(session = %meeting_id, "meeting stopped");

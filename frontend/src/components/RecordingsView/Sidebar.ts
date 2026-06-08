@@ -79,6 +79,7 @@ export class SidebarElement extends LitElement {
             <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
               <span class="sidebar-icon" style="color: var(--accent);">#</span>
               <span>${t.name}</span>
+              <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
             </div>
           `)}
         </div>

@@ -6,6 +6,7 @@ export class SectionAdvanced {
   constructor(
     container: HTMLElement,
     private config: any,
+    private onNavigateToWizard?: () => void,
   ) {
     this.render(container);
   }
@@ -36,6 +37,11 @@ export class SectionAdvanced {
           <label>Config file</label>
           <div><button class="inline-button" id="open-config">Open config.toml</button></div>
         </div>
+        <div class="settings-field">
+          <label>First Run Wizard</label>
+          <div><button class="inline-button" id="rerun-wizard">Rerun First Run Wizard</button></div>
+          <div style="font-size: 12px; color: var(--fg-muted); margin-top: 4px;">Re-download whisper-server and models if missing</div>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
@@ -46,6 +52,12 @@ export class SectionAdvanced {
         await invoke("open_file", { path });
       } catch (e) {
         console.error("Failed to open config file:", e);
+      }
+    });
+
+    container.querySelector("#rerun-wizard")?.addEventListener("click", async () => {
+      if (this.onNavigateToWizard) {
+        this.onNavigateToWizard();
       }
     });
   }

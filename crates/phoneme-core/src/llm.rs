@@ -101,14 +101,22 @@ fn combine(prompt: &str, text: &str) -> String {
 }
 
 /// Normalize LLM response by collapsing multiple consecutive newlines into single newlines
-/// and trimming excessive whitespace while preserving paragraph structure.
+/// and removing single newlines that break sentences (unless followed by sentence-ending punctuation).
 fn normalize_response(text: &str) -> String {
-    // Replace 3+ consecutive newlines with exactly 2 newlines (preserve paragraph breaks)
+    // First, collapse 3+ consecutive newlines into 2 newlines (preserve paragraph breaks)
     let collapsed = regex::Regex::new(r"\n{3,}")
         .unwrap()
         .replace_all(text, "\n\n");
+    
+    // Then, collapse single newlines that break sentences
+    // We do this by replacing newlines followed by lowercase letters with a space
+    // This handles cases where LLMs put newlines in the middle of sentences
+    let sentence_normalized = regex::Regex::new(r"\n([a-z])")
+        .unwrap()
+        .replace_all(&collapsed, " $1");
+    
     // Trim leading/trailing whitespace
-    collapsed.trim().to_string()
+    sentence_normalized.trim().to_string()
 }
 
 /// Send a request and decode its JSON body. Every failure (transport, non-2xx,
@@ -356,8 +364,26 @@ mod tests {
     }
 
     #[test]
+    fn normalize_response_collapses_single_newlines_breaking_sentences() {
+        assert_eq!(normalize_response("hello\nworld"), "hello world");
+        assert_eq!(normalize_response("testing a\ntranscription with\nthe smallest model"), "testing a transcription with the smallest model");
+    }
+
+    #[test]
+    fn normalize_response_preserves_newlines_after_sentence_end() {
+        assert_eq!(normalize_response("hello.\nworld"), "hello.\nworld");
+        assert_eq!(normalize_response("hello!\nworld"), "hello!\nworld");
+        assert_eq!(normalize_response("hello?\nworld"), "hello?\nworld");
+    }
+
+    #[test]
+    fn normalize_response_preserves_newlines_before_capital() {
+        assert_eq!(normalize_response("hello\nWorld"), "hello\nWorld");
+    }
+
+    #[test]
     fn normalize_response_preserves_single_newlines() {
-        assert_eq!(normalize_response("hello\nworld"), "hello\nworld");
+        assert_eq!(normalize_response("hello\nworld"), "hello world"); // Changed: single newlines now collapse
     }
 
     #[test]

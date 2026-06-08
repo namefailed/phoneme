@@ -25,6 +25,7 @@ export class SettingsViewElement extends LitElement {
   }
 
   @property({ type: Object }) onClose!: () => void;
+  @property({ type: Function }) onNavigateToWizard?: () => void;
 
   @state() private activeTab: string = "transcription";
   @state() private config: any = null;
@@ -127,7 +128,7 @@ export class SettingsViewElement extends LitElement {
       new SectionHook(createSubHost(), this.config);
       new SectionStorage(createSubHost(), this.config);
       new SectionProfiles(createSubHost(), this.config);
-      new SectionAdvanced(createSubHost(), this.config);
+      new SectionAdvanced(createSubHost(), this.config, this.onNavigateToWizard);
     };
 
     if (isSearching) {
@@ -177,7 +178,7 @@ export class SettingsViewElement extends LitElement {
           new SectionStorage(createSubHost(), this.config);
           new SectionProfiles(createSubHost(), this.config);
           new SectionTray(createSubHost(), this.config);
-          new SectionAdvanced(createSubHost(), this.config);
+          new SectionAdvanced(createSubHost(), this.config, this.onNavigateToWizard);
           break;
       }
     }
@@ -235,9 +236,10 @@ export class SettingsViewElement extends LitElement {
 // Legacy wrapper
 export class SettingsView {
   private element: SettingsViewElement;
-  constructor(container: HTMLElement, onClose: () => void) {
+  constructor(container: HTMLElement, onClose: () => void, onNavigateToWizard?: () => void) {
     this.element = document.createElement('ph-settings-view') as SettingsViewElement;
     this.element.onClose = onClose;
+    this.element.onNavigateToWizard = onNavigateToWizard;
     container.appendChild(this.element);
   }
 
