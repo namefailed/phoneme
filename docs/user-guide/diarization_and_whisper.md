@@ -14,17 +14,17 @@ With the native engine, audio is fed into the Whisper model as it is recorded. Y
 - **Hardware Agnostic:** Phoneme uses the optimized `whisper.cpp` engine which accelerates using your CPU, or offloads to your GPU if supported.
 - **Model Sizes:** Through the First Run Wizard, Phoneme detects your system RAM/VRAM and automatically recommends the best Whisper model. You can always change this later in **Settings -> Whisper**.
 
-## 🗣️ Offline Speaker Diarization (Pyannote)
+## 🗣️ Offline Speaker Diarization (speakrs)
 
 When you capture audio using Meeting Mode (recording both your mic and the system audio), Phoneme has enough data to accurately reconstruct the conversation. But what if multiple people are speaking on the system audio track?
 
-Enter **Pyannote**.
+Enter **speakrs**.
 
-Phoneme integrates the powerful Pyannote ONNX model for offline speaker diarization. This means it can listen to a track and separate out different speakers entirely locally.
+Phoneme integrates the powerful speakrs ONNX model for offline speaker diarization. This means it can listen to a track and separate out different speakers entirely locally.
 
 ### ⚙️ How it Works
 1. **Recording:** You start a Meeting. Phoneme captures `Mic` and `System` as two separate files.
-2. **Diarization Pipeline:** Before transcription, Phoneme pipes the audio through the Pyannote ONNX model.
+2. **Diarization Pipeline:** Before transcription, Phoneme pipes the audio through the speakrs ONNX model.
 3. **Speaker Tagging:** The model emits timestamps of who spoke when.
 4. **Transcription:** Phoneme uses Whisper to transcribe those specific time-slices.
 5. **Merging:** The final transcript neatly identifies `[Speaker 1]`, `[Speaker 2]`, and your own `[Mic]` track.

@@ -225,7 +225,7 @@ export class FirstRunWizardElement extends LitElement {
             <label for="setup-diarization" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">👥 Local Speaker Diarization</label>
           </div>
           ${this.config._setup_diarization ? html`
-            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem; color: #ffb86c;">⚠️ Downloads a ~500MB Pyannote model. Requires 16GB+ RAM for stable transcription.</div>
+            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem; color: #ffb86c;">⚠️ Downloads a ~500MB speakrs model. Requires 16GB+ RAM for stable transcription.</div>
           ` : html`
             <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud APIs or disable speaker separation.</div>
           `}
@@ -468,7 +468,7 @@ export class FirstRunWizardElement extends LitElement {
 
   private async doDiarization() {
     this.downloadTitle = "Diarization Setup";
-    this.downloadSubtitle = "Fetching the Pyannote ONNX models (~500MB)...";
+    this.downloadSubtitle = "Fetching the speakrs ONNX models (~500MB)...";
     this.progressValue = null;
     this.downloadStatus = "Starting download...";
 
