@@ -107,14 +107,14 @@ fn normalize_response(text: &str) -> String {
     let collapsed = regex::Regex::new(r"\n{3,}")
         .unwrap()
         .replace_all(text, "\n\n");
-    
+
     // Then, collapse single newlines that break sentences
     // We do this by replacing newlines followed by lowercase letters with a space
     // This handles cases where LLMs put newlines in the middle of sentences
     let sentence_normalized = regex::Regex::new(r"\n([a-z])")
         .unwrap()
         .replace_all(&collapsed, " $1");
-    
+
     // Trim leading/trailing whitespace
     sentence_normalized.trim().to_string()
 }
@@ -366,7 +366,10 @@ mod tests {
     #[test]
     fn normalize_response_collapses_single_newlines_breaking_sentences() {
         assert_eq!(normalize_response("hello\nworld"), "hello world");
-        assert_eq!(normalize_response("testing a\ntranscription with\nthe smallest model"), "testing a transcription with the smallest model");
+        assert_eq!(
+            normalize_response("testing a\ntranscription with\nthe smallest model"),
+            "testing a transcription with the smallest model"
+        );
     }
 
     #[test]
