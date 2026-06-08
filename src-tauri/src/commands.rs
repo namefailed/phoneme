@@ -791,10 +791,7 @@ pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, String> {
 /// allowed root. Returns `false` if either path can't be canonicalized (e.g.
 /// doesn't exist) — fail closed.
 fn path_within(child: &std::path::Path, root: &std::path::Path) -> bool {
-    match (
-        std::fs::canonicalize(child),
-        std::fs::canonicalize(root),
-    ) {
+    match (std::fs::canonicalize(child), std::fs::canonicalize(root)) {
         (Ok(c), Ok(r)) => c.starts_with(&r),
         _ => false,
     }
