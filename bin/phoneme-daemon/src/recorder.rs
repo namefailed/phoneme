@@ -149,6 +149,13 @@ pub struct DaemonRecorder {
     /// meeting is recording. Held separately from `active` so the existing
     /// single-recording path is completely untouched.
     meeting: Arc<Mutex<Option<ActiveMeeting>>>,
+    /// Serializes `MeetingToggle`. Without it the toggle is check-then-act
+    /// across two separate `meeting` lock acquisitions (read state, then
+    /// start/stop), so two near-simultaneous hotkey presses can both observe
+    /// "no meeting" and both call `start_meeting` (one then fails), or both
+    /// observe "meeting" and race to stop. Held for the whole toggle so the
+    /// decision and the action are atomic with respect to other toggles.
+    toggle_guard: Arc<Mutex<()>>,
 }
 
 /// Whether pre-roll should be active for the current config: opt-in
@@ -789,6 +796,27 @@ impl DaemonRecorder {
         self.meeting.lock().await.is_some()
     }
 
+    /// Atomically toggle Meeting Mode: stop the meeting if one is running,
+    /// otherwise start one. Returns `Ok(true)` if a meeting was started and
+    /// `Ok(false)` if one was stopped.
+    ///
+    /// The `toggle_guard` is held for the entire decision-and-action so two
+    /// concurrent toggles (e.g. a double-tapped hotkey, or hotkey + UI button)
+    /// can't both read the same state and act on it — the second waits, re-reads
+    /// the now-updated state, and does the opposite. `start_meeting`/
+    /// `stop_meeting` keep their own internal guards, so this composes safely
+    /// with the explicit `StartMeeting`/`StopMeeting` requests too.
+    pub async fn toggle_meeting(&self, state: &AppState) -> Result<bool> {
+        let _guard = self.toggle_guard.lock().await;
+        if self.meeting_active().await {
+            self.stop_meeting(state).await?;
+            Ok(false)
+        } else {
+            self.start_meeting(state).await?;
+            Ok(true)
+        }
+    }
+
     /// Start Meeting Mode (v1.6): record the microphone AND the system audio
     /// (WASAPI loopback) concurrently as two separate, linked recordings.
     ///
@@ -1307,6 +1335,48 @@ mod tests {
             .await
             .expect_err("second meeting must be rejected");
         assert!(matches!(err, Error::AlreadyRecording { .. }));
+    }
+
+    #[tokio::test]
+    async fn toggle_meeting_stops_an_active_meeting() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let audio_cfg = AudioConfig::phoneme_default();
+
+        // Stand up an active meeting via the synthetic-source path.
+        let (mic_src, mic_sink) = SyntheticSource::new(audio_cfg);
+        let (sys_src, sys_sink) = SyntheticSource::new(audio_cfg);
+        state
+            .recorder
+            .start_meeting_with_sources(
+                &state,
+                vec![
+                    (MeetingTrack::Mic, Box::new(mic_src)),
+                    (MeetingTrack::System, Box::new(sys_src)),
+                ],
+            )
+            .await
+            .expect("meeting starts");
+        assert!(state.recorder.meeting_active().await);
+
+        // Drain a little audio so the tracks can finalize cleanly on stop.
+        mic_sink.push(vec![100i16; 8_000]).await.unwrap();
+        sys_sink.push(vec![200i16; 8_000]).await.unwrap();
+        mic_sink.close();
+        sys_sink.close();
+
+        // Toggling while a meeting is active must stop it and report `false`
+        // (no longer running) rather than trying to start a second meeting.
+        let started = state
+            .recorder
+            .toggle_meeting(&state)
+            .await
+            .expect("toggle stops the meeting");
+        assert!(!started, "toggle should report the meeting stopped");
+        assert!(
+            !state.recorder.meeting_active().await,
+            "meeting should be cleared after toggle"
+        );
     }
 
     #[tokio::test]

@@ -113,13 +113,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::MeetingToggle => {
-            let result = if state.recorder.meeting_active().await {
-                state.recorder.stop_meeting(state).await
-            } else {
-                state.recorder.start_meeting(state).await
-            };
-            match result {
-                Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
+            // Atomic toggle: the recorder holds a guard across the read+act so a
+            // double-tapped hotkey can't race two starts (or two stops). See
+            // `DaemonRecorder::toggle_meeting`.
+            match state.recorder.toggle_meeting(state).await {
+                Ok(started) => Response::Ok(serde_json::json!({ "started": started })),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
                     message: e.to_string(),
