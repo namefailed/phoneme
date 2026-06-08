@@ -221,36 +221,9 @@ pub fn run() {
                     }
                 }
 
-                if bridge.config.hotkey.enabled
-                    || bridge.config.meeting_hotkey.enabled
-                    || bridge.config.in_place_hotkey.enabled
-                {
-                    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-                    if bridge.config.hotkey.enabled {
-                        if let Ok(shortcut) = bridge.config.hotkey.combo.parse::<Shortcut>() {
-                            if let Err(e) = app.handle().global_shortcut().register(shortcut) {
-                                tracing::error!("failed to register record hotkey: {e}");
-                            }
-                        }
-                    }
-                    if bridge.config.meeting_hotkey.enabled {
-                        if let Ok(shortcut) = bridge.config.meeting_hotkey.combo.parse::<Shortcut>()
-                        {
-                            if let Err(e) = app.handle().global_shortcut().register(shortcut) {
-                                tracing::error!("failed to register meeting hotkey: {e}");
-                            }
-                        }
-                    }
-                    if bridge.config.in_place_hotkey.enabled {
-                        if let Ok(shortcut) =
-                            bridge.config.in_place_hotkey.combo.parse::<Shortcut>()
-                        {
-                            if let Err(e) = app.handle().global_shortcut().register(shortcut) {
-                                tracing::error!("failed to register in_place hotkey: {e}");
-                            }
-                        }
-                    }
-                }
+                // Register all enabled global hotkeys via the shared helper, so
+                // startup and config-save/profile-switch stay in lockstep.
+                commands::register_hotkeys(app.handle(), &bridge.config);
             }
             Ok(())
         })

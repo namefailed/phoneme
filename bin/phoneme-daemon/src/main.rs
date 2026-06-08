@@ -149,13 +149,7 @@ async fn main() -> Result<()> {
 }
 
 pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
-    if let Ok(p) = std::env::var("PHONEME_CONFIG") {
-        return Ok(phoneme_core::Config::load(std::path::Path::new(&p))?);
-    }
-    if let Some(default_path) = phoneme_core::config::default_config_path() {
-        if default_path.exists() {
-            return Ok(phoneme_core::Config::load(&default_path)?);
-        }
-    }
-    Ok(phoneme_core::Config::default())
+    // Canonical loader shared with the CLI: honors PHONEME_CONFIG, else the
+    // per-user default, else built-in defaults.
+    Ok(phoneme_core::Config::load_resolved()?)
 }
