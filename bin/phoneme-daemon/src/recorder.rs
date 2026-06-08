@@ -36,6 +36,16 @@ const STOP_TAIL_GRACE: Duration = Duration::from_millis(150);
 /// re-transcription rarely changes the text enough to be worth the round trip.
 const PREVIEW_MIN_NEW_SAMPLES: usize = 16_000;
 
+/// The streaming preview transcribes only the last `PREVIEW_WINDOW_SAMPLES` of
+/// captured audio each tick — a rolling "live caption" — so per-tick work stays
+/// roughly constant instead of growing with the recording length. Without this
+/// the loop re-transcribed the entire (ever-growing) buffer every tick, which is
+/// O(n²) over a recording and saturates the CPU / whisper-server on long takes.
+/// The authoritative full transcript is still produced from the complete file
+/// after the recording stops (see the pipeline), so this only bounds the live
+/// preview, not the final result. 15 s at 16 kHz.
+const PREVIEW_WINDOW_SAMPLES: usize = 16_000 * 15;
+
 /// Open a [`Source`] for the current recording: returns a real CPAL source in
 /// production and a [`GeneratorSource`] when `PHONEME_AUDIO_BACKEND=synthetic`
 /// is set (CI / headless tests).
@@ -340,12 +350,14 @@ impl DaemonRecorder {
                     _ = interval.tick() => {}
                 }
 
-                // Snapshot the audio captured so far. If the recorder is gone
+                // Snapshot only the trailing window of audio captured so far (the
+                // recorder also tells us the full captured length so we can still
+                // throttle on newly-accumulated audio). If the recorder is gone
                 // (race with stop), end the loop.
-                let samples = {
+                let (total_len, samples) = {
                     let guard = handle.lock().await;
                     match guard.as_ref() {
-                        Some(rec) => match rec.snapshot().await {
+                        Some(rec) => match rec.snapshot_tail(PREVIEW_WINDOW_SAMPLES).await {
                             Ok(s) => s,
                             Err(_) => break,
                         },
@@ -353,10 +365,10 @@ impl DaemonRecorder {
                     }
                 };
                 // Skip until enough *new* audio has accumulated to be worth a tick.
-                if samples.len() < last_len + PREVIEW_MIN_NEW_SAMPLES {
+                if total_len < last_len + PREVIEW_MIN_NEW_SAMPLES {
                     continue;
                 }
-                last_len = samples.len();
+                last_len = total_len;
 
                 // Write a temp WAV and transcribe via the configured provider.
                 if let Err(e) = wav::write_wav(&tmp_wav, &samples, audio_cfg) {
