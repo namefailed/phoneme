@@ -5,7 +5,7 @@ use crate::app_state::AppState;
 use chrono::Local;
 use phoneme_audio::device::resolve_input_device;
 use phoneme_audio::format::SampleRate;
-use phoneme_audio::meeting_align::align_meeting_track_samples;
+use phoneme_audio::meeting_align::{align_meeting_tracks, TrackAlignInput};
 use phoneme_audio::preroll::PreRollBuffer;
 use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
 use phoneme_audio::source::{CpalSource, GeneratorSource, Source};
@@ -985,30 +985,61 @@ impl DaemonRecorder {
             "meeting wall-clock duration for track alignment"
         );
 
-        // Stop all recorders and collect their samples.
-        let mut track_data: Vec<(
-            RecordingId,
-            std::path::PathBuf,
-            chrono::DateTime<Local>,
-            MeetingTrack,
-            Vec<i16>,
-            i64,
-        )> = Vec::new();
+        // Stop every recorder at once so one track doesn't keep capturing while
+        // the other is draining (which skews sample counts vs wall-clock time).
+        let stop_results = futures::future::join_all(meeting.tracks.into_iter().map(
+            |handle| async move {
+                let MeetingTrackHandle {
+                    id,
+                    audio_path,
+                    started_at,
+                    track,
+                    recorder,
+                    capture_started,
+                } = handle;
+                let track_late_by_ms =
+                    capture_started.duration_since(wall_started).as_millis() as i64;
+                let stop_result = recorder.stop_and_get_samples().await;
+                (
+                    id,
+                    audio_path,
+                    started_at,
+                    track,
+                    track_late_by_ms,
+                    stop_result,
+                )
+            },
+        ))
+        .await;
 
-        for handle in meeting.tracks.into_iter() {
-            let MeetingTrackHandle {
-                id,
-                audio_path,
-                started_at,
-                track,
-                recorder,
-                capture_started,
-            } = handle;
+        struct StoppedTrack {
+            id: RecordingId,
+            audio_path: std::path::PathBuf,
+            started_at: chrono::DateTime<Local>,
+            track: MeetingTrack,
+            track_late_by_ms: i64,
+            first_content_from_wall_ms: Option<i64>,
+            raw_samples: Vec<i16>,
+        }
 
-            let track_late_by_ms = capture_started.duration_since(wall_started).as_millis() as i64;
+        let mut stopped: Vec<StoppedTrack> = Vec::new();
 
-            let (raw_samples, _duration_ms) = match recorder.stop_and_get_samples().await {
-                Ok(r) => r,
+        for (id, audio_path, started_at, track, track_late_by_ms, stop_result) in stop_results {
+            match stop_result {
+                Ok((raw_samples, _duration_ms, first_non_silent_at)) => {
+                    let first_content_from_wall_ms = first_non_silent_at.map(|t| {
+                        t.duration_since(wall_started).as_millis() as i64
+                    });
+                    stopped.push(StoppedTrack {
+                        id,
+                        audio_path,
+                        started_at,
+                        track,
+                        track_late_by_ms,
+                        first_content_from_wall_ms,
+                        raw_samples,
+                    });
+                }
                 Err(e) => {
                     tracing::error!(id = %id, track = track.as_str(), error = %e, "meeting track finalize failed");
                     if let Err(err) = state
@@ -1018,33 +1049,56 @@ impl DaemonRecorder {
                     {
                         tracing::warn!(id = %id, error = %err, "failed to mark track as failed");
                     }
-                    continue;
                 }
-            };
+            }
+        }
 
-            let raw_len = raw_samples.len();
-            let samples = align_meeting_track_samples(
-                raw_samples,
-                track_late_by_ms,
-                target_duration_ms,
-                sample_rate,
-            );
+        let align_inputs: Vec<TrackAlignInput> = stopped
+            .iter()
+            .map(|t| TrackAlignInput {
+                samples: t.raw_samples.clone(),
+                track_late_by_ms: t.track_late_by_ms,
+                first_content_from_wall_ms: t.first_content_from_wall_ms,
+                // The mic is continuous (dense); only the system/loopback track
+                // may be sparse and need wall-clock first-content relocation.
+                dense: matches!(t.track, MeetingTrack::Mic),
+            })
+            .collect();
+        let aligned = align_meeting_tracks(&align_inputs, target_duration_ms, sample_rate);
+
+        let mut track_data: Vec<(
+            RecordingId,
+            std::path::PathBuf,
+            chrono::DateTime<Local>,
+            MeetingTrack,
+            Vec<i16>,
+            i64,
+        )> = Vec::new();
+
+        for (meta, aligned_track) in stopped.into_iter().zip(aligned) {
+            let capture_window_ms = (target_duration_ms - meta.track_late_by_ms).max(0);
+            let expected_raw =
+                phoneme_audio::meeting_align::ms_to_samples(capture_window_ms, sample_rate);
 
             tracing::info!(
-                id = %id,
-                track = track.as_str(),
-                raw_samples = raw_len,
-                aligned_samples = samples.len(),
-                track_late_by_ms = track_late_by_ms,
+                id = %meta.id,
+                track = meta.track.as_str(),
+                raw_samples = meta.raw_samples.len(),
+                expected_raw_samples = expected_raw,
+                aligned_samples = aligned_track.samples.len(),
+                track_late_by_ms = meta.track_late_by_ms,
+                first_content_from_wall_ms = ?meta.first_content_from_wall_ms,
+                sparse = aligned_track.sparse,
+                placement_ms = aligned_track.placement_ms,
                 "aligned meeting track to wall-clock timeline"
             );
 
             track_data.push((
-                id,
-                audio_path,
-                started_at,
-                track,
-                samples,
+                meta.id,
+                meta.audio_path,
+                meta.started_at,
+                meta.track,
+                aligned_track.samples,
                 target_duration_ms,
             ));
         }
