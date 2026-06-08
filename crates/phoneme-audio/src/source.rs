@@ -17,6 +17,19 @@ use tokio::sync::mpsc;
 /// 16-bit mono PCM at 16 kHz).
 pub type SampleBlock = Vec<i16>;
 
+/// Number of silence samples to insert to fill a wall-clock gap: how many
+/// samples *should* have been produced by now (`expected`) minus how many
+/// actually were (`produced`) — but only once that difference exceeds
+/// `tolerance`, so normal scheduling jitter between capture callbacks isn't
+/// mistaken for a real silent gap. Saturating, so a momentarily-ahead
+/// `produced` (timing skew) yields 0 rather than underflowing.
+fn gap_fill_len(expected: usize, produced: usize, tolerance: usize) -> usize {
+    match expected.checked_sub(produced) {
+        Some(gap) if gap > tolerance => gap,
+        _ => 0,
+    }
+}
+
 /// An asynchronous source of audio sample blocks. Implementations must convert
 /// to Phoneme's canonical format (16-bit, 16 kHz, mono) before yielding.
 #[async_trait::async_trait]
@@ -33,6 +46,11 @@ pub trait Source: Send {
     /// Stop the underlying capture. After calling, `next_block` should return
     /// `Ok(None)` shortly.
     async fn stop(&mut self) -> Result<()>;
+
+    /// Notify the source that recording was paused (`true`) or resumed
+    /// (`false`). Used by gap-filling sources (loopback) to avoid back-filling a
+    /// paused span as silence. Default: no-op (dense sources need nothing).
+    async fn set_paused(&mut self, _paused: bool) {}
 }
 
 /// A synthetic source: backed by an mpsc channel that tests push samples into.
@@ -170,6 +188,10 @@ pub struct CpalSource {
     stop_tx: Option<std::sync::mpsc::Sender<()>>,
     _stream_thread: Option<std::thread::JoinHandle<()>>,
     _worker: tokio::task::JoinHandle<()>,
+    /// Set true on resume so the gap-fill worker re-baselines its wall clock and
+    /// doesn't back-fill a paused span as silence. Only meaningful when the
+    /// source was opened with gap filling (loopback).
+    rebaseline_fill_clock: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CpalSource {
@@ -191,7 +213,9 @@ impl CpalSource {
         let supported = device
             .default_input_config()
             .map_err(|e| Error::Internal(format!("cpal default_input_config: {e}")))?;
-        Self::open_with_config(device, supported, tail_grace)
+        // Microphone capture is continuous (the device always delivers), so it
+        // never needs wall-clock gap filling.
+        Self::open_with_config(device, supported, tail_grace, false)
     }
 
     /// Open a capture source for the requested [`CaptureSource`].
@@ -252,13 +276,18 @@ impl CpalSource {
         let supported = device
             .default_output_config()
             .map_err(|e| Error::Internal(format!("cpal default_output_config (loopback): {e}")))?;
-        Self::open_with_config(device, supported, tail_grace)
+        // WASAPI loopback delivers samples ONLY while something is playing — it
+        // hands back nothing during silence (e.g. a paused video), which would
+        // collapse silent gaps and desync the meeting's two tracks. Enable
+        // wall-clock gap filling so the loopback track stays continuous.
+        Self::open_with_config(device, supported, tail_grace, true)
     }
 
     fn open_with_config(
         device: cpal::Device,
         supported: cpal::SupportedStreamConfig,
         tail_grace: Duration,
+        fill_gaps: bool,
     ) -> Result<Self> {
         let device_sample_rate = supported.sample_rate().0;
         let device_channels = supported.channels() as usize;
@@ -373,6 +402,11 @@ impl CpalSource {
 
         // Background worker — does all the heavy lifting off the audio thread.
         let target_rate = SampleRate::HZ_16K.as_u32();
+        // Flipped true by `set_paused(false)` (resume) so the fill worker forgets
+        // wall-clock that elapsed during a pause instead of back-filling it as
+        // silence (which would desync a meeting's tracks across a pause).
+        let rebaseline_fill_clock = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let rebaseline_worker = rebaseline_fill_clock.clone();
         let worker = tokio::spawn(async move {
             use rubato::{
                 Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
@@ -398,7 +432,43 @@ impl CpalSource {
             // Max size: 10 seconds of raw float audio per channel. If we hit this, the consumer is dead.
             let max_accumulator_len = device_sample_rate as usize * device_channels * 10;
 
+            // Wall-clock gap filling (loopback only — see `fill_gaps`). `produced`
+            // counts canonical (16 kHz) samples emitted so far; `fill_start`
+            // marks stream start. When a block arrives after the device went
+            // quiet, the elapsed wall-clock implies more samples *should* exist
+            // than we've emitted, and we insert that much real silence first so
+            // the track stays continuous and time-aligned.
+            let mut fill_start = std::time::Instant::now();
+            let mut produced: usize = 0;
+            // 100 ms at 16 kHz — only fill gaps larger than this so ordinary
+            // scheduling jitter between callbacks is never mistaken for silence.
+            let fill_tolerance = target_rate as usize / 10;
+
             while let Some(mut raw) = raw_rx.recv().await {
+                if fill_gaps {
+                    // On resume, re-baseline so wall-clock that elapsed during a
+                    // (meeting) pause is forgotten — otherwise we'd insert the
+                    // whole paused span as silence here and desync the tracks.
+                    // After this, `expected == produced`, so no gap is filled for
+                    // the pause; the post-resume timeline starts fresh in step
+                    // with the mic track (which also resumed at the same instant).
+                    if rebaseline_worker.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                        fill_start = std::time::Instant::now()
+                            - std::time::Duration::from_secs_f64(
+                                produced as f64 / target_rate as f64,
+                            );
+                    }
+                    let expected =
+                        (fill_start.elapsed().as_secs_f64() * target_rate as f64) as usize;
+                    let gap = gap_fill_len(expected, produced, fill_tolerance);
+                    if gap > 0 {
+                        if out_tx.send(vec![0i16; gap]).await.is_err() {
+                            return;
+                        }
+                        produced += gap;
+                    }
+                }
+
                 if accumulator.len() + raw.len() > max_accumulator_len {
                     tracing::warn!(
                         "audio accumulator overflow ({} frames), dropping buffered audio!",
@@ -431,9 +501,11 @@ impl CpalSource {
                     };
 
                     let i16s = f32_to_i16(&processed);
+                    let n = i16s.len();
                     if out_tx.send(i16s).await.is_err() {
                         return;
                     }
+                    produced += n;
                 }
             }
 
@@ -461,6 +533,7 @@ impl CpalSource {
             stop_tx: Some(stop_tx),
             _stream_thread: Some(stream_thread),
             _worker: worker,
+            rebaseline_fill_clock,
         })
     }
 }
@@ -484,6 +557,18 @@ impl Source for CpalSource {
             let _ = tx.send(());
         }
         Ok(())
+    }
+
+    async fn set_paused(&mut self, paused: bool) {
+        // On resume, tell the fill worker to re-baseline its wall clock so the
+        // paused span isn't back-filled with silence (which would lengthen the
+        // loopback track past the mic and desync the meeting). Nothing to do on
+        // pause: the recorder discards captured audio while paused, and any fill
+        // silence emitted meanwhile is discarded with it.
+        if !paused {
+            self.rebaseline_fill_clock
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -524,6 +609,21 @@ mod tests {
     #[test]
     fn capture_source_defaults_to_microphone() {
         assert_eq!(CaptureSource::default(), CaptureSource::Microphone);
+    }
+
+    #[test]
+    fn gap_fill_only_beyond_tolerance() {
+        let tol = 1600; // 100 ms at 16 kHz
+                        // No elapsed, nothing produced → nothing to fill.
+        assert_eq!(gap_fill_len(0, 0, tol), 0);
+        // Small gap within tolerance (jitter) → no fill.
+        assert_eq!(gap_fill_len(1000, 0, tol), 0);
+        // A 5-second pause (80 000 samples) → fill all of it.
+        assert_eq!(gap_fill_len(80_000, 0, tol), 80_000);
+        // Mid-stream gap: expected far ahead of produced → fill the difference.
+        assert_eq!(gap_fill_len(100_000, 20_000, tol), 80_000);
+        // Produced momentarily ahead of expected (timing skew) → saturate to 0.
+        assert_eq!(gap_fill_len(500, 1000, tol), 0);
     }
 
     #[cfg(not(windows))]
