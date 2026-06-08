@@ -93,7 +93,10 @@ impl Embedder {
         let token_type_ids_tensor = Tensor::from_array(token_type_ids_array)
             .map_err(|e| Error::Internal(format!("Tensor error: {}", e)))?;
 
-        let mut session = self.session.lock().unwrap();
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| Error::Internal(format!("embedder session mutex poisoned: {e}")))?;
         let outputs = session
             .run(inputs![
                 "input_ids" => input_ids_tensor,
