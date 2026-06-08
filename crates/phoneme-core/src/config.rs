@@ -586,10 +586,30 @@ impl Default for TrayConfig {
 }
 
 impl Config {
+    /// Best-effort load of the active config (honors `PHONEME_CONFIG`), falling
+    /// back to defaults on any error. Use when a missing/broken config should
+    /// degrade gracefully rather than abort (e.g. the tray reading hotkeys).
     pub fn read_or_default() -> Self {
-        default_config_path()
+        resolved_config_path()
             .and_then(|p| Self::load(&p).ok())
             .unwrap_or_default()
+    }
+
+    /// Load the active config, resolving `PHONEME_CONFIG` first then the per-user
+    /// default. An explicit `PHONEME_CONFIG` override must exist and parse —
+    /// errors are surfaced rather than silently defaulted, so a typo'd path
+    /// fails loudly. A missing default config falls back to `Config::default()`.
+    /// This is the canonical loader shared by the daemon and the CLI.
+    pub fn load_resolved() -> Result<Self> {
+        if let Ok(p) = std::env::var("PHONEME_CONFIG") {
+            if !p.is_empty() {
+                return Self::load(std::path::Path::new(&p));
+            }
+        }
+        match default_config_path() {
+            Some(p) if p.exists() => Self::load(&p),
+            _ => Ok(Self::default()),
+        }
     }
 }
 
@@ -820,6 +840,20 @@ where
 /// Helper for tests/wizard: resolve the default config file path.
 pub fn default_config_path() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", "phoneme").map(|p| p.config_dir().join("config.toml"))
+}
+
+/// Resolve the *active* config path: the `PHONEME_CONFIG` env override if set
+/// (and non-empty), otherwise the per-user default. This is the single source of
+/// truth so the daemon, the CLI, and the tray all agree on which file is live —
+/// previously only the daemon honored `PHONEME_CONFIG`, so a `phoneme` CLI
+/// invocation could read a different config than the daemon it talks to.
+pub fn resolved_config_path() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("PHONEME_CONFIG") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    default_config_path()
 }
 
 /// Ensure the default config directory exists with secure (0o700) permissions.

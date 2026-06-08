@@ -55,10 +55,7 @@ async fn dispatch(cli: Cli, cfg: &phoneme_core::Config) -> ExitCode {
 }
 
 fn load_config() -> Result<phoneme_core::Config> {
-    if let Some(p) = phoneme_core::config::default_config_path() {
-        if p.exists() {
-            return Ok(phoneme_core::Config::load(&p)?);
-        }
-    }
-    Ok(phoneme_core::Config::default())
+    // Canonical loader shared with the daemon: honors PHONEME_CONFIG so a CLI
+    // invocation reads the same config as the daemon it drives.
+    Ok(phoneme_core::Config::load_resolved()?)
 }
