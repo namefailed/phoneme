@@ -6,7 +6,27 @@ use ort::{
 };
 use std::path::Path;
 use std::sync::Mutex;
-use tokenizers::Tokenizer;
+use tokenizers::{Tokenizer, TruncationParams};
+
+/// Maximum input length (in tokens) fed to the embedding model.
+///
+/// `all-MiniLM-L6-v2` is a BERT model with 512 learned position embeddings and
+/// was fine-tuned at a 256-token sequence length. The tokenizer.json shipped
+/// with the model has truncation **disabled**, so without configuring it here a
+/// long transcript produces a sequence in the thousands of tokens — which makes
+/// the ONNX session either error (the embedding is then silently skipped,
+/// leaving the recording unsearchable) or return a meaningless vector. We
+/// truncate to the model's training length so every transcript embeds cleanly.
+pub(crate) const EMBED_MAX_TOKENS: usize = 256;
+
+/// Truncation policy applied to the tokenizer at load. Pulled out as a function
+/// so it can be unit-tested without the (unbundled) ONNX model + tokenizer.
+pub(crate) fn embedding_truncation() -> TruncationParams {
+    TruncationParams {
+        max_length: EMBED_MAX_TOKENS,
+        ..Default::default()
+    }
+}
 
 /// Wrapper around the ONNX model and tokenizer for generating embeddings.
 ///
@@ -36,8 +56,15 @@ impl Embedder {
             )));
         }
 
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+        let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| Error::Internal(format!("Failed to load tokenizer: {}", e)))?;
+        // Cap sequence length to the model's limit — see EMBED_MAX_TOKENS. Without
+        // this, long transcripts overflow BERT's 512 positions and fail to embed.
+        tokenizer
+            .with_truncation(Some(embedding_truncation()))
+            .map_err(|e| {
+                Error::Internal(format!("Failed to configure tokenizer truncation: {}", e))
+            })?;
 
         let session = Session::builder()
             .map_err(|e| Error::Internal(format!("Failed to build ORT session: {}", e)))?
@@ -146,5 +173,25 @@ impl Embedder {
     /// Computes cosine similarity between two L2-normalized vectors.
     pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokenizers::TruncationStrategy;
+
+    #[test]
+    fn truncation_caps_at_model_limit() {
+        // The embedder must truncate long inputs to the model's trained length,
+        // otherwise long transcripts overflow BERT's position embeddings and
+        // fail to embed (the recording then becomes unsearchable).
+        let t = embedding_truncation();
+        assert_eq!(t.max_length, EMBED_MAX_TOKENS);
+        assert_eq!(EMBED_MAX_TOKENS, 256, "all-MiniLM-L6-v2 was trained at 256");
+        assert!(
+            matches!(t.strategy, TruncationStrategy::LongestFirst),
+            "longest-first truncation keeps the start of the transcript"
+        );
     }
 }
