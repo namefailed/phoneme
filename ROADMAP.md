@@ -303,7 +303,7 @@ alongside the feature releases above.*
 **Quick correctness wins** *(small, mostly isolated)*
 - [x] `embed.rs` mutex-poison `unwrap()` → `map_err` (no daemon panic on a poisoned lock). *(audit A-C2)*
 - [x] Atomic `toggle_meeting()` — holds a `toggle_guard` across the read+act so concurrent toggles serialize. *(A-H11)*
-- [ ] Shared `load_config()` so the CLI honors `PHONEME_CONFIG` like the daemon; shared `apply_hotkeys(cfg)` so a tray profile switch re-registers *all* hotkeys, not just the main one. *(A-H13/A-H14)*
+- [x] Shared `Config::load_resolved()` so the CLI honors `PHONEME_CONFIG` like the daemon; shared `register_hotkeys(cfg)` so startup and a profile switch re-register *all* hotkeys (record/meeting/in-place). *(A-H13/A-H14)*
 - [ ] Structured Tauri IPC errors (`{ kind, message }`) instead of flattened strings. *(A-H6)*
 - [x] Align `zip` versions across workspace vs tray (tray now uses the workspace `zip`). *(A-H12)*
 - [x] Delete or implement the orphaned `checkMicrophoneAccess()` (no Tauri handler). *(A-C3)*
