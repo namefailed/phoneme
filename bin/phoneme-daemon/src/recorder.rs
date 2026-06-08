@@ -370,6 +370,17 @@ impl DaemonRecorder {
                 }
                 last_len = total_len;
 
+                // Yield to final transcriptions: only run this preview tick if
+                // the whisper-server permit is free *right now*. If a final
+                // transcription holds it, skip — the preview must never pile onto
+                // the single serial server and starve the real transcription
+                // (which previously caused "Whisper timed out after 60s"). The
+                // permit is held for the duration of this tick's transcription.
+                let _preview_permit = match state.whisper_sem.try_acquire() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+
                 // Write a temp WAV and transcribe via the configured provider.
                 if let Err(e) = wav::write_wav(&tmp_wav, &samples, audio_cfg) {
                     tracing::warn!(error = %e, "streaming preview: failed to write temp WAV; skipping tick");
