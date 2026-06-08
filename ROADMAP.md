@@ -48,8 +48,53 @@ Landing now as focused PRs (each tested, `clippy -D warnings` clean):
 - [ ] **Embedding input truncated** to the model's 256-token limit (long transcripts
   silently failed to embed → became unsearchable).
 - [ ] **In-place dictation surfaces errors** instead of panicking / silently no-op'ing.
+- [ ] **Meeting tracks stay synced across silence** — loopback (system audio) is
+  captured continuously by filling real silence for wall-clock gaps, so pausing
+  a video mid-meeting no longer collapses the gap and desyncs the tracks; the
+  fill is pause-aware (a meeting pause freezes both tracks, no back-filled silence).
+- [ ] **Transcriptions no longer time out under live preview** — a whisper-server
+  semaphore makes the preview yield to the real transcription, fixing the
+  `"Whisper timed out after 60s"` failures on long recordings / meetings.
 
 > These are the baseline for v1.9 — several items below build directly on them.
+
+---
+
+## 🔒 Security hardening (from June 2026 audit)
+
+*Posture today: solid app-layer hygiene (parameterized SQL, FTS5 sanitization,
+shlex hooks with timeouts, redacted Debug, no `unsafe`), but a weak platform
+trust boundary. Fit for a single trusted Windows user; not hardened against
+same-user malware or a malicious IPC client. Ordered by priority.*
+
+**Near-term (the trust boundary)**
+- [ ] **Named-pipe access control** — the IPC pipe is unauthenticated, so any
+  same-user process can drive record/delete/hooks/shutdown and read transcripts
+  off the event stream. Set an owner-only SDDL on the pipe; optional auth token. *(audit S-C1/S-H8)*
+- [ ] **Hook execution allowlist over IPC** — `RefireHook`/`HookTest` accept
+  arbitrary commands; restrict to the hooks already in config rather than
+  running anything a caller sends. *(S-C2)*
+- [ ] **IPC frame size cap** (`codec.rs`) — bound NDJSON frames (~8 MiB) so a
+  client can't OOM the daemon. *(S-H6)*
+- [ ] **Path guards** — `reveal_file` and audio deletion must canonicalize and
+  verify the target is under `audio_dir`/hooks before acting. *(S-H3/S-H5)*
+- [ ] **`escapeHtml` the RecordingDetail error path** (`RecordingDetail.ts:59`,
+  `innerHTML` without escaping). *(S-medium)*
+
+**Secrets & transport**
+- [ ] **Stop sending full API keys to the WebView** — `read_config` returns
+  plaintext keys; serve a masked DTO and keep secrets daemon-side. *(S-H2)*
+- [ ] **Encrypt secrets at rest** (Windows DPAPI) instead of plaintext `config.toml`. *(S-H2)*
+- [ ] **Webhook SSRF guard** — HTTPS-only, block private/loopback ranges; HMAC
+  signing later. *(S-H1)*
+- [ ] **Baseline CSP + narrowed asset/fs scopes** (`tauri.conf.json` is `csp:null`,
+  `$HOME/**`). *(S-H4 — also tracked under Long Term → Security)*
+- [ ] **Model-download checksums** — pin SHA-256 before extracting the whisper zip. *(S-H7)*
+
+**Hygiene**
+- [ ] **`cargo audit` + `pnpm audit` in CI** (non-blocking first, then gate core crates). *(also in tech-debt backlog)*
+- [ ] Hook `HookTest` stderr may contain secrets — redact before returning.
+- [ ] A short **threat-model doc** capturing these boundaries.
 
 ---
 
@@ -248,6 +293,26 @@ alongside the feature releases above.*
 **Docs / DX**
 - [ ] `config.example.toml` + `.env.example`; document JSON output + env vars; semantic-search + advanced-search-syntax docs; troubleshooting (audio devices, network/cloud, performance).
 - [ ] Shell completions (bash/zsh/PowerShell); `cargo-audit`/`cargo-deny`; code coverage; consolidate `release_notes.md`/`.txt`.
+
+**Testing & CI** *(from June 2026 audit — ~6/10 maturity; strong Rust foundation, integration gaps)*
+- [ ] **Gate `release.yml` on `cargo test` + vitest** — releases currently ship without a test gate.
+- [ ] **Pipeline integration tests** — the full transcribe → LLM → hooks → webhook → catalog/inbox path is the biggest untested critical path (`pipeline.rs`).
+- [ ] **Webhook + embedding tests** — `webhook.rs` timeout/error contracts; embedding upsert/search round-trip + corrupt-BLOB handling.
+- [ ] **Meeting capture E2E** (synthetic backend, incl. a paused-video internal gap) and **retention daemon** + **export-zip** integrity tests.
+- [ ] Split CI: parallel `--lib`, serial `--test '*'` (today everything runs `--test-threads=1`); cache the `tauri-cli` binary.
+
+**Quick correctness wins** *(small, mostly isolated)*
+- [ ] `embed.rs` mutex-poison `unwrap()` → `map_err` (no daemon panic on a poisoned lock). *(audit A-C2)*
+- [ ] Atomic `toggle_meeting()` — the meeting toggle is check-then-act across two lock acquisitions. *(A-H11)*
+- [ ] Shared `load_config()` so the CLI honors `PHONEME_CONFIG` like the daemon; shared `apply_hotkeys(cfg)` so a tray profile switch re-registers *all* hotkeys, not just the main one. *(A-H13/A-H14)*
+- [ ] Structured Tauri IPC errors (`{ kind, message }`) instead of flattened strings. *(A-H6)*
+- [ ] Align `zip` versions across workspace vs tray. *(A-H12)*
+- [ ] Delete or implement the orphaned `checkMicrophoneAccess()` (no Tauri handler). *(A-C3)*
+- [ ] Consolidate the duplicated **Doctor** and triplicate **record-mode** enums into core. *(A-H3/A-H4)*
+
+**Docs accuracy** *(audit found drift — fix the user-facing claims)*
+- [ ] Say **speakrs**, not "Pyannote", everywhere (docs, `SectionDiarization.ts`). *(A-C5)*
+- [ ] Reconcile claims that don't match code: `hook.log` (no writer), `phoneme config validate` (not a command — implement it, docs already claim it), inbox states (`processing/` also used), `HookPayload.original_transcript` (absent), "merged conversation = chronological" (currently stacked panes), semantic settings location (wizard-only), empty `docs/screenshots/`, Doctor hook-template path.
 
 ---
 
