@@ -102,7 +102,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `provider` | `none` | `none` \| `local` \| `deepgram` \| `assemblyai` |
-| `local_model_path` | `""` | Pyannote ONNX path |
+| `local_model_path` | `""` | speakrs ONNX path |
 
 ---
 

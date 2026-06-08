@@ -26,7 +26,7 @@ export class SectionDiarization {
               kind: "select",
               options: [
                 { value: "none", label: "Disabled (Rely on Meeting Mode)" },
-                { value: "local", label: "Local (Pyannote ONNX)" },
+                { value: "local", label: "Local (speakrs ONNX)" },
                 { value: "deepgram", label: "Deepgram API" },
                 { value: "assemblyai", label: "AssemblyAI API" },
               ],
@@ -51,7 +51,7 @@ export class SectionDiarization {
               this.config.diarization?.local_model_path ?? "",
             )}</div>
             <span style="${HELP}">
-              Optional. Leave blank to use the default Pyannote models automatically downloaded to the Hugging Face cache (located at %USERPROFILE%\\.cache\\huggingface\\hub).
+              Optional. Leave blank to use the default speakrs models automatically downloaded to the Hugging Face cache (located at %USERPROFILE%\\.cache\\huggingface\\hub).
             </span>
           </div>
         </div>

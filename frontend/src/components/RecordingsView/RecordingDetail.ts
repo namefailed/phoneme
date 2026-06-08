@@ -56,7 +56,7 @@ export class RecordingDetail {
     } catch (e) {
       this.renderedId = null;
       this.renderedAudioPath = null;
-      this.container.innerHTML = `<div class="empty error">Failed to load: ${String(e)}</div>`;
+      this.container.innerHTML = `<div class="empty error">Failed to load: ${escapeHtml(String(e))}</div>`;
     }
   }
 

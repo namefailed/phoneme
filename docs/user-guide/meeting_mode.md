@@ -50,7 +50,7 @@ flowchart LR
     end
     
     subgraph D [Diarize & Merge]
-        R2 --> P{Pyannote}
+        R2 --> P{speakrs}
         P -->|Speakers| L[Labels]
         R1 --> M{Merge}
         L --> M
@@ -67,7 +67,7 @@ Expand a meeting group in the recordings list, then open the **merged conversati
 
 If you want to take this to the next level, you can enable **Offline Speaker Diarization** in **Settings → Whisper**.
 
-By default, the System Track is just one long transcript of everyone on the call. But with Diarization enabled, Phoneme uses a powerful AI model (Pyannote) to analyze the System Track and separate the different voices.
+By default, the System Track is just one long transcript of everyone on the call. But with Diarization enabled, Phoneme uses a powerful AI model (speakrs) to analyze the System Track and separate the different voices.
 
 Your final transcript will look like this:
 
