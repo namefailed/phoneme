@@ -8,6 +8,7 @@ use phoneme_audio::format::SampleRate;
 use phoneme_audio::preroll::PreRollBuffer;
 use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
 use phoneme_audio::source::{CpalSource, GeneratorSource, Source};
+use phoneme_audio::meeting_align::align_meeting_track_samples;
 use phoneme_audio::wav;
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
@@ -17,7 +18,7 @@ use phoneme_core::{
 use phoneme_ipc::DaemonEvent;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 /// How often the streaming-preview loop transcribes the in-progress recording.
@@ -104,14 +105,14 @@ struct PreviewTask {
 
 /// One track of an in-flight meeting: its catalog id, where the WAV will be
 /// written, when it started, the track label, the live recorder handle, and
-/// the sample count when audio first started (for alignment).
+/// when capture actually began (for timeline alignment).
 struct MeetingTrackHandle {
     id: RecordingId,
     audio_path: PathBuf,
     started_at: chrono::DateTime<Local>,
     track: MeetingTrack,
     recorder: Recorder,
-    first_audio_at: Option<tokio::sync::mpsc::Receiver<usize>>,
+    capture_started: Instant,
 }
 
 /// An in-flight meeting: the two concurrently-recording tracks (mic + system).
@@ -120,6 +121,8 @@ struct ActiveMeeting {
     meeting_id: String,
     tracks: Vec<MeetingTrackHandle>,
     paused: bool,
+    /// Wall-clock instant when the meeting session began (before per-track setup).
+    wall_started: Instant,
 }
 
 #[derive(Clone, Default)]
@@ -511,7 +514,6 @@ impl DaemonRecorder {
             max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,
-            on_first_audio: None,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
         let recorder =
@@ -866,7 +868,10 @@ impl DaemonRecorder {
         let meeting_id = format!("meeting-{}", RecordingId::new());
         let mut tracks = Vec::with_capacity(sources.len());
 
-        // Capture a single start time for all tracks so they stay synchronized
+        // Wall-clock anchor for the whole meeting — both tracks are padded to this
+        // elapsed duration on stop so mic and system stay time-aligned.
+        let wall_started = Instant::now();
+        // Catalog timestamp shared by both tracks.
         let started_at = Local::now();
 
         for (track, source) in sources {
@@ -876,9 +881,6 @@ impl DaemonRecorder {
                 .audio_dir
                 .join(id.day_folder())
                 .join(format!("{}.wav", id.file_stem()));
-
-            // Create a channel to receive the first audio sample count
-            let (first_audio_tx, first_audio_rx) = tokio::sync::mpsc::channel::<usize>(1);
 
             let row = Recording {
                 id: id.clone(),
@@ -919,10 +921,10 @@ impl DaemonRecorder {
                 max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
                 silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
                 silence_window_ms: state.config.load().recording.silence_window_ms,
-                on_first_audio: Some(first_audio_tx),
             };
             // Start the audio recorder. If it fails, delete the row we just
             // inserted *and* roll back the earlier tracks before bailing out.
+            let capture_started = Instant::now();
             let recorder = match Recorder::start(source, recorder_cfg, None).await {
                 Ok(r) => r,
                 Err(e) => {
@@ -947,7 +949,7 @@ impl DaemonRecorder {
                 started_at,
                 track,
                 recorder,
-                first_audio_at: Some(first_audio_rx),
+                capture_started,
             });
         }
 
@@ -955,6 +957,7 @@ impl DaemonRecorder {
             meeting_id: meeting_id.clone(),
             tracks,
             paused: false,
+            wall_started,
         });
         tracing::info!(session = %meeting_id, "meeting started");
         Ok(meeting_id)
@@ -971,44 +974,44 @@ impl DaemonRecorder {
             .take()
             .ok_or(Error::NotRecording)?;
         let meeting_id = meeting.meeting_id.clone();
+        let wall_started = meeting.wall_started;
+        // Snapshot meeting wall-clock length before stopping recorders (stop/drain can take time).
+        let stop_at = Instant::now();
+        let target_duration_ms = stop_at
+            .duration_since(wall_started)
+            .as_millis() as i64;
+        let sample_rate = phoneme_audio::format::SampleRate::HZ_16K.as_u32();
 
-        // First, collect first audio sample counts from all tracks
-        let mut track_first_audio: Vec<(RecordingId, Option<usize>)> = Vec::new();
-        for handle in &mut meeting.tracks {
-            let first_audio_at = if let Some(ref mut rx) = handle.first_audio_at {
-                // Try to receive the first audio sample count with a timeout
-                match tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await {
-                    Ok(Some(count)) => Some(count),
-                    _ => None, // Timeout or error - no audio detected
-                }
-            } else {
-                None
-            };
-            track_first_audio.push((handle.id.clone(), first_audio_at));
-        }
+        tracing::info!(
+            target_duration_ms = target_duration_ms,
+            "meeting wall-clock duration for track alignment"
+        );
 
-        // Find the minimum first audio sample count (the track that started audio first)
-        let min_first_audio = track_first_audio.iter()
-            .filter_map(|(_, count)| *count)
-            .min()
-            .unwrap_or(0);
+        // Stop all recorders and collect their samples.
+        let mut track_data: Vec<(
+            RecordingId,
+            std::path::PathBuf,
+            chrono::DateTime<Local>,
+            MeetingTrack,
+            Vec<i16>,
+            i64,
+        )> = Vec::new();
 
-        tracing::info!(min_first_audio = min_first_audio, "earliest first audio sample count");
-
-        // First, stop all recorders and collect their samples
-        let mut track_data: Vec<(RecordingId, std::path::PathBuf, chrono::DateTime<Local>, MeetingTrack, Vec<i16>, i64, Option<usize>)> = Vec::new();
-        
-        for (i, handle) in meeting.tracks.into_iter().enumerate() {
+        for handle in meeting.tracks.into_iter() {
             let MeetingTrackHandle {
                 id,
                 audio_path,
                 started_at,
                 track,
                 recorder,
-                first_audio_at: _,
+                capture_started,
             } = handle;
 
-            let (samples, duration_ms) = match recorder.stop_and_get_samples().await {
+            let track_late_by_ms = capture_started
+                .duration_since(wall_started)
+                .as_millis() as i64;
+
+            let (raw_samples, _duration_ms) = match recorder.stop_and_get_samples().await {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!(id = %id, track = track.as_str(), error = %e, "meeting track finalize failed");
@@ -1022,51 +1025,30 @@ impl DaemonRecorder {
                     continue;
                 }
             };
-            
-            let first_audio_count = track_first_audio[i].1;
-            track_data.push((id, audio_path, started_at, track, samples, duration_ms, first_audio_count));
+
+            let raw_len = raw_samples.len();
+            let samples = align_meeting_track_samples(
+                raw_samples,
+                track_late_by_ms,
+                target_duration_ms,
+                sample_rate,
+            );
+
+            tracing::info!(
+                id = %id,
+                track = track.as_str(),
+                raw_samples = raw_len,
+                aligned_samples = samples.len(),
+                track_late_by_ms = track_late_by_ms,
+                "aligned meeting track to wall-clock timeline"
+            );
+
+            track_data.push((id, audio_path, started_at, track, samples, target_duration_ms));
         }
 
-        // Find the maximum duration among all tracks (to ensure they all end at the same time)
-        let max_duration_ms = track_data.iter().map(|(_, _, _, _, _, duration, _)| *duration).max().unwrap_or(0);
-        
-        tracing::info!(max_duration_ms = max_duration_ms, "maximum duration across all tracks");
-        
-        // Pad tracks: at the beginning to align audio content based on first audio sample counts, and at the end to match duration
-        for (id, audio_path, started_at, track, mut samples, _duration_ms, first_audio_count) in track_data {
-            // Calculate beginning padding based on first audio sample count
-            let beginning_padding_samples = if let Some(count) = first_audio_count {
-                count.saturating_sub(min_first_audio)
-            } else {
-                0
-            };
+        for (id, audio_path, started_at, track, samples, final_duration_ms) in track_data {
             
-            if beginning_padding_samples > 0 {
-                let mut padded = vec![0i16; beginning_padding_samples];
-                padded.extend(samples);
-                samples = padded;
-                tracing::info!(id = %id, track = track.as_str(), padding_samples = beginning_padding_samples, "padded track at beginning to align audio timing");
-            }
-            
-            // Pad at the end to match the maximum duration
-            let sample_rate = 16000;
-            let current_duration_ms = (samples.len() as u64 * 1000 / sample_rate) as i64;
-            let end_padding_samples = if current_duration_ms < max_duration_ms {
-                let needed_ms = (max_duration_ms - current_duration_ms) as u64;
-                (needed_ms * sample_rate / 1000) as usize
-            } else {
-                0
-            };
-            
-            if end_padding_samples > 0 {
-                samples.extend(vec![0i16; end_padding_samples]);
-                tracing::info!(id = %id, track = track.as_str(), padding_samples = end_padding_samples, "padded track at end to match duration");
-            }
-            
-            // Calculate final duration based on the padded samples
-            let final_duration_ms = (samples.len() as u64 * 1000 / sample_rate) as i64;
-            
-            // Write the (possibly padded) samples to WAV
+            // Write the timeline-aligned samples to WAV.
             let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
             if let Err(e) = phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg) {
                 tracing::error!(id = %id, track = track.as_str(), error = %e, "failed to write WAV");
@@ -1121,7 +1103,7 @@ mod tests {
     use super::*;
     use crate::app_state::AppState;
     use phoneme_audio::format::AudioConfig;
-    use phoneme_audio::source::SyntheticSource;
+    use phoneme_audio::source::{GeneratorSource, SyntheticSource};
     use phoneme_core::{Config, ListFilter};
 
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
@@ -1345,6 +1327,7 @@ mod tests {
             started_at: Local::now(),
             track: MeetingTrack::Mic,
             recorder,
+            capture_started: Instant::now(),
         };
 
         // Roll back: the orphaned catalog row must be gone afterward, and the
@@ -1358,6 +1341,66 @@ mod tests {
         assert!(
             !std::path::Path::new(&row.audio_path).exists(),
             "cancelled recorder must not write a WAV"
+        );
+    }
+
+    #[tokio::test]
+    async fn meeting_tracks_match_wall_clock_duration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+
+        // GeneratorSource produces blocks at real-time rate — mimics continuous capture.
+        let mic = GeneratorSource::new(1_600);
+        let system = GeneratorSource::new(1_600);
+
+        let meeting_id = state
+            .recorder
+            .start_meeting_with_sources(
+                &state,
+                vec![
+                    (MeetingTrack::Mic, Box::new(mic)),
+                    (MeetingTrack::System, Box::new(system)),
+                ],
+            )
+            .await
+            .expect("start meeting");
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        state
+            .recorder
+            .stop_meeting(&state)
+            .await
+            .expect("stop meeting");
+
+        let rows = state.catalog.list(&ListFilter::default()).await.unwrap();
+        let meeting_rows: Vec<_> = rows
+            .iter()
+            .filter(|r| r.meeting_id.as_deref() == Some(meeting_id.as_str()))
+            .collect();
+
+        assert_eq!(meeting_rows.len(), 2);
+        let durations: Vec<i64> = meeting_rows.iter().map(|r| r.duration_ms).collect();
+        assert_eq!(
+            durations[0], durations[1],
+            "both tracks must share the same duration"
+        );
+        assert!(
+            durations[0] >= 400,
+            "expected at least ~500 ms of wall-clock audio, got {durations:?}"
+        );
+
+        let sample_counts: Vec<usize> = meeting_rows
+            .iter()
+            .map(|r| {
+                let data = std::fs::read(&r.audio_path).expect("read wav");
+                // WAV header is 44 bytes for our canonical format.
+                (data.len().saturating_sub(44)) / 2
+            })
+            .collect();
+        assert_eq!(
+            sample_counts[0], sample_counts[1],
+            "WAV sample counts must match"
         );
     }
 }
