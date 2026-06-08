@@ -24,6 +24,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     // Filter empty string to None — frontend sends "" for "auto-detect"
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
     let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
+    // Hold the whisper-server permit for the whole final transcription so the
+    // streaming preview backs off and can't starve it (the "Whisper timed out
+    // after 60s" bug). Acquiring waits for any in-flight preview tick to finish.
+    let _whisper_permit = state.whisper_sem.acquire().await;
     let transcript = match provider.transcribe(&audio_path, language.as_deref()).await {
         Ok(t) => t,
         Err(e) => {
@@ -42,6 +46,11 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
             return Err(e);
         }
     };
+
+    // Release the whisper-server permit now that transcription is done — LLM
+    // post-processing and hooks below don't touch the server, so the preview
+    // can resume immediately.
+    drop(_whisper_permit);
 
     // Preserve the raw Whisper output as the "original" transcript regardless
     // of whether LLM post-processing rewrites the live version. Users can
