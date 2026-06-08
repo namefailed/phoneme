@@ -670,14 +670,10 @@ mark.search-hit {
   text-overflow: ellipsis;
 }
 
-/* Expanded meeting track rows: indented and tagged with a track badge. */
+/* Expanded meeting track rows: same column grid as standalone rows; track badge in transcript col. */
 .rec-row--track {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   border-left-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  padding-left: 8px;
-}
-.rec-row--track > span:nth-child(2) {
-  padding-left: 32px;
 }
 .rec-track-badge {
   display: inline-block;

@@ -10,8 +10,30 @@ use crate::source::Source;
 use crate::wav;
 use phoneme_core::error::{Error, Result};
 use std::path::Path;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+
+/// Same threshold as [`crate::meeting_align::QUIET_THRESHOLD`].
+const FIRST_CONTENT_THRESHOLD: i16 = 100;
+
+/// Minimum number of samples in a single block that must exceed
+/// [`FIRST_CONTENT_THRESHOLD`] before the block counts as the first real
+/// content. Guards `first_non_silent_at` against a lone spike / click (a
+/// transient on the loopback device, a key press) being mistaken for the onset
+/// of audio — which would relocate a sparse system track too early on the
+/// shared timeline. ~32 samples is ~2 ms at 16 kHz.
+const FIRST_CONTENT_MIN_LOUD_SAMPLES: usize = 32;
+
+/// Whether `block` carries real content (a sustained run above threshold), used
+/// to stamp `first_non_silent_at`. See [`FIRST_CONTENT_MIN_LOUD_SAMPLES`].
+fn block_has_content(block: &[i16]) -> bool {
+    block
+        .iter()
+        .filter(|&&s| s.abs() > FIRST_CONTENT_THRESHOLD)
+        .count()
+        >= FIRST_CONTENT_MIN_LOUD_SAMPLES
+}
 
 /// How the recorder should decide to stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +92,8 @@ struct TaskOutput {
     samples: Vec<i16>,
     duration_ms: i64,
     cancelled: bool,
+    /// Wall-clock instant when the first non-silent block was captured.
+    first_non_silent_at: Option<Instant>,
 }
 
 impl Recorder {
@@ -124,6 +148,7 @@ impl Recorder {
             let mut cancelled = false;
             let mut is_paused = false;
             let mut should_drain = false;
+            let mut first_non_silent_at: Option<Instant> = None;
 
             loop {
                 tokio::select! {
@@ -147,6 +172,9 @@ impl Recorder {
                         match block? {
                             Some(b) => {
                                 if !is_paused {
+                                    if first_non_silent_at.is_none() && block_has_content(&b) {
+                                        first_non_silent_at = Some(Instant::now());
+                                    }
                                     // Silence detector is only used for Oneshot mode auto-stop.
                                     // In Hold mode (meeting mode), it's called but never triggers
                                     // a stop, so no audio is trimmed based on silence.
@@ -181,6 +209,9 @@ impl Recorder {
                 let _ = source.stop().await;
                 while let Ok(Some(b)) = source.next_block().await {
                     if !is_paused {
+                        if first_non_silent_at.is_none() && block_has_content(&b) {
+                            first_non_silent_at = Some(Instant::now());
+                        }
                         samples.extend_from_slice(&b);
                     }
                 }
@@ -197,6 +228,7 @@ impl Recorder {
                 samples,
                 duration_ms,
                 cancelled,
+                first_non_silent_at,
             })
         });
 
@@ -231,7 +263,7 @@ impl Recorder {
 
     /// Stop recording and return the raw samples without writing a WAV file.
     /// This is useful for post-processing (e.g., padding for meeting track synchronization).
-    pub async fn stop_and_get_samples(self) -> Result<(Vec<i16>, i64)> {
+    pub async fn stop_and_get_samples(self) -> Result<(Vec<i16>, i64, Option<Instant>)> {
         let _ = self.cmd_tx.send(RecorderCommand::Stop).await;
         let out = self
             .task
@@ -240,7 +272,7 @@ impl Recorder {
         if out.cancelled {
             return Err(Error::Internal("recording was cancelled".into()));
         }
-        Ok((out.samples, out.duration_ms))
+        Ok((out.samples, out.duration_ms, out.first_non_silent_at))
     }
 
     /// Discard the recording. No WAV file is written.
