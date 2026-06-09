@@ -61,6 +61,11 @@ export class ActionRowElement extends LitElement {
   @state() private cleanupModelsError: string | null = null;
   @state() private llmPostProcessEnabled = false;
 
+  // One-time Summarize overrides (model + prompt), prefilled from config; never
+  // persisted. Summaries reuse the cleanup provider connection.
+  @state() private summaryModel = "";
+  @state() private summaryPrompt = "";
+
   @state() private configuredHookCommands: string[] = [];
   @state() private selectedHookCommand = "";
   @state() private customHookCommandSelected = false;
@@ -124,6 +129,12 @@ export class ActionRowElement extends LitElement {
         // Best-effort prefetch of the configured provider's model list so the
         // dropdown is populated when the user opens the Cleanup step.
         void this.fetchCleanupModels();
+      }
+
+      // Prefill the one-time Summarize overrides from the saved summary config.
+      if (this.config && this.config.summary) {
+        this.summaryModel = this.config.summary.model ?? "";
+        this.summaryPrompt = this.config.summary.prompt ?? "";
       }
 
       // Load STT models
@@ -328,10 +339,16 @@ export class ActionRowElement extends LitElement {
           showToast("Cleanup re-run started", "info");
           break;
         }
-        case "summarize":
-          await rerunSummary(this.recordingId);
+        case "summarize": {
+          const orNull = (s: string) => (s.trim() === "" ? null : s.trim());
+          await rerunSummary(
+            this.recordingId,
+            orNull(this.summaryModel),
+            this.summaryPrompt.trim() === "" ? null : this.summaryPrompt,
+          );
           showToast("Summary regenerating…", "info");
           break;
+        }
         case "all":
           // Re-fire the whole pipeline: re-transcribe the audio, then run LLM
           // cleanup, the auto-summary (if configured), and the hooks. This is a
@@ -434,10 +451,24 @@ export class ActionRowElement extends LitElement {
             @click=${this.openCleanupSettings}>Set up AI in Settings →</button>
         `;
       }
+      const sInput = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
+      const sLabel = "font-size: 11px; color: var(--fg-muted);";
       return html`
         <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
-          Regenerates the AI summary from the current transcript using your configured summary model. The transcript itself isn't changed.
+          Regenerates the AI summary from the current transcript. Overrides apply to this run only and aren't saved; the transcript itself isn't changed.
         </p>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style=${sLabel}>Summary model</label>
+          <input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
+            placeholder="Leave blank to use the configured summary model"
+            @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style=${sLabel}>Summary instructions</label>
+          <textarea class="rerun-summary-prompt" rows="3" style="${sInput} resize: vertical; font-family: inherit;"
+            .value=${this.summaryPrompt} placeholder="Leave blank to use the configured summary prompt"
+            @input=${(e: Event) => this.summaryPrompt = (e.target as HTMLTextAreaElement).value}></textarea>
+        </div>
       `;
     }
 
