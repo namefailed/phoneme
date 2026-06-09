@@ -273,12 +273,16 @@ mark.search-hit {
   color: var(--accent);
 }
 
-/* Transcript history row holding the "View original transcript" toggle. */
+/* Transcript history row holding the View summary / unedited / original
+   toggles. Horizontal and right-aligned; wraps only if the pane is too narrow
+   to fit all three on one line. */
 .transcript-history {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 .transcript-block {
   /* Tighter bottom margin: it sits directly above the notes block, so this is
