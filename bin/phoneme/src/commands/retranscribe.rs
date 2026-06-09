@@ -21,6 +21,10 @@ pub async fn run(args: IdArgs, cfg: &Config) -> ExitCode {
             id,
             model: None,
             run_hooks: None,
+            // CLI re-transcribe uses the configured behavior (post-process when
+            // `[llm_post_process]` is enabled); the one-time opt-out is a GUI
+            // affordance.
+            post_process: None,
         })
         .await
     {

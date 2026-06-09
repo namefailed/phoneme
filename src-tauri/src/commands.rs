@@ -215,6 +215,7 @@ pub async fn retranscribe_recording(
     id: String,
     model: Option<String>,
     run_hooks: Option<bool>,
+    post_process: Option<bool>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(
@@ -223,6 +224,7 @@ pub async fn retranscribe_recording(
             id,
             model,
             run_hooks,
+            post_process,
         },
     )
     .await
@@ -255,9 +257,24 @@ pub async fn rerun_cleanup(
     bridge: Br<'_>,
     id: String,
     model: Option<String>,
+    provider: Option<String>,
+    prompt: Option<String>,
+    api_url: Option<String>,
+    api_key: Option<String>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
-    forward(&bridge, Request::RerunCleanup { id, model }).await
+    forward(
+        &bridge,
+        Request::RerunCleanup {
+            id,
+            model,
+            provider,
+            prompt,
+            api_url,
+            api_key,
+        },
+    )
+    .await
 }
 
 /// Manually update the transcript text for a specific recording.

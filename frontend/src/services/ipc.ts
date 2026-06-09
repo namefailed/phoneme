@@ -127,8 +127,13 @@ export async function stopMeeting(): Promise<{ meeting_id: string }> {
   return await tauriInvoke<{ meeting_id: string }>("stop_meeting");
 }
 
-export async function retranscribeRecording(id: string, model: string | null = null, runHooks: boolean | null = null): Promise<void> {
-  await tauriInvoke("retranscribe_recording", { id, model, runHooks });
+export async function retranscribeRecording(
+  id: string,
+  model: string | null = null,
+  runHooks: boolean | null = null,
+  postProcess: boolean | null = null,
+): Promise<void> {
+  await tauriInvoke("retranscribe_recording", { id, model, runHooks, postProcess });
 }
 
 /**
@@ -150,10 +155,19 @@ export async function refireHook(id: string, command: string | null = null): Pro
  * Re-run ONLY the LLM post-processing ("cleanup") step on a recording's stored
  * transcript — without re-transcribing the audio. The preserved original
  * (machine) transcript is used as the input, so the original is never lost.
- * `model` optionally overrides the configured cleanup model for this one run.
+ * Each override applies to this run only and is never written back to config;
+ * `null` falls back to the configured `[llm_post_process]` value. Supplying a
+ * `provider` also forces cleanup on for this run.
  */
-export async function rerunCleanup(id: string, model: string | null = null): Promise<void> {
-  await tauriInvoke("rerun_cleanup", { id, model });
+export async function rerunCleanup(
+  id: string,
+  model: string | null = null,
+  provider: string | null = null,
+  prompt: string | null = null,
+  apiUrl: string | null = null,
+  apiKey: string | null = null,
+): Promise<void> {
+  await tauriInvoke("rerun_cleanup", { id, model, provider, prompt, apiUrl, apiKey });
 }
 
 /**

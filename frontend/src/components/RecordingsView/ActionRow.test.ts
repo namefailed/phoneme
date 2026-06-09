@@ -24,6 +24,12 @@ beforeEach(() => {
   vi.mocked(ipcServices.refireHook).mockReset();
   vi.mocked(ipcServices.rerunCleanup).mockReset();
 
+  // The cleanup step fetches the provider's model list over HTTP; with no
+  // server reachable in tests, force it to reject so the menu deterministically
+  // falls back to the free-text model entry (the dropdown path needs a live
+  // endpoint and is exercised manually).
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no network in tests")));
+
   // mock default read_config response
   vi.mocked(tauriCore.invoke).mockImplementation(async (cmd) => {
     if (cmd === "read_config") {
@@ -101,15 +107,37 @@ describe("ActionRow Re-run menu", () => {
     expect(modelSelect).toBeTruthy();
     expect(modelSelect.options).toHaveLength(3); // ggml-tiny, ggml-base, current path
 
-    // Uncheck "run hooks after transcribing".
-    const checkbox = element.querySelector(".custom-dropdown input[type='checkbox']") as HTMLInputElement;
-    checkbox.click();
+    // With cleanup enabled in config, both the post-processing and the hooks
+    // toggles are present (defaulting on). Uncheck "run hooks" only.
+    const hooksCb = element.querySelector(".rerun-hooks-cb") as HTMLInputElement;
+    expect(hooksCb).toBeTruthy();
+    expect(element.querySelector(".rerun-postprocess-cb")).toBeTruthy();
+    hooksCb.click();
     await element.updateComplete;
 
     (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
     await element.updateComplete;
 
-    expect(ipcServices.retranscribeRecording).toHaveBeenCalledWith("rec-1", "ggml-medium.bin", false);
+    // run_hooks=false, post_process stays true (default).
+    expect(ipcServices.retranscribeRecording).toHaveBeenCalledWith("rec-1", "ggml-medium.bin", false, true);
+  });
+
+  it("can opt out of post-processing for a one-time re-transcription", async () => {
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    // Uncheck "run cleanup (post-processing)".
+    const ppCb = element.querySelector(".rerun-postprocess-cb") as HTMLInputElement;
+    expect(ppCb).toBeTruthy();
+    ppCb.click();
+    await element.updateComplete;
+
+    (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    // post_process=false; run_hooks stays true (default).
+    expect(ipcServices.retranscribeRecording).toHaveBeenCalledWith("rec-1", "ggml-medium.bin", true, false);
   });
 
   it("runs Cleanup against the stored transcript with a one-time model override", async () => {
@@ -123,12 +151,14 @@ describe("ActionRow Re-run menu", () => {
     stepSelect.dispatchEvent(new Event("change"));
     await element.updateComplete;
 
-    // Cleanup model input is prefilled from config.
+    // Provider + model are prefilled from config (model list fetch fails in
+    // tests, so the free-text model field is shown).
+    expect(element.cleanupProvider).toBe("ollama");
     const modelInput = element.querySelector(".rerun-cleanup-model") as HTMLInputElement;
     expect(modelInput).toBeTruthy();
     expect(element.cleanupModel).toBe("llama3.2:3b");
 
-    // Override it for this one run.
+    // Override the model for this one run.
     modelInput.value = "gpt-4o-mini";
     modelInput.dispatchEvent(new Event("input"));
     await element.updateComplete;
@@ -136,12 +166,56 @@ describe("ActionRow Re-run menu", () => {
     (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
     await element.updateComplete;
 
-    expect(ipcServices.rerunCleanup).toHaveBeenCalledWith("rec-1", "gpt-4o-mini");
+    // model + provider overrides sent; ollama is not an API provider so url/key
+    // are null, and the (unset) prompt falls back to null.
+    expect(ipcServices.rerunCleanup).toHaveBeenCalledWith("rec-1", "gpt-4o-mini", "ollama", null, null, null);
     // Cleanup must never trigger a re-transcription.
     expect(ipcServices.retranscribeRecording).not.toHaveBeenCalled();
   });
 
-  it("disables Cleanup when LLM post-processing is off", async () => {
+  it("sends API url/key overrides for an API cleanup provider", async () => {
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    const stepSelect = element.querySelector(".rerun-step-select") as HTMLSelectElement;
+    stepSelect.value = "cleanup";
+    stepSelect.dispatchEvent(new Event("change"));
+    await element.updateComplete;
+
+    // Switch provider to an API one — url/key fields appear.
+    const provSelect = element.querySelector(".rerun-cleanup-provider") as HTMLSelectElement;
+    provSelect.value = "openai";
+    provSelect.dispatchEvent(new Event("change"));
+    await element.updateComplete;
+
+    const urlInput = element.querySelector(".rerun-cleanup-url") as HTMLInputElement;
+    const keyInput = element.querySelector(".rerun-cleanup-key") as HTMLInputElement;
+    expect(urlInput).toBeTruthy();
+    expect(keyInput).toBeTruthy();
+    urlInput.value = "https://api.example.com/v1/chat/completions";
+    urlInput.dispatchEvent(new Event("input"));
+    keyInput.value = "sk-test";
+    keyInput.dispatchEvent(new Event("input"));
+    const modelInput = element.querySelector(".rerun-cleanup-model") as HTMLInputElement;
+    modelInput.value = "gpt-4o-mini";
+    modelInput.dispatchEvent(new Event("input"));
+    await element.updateComplete;
+
+    (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    expect(ipcServices.rerunCleanup).toHaveBeenCalledWith(
+      "rec-1",
+      "gpt-4o-mini",
+      "openai",
+      null,
+      "https://api.example.com/v1/chat/completions",
+      "sk-test",
+    );
+  });
+
+  it("disables Cleanup when post-processing is off, offering a Settings shortcut", async () => {
     vi.mocked(tauriCore.invoke).mockImplementation(async (cmd) => {
       if (cmd === "read_config") {
         return {
@@ -163,10 +237,23 @@ describe("ActionRow Re-run menu", () => {
     stepSelect.dispatchEvent(new Event("change"));
     await element.updateComplete;
 
-    // No model input, and the Re-run button is disabled.
+    // Off means off: no model/provider controls, the run button is disabled, and
+    // an "Enable in Settings" shortcut is offered instead.
     expect(element.querySelector(".rerun-cleanup-model")).toBeFalsy();
-    const submit = element.querySelector(".rerun-submit") as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
+    expect(element.querySelector(".rerun-cleanup-provider")).toBeFalsy();
+    expect((element.querySelector(".rerun-submit") as HTMLButtonElement).disabled).toBe(true);
+
+    const enableBtn = element.querySelector(".rerun-enable-cleanup") as HTMLButtonElement;
+    expect(enableBtn).toBeTruthy();
+
+    // The shortcut dispatches a navigate event toward the Post-Processing tab.
+    let navDetail: any = null;
+    const onNav = (e: Event) => { navDetail = (e as CustomEvent).detail; };
+    window.addEventListener("phoneme:navigate", onNav);
+    enableBtn.click();
+    window.removeEventListener("phoneme:navigate", onNav);
+    expect(navDetail).toEqual({ view: "settings", section: "postprocessing" });
+    expect(ipcServices.rerunCleanup).not.toHaveBeenCalled();
   });
 
   it("runs the Hook step with the chosen configured command", async () => {
