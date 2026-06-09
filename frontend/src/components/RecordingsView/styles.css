@@ -649,30 +649,75 @@ mark.search-hit {
   z-index: 50;
   pointer-events: none;
 }
+/* Floating, draggable bulk-action popup (position set inline by the component). */
 .bulk-bar {
   pointer-events: all;
+  z-index: 150;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-top: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
-  animation: bulk-bar-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  gap: 8px;
+  padding: 8px 10px 8px 6px;
+  max-width: calc(100vw - 32px);
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: var(--popup-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+  animation: bulk-bar-in 0.16s ease-out;
 }
 @keyframes bulk-bar-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
+.bulk-grip {
+  cursor: move;
+  color: var(--fg-faded);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 3px;
+  user-select: none;
+  letter-spacing: -2px;
+  flex: 0 0 auto;
+}
+.bulk-grip:hover { color: var(--accent); }
+.bulk-menu-wrap { position: relative; display: inline-flex; }
+.bulk-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  min-width: 168px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  border-radius: 10px;
+  padding: 5px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bulk-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg-default);
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.bulk-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.bulk-menu-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.bulk-menu-empty { font-size: 11px; color: var(--fg-faded); padding: 8px 10px; }
 .bulk-count {
   font-size: 12px;
   font-weight: 600;
