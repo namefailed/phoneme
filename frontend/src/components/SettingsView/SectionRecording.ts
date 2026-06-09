@@ -66,6 +66,17 @@ export class SectionRecording {
           )}</div>
         </div>
         <div class="settings-field">
+          <label>Auto-stop on silence</label>
+          <div>${renderField(
+            { key: "recording.auto_stop_on_silence", label: "", kind: "checkbox" },
+            this.config.recording.auto_stop_on_silence || false,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            When <b>on</b>, the Record button stops automatically once your mic goes quiet (using the threshold and window below) — good for hands-free quick notes.<br/>
+            When <b>off</b> (default), the Record button is a <b>Start/Stop toggle</b>: it records until you click stop, so a quiet mic or a natural pause never cuts you off. The silence threshold and window below only apply when this is on. (Your push-to-talk hotkey is unaffected.)
+          </span>
+        </div>
+        <div class="settings-field">
           <label>Silence threshold (dBFS)</label>
           <div>${renderField(
             { key: "recording.silence_threshold_dbfs", label: "", kind: "number" },

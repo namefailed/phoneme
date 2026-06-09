@@ -386,6 +386,17 @@ pub struct RecordingConfig {
     /// spawned and behavior is identical to before this feature existed.
     #[serde(default)]
     pub streaming_preview: bool,
+    /// Whether the GUI "Record" button auto-stops a single recording once the
+    /// mic goes quiet (`silence_threshold_dbfs` / `silence_window_ms` above), or
+    /// records until the user explicitly stops it.
+    ///
+    /// **Default false = a Start/Stop toggle**: click to start, click to stop;
+    /// the recording never cuts off on a quiet mic or a natural pause. The
+    /// silence threshold/window only take effect when this is `true`. The
+    /// push-to-talk hotkey is always hold-to-record regardless of this flag, and
+    /// the CLI still honors whatever record mode it is given.
+    #[serde(default)]
+    pub auto_stop_on_silence: bool,
 }
 
 /// A conditional hook: when a transcript matches `pattern`, `command` is run in
@@ -683,6 +694,7 @@ impl Default for Config {
                 source: CaptureSource::Microphone,
                 pre_roll_ms: 1500,
                 streaming_preview: false,
+                auto_stop_on_silence: false,
             },
             hook: HookConfig {
                 commands: vec![
