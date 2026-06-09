@@ -136,11 +136,13 @@ jobs:
         with:
           version: 9
 
+      # No pnpm cache here: this job only runs `pnpm audit` (no install), so the
+      # store is empty and the cache-save post-step errored ("path does not
+      # exist") — turning the whole advisory job red. The audit reads the
+      # lockfile directly and doesn't need a warm cache.
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: pnpm audit (frontend)
         working-directory: frontend
