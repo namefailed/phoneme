@@ -163,35 +163,29 @@ export class ThinkingPopoutElement extends LitElement {
     document.addEventListener("mouseup", onUp);
   }
 
-  /** Position the panel near the FAB without ever covering it or running off the
-   *  screen. It opens BELOW the button when there's room, otherwise ABOVE, using
-   *  the panel's actual size (so it still fits after a resize), and clamps to the
-   *  viewport so nothing is cut off at the edges. Applied imperatively
-   *  (per-property) so the user's resize (inline width/height) survives
-   *  re-renders. The FAB is 40px square. */
+  /** Default placement (used until the user resizes and a geometry is saved):
+   *  the panel pops out DIAGONALLY from the button toward the side with the most
+   *  room — for the default bottom-right button, up and to the left — so the
+   *  button sits just off the panel's corner and is never covered. Clamped to the
+   *  viewport so nothing is cut off. Applied per-property so a later resize
+   *  survives re-renders. The FAB is 40px square. */
   private applyPosition(panel: HTMLElement) {
     const { x, y } = this.fabXY();
-    const w = panel.offsetWidth || 380;
-    const h = panel.offsetHeight || 420;
+    const w = panel.offsetWidth || 560;
+    const h = panel.offsetHeight || 600;
     const m = 8;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // Horizontal: keep the panel's right edge near the FAB (extends left); open
-    // rightward only if the FAB hugs the left edge. Clamp on-screen.
-    let left = x + 40 - w;
-    if (left < m) left = x;
-    left = Math.max(m, Math.min(left, vw - w - m));
+    // Open DIAGONALLY away from the button toward the side with the most room,
+    // so the button sits just off the panel's nearest corner. Default
+    // (bottom-right button) → the panel pops up and to the left.
+    const openLeft = x > vw * 0.5;
+    const openUp = y > vh * 0.45;
+    let left = openLeft ? x + 20 - w : x + 20;
+    let top = openUp ? y - 12 - h : y + 52;
 
-    // Vertical: below the FAB if it fits there, else above; if neither fits
-    // (very tall panel) pin to the bottom. Never overlaps the FAB unless the
-    // panel is taller than the whole viewport.
-    const spaceBelow = vh - (y + 40) - m;
-    const spaceAbove = y - m;
-    let top: number;
-    if (h <= spaceBelow) top = y + 48;
-    else if (h <= spaceAbove) top = y - h - 8;
-    else top = vh - h - m;
+    left = Math.max(m, Math.min(left, vw - w - m));
     top = Math.max(m, Math.min(top, vh - h - m));
 
     panel.style.position = "fixed";

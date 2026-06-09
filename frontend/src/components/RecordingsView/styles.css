@@ -424,8 +424,10 @@ mark.search-hit {
 @keyframes thinkingPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .thinking-popout {
   z-index: 201;
-  width: 380px;
-  height: 420px;
+  /* Default size — comfortable enough to read a few activity entries at a
+     glance. Movable/resizable; a saved geometry overrides this. */
+  width: 560px;
+  height: 600px;
   min-width: 300px;
   min-height: 220px;
   max-width: 92vw;
