@@ -13,6 +13,8 @@ const REFERENCE_HOOKS: &[&str] = &[
     "to-clipboard.ps1",
     "to-file.ps1",
     "to-markdown-daily.ps1",
+    "to-timestamped-note.ps1",
+    "notify-desktop.ps1",
     // Showcase / integrations
     "to-webhook.ps1",
     "summarize-with-ollama.ps1",

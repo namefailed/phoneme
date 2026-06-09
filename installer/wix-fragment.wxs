@@ -38,6 +38,8 @@
           <File Id="HookWebhook"    Name="to-webhook.ps1"       Source="..\..\..\..\hooks\to-webhook.ps1" />
           <File Id="HookOllama"     Name="summarize-with-ollama.ps1" Source="..\..\..\..\hooks\summarize-with-ollama.ps1" />
           <File Id="HookTodoist"    Name="to-todoist.ps1"       Source="..\..\..\..\hooks\to-todoist.ps1" />
+          <File Id="HookTimestamped" Name="to-timestamped-note.ps1" Source="..\..\..\..\hooks\to-timestamped-note.ps1" />
+          <File Id="HookNotify"      Name="notify-desktop.ps1"   Source="..\..\..\..\hooks\notify-desktop.ps1" />
         </Component>
       </Directory>
     </DirectoryRef>
