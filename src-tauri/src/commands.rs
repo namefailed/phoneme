@@ -335,6 +335,13 @@ pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::CancelAllQueued).await
 }
 
+/// Cancel the item currently being processed (abort the in-flight transcription/LLM).
+#[tauri::command]
+pub async fn cancel_processing(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::CancelProcessing { id }).await
+}
+
 /// Manually update the transcript text for a specific recording.
 #[tauri::command]
 pub async fn update_transcript(

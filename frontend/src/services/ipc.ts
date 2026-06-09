@@ -235,6 +235,11 @@ export async function cancelAllQueued(): Promise<number> {
   return r.removed;
 }
 
+/** Cancel the item currently being processed (aborts the in-flight work). */
+export async function cancelProcessing(id: string): Promise<void> {
+  await tauriInvoke("cancel_processing", { id });
+}
+
 /** One Doctor health-check result. */
 export type DoctorCheck = {
   name: string;

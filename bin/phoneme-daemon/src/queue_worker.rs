@@ -50,7 +50,17 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
         match claimed {
             Some(payload) => {
                 emit_queue_depth(&state).await;
-                match pipeline::run(&state, payload).await {
+                // Publish a fresh cancellation token for this in-flight item so
+                // `CancelProcessing` can abort the whisper/LLM work mid-flight.
+                let token = tokio_util::sync::CancellationToken::new();
+                if let Ok(mut slot) = state.processing.lock() {
+                    *slot = Some((payload.id.clone(), token.clone()));
+                }
+                let result = pipeline::run(&state, payload, token).await;
+                if let Ok(mut slot) = state.processing.lock() {
+                    *slot = None;
+                }
+                match result {
                     Ok(()) => {
                         backoff = Duration::from_secs(30); // reset on success
                     }

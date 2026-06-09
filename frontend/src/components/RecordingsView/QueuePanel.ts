@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, getRecording, type QueueEntry } from "../../services/ipc";
+import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, type QueueEntry } from "../../services/ipc";
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
 import { formatTime, formatDuration } from "../../utils/format";
 import { showToast } from "../../utils/toast";
@@ -172,6 +172,17 @@ export class QueuePanelElement extends LitElement {
     }
   }
 
+  /** Cancel the item currently being processed (abort the in-flight work). */
+  private async cancelActive(id: string) {
+    try {
+      await cancelProcessing(id);
+      this.clearStage(id);
+      await this.load();
+    } catch (e) {
+      showToast(`Couldn't cancel: ${errText(e)}`, "error");
+    }
+  }
+
   /** Move a pending item up (-1) or down (+1) and persist the new claim order. */
   private async move(id: string, dir: -1 | 1) {
     const pending = this.items.filter((i) => i.state === "pending");
@@ -279,7 +290,12 @@ export class QueuePanelElement extends LitElement {
                                   </span>
                                   <button class="queue-cancel" title="Remove from queue" @click=${() => this.cancel(it.id)}>✕</button>
                                 `
-                              : html`<span class="queue-spin" aria-hidden="true"></span>`}
+                              : html`
+                                  <span class="queue-spin" aria-hidden="true"></span>
+                                  ${this.items.some((i) => i.id === it.id)
+                                    ? html`<button class="queue-cancel" title="Cancel the in-progress item" @click=${() => this.cancelActive(it.id)}>✕</button>`
+                                    : null}
+                                `}
                           </div>
                         `;
                       });

@@ -674,6 +674,30 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::QueuePaused => {
             Response::Ok(serde_json::json!({ "paused": state.inbox.is_paused().await }))
         }
+        Request::CancelProcessing { id } => {
+            // Signal the in-flight cancellation token only if `id` is the item
+            // currently processing; the worker + pipeline finalize the rest.
+            let canceled = {
+                match state.processing.lock() {
+                    Ok(slot) => match slot.as_ref() {
+                        Some((pid, token)) if *pid == id => {
+                            token.cancel();
+                            true
+                        }
+                        _ => false,
+                    },
+                    Err(_) => false,
+                }
+            };
+            if canceled {
+                Response::Ok(serde_json::Value::Null)
+            } else {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: "recording is not the item currently being processed".into(),
+                })
+            }
+        }
         Request::CancelAllQueued => match state.inbox.cancel_all_pending().await {
             Ok(ids) => {
                 // Mark each cancelled recording terminal so it isn't stuck

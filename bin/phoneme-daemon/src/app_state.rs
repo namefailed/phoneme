@@ -81,6 +81,10 @@ pub struct AppState {
     /// that caused "Whisper timed out after 60s" on long recordings while the
     /// preview hammered the server with a big model.
     pub whisper_sem: Arc<tokio::sync::Semaphore>,
+    /// The currently-processing recording and its cancellation token, set by the
+    /// queue worker around each `pipeline::run` call and cleared after. The
+    /// `CancelProcessing` IPC cancels this token to abort the in-flight item.
+    pub processing: Arc<std::sync::Mutex<Option<(phoneme_core::RecordingId, tokio_util::sync::CancellationToken)>>>,
 }
 
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -129,6 +133,7 @@ impl AppState {
             webhook,
             embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
             whisper_sem: Arc::new(tokio::sync::Semaphore::new(1)),
+            processing: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 }

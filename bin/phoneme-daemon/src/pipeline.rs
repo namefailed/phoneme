@@ -199,10 +199,44 @@ async fn maybe_auto_summarize(
     }
 }
 
+/// Finalize an in-flight item canceled by the user: move the inbox file out of
+/// `processing/`, mark the recording terminal, and emit the cancel events.
+/// Best-effort — logs (but doesn't propagate) errors so a cancel always settles.
+/// (Uses TranscribeFailed for parity with the pending-queue cancel until a
+/// dedicated Canceled status lands.)
+async fn finalize_canceled(state: &AppState, id: &RecordingId) {
+    if let Err(e) = state
+        .catalog
+        .update_status(id, RecordingStatus::TranscribeFailed)
+        .await
+    {
+        tracing::warn!(error = %e, "cancel: failed to set status");
+    }
+    if let Err(e) = state
+        .inbox
+        .finish_failed(id, "canceled", "canceled by user")
+        .await
+    {
+        tracing::warn!(error = %e, "cancel: failed to move inbox item out of processing");
+    }
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Failed,
+    });
+    state
+        .events
+        .emit(DaemonEvent::RecordingCancelled { id: id.clone() });
+    tracing::info!(id = %id, "in-flight recording canceled by user");
+}
+
 /// Process a single claimed payload through the full pipeline.
 ///
 /// Updates catalog, fires events, moves inbox files to done/ or failed/.
-pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
+pub async fn run(
+    state: &AppState,
+    mut payload: HookPayload,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<()> {
     let id = payload.id.clone();
     state
         .events
@@ -223,24 +257,40 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     // streaming preview backs off and can't starve it (the "Whisper timed out
     // after 60s" bug). Acquiring waits for any in-flight preview tick to finish.
     let _whisper_permit = state.whisper_sem.acquire().await;
-    let transcript = match provider.transcribe(&audio_path, language.as_deref()).await {
-        Ok(t) => t,
-        Err(e) => {
-            state
-                .catalog
-                .update_status(&id, RecordingStatus::TranscribeFailed)
-                .await?;
-            state
-                .inbox
-                .finish_failed(&id, "whisper_error", &e.to_string())
-                .await?;
-            state.events.emit(DaemonEvent::TranscriptionFailed {
-                id: id.clone(),
-                error: e.to_string(),
-            });
-            return Err(e);
+    // Race transcription against cancellation. Dropping the transcribe future on
+    // cancel tears down the in-flight HTTP request (reqwest futures are
+    // cancel-safe); the native path stops at the next stage boundary.
+    let transcript = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            finalize_canceled(state, &id).await;
+            return Ok(());
+        }
+        res = provider.transcribe(&audio_path, language.as_deref()) => match res {
+            Ok(t) => t,
+            Err(e) => {
+                state
+                    .catalog
+                    .update_status(&id, RecordingStatus::TranscribeFailed)
+                    .await?;
+                state
+                    .inbox
+                    .finish_failed(&id, "whisper_error", &e.to_string())
+                    .await?;
+                state.events.emit(DaemonEvent::TranscriptionFailed {
+                    id: id.clone(),
+                    error: e.to_string(),
+                });
+                return Err(e);
+            }
         }
     };
+
+    // Checkpoint between transcription and post-processing.
+    if cancel.is_cancelled() {
+        finalize_canceled(state, &id).await;
+        return Ok(());
+    }
 
     // Release the whisper-server permit now that transcription is done — LLM
     // post-processing and hooks below don't touch the server, so the preview
@@ -261,16 +311,22 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
             id: id.clone(),
             stage: PipelineStage::CleaningUp,
         });
-        match run_llm_stage(
-            state,
-            &id,
-            PipelineStage::CleaningUp,
-            &*llm,
-            &cfg.llm_post_process.prompt,
-            &transcript,
-        )
-        .await
-        {
+        let cleanup_result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                finalize_canceled(state, &id).await;
+                return Ok(());
+            }
+            r = run_llm_stage(
+                state,
+                &id,
+                PipelineStage::CleaningUp,
+                &*llm,
+                &cfg.llm_post_process.prompt,
+                &transcript,
+            ) => r,
+        };
+        match cleanup_result {
             Ok(processed) => {
                 tracing::info!("LLM post-processing succeeded");
                 transcript = processed;

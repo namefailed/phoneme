@@ -174,6 +174,12 @@ pub enum Request {
     /// Remove ALL still-pending items from the queue at once ("clear queue").
     /// The currently-processing item is left untouched.
     CancelAllQueued,
+    /// Cancel the item currently being processed (transcribe/cleanup/summary).
+    /// Aborts the in-flight work, moves it out of `processing/`, and marks it
+    /// terminal. No-op if `id` isn't the in-flight item.
+    CancelProcessing {
+        id: RecordingId,
+    },
 
     /// Run all health checks (local filesystem + backend reachability) and
     /// return the results for the GUI Doctor view. Each result carries a name,

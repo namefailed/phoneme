@@ -252,6 +252,7 @@ pub fn run() {
             commands::set_queue_paused,
             commands::queue_paused,
             commands::cancel_all_queued,
+            commands::cancel_processing,
             commands::run_doctor,
             commands::update_transcript,
             commands::update_meeting_name,
