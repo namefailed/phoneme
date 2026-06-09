@@ -304,10 +304,10 @@ alongside the feature releases above.*
 - [x] `embed.rs` mutex-poison `unwrap()` → `map_err` (no daemon panic on a poisoned lock). *(audit A-C2)*
 - [x] Atomic `toggle_meeting()` — holds a `toggle_guard` across the read+act so concurrent toggles serialize. *(A-H11)*
 - [x] Shared `Config::load_resolved()` so the CLI honors `PHONEME_CONFIG` like the daemon; shared `register_hotkeys(cfg)` so startup and a profile switch re-register *all* hotkeys (record/meeting/in-place). *(A-H13/A-H14)*
-- [ ] Structured Tauri IPC errors (`{ kind, message }`) instead of flattened strings. *(A-H6)*
+- [x] Structured Tauri IPC errors (`{ kind, message }`) instead of flattened strings; frontend reads them via `errText`/`errKind`. *(A-H6)*
 - [x] Align `zip` versions across workspace vs tray (tray now uses the workspace `zip`). *(A-H12)*
 - [x] Delete or implement the orphaned `checkMicrophoneAccess()` (no Tauri handler). *(A-C3)*
-- [ ] Consolidate the duplicated **Doctor** and triplicate **record-mode** enums into core. *(A-H3/A-H4)*
+- [x] Consolidate the duplicated **Doctor** and triplicate **record-mode** enums into core. *(A-H3/A-H4)*
 
 **Docs accuracy** *(audit found drift — fix the user-facing claims)*
 - [ ] Say **speakrs**, not "Pyannote", everywhere (docs, `SectionDiarization.ts`). *(A-C5)*

@@ -1,3 +1,4 @@
+import { errText } from "../utils/error";
 import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 
@@ -217,7 +218,7 @@ export class ModelPickerElement extends LitElement {
       showToast("Models saved", "success");
       this.close(true);
     } catch (e) {
-      showToast(`Save failed: ${e}`, "error");
+      showToast(`Save failed: ${errText(e)}`, "error");
     }
   }
 
@@ -367,7 +368,7 @@ export async function openModelPicker(
   try {
     config = await invoke("read_config");
   } catch (e) {
-    showToast(`Failed to load config: ${e}`, "error");
+    showToast(`Failed to load config: ${errText(e)}`, "error");
     return false;
   }
 

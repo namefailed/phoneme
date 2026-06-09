@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { renderField, bindFieldEvents } from "./form";
 import { check } from "@tauri-apps/plugin-updater";
 import { message, confirm } from "@tauri-apps/plugin-dialog";
@@ -95,7 +96,7 @@ export class SectionTray {
           }
         } catch (e: any) {
           console.error("Failed to check for updates:", e);
-          updateStatus.textContent = `Error: ${e.message || String(e)}`;
+          updateStatus.textContent = `Error: ${errText(e)}`;
         } finally {
           updateBtn.disabled = false;
           if (updateBtn.textContent !== "Installing...") {

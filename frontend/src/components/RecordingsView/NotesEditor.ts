@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { updateNotes } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { applyVimrc } from "../../utils/vimrc";
@@ -193,7 +194,7 @@ export class NotesEditor {
       await updateNotes(this.id, value);
       this.lastSaved = value;
     } catch (e) {
-      showToast(`Failed to save notes: ${String(e)}`, "error");
+      showToast(`Failed to save notes: ${errText(e)}`, "error");
     }
   }
 

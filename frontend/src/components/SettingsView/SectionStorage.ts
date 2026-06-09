@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { renderField, bindFieldEvents } from "./form";
 import { listRecordings } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
@@ -165,7 +166,7 @@ export class SectionStorage {
             if (statusEl) statusEl.textContent = "";
           }
         } catch (e) {
-          showToast(`Export failed: ${e}`, "error");
+          showToast(`Export failed: ${errText(e)}`, "error");
           if (statusEl) statusEl.textContent = "";
         }
       });

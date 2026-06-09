@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html, css, unsafeCSS } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { listAllTags, listTags, addTag, updateTag, deleteTag, type Tag } from "../../services/ipc";
@@ -40,7 +41,7 @@ export class SectionTagsElement extends LitElement {
       this.allTags = all;
       this.activeTags = new Set(active.map((t) => t.id));
     } catch (e) {
-      showToast(`Failed to load tags: ${e}`, "error");
+      showToast(`Failed to load tags: ${errText(e)}`, "error");
       this.allTags = [];
       this.activeTags = new Set();
     }
@@ -68,7 +69,7 @@ export class SectionTagsElement extends LitElement {
       this.editingId = null;
       await this.load();
     } catch (e) {
-      showToast(`Failed to update tag: ${e}`, "error");
+      showToast(`Failed to update tag: ${errText(e)}`, "error");
     }
   }
 
@@ -88,7 +89,7 @@ export class SectionTagsElement extends LitElement {
       showToast(`Tag "${t.name}" deleted`, "success");
       await this.load();
     } catch (e) {
-      showToast(`Failed to delete tag: ${e}`, "error");
+      showToast(`Failed to delete tag: ${errText(e)}`, "error");
     }
   }
 
@@ -104,7 +105,7 @@ export class SectionTagsElement extends LitElement {
       this.newTagName = "";
       await this.load();
     } catch (e) {
-      showToast(`Failed to create tag: ${e}`, "error");
+      showToast(`Failed to create tag: ${errText(e)}`, "error");
     }
   }
 
