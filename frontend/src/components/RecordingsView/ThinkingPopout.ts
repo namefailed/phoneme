@@ -35,7 +35,15 @@ export class ThinkingPopoutElement extends LitElement {
   private activeId = "";
   private unsub: (() => void) | null = null;
   private static readonly FAB_LS = "phoneme.thinkingFabPos";
+  private static readonly OPEN_LS = "phoneme.thinkingFabOpen";
   private static readonly MAX_TRACKED = 6;
+
+  /** Set the panel's open state and remember it (part of interface prefs,
+   *  cleared by "Reset interface preferences" like the other phoneme.* keys). */
+  private setOpen(v: boolean) {
+    this.open = v;
+    try { localStorage.setItem(ThinkingPopoutElement.OPEN_LS, String(v)); } catch { /* ignore */ }
+  }
 
   async connectedCallback() {
     super.connectedCallback();
@@ -45,6 +53,9 @@ export class ThinkingPopoutElement extends LitElement {
         const p = JSON.parse(raw);
         if (typeof p?.x === "number" && typeof p?.y === "number") this.fabPos = p;
       }
+    } catch { /* ignore */ }
+    try {
+      this.open = localStorage.getItem(ThinkingPopoutElement.OPEN_LS) === "true";
     } catch { /* ignore */ }
     this.unsub = await subscribe((event: DaemonEvent) => {
       if (event.event !== "llm_activity") return;
@@ -119,7 +130,7 @@ export class ThinkingPopoutElement extends LitElement {
       if (dragged) {
         try { localStorage.setItem(ThinkingPopoutElement.FAB_LS, JSON.stringify(this.fabPos)); } catch { /* ignore */ }
       } else {
-        this.open = !this.open; // it was a click
+        this.setOpen(!this.open); // it was a click
       }
     };
     document.addEventListener("mousemove", onMove);
@@ -159,7 +170,7 @@ export class ThinkingPopoutElement extends LitElement {
             <div class="thinking-popout" style=${this.panelStyle()}>
               <div class="thinking-head">
                 <span>AI activity${live ? " · live" : ""}</span>
-                <button class="thinking-close" @click=${() => (this.open = false)} title="Close">✕</button>
+                <button class="thinking-close" @click=${() => this.setOpen(false)} title="Close">✕</button>
               </div>
               <div class="thinking-body">
                 ${stages.length === 0
