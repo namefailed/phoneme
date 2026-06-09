@@ -16,6 +16,20 @@
   font-size: 18px;
   color: var(--fg-default);
 }
+/* Search box: replace the harsh default focus outline with a soft accent ring
+   that matches the rest of the app's inputs. */
+.settings-search {
+  outline: none;
+}
+.settings-search:focus,
+.settings-search:focus-visible {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.settings-search::-webkit-search-cancel-button {
+  cursor: pointer;
+}
 .sv-tab {
   padding: 10px 20px;
   cursor: pointer;
@@ -322,9 +336,14 @@ select[data-key="daemon.log_level"] {
 }
 .model-actions button {
   width: auto;
+  /* Uniform, compact width so Select / Download / Use / Selected line up and
+     read consistently with the rest of the UI's buttons (was content-width
+     with roomy padding, which looked a touch long). */
+  min-width: 82px;
+  text-align: center;
   align-self: flex-end;
   white-space: nowrap;
-  padding: 5px 12px;
+  padding: 5px 10px;
   font-size: 12px;
   font-weight: 500;
   border-radius: 6px;

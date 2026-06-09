@@ -162,12 +162,17 @@ impl Catalog {
     ) -> Result<()> {
         sqlx::query(
             r#"UPDATE recordings
-               SET transcript = ?, original_transcript = ?, model = ?,
+               SET transcript = ?, original_transcript = ?, clean_transcript = ?, model = ?,
                    transcribed_at = datetime('now'), updated_at = datetime('now')
                WHERE id = ?"#,
         )
         .bind(transcript)
         .bind(original_transcript)
+        // `clean_transcript` snapshots the pipeline output (transcribed + cleaned)
+        // so "View unedited transcript" can show it even after the user edits the
+        // live transcript. User edits go through `update_user_transcript`, which
+        // leaves this column untouched.
+        .bind(transcript)
         .bind(model)
         .bind(id.as_str())
         .execute(&self.pool)
@@ -191,6 +196,27 @@ impl Catalog {
         )
         .bind(cleanup_model)
         .bind(diarized)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Store (or replace) the LLM-generated summary for a recording, along with
+    /// the model that produced it.
+    pub async fn update_summary(
+        &self,
+        id: &RecordingId,
+        summary: &str,
+        model: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET summary = ?, summary_model = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(summary)
+        .bind(model)
         .bind(id.as_str())
         .execute(&self.pool)
         .await?;
@@ -221,6 +247,21 @@ impl Catalog {
             .await?;
         match row {
             Some(r) => Ok(r.try_get::<Option<String>, _>("original_transcript")?),
+            None => Ok(None),
+        }
+    }
+
+    /// The preserved "unedited" transcript — the pipeline output (machine
+    /// transcription + any LLM cleanup) before the user made hand edits. `None`
+    /// for recordings transcribed before this column existed, or never
+    /// transcribed.
+    pub async fn get_clean_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT clean_transcript FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok(r.try_get::<Option<String>, _>("clean_transcript")?),
             None => Ok(None),
         }
     }
@@ -777,6 +818,8 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         in_place: row.try_get("in_place").unwrap_or(false),
         cleanup_model: row.try_get("cleanup_model").unwrap_or(None),
         diarized: row.try_get("diarized").unwrap_or(false),
+        summary: row.try_get("summary").unwrap_or(None),
+        summary_model: row.try_get("summary_model").unwrap_or(None),
         tags: Vec::new(),
     })
 }
@@ -875,6 +918,8 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         }
     }
@@ -1015,6 +1060,8 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         };
         db.insert(&r).await.expect("insert");
@@ -1072,6 +1119,8 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         };
         db.insert(&r).await.expect("insert");
@@ -1125,6 +1174,8 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         };
         db.insert(&r).await.expect("insert");
@@ -1200,6 +1251,8 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         };
         let mic = make("mic");
@@ -1241,6 +1294,8 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         };
         db.insert(&solo).await.expect("insert solo");

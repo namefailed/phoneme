@@ -339,6 +339,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::GetCleanTranscript { id } => {
+            match state.catalog.get_clean_transcript(&id).await {
+                Ok(clean) => serialize_response(clean),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::NotesUpdated { id });
@@ -573,6 +582,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 },
             )
             .await
+        }
+        Request::RerunSummary { id, model, prompt } => {
+            rerun_summary(state, id, model, prompt).await
         }
         // Unlike RefireHook, HookTest intentionally runs a caller-supplied
         // command: it is the Hook Manager's "test this command" affordance, used
@@ -991,6 +1003,99 @@ async fn rerun_cleanup(
     Response::Ok(serde_json::Value::Null)
 }
 
+/// Generate (or regenerate) an LLM summary of a recording's current transcript
+/// on demand. Like `rerun_cleanup`, the network call runs in a spawned task so
+/// it doesn't block the IPC connection; the UI listens for `SummaryUpdated`.
+/// `model`/`prompt` override the configured summary model/prompt for this run
+/// only and are never persisted.
+async fn rerun_summary(
+    state: &AppState,
+    id: phoneme_core::RecordingId,
+    model: Option<String>,
+    prompt: Option<String>,
+) -> Response {
+    let recording = match state.catalog.get(&id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::NotFound,
+                message: format!("recording {id} not found"),
+            });
+        }
+        Err(e) => {
+            return Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            });
+        }
+    };
+
+    let transcript = recording.transcript.clone().unwrap_or_default();
+    if transcript.trim().is_empty() {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::Internal,
+            message: "no transcript to summarize".into(),
+        });
+    }
+
+    // Clone the live config and apply the one-time summary overrides. Summaries
+    // reuse the [llm_post_process] provider connection; only model/prompt are
+    // summary-specific.
+    let mut cfg = (**state.config.load()).clone();
+    if let Some(m) = model {
+        if !m.trim().is_empty() {
+            cfg.summary.model = m;
+        }
+    }
+    if let Some(p) = prompt {
+        if !p.trim().is_empty() {
+            cfg.summary.prompt = p;
+        }
+    }
+
+    // Require a usable LLM provider up front so the user gets a clear error
+    // rather than a silent no-op. `generate_summary` re-checks defensively.
+    {
+        let probe = crate::pipeline::summary_llm_config(&cfg);
+        if state.llm.provider(&probe).is_none() {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::InvalidConfig,
+                message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)"
+                    .into(),
+            });
+        }
+    }
+
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        match crate::pipeline::generate_summary(&task_state, &cfg, &transcript).await {
+            Some((summary, model)) => {
+                if let Err(e) = task_state
+                    .catalog
+                    .update_summary(&id, &summary, Some(&model))
+                    .await
+                {
+                    tracing::error!(error = %e, "rerun_summary: failed to persist summary");
+                    task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                        id,
+                        error: e.to_string(),
+                    });
+                    return;
+                }
+                task_state.events.emit(DaemonEvent::SummaryUpdated { id });
+            }
+            None => {
+                task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                    id,
+                    error: "summary generation failed".into(),
+                });
+            }
+        }
+    });
+
+    Response::Ok(serde_json::Value::Null)
+}
+
 /// Import an existing audio file: decode it to a canonical WAV under the audio
 /// dir, insert a catalog row, and enqueue it for the normal transcription
 /// pipeline. Mirrors `DaemonRecorder::stop` (catalog row at `Transcribing` +
@@ -1107,6 +1212,8 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         track: None,
         cleanup_model: None,
         diarized: false,
+        summary: None,
+        summary_model: None,
         tags: vec![],
     };
     if let Err(e) = state.catalog.insert(&row).await {

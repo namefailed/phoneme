@@ -215,7 +215,8 @@ export class RecordingsView {
         eventName === "hook_done" ||
         eventName === "hook_failed" ||
         eventName === "recording_deleted" ||
-        eventName === "transcript_updated"
+        eventName === "transcript_updated" ||
+        eventName === "summary_updated"
       ) {
         void this.refresh();
       }

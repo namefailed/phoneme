@@ -5,41 +5,11 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 
 import { invoke } from '@tauri-apps/api/core';
 import { showToast } from '../utils/toast';
+import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from '../services/llmProviders';
+import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModels } from '../services/sttProviders';
+import { fetchLlmModels } from '../services/llmModels';
 
 type ProviderOption = { value: string; label: string };
-
-type Preset = {
-  id: string;
-  label: string;
-  provider: string;
-  apiUrl: string;
-  model: string;
-};
-
-const LLM_PRESETS: Preset[] = [
-  { id: "preset:gemini", label: "Google Gemini", provider: "openai", apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-flash-latest" },
-  { id: "preset:mistral", label: "Mistral", provider: "openai", apiUrl: "https://api.mistral.ai/v1/chat/completions", model: "mistral-small-latest" },
-  { id: "preset:deepseek", label: "DeepSeek", provider: "openai", apiUrl: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" },
-  { id: "preset:openrouter", label: "OpenRouter", provider: "openai", apiUrl: "https://openrouter.ai/api/v1/chat/completions", model: "meta-llama/llama-3.3-70b-instruct:free" },
-  { id: "preset:together", label: "Together", provider: "openai", apiUrl: "https://api.together.xyz/v1/chat/completions", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
-  { id: "preset:xai", label: "xAI / Grok", provider: "openai", apiUrl: "https://api.x.ai/v1/chat/completions", model: "grok-2-latest" },
-  { id: "preset:cerebras", label: "Cerebras", provider: "openai", apiUrl: "https://api.cerebras.ai/v1/chat/completions", model: "llama-3.3-70b" },
-  { id: "preset:lmstudio", label: "LM Studio (local)", provider: "openai", apiUrl: "http://localhost:1234/v1/chat/completions", model: "" },
-];
-
-const STT_PRESETS: Preset[] = [
-  { id: "preset:fireworks", label: "Fireworks", provider: "custom", apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
-];
-
-const STT_PROVIDERS: ProviderOption[] = [
-  { value: "local", label: "Local — whisper.cpp (offline, default)" },
-  { value: "openai", label: "OpenAI (cloud)" },
-  { value: "groq", label: "Groq (cloud)" },
-  { value: "deepgram", label: "Deepgram (cloud)" },
-  { value: "assemblyai", label: "AssemblyAI (cloud)" },
-  { value: "elevenlabs", label: "ElevenLabs Scribe (cloud)" },
-  { value: "custom", label: "Custom (OpenAI-compatible endpoint)" },
-];
 
 const LLM_PROVIDERS: ProviderOption[] = [
   { value: "none", label: "None" },
@@ -57,7 +27,8 @@ function localModelLabel(path: string): string {
     "ggml-small.en.bin": "Small (English) — balanced",
     "ggml-medium.en.bin": "Medium (English) — accurate, slower",
     "ggml-large-v3.bin": "Large v3 — most accurate, slowest",
-    "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo — fast and accurate",
+    "ggml-large-v3-turbo.bin": "Large v3 Turbo — fast and accurate",
+    "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5) — fast and accurate",
   };
   return map[file] ?? file;
 }
@@ -83,8 +54,10 @@ export class ModelPickerElement extends LitElement {
   @state() private llmModel = "";
   @state() private llmKey = "";
   @state() private diarizationEnabled = false;
-  @state() private ollamaModels: string[] = [];
-  @state() private fetchingOllamaModels = false;
+  @state() private llmModels: string[] = [];
+  @state() private fetchingLlm = false;
+  @state() private llmModelOther = false;
+  @state() private sttModelOther = false;
 
   @query('.mp-dialog') dialog!: HTMLElement;
   @query('#mp-stt-provider') sttProviderSelect!: HTMLSelectElement;
@@ -148,27 +121,26 @@ export class ModelPickerElement extends LitElement {
     const d = this.config.diarization || {};
     this.diarizationEnabled = d.provider !== "none";
 
-    // Fetch Ollama models if Ollama is selected
-    if (this.llmRealProvider === "ollama") {
-      void this.fetchOllamaModels();
+    if (this.llmRealProvider !== "none") {
+      void this.fetchLlmModelList();
     }
   }
 
-  private async fetchOllamaModels() {
-    this.fetchingOllamaModels = true;
+  /** Fetch the model list for the current LLM provider (Ollama or any cloud). */
+  private async fetchLlmModelList() {
+    const provider = this.llmRealProvider;
+    if (!provider || provider === "none") {
+      this.llmModels = [];
+      return;
+    }
+    this.fetchingLlm = true;
     try {
-      const configuredUrl = this.llmUrl || "http://127.0.0.1:11434/api/generate";
-      const url = new URL(configuredUrl);
-      const apiUrl = `${url.protocol}//${url.host}/api/tags`;
-      const response = await fetch(apiUrl);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      this.ollamaModels = data.models?.map((m: any) => m.name) || [];
+      this.llmModels = await fetchLlmModels(provider, this.llmUrl, this.llmKey);
     } catch (e) {
-      console.warn("Failed to fetch Ollama models:", e);
-      this.ollamaModels = [];
+      console.warn("Failed to fetch models:", e);
+      this.llmModels = [];
     } finally {
-      this.fetchingOllamaModels = false;
+      this.fetchingLlm = false;
     }
   }
 
@@ -224,11 +196,13 @@ export class ModelPickerElement extends LitElement {
 
   private onSttProviderChange() {
     const v = this.sttProviderSelect.value;
-    const preset = STT_PRESETS.find((p) => p.id === v);
-    if (preset) {
-      this.sttRealProvider = preset.provider;
-      this.sttUrl = preset.apiUrl;
-      this.sttModel = preset.model;
+    if (v.startsWith("preset:")) {
+      const preset = findSttCustomPreset(v.slice("preset:".length));
+      if (preset) {
+        this.sttRealProvider = "custom";
+        this.sttUrl = preset.apiUrl;
+        this.sttModel = preset.model;
+      }
     } else {
       this.sttRealProvider = v;
     }
@@ -236,18 +210,78 @@ export class ModelPickerElement extends LitElement {
 
   private onLlmProviderChange() {
     const v = this.llmProviderSelect.value;
-    const preset = LLM_PRESETS.find((p) => p.id === v);
-    if (preset) {
-      this.llmRealProvider = preset.provider;
-      this.llmUrl = preset.apiUrl;
-      this.llmModel = preset.model;
+    if (v.startsWith("preset:")) {
+      const preset = findLlmPreset(v.slice("preset:".length));
+      if (preset) {
+        this.llmRealProvider = preset.kind;
+        this.llmUrl = preset.apiUrl;
+        this.llmModel = preset.defaultModel;
+      }
     } else {
       this.llmRealProvider = v;
     }
-    // Fetch Ollama models when Ollama is selected
-    if (this.llmRealProvider === "ollama") {
-      void this.fetchOllamaModels();
+    this.llmModelOther = false;
+    if (this.llmRealProvider !== "none") {
+      void this.fetchLlmModelList();
     }
+  }
+
+  /** LLM model control: live-fetched dropdown + Refresh + "Other…" free-text. */
+  private renderLlmModel() {
+    const cur = this.llmModel;
+    const known = new Set(this.llmModels);
+    if (cur) known.add(cur);
+    if (this.llmModelOther) {
+      return html`
+        <div style="display:flex; gap:8px;">
+          <input id="mp-llm-model" class="mp-input" type="text" .value=${cur} placeholder="Model id"
+            @input=${(e: Event) => this.llmModel = (e.target as HTMLInputElement).value} />
+          <button class="modal-btn" @click=${() => { this.llmModelOther = false; }}>▾ List</button>
+        </div>`;
+    }
+    return html`
+      <div style="display:flex; gap:8px;">
+        <select id="mp-llm-model" class="mp-input" @change=${(e: Event) => {
+          const v = (e.target as HTMLSelectElement).value;
+          if (v === "__other__") this.llmModelOther = true; else this.llmModel = v;
+        }}>
+          <option value="" ?selected=${!cur}>(provider default)</option>
+          ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
+          <option value="__other__">Other… (type a model id)</option>
+        </select>
+        <button class="modal-btn" ?disabled=${this.fetchingLlm} title="Fetch available models"
+          @click=${() => void this.fetchLlmModelList()}>↻</button>
+      </div>
+      ${this.fetchingLlm
+        ? html`<p class="mp-hint">Loading models…</p>`
+        : this.llmModels.length === 0
+          ? html`<p class="mp-hint">Click ↻ to list models, or choose Other to type one.</p>`
+          : ""}`;
+  }
+
+  /** STT model control: curated per-provider dropdown + "Other…" free-text. */
+  private renderSttModel() {
+    const cur = this.sttModel;
+    const list = curatedSttModels(this.sttRealProvider);
+    if (this.sttModelOther || list.length === 0) {
+      return html`
+        <div style="display:flex; gap:8px;">
+          <input id="mp-stt-model" class="mp-input" type="text" .value=${cur} placeholder="Leave blank for provider default"
+            @input=${(e: Event) => this.sttModel = (e.target as HTMLInputElement).value} />
+          ${list.length ? html`<button class="modal-btn" @click=${() => { this.sttModelOther = false; }}>▾ List</button>` : ""}
+        </div>`;
+    }
+    const known = new Set(list);
+    if (cur) known.add(cur);
+    return html`
+      <select id="mp-stt-model" class="mp-input" @change=${(e: Event) => {
+        const v = (e.target as HTMLSelectElement).value;
+        if (v === "__other__") this.sttModelOther = true; else this.sttModel = v;
+      }}>
+        <option value="" ?selected=${!cur}>(provider default)</option>
+        ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
+        <option value="__other__">Other… (type a model id)</option>
+      </select>`;
   }
 
   render() {
@@ -256,9 +290,11 @@ export class ModelPickerElement extends LitElement {
     const isLlmOllama = this.llmRealProvider === "ollama";
 
     const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
-    const sttPresetOpts = STT_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
+    const sttPresetOpts = STT_CUSTOM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`);
     const llmRealOpts = LLM_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.llmRealProvider}>${p.label}</option>`);
-    const llmPresetOpts = LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
+    const llmPresetOpts = html`
+      <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`)}</optgroup>
+      <optgroup label="Cloud (API key)">${CLOUD_LLM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`)}</optgroup>`;
 
     const hasDownloaded = this.downloadedModels.length > 0;
     const currentDownloadedOpts = hasDownloaded ? this.downloadedModels.map(p => html`<option value=${p} ?selected=${p === this.sttLocalModel}>${localModelLabel(p)}</option>`) : html`<option value="">No models downloaded — get one in Settings → Whisper</option>`;
@@ -302,7 +338,7 @@ export class ModelPickerElement extends LitElement {
               <input id="mp-stt-url" class="mp-input" type="text" .value=${this.sttUrl} @input=${(e: Event) => this.sttUrl = (e.target as HTMLInputElement).value} />
 
               <label class="mp-label" for="mp-stt-model">Model</label>
-              <input id="mp-stt-model" class="mp-input" type="text" .value=${this.sttModel} placeholder="Leave blank for provider default" @input=${(e: Event) => this.sttModel = (e.target as HTMLInputElement).value} />
+              ${this.renderSttModel()}
             </div>
 
             <div class="mp-row">
@@ -320,7 +356,7 @@ export class ModelPickerElement extends LitElement {
             <label class="mp-label" for="mp-llm-provider">Provider</label>
             <select id="mp-llm-provider" class="mp-input" @change=${this.onLlmProviderChange}>
               ${llmRealOpts}
-              <optgroup label="Presets">${llmPresetOpts}</optgroup>
+              ${llmPresetOpts}
             </select>
 
             <div class="mp-row" style="display:${isLlmCloud ? '' : 'none'}">
@@ -333,20 +369,11 @@ export class ModelPickerElement extends LitElement {
 
             <div class="mp-row" style="display:${isLlmOllama ? '' : 'none'}">
               <label class="mp-label" for="mp-llm-url">Ollama API URL</label>
-              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} placeholder="http://127.0.0.1:11434/api/generate" @input=${(e: Event) => { this.llmUrl = (e.target as HTMLInputElement).value; void this.fetchOllamaModels(); }} />
+              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} placeholder="http://127.0.0.1:11434/api/generate" @input=${(e: Event) => { this.llmUrl = (e.target as HTMLInputElement).value; void this.fetchLlmModelList(); }} />
             </div>
 
-            <label class="mp-label" for="mp-llm-model">Model</label>
-            ${isLlmOllama ? html`
-              <select id="mp-llm-model" class="mp-input" .value=${this.llmModel} @change=${(e: Event) => this.llmModel = (e.target as HTMLSelectElement).value}>
-                ${this.fetchingOllamaModels ? html`<option disabled>Loading models...</option>` : ''}
-                ${this.ollamaModels.length === 0 && !this.fetchingOllamaModels ? html`<option value="">No models found — make sure Ollama is running</option>` : ''}
-                ${this.ollamaModels.map(m => html`<option value=${m} ?selected=${m === this.llmModel}>${m}</option>`)}
-                ${this.llmModel && !this.ollamaModels.includes(this.llmModel) ? html`<option value=${this.llmModel} selected>${this.llmModel} (current)</option>` : ''}
-              </select>
-            ` : html`
-              <input id="mp-llm-model" class="mp-input" type="text" .value=${this.llmModel} placeholder="e.g. llama3.2:3b" @input=${(e: Event) => this.llmModel = (e.target as HTMLInputElement).value} />
-            `}
+            <label class="mp-label" for="mp-llm-model" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}">Model</label>
+            <div style="display:${this.llmRealProvider === 'none' ? 'none' : ''}">${this.renderLlmModel()}</div>
             <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Local Ollama</b> keeps everything offline.</p>
           </div>
 

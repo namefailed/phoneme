@@ -488,6 +488,8 @@ impl DaemonRecorder {
             in_place,
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         };
         if let Err(e) = state.catalog.insert(&row).await {
@@ -939,6 +941,8 @@ impl DaemonRecorder {
                 track: Some(track.as_str().to_string()),
                 cleanup_model: None,
                 diarized: false,
+                summary: None,
+                summary_model: None,
                 tags: vec![],
             };
             // Insert the catalog row. If it fails, roll back every track already
@@ -1451,6 +1455,8 @@ mod tests {
             track: Some(MeetingTrack::Mic.as_str().to_string()),
             cleanup_model: None,
             diarized: false,
+            summary: None,
+            summary_model: None,
             tags: vec![],
         };
         state.catalog.insert(&row).await.unwrap();

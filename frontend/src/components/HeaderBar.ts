@@ -325,9 +325,9 @@ export class HeaderBarElement extends LitElement {
   render() {
     const f = this.filterState;
     const isCapturing = this.isRecording || this.isMeeting;
-    const actionLabel = this.isMeeting ? "⏹ End Meeting" 
-                      : this.isRecording ? "⏹ Stop" 
-                      : this.recordMode === "meeting" ? "👥 Meeting" 
+    const actionLabel = this.isMeeting ? "⏹ End Meeting"
+                      : this.isRecording ? "⏹ Stop"
+                      : this.recordMode === "meeting" ? "👥 Meeting"
                       : "🔴 Record";
     const actionTitle = this.recordMode === "meeting"
       ? "Meeting Mode: record your mic and the system audio as two linked tracks"
@@ -336,6 +336,23 @@ export class HeaderBarElement extends LitElement {
 
     return html`
       <div class="headerbar" data-tauri-drag-region>
+        <style>
+          /* Consistent control height across every top-bar element. */
+          .headerbar .icon-btn,
+          .headerbar .record-btn,
+          .headerbar .filter-pill,
+          .headerbar .hb-status-select,
+          .headerbar .search-group,
+          .headerbar .search,
+          .headerbar select,
+          .headerbar input[type="search"],
+          .headerbar input[type="date"] {
+            height: 32px;
+            box-sizing: border-box;
+          }
+          .headerbar .icon-btn, .headerbar .record-btn { display: inline-flex; align-items: center; justify-content: center; }
+          .headerbar .hb-date-range, .headerbar .hb-status-cluster, .headerbar .hb-rec-group { align-items: center; }
+        </style>
         <button class="icon-btn" aria-label="Toggle Sidebar" title="Toggle Sidebar" @click=${() => this.callbacks?.onToggleSidebar?.()}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
         </button>
@@ -343,7 +360,7 @@ export class HeaderBarElement extends LitElement {
           title=${f.sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}>
           ${f.sort_desc === false ? "↑ Oldest" : "↓ Newest"}
         </button>
-        <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:1; max-width:300px;">
+        <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:1 100 220px; min-width:170px;">
           <input type="search" class="search" style="flex:1;" placeholder="Search transcripts…" 
             .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />
           <button class="icon-btn ${f.semantic ? 'active' : ''}" 
@@ -366,7 +383,7 @@ export class HeaderBarElement extends LitElement {
           <option value="transcribe_failed" ?selected=${f.status === "transcribe_failed"}>Transcription Failed</option>
           <option value="hook_failed" ?selected=${f.status === "hook_failed"}>Hook Failed</option>
         </select>
-        <div class="hb-status-cluster" style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
+        <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
           <span class="hb-whisper-dot ${this.whisperReachable === true ? 'reachable' : this.whisperReachable === false ? 'unreachable' : ''}"
             title=${this.whisperReachable === true ? 'Whisper: connected' : this.whisperReachable === false ? 'Whisper: unreachable' : 'Whisper status unknown'}></span>
           <span class="hb-queue-badge" style="display:${totalQueue > 0 ? "inline-flex" : "none"}"
@@ -382,15 +399,29 @@ export class HeaderBarElement extends LitElement {
               title="Switch capture mode (single recording or meeting)" ?disabled=${isCapturing} 
               style="padding:6px 8px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid rgba(0,0,0,0.25);"
               @click=${this.toggleModeMenu}>▾</button>
-            <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen} 
-              style="position:absolute; top:calc(100% + 4px); right:0; z-index:60; min-width:220px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border, rgba(255,255,255,0.12)); border-radius:8px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.45);">
-              <button class="hb-mode-item" @click=${(e: Event) => this.selectMode('recording', e)}
-                style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--fg-default); padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px;">
-                🔴 Single recording<span style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
+            <style>
+              .hb-mode-menu { animation: hbMenuIn 0.12s ease-out; }
+              @keyframes hbMenuIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+              .hb-mode-item {
+                display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                width: 100%; text-align: left; background: none; border: none;
+                color: var(--fg-default); padding: 8px 10px; border-radius: 7px;
+                cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
+              }
+              .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+              .hb-mode-item.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+              .hb-mode-item .hb-mode-label { display: flex; align-items: center; gap: 9px; }
+              .hb-mode-item .hb-mode-check { color: var(--accent); font-weight: 700; }
+            </style>
+            <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+              <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
+                <span class="hb-mode-label">🎙️ Voice note</span>
+                <span class="hb-mode-check" style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
               </button>
-              <button class="hb-mode-item" @click=${(e: Event) => this.selectMode('meeting', e)}
-                style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--fg-default); padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px;">
-                👥 Meeting (mic + system)<span style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
+              <button class="hb-mode-item ${this.recordMode === 'meeting' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'meeting'} @click=${(e: Event) => this.selectMode('meeting', e)}>
+                <span class="hb-mode-label">👥 Meeting</span>
+                <span class="hb-mode-check" style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
               </button>
             </div>
           </div>
@@ -398,8 +429,11 @@ export class HeaderBarElement extends LitElement {
         <button class="icon-btn" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models" @click=${this.openModels}>🎛 Models</button>
         <button class="icon-btn" aria-label="Settings" title="Open application settings" @click=${() => this.callbacks?.onOpenSettings()}>⚙</button>
       </div>
-      <div class="hb-preview" style="display:${this.previewText ? 'block' : 'none'}" title="Live transcription preview (updates while recording)">
-        ${this.previewText ? html`<span class="hb-preview-label">live</span> ${this.previewText}` : ''}
+      <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"
+        title="Live transcription preview — updates as you speak while recording">
+        <span class="hb-preview-pulse" aria-hidden="true"></span>
+        <span class="hb-preview-label">Live</span>
+        <span class="hb-preview-text">${this.previewText ?? ''}</span>
       </div>
     `;
   }

@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
+import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, sttMeta, curatedSttModels } from "../../services/sttProviders";
+import { mountModelField } from "./modelField";
 
 const HELP =
   "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
@@ -165,15 +167,7 @@ export class SectionWhisper {
               key: "whisper.provider",
               label: "",
               kind: "select",
-              options: [
-                { value: "local", label: "Local — whisper.cpp (offline, default)" },
-                { value: "openai", label: "OpenAI (cloud)" },
-                { value: "groq", label: "Groq (cloud)" },
-                { value: "deepgram", label: "Deepgram (cloud)" },
-                { value: "assemblyai", label: "AssemblyAI (cloud)" },
-                { value: "elevenlabs", label: "ElevenLabs Scribe (cloud)" },
-                { value: "custom", label: "Custom (OpenAI-compatible endpoint)" },
-              ],
+              options: STT_PROVIDERS.map((p) => ({ value: p.value, label: p.label })),
             },
             this.config.whisper.provider ?? "local",
           )}</div>
@@ -192,7 +186,7 @@ export class SectionWhisper {
             <div>
               <select id="stt-preset-select">
                 <option value="">— Pick a provider preset —</option>
-                <option value="fireworks">Fireworks</option>
+                ${STT_CUSTOM_PRESETS.map((p) => `<option value="${p.id}">${p.label}</option>`).join("")}
               </select>
             </div>
             <span style="${HELP}">
@@ -211,10 +205,7 @@ export class SectionWhisper {
           </div>
           <div class="settings-field long-input">
             <label>Model</label>
-            <div>${renderField(
-              { key: "whisper.model", label: "", kind: "text" },
-              this.config.whisper.model ?? "",
-            )}</div>
+            <div id="whisper-model-host"></div>
             <span style="${HELP}" id="cloud-model-help">
               Leave blank to use the provider default.
             </span>
@@ -319,6 +310,22 @@ export class SectionWhisper {
     `;
     bindFieldEvents(container, this.config);
 
+    // Curated STT model dropdown (+ "Other…" free-text) for cloud providers,
+    // re-mounted whenever the provider changes so the list matches it.
+    const mountWhisperModel = () => {
+      const host = container.querySelector<HTMLElement>("#whisper-model-host");
+      if (!host) return;
+      mountModelField(host, {
+        mode: "curated",
+        getProvider: () => this.config.whisper.provider ?? "",
+        getApiUrl: () => this.config.whisper.api_url ?? "",
+        getApiKey: () => this.config.whisper.api_key ?? "",
+        getModel: () => this.config.whisper.model ?? "",
+        setModel: (m) => { this.config.whisper.model = m; },
+        curated: () => curatedSttModels(this.config.whisper.provider ?? ""),
+      });
+    };
+
     // Show local vs cloud settings based on the selected provider.
     const applyProviderVisibility = (provider: string) => {
       const isLocal = provider === "local";
@@ -330,16 +337,8 @@ export class SectionWhisper {
         : "";
       if (isLocal) return;
 
-      // provider metadata is from a fixed set, not user input — safe in innerHTML.
-      const meta: Record<string, { name: string; host: string; model: string }> = {
-        openai: { name: "OpenAI", host: "api.openai.com", model: "whisper-1" },
-        groq: { name: "Groq", host: "api.groq.com", model: "whisper-large-v3" },
-        deepgram: { name: "Deepgram", host: "api.deepgram.com", model: "nova-2" },
-        assemblyai: { name: "AssemblyAI", host: "api.assemblyai.com", model: "best" },
-        elevenlabs: { name: "ElevenLabs", host: "api.elevenlabs.io", model: "scribe_v1" },
-        custom: { name: "your custom endpoint", host: "the URL you set below", model: "(optional)" },
-      };
-      const { name, host, model: defaultModel } = meta[provider] ?? meta.openai;
+      // provider metadata is from the shared STT catalog, not user input.
+      const { name, host, model: defaultModel } = sttMeta(provider);
       container.querySelector<HTMLElement>("#cloud-warning")!.innerHTML =
         `⚠️ <b>Cloud transcription.</b> Selecting ${name} uploads your recorded audio to ` +
         `${host} for processing — your audio leaves your machine. Switch back to ` +
@@ -349,6 +348,7 @@ export class SectionWhisper {
       const modelHelp = container.querySelector<HTMLElement>("#cloud-model-help");
       if (modelHelp)
         modelHelp.textContent = `Leave blank to use the provider default (${defaultModel}).`;
+      mountWhisperModel();
     };
 
     const providerSelect = container.querySelector<HTMLSelectElement>(
@@ -362,25 +362,19 @@ export class SectionWhisper {
     // Transcription provider presets — map onto the existing `custom`
     // (OpenAI-compatible) provider and prefill the base URL + default model.
     // Frontend-only: the backend appends /v1/audio/transcriptions.
-    const STT_PRESETS: Record<string, { apiUrl: string; model: string }> = {
-      fireworks: { apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
-    };
     const sttPresetSelect = container.querySelector<HTMLSelectElement>("#stt-preset-select");
     sttPresetSelect?.addEventListener("change", () => {
-      const preset = STT_PRESETS[sttPresetSelect.value];
+      const preset = findSttCustomPreset(sttPresetSelect.value);
       if (!preset || !providerSelect) return;
       providerSelect.value = "custom";
       providerSelect.dispatchEvent(new Event("change", { bubbles: true }));
       const urlInput = container.querySelector<HTMLInputElement>(`[data-key="whisper.api_url"]`);
-      const modelInput = container.querySelector<HTMLInputElement>(`[data-key="whisper.model"]`);
       if (urlInput) {
         urlInput.value = preset.apiUrl;
         urlInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      if (modelInput) {
-        modelInput.value = preset.model;
-        modelInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+      this.config.whisper.model = preset.model;
+      mountWhisperModel(); // reflect the preset's default model
       sttPresetSelect.value = "";
     });
 

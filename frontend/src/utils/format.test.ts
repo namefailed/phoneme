@@ -28,7 +28,12 @@ describe("formatDuration", () => {
     expect(formatDuration(75_000)).toBe("1m15s");
     expect(formatDuration(65_000)).toBe("1m05s");
     expect(formatDuration(120_000)).toBe("2m00s");
-    expect(formatDuration(3_665_000)).toBe("61m05s");
+  });
+
+  it("formats hour-plus durations as Hh MMm", () => {
+    expect(formatDuration(3_600_000)).toBe("1h00m"); // exactly 1h
+    expect(formatDuration(3_665_000)).toBe("1h01m"); // 1h 1m 5s → seconds dropped at hour scale
+    expect(formatDuration(9_000_000)).toBe("2h30m");
   });
 });
 

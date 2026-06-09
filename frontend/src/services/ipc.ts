@@ -30,6 +30,10 @@ export type Recording = {
   cleanup_model?: string | null;
   /** Whether speaker diarization was applied */
   diarized?: boolean;
+  /** LLM-generated summary of the transcript, if one has been produced. */
+  summary?: string | null;
+  /** The LLM model used to produce `summary`, if any. */
+  summary_model?: string | null;
   /** Tags associated with this recording */
   tags?: Array<{ id: number; name: string; color?: string | null }>;
 };
@@ -171,6 +175,21 @@ export async function rerunCleanup(
 }
 
 /**
+ * Generate (or regenerate) an LLM summary of a recording's current transcript
+ * on demand, and store it. Reuses the configured `[llm_post_process]` provider
+ * connection; `model`/`prompt` override the configured summary model/prompt for
+ * this run only (never persisted). The summary text arrives via the
+ * `SummaryUpdated` daemon event — re-fetch the recording when it fires.
+ */
+export async function rerunSummary(
+  id: string,
+  model: string | null = null,
+  prompt: string | null = null,
+): Promise<void> {
+  await tauriInvoke("rerun_summary", { id, model, prompt });
+}
+
+/**
  * Manually update the text transcript of a specific recording.
  */
 export async function updateTranscript(id: string, text: string): Promise<void> {
@@ -180,6 +199,15 @@ export async function updateTranscript(id: string, text: string): Promise<void> 
 /** The preserved original (machine) transcript, or null if none was saved. */
 export async function getOriginalTranscript(id: string): Promise<string | null> {
   return await tauriInvoke<string | null>("get_original_transcript", { id });
+}
+
+/**
+ * The preserved "unedited" transcript — the pipeline output (transcribed +
+ * cleaned) before the user made any hand edits. `null` if none was saved (e.g.
+ * recordings transcribed before this was tracked).
+ */
+export async function getCleanTranscript(id: string): Promise<string | null> {
+  return await tauriInvoke<string | null>("get_clean_transcript", { id });
 }
 
 /**

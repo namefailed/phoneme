@@ -1,254 +1,438 @@
+/* ── First-run wizard ───────────────────────────────────────────────────────
+   A guided, multi-step setup. The shell is a vertical column: a header with the
+   brand + a labeled progress stepper, a scrolling body (content centered for
+   readability), and a sticky footer with Back / Skip / Continue. */
+
 .wizard-shell {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-deep);
+  background:
+    radial-gradient(1200px 400px at 50% -10%, color-mix(in srgb, var(--accent) 9%, transparent), transparent),
+    var(--bg-deep);
 }
+
+/* ── Header + progress ─────────────────────────────────────────────────────── */
 .wizard-header {
-  background: var(--bg-surface);
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border-subtle);
   display: flex;
-  gap: 16px;
+  flex-direction: column;
+  gap: 12px;
+}
+.wizard-header-top {
+  display: flex;
   align-items: center;
+  gap: 16px;
 }
 .wizard-brand {
   color: var(--fg-default);
   font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.2px;
 }
+.wizard-steplabel {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.wizard-steplabel b {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+.wizard-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+.wizard-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 70%, #fff 0%), var(--accent));
+  transition: width 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Tiny dot rail under the bar for at-a-glance position. */
 .wizard-dots {
   display: flex;
   gap: 6px;
-  margin-left: auto;
 }
 .wizard-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--border);
+  transition: background 0.2s ease, transform 0.2s ease;
 }
 .wizard-dot.active {
   background: var(--accent);
+  transform: scale(1.25);
 }
 .wizard-dot.done {
-  background: var(--ok);
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
+
+/* ── Body ──────────────────────────────────────────────────────────────────── */
 .wizard-body {
   flex: 1;
-  padding: 36px 48px;
+  padding: 40px 32px;
   overflow-y: auto;
-}
-.wizard-footer {
-  padding: 16px 24px;
-  border-top: 1px solid var(--border);
+  /* Center the column for readability on wide windows. */
   display: flex;
-  gap: 12px;
-  align-items: center;
+  flex-direction: column;
 }
-.wizard-footer .spacer {
-  flex: 1;
+.wizard-body > * {
+  width: 100%;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+/* Each step fades/slides in so transitions feel intentional, not abrupt. */
+.wizard-body {
+  animation: wizardStepIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes wizardStepIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
 }
 .wizard-title {
-  font-size: 24px;
+  font-size: 26px;
+  font-weight: 700;
   color: var(--fg-default);
   margin: 0 0 8px;
+  letter-spacing: -0.3px;
 }
 .wizard-subtitle {
   color: var(--fg-muted);
   margin: 0 0 24px;
   font-size: 14px;
+  line-height: 1.55;
 }
 .wizard-bullets {
   color: var(--fg-default);
+  line-height: 1.6;
+  padding-left: 20px;
 }
 .wizard-bullets li {
   margin-bottom: 6px;
 }
+
+/* ── Footer + buttons ──────────────────────────────────────────────────────── */
+.wizard-footer {
+  padding: 16px 28px;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-surface) 50%, transparent);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.wizard-footer .spacer {
+  flex: 1;
+}
 .wizard-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
-  padding: 8px 18px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 9px 18px;
   font-size: 13px;
   color: var(--fg-default);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+.wizard-btn:hover {
+  background: var(--border-subtle);
+  border-color: var(--fg-faded);
+}
+.wizard-btn:active {
+  transform: translateY(1px);
 }
 .wizard-btn.primary {
   background: var(--accent);
   color: var(--accent-fg);
   font-weight: 600;
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.wizard-btn.primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #fff);
+  border-color: var(--accent);
 }
 .wizard-btn.primary:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
+}
+.wizard-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-muted);
+}
+.wizard-btn.ghost:hover {
+  background: var(--bg-surface);
+  color: var(--fg-default);
 }
 .wizard-btn.small {
-  padding: 4px 10px;
+  padding: 5px 11px;
   font-size: 12px;
 }
+
+/* ── Generic fields ────────────────────────────────────────────────────────── */
 .wizard-field {
   margin-bottom: 16px;
 }
-.wizard-field label {
+.wizard-field > label {
   display: block;
   color: var(--fg-muted);
   font-size: 12px;
   margin-bottom: 4px;
 }
-.wizard-field input {
+.wizard-field input[type="text"],
+.wizard-field input[type="number"],
+.wizard-field select {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
-  padding: 8px 12px;
+  border-radius: 6px;
+  padding: 9px 12px;
   color: var(--fg-default);
   width: 100%;
-  max-width: 500px;
+  max-width: 100%;
   font-size: 14px;
 }
-.mode-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
-  margin-top: 12px;
+.wizard-field input:focus,
+.wizard-field select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
-.mode-card {
+
+/* ── Feature cards (Features step) ─────────────────────────────────────────── */
+.wizard-feature {
   background: var(--bg-surface);
-  border: 2px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 20px;
-  cursor: pointer;
-  position: relative;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-top: 12px;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-.mode-card:hover {
-  border-color: var(--fg-faded);
+.wizard-feature.on {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface));
 }
-.mode-card.recommended {
-  border-color: var(--accent);
-  background: rgba(203, 166, 247, 0.06);
+.wizard-feature-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-.mode-card.selected {
-  background: rgba(203, 166, 247, 0.12);
-  border-color: var(--accent);
-}
-.mode-card.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.mode-badge {
-  position: absolute;
-  top: -10px;
-  right: 12px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: bold;
-}
-.mode-badge.soon {
-  background: var(--fg-faded);
-  color: var(--bg-deep);
-}
-.mode-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
-}
-.mode-name {
+.wizard-feature-title {
+  font-weight: 600;
   font-size: 15px;
   color: var(--fg-default);
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.mode-desc {
+.wizard-feature-rec {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.wizard-feature-body {
+  margin-top: 12px;
+  padding-left: 2px;
+}
+.wizard-feature-note {
+  font-size: 12.5px;
   color: var(--fg-muted);
-  font-size: 12px;
-  margin-top: 6px;
+  line-height: 1.5;
+  margin-top: 8px;
 }
-.help {
-  color: var(--fg-faded);
-  font-size: 11px;
+.wizard-feature-note.warn { color: #ffb86c; }
+
+/* ── Themed toggle switch ──────────────────────────────────────────────────── */
+.wizard-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  margin-left: auto;
+  cursor: pointer;
 }
+.wizard-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+.wizard-switch .track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.2s ease;
+}
+.wizard-switch .thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.wizard-switch input:checked + .track {
+  background: var(--accent);
+}
+.wizard-switch input:checked + .track + .thumb {
+  transform: translateX(18px);
+}
+.wizard-switch input:focus-visible + .track {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* ── Choice buttons (Live Preview / Summary) ───────────────────────────────── */
+.wizard-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wizard-choice .wizard-btn {
+  text-align: left;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+.wizard-choice .wizard-btn .opt-title { font-weight: 600; font-size: 14px; }
+.wizard-choice .wizard-btn .opt-sub { font-size: 12px; color: var(--fg-muted); }
+.wizard-choice .wizard-btn.primary .opt-sub { color: color-mix(in srgb, var(--accent-fg) 80%, transparent); }
+
+/* ── Review step ───────────────────────────────────────────────────────────── */
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 6px 0;
+}
+.review-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.review-row:last-child { border-bottom: none; }
+.review-key {
+  flex: 0 0 150px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+.review-val {
+  flex: 1;
+  color: var(--fg-default);
+  font-size: 13px;
+  font-weight: 500;
+}
+.review-val.off { color: var(--fg-faded); font-weight: 400; }
+
+/* ── Configure (download) progress ─────────────────────────────────────────── */
+.wizard-progress-block {
+  margin: 28px 0;
+}
+progress {
+  width: 100%;
+  height: 22px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* ── Hotkey capture ────────────────────────────────────────────────────────── */
 .combo-capture {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 4px;
-  padding: 8px 14px;
+  border-radius: 8px;
+  padding: 9px 14px;
   color: var(--fg-default);
   font-family: ui-monospace, "Cascadia Code", monospace;
-  min-width: 180px;
+  min-width: 200px;
   text-align: left;
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-.combo-capture:hover {
-  border-color: var(--fg-faded);
-}
+.combo-capture:hover { border-color: var(--fg-faded); }
 .combo-capture.capturing {
   border-color: var(--accent);
-  background: rgba(203, 166, 247, 0.1);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
 }
+
+/* ── Done step record button ───────────────────────────────────────────────── */
 .wizard-record-big {
   width: 120px;
   height: 120px;
   border-radius: 50%;
+  border: none;
   background: var(--accent);
   color: var(--accent-fg);
-  font-size: 36px;
-  margin: 24px auto;
+  font-size: 38px;
+  margin: 28px auto;
   display: block;
   cursor: pointer;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent);
+  animation: wizardRecordPulse 2s ease-out infinite;
+  transition: transform 0.15s ease;
 }
-.wizard-record-big:hover {
-  transform: scale(1.05);
-  transition: transform 0.15s;
-}
-.test-result {
-  padding: 6px 10px;
-  border-radius: 4px;
-  margin-top: 8px;
-  font-size: 12px;
-  max-width: 500px;
-}
-.test-result.ok {
-  background: rgba(166, 227, 161, 0.15);
-  color: var(--ok);
-}
-.test-result.err {
-  background: rgba(243, 139, 168, 0.15);
-  color: var(--err);
+.wizard-record-big:hover { transform: scale(1.06); }
+@keyframes wizardRecordPulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  70%  { box-shadow: 0 0 0 22px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-.wizard-field input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 20px;
-  height: 20px;
-  max-width: 20px;
+/* ── Theme picker (welcome) ────────────────────────────────────────────────── */
+.wizard-theme-card {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+.wizard-theme-card label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  color: var(--fg-default);
+}
+.wizard-theme-card select {
+  width: 100%;
+  padding: 9px 12px;
   background: var(--bg-deep);
-  border: 2px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
+  color: var(--fg-default);
   cursor: pointer;
-  position: relative;
-  transition: all 0.2s ease;
-  padding: 0;
-  margin: 0;
-  display: inline-block;
-  vertical-align: middle;
 }
-.wizard-field input[type="checkbox"]:checked {
-  background: var(--accent);
-  border-color: var(--accent);
+
+.test-result {
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  max-width: 100%;
 }
-.wizard-field input[type="checkbox"]:checked::after {
-  content: "";
-  position: absolute;
-  left: 6px;
-  top: 2px;
-  width: 5px;
-  height: 10px;
-  border: solid var(--accent-fg);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-.wizard-field input[type="checkbox"]:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.15);
-}
+.test-result.ok { background: rgba(166, 227, 161, 0.15); color: var(--ok); }
+.test-result.err { background: rgba(243, 139, 168, 0.15); color: var(--err); }

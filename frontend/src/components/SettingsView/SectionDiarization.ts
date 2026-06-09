@@ -39,10 +39,11 @@ export class SectionDiarization {
         </div>
 
         <div id="diarize-local" style="display:none">
-           <div
-            style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; margin-bottom:14px; font-size:12px; line-height:1.45;"
-          >
-            ⚠️ <b>Local Diarization</b> requires an additional 500MB ONNX model and significantly more RAM.
+          <div class="settings-field">
+            <label></label>
+            <div style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.45;">
+              ⚠️ <b>Local Diarization</b> requires an additional 500MB ONNX model and significantly more RAM.
+            </div>
           </div>
           <div class="settings-field long-input">
             <label>Model Path</label>
@@ -57,10 +58,11 @@ export class SectionDiarization {
         </div>
 
         <div id="diarize-cloud" style="display:none">
-          <div
-            style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; margin-bottom:14px; font-size:12px; line-height:1.45;"
-          >
-            ⚠️ <b>Cloud Diarization.</b> Make sure to configure your chosen provider's API key in the Whisper section above.
+          <div class="settings-field">
+            <label></label>
+            <div style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.45;">
+              ⚠️ <b>Cloud Diarization.</b> Make sure to configure your chosen provider's API key in the Whisper section above.
+            </div>
           </div>
         </div>
       </div>

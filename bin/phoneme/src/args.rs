@@ -112,6 +112,11 @@ pub struct ListArgs {
     /// Search transcripts via FTS5.
     #[arg(long)]
     pub search: Option<String>,
+    /// Filter by recording type: `all` (default), `single` (voice notes — no
+    /// meeting) or `meeting` (multi-track meeting recordings). Mirrors the GUI
+    /// Library filter.
+    #[arg(long, value_name = "KIND", value_parser = ["all", "single", "meeting"])]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]

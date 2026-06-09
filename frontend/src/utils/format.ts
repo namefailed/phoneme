@@ -2,10 +2,15 @@
 
 /** Format a duration in milliseconds as a human-readable string. */
 export function formatDuration(ms: number): string {
+  // Under a minute: precise seconds (e.g. "46.2s").
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)
-    .toString()
-    .padStart(2, "0")}s`;
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  // An hour or more: "1h05m"; otherwise "5m03s".
+  if (h > 0) return `${h}h${m.toString().padStart(2, "0")}m`;
+  return `${m}m${s.toString().padStart(2, "0")}s`;
 }
 
 /**

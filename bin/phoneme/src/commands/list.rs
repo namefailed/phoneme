@@ -7,6 +7,10 @@ use phoneme_ipc::Request;
 use std::process::ExitCode;
 
 pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
+    // Capture the type-filter before `build_filter` consumes `args`. Applied
+    // client-side on `meeting_id` (single = none, meeting = present) to mirror
+    // the GUI Library filter; the daemon's list shape stays unchanged.
+    let kind = args.kind.clone();
     let filter = build_filter(args);
     let mut client = match Client::connect(cfg).await {
         Ok(c) => c,
@@ -16,13 +20,18 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
         Ok(v) => v,
         Err(code) => return code,
     };
-    let rows: Vec<Recording> = match serde_json::from_value(value) {
+    let mut rows: Vec<Recording> = match serde_json::from_value(value) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: parsing list response: {e}");
             return ExitCode::from(exit::GENERIC_FAIL);
         }
     };
+    match kind.as_deref() {
+        Some("single") => rows.retain(|r| r.meeting_id.is_none()),
+        Some("meeting") => rows.retain(|r| r.meeting_id.is_some()),
+        _ => {}
+    }
     if json {
         output::print_json_lines(&rows);
     } else {

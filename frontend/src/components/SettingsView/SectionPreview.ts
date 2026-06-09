@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";
 import { errText } from "../../utils/error";
+import { PREVIEW_STT_PROVIDERS, curatedSttModels } from "../../services/sttProviders";
+import { mountModelField } from "./modelField";
 
 /** Small, fast models suitable for the live preview (the final transcript keeps
  *  whatever the Transcription section is set to). */
@@ -11,13 +13,20 @@ const PREVIEW_MODELS = [
 ];
 const HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
-/** Cloud providers that work well for a fast preview (final stays separate). */
-const PREVIEW_API_PROVIDERS = [
-  { value: "groq", label: "Groq (fast, recommended)" },
-  { value: "openai", label: "OpenAI" },
-  { value: "deepgram", label: "Deepgram" },
-  { value: "custom", label: "Custom (OpenAI-compatible)" },
-];
+/** Friendly label for a downloaded whisper model filename. */
+function prettyModel(path: string): string {
+  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  const map: Record<string, string> = {
+    "ggml-tiny.en.bin": "Tiny (English)",
+    "ggml-base.en.bin": "Base (English)",
+    "ggml-small.en.bin": "Small (English)",
+    "ggml-medium.en.bin": "Medium (English)",
+    "ggml-large-v3.bin": "Large v3",
+    "ggml-large-v3-turbo.bin": "Large v3 Turbo",
+    "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
+  };
+  return map[name] ?? name;
+}
 
 type PreviewSource = "same" | "local" | "api";
 
@@ -36,6 +45,10 @@ export class SectionPreview {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private container: HTMLElement, private config: any) {
+    // Render synchronously so the section appears in order with the other
+    // (synchronous) sections instead of popping in after the async model-list
+    // fetch. The downloaded-model list then fills in via init().
+    this.render();
     void this.init();
   }
 
@@ -157,11 +170,25 @@ export class SectionPreview {
 
     if (src === "local") {
       const current = this.config.preview_whisper?.model_path ?? "";
+      const currentNorm = current.replace(/\\/g, "/");
+      // Auto-detected dropdown of ALL downloaded models (full choice, not just
+      // the recommended presets). Any whisper model you've downloaded — via the
+      // main Transcription section or a preset below — is selectable here.
+      const options = this.downloaded.length
+        ? this.downloaded
+            .map((p) => {
+              const sel = currentNorm && currentNorm.endsWith(p.replace(/\\/g, "/").split("/").pop() ?? "") ? "selected" : "";
+              return `<option value="${p.replace(/"/g, "&quot;")}" ${sel}>${prettyModel(p)}</option>`;
+            })
+            .join("")
+        : `<option value="">No models downloaded yet</option>`;
+
+      // Recommended small/fast preview models — download in one click if absent.
       const rows = PREVIEW_MODELS.map((m) => {
         const path = this.downloadedPath(m.filename);
-        const selected = current && current.replace(/\\/g, "/").endsWith(m.filename);
+        const selected = current && currentNorm.endsWith(m.filename);
         const action = path
-          ? `<button class="inline-button" data-pick="${path}">${selected ? "Selected" : "Use"}</button>`
+          ? `<button class="inline-button" data-pick="${path.replace(/"/g, "&quot;")}">${selected ? "Selected" : "Use"}</button>`
           : `<button class="inline-button" data-dl="${m.filename}">Download</button>`;
         return `<div class="settings-field" style="border:0; padding:6px 0;">
             <label style="font-weight:normal;">${m.name} <span style="color:var(--fg-faded);">${m.size}</span><br>
@@ -169,11 +196,26 @@ export class SectionPreview {
             <div>${action}</div>
           </div>`;
       }).join("");
+
       host.innerHTML = `
         <p style="font-size:12px; color:var(--fg-muted); padding:4px 0;">
           Runs on a second whisper-server (thread-limited so it can't lag your machine).</p>
+        <div class="settings-field">
+          <label>Preview model</label>
+          <div><select id="prev-local-model" style="width:100%;">${options}</select></div>
+        </div>
+        <p style="font-size:11px; color:var(--fg-muted); margin:10px 0 2px;">
+          Recommended small models for a snappy overlay — download one if you don't have it:</p>
         ${rows}
         ${current ? "" : `<p style="font-size:12px; color:var(--err);">Pick or download a model above.</p>`}`;
+
+      host.querySelector<HTMLSelectElement>("#prev-local-model")?.addEventListener("change", (e) => {
+        const path = (e.target as HTMLSelectElement).value;
+        if (path) {
+          this.setLocal(path);
+          this.render();
+        }
+      });
 
       host.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach((b) =>
         b.addEventListener("click", () => {
@@ -211,7 +253,7 @@ export class SectionPreview {
       <div class="settings-field">
         <label>API provider</label>
         <div><select id="prev-api-provider">
-          ${PREVIEW_API_PROVIDERS.map(
+          ${PREVIEW_STT_PROVIDERS.map(
             (p) => `<option value="${p.value}" ${pv.provider === p.value ? "selected" : ""}>${p.label}</option>`,
           ).join("")}
         </select></div>
@@ -222,7 +264,7 @@ export class SectionPreview {
       </div>
       <div class="settings-field">
         <label>Model <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
-        <div><input type="text" id="prev-api-model" value="${pv.model ?? ""}" placeholder="provider default" style="width:100%;" /></div>
+        <div id="prev-api-model-host"></div>
       </div>
       <div class="settings-field">
         <label>API URL <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
@@ -231,13 +273,23 @@ export class SectionPreview {
 
     host.querySelector<HTMLSelectElement>("#prev-api-provider")?.addEventListener("change", (e) => {
       this.setApi((e.target as HTMLSelectElement).value);
+      this.render();
     });
     host.querySelector<HTMLInputElement>("#prev-api-key")?.addEventListener("input", (e) => {
       if (this.config.preview_whisper) this.config.preview_whisper.api_key = (e.target as HTMLInputElement).value;
     });
-    host.querySelector<HTMLInputElement>("#prev-api-model")?.addEventListener("input", (e) => {
-      if (this.config.preview_whisper) this.config.preview_whisper.model = (e.target as HTMLInputElement).value;
-    });
+    const modelHost = host.querySelector<HTMLElement>("#prev-api-model-host");
+    if (modelHost) {
+      mountModelField(modelHost, {
+        mode: "curated",
+        getProvider: () => this.config.preview_whisper?.provider ?? "",
+        getApiUrl: () => this.config.preview_whisper?.api_url ?? "",
+        getApiKey: () => this.config.preview_whisper?.api_key ?? "",
+        getModel: () => this.config.preview_whisper?.model ?? "",
+        setModel: (m) => { if (this.config.preview_whisper) this.config.preview_whisper.model = m; },
+        curated: () => curatedSttModels(this.config.preview_whisper?.provider ?? ""),
+      });
+    }
     host.querySelector<HTMLInputElement>("#prev-api-url")?.addEventListener("input", (e) => {
       if (this.config.preview_whisper) this.config.preview_whisper.api_url = (e.target as HTMLInputElement).value;
     });

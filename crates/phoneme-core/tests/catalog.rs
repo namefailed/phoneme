@@ -27,6 +27,8 @@ fn sample_recording(id: RecordingId) -> Recording {
         track: None,
         cleanup_model: None,
         diarized: false,
+        summary: None,
+        summary_model: None,
         tags: vec![],
     }
 }
@@ -88,6 +90,27 @@ async fn update_transcript_persists_text() {
     let got = catalog.get(&rec.id).await.unwrap().unwrap();
     assert_eq!(got.transcript.as_deref(), Some("hello world"));
     assert_eq!(got.model.as_deref(), Some("gemma-4-E4B"));
+}
+
+#[tokio::test]
+async fn update_summary_persists_text_and_model() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    // Defaults to absent until generated.
+    let before = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(before.summary, None);
+    assert_eq!(before.summary_model, None);
+
+    catalog
+        .update_summary(&rec.id, "- key point\n- action item", Some("gemma3:4b"))
+        .await
+        .unwrap();
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(got.summary.as_deref(), Some("- key point\n- action item"));
+    assert_eq!(got.summary_model.as_deref(), Some("gemma3:4b"));
+    // A summary must not disturb the stored transcript.
+    assert_eq!(got.transcript, None);
 }
 
 #[tokio::test]
@@ -784,6 +807,46 @@ async fn user_edit_preserves_original_transcript() {
         original.as_deref(),
         Some("raw whisper output"),
         "original_transcript must not be touched by user edits"
+    );
+}
+
+/// The "unedited" (clean) transcript snapshots the pipeline output and must
+/// survive user edits, so "View unedited transcript" shows transcribed+cleaned
+/// text even after the user changes the live transcript.
+#[tokio::test]
+async fn user_edit_preserves_clean_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    // Pipeline: raw machine output → original_transcript, cleaned → transcript +
+    // clean_transcript.
+    catalog
+        .update_transcript(&rec.id, "We talked about the thing.", "um so like the thing", "m")
+        .await
+        .unwrap();
+
+    // User edits the live transcript.
+    catalog
+        .update_user_transcript(&rec.id, "We discussed the proposal.")
+        .await
+        .unwrap();
+
+    // Raw (pre-cleanup) version untouched.
+    assert_eq!(
+        catalog.get_original_transcript(&rec.id).await.unwrap().as_deref(),
+        Some("um so like the thing"),
+    );
+    // Unedited (cleaned, pre-edit) version untouched.
+    assert_eq!(
+        catalog.get_clean_transcript(&rec.id).await.unwrap().as_deref(),
+        Some("We talked about the thing."),
+        "clean_transcript must survive user edits",
+    );
+    // Live transcript reflects the user edit.
+    assert_eq!(
+        catalog.get(&rec.id).await.unwrap().unwrap().transcript.as_deref(),
+        Some("We discussed the proposal."),
     );
 }
 
