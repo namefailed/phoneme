@@ -159,7 +159,7 @@ export class RecordingDetail {
           <span id="detail-stats">${stats}</span>
           <span id="detail-models">${modelsLine(r)}</span>
           <span id="detail-hook-exit">Hook exit: ${r.hook_exit_code ?? "—"}</span>
-          <span>${escapeHtml(r.audio_path)}</span>
+          <span class="detail-path" title="${escapeHtml(r.audio_path)}">${escapeHtml(r.audio_path)}</span>
         </div>
       </div>
     `;

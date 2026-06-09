@@ -404,6 +404,15 @@ export class SectionPostProcessing {
           </span>
         </div>
 
+        <div class="settings-field">
+          <label>Summary model (optional)</label>
+          <div id="summary-model-host"></div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Leave on "Same as cleanup model" to reuse the post-processing model, or pick a different
+            one (e.g. a smaller/faster model just for summaries).
+          </span>
+        </div>
+
         <div class="settings-field summary-provider-field summary-needs-url">
           <label>Summary API URL</label>
           <div>${renderField(
@@ -412,15 +421,6 @@ export class SectionPostProcessing {
           )}</div>
           <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
             Optional — leave blank for the provider's default endpoint.
-          </span>
-        </div>
-
-        <div class="settings-field">
-          <label>Summary model (optional)</label>
-          <div id="summary-model-host"></div>
-          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
-            Leave on "Same as cleanup model" to reuse the post-processing model, or pick a different
-            one (e.g. a smaller/faster model just for summaries).
           </span>
         </div>
 
