@@ -92,7 +92,7 @@ same-user malware or a malicious IPC client. Ordered by priority.*
 - [ ] **Model-download checksums** — pin SHA-256 before extracting the whisper zip. *(S-H7)*
 
 **Hygiene**
-- [ ] **`cargo audit` + `pnpm audit` in CI** (non-blocking first, then gate core crates). *(also in tech-debt backlog)*
+- [x] **`cargo audit` + `pnpm audit` in CI** (non-blocking advisory job; gate core crates later). *(also in tech-debt backlog)*
 - [ ] Hook `HookTest` stderr may contain secrets — redact before returning.
 - [x] A short **threat-model doc** capturing these boundaries. → [docs/developer-guide/threat_model.md](docs/developer-guide/threat_model.md)
 
