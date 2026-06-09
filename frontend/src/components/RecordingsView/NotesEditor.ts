@@ -86,7 +86,7 @@ export class NotesEditor {
         background: "var(--bg-surface)",
         color: "var(--fg-default)",
         height: "auto",
-        minHeight: "90px",
+        minHeight: "120px",
         fontFamily: "inherit",
         fontSize: "13px",
         borderRadius: "8px",

@@ -139,7 +139,7 @@ export class RecordingDetail {
             <div id="original-box" style="display: none; margin-top: 6px;"></div>
           </div>
         </div>
-        <div class="notes-block" style="margin-top: 12px;">
+        <div class="notes-block" style="margin-top: 6px;">
           <div id="notes-editor"></div>
         </div>
         <div class="detail-footer">
