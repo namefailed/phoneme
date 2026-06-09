@@ -54,6 +54,10 @@ impl DaemonHarness {
         cfg.recording.audio_dir = temp.path().join("audio").to_string_lossy().into_owned();
         cfg.recording.silence_threshold_dbfs = -100.0;
         cfg.recording.silence_window_ms = 100;
+        // Disable idle pre-roll in tests: it opens a real microphone via cpal,
+        // which crashes (STATUS_ACCESS_VIOLATION) on a headless CI runner with no
+        // audio endpoint. Tests must never touch real capture hardware.
+        cfg.recording.pre_roll_ms = 0;
         cfg.hook.commands.clear();
         cfg.daemon.pipe_name = pipe_name.clone();
         customize(&mut cfg);
