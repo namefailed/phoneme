@@ -76,29 +76,29 @@ export class TranscriptEditorElement extends LitElement {
   private mountEditor(vimrc: string) {
     const theme = EditorView.theme({
       "&": {
-        // Match the Notes editor: a rounded bordered field that fills its block
-        // and turns accent on focus. height:100% lets it grow to fill the
-        // flex:1 transcript-block instead of sitting at content height.
-        background: "var(--bg-surface)",
+        // Chrome-less: the surrounding `.transcript-block` is the bordered box,
+        // so the editor itself is transparent with no border/radius/padding.
+        // This avoids the "box-in-a-box" double border + doubled left padding
+        // that pushed the text far from the edge. height:100% fills the block.
+        background: "transparent",
         color: "var(--fg-default)",
         height: "100%",
         minHeight: "150px",
         fontFamily: "inherit",
         fontSize: "14px",
-        borderRadius: "8px",
-        border: "1px solid var(--border-subtle)",
-        padding: "8px 6px",
+        border: "none",
+        padding: "0",
       },
       ".cm-content": {
         caretColor: "var(--accent)",
-        padding: "8px 12px",
+        // Minimal padding — horizontal alignment comes from the block's padding.
+        padding: "2px 0",
       },
       ".cm-cursor": {
         borderLeftColor: "var(--accent)"
       },
       "&.cm-focused": {
         outline: "none",
-        borderColor: "var(--accent)",
       },
       ".cm-activeLine": {
         backgroundColor: "rgba(255, 255, 255, 0.02)"

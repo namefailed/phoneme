@@ -28,34 +28,36 @@ export class SectionStorage {
           </div>
         </div>
 
-        <div class="settings-field stacked">
-          <label>Auto-Delete Policy</label>
-          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <label style="min-width: 130px; font-weight: normal; color: var(--fg-muted);">Max age (days)</label>
-              <input type="number" min="1" id="ret-max-age" placeholder="disabled"
-                value="${this.config.retention?.max_age_days ?? ""}" />
-              <span style="font-size: 11px; color: var(--fg-faded);">Leave blank to disable</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <label style="min-width: 130px; font-weight: normal; color: var(--fg-muted);">Max recordings</label>
-              <input type="number" min="1" id="ret-max-count" placeholder="disabled"
-                value="${this.config.retention?.max_count ?? ""}" />
-              <span style="font-size: 11px; color: var(--fg-faded);">Keep only the most recent N</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <input type="checkbox" id="ret-delete-audio" ${this.config.retention?.delete_audio ? "checked" : ""} />
-              <label for="ret-delete-audio" style="font-weight: normal; color: var(--fg-muted); cursor: pointer;">Delete audio files (keep transcripts)</label>
-            </div>
+        <div class="settings-field">
+          <label>Max age (days)</label>
+          <div>
+            <input type="number" min="1" id="ret-max-age" placeholder="disabled"
+              style="max-width: 120px;" value="${this.config.retention?.max_age_days ?? ""}" />
           </div>
-          <p style="font-size: 11px; color: var(--fg-muted); margin-top: 8px;">
-            Automatically remove old recordings on startup and every hour. Only completed recordings are affected — in-progress ones are always preserved.
-          </p>
+          <span>Auto-delete recordings older than this. Leave blank to disable.</span>
         </div>
 
         <div class="settings-field">
-          <label>Export Recordings</label>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
+          <label>Max recordings</label>
+          <div>
+            <input type="number" min="1" id="ret-max-count" placeholder="disabled"
+              style="max-width: 120px;" value="${this.config.retention?.max_count ?? ""}" />
+          </div>
+          <span>Keep only the most recent N recordings. Leave blank to disable.</span>
+        </div>
+
+        <div class="settings-field">
+          <label>Delete audio only</label>
+          <div>
+            <input type="checkbox" id="ret-delete-audio" ${this.config.retention?.delete_audio ? "checked" : ""} />
+          </div>
+          <span>When pruning, remove the audio file but keep the transcript. Auto-delete runs on
+            startup and hourly; only completed recordings are affected — in-progress ones are always preserved.</span>
+        </div>
+
+        <div class="settings-field">
+          <label>Export recordings</label>
+          <div>
             <select id="export-format" style="max-width: 110px;">
               <option value="json">JSON</option>
               <option value="csv">CSV</option>
@@ -64,9 +66,7 @@ export class SectionStorage {
             <button class="inline-button" id="btn-export-all">⬇ Export All…</button>
             <span id="export-status" style="font-size:11px; color: var(--fg-muted);"></span>
           </div>
-          <p style="font-size: 11px; color: var(--fg-muted); margin-top: 6px; white-space: nowrap;">
-            Exports all recordings and their transcripts to a single file.
-          </p>
+          <span>Exports all recordings and their transcripts to a single file.</span>
         </div>
       </div>
     `;

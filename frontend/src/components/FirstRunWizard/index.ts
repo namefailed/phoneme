@@ -7,8 +7,11 @@ import { showToast } from "../../utils/toast";
 import "./styles.css";
 
 
-export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "preview" | "hook" | "hotkey" | "done";
-const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "preview", "hook", "hotkey", "done"];
+export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "done";
+const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "preview", "summary", "hook", "hotkey", "done"];
+
+const DEFAULT_SUMMARY_PROMPT =
+  "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.";
 
 @customElement('ph-first-run-wizard')
 export class FirstRunWizardElement extends LitElement {
@@ -624,6 +627,50 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
+  private renderSummary() {
+    if (!this.config.summary) {
+      this.config.summary = { auto: false, provider: "", api_key: "", api_url: "", model: "", prompt: DEFAULT_SUMMARY_PROMPT };
+    }
+    if (!this.config.summary.prompt) this.config.summary.prompt = DEFAULT_SUMMARY_PROMPT;
+    const on = !!this.config.summary.auto;
+    // An LLM is available for summaries if cleanup was set up (Ollama) or a
+    // post-processing provider is already enabled.
+    const hasLlm = !!this.config._setup_ollama || !!this.config.llm_post_process?.enabled;
+    return html`
+      <div class="wizard-body">
+        <h2 class="wizard-title">Auto Summary</h2>
+        <p class="wizard-subtitle">
+          Optionally generate a short AI summary of every recording as the final step of the
+          pipeline. You can always summarize a single note on demand later with the
+          <b>View summary</b> button — turning this on just makes it automatic. Summaries use the
+          AI model you set up for cleanup and are fully configurable in
+          Settings → AI Post-Processing (including a different provider/model).
+        </p>
+        <div class="wizard-field" style="display:flex; flex-direction:column; gap:8px;">
+          <button class="wizard-btn ${on ? "" : "primary"}"
+            @click=${() => { this.config.summary.auto = false; this.requestUpdate(); }}>
+            Off — summarize on demand only
+          </button>
+          <button class="wizard-btn ${on ? "primary" : ""}"
+            @click=${() => { this.config.summary.auto = true; this.requestUpdate(); }}>
+            On — summarize every recording automatically
+          </button>
+        </div>
+        ${on && !hasLlm ? html`
+          <p class="wizard-subtitle" style="color:#ffb86c; margin-top: 1rem;">
+            ⚠️ You haven't set up a local LLM. Add a provider in Settings → AI Post-Processing for
+            summaries to actually run.
+          </p>` : ""}
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
+        <span class="spacer"></span>
+        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
+        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
+      </div>
+    `;
+  }
+
   private renderHook() {
     if (!this.config.hook) this.config.hook = {};
     if (!this.config.hook.commands) this.config.hook.commands = [];
@@ -806,6 +853,7 @@ export class FirstRunWizardElement extends LitElement {
         ${this.step === 'configure' ? this.renderConfigure() : ''}
         ${this.step === 'mic' ? this.renderMic() : ''}
         ${this.step === 'preview' ? this.renderPreview() : ''}
+        ${this.step === 'summary' ? this.renderSummary() : ''}
         ${this.step === 'hook' ? this.renderHook() : ''}
         ${this.step === 'hotkey' ? this.renderHotkey() : ''}
         ${this.step === 'done' ? this.renderDone() : ''}

@@ -83,26 +83,25 @@ export class NotesEditor {
 
     const theme = EditorView.theme({
       "&": {
-        background: "var(--bg-surface)",
+        // Chrome-less: the surrounding `.notes-block` is the bordered box.
+        background: "transparent",
         color: "var(--fg-default)",
         height: "auto",
         minHeight: "120px",
         fontFamily: "inherit",
         fontSize: "13px",
-        borderRadius: "8px",
-        border: "1px solid var(--border-subtle)",
-        padding: "8px 6px",
+        border: "none",
+        padding: "0",
       },
       ".cm-content": {
         caretColor: "var(--accent)",
-        padding: "6px 12px",
+        padding: "2px 0",
       },
       ".cm-cursor": {
         borderLeftColor: "var(--accent)",
       },
       "&.cm-focused": {
         outline: "none",
-        borderColor: "var(--accent)",
       },
       ".cm-activeLine": {
         backgroundColor: "rgba(255,255,255,0.02)",
