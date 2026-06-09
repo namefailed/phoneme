@@ -191,7 +191,13 @@ export class RecordingsView {
     const sidebarWidth = this.sidebarVisible ? `${this.sidebarWidth}px` : "0px";
     const resizerWidth = this.sidebarVisible ? "4px" : "0px";
     const resizer = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
-    if (resizer) resizer.style.display = this.sidebarVisible ? "" : "none";
+    // IMPORTANT: never `display:none` the resizer. The grid has five explicit
+    // column tracks (sidebar, resizer, list, splitter, detail); removing the
+    // resizer from flow shifts the list/splitter/detail one track to the left,
+    // dropping the list into the 0px track and the detail into the 3px track —
+    // i.e. the entire content area collapses to nothing when the sidebar is
+    // hidden. Keep it in the grid and just give it a 0px-wide track instead.
+    if (resizer) resizer.style.display = "";
 
     if (this.detailVisible) {
       shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} ${this.splitPercent}% 3px minmax(0, 1fr)`;
