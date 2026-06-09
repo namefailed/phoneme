@@ -423,15 +423,27 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 };
                 let cfg = state.config.load();
                 let timeout = std::time::Duration::from_secs(cfg.hook.timeout_secs);
-                let commands = if let Some(cmd) = command {
-                    vec![cmd]
-                } else {
-                    match cfg.expanded() {
-                        Ok(c) => c.hook.commands,
-                        Err(_) => cfg.hook.commands.clone(),
-                    }
+                let configured = match cfg.expanded() {
+                    Ok(c) => c.hook.commands,
+                    Err(_) => cfg.hook.commands.clone(),
                 };
                 drop(cfg);
+                let commands = if let Some(cmd) = command {
+                    // Security (S-C2): a caller may only re-fire a command that is
+                    // already in the configured hook allowlist — never an arbitrary
+                    // command handed in over IPC. The UI only ever sends a command
+                    // it picked from this same list, so legitimate flows are intact.
+                    if !hook_command_allowed(&cmd, &configured) {
+                        return Response::Err(IpcError {
+                            kind: IpcErrorKind::Internal,
+                            message: "refire command is not in the configured hook allowlist"
+                                .into(),
+                        });
+                    }
+                    vec![cmd]
+                } else {
+                    configured
+                };
                 // Run the hook OFF the IPC connection. A hook can take up to
                 // its full timeout (30s default); running it inline froze the
                 // connection — and with it the single-connection Tauri bridge,
@@ -530,6 +542,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        // Unlike RefireHook, HookTest intentionally runs a caller-supplied
+        // command: it is the Hook Manager's "test this command" affordance, used
+        // to validate a hook the user is editing but has not saved yet. That is a
+        // deliberate, user-initiated test — gated by the owner-only IPC pipe
+        // (S-C1) — so it is not an additional privilege-escalation channel and is
+        // not subject to the RefireHook allowlist (S-C2).
         Request::HookTest { custom_command } => {
             let command = custom_command.unwrap_or_else(|| {
                 state
@@ -717,6 +735,17 @@ const MAX_IMPORT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// Factored out so the bound is unit-testable without a multi-GiB fixture file.
 fn exceeds_import_size_cap(len: u64) -> bool {
     len > MAX_IMPORT_BYTES
+}
+
+/// Whether `requested` matches a configured hook command (compared trimmed).
+///
+/// The IPC `RefireHook` request lets a caller pass a command to run; without
+/// this check any process reaching the pipe could run an arbitrary command via
+/// the daemon. Restricting to the already-configured hooks turns it into "re-run
+/// one of my hooks" instead of an open exec channel. (audit S-C2)
+fn hook_command_allowed(requested: &str, configured: &[String]) -> bool {
+    let requested = requested.trim();
+    !requested.is_empty() && configured.iter().any(|c| c.trim() == requested)
 }
 
 /// Returns `true` if `audio_path` is a normal path located under `audio_dir`.
@@ -928,6 +957,35 @@ mod tests {
         assert!(exceeds_import_size_cap(MAX_IMPORT_BYTES + 1));
         // A clearly-oversized file (3 GiB) is rejected.
         assert!(exceeds_import_size_cap(3 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn hook_allowlist_accepts_only_configured_commands() {
+        let configured = vec![
+            "powershell -File C:\\hooks\\save.ps1".to_string(),
+            "  notify-send {transcript}  ".to_string(), // padded in config
+        ];
+        // Exact configured command is allowed.
+        assert!(hook_command_allowed(
+            "powershell -File C:\\hooks\\save.ps1",
+            &configured
+        ));
+        // Whitespace differences around the command don't matter (trimmed both sides).
+        assert!(hook_command_allowed(
+            "notify-send {transcript}",
+            &configured
+        ));
+        // A command not in the list is rejected — this is the exec channel we close.
+        assert!(!hook_command_allowed("calc.exe", &configured));
+        assert!(!hook_command_allowed(
+            "powershell -Command Remove-Item C:\\ -Recurse",
+            &configured
+        ));
+        // Empty / whitespace-only requests are never allowed.
+        assert!(!hook_command_allowed("", &configured));
+        assert!(!hook_command_allowed("   ", &configured));
+        // With no configured hooks, nothing is allowed.
+        assert!(!hook_command_allowed("anything", &[]));
     }
 
     #[test]
