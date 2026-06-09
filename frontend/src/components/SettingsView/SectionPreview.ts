@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";
 import { errText } from "../../utils/error";
-import { PREVIEW_STT_PROVIDERS } from "../../services/sttProviders";
+import { PREVIEW_STT_PROVIDERS, curatedSttModels } from "../../services/sttProviders";
+import { mountModelField } from "./modelField";
 
 /** Small, fast models suitable for the live preview (the final transcript keeps
  *  whatever the Transcription section is set to). */
@@ -263,7 +264,7 @@ export class SectionPreview {
       </div>
       <div class="settings-field">
         <label>Model <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
-        <div><input type="text" id="prev-api-model" value="${pv.model ?? ""}" placeholder="provider default" style="width:100%;" /></div>
+        <div id="prev-api-model-host"></div>
       </div>
       <div class="settings-field">
         <label>API URL <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
@@ -272,13 +273,23 @@ export class SectionPreview {
 
     host.querySelector<HTMLSelectElement>("#prev-api-provider")?.addEventListener("change", (e) => {
       this.setApi((e.target as HTMLSelectElement).value);
+      this.render();
     });
     host.querySelector<HTMLInputElement>("#prev-api-key")?.addEventListener("input", (e) => {
       if (this.config.preview_whisper) this.config.preview_whisper.api_key = (e.target as HTMLInputElement).value;
     });
-    host.querySelector<HTMLInputElement>("#prev-api-model")?.addEventListener("input", (e) => {
-      if (this.config.preview_whisper) this.config.preview_whisper.model = (e.target as HTMLInputElement).value;
-    });
+    const modelHost = host.querySelector<HTMLElement>("#prev-api-model-host");
+    if (modelHost) {
+      mountModelField(modelHost, {
+        mode: "curated",
+        getProvider: () => this.config.preview_whisper?.provider ?? "",
+        getApiUrl: () => this.config.preview_whisper?.api_url ?? "",
+        getApiKey: () => this.config.preview_whisper?.api_key ?? "",
+        getModel: () => this.config.preview_whisper?.model ?? "",
+        setModel: (m) => { if (this.config.preview_whisper) this.config.preview_whisper.model = m; },
+        curated: () => curatedSttModels(this.config.preview_whisper?.provider ?? ""),
+      });
+    }
     host.querySelector<HTMLInputElement>("#prev-api-url")?.addEventListener("input", (e) => {
       if (this.config.preview_whisper) this.config.preview_whisper.api_url = (e.target as HTMLInputElement).value;
     });

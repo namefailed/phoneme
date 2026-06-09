@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
-import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, sttMeta } from "../../services/sttProviders";
+import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, sttMeta, curatedSttModels } from "../../services/sttProviders";
+import { mountModelField } from "./modelField";
 
 const HELP =
   "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
@@ -204,10 +205,7 @@ export class SectionWhisper {
           </div>
           <div class="settings-field long-input">
             <label>Model</label>
-            <div>${renderField(
-              { key: "whisper.model", label: "", kind: "text" },
-              this.config.whisper.model ?? "",
-            )}</div>
+            <div id="whisper-model-host"></div>
             <span style="${HELP}" id="cloud-model-help">
               Leave blank to use the provider default.
             </span>
@@ -312,6 +310,22 @@ export class SectionWhisper {
     `;
     bindFieldEvents(container, this.config);
 
+    // Curated STT model dropdown (+ "Other…" free-text) for cloud providers,
+    // re-mounted whenever the provider changes so the list matches it.
+    const mountWhisperModel = () => {
+      const host = container.querySelector<HTMLElement>("#whisper-model-host");
+      if (!host) return;
+      mountModelField(host, {
+        mode: "curated",
+        getProvider: () => this.config.whisper.provider ?? "",
+        getApiUrl: () => this.config.whisper.api_url ?? "",
+        getApiKey: () => this.config.whisper.api_key ?? "",
+        getModel: () => this.config.whisper.model ?? "",
+        setModel: (m) => { this.config.whisper.model = m; },
+        curated: () => curatedSttModels(this.config.whisper.provider ?? ""),
+      });
+    };
+
     // Show local vs cloud settings based on the selected provider.
     const applyProviderVisibility = (provider: string) => {
       const isLocal = provider === "local";
@@ -334,6 +348,7 @@ export class SectionWhisper {
       const modelHelp = container.querySelector<HTMLElement>("#cloud-model-help");
       if (modelHelp)
         modelHelp.textContent = `Leave blank to use the provider default (${defaultModel}).`;
+      mountWhisperModel();
     };
 
     const providerSelect = container.querySelector<HTMLSelectElement>(
@@ -354,15 +369,12 @@ export class SectionWhisper {
       providerSelect.value = "custom";
       providerSelect.dispatchEvent(new Event("change", { bubbles: true }));
       const urlInput = container.querySelector<HTMLInputElement>(`[data-key="whisper.api_url"]`);
-      const modelInput = container.querySelector<HTMLInputElement>(`[data-key="whisper.model"]`);
       if (urlInput) {
         urlInput.value = preset.apiUrl;
         urlInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      if (modelInput) {
-        modelInput.value = preset.model;
-        modelInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+      this.config.whisper.model = preset.model;
+      mountWhisperModel(); // reflect the preset's default model
       sttPresetSelect.value = "";
     });
 
