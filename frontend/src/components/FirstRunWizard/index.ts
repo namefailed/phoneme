@@ -7,8 +7,8 @@ import { showToast } from "../../utils/toast";
 import "./styles.css";
 
 
-export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "hook" | "hotkey" | "done";
-const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "hook", "hotkey", "done"];
+export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "preview" | "hook" | "hotkey" | "done";
+const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "preview", "hook", "hotkey", "done"];
 
 @customElement('ph-first-run-wizard')
 export class FirstRunWizardElement extends LitElement {
@@ -30,6 +30,9 @@ export class FirstRunWizardElement extends LitElement {
   @state() private progressValue: number | null = null;
   @state() private progressMax: number = 100;
   @state() private isDownloading = false;
+
+  // Live-preview step state
+  @state() private previewDownloading = false;
 
   // Hotkey mode state
   @state() private capturingHotkeyFor: "general" | "meeting" | "in_place" | null = null;
@@ -541,6 +544,86 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
+  /** Enable live preview on a dedicated local Tiny model (its own server), downloading it if needed. */
+  private async setPreviewLocal() {
+    if (!this.config.recording) this.config.recording = {};
+    this.previewDownloading = true;
+    try {
+      const path = await invoke<string>("wizard_download_model", {
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+        filename: "ggml-tiny.en.bin",
+      });
+      this.config.recording.streaming_preview = true;
+      const mainPort = this.config.whisper?.bundled_server_port ?? 5809;
+      this.config.preview_whisper = {
+        ...this.config.whisper,
+        provider: "local",
+        mode: "bundled_model",
+        model_path: path,
+        bundled_server_port: mainPort + 1,
+        api_key: "",
+      };
+    } catch (e) {
+      showToast(`Preview model download failed: ${errText(e)}`, "error");
+    } finally {
+      this.previewDownloading = false;
+      this.requestUpdate();
+    }
+  }
+
+  /** Enable live preview but reuse the main (final) model — no extra server. */
+  private setPreviewSame() {
+    if (!this.config.recording) this.config.recording = {};
+    this.config.recording.streaming_preview = true;
+    delete this.config.preview_whisper;
+    this.requestUpdate();
+  }
+
+  /** Disable live preview entirely. */
+  private setPreviewOff() {
+    if (!this.config.recording) this.config.recording = {};
+    this.config.recording.streaming_preview = false;
+    delete this.config.preview_whisper;
+    this.requestUpdate();
+  }
+
+  private renderPreview() {
+    const sp = this.config.recording?.streaming_preview;
+    const pv = this.config.preview_whisper;
+    const choice = !sp ? "off" : pv ? (pv.provider === "local" ? "local" : "api") : "same";
+    return html`
+      <div class="wizard-body">
+        <h2 class="wizard-title">Live Preview</h2>
+        <p class="wizard-subtitle">
+          Optionally watch words appear as you speak. Give it its own fast model so it
+          never slows down your final transcription. You can change this anytime in
+          Settings → Live Preview (including a cloud API like Groq).
+        </p>
+        <div class="wizard-field" style="display:flex; flex-direction:column; gap:8px;">
+          <button class="wizard-btn ${choice === "local" ? "primary" : ""}" ?disabled=${this.previewDownloading}
+            @click=${() => this.setPreviewLocal()}>
+            ${this.previewDownloading ? "Downloading Tiny…" : "Fast local model (Tiny · ~75 MB) — recommended"}
+          </button>
+          <button class="wizard-btn ${choice === "same" ? "primary" : ""}" @click=${() => this.setPreviewSame()}>
+            Use my main model (simplest; can lag on heavy models)
+          </button>
+          <button class="wizard-btn ${choice === "off" ? "primary" : ""}" @click=${() => this.setPreviewOff()}>
+            Off
+          </button>
+        </div>
+        ${choice === "local" && pv?.model_path
+          ? html`<p class="wizard-subtitle">✓ Tiny model ready — preview runs on its own thread-limited server.</p>`
+          : ""}
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
+        <span class="spacer"></span>
+        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
+        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
+      </div>
+    `;
+  }
+
   private renderHook() {
     if (!this.config.hook) this.config.hook = {};
     if (!this.config.hook.commands) this.config.hook.commands = [];
@@ -722,6 +805,7 @@ export class FirstRunWizardElement extends LitElement {
         ${this.step === 'mode' ? this.renderModePicker() : ''}
         ${this.step === 'configure' ? this.renderConfigure() : ''}
         ${this.step === 'mic' ? this.renderMic() : ''}
+        ${this.step === 'preview' ? this.renderPreview() : ''}
         ${this.step === 'hook' ? this.renderHook() : ''}
         ${this.step === 'hotkey' ? this.renderHotkey() : ''}
         ${this.step === 'done' ? this.renderDone() : ''}
