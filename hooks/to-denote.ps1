@@ -1,16 +1,26 @@
 # to-denote.ps1 — ADVANCED example. Creates a Denote-flavoured Org note (with a
-# proper `ID--slug__tags.org` filename) under ~/Documents/org/notes/. For
+# proper `ID--slug__tags.org` filename) under <PHONEME_ORG_DIR>/notes/. For
 # Emacs/Denote users; a template to adapt rather than a general default.
+#
+# Reads the recording as a JSON object on STDIN (see to-stdout.ps1 or
+# docs/developer-guide/plugins_and_hooks.md for the full payload shape).
+#
+# ── Configure ───────────────────────────────────────────────────────────────
+#   PHONEME_ORG_DIR   org root. Default: ~/Documents/org (notes go in <dir>/notes)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$payload = $input | Out-String | ConvertFrom-Json
+$raw = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace($raw)) { Write-Error 'No payload received on stdin.' }
+$payload = $raw | ConvertFrom-Json
 $id    = Get-Date -Date $payload.timestamp -Format "yyyyMMddTHHmmss"
 $title = (($payload.transcript -split '\s+' | Select-Object -First 6) -join ' ').Trim()
 if ([string]::IsNullOrWhiteSpace($title)) { $title = "voice-note" }
 $slug = ($title -replace '[^a-zA-Z0-9 ]', '' -replace '\s+', '-').ToLower()
-$dir  = Join-Path $env:USERPROFILE "Documents\org\notes"
+$orgRoot = $env:PHONEME_ORG_DIR
+if ([string]::IsNullOrWhiteSpace($orgRoot)) { $orgRoot = Join-Path $env:USERPROFILE 'Documents\org' }
+$dir  = Join-Path $orgRoot "notes"
 
 if (-not (Test-Path $dir)) {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null

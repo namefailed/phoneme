@@ -1,13 +1,23 @@
 # to-org-journal.ps1 — ADVANCED example. Appends each transcript to
-# ~/Documents/org/journal.org under today's "Log" section, matching one specific
-# Org-mode daily-journal layout. Included as a worked example of a richer
-# integration; adapt the headings/format to your own journal.
+# <PHONEME_ORG_DIR>/journal.org under today's "Log" section, matching one
+# specific Org-mode daily-journal layout. Included as a worked example of a
+# richer integration; adapt the headings/format to your own journal.
+#
+# Reads the recording as a JSON object on STDIN (see to-stdout.ps1 or
+# docs/developer-guide/plugins_and_hooks.md for the full payload shape).
+#
+# ── Configure ───────────────────────────────────────────────────────────────
+#   PHONEME_ORG_DIR   org root. Default: ~/Documents/org (journal is <dir>/journal.org)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$payload = $input | Out-String | ConvertFrom-Json
-$journal = Join-Path $env:USERPROFILE "Documents\org\journal.org"
+$raw = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace($raw)) { Write-Error 'No payload received on stdin.' }
+$payload = $raw | ConvertFrom-Json
+$orgRoot = $env:PHONEME_ORG_DIR
+if ([string]::IsNullOrWhiteSpace($orgRoot)) { $orgRoot = Join-Path $env:USERPROFILE 'Documents\org' }
+$journal = Join-Path $orgRoot "journal.org"
 
 # Ensure the file exists
 if (-not (Test-Path $journal)) {
