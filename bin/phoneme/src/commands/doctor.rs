@@ -2,6 +2,7 @@ use crate::args::DoctorArgs;
 use crate::client::Client;
 use crate::exit;
 use colored::Colorize;
+use phoneme_core::doctor::{self, CheckResult};
 use phoneme_core::Config;
 use phoneme_ipc::Request;
 use std::process::ExitCode;
@@ -37,117 +38,48 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let mut checks = Vec::new();
+    let mut checks: Vec<CheckResult> = Vec::new();
 
-    // Daemon reachability.
+    // Daemon reachability (CLI-specific — the GUI doesn't talk to itself over
+    // IPC). The remaining checks are shared with the GUI via `phoneme_core::doctor`.
     let mut client_result = Client::connect(cfg).await;
     let daemon_ok = client_result.is_ok();
-    checks.push(Check {
-        name: "daemon",
+    checks.push(CheckResult {
+        name: "daemon".into(),
         ok: daemon_ok,
         detail: match &client_result {
             Ok(_) => "running".into(),
             Err(_) => "not reachable — run: phoneme daemon start".into(),
         },
+        fix_action: None,
     });
 
     // Daemon status detail (pid) — only if daemon is reachable.
     if let Ok(ref mut c) = client_result {
         match c.send(Request::DaemonStatus).await {
-            Ok(value) => checks.push(Check {
-                name: "daemon_pid",
+            Ok(value) => checks.push(CheckResult {
+                name: "daemon_pid".into(),
                 ok: true,
                 detail: format!("pid {}", value["pid"]),
+                fix_action: None,
             }),
-            Err(_) => checks.push(Check {
-                name: "daemon_pid",
+            Err(_) => checks.push(CheckResult {
+                name: "daemon_pid".into(),
                 ok: false,
                 detail: "no status reply".into(),
+                fix_action: None,
             }),
         }
     }
 
-    // Filesystem checks. Expand %VAR%/~ so checks reflect real paths.
-    let expanded = cfg.expanded();
-    let audio_dir_raw = match &expanded {
-        Ok(c) => c.recording.audio_dir.clone(),
-        Err(_) => cfg.recording.audio_dir.clone(),
-    };
-    let audio_dir = std::path::Path::new(&audio_dir_raw);
-    checks.push(Check {
-        name: "audio_dir",
-        ok: audio_dir.exists() || std::fs::create_dir_all(audio_dir).is_ok(),
-        detail: audio_dir.display().to_string(),
-    });
+    // Shared local-filesystem + backend-reachability checks (config presence,
+    // audio dir, hook command, whisper model, whisper/ollama probes).
+    checks.extend(doctor::run_local_checks(cfg));
+    checks.extend(doctor::run_backend_checks(cfg).await);
 
-    // Hook executable (best-effort; empty list is treated as ok).
-    let hook_cmd = cfg.hook.commands.first().map(String::as_str).unwrap_or("");
-    let hook_first_word = hook_cmd.split_whitespace().next().unwrap_or("");
-    let (hook_ok, hook_detail) = if hook_first_word.is_empty() {
-        (true, "none configured".into())
-    } else {
-        (
-            which::which(hook_first_word).is_ok() || std::path::Path::new(hook_first_word).exists(),
-            hook_cmd.to_owned(),
-        )
-    };
-    checks.push(Check {
-        name: "hook_executable",
-        ok: hook_ok,
-        detail: hook_detail,
-    });
-
-    // Whisper server reachability.
-    let whisper_url = cfg.whisper.server_base_url();
-    let whisper_probe = format!("{whisper_url}/health");
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .unwrap_or_default();
-    let (whisper_ok, whisper_detail) = match http.get(&whisper_probe).send().await {
-        Ok(r) => (
-            r.status().is_success() || r.status().as_u16() == 404,
-            format!("{whisper_url} — HTTP {}", r.status()),
-        ),
-        Err(e) if e.is_timeout() => (false, format!("{whisper_url} — timed out")),
-        Err(_) => (false, format!("{whisper_url} — not reachable")),
-    };
-    checks.push(Check {
-        name: "whisper_server",
-        ok: whisper_ok,
-        detail: whisper_detail,
-    });
-
-    // Ollama (optional) — probe default port.
-    let ollama_required = cfg.llm_post_process.enabled && cfg.llm_post_process.provider == "ollama";
-    let (probe_ok, probe_detail) = match http.get("http://127.0.0.1:11434/api/tags").send().await {
-        Ok(r) => (
-            r.status().is_success(),
-            format!("http://127.0.0.1:11434 — HTTP {}", r.status()),
-        ),
-        Err(e) if e.is_timeout() => (false, "http://127.0.0.1:11434 — timed out".into()),
-        Err(_) => (false, "http://127.0.0.1:11434 — not running".into()),
-    };
-    let (ollama_ok, ollama_detail) = if ollama_required {
-        (probe_ok, probe_detail)
-    } else if probe_ok {
-        (true, format!("{probe_detail} (optional)"))
-    } else {
-        (
-            true,
-            format!("{probe_detail} — optional; not required for your config"),
-        )
-    };
-    checks.push(Check {
-        name: "ollama (optional)",
-        ok: ollama_ok,
-        detail: ollama_detail,
-    });
-
-    // Print results.
-    let any_failed = checks
-        .iter()
-        .any(|c| !c.ok && c.name != "ollama (optional)");
+    // A check whose name is marked "(optional)" never fails the run.
+    let is_optional = |name: &str| name.to_lowercase().contains("(optional)");
+    let any_failed = checks.iter().any(|c| !c.ok && !is_optional(&c.name));
 
     if json {
         let arr: Vec<_> = checks
@@ -174,10 +106,4 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
-}
-
-struct Check {
-    name: &'static str,
-    ok: bool,
-    detail: String,
 }
