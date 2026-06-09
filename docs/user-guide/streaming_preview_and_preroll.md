@@ -21,7 +21,7 @@ On **Record Start**, those buffered samples are **prepended** to the new WAV bef
 pre_roll_ms = 1500   # 0 = disabled (mic only open while recording)
 ```
 
-Or **Settings → Recording → Pre-roll**.
+Or **Settings → Capture → Pre-roll**.
 
 ### Notes
 
@@ -52,7 +52,7 @@ Enable `recording.streaming_preview = true`. While recording, the daemon periodi
 streaming_preview = true
 ```
 
-Or **Settings → Recording → Streaming preview**.
+Or **Settings → Capture → Streaming preview**.
 
 ## Using both together
 

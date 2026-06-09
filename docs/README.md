@@ -24,9 +24,10 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Settings Overview](user-guide/settings_overview.md) — Every settings screen explained (with screenshots)
 
 ### Capture & transcription
+- [Providers & Models](user-guide/providers_and_models.md) — Independent STT/LLM providers, keys, local vs cloud
 - [Meeting Mode (Dual-Track)](user-guide/meeting_mode.md) — Mic + system audio, merged timeline, wall-clock sync
 - [Transcribe-in-Place](user-guide/transcribe_in_place.md) — Type dictated text into the focused window
-- [Diarization & Whisper](user-guide/diarization_and_whisper.md) — Models, providers, speaker labels
+- [Whisper & Diarization](user-guide/diarization_and_whisper.md) — Local server, cloud providers, speaker labels
 - [Streaming Preview & Pre-Roll](user-guide/streaming_preview_and_preroll.md) — Live partial transcripts, anti-clip buffer
 
 ### Organize & export
@@ -38,7 +39,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Storage, Paths & Retention](user-guide/storage_paths_and_retention.md) — Where files live, auto-delete policy
 
 ### Polish
-- [Smart Cleanup (LLM)](user-guide/smart_cleanup.md) — Ollama, OpenAI, Groq, Anthropic post-processing
+- [Smart Cleanup & Summary (LLM)](user-guide/smart_cleanup.md) — LLM post-processing + auto AI summary; many providers
 - [FAQ](user-guide/faq.md) — Common questions in one place
 - [Troubleshooting](user-guide/troubleshooting.md) — Daemon, Whisper, hooks, catalog, factory reset
 

@@ -11,7 +11,7 @@ Everything runs **offline** on your machine. No cloud API.
 ## Enabling
 
 1. Download or place the ONNX model + tokenizer in a directory (the First Run Wizard can guide this, or set the path manually).
-2. Open **Settings → Advanced** (or edit `config.toml`):
+2. Open **Settings → System → Advanced** (or edit `config.toml`):
 
 ```toml
 [semantic_search]

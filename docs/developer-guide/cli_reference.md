@@ -1,6 +1,18 @@
 # 💻 Phoneme CLI Reference
 
-Every core action in Phoneme is fully accessible from the command line interface via `phoneme.exe` or `phoneme-daemon.exe`.
+Every core action in Phoneme is fully accessible from the command line interface via `phoneme.exe` (the client) and `phoneme-daemon.exe` (the engine).
+
+## 🌐 Global flags
+
+These apply to any subcommand:
+
+| Flag | Effect |
+|------|--------|
+| `--json` | JSON-lines output where supported |
+| `--no-color` | Disable colored output (or set `NO_COLOR=1`) |
+| `-v`, `--verbose` | Verbose tracing to stderr |
+
+The CLI auto-spawns the daemon if it isn't already running.
 
 ## ⚙️ Core Commands
 
@@ -67,12 +79,15 @@ phoneme list --since 2026-05-19
 # Filter by status (e.g., Recording, Transcribing, Done, Failed)
 phoneme list --status Done
 
-# Limit the number of results returned (with optional offset)
+# Limit the number of results returned (with optional offset for pagination)
 phoneme list --limit 10
 phoneme list --limit 10 --offset 20
 
 # Full-Text Search via FTS5
 phoneme list --search "rust migration"
+
+# Filter by recording type: all (default), single (voice notes), or meeting
+phoneme list --kind meeting
 ```
 
 ### 👁️ `phoneme show <ID>`
@@ -171,15 +186,21 @@ phoneme doctor --rebuild-catalog
 Manage configuration.
 
 ```bash
+# With no subcommand: print the active config as TOML
+phoneme config
+
 # Print the path to the active config file
 phoneme config path
 
-# Set a config value
+# Set a config value (parses bool/int/float, else string)
 phoneme config set whisper.mode external
 
-# Hot-reload the configuration file from disk. The daemon will immediately apply changes (like hotkeys or models) without needing to be restarted.
+# Hot-reload the configuration file from disk. The daemon immediately applies
+# changes (hotkeys, models, …) without restarting.
 phoneme config reload
 ```
+
+> The config is **validated automatically** when the daemon loads or reloads it; an invalid file is rejected with an error. There is no separate `config validate` subcommand.
 
 ### 📡 `phoneme watch`
 
@@ -204,14 +225,22 @@ phoneme daemon status
 phoneme daemon stop
 ```
 
-## 🧠 Daemon Management
+### 🏷️ `phoneme version`
 
-While the daemon is usually auto-spawned by the System Tray application or `phoneme daemon start`, you can run it directly:
+Print version and commit info.
 
 ```bash
+phoneme version
+```
+
+## 🧠 Daemon Management
+
+While the daemon is usually auto-spawned by the CLI, the System Tray application, or `phoneme daemon start`, you can run it directly:
+
+```powershell
 # Run the daemon in the foreground
 phoneme-daemon
 
-# Run the daemon with explicit trace logging for debugging
-RUST_LOG=debug phoneme-daemon
+# Run with explicit debug logging (PowerShell)
+$env:RUST_LOG = "debug"; phoneme-daemon
 ```

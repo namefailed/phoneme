@@ -34,6 +34,33 @@ move at least one of these personas closer to "done":
 
 ---
 
+## ✅ Recently shipped (post-v1.8 baseline)
+
+Landed since the last roadmap reorg — these close several promise-vs-reality gaps:
+
+- [x] **Independent provider system** — transcription, live preview, cleanup, and
+  summary each pick their **own** provider + model. Shared catalogs ship one-click
+  presets for STT (local whisper.cpp, OpenAI, Groq, Deepgram, AssemblyAI,
+  ElevenLabs, custom OpenAI-compatible) and LLM (Ollama, LM Studio, Jan, llama.cpp,
+  OpenAI, Anthropic, Groq, Gemini, Mistral, DeepSeek, OpenRouter, Together, xAI,
+  Cerebras, Fireworks, DeepInfra, Perplexity, Nebius, Hyperbolic). LLM model fields
+  fetch live `/models`; STT fields use curated lists + an "Other" fallback.
+- [x] **Auto AI Summary** — per-recording LLM summary, on demand (**View summary**)
+  or automatically as the final pipeline step (`summary.auto`), with an independent
+  `[summary]` provider/model/prompt and a `RerunSummary` IPC. Stored in
+  `recordings.summary` / `summary_model`.
+- [x] **Three transcript layers** — raw machine output (`original_transcript`),
+  cleaned-but-unedited pipeline output (`clean_transcript`), and the current edited
+  transcript (`transcript`), each viewable + restorable in the detail view.
+- [x] **Reworked First Run Wizard** — multi-step (Welcome → Mode → Setup → Connect
+  AI → Mic → Live Preview → Auto Summary → Destination → Hotkeys → Review → Done),
+  with a unified "Connect AI" key-entry step and local-dependency installs.
+- [x] **Settings overhaul** — search, six grouped tabs, Live Preview config, the
+  Post-Processing (cleanup + summary) section, and a per-recording **Re-run** menu
+  with one-time overrides.
+
+---
+
 ## 🔧 In flight — v1.8.x (correctness & performance)
 
 Landing now as focused PRs (each tested, `clippy -D warnings` clean):
@@ -318,7 +345,7 @@ alongside the feature releases above.*
 
 **Docs accuracy** *(audit found drift — fix the user-facing claims)*
 - [ ] Say **speakrs**, not "Pyannote", everywhere (docs, `SectionDiarization.ts`). *(A-C5)*
-- [ ] Reconcile claims that don't match code: `hook.log` (no writer), `phoneme config validate` (not a command — implement it, docs already claim it), inbox states (`processing/` also used), `HookPayload.original_transcript` (absent), "merged conversation = chronological" (currently stacked panes), semantic settings location (wizard-only), empty `docs/screenshots/`, Doctor hook-template path.
+- [ ] Reconcile claims that don't match code: `hook.log` (no writer), inbox states (`processing/` also used), `HookPayload.original_transcript` (absent), "merged conversation = chronological" (currently stacked panes), empty `docs/screenshots/`, Doctor hook-template path. *(Docs no longer claim a `phoneme config validate` command — validation is automatic on load/reload. Semantic-search settings are now documented as Settings → System → Advanced.)*
 
 ---
 
