@@ -39,6 +39,34 @@ function saveExpandedMeetings(set: Set<string>): void {
   }
 }
 
+/** Per-meeting display icon (a cosmetic per-device pref, like the meeting name
+ *  is in the catalog). Keyed by meeting id. */
+const LS_MEETING_ICONS = "phoneme.meetingIcons";
+const DEFAULT_MEETING_ICON = "👥";
+/** Emoji choices offered when renaming a meeting. */
+const MEETING_ICON_CHOICES = ["👥", "🎙️", "📞", "💼", "🧑‍🏫", "🎧", "🗣️", "📅", "🤝", "🎬", "📋", "💡"];
+function loadMeetingIcons(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LS_MEETING_ICONS);
+    const obj = raw ? JSON.parse(raw) : {};
+    return obj && typeof obj === "object" ? obj : {};
+  } catch {
+    return {};
+  }
+}
+function meetingIcon(meetingId: string): string {
+  return loadMeetingIcons()[meetingId] || DEFAULT_MEETING_ICON;
+}
+function saveMeetingIcon(meetingId: string, icon: string): void {
+  try {
+    const all = loadMeetingIcons();
+    all[meetingId] = icon;
+    localStorage.setItem(LS_MEETING_ICONS, JSON.stringify(all));
+  } catch {
+    /* private mode — non-fatal */
+  }
+}
+
 export type RecordingsListState = {
   recordings: Recording[];
   selectedId: string | null;
@@ -63,6 +91,7 @@ export class RecordingsListElement extends LitElement {
   @state() private loadingMore = false;
   @state() private editingMeetingId: string | null = null;
   @state() private editingName = "";
+  @state() private editingIcon = DEFAULT_MEETING_ICON;
   
   private offset = 0;
   private readonly pageSize = 100;
@@ -218,6 +247,7 @@ export class RecordingsListElement extends LitElement {
     e.stopPropagation();
     this.editingMeetingId = meetingId;
     this.editingName = currentName;
+    this.editingIcon = meetingIcon(meetingId);
     this.updateComplete.then(() => {
       const input = this.querySelector(`.rec-group-input[data-session="${meetingId}"]`) as HTMLInputElement | null;
       if (input) {
@@ -248,9 +278,12 @@ export class RecordingsListElement extends LitElement {
     this.editingMeetingId = null;
     const trimmed = value.trim();
     const finalValue = trimmed === "" ? null : trimmed;
+    // The icon is a per-device display pref (localStorage); the name is stored
+    // in the catalog via the daemon.
+    saveMeetingIcon(meetingId, this.editingIcon);
     try {
       await updateMeetingName(meetingId, finalValue);
-      showToast("Meeting renamed", "success");
+      showToast("Meeting updated", "success");
       await this.refresh();
     } catch (err) {
       console.error("Failed to rename meeting:", err);
@@ -642,6 +675,14 @@ export class RecordingsListElement extends LitElement {
           </span>
           <span class="rec-group-meta" style="margin-right: 8px;">${day} · ${time}</span>
           ${isEditing ? html`
+            <span class="rec-group-iconpick" @click=${(e: Event) => e.stopPropagation()}>
+              ${MEETING_ICON_CHOICES.map((ic) => html`
+                <button
+                  class="rec-icon-choice ${ic === this.editingIcon ? "sel" : ""}"
+                  title="Use ${ic}"
+                  @click=${(e: Event) => { e.stopPropagation(); this.editingIcon = ic; this.requestUpdate(); }}
+                >${ic}</button>`)}
+            </span>
             <input
               type="text"
               class="rec-group-input"
@@ -654,7 +695,7 @@ export class RecordingsListElement extends LitElement {
               @blur=${(e: FocusEvent) => this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value)}
             />
           ` : html`
-            <span class="rec-group-title"><span style="margin-right: 5px;">👥</span>${meetingName}</span>
+            <span class="rec-group-title"><span style="margin-right: 5px;">${meetingIcon(meetingId)}</span>${meetingName}</span>
             <button
               class="rec-group-rename"
               title="Rename meeting"

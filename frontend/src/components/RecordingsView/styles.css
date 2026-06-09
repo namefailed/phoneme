@@ -753,8 +753,15 @@ ph-sidebar {
   border-top: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
   display: flex;
-  flex-direction: column;
-  max-height: 45%;
+  /* column-reverse keeps the "QUEUE" header pinned at the very bottom of the
+     sidebar; the list (DOM order: header then list) renders ABOVE it, so the
+     panel grows upward when expanded instead of off the bottom edge. */
+  flex-direction: column-reverse;
+  max-height: 50%;
+}
+/* When expanded, separate the list (above) from the pinned header (below). */
+.queue-panel .queue-list {
+  border-bottom: 1px solid var(--border-subtle);
 }
 .queue-header {
   display: flex;
@@ -771,7 +778,8 @@ ph-sidebar {
 }
 .queue-header:hover { color: var(--fg-default); }
 .queue-chevron { font-size: 9px; transition: transform 0.15s ease; }
-.queue-chevron.open { transform: rotate(90deg); }
+/* Points up when open — the panel expands upward. */
+.queue-chevron.open { transform: rotate(-90deg); }
 .queue-title { flex: 1; }
 .queue-count {
   font-size: 10px;
@@ -838,6 +846,31 @@ ph-sidebar {
   animation: queueSpin 0.8s linear infinite;
 }
 @keyframes queueSpin { to { transform: rotate(360deg); } }
+
+/* Meeting rename: inline emoji picker shown next to the name input. */
+.rec-group-iconpick {
+  display: inline-flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-right: 6px;
+  max-width: 200px;
+}
+.rec-icon-choice {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 3px;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.rec-icon-choice:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.rec-icon-choice.sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
 
 /* Tag chips inside the list's Tags column. */
 .rec-tags {
