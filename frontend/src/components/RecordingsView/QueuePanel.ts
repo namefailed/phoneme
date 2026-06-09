@@ -176,7 +176,7 @@ export class QueuePanelElement extends LitElement {
     return html`
       <div class="queue-panel ${this.collapsed ? "collapsed" : "expanded"}">
         <div class="queue-header" @click=${() => this.toggle()} title="Transcription pipeline queue">
-          <span class="queue-chevron ${this.collapsed ? "" : "open"}">▸</span>
+          <span class="queue-chevron ${this.collapsed ? "" : "open"}" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>
           <span class="queue-title">Queue</span>
           ${items.length
             ? html`<span class="queue-count">${pending}${active ? ` +${active}⟳` : ""}</span>`
@@ -211,8 +211,8 @@ export class QueuePanelElement extends LitElement {
                             ${it.state === "pending"
                               ? html`
                                   <span class="queue-reorder">
-                                    <button class="queue-move" title="Move up" ?disabled=${pIdx <= 0} @click=${() => this.move(it.id, -1)}>▲</button>
-                                    <button class="queue-move" title="Move down" ?disabled=${pIdx === pendingIds.length - 1} @click=${() => this.move(it.id, 1)}>▼</button>
+                                    <button class="queue-move" title="Move up" ?disabled=${pIdx <= 0} @click=${() => this.move(it.id, -1)}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg></button>
+                                    <button class="queue-move" title="Move down" ?disabled=${pIdx === pendingIds.length - 1} @click=${() => this.move(it.id, 1)}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
                                   </span>
                                   <button class="queue-cancel" title="Remove from queue" @click=${() => this.cancel(it.id)}>✕</button>
                                 `

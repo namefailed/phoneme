@@ -790,7 +790,15 @@ ph-sidebar {
   user-select: none;
 }
 .queue-header:hover { color: var(--fg-default); }
-.queue-chevron { font-size: 9px; transition: transform 0.15s ease; }
+.queue-chevron {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease;
+}
+.queue-chevron svg { display: block; }
 /* Points up when open — the panel expands upward. */
 .queue-chevron.open { transform: rotate(-90deg); }
 .queue-title { flex: 1; }
