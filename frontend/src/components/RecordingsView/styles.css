@@ -49,12 +49,23 @@
   color: var(--accent);
 }
 .rec-row.active {
-  background: rgba(203, 166, 247, 0.08);
-  background-image: linear-gradient(to right, rgba(203, 166, 247, 0.04), transparent);
-  /* Border is a constant 3px on every row (transparent → accent here), so the
-     padding must stay identical too — otherwise selecting shifts the row's
-     content sideways. */
+  /* Make the selected row unmistakable: a strong accent tint, a bold accent
+     left bar, and a faint full-row ring. The left bar is drawn with an inset
+     box-shadow (not extra border/padding) so selecting never shifts content —
+     the base border-left stays a constant 3px on every row. */
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-left-color: var(--accent);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+/* Keep the selected row's text bright (don't let the muted time/duration
+   columns wash it out) so the active row reads as clearly "current". */
+.rec-row.active,
+.rec-row.active .rec-time,
+.rec-row.active .rec-dur,
+.rec-row.active .rec-preview {
+  color: var(--fg-default);
 }
 .rec-row.kbd-focused {
   outline: none;
