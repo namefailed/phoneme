@@ -850,6 +850,144 @@ mod tests {
         assert_eq!(sanitize_fts5_query(""), "");
     }
 
+    /// A minimal `Done` recording for embedding/search tests. `semantic_search`
+    /// JOINs embeddings to recordings, so the row must exist before embedding.
+    fn embedded_recording(meeting_id: Option<&str>) -> Recording {
+        Recording {
+            id: RecordingId::new(),
+            started_at: Local::now(),
+            duration_ms: 1000,
+            audio_path: "x.wav".into(),
+            transcript: Some("t".into()),
+            model: Some("tiny".into()),
+            status: RecordingStatus::Done,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+            meeting_id: meeting_id.map(|s| s.to_string()),
+            meeting_name: None,
+            track: None,
+            in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            tags: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn semantic_search_ranks_by_cosine_and_respects_limit() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        let c = embedded_recording(None);
+        for r in [&a, &b, &c] {
+            db.insert(r).await.unwrap();
+        }
+        // Orthonormal vectors: query [1,0,0] is identical to `a`, orthogonal to b/c.
+        db.upsert_embedding(&a.id, &[1.0, 0.0, 0.0]).await.unwrap();
+        db.upsert_embedding(&b.id, &[0.0, 1.0, 0.0]).await.unwrap();
+        db.upsert_embedding(&c.id, &[0.0, 0.0, 1.0]).await.unwrap();
+
+        // min_score -1.0 keeps everything so we can assert ordering.
+        let results = db
+            .semantic_search(&[1.0, 0.0, 0.0], 10, -1.0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0.as_str(), a.id.as_str(), "best match first");
+        assert!(
+            (results[0].1 - 1.0).abs() < 1e-6,
+            "identical vector scores ~1.0"
+        );
+        assert!(
+            results[0].1 >= results[1].1 && results[1].1 >= results[2].1,
+            "results must be sorted high→low"
+        );
+
+        // `limit` caps the result count.
+        let top1 = db.semantic_search(&[1.0, 0.0, 0.0], 1, -1.0).await.unwrap();
+        assert_eq!(top1.len(), 1);
+        assert_eq!(top1[0].0.as_str(), a.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn semantic_search_min_score_filters_low_matches() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.upsert_embedding(&a.id, &[1.0, 0.0, 0.0]).await.unwrap();
+        // Orthogonal query → cosine 0.0, under a 0.5 floor → dropped.
+        let results = db.semantic_search(&[0.0, 1.0, 0.0], 10, 0.5).await.unwrap();
+        assert!(
+            results.is_empty(),
+            "below-floor matches must be filtered out"
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_search_skips_dimension_mismatch_without_panicking() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let good = embedded_recording(None);
+        let bad = embedded_recording(None);
+        db.insert(&good).await.unwrap();
+        db.insert(&bad).await.unwrap();
+        db.upsert_embedding(&good.id, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        // Wrong dimension (2 vs the query's 3) — must be skipped, not scored on a
+        // truncated prefix and not panic.
+        db.upsert_embedding(&bad.id, &[1.0, 0.0]).await.unwrap();
+
+        let results = db
+            .semantic_search(&[1.0, 0.0, 0.0], 10, -1.0)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1, "the mismatched-dim embedding is skipped");
+        assert_eq!(results[0].0.as_str(), good.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn semantic_search_collapses_meeting_tracks() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let mic = embedded_recording(Some("meeting-1"));
+        let sys = embedded_recording(Some("meeting-1"));
+        let solo = embedded_recording(None);
+        for r in [&mic, &sys, &solo] {
+            db.insert(r).await.unwrap();
+        }
+        // Both tracks of meeting-1 are highly similar to the query; solo isn't.
+        db.upsert_embedding(&mic.id, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.upsert_embedding(&sys.id, &[0.99, 0.01, 0.0])
+            .await
+            .unwrap();
+        db.upsert_embedding(&solo.id, &[0.0, 1.0, 0.0])
+            .await
+            .unwrap();
+
+        let results = db
+            .semantic_search(&[1.0, 0.0, 0.0], 10, -1.0)
+            .await
+            .unwrap();
+        // The meeting's two tracks collapse to one entry (best-scoring track),
+        // alongside the standalone recording.
+        assert_eq!(results.len(), 2);
+        let meeting_hits = results
+            .iter()
+            .filter(|(id, _)| id.as_str() == mic.id.as_str() || id.as_str() == sys.id.as_str())
+            .count();
+        assert_eq!(
+            meeting_hits, 1,
+            "meeting tracks must collapse to one result"
+        );
+    }
+
     #[tokio::test]
     async fn test_insert_and_get() {
         let db = Catalog::open(Path::new("sqlite::memory:"))
