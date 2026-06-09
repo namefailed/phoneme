@@ -3,6 +3,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";
+import { fuzzyMatch } from "../../utils/fuzzy";
 
 import { SectionWhisper } from "./SectionWhisper";
 import { SectionPreview } from "./SectionPreview";
@@ -209,11 +210,18 @@ export class SettingsViewElement extends LitElement {
     let visibleSections = 0;
     let visibleFields = 0;
     sections.forEach((sec) => {
-      const titleMatch = sec.querySelector("h3")?.textContent?.toLowerCase().includes(query) ?? false;
+      const title = sec.querySelector("h3")?.textContent?.toLowerCase() ?? "";
+      // Fuzzy on the (short) section title; substring as well for exact hits.
+      const titleMatch = title.includes(query) || fuzzyMatch(query, title);
       const fields = sec.querySelectorAll<HTMLElement>(".settings-field");
       let sectionHasMatch = false;
       fields.forEach((field) => {
-        const show = titleMatch || (field.textContent?.toLowerCase().includes(query) ?? false);
+        const fullText = field.textContent?.toLowerCase() ?? "";
+        // Fuzzy-match the concise label (first label element, else a short head
+        // of the field text) to stay typo-tolerant without the whole, long
+        // description making a scattered subsequence match almost anything.
+        const label = (field.querySelector("label")?.textContent ?? fullText.slice(0, 60)).toLowerCase();
+        const show = titleMatch || fullText.includes(query) || fuzzyMatch(query, label);
         field.style.display = show ? "" : "none";
         if (show) {
           sectionHasMatch = true;

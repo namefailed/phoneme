@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { deleteRecording, refireHook, retranscribeRecording, rerunCleanup } from "../../services/ipc";
+import { deleteRecording, refireHook, retranscribeRecording, rerunCleanup, rerunSummary } from "../../services/ipc";
 import { fetchLlmModels, isApiLlmProvider } from "../../services/llmModels";
 import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
 import { showToast } from "../../utils/toast";
@@ -18,7 +18,7 @@ export type ActionRowCallbacks = {
 };
 
 /** Which step the unified "Re-run…" menu is currently configured to perform. */
-type RerunStep = "transcribe" | "cleanup" | "hook";
+type RerunStep = "transcribe" | "cleanup" | "summarize" | "all" | "hook";
 
 @customElement('ph-action-row')
 export class ActionRowElement extends LitElement {
@@ -328,6 +328,17 @@ export class ActionRowElement extends LitElement {
           showToast("Cleanup re-run started", "info");
           break;
         }
+        case "summarize":
+          await rerunSummary(this.recordingId);
+          showToast("Summary regenerating…", "info");
+          break;
+        case "all":
+          // Re-fire the whole pipeline: re-transcribe the audio, then run LLM
+          // cleanup, the auto-summary (if configured), and the hooks. This is a
+          // re-transcription with post-processing + hooks both on.
+          await retranscribeRecording(this.recordingId, this.selectedModel, true, true);
+          showToast("Queued — re-running transcribe, cleanup, summary & hooks", "info");
+          break;
         case "hook": {
           const cmd = this.selectedHookCommand === "" ? null : this.selectedHookCommand;
           await refireHook(this.recordingId, cmd);
@@ -394,6 +405,30 @@ export class ActionRowElement extends LitElement {
 
   /** The per-step options block shown inside the Re-run menu. */
   private renderStepOptions() {
+    if (this.rerunStep === "all") {
+      return html`
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style="font-size: 11px; color: var(--fg-muted);">Transcription model</label>
+          <select class="rerun-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
+            ${this.availableModels.map(m => html`
+              <option value=${m.value} ?selected=${m.value === this.selectedModel}>${m.label}</option>
+            `)}
+          </select>
+        </div>
+        <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
+          Re-transcribes the audio, then re-runs cleanup, the AI summary (if enabled in Settings), and your hooks.
+        </p>
+      `;
+    }
+
+    if (this.rerunStep === "summarize") {
+      return html`
+        <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
+          Regenerates the AI summary from the current transcript using your configured summary model. The transcript itself isn't changed.
+        </p>
+      `;
+    }
+
     if (this.rerunStep === "transcribe") {
       return html`
         <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -547,8 +582,10 @@ export class ActionRowElement extends LitElement {
               <div style="display: flex; flex-direction: column; gap: 4px;">
                 <label style="font-size: 11px; color: var(--fg-muted);">Step</label>
                 <select class="rerun-step-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleStepChange}>
+                  <option value="all" ?selected=${this.rerunStep === "all"}>All (everything)</option>
                   <option value="transcribe" ?selected=${this.rerunStep === "transcribe"}>Transcribe</option>
                   <option value="cleanup" ?selected=${this.rerunStep === "cleanup"}>Cleanup</option>
+                  <option value="summarize" ?selected=${this.rerunStep === "summarize"}>Summarize</option>
                   <option value="hook" ?selected=${this.rerunStep === "hook"}>Hook</option>
                 </select>
               </div>

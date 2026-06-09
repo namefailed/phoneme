@@ -3,6 +3,7 @@ import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { addTag, attachTag, detachTag, listAllTags, tagsFor, updateTag, type Tag } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
+import { fuzzyFilter } from "../../utils/fuzzy";
 
 export function getContrastColor(hexColor: string): string {
   if (!hexColor || !hexColor.startsWith('#')) {
@@ -30,6 +31,8 @@ export class TagChipsElement extends LitElement {
   @state() private attached: Tag[] = [];
   @state() private allTags: Tag[] = [];
   @state() private _showDropdown = false;
+  /** Current text in the "+ add tag" box, used to fuzzy-filter the dropdown. */
+  @state() private tagQuery = "";
   /** id of the tag whose inline name/color editor is open, or null. */
   @state() private editingTagId: number | null = null;
   @state() private editName = "";
@@ -122,7 +125,8 @@ export class TagChipsElement extends LitElement {
       
       const input = this.renderRoot.querySelector<HTMLInputElement>(".tag-add");
       if (input) input.value = "";
-      
+      this.tagQuery = "";
+
       await this.load();
     } catch (e) {
       showToast(`Failed to add tag: ${errText(e)}`, "error");
@@ -145,7 +149,12 @@ export class TagChipsElement extends LitElement {
   }
 
   render() {
-    const availableTags = this.allTags.filter((t) => !this.attached.map(a => a.id).includes(t.id));
+    const attachedIds = new Set(this.attached.map((a) => a.id));
+    const availableTags = fuzzyFilter(
+      this.tagQuery,
+      this.allTags.filter((t) => !attachedIds.has(t.id)),
+      (t) => t.name,
+    );
     const showDropdown = this._showDropdown && availableTags.length > 0;
     
     return html`
@@ -192,11 +201,13 @@ export class TagChipsElement extends LitElement {
           `;
         })}
         <div class="tag-input-wrapper">
-          <input 
-            class="tag-add" 
-            placeholder="+ add tag" 
+          <input
+            class="tag-add"
+            placeholder="+ add tag"
+            .value=${this.tagQuery}
             @focus=${() => this._showDropdown = true}
             @blur=${() => setTimeout(() => this._showDropdown = false, 150)}
+            @input=${(e: Event) => this.tagQuery = (e.target as HTMLInputElement).value}
             @keydown=${this.onInputKeydown}
           />
           ${showDropdown ? html`
