@@ -1,7 +1,8 @@
 import { renderField, bindFieldEvents } from "./form";
 
-/** All reorderable/toggleable list columns (the "Day" column is always first). */
+/** All reorderable/toggleable list columns. */
 const COLUMN_CATALOG: { value: string; label: string }[] = [
+  { value: "day", label: "Day" },
   { value: "time", label: "Time" },
   { value: "duration", label: "Duration" },
   { value: "status", label: "Status" },
@@ -36,8 +37,7 @@ export class SectionInterface {
     }
 
     const known = new Set(COLUMN_CATALOG.map((c) => c.value));
-    const saved: string[] = (config.interface.visible_columns || [])
-      .filter((c: string) => c !== "day" && known.has(c));
+    const saved: string[] = (config.interface.visible_columns || []).filter((c: string) => known.has(c));
     // Visible columns first (saved order), then any remaining hidden columns.
     this.order = [
       ...saved,
@@ -55,7 +55,7 @@ export class SectionInterface {
 
   /** Persist the current order + visibility into config and notify SettingsView. */
   private syncConfig() {
-    this.config.interface.visible_columns = ["day", ...this.order.filter((c) => this.visible.has(c))];
+    this.config.interface.visible_columns = this.order.filter((c) => this.visible.has(c));
     // Saved widths are positional, so dropping/reordering columns would
     // misalign them. Clear them so the list recomputes per-column widths in the
     // new order (the user can re-drag widths afterward).
@@ -78,14 +78,14 @@ export class SectionInterface {
     host.innerHTML = this.order
       .map((value, i) => `
           <div class="col-row" data-col="${value}">
-            <span class="col-move">
-              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
-              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}>▼</button>
-            </span>
             <label class="col-label">
               <input type="checkbox" class="col-toggle" value="${value}" ${this.visible.has(value) ? "checked" : ""} />
               <span>${this.label(value)}</span>
             </label>
+            <span class="col-move">
+              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
+              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}>▼</button>
+            </span>
           </div>`)
       .join("");
 
@@ -109,8 +109,9 @@ export class SectionInterface {
     this.container.innerHTML = `
       <div class="settings-section">
         <style>
+          #col-list { max-width: 320px; }
           #col-list .col-row {
-            display: flex; align-items: center; gap: 10px;
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
             padding: 3px 6px; border-radius: 6px; transition: background 0.12s ease;
           }
           #col-list .col-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
@@ -179,7 +180,7 @@ export class SectionInterface {
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
             <div id="col-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
             <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-              Check a column to show it; use ▲▼ to reorder. Columns appear left-to-right in this order. The "Day" column is always first.
+              Check a column to show it; use ▲▼ to reorder. Columns appear left-to-right in this order.
             </span>
           </div>
         </div>
