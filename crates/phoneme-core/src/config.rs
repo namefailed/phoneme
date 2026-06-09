@@ -39,6 +39,17 @@ where
 pub struct Config {
     /// Configuration for the Whisper transcription engine.
     pub whisper: WhisperConfig,
+    /// Optional independent transcription provider for the **live preview**.
+    ///
+    /// `None` (default) → the live preview reuses the main [`whisper`](Self::whisper)
+    /// provider and shares its server. `Some` → the preview runs through this
+    /// separate provider so it never contends with the final transcription:
+    /// typically a small/fast local model on its OWN bundled server (give it a
+    /// distinct `bundled_server_port`), the same model as the final on a second
+    /// server, or a fast cloud API (e.g. Groq). The final transcript always uses
+    /// [`whisper`](Self::whisper).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_whisper: Option<WhisperConfig>,
     /// Hardware and threshold settings for the audio recording stream.
     pub recording: RecordingConfig,
     /// Settings governing external script execution (hooks) upon transcription success.
@@ -611,6 +622,31 @@ impl Config {
             _ => Ok(Self::default()),
         }
     }
+
+    /// The transcription provider config the **live preview** should use:
+    /// the dedicated [`preview_whisper`](Self::preview_whisper) when set,
+    /// otherwise the main [`whisper`](Self::whisper) provider. The final
+    /// transcript always uses `whisper` regardless.
+    pub fn preview_provider_config(&self) -> &WhisperConfig {
+        self.preview_whisper.as_ref().unwrap_or(&self.whisper)
+    }
+
+    /// True when the live preview runs on its OWN local bundled server (a
+    /// distinct model/port from the final), so the daemon must supervise a
+    /// second whisper-server. False when preview reuses the main provider or
+    /// uses a cloud API (no extra server needed).
+    pub fn preview_needs_own_server(&self) -> bool {
+        match &self.preview_whisper {
+            Some(p) => {
+                p.provider == TranscriptionBackend::Local
+                    && matches!(
+                        p.mode,
+                        WhisperMode::BundledModel | WhisperMode::BundledDownload
+                    )
+            }
+            None => false,
+        }
+    }
 }
 
 impl Default for Config {
@@ -629,6 +665,9 @@ impl Default for Config {
                 model: String::new(),
                 api_url: String::new(),
             },
+            // Default: live preview shares the main whisper provider (no separate
+            // server). Users opt into a dedicated fast model / API via Settings.
+            preview_whisper: None,
             recording: RecordingConfig {
                 audio_dir: "~/Documents/phoneme/audio".into(),
                 sample_rate: 16000,
@@ -888,6 +927,40 @@ mod tests {
         assert_eq!(
             Config::default().recording.source,
             CaptureSource::Microphone
+        );
+    }
+
+    #[test]
+    fn preview_provider_resolution() {
+        // Default: preview shares the main provider, no second server needed.
+        let cfg = Config::default();
+        assert!(cfg.preview_whisper.is_none());
+        assert_eq!(
+            cfg.preview_provider_config().bundled_server_port,
+            cfg.whisper.bundled_server_port
+        );
+        assert!(!cfg.preview_needs_own_server());
+
+        // Dedicated local model on its own server → needs a 2nd server.
+        let mut local = Config::default();
+        let mut pv = local.whisper.clone();
+        pv.mode = WhisperMode::BundledModel;
+        pv.model_path = "C:/models/ggml-tiny.en.bin".into();
+        pv.bundled_server_port = 5810;
+        local.preview_whisper = Some(pv);
+        assert!(local.preview_needs_own_server());
+        assert_eq!(local.preview_provider_config().bundled_server_port, 5810);
+
+        // Cloud API preview → independent provider, but NO second local server.
+        let mut api = Config::default();
+        let mut pv = api.whisper.clone();
+        pv.provider = TranscriptionBackend::Groq;
+        pv.mode = WhisperMode::External;
+        api.preview_whisper = Some(pv);
+        assert!(!api.preview_needs_own_server());
+        assert_eq!(
+            api.preview_provider_config().provider,
+            TranscriptionBackend::Groq
         );
     }
 
