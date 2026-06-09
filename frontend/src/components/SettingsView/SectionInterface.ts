@@ -2,7 +2,7 @@ import { renderField, bindFieldEvents } from "./form";
 import { invoke } from "@tauri-apps/api/core";
 
 /** Default visible columns, used by the reset action. */
-const DEFAULT_VISIBLE_COLUMNS = ["day", "time", "duration", "status", "transcript"];
+const DEFAULT_VISIBLE_COLUMNS = ["day", "time", "duration", "status", "source", "transcript"];
 
 /** All reorderable/toggleable list columns. */
 const COLUMN_CATALOG: { value: string; label: string }[] = [
@@ -16,6 +16,7 @@ const COLUMN_CATALOG: { value: string; label: string }[] = [
   { value: "summary_model", label: "Summary Model" },
   { value: "diarized", label: "Diarized" },
   { value: "user_edited", label: "Edited" },
+  { value: "source", label: "Source" },
   { value: "transcript", label: "Transcript Snippet" },
 ];
 
@@ -38,7 +39,7 @@ export class SectionInterface {
         theme: "catppuccin-mocha",
         format_24h: false,
         strip_titlebar: false,
-        visible_columns: ["day", "time", "duration", "status", "transcript"],
+        visible_columns: ["day", "time", "duration", "status", "source", "transcript"],
       };
     }
 

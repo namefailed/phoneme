@@ -457,6 +457,7 @@ export class RecordingsListElement extends LitElement {
       "time",
       "duration",
       "status",
+      "source",
       "transcript",
     ];
     let activeWidths = this.currentWidths;
@@ -473,6 +474,7 @@ export class RecordingsListElement extends LitElement {
         summary_model: "120px",
         diarized: "60px",
         user_edited: "60px",
+        source: "124px",
         transcript: "1fr",
       };
       if (!activeWidths || activeWidths.length !== visibleCols.length) {
@@ -498,6 +500,7 @@ export class RecordingsListElement extends LitElement {
       summary_model: "Summary Model",
       diarized: "Diarized",
       user_edited: "Edited",
+      source: "Source",
       transcript: "Transcript",
     };
 
@@ -595,7 +598,17 @@ export class RecordingsListElement extends LitElement {
     const preview = r.transcript ?? truncatedError(r);
     const searchTerm = filterStore.get().search ?? "";
 
-    const trackBadge = track
+    // Source: meeting tracks report "mic"/"system"; a single recording has no
+    // track and is, by definition, the microphone.
+    const sourceIsSystem = track === "system";
+    const sourceLabel = sourceIsSystem ? "System audio" : "Microphone";
+    const sourceIcon = sourceIsSystem ? "🔊" : "🎤";
+
+    // When the dedicated Source column is visible, the badge lives there; only
+    // fall back to prefixing the transcript (legacy behaviour) when it isn't,
+    // so meeting tracks never lose their source label.
+    const sourceColVisible = visibleCols.includes("source");
+    const trackBadge = track && !sourceColVisible
       ? html`<span class="rec-track-badge">${trackLabel(track)}</span> `
       : nothing;
 
@@ -614,6 +627,7 @@ export class RecordingsListElement extends LitElement {
       summary_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.summary_model || ""}</span>`,
       user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
+      source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span>${sourceLabel}</span>`,
       transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 

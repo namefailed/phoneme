@@ -881,6 +881,39 @@ mark.search-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+/* Source column: a compact pill per track ("Microphone" / "System audio"). */
+.rec-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg-default) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg-default) 12%, transparent);
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+.rec-source-ico {
+  font-size: 10px;
+  line-height: 1;
+}
+/* System audio stands out with the accent treatment; mic stays neutral. */
+.rec-source--system {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.rec-row:hover .rec-source--mic {
+  color: var(--fg-default);
+}
+
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 ph-sidebar {
   display: block;

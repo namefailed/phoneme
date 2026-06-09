@@ -225,7 +225,7 @@ export class BulkActionBarElement extends LitElement {
         <span class="bulk-count">${this.busy ? "Working…" : `${n} selected`}</span>
         <div class="bulk-actions">
           <span class="bulk-menu-wrap">
-            <button class="bulk-btn" title="Re-run a step on the selected recordings" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("rerun", e)}>↻ Re-run ▾</button>
+            <button class="bulk-btn" title="Re-run a step on the selected recordings" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("rerun", e)}>↻ Re-run <svg class="ph-caret-ico ${this.openMenu === "rerun" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             ${this.openMenu === "rerun" ? html`
               <div class="bulk-menu" @click=${(e: Event) => e.stopPropagation()}>
                 <button class="bulk-menu-item" @click=${this.handleRetranscribe}>↺ Re-transcribe (everything)</button>
@@ -235,7 +235,7 @@ export class BulkActionBarElement extends LitElement {
           </span>
 
           <span class="bulk-menu-wrap">
-            <button class="bulk-btn" title="Add a tag to selected" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("tag", e)}>🏷 Tag ▾</button>
+            <button class="bulk-btn" title="Add a tag to selected" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("tag", e)}>🏷 Tag <svg class="ph-caret-ico ${this.openMenu === "tag" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             ${this.openMenu === "tag" ? html`
               <div class="bulk-menu" @click=${(e: Event) => e.stopPropagation()}>
                 ${this.allTags.length === 0
@@ -248,7 +248,7 @@ export class BulkActionBarElement extends LitElement {
           </span>
 
           <span class="bulk-menu-wrap">
-            <button class="bulk-btn" title="Export transcripts" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("export", e)}>↓ Export ▾</button>
+            <button class="bulk-btn" title="Export transcripts" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("export", e)}>↓ Export <svg class="ph-caret-ico ${this.openMenu === "export" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             ${this.openMenu === "export" ? html`
               <div class="bulk-menu" @click=${(e: Event) => e.stopPropagation()}>
                 <button class="bulk-menu-item" @click=${() => this.handleExport("txt")}>Plain text (.txt)</button>
