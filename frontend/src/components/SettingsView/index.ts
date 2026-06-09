@@ -29,7 +29,9 @@ export class SettingsViewElement extends LitElement {
   @property({ type: Object }) onClose!: () => void;
   @property({ type: Function }) onNavigateToWizard?: () => void;
 
-  @state() private activeTab: string = "transcription";
+  // Public so an opener (e.g. the Re-run "Enable cleanup in Settings" shortcut)
+  // can deep-link to a tab; also mutated internally by switchTab.
+  @property({ type: String }) activeTab: string = "transcription";
   @state() private config: any = null;
   @state() private searchQuery: string = "";
   private originalConfigStr: string = "";
@@ -239,10 +241,11 @@ export class SettingsViewElement extends LitElement {
 // Legacy wrapper
 export class SettingsView {
   private element: SettingsViewElement;
-  constructor(container: HTMLElement, onClose: () => void, onNavigateToWizard?: () => void) {
+  constructor(container: HTMLElement, onClose: () => void, onNavigateToWizard?: () => void, initialTab?: string | null) {
     this.element = document.createElement('ph-settings-view') as SettingsViewElement;
     this.element.onClose = onClose;
     this.element.onNavigateToWizard = onNavigateToWizard;
+    if (initialTab) this.element.activeTab = initialTab;
     container.appendChild(this.element);
   }
 

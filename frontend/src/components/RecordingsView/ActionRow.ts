@@ -2,8 +2,12 @@ import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { deleteRecording, refireHook, retranscribeRecording, rerunCleanup } from "../../services/ipc";
+import { fetchLlmModels, isApiLlmProvider } from "../../services/llmModels";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
+
+/** LLM cleanup providers selectable for a one-time Re-run → Cleanup override. */
+const CLEANUP_PROVIDERS = ["ollama", "openai", "groq", "anthropic"] as const;
 
 export type ActionRowCallbacks = {
   onTogglePlay: () => void;
@@ -42,8 +46,18 @@ export class ActionRowElement extends LitElement {
   @state() private rerunMenuOpen = false;
   @state() private rerunStep: RerunStep = "transcribe";
 
-  // Cleanup (LLM post-process) one-time model override; prefilled from config.
+  // Cleanup (LLM post-process) one-time overrides; all prefilled from config and
+  // applied to this run only (never persisted). Mirrors Settings → Post-Processing.
   @state() private cleanupModel = "";
+  // Default to a sane provider so the Cleanup step is usable even when the
+  // config has no/none LLM provider; overwritten by the config prefill.
+  @state() private cleanupProvider = "ollama";
+  @state() private cleanupPrompt = "";
+  @state() private cleanupApiUrl = "";
+  @state() private cleanupApiKey = "";
+  @state() private cleanupModelOptions: string[] = [];
+  @state() private cleanupModelsLoading = false;
+  @state() private cleanupModelsError: string | null = null;
   @state() private llmPostProcessEnabled = false;
 
   @state() private configuredHookCommands: string[] = [];
@@ -90,11 +104,25 @@ export class ActionRowElement extends LitElement {
       // disable the Cleanup option and explain why).
       if (this.config && this.config.llm_post_process) {
         const llm = this.config.llm_post_process;
+        const provider = typeof llm.provider === "string" ? llm.provider.trim() : "";
         this.llmPostProcessEnabled = !!llm.enabled &&
-          typeof llm.provider === "string" &&
-          llm.provider.trim() !== "" &&
-          llm.provider.trim().toLowerCase() !== "none";
+          provider !== "" &&
+          provider.toLowerCase() !== "none";
+        // Prefill all one-time cleanup overrides from the saved config.
         this.cleanupModel = llm.model ?? "";
+        // Only adopt the configured provider if the menu actually offers it;
+        // otherwise (none / unset / an unrecognized value) fall back to ollama
+        // so the dropdown selection and state never disagree.
+        const lc = provider.toLowerCase();
+        this.cleanupProvider = (CLEANUP_PROVIDERS as readonly string[]).includes(lc)
+          ? lc
+          : "ollama";
+        this.cleanupPrompt = llm.prompt ?? "";
+        this.cleanupApiUrl = llm.api_url ?? "";
+        this.cleanupApiKey = llm.api_key ?? "";
+        // Best-effort prefetch of the configured provider's model list so the
+        // dropdown is populated when the user opens the Cleanup step.
+        void this.fetchCleanupModels();
       }
 
       // Load STT models
@@ -169,6 +197,65 @@ export class ActionRowElement extends LitElement {
     this.selectedModel = (e.target as HTMLSelectElement).value;
   }
 
+  /** Fetch the model list for the currently-selected cleanup provider. */
+  private async fetchCleanupModels() {
+    const provider = this.cleanupProvider;
+    if (!provider) return;
+    this.cleanupModelsLoading = true;
+    this.cleanupModelsError = null;
+    this.requestUpdate();
+    try {
+      const models = await fetchLlmModels(provider, this.cleanupApiUrl, this.cleanupApiKey);
+      this.cleanupModelOptions = models;
+      // Keep the configured/selected model if the provider doesn't list it.
+      if (this.cleanupModel && !models.includes(this.cleanupModel)) {
+        this.cleanupModelOptions = [...models, this.cleanupModel];
+      } else if (!this.cleanupModel && models.length > 0) {
+        this.cleanupModel = models[0];
+      }
+    } catch (e) {
+      this.cleanupModelOptions = [];
+      this.cleanupModelsError = errText(e);
+    } finally {
+      this.cleanupModelsLoading = false;
+      this.requestUpdate();
+    }
+  }
+
+  private handleCleanupProviderChange(e: Event) {
+    this.cleanupProvider = (e.target as HTMLSelectElement).value;
+    // Model list is provider-specific — clear and refetch for the new provider.
+    this.cleanupModelOptions = [];
+    void this.fetchCleanupModels();
+  }
+
+  private handleCleanupModelSelect(e: Event) {
+    this.cleanupModel = (e.target as HTMLSelectElement).value;
+  }
+
+  private handleCleanupPromptInput(e: Event) {
+    this.cleanupPrompt = (e.target as HTMLTextAreaElement).value;
+  }
+
+  private handleCleanupApiUrlInput(e: Event) {
+    this.cleanupApiUrl = (e.target as HTMLInputElement).value;
+  }
+
+  private handleCleanupApiKeyInput(e: Event) {
+    this.cleanupApiKey = (e.target as HTMLInputElement).value;
+  }
+
+  /**
+   * Jump to Settings (Post-Processing) so the user can enable cleanup. Uses a
+   * decoupled window event the app routes, avoiding threading a settings-nav
+   * callback down through RecordingDetail → ActionRow.
+   */
+  private openCleanupSettings(e: Event) {
+    e.stopPropagation();
+    this.rerunMenuOpen = false;
+    window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view: "settings", section: "postprocessing" } }));
+  }
+
   private handleCleanupModelInput(e: Event) {
     this.cleanupModel = (e.target as HTMLInputElement).value;
   }
@@ -208,10 +295,20 @@ export class ActionRowElement extends LitElement {
           showToast("Queued for re-transcription", "info");
           break;
         case "cleanup": {
-          // Pass the override only when it differs from nothing; an empty
-          // string lets the daemon fall back to the configured cleanup model.
-          const model = this.cleanupModel.trim() === "" ? null : this.cleanupModel.trim();
-          await rerunCleanup(this.recordingId, model);
+          // Send each override only when set; null lets the daemon fall back to
+          // the configured value. None of these are persisted to config.
+          const orNull = (s: string) => (s.trim() === "" ? null : s.trim());
+          const isApi = isApiLlmProvider(this.cleanupProvider);
+          await rerunCleanup(
+            this.recordingId,
+            orNull(this.cleanupModel),
+            orNull(this.cleanupProvider),
+            // Preserve intentional prompt whitespace/newlines; only treat a fully
+            // empty prompt as "use configured".
+            this.cleanupPrompt.trim() === "" ? null : this.cleanupPrompt,
+            isApi ? orNull(this.cleanupApiUrl) : null,
+            isApi ? orNull(this.cleanupApiKey) : null,
+          );
           showToast("Cleanup re-run started", "info");
           break;
         }
@@ -307,21 +404,72 @@ export class ActionRowElement extends LitElement {
     }
 
     if (this.rerunStep === "cleanup") {
+      const inputStyle = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
+      const labelStyle = "font-size: 11px; color: var(--fg-muted);";
+      // Off means off: with post-processing disabled there is no cleanup to
+      // re-fire. Explain why and offer a one-click jump to Settings to enable it.
       if (!this.llmPostProcessEnabled) {
         return html`
           <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
-            LLM post-processing is disabled. Enable a cleanup provider in Settings to use this.
+            Post-processing (LLM cleanup) is turned off, so there's nothing to re-run. Enable a cleanup provider to use this.
           </p>
+          <button class="rerun-enable-cleanup" type="button"
+            style="align-self: flex-start; padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
+            @click=${this.openCleanupSettings}>Enable cleanup in Settings →</button>
         `;
       }
+      const isApi = isApiLlmProvider(this.cleanupProvider);
       return html`
         <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
-          Re-cleans the original transcript with the LLM. Re-transcription is skipped.
+          Re-cleans the original transcript with the LLM (re-transcription is skipped). These overrides apply to this run only and aren't saved.${this.llmPostProcessEnabled ? "" : " Cleanup is off in Settings — picking a provider here runs it just this once."}
         </p>
+
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style="font-size: 11px; color: var(--fg-muted);">Cleanup model (one-time override)</label>
-          <input type="text" class="rerun-cleanup-model" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"
-            .value=${this.cleanupModel} @input=${this.handleCleanupModelInput} placeholder="Configured cleanup model" />
+          <label style=${labelStyle}>Provider</label>
+          <select class="rerun-cleanup-provider" style=${inputStyle} @change=${this.handleCleanupProviderChange}>
+            ${CLEANUP_PROVIDERS.map(p => html`<option value=${p} ?selected=${p === this.cleanupProvider}>${p}</option>`)}
+          </select>
+        </div>
+
+        ${isApi ? html`
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style=${labelStyle}>API URL (blank = provider default)</label>
+            <input type="text" class="rerun-cleanup-url" style=${inputStyle}
+              .value=${this.cleanupApiUrl} @input=${this.handleCleanupApiUrlInput} @change=${() => this.fetchCleanupModels()} placeholder="Provider default" />
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style=${labelStyle}>API key</label>
+            <input type="password" class="rerun-cleanup-key" style=${inputStyle}
+              .value=${this.cleanupApiKey} @input=${this.handleCleanupApiKeyInput} @change=${() => this.fetchCleanupModels()} placeholder="Configured key" />
+          </div>
+        ` : nothing}
+
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style="display: flex; justify-content: space-between; align-items: center; ${labelStyle}">
+            <span>Model</span>
+            <button type="button" class="rerun-cleanup-refresh" title="Refresh model list"
+              style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0;"
+              ?disabled=${this.cleanupModelsLoading} @click=${() => this.fetchCleanupModels()}>↻ Refresh</button>
+          </label>
+          ${this.cleanupModelOptions.length > 0
+            ? html`<select class="rerun-cleanup-model-select" style=${inputStyle} @change=${this.handleCleanupModelSelect}>
+                ${this.cleanupModelOptions.map(m => html`<option value=${m} ?selected=${m === this.cleanupModel}>${m}</option>`)}
+              </select>`
+            : html`<input type="text" class="rerun-cleanup-model" style=${inputStyle}
+                .value=${this.cleanupModel} @input=${this.handleCleanupModelInput} placeholder="Model id" />`}
+          ${this.cleanupModelsLoading
+            ? html`<p style="margin: 0; ${labelStyle}">Loading models…</p>`
+            : this.cleanupModelOptions.length === 0
+              ? html`<p style="margin: 0; ${labelStyle}">${this.cleanupModelsError
+                  ? `Couldn't list models (${this.cleanupModelsError}). Type a model id or Refresh.`
+                  : "No models listed — type one or click Refresh."}</p>`
+              : nothing}
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style=${labelStyle}>Prompt</label>
+          <textarea class="rerun-cleanup-prompt" rows="3" style="${inputStyle} resize: vertical; font-family: inherit;"
+            .value=${this.cleanupPrompt} @input=${this.handleCleanupPromptInput} placeholder="Cleanup instructions"></textarea>
         </div>
       `;
     }
@@ -350,9 +498,12 @@ export class ActionRowElement extends LitElement {
   }
 
   render() {
-    // Cleanup is the only step that can be unavailable (LLM disabled); block the
-    // Re-run button in that case so the user gets a clear reason in the menu.
-    const runDisabled = this.rerunStep === "cleanup" && !this.llmPostProcessEnabled;
+    // Cleanup is blocked when post-processing is off (nothing to re-fire — the
+    // step shows an "Enable in Settings" shortcut instead), or when no model has
+    // been chosen yet. The daemon also validates and reports an unusable config.
+    const runDisabled = this.rerunStep === "cleanup"
+      && (!this.llmPostProcessEnabled
+        || (this.cleanupModel.trim() === "" && this.cleanupModelOptions.length === 0));
     return html`
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>

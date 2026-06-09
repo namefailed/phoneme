@@ -186,6 +186,16 @@ impl PartialEq for LlmPostProcessConfig {
     }
 }
 
+impl LlmPostProcessConfig {
+    /// Replace the API key. Encapsulates the [`SecretString`] construction so
+    /// callers outside this crate (e.g. the daemon applying a one-time cleanup
+    /// override) can set a key from a plain `String` without taking a direct
+    /// dependency on the `secrecy` crate.
+    pub fn set_api_key(&mut self, key: impl Into<String>) {
+        self.api_key = SecretString::from(key.into());
+    }
+}
+
 fn default_llm_post_process() -> LlmPostProcessConfig {
     LlmPostProcessConfig {
         enabled: false,

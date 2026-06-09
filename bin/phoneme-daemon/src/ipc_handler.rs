@@ -553,7 +553,27 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
-        Request::RerunCleanup { id, model } => rerun_cleanup(state, id, model).await,
+        Request::RerunCleanup {
+            id,
+            model,
+            provider,
+            prompt,
+            api_url,
+            api_key,
+        } => {
+            rerun_cleanup(
+                state,
+                id,
+                CleanupOverrides {
+                    model,
+                    provider,
+                    prompt,
+                    api_url,
+                    api_key,
+                },
+            )
+            .await
+        }
         // Unlike RefireHook, HookTest intentionally runs a caller-supplied
         // command: it is the Hook Manager's "test this command" affordance, used
         // to validate a hook the user is editing but has not saved yet. That is a
@@ -797,10 +817,21 @@ fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
 /// it is never written back to config (unlike `RetranscribeRecording`, which
 /// must restart the whisper server). The post-processing provider is built from
 /// a cloned config with just the model field swapped.
+/// One-time, per-run overrides for [`rerun_cleanup`]. Each field falls back to
+/// the configured `[llm_post_process]` value when `None` and is never persisted.
+#[derive(Default)]
+struct CleanupOverrides {
+    model: Option<String>,
+    provider: Option<String>,
+    prompt: Option<String>,
+    api_url: Option<String>,
+    api_key: Option<String>,
+}
+
 async fn rerun_cleanup(
     state: &AppState,
     id: phoneme_core::RecordingId,
-    model: Option<String>,
+    overrides: CleanupOverrides,
 ) -> Response {
     let recording = match state.catalog.get(&id).await {
         Ok(Some(r)) => r,
@@ -826,15 +857,50 @@ async fn rerun_cleanup(
         });
     }
 
-    // Build a cleanup config with the optional one-time model override applied.
-    // Cloning the live config and swapping only `model` keeps every other
-    // setting (provider, api key/url, prompt, timeout) intact, and — crucially —
-    // never persists the override the way RetranscribeRecording does.
+    // Build a cleanup config with the optional one-time overrides applied.
+    // Cloning the live config and swapping only the supplied fields keeps every
+    // other setting intact and — crucially — never persists the override the way
+    // RetranscribeRecording does (this config is local to the spawned task).
+    let CleanupOverrides {
+        model,
+        provider,
+        prompt,
+        api_url,
+        api_key,
+    } = overrides;
     let mut llm_cfg = state.config.load().llm_post_process.clone();
+    // Override the provider for this run, but do NOT force the step on: if
+    // post-processing is disabled in config, cleanup stays unavailable ("off
+    // means off"). The validation below reports that clearly, and the GUI
+    // disables the Cleanup option entirely when cleanup is off.
+    if let Some(p) = provider {
+        let p = p.trim();
+        if !p.is_empty() {
+            llm_cfg.provider = p.to_string();
+        }
+    }
     if let Some(m) = model {
         let m = m.trim();
         if !m.is_empty() {
             llm_cfg.model = m.to_string();
+        }
+    }
+    // A blank prompt would strip the cleanup instructions, so keep the
+    // configured prompt unless a non-empty override is given.
+    if let Some(pr) = prompt {
+        if !pr.trim().is_empty() {
+            llm_cfg.prompt = pr;
+        }
+    }
+    // An explicit empty URL is meaningful (= "use the provider default"), so
+    // honor any provided value rather than only non-empty ones.
+    if let Some(u) = api_url {
+        llm_cfg.api_url = u;
+    }
+    if let Some(k) = api_key {
+        let k = k.trim();
+        if !k.is_empty() {
+            llm_cfg.set_api_key(k.to_string());
         }
     }
 

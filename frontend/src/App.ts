@@ -25,6 +25,9 @@ export class App {
   private mainEl: HTMLElement;
   private headerEl: HTMLElement;
   private current: MountedView | null = null;
+  // When an in-app shortcut (e.g. Re-run → "Enable cleanup in Settings") routes
+  // to Settings, the tab it wants opened. Consumed on the next settings mount.
+  private pendingSettingsTab: string | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -59,6 +62,17 @@ export class App {
     // Tray menu navigation.
     void onNav("settings", () => this.router.go("settings"));
     void onNav("doctor", () => this.router.go("doctor"));
+
+    // In-app navigation shortcuts (decoupled window event so deep components
+    // don't need a routing callback threaded through). e.g. the Re-run menu's
+    // "Enable cleanup in Settings" jumps straight to the Post-Processing tab.
+    window.addEventListener("phoneme:navigate", (e) => {
+      const detail = (e as CustomEvent).detail ?? {};
+      if (detail.view === "settings") {
+        this.pendingSettingsTab = typeof detail.section === "string" ? detail.section : null;
+        this.router.go("settings");
+      }
+    });
 
     // Tray menu recording commands.
     void listen("menu:record", async () => {
@@ -141,9 +155,12 @@ export class App {
       case "recordings":
         this.current = new RecordingsView(this.mainEl);
         break;
-      case "settings":
-        this.current = new SettingsView(this.mainEl, () => this.router.go("recordings"), () => this.router.go("wizard"));
+      case "settings": {
+        const initialTab = this.pendingSettingsTab;
+        this.pendingSettingsTab = null;
+        this.current = new SettingsView(this.mainEl, () => this.router.go("recordings"), () => this.router.go("wizard"), initialTab);
         break;
+      }
       case "doctor":
         this.current = new DoctorView(this.mainEl, () => this.router.go("recordings"));
         break;

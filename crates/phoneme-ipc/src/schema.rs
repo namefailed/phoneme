@@ -99,6 +99,19 @@ pub enum Request {
         id: RecordingId,
         #[serde(default)]
         model: Option<String>,
+        /// One-time overrides for this cleanup run only — each falls back to the
+        /// configured `[llm_post_process]` value when `None`, and none of them
+        /// are ever written back to config. Supplying `provider` also forces the
+        /// step on for this run (so the user can re-clean with a provider even
+        /// when cleanup is otherwise disabled).
+        #[serde(default)]
+        provider: Option<String>,
+        #[serde(default)]
+        prompt: Option<String>,
+        #[serde(default)]
+        api_url: Option<String>,
+        #[serde(default)]
+        api_key: Option<String>,
     },
     UpdateTranscript {
         id: RecordingId,
