@@ -83,6 +83,16 @@ export class SectionHook {
             Example: <code>python process.py</code> (runs as <code>python pipes.py &lt; data.json</code>).
           </span>
         </div>
+        <div class="settings-field long-input">
+          <label>Webhook URL (optional)</label>
+          <div>${renderField(
+            { key: "hook.webhook_url", label: "", kind: "text", placeholder: "https://… — POSTs the recording JSON after each transcription" },
+            this.config.hook.webhook_url ?? "",
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Optional. Phoneme sends an HTTP POST with the recording's JSON payload to this URL after each transcription (alongside any Integration Scripts above). Leave blank to disable. Honors the <b>Run hooks after transcription</b> toggle below.
+          </span>
+        </div>
         <div class="settings-field">
           <label>Timeout (seconds)</label>
           <div>${renderField(

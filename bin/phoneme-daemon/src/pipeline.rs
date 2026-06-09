@@ -602,7 +602,9 @@ pub async fn run(
         exit_code: final_exit_code,
     });
 
-    if let Some(url) = &cfg.hook.webhook_url {
+    // Only POST when a non-blank URL is configured — an empty string (e.g. the
+    // Settings field was filled then cleared) must not fire a request per run.
+    if let Some(url) = cfg.hook.webhook_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
         if let Err(e) = state
             .webhook
             .post(url, Duration::from_secs(cfg.hook.timeout_secs), &payload)
