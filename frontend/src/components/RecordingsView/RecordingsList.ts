@@ -424,7 +424,7 @@ export class RecordingsListElement extends LitElement {
     const colLabels: Record<string, string> = {
       day: "Day",
       time: "Time",
-      duration: "Dur",
+      duration: "Duration",
       status: "Status",
       tags: "Tags",
       model: "Transcript Model",

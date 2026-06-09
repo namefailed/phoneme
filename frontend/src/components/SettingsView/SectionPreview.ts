@@ -36,6 +36,10 @@ export class SectionPreview {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private container: HTMLElement, private config: any) {
+    // Render synchronously so the section appears in order with the other
+    // (synchronous) sections instead of popping in after the async model-list
+    // fetch. The downloaded-model list then fills in via init().
+    this.render();
     void this.init();
   }
 

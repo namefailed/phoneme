@@ -74,6 +74,9 @@ export class RecordingDetail {
     const hookEl = this.container.querySelector<HTMLElement>("#detail-hook-exit");
     if (hookEl) hookEl.textContent = `Hook exit: ${r.hook_exit_code ?? "—"}`;
 
+    const modelsEl = this.container.querySelector<HTMLElement>("#detail-models");
+    if (modelsEl) modelsEl.innerHTML = modelsLine(r);
+
     const statsEl = this.container.querySelector<HTMLElement>("#detail-stats");
     if (statsEl) statsEl.textContent = wordCountSummary(r.transcript ?? "");
 
@@ -144,6 +147,7 @@ export class RecordingDetail {
         </div>
         <div class="detail-footer">
           <span id="detail-stats">${stats}</span>
+          <span id="detail-models">${modelsLine(r)}</span>
           <span id="detail-hook-exit">Hook exit: ${r.hook_exit_code ?? "—"}</span>
           <span>${escapeHtml(r.audio_path)}</span>
         </div>
@@ -228,4 +232,12 @@ function formatDate(iso: string): string {
   const dateObj = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   const timeObj = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${dateObj} at ${timeObj}`;
+}
+
+/** Compact "transcription · cleanup" model line for the detail footer. */
+function modelsLine(r: Recording): string {
+  const parts: string[] = [];
+  if (r.model) parts.push(`🗣 ${escapeHtml(r.model)}`);
+  if (r.cleanup_model) parts.push(`✨ ${escapeHtml(r.cleanup_model)}`);
+  return parts.join("  ·  ");
 }

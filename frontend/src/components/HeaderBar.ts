@@ -325,10 +325,10 @@ export class HeaderBarElement extends LitElement {
   render() {
     const f = this.filterState;
     const isCapturing = this.isRecording || this.isMeeting;
-    const actionLabel = this.isMeeting ? "⏹ End Meeting" 
-                      : this.isRecording ? "⏹ Stop" 
-                      : this.recordMode === "meeting" ? "👥 Meeting" 
-                      : "🔴 Record";
+    const actionLabel = this.isMeeting ? "⏹ End Meeting"
+                      : this.isRecording ? "⏹ Stop"
+                      : this.recordMode === "meeting" ? "👥 Meeting"
+                      : "🎙️ Record";
     const actionTitle = this.recordMode === "meeting"
       ? "Meeting Mode: record your mic and the system audio as two linked tracks"
       : "Start/Stop a single recording (or use your global hotkey)";
@@ -386,11 +386,11 @@ export class HeaderBarElement extends LitElement {
               style="position:absolute; top:calc(100% + 4px); right:0; z-index:60; min-width:220px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border, rgba(255,255,255,0.12)); border-radius:8px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.45);">
               <button class="hb-mode-item" @click=${(e: Event) => this.selectMode('recording', e)}
                 style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--fg-default); padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px;">
-                🔴 Single recording<span style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
+                🎙️ Voice note<span style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
               </button>
               <button class="hb-mode-item" @click=${(e: Event) => this.selectMode('meeting', e)}
                 style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--fg-default); padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px;">
-                👥 Meeting (mic + system)<span style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
+                👥 Meeting<span style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
               </button>
             </div>
           </div>
