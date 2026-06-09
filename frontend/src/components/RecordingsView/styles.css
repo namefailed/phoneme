@@ -858,23 +858,50 @@ ph-sidebar {
 }
 @keyframes queueSpin { to { transform: rotate(360deg); } }
 
-/* Meeting rename: inline emoji picker shown next to the name input. */
-.rec-group-iconpick {
+/* Meeting rename: an icon button + name input; clicking the icon opens a popover
+   grid to pick a new icon. */
+.rec-rename {
+  position: relative;
   display: inline-flex;
-  gap: 2px;
-  flex-wrap: wrap;
   align-items: center;
-  margin-right: 6px;
-  max-width: 200px;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.rec-icon-btn {
+  flex: 0 0 auto;
+  background: var(--bg-deep, #11111b);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 3px 5px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.rec-icon-btn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.rec-icon-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 8px;
+  background: var(--bg-elevated, #1e1e2e);
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.12));
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 .rec-icon-choice {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
-  padding: 2px 3px;
+  padding: 4px;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .rec-icon-choice:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }

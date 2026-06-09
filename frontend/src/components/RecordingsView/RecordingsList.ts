@@ -43,8 +43,11 @@ function saveExpandedMeetings(set: Set<string>): void {
  *  is in the catalog). Keyed by meeting id. */
 const LS_MEETING_ICONS = "phoneme.meetingIcons";
 const DEFAULT_MEETING_ICON = "👥";
-/** Emoji choices offered when renaming a meeting. */
-const MEETING_ICON_CHOICES = ["👥", "🎙️", "📞", "💼", "🧑‍🏫", "🎧", "🗣️", "📅", "🤝", "🎬", "📋", "💡"];
+/** Emoji choices offered in the meeting icon picker. */
+const MEETING_ICON_CHOICES = [
+  "👥", "🎙️", "📞", "💼", "🧑‍🏫", "🎧", "🗣️", "📅", "🤝", "🎬", "📋", "💡",
+  "📝", "🧠", "⭐", "🔥", "🎯", "🚀", "🐞", "🔧", "💬", "📣", "🎓", "🩺",
+];
 function loadMeetingIcons(): Record<string, string> {
   try {
     const raw = localStorage.getItem(LS_MEETING_ICONS);
@@ -92,6 +95,7 @@ export class RecordingsListElement extends LitElement {
   @state() private editingMeetingId: string | null = null;
   @state() private editingName = "";
   @state() private editingIcon = DEFAULT_MEETING_ICON;
+  @state() private iconPickerOpen = false;
   
   private offset = 0;
   private readonly pageSize = 100;
@@ -248,6 +252,7 @@ export class RecordingsListElement extends LitElement {
     this.editingMeetingId = meetingId;
     this.editingName = currentName;
     this.editingIcon = meetingIcon(meetingId);
+    this.iconPickerOpen = false;
     this.updateComplete.then(() => {
       const input = this.querySelector(`.rec-group-input[data-session="${meetingId}"]`) as HTMLInputElement | null;
       if (input) {
@@ -269,6 +274,7 @@ export class RecordingsListElement extends LitElement {
       e.preventDefault();
       this.editingMeetingId = null;
       this.editingName = "";
+      this.iconPickerOpen = false;
       this.requestUpdate();
     }
   }
@@ -675,25 +681,52 @@ export class RecordingsListElement extends LitElement {
           </span>
           <span class="rec-group-meta" style="margin-right: 8px;">${day} · ${time}</span>
           ${isEditing ? html`
-            <span class="rec-group-iconpick" @click=${(e: Event) => e.stopPropagation()}>
-              ${MEETING_ICON_CHOICES.map((ic) => html`
-                <button
-                  class="rec-icon-choice ${ic === this.editingIcon ? "sel" : ""}"
-                  title="Use ${ic}"
-                  @click=${(e: Event) => { e.stopPropagation(); this.editingIcon = ic; this.requestUpdate(); }}
-                >${ic}</button>`)}
+            <span class="rec-rename" @click=${(e: Event) => e.stopPropagation()}>
+              <button
+                class="rec-icon-btn"
+                title="Change icon"
+                @click=${(e: Event) => { e.stopPropagation(); this.iconPickerOpen = !this.iconPickerOpen; this.requestUpdate(); }}
+              >${this.editingIcon}</button>
+              <input
+                type="text"
+                class="rec-group-input"
+                data-session="${meetingId}"
+                placeholder="Meeting name"
+                style="background: var(--bg-deep, #11111b); color: var(--fg-default); border: 1px solid var(--accent, #89b4fa); border-radius: 4px; padding: 2px 6px; font-size: 13px; font-family: inherit; font-weight: 600; outline: none; flex: 1; min-width: 120px;"
+                .value=${this.editingName}
+                @click=${(e: Event) => e.stopPropagation()}
+                @dblclick=${(e: Event) => e.stopPropagation()}
+                @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, meetingId)}
+                @blur=${(e: FocusEvent) => {
+                  // Keep editing if focus moved within the rename widget (e.g.
+                  // clicking the icon button or a picker choice); only save when
+                  // focus leaves it entirely.
+                  const rel = e.relatedTarget as HTMLElement | null;
+                  if (rel && rel.closest && rel.closest(".rec-rename")) return;
+                  this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value);
+                }}
+              />
+              ${this.iconPickerOpen ? html`
+                <div class="rec-icon-popover" @click=${(e: Event) => e.stopPropagation()}>
+                  ${MEETING_ICON_CHOICES.map((ic) => html`
+                    <button
+                      class="rec-icon-choice ${ic === this.editingIcon ? "sel" : ""}"
+                      title="Use ${ic}"
+                      @click=${(e: Event) => {
+                        e.stopPropagation();
+                        this.editingIcon = ic;
+                        this.iconPickerOpen = false;
+                        this.requestUpdate();
+                        // Return focus to the name field so Enter/blur still saves.
+                        this.updateComplete.then(() => {
+                          const input = this.querySelector(`.rec-group-input[data-session="${meetingId}"]`) as HTMLInputElement | null;
+                          input?.focus();
+                        });
+                      }}
+                    >${ic}</button>`)}
+                </div>
+              ` : ""}
             </span>
-            <input
-              type="text"
-              class="rec-group-input"
-              data-session="${meetingId}"
-              style="background: var(--bg-deep, #11111b); color: var(--fg-default); border: 1px solid var(--accent, #89b4fa); border-radius: 4px; padding: 2px 6px; font-size: 13px; font-family: inherit; font-weight: 600; outline: none; margin-left: -4px; flex: 1; min-width: 120px;"
-              .value=${this.editingName}
-              @click=${(e: Event) => e.stopPropagation()}
-              @dblclick=${(e: Event) => e.stopPropagation()}
-              @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, meetingId)}
-              @blur=${(e: FocusEvent) => this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value)}
-            />
           ` : html`
             <span class="rec-group-title"><span style="margin-right: 5px;">${meetingIcon(meetingId)}</span>${meetingName}</span>
             <button
