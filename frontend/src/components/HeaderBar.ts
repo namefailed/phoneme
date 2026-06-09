@@ -382,15 +382,29 @@ export class HeaderBarElement extends LitElement {
               title="Switch capture mode (single recording or meeting)" ?disabled=${isCapturing} 
               style="padding:6px 8px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid rgba(0,0,0,0.25);"
               @click=${this.toggleModeMenu}>▾</button>
-            <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen} 
-              style="position:absolute; top:calc(100% + 4px); right:0; z-index:60; min-width:220px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border, rgba(255,255,255,0.12)); border-radius:8px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.45);">
-              <button class="hb-mode-item" @click=${(e: Event) => this.selectMode('recording', e)}
-                style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--fg-default); padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px;">
-                🎙️ Voice note<span style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
+            <style>
+              .hb-mode-menu { animation: hbMenuIn 0.12s ease-out; }
+              @keyframes hbMenuIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+              .hb-mode-item {
+                display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                width: 100%; text-align: left; background: none; border: none;
+                color: var(--fg-default); padding: 8px 10px; border-radius: 7px;
+                cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
+              }
+              .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+              .hb-mode-item.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+              .hb-mode-item .hb-mode-label { display: flex; align-items: center; gap: 9px; }
+              .hb-mode-item .hb-mode-check { color: var(--accent); font-weight: 700; }
+            </style>
+            <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+              <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
+                <span class="hb-mode-label">🎙️ Voice note</span>
+                <span class="hb-mode-check" style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
               </button>
-              <button class="hb-mode-item" @click=${(e: Event) => this.selectMode('meeting', e)}
-                style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--fg-default); padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px;">
-                👥 Meeting<span style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
+              <button class="hb-mode-item ${this.recordMode === 'meeting' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'meeting'} @click=${(e: Event) => this.selectMode('meeting', e)}>
+                <span class="hb-mode-label">👥 Meeting</span>
+                <span class="hb-mode-check" style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
               </button>
             </div>
           </div>

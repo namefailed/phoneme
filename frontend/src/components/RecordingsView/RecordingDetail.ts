@@ -202,9 +202,9 @@ export class RecordingDetail {
         return;
       }
       peekEl.innerHTML = `
-        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">Original (machine) transcript — read-only</div>
+        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">Raw transcript — straight from the model, <b>before</b> AI cleanup (read-only)</div>
         <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(original)}</div>
-        <button class="inline-button" id="restore-original" style="margin-top: 10px;">Restore this version</button>`;
+        <button class="inline-button" id="restore-original" style="margin-top: 10px;" title="Replace the current (cleaned/edited) transcript with this raw version">Restore raw transcript</button>`;
       peekEl.querySelector("#restore-original")?.addEventListener("click", async () => {
         await updateTranscript(r.id, original);
         showToast("Transcript restored to the original.", "success");
