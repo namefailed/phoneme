@@ -372,6 +372,23 @@ impl InboxQueue {
         Ok(removed)
     }
 
+    /// Remove every payload quarantined in `failed/` (user-initiated "dismiss
+    /// failed"). The `failed/` folder only ever grows — permanent transcription
+    /// errors, hook failures, corrupt payloads, and user cancellations all land
+    /// here and nothing else empties it — so this is the way to acknowledge and
+    /// clear them. The catalog rows (with their `transcribe_failed`/`hook_failed`
+    /// status) are untouched; only the inbox quarantine is cleared. Returns how
+    /// many files were removed.
+    pub async fn clear_failed(&self) -> Result<usize> {
+        let mut removed = 0;
+        for path in read_json_entries_sorted(&self.root.join("failed")).await? {
+            if fs::remove_file(&path).await.is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     /// Count files in each inbox subdirectory.
     pub async fn counts(&self) -> Result<InboxCounts> {
         Ok(InboxCounts {

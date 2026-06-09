@@ -251,6 +251,8 @@ pub fn run() {
             commands::reorder_queue,
             commands::set_queue_paused,
             commands::queue_paused,
+            commands::queue_counts,
+            commands::clear_failed,
             commands::cancel_all_queued,
             commands::cancel_processing,
             commands::run_doctor,

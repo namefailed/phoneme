@@ -246,6 +246,23 @@ export async function queuePaused(): Promise<boolean> {
   return r.paused;
 }
 
+/** Inbox depth counts. `failed` = items quarantined in the inbox `failed/`
+ *  folder (permanent transcription/hook errors, corrupt payloads, cancels). */
+export type QueueCounts = { pending: number; processing: number; done: number; failed: number };
+
+/** Fetch the current inbox depth counts on demand (accurate on a fresh load,
+ *  unlike the event-only path which a webview reload would miss). */
+export async function getQueueCounts(): Promise<QueueCounts> {
+  return await tauriInvoke<QueueCounts>("queue_counts");
+}
+
+/** Clear the inbox `failed/` quarantine ("dismiss failed"). Returns the count
+ *  removed. Catalog rows keep their failed status — only the inbox is emptied. */
+export async function clearFailed(): Promise<number> {
+  const r = await tauriInvoke<{ removed: number }>("clear_failed");
+  return r.removed;
+}
+
 /** Remove ALL still-pending items from the queue. Returns how many were removed. */
 export async function cancelAllQueued(): Promise<number> {
   const r = await tauriInvoke<{ removed: number }>("cancel_all_queued");

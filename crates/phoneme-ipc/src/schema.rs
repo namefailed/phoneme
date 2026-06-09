@@ -198,6 +198,15 @@ pub enum Request {
     },
     /// Query whether the queue is currently paused.
     QueuePaused,
+    /// Return the inbox depth counts (`pending`, `processing`, `done`,
+    /// `failed`). The same numbers `QueueDepthChanged` carries, fetchable on
+    /// demand so a freshly-loaded UI shows accurate counts (e.g. the failed
+    /// count) without waiting for the next queue-change event.
+    QueueCounts,
+    /// Remove every payload quarantined in the inbox `failed/` folder
+    /// ("dismiss failed"). Returns how many were cleared. Catalog rows are
+    /// untouched — only the inbox quarantine is emptied.
+    ClearFailed,
     /// Remove ALL still-pending items from the queue at once ("clear queue").
     /// The currently-processing item is left untouched.
     CancelAllQueued,

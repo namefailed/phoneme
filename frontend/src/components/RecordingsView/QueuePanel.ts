@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, type QueueEntry } from "../../services/ipc";
+import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, getQueueCounts, clearFailed, type QueueEntry } from "../../services/ipc";
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
 import { formatTime, formatDuration } from "../../utils/format";
 import { showToast } from "../../utils/toast";
@@ -23,6 +23,11 @@ export class QueuePanelElement extends LitElement {
   @state() private listHeight: number | null = null;
   /** Whether the daemon's queue worker is paused (gated from claiming new work). */
   @state() private paused = false;
+  /** Count of payloads quarantined in the inbox `failed/` folder (permanent
+   *  transcription/hook errors, corrupt payloads, cancels). 0 hides the badge. */
+  @state() private failed = 0;
+  /** True while a clear-failed request is in flight (disables the badge). */
+  @state() private clearingFailed = false;
   private unsub: (() => void) | null = null;
   private pollTimer: number | null = null;
 
@@ -51,6 +56,11 @@ export class QueuePanelElement extends LitElement {
     this.listHeight = Number.isFinite(h) && h >= QueuePanelElement.MIN_H ? h : null;
     void this.load();
     this.unsub = await subscribe((event: DaemonEvent) => {
+      // The depth event carries the failed count directly — reflect it at once
+      // (load() also reconciles it, but this avoids a round-trip on every tick).
+      if (event.event === "queue_depth_changed") {
+        this.failed = event.failed;
+      }
       if (event.event === "pipeline_stage_changed") {
         void this.onStageChanged(event.id, event.stage);
         return;
@@ -100,6 +110,33 @@ export class QueuePanelElement extends LitElement {
       this.paused = await queuePaused();
     } catch {
       /* leave last-known paused state */
+    }
+    try {
+      // Fetch counts on demand so the failed badge is accurate on a fresh load
+      // (the depth event fires only on queue changes, which a reload misses).
+      this.failed = (await getQueueCounts()).failed;
+    } catch {
+      /* leave last-known failed count */
+    }
+  }
+
+  /** Clear the inbox `failed/` quarantine after confirmation. */
+  private async clearFailedItems(e: Event) {
+    e.stopPropagation();
+    if (this.failed === 0 || this.clearingFailed) return;
+    const n = this.failed;
+    if (!window.confirm(`Dismiss ${n} failed item${n === 1 ? "" : "s"} from the queue? This clears the failed marker only — the recordings and their transcripts are untouched.`)) {
+      return;
+    }
+    this.clearingFailed = true;
+    try {
+      const removed = await clearFailed();
+      this.failed = 0;
+      showToast(`Cleared ${removed} failed item${removed === 1 ? "" : "s"}`, "info");
+    } catch (err) {
+      showToast(`Couldn't clear failed: ${errText(err)}`, "error");
+    } finally {
+      this.clearingFailed = false;
     }
   }
 
@@ -255,6 +292,11 @@ export class QueuePanelElement extends LitElement {
           ${items.length
             ? html`<span class="queue-count">${pending}${active ? ` +${active}⟳` : ""}</span>`
             : html`<span class="queue-count ${this.paused ? "paused" : "idle"}">${this.paused ? "paused" : "idle"}</span>`}
+          ${this.failed > 0
+            ? html`<button class="queue-failed" ?disabled=${this.clearingFailed}
+                title=${`${this.failed} item${this.failed === 1 ? "" : "s"} failed to transcribe — click to dismiss (transcripts are kept)`}
+                @click=${(e: Event) => this.clearFailedItems(e)}>⚠ ${this.failed} failed</button>`
+            : null}
           ${!this.collapsed
             ? html`
                 <span class="queue-actions">

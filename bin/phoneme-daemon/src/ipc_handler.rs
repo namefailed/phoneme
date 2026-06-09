@@ -709,6 +709,29 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::QueuePaused => {
             Response::Ok(serde_json::json!({ "paused": state.inbox.is_paused().await }))
         }
+        Request::QueueCounts => match state.inbox.counts().await {
+            Ok(c) => Response::Ok(serde_json::json!({
+                "pending": c.pending,
+                "processing": c.processing,
+                "done": c.done,
+                "failed": c.failed,
+            })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::ClearFailed => match state.inbox.clear_failed().await {
+            Ok(removed) => {
+                // Refresh the depth so the panel's failed badge clears at once.
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::json!({ "removed": removed }))
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::CancelProcessing { id } => {
             // Signal the in-flight cancellation token only if `id` is the item
             // currently processing; the worker + pipeline finalize the rest.

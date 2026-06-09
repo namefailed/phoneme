@@ -1068,6 +1068,23 @@ ph-sidebar {
 }
 .queue-count.idle { background: transparent; color: var(--fg-faded); font-weight: 500; }
 .queue-count.paused { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+/* Failed-items badge: a clickable chip that dismisses the inbox failed/ quarantine. */
+.queue-failed {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  padding: 1px 7px;
+  margin-left: 4px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  color: var(--err);
+  transition: background 0.12s ease;
+}
+.queue-failed:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 30%, transparent); }
+.queue-failed:disabled { opacity: 0.6; cursor: default; }
 /* Pause / clear controls on the right of the queue header. */
 .queue-actions {
   display: flex;

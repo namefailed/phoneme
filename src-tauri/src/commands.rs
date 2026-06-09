@@ -340,6 +340,19 @@ pub async fn queue_paused(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::QueuePaused).await
 }
 
+/// Return inbox depth counts (pending/processing/done/failed) on demand, so a
+/// freshly-loaded UI shows accurate counts without waiting for an event.
+#[tauri::command]
+pub async fn queue_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::QueueCounts).await
+}
+
+/// Clear the inbox `failed/` quarantine ("dismiss failed"). Returns the count.
+#[tauri::command]
+pub async fn clear_failed(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ClearFailed).await
+}
+
 /// Remove ALL still-pending items from the queue ("clear queue").
 #[tauri::command]
 pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {
