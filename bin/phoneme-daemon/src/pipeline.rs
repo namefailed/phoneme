@@ -196,8 +196,15 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
 
-    // Record which post-processing model was used and whether diarization was applied
-    let diarized = cfg.diarization.provider != phoneme_core::config::DiarizationBackend::None;
+    // Record which post-processing model was used and whether diarization was
+    // actually applied. Diarization is only meaningfully "applied" when it
+    // produced multi-speaker labels — both the local diarizer (`assign_speakers`)
+    // and the cloud providers emit a "[Speaker N]: " prefix and fall back to
+    // plain, unlabeled text when diarization is off, fails, or finds ≤1 speaker.
+    // So a recording is diarized iff its raw (pre-cleanup) transcript carries
+    // those labels — not merely because the setting is enabled. (Check the raw
+    // transcript: LLM cleanup may strip the labels from the live version.)
+    let diarized = raw_transcript.contains("[Speaker ");
     state
         .catalog
         .update_processing_meta(&id, cleanup_model.as_deref(), diarized)

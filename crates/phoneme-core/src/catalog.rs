@@ -163,6 +163,7 @@ impl Catalog {
         sqlx::query(
             r#"UPDATE recordings
                SET transcript = ?, original_transcript = ?, clean_transcript = ?, model = ?,
+                   user_edited = 0,
                    transcribed_at = datetime('now'), updated_at = datetime('now')
                WHERE id = ?"#,
         )
