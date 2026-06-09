@@ -809,13 +809,21 @@ ph-sidebar {
   margin-left: 4px;
 }
 .queue-action {
+  /* Fixed-size centered box so the pause symbol and the trash emoji (which have
+     different intrinsic glyph metrics) sit on the same baseline and don't look
+     misaligned next to each other. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
   background: none;
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
-  padding: 3px 5px;
+  padding: 0;
   border-radius: 6px;
   transition: background 0.12s ease, color 0.12s ease;
 }

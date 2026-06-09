@@ -15,6 +15,9 @@ import "./styles.css";
 const LS_SPLIT = "phoneme.layout.splitPercent";
 const LS_SIDEBAR = "phoneme.layout.sidebarOpen";
 const LS_SIDEBAR_WIDTH = "phoneme.layout.sidebarWidth";
+/** Last-selected recording (or `session:<id>`), restored on a soft reload.
+ *  Cleared by "Reset interface preferences" like the other phoneme.* keys. */
+const LS_SELECTED = "phoneme.layout.selectedId";
 const SIDEBAR_MIN = 160;
 const SIDEBAR_MAX = 480;
 
@@ -46,6 +49,8 @@ export class RecordingsView {
   private sidebarVisible = readStoredSidebar();
   private sidebarWidth = readStoredSidebarWidth();
   private unsub: (() => void) | null = null;
+  /** Guards the one-time "restore last selection on load" pass in refresh(). */
+  private restoredSelection = false;
   private splitter: Splitter;
   private keydownHandler: (e: KeyboardEvent) => void;
   private selectHandler: ((e: Event) => void) | null = null;
@@ -120,12 +125,31 @@ export class RecordingsView {
 
   async refresh() {
     await this.list.refresh();
+
+    // One-time: restore the last-selected recording across a soft reload, but
+    // only if nothing is selected yet and the stored id is still in the list.
+    if (!this.restoredSelection) {
+      this.restoredSelection = true;
+      const stored = (() => { try { return localStorage.getItem(LS_SELECTED); } catch { return null; } })();
+      if (stored && this.state.get().selectedId == null) {
+        const recs = this.state.get().recordings;
+        const exists = stored.startsWith("session:")
+          ? recs.some(r => r.meeting_id === stored.slice(8))
+          : recs.some(r => r.id === stored);
+        if (exists) {
+          this.onSelect(stored);
+          return;
+        }
+      }
+    }
+
     const s = this.state.get();
     const selectedId = s.selectedId;
     if (selectedId && !s.recordings.some(r => r.id === selectedId || r.meeting_id === selectedId.replace("session:", ""))) {
       this.state.set({ ...s, selectedId: null });
       this.detail.clear();
       this.mergedDetail.meetingId = "";
+      try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
     } else if (selectedId && !this.detail.hasDirtyEdits()) {
       if (selectedId.startsWith("session:")) {
         this.mergedDetail.meetingId = selectedId.substring(8);
@@ -211,6 +235,7 @@ export class RecordingsView {
 
   private onSelect(id: string) {
     this.state.set({ ...this.state.get(), selectedId: id });
+    try { localStorage.setItem(LS_SELECTED, id); } catch { /* private mode */ }
     const singleContainer = this.container.querySelector<HTMLElement>("#rv-single-detail")!;
     if (id.startsWith("session:")) {
       singleContainer.style.display = "none";
