@@ -160,6 +160,9 @@ export class SettingsViewElement extends LitElement {
       switch (this.activeTab) {
         case "transcription":
           new SectionWhisper(createSubHost(), this.config);
+          // Live Preview sits directly under Whisper — it's a transcription
+          // concern and was previously only reachable via search.
+          new SectionPreview(createSubHost(), this.config);
           new SectionDiarization(createSubHost(), this.config);
           break;
         case "capture":
