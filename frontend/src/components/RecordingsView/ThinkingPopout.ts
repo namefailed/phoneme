@@ -156,20 +156,39 @@ export class ThinkingPopoutElement extends LitElement {
     document.addEventListener("mouseup", onUp);
   }
 
-  /** Position the panel near the FAB. Applied imperatively (per-property) rather
-   *  than via a reactive `style=` binding so the user's resize (inline
-   *  width/height) is never wiped on re-render. Top-anchored so dragging the
-   *  resize corner grows the panel down/right naturally. */
+  /** Position the panel near the FAB without ever covering it or running off the
+   *  screen. It opens BELOW the button when there's room, otherwise ABOVE, using
+   *  the panel's actual size (so it still fits after a resize), and clamps to the
+   *  viewport so nothing is cut off at the edges. Applied imperatively
+   *  (per-property) so the user's resize (inline width/height) survives
+   *  re-renders. The FAB is 40px square. */
   private applyPosition(panel: HTMLElement) {
     const { x, y } = this.fabXY();
-    const w = panel.offsetWidth || 360;
-    const leftAnchored = x + 40 - w;
-    const left = leftAnchored >= 8
-      ? Math.min(leftAnchored, window.innerWidth - w - 8)
-      : Math.min(x, window.innerWidth - w - 8);
-    const top = Math.max(8, Math.min(y - 24, window.innerHeight - 280));
+    const w = panel.offsetWidth || 380;
+    const h = panel.offsetHeight || 420;
+    const m = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Horizontal: keep the panel's right edge near the FAB (extends left); open
+    // rightward only if the FAB hugs the left edge. Clamp on-screen.
+    let left = x + 40 - w;
+    if (left < m) left = x;
+    left = Math.max(m, Math.min(left, vw - w - m));
+
+    // Vertical: below the FAB if it fits there, else above; if neither fits
+    // (very tall panel) pin to the bottom. Never overlaps the FAB unless the
+    // panel is taller than the whole viewport.
+    const spaceBelow = vh - (y + 40) - m;
+    const spaceAbove = y - m;
+    let top: number;
+    if (h <= spaceBelow) top = y + 48;
+    else if (h <= spaceAbove) top = y - h - 8;
+    else top = vh - h - m;
+    top = Math.max(m, Math.min(top, vh - h - m));
+
     panel.style.position = "fixed";
-    panel.style.left = `${Math.max(8, left)}px`;
+    panel.style.left = `${left}px`;
     panel.style.top = `${top}px`;
     panel.style.right = "auto";
     panel.style.bottom = "auto";
