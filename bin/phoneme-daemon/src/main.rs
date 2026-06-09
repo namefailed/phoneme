@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
     // before run_preview kills its child, orphaning the 2nd whisper-server. Not
     // in the crash-detection select below: a preview-server crash must not take
     // down the daemon (preview is non-critical).
-    let mut preview_supervisor_handle = tokio::spawn(async move {
+    let preview_supervisor_handle = tokio::spawn(async move {
         if let Err(e) = whisper_supervisor::run_preview(preview_sup_state, preview_sup_signal).await
         {
             tracing::error!(error = %e, "preview whisper supervisor terminated");
