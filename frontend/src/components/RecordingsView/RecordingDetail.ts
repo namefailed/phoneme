@@ -133,13 +133,13 @@ export class RecordingDetail {
         <div id="actions"></div>
         <div id="tags"></div>
         <div class="transcript-block">
-          <div id="editor"></div>
-          <div class="transcript-history" style="margin-top: 6px;">
+          <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
+          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto;">
             <button class="inline-button" id="view-original">View original transcript</button>
             <div id="original-box" style="display: none; margin-top: 6px;"></div>
           </div>
         </div>
-        <div class="notes-block" style="margin-top: 12px;">
+        <div class="notes-block" style="margin-top: 6px;">
           <div id="notes-editor"></div>
         </div>
         <div class="detail-footer">

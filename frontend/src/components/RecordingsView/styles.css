@@ -281,7 +281,9 @@ mark.search-hit {
   gap: 6px;
 }
 .transcript-block {
-  margin: 0 18px 18px;
+  /* Tighter bottom margin: it sits directly above the notes block, so this is
+     half of the previous gap (paired with notes-block's reduced top margin). */
+  margin: 0 18px 9px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
@@ -291,7 +293,9 @@ mark.search-hit {
   flex-direction: column;
 }
 .notes-block {
-  margin: 0 18px 18px;
+  /* Bottom margin matches transcript-block so the notes→footer gap mirrors the
+     transcript→notes gap (paired with detail-footer's reduced padding-top). */
+  margin: 0 18px 9px;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
@@ -320,7 +324,7 @@ mark.search-hit {
   display: flex;
   gap: 16px;
   border-top: 1px solid var(--border-subtle);
-  padding-top: 10px;
+  padding-top: 6px;
 }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 12px; }
 .tag-chip {
