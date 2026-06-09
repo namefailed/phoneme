@@ -19,6 +19,25 @@ import { groupRecordings, visibleRecordings, trackLabel } from "./grouping";
 import "../shared/styles.css";
 import "./styles.css";
 
+/** Which meeting groups are expanded — remembered across reloads (per device). */
+const LS_EXPANDED_MEETINGS = "phoneme.expandedMeetings";
+function loadExpandedMeetings(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_EXPANDED_MEETINGS);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function saveExpandedMeetings(set: Set<string>): void {
+  try {
+    localStorage.setItem(LS_EXPANDED_MEETINGS, JSON.stringify([...set]));
+  } catch {
+    /* private mode / quota — non-fatal */
+  }
+}
+
 export type RecordingsListState = {
   recordings: Recording[];
   selectedId: string | null;
@@ -50,7 +69,7 @@ export class RecordingsListElement extends LitElement {
 
   private multiSelected = new Set<string>();
   private anchorIndex = -1;
-  private expandedSessions = new Set<string>();
+  private expandedSessions = new Set<string>(loadExpandedMeetings());
 
   private unsubStore: (() => void) | null = null;
   private unsubFilter: (() => void) | null = null;
@@ -327,6 +346,7 @@ export class RecordingsListElement extends LitElement {
     } else {
       this.expandedSessions.add(sid);
     }
+    saveExpandedMeetings(this.expandedSessions);
     this.onSelectCb("session:" + sid);
     this.requestUpdate();
   }
