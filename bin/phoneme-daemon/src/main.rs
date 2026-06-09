@@ -106,6 +106,18 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Second supervisor for the optional dedicated live-preview server. Idles
+    // unless `preview_whisper` is configured as a local bundled model on its own
+    // port; never touches the main server above.
+    let preview_sup_state = state.clone();
+    let preview_sup_signal = state.shutdown.signal.clone();
+    tokio::spawn(async move {
+        if let Err(e) = whisper_supervisor::run_preview(preview_sup_state, preview_sup_signal).await
+        {
+            tracing::error!(error = %e, "preview whisper supervisor terminated");
+        }
+    });
+
     let retention_state = state.clone();
     let retention_shutdown = state.shutdown.signal.clone_receiver();
     tokio::spawn(async move {
