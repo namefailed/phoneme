@@ -14,7 +14,7 @@ export class SectionTray {
       <div class="settings-section">
         <h3>System</h3>
         
-        <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);">
+        <div class="settings-field">
           <label>Software Updates</label>
           <div style="display: flex; align-items: center; gap: 12px;">
             <button class="inline-button" id="check-updates-btn">Check for Updates</button>
