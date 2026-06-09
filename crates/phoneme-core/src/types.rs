@@ -110,6 +110,10 @@ pub struct Recording {
     /// Whether speaker diarization was applied to this recording.
     #[serde(default)]
     pub diarized: bool,
+    /// Whether the user hand-edited the transcript. Independent of `model`,
+    /// which always reflects the transcription model that produced the text.
+    #[serde(default)]
+    pub user_edited: bool,
     /// LLM-generated summary of the transcript, if one has been produced
     /// (on demand or as the final pipeline step). `None` until generated.
     #[serde(default)]

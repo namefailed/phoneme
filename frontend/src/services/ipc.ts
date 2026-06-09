@@ -30,6 +30,8 @@ export type Recording = {
   cleanup_model?: string | null;
   /** Whether speaker diarization was applied */
   diarized?: boolean;
+  /** Whether the user hand-edited the transcript (independent of `model`). */
+  user_edited?: boolean;
   /** LLM-generated summary of the transcript, if one has been produced. */
   summary?: string | null;
   /** The LLM model used to produce `summary`, if any. */

@@ -224,11 +224,14 @@ impl Catalog {
     }
 
     /// Update the transcript from a manual user edit, preserving
-    /// `original_transcript` (the machine output) so the edit can be reverted.
+    /// `original_transcript`/`clean_transcript` so the edit can be reverted.
+    /// Sets the `user_edited` flag and — crucially — leaves `model` untouched so
+    /// the "Transcript Model" column keeps showing the transcription model that
+    /// actually produced the text (the "Edited" column surfaces the hand edit).
     pub async fn update_user_transcript(&self, id: &RecordingId, transcript: &str) -> Result<()> {
         sqlx::query(
             r#"UPDATE recordings
-               SET transcript = ?, model = 'user-edit', updated_at = datetime('now')
+               SET transcript = ?, user_edited = 1, updated_at = datetime('now')
                WHERE id = ?"#,
         )
         .bind(transcript)
@@ -818,6 +821,7 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         in_place: row.try_get("in_place").unwrap_or(false),
         cleanup_model: row.try_get("cleanup_model").unwrap_or(None),
         diarized: row.try_get("diarized").unwrap_or(false),
+        user_edited: row.try_get("user_edited").unwrap_or(false),
         summary: row.try_get("summary").unwrap_or(None),
         summary_model: row.try_get("summary_model").unwrap_or(None),
         tags: Vec::new(),
@@ -918,6 +922,7 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1060,6 +1065,7 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1119,6 +1125,7 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1174,6 +1181,7 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1251,6 +1259,7 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1294,6 +1303,7 @@ mod tests {
             in_place: false,
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],

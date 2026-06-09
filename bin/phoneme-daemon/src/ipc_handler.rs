@@ -1212,6 +1212,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         track: None,
         cleanup_model: None,
         diarized: false,
+        user_edited: false,
         summary: None,
         summary_model: None,
         tags: vec![],

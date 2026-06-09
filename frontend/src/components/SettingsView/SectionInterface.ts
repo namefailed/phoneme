@@ -9,7 +9,9 @@ const COLUMN_CATALOG: { value: string; label: string }[] = [
   { value: "tags", label: "Tags" },
   { value: "model", label: "Transcription Model" },
   { value: "cleanup_model", label: "Post-Processing Model" },
+  { value: "summary_model", label: "Summary Model" },
   { value: "diarized", label: "Diarized" },
+  { value: "user_edited", label: "Edited" },
   { value: "transcript", label: "Transcript Snippet" },
 ];
 

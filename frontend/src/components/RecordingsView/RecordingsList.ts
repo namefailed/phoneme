@@ -406,7 +406,9 @@ export class RecordingsListElement extends LitElement {
         tags: "100px",
         model: "120px",
         cleanup_model: "120px",
+        summary_model: "120px",
         diarized: "60px",
+        user_edited: "60px",
         transcript: "1fr",
       };
       if (!activeWidths || activeWidths.length !== visibleCols.length) {
@@ -429,7 +431,9 @@ export class RecordingsListElement extends LitElement {
       tags: "Tags",
       model: "Transcript Model",
       cleanup_model: "Post-Process Model",
+      summary_model: "Summary Model",
       diarized: "Diarized",
+      user_edited: "Edited",
       transcript: "Transcript",
     };
 
@@ -539,6 +543,8 @@ export class RecordingsListElement extends LitElement {
       tags: html`<span class="rec-tags" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.tags?.map((t: any) => t.name).join(", ") || ""}</span>`,
       model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,
       cleanup_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.cleanup_model || ""}</span>`,
+      summary_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.summary_model || ""}</span>`,
+      user_edited: html`<span class="rec-edited" style="color: var(--fg-muted); text-align: center; display: block;" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? "✓" : ""}</span>`,
       diarized: html`<span class="rec-diarized" style="color: var(--fg-muted); text-align: center; display: block;">${r.diarized ? "✓" : ""}</span>`,
       transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };

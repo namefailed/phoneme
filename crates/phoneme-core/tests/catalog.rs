@@ -27,6 +27,7 @@ fn sample_recording(id: RecordingId) -> Recording {
         track: None,
         cleanup_model: None,
         diarized: false,
+        user_edited: false,
         summary: None,
         summary_model: None,
         tags: vec![],
@@ -796,10 +797,11 @@ async fn user_edit_preserves_original_transcript() {
         Some("edited by user"),
         "live transcript must reflect the user edit"
     );
+    assert!(got.user_edited, "user_edited flag must be set after a hand edit");
     assert_eq!(
         got.model.as_deref(),
-        Some("user-edit"),
-        "model must be set to 'user-edit'"
+        Some("m"),
+        "model must keep the transcription model, not be clobbered by the edit"
     );
 
     let original = catalog.get_original_transcript(&rec.id).await.unwrap();
