@@ -616,3 +616,7 @@ pub async fn run(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "pipeline_test.rs"]
+mod pipeline_test;
