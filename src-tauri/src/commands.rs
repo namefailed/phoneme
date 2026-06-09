@@ -247,6 +247,19 @@ pub async fn refire_hook(
     forward(&bridge, Request::RefireHook { id, command }).await
 }
 
+/// Re-run only the LLM post-processing ("cleanup") step on a recording's stored
+/// transcript, without re-transcribing the audio. `model` optionally overrides
+/// the configured cleanup model for this one run.
+#[tauri::command]
+pub async fn rerun_cleanup(
+    bridge: Br<'_>,
+    id: String,
+    model: Option<String>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::RerunCleanup { id, model }).await
+}
+
 /// Manually update the transcript text for a specific recording.
 #[tauri::command]
 pub async fn update_transcript(

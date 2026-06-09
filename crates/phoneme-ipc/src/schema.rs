@@ -81,6 +81,18 @@ pub enum Request {
         #[serde(default)]
         command: Option<String>,
     },
+    /// Re-run ONLY the LLM post-processing ("cleanup") step on a recording's
+    /// already-stored transcript — without re-transcribing the audio. The
+    /// preserved original (machine) transcript is the input, so cleanup is
+    /// always idempotent and can be re-run against the same baseline; the
+    /// resulting text replaces the live transcript while the original is left
+    /// untouched. `model` optionally overrides the configured cleanup model for
+    /// this one run only (never persisted to config).
+    RerunCleanup {
+        id: RecordingId,
+        #[serde(default)]
+        model: Option<String>,
+    },
     UpdateTranscript {
         id: RecordingId,
         text: String,

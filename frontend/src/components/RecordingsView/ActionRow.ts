@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { deleteRecording, refireHook, retranscribeRecording } from "../../services/ipc";
+import { deleteRecording, refireHook, retranscribeRecording, rerunCleanup } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -11,6 +11,9 @@ export type ActionRowCallbacks = {
   getTranscript: () => string;
   getAudioPath: () => string;
 };
+
+/** Which step the unified "Re-run…" menu is currently configured to perform. */
+type RerunStep = "transcribe" | "cleanup" | "hook";
 
 @customElement('ph-action-row')
 export class ActionRowElement extends LitElement {
@@ -27,9 +30,17 @@ export class ActionRowElement extends LitElement {
   @state() private availableModels: { value: string; label: string }[] = [];
   @state() private selectedModel = "";
   @state() private runHooksAfterTranscribing = true;
-  @state() private retranscribeMenuOpen = false;
 
-  @state() private refireMenuOpen = false;
+  // Unified "Re-run…" menu. One control replaces the former standalone
+  // Re-transcribe + Re-fire hook split-buttons; the user picks a step
+  // (Transcribe | Cleanup | Hook), tunes its one-time options, then hits Re-run.
+  @state() private rerunMenuOpen = false;
+  @state() private rerunStep: RerunStep = "transcribe";
+
+  // Cleanup (LLM post-process) one-time model override; prefilled from config.
+  @state() private cleanupModel = "";
+  @state() private llmPostProcessEnabled = false;
+
   @state() private configuredHookCommands: string[] = [];
   @state() private selectedHookCommand = "";
   @state() private customHookCommandSelected = false;
@@ -39,12 +50,11 @@ export class ActionRowElement extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.loadConfigAndModels();
-    
+
     this.docClickHandler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest(".split-btn")) {
-        this.retranscribeMenuOpen = false;
-        this.refireMenuOpen = false;
+        this.rerunMenuOpen = false;
         this.requestUpdate();
       }
     };
@@ -61,20 +71,32 @@ export class ActionRowElement extends LitElement {
   private async loadConfigAndModels() {
     try {
       this.config = await invoke("read_config");
-      
+
       // Load hook commands
       if (this.config && this.config.hook) {
         this.runHooksAfterTranscribing = !!this.config.hook.run_on_transcribe;
-        this.configuredHookCommands = Array.isArray(this.config.hook.commands) 
-          ? this.config.hook.commands 
+        this.configuredHookCommands = Array.isArray(this.config.hook.commands)
+          ? this.config.hook.commands
           : (this.config.hook.command ? [this.config.hook.command] : []);
+      }
+
+      // Load LLM post-process (cleanup) config: prefill the one-time model
+      // override and remember whether cleanup is even enabled (so the menu can
+      // disable the Cleanup option and explain why).
+      if (this.config && this.config.llm_post_process) {
+        const llm = this.config.llm_post_process;
+        this.llmPostProcessEnabled = !!llm.enabled &&
+          typeof llm.provider === "string" &&
+          llm.provider.trim() !== "" &&
+          llm.provider.trim().toLowerCase() !== "none";
+        this.cleanupModel = llm.model ?? "";
       }
 
       // Load STT models
       if (this.config && this.config.whisper) {
         const w = this.config.whisper;
         this.selectedModel = w.provider === "local" ? w.model_path : w.model;
-        
+
         if (w.provider === "local") {
           const files: string[] = await invoke("wizard_list_downloaded_models");
           this.availableModels = files.map(file => {
@@ -121,20 +143,20 @@ export class ActionRowElement extends LitElement {
     this.cbs.onTogglePlay();
   }
 
-  private async handleRetranscribe() {
-    try {
-      await retranscribeRecording(this.recordingId);
-      showToast("Queued for re-transcription", "info");
-      this.cbs.onRefresh();
-    } catch (e) {
-      showToast(`Re-transcribe failed: ${errText(e)}`, "error");
-    }
+  private toggleRerunMenu(e: Event) {
+    e.stopPropagation();
+    this.rerunMenuOpen = !this.rerunMenuOpen;
+    this.requestUpdate();
   }
 
-  private toggleRetranscribeMenu(e: Event) {
+  private closeRerunMenu(e: Event) {
     e.stopPropagation();
-    this.refireMenuOpen = false;
-    this.retranscribeMenuOpen = !this.retranscribeMenuOpen;
+    this.rerunMenuOpen = false;
+    this.requestUpdate();
+  }
+
+  private handleStepChange(e: Event) {
+    this.rerunStep = (e.target as HTMLSelectElement).value as RerunStep;
     this.requestUpdate();
   }
 
@@ -142,33 +164,8 @@ export class ActionRowElement extends LitElement {
     this.selectedModel = (e.target as HTMLSelectElement).value;
   }
 
-  private async submitRetranscribe(e: Event) {
-    e.stopPropagation();
-    this.retranscribeMenuOpen = false;
-    try {
-      await retranscribeRecording(this.recordingId, this.selectedModel, this.runHooksAfterTranscribing);
-      showToast("Queued for re-transcription", "info");
-      this.cbs.onRefresh();
-    } catch (err) {
-      showToast(`Re-transcribe failed: ${err}`, "error");
-    }
-  }
-
-  private async handleRefire() {
-    try {
-      await refireHook(this.recordingId);
-      showToast("Hook queued", "info");
-      this.cbs.onRefresh();
-    } catch (e) {
-      showToast(`Re-fire hook failed: ${errText(e)}`, "error");
-    }
-  }
-
-  private toggleRefireMenu(e: Event) {
-    e.stopPropagation();
-    this.retranscribeMenuOpen = false;
-    this.refireMenuOpen = !this.refireMenuOpen;
-    this.requestUpdate();
+  private handleCleanupModelInput(e: Event) {
+    this.cleanupModel = (e.target as HTMLInputElement).value;
   }
 
   private handleHookCommandSelect(e: Event) {
@@ -187,28 +184,34 @@ export class ActionRowElement extends LitElement {
     this.selectedHookCommand = (e.target as HTMLInputElement).value;
   }
 
-  private closeRetranscribeMenu(e: Event) {
+  /** Run the currently-selected step with its one-time options. */
+  private async submitRerun(e: Event) {
     e.stopPropagation();
-    this.retranscribeMenuOpen = false;
-    this.requestUpdate();
-  }
-
-  private closeRefireMenu(e: Event) {
-    e.stopPropagation();
-    this.refireMenuOpen = false;
-    this.requestUpdate();
-  }
-
-  private async submitRefire(e: Event) {
-    e.stopPropagation();
-    this.refireMenuOpen = false;
+    this.rerunMenuOpen = false;
     try {
-      const cmd = this.selectedHookCommand === "" ? null : this.selectedHookCommand;
-      await refireHook(this.recordingId, cmd);
-      showToast("Hook queued", "info");
+      switch (this.rerunStep) {
+        case "transcribe":
+          await retranscribeRecording(this.recordingId, this.selectedModel, this.runHooksAfterTranscribing);
+          showToast("Queued for re-transcription", "info");
+          break;
+        case "cleanup": {
+          // Pass the override only when it differs from nothing; an empty
+          // string lets the daemon fall back to the configured cleanup model.
+          const model = this.cleanupModel.trim() === "" ? null : this.cleanupModel.trim();
+          await rerunCleanup(this.recordingId, model);
+          showToast("Cleanup re-run started", "info");
+          break;
+        }
+        case "hook": {
+          const cmd = this.selectedHookCommand === "" ? null : this.selectedHookCommand;
+          await refireHook(this.recordingId, cmd);
+          showToast("Hook queued", "info");
+          break;
+        }
+      }
       this.cbs.onRefresh();
     } catch (err) {
-      showToast(`Re-fire hook failed: ${err}`, "error");
+      showToast(`Re-run failed: ${errText(err)}`, "error");
     }
   }
 
@@ -263,71 +266,98 @@ export class ActionRowElement extends LitElement {
     }
   }
 
+  /** The per-step options block shown inside the Re-run menu. */
+  private renderStepOptions() {
+    if (this.rerunStep === "transcribe") {
+      return html`
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style="font-size: 11px; color: var(--fg-muted);">Model</label>
+          <select class="rerun-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
+            ${this.availableModels.map(m => html`
+              <option value=${m.value} ?selected=${m.value === this.selectedModel}>${m.label}</option>
+            `)}
+          </select>
+        </div>
+
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
+          <input type="checkbox" ?checked=${this.runHooksAfterTranscribing} @change=${(e: Event) => this.runHooksAfterTranscribing = (e.target as HTMLInputElement).checked} />
+          Run hooks after transcribing
+        </label>
+      `;
+    }
+
+    if (this.rerunStep === "cleanup") {
+      if (!this.llmPostProcessEnabled) {
+        return html`
+          <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
+            LLM post-processing is disabled. Enable a cleanup provider in Settings to use this.
+          </p>
+        `;
+      }
+      return html`
+        <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
+          Re-cleans the original transcript with the LLM. Re-transcription is skipped.
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style="font-size: 11px; color: var(--fg-muted);">Cleanup model (one-time override)</label>
+          <input type="text" class="rerun-cleanup-model" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"
+            .value=${this.cleanupModel} @input=${this.handleCleanupModelInput} placeholder="Configured cleanup model" />
+        </div>
+      `;
+    }
+
+    // hook
+    return html`
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <label style="font-size: 11px; color: var(--fg-muted);">Run command</label>
+        <select class="rerun-hook-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleHookCommandSelect}>
+          <option value="">All configured commands</option>
+          ${this.configuredHookCommands.map(cmd => html`
+            <option value=${cmd} ?selected=${cmd === this.selectedHookCommand}>${cmd}</option>
+          `)}
+          <option value="__custom__" ?selected=${this.customHookCommandSelected}>Custom command...</option>
+        </select>
+      </div>
+
+      ${this.customHookCommandSelected ? html`
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style="font-size: 11px; color: var(--fg-muted);">Custom Command</label>
+          <input type="text" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"
+            .value=${this.selectedHookCommand} @input=${this.handleCustomHookCommandInput} />
+        </div>
+      ` : nothing}
+    `;
+  }
+
   render() {
+    // Cleanup is the only step that can be unavailable (LLM disabled); block the
+    // Re-run button in that case so the user gets a clear reason in the menu.
+    const runDisabled = this.rerunStep === "cleanup" && !this.llmPostProcessEnabled;
     return html`
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
-        
+
         <div class="split-btn" style="position: relative;">
-          <button @click=${this.handleRetranscribe}>↻ Re-transcribe</button>
-          <button class="split-caret" title="Re-transcribe with…" aria-label="Re-transcribe with…" @click=${this.toggleRetranscribeMenu}>▾</button>
-          
-          ${this.retranscribeMenuOpen ? html`
-            <div class="custom-dropdown" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 260px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
-              <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-transcribe Options</h4>
-              
+          <button class="rerun-trigger" title="Re-run a step on this recording" aria-haspopup="menu" aria-expanded=${this.rerunMenuOpen ? "true" : "false"} @click=${this.toggleRerunMenu}>↻ Re-run… ▾</button>
+
+          ${this.rerunMenuOpen ? html`
+            <div class="custom-dropdown" role="menu" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 280px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
+              <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-run</h4>
+
               <div style="display: flex; flex-direction: column; gap: 4px;">
-                <label style="font-size: 11px; color: var(--fg-muted);">Model</label>
-                <select style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
-                  ${this.availableModels.map(m => html`
-                    <option value=${m.value} ?selected=${m.value === this.selectedModel}>${m.label}</option>
-                  `)}
+                <label style="font-size: 11px; color: var(--fg-muted);">Step</label>
+                <select class="rerun-step-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleStepChange}>
+                  <option value="transcribe" ?selected=${this.rerunStep === "transcribe"}>Transcribe</option>
+                  <option value="cleanup" ?selected=${this.rerunStep === "cleanup"}>Cleanup</option>
+                  <option value="hook" ?selected=${this.rerunStep === "hook"}>Hook</option>
                 </select>
               </div>
 
-              <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
-                <input type="checkbox" ?checked=${this.runHooksAfterTranscribing} @change=${(e: Event) => this.runHooksAfterTranscribing = (e.target as HTMLInputElement).checked} />
-                Run hooks after transcribing
-              </label>
+              ${this.renderStepOptions()}
 
               <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px;">
-                <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @click=${this.closeRetranscribeMenu}>Cancel</button>
-                <button class="primary" style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--accent-fg); border: none;" @click=${this.submitRetranscribe}>Run</button>
-              </div>
-            </div>
-          ` : nothing}
-        </div>
-
-        <div class="split-btn" style="position: relative;">
-          <button @click=${this.handleRefire}>⚡ Re-fire hook</button>
-          <button class="split-caret" title="Re-fire hook with…" aria-label="Re-fire hook with…" @click=${this.toggleRefireMenu}>▾</button>
-
-          ${this.refireMenuOpen ? html`
-            <div class="custom-dropdown" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 280px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
-              <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-fire Hook Options</h4>
-              
-              <div style="display: flex; flex-direction: column; gap: 4px;">
-                <label style="font-size: 11px; color: var(--fg-muted);">Run command</label>
-                <select style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleHookCommandSelect}>
-                  <option value="">All configured commands</option>
-                  ${this.configuredHookCommands.map(cmd => html`
-                    <option value=${cmd} ?selected=${cmd === this.selectedHookCommand}>${cmd}</option>
-                  `)}
-                  <option value="__custom__" ?selected=${this.customHookCommandSelected}>Custom command...</option>
-                </select>
-              </div>
-
-              ${this.customHookCommandSelected ? html`
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                  <label style="font-size: 11px; color: var(--fg-muted);">Custom Command</label>
-                  <input type="text" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"
-                    .value=${this.selectedHookCommand} @input=${this.handleCustomHookCommandInput} />
-                </div>
-              ` : nothing}
-
-              <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px;">
-                <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @click=${this.closeRefireMenu}>Cancel</button>
-                <button class="primary" style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--accent-fg); border: none;" @click=${this.submitRefire}>Run</button>
+                <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @click=${this.closeRerunMenu}>Cancel</button>
+                <button class="primary rerun-submit" ?disabled=${runDisabled} style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--accent-fg); border: none;" @click=${this.submitRerun}>Re-run</button>
               </div>
             </div>
           ` : nothing}

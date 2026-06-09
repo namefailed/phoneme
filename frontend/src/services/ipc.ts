@@ -147,6 +147,16 @@ export async function refireHook(id: string, command: string | null = null): Pro
 }
 
 /**
+ * Re-run ONLY the LLM post-processing ("cleanup") step on a recording's stored
+ * transcript — without re-transcribing the audio. The preserved original
+ * (machine) transcript is used as the input, so the original is never lost.
+ * `model` optionally overrides the configured cleanup model for this one run.
+ */
+export async function rerunCleanup(id: string, model: string | null = null): Promise<void> {
+  await tauriInvoke("rerun_cleanup", { id, model });
+}
+
+/**
  * Manually update the text transcript of a specific recording.
  */
 export async function updateTranscript(id: string, text: string): Promise<void> {

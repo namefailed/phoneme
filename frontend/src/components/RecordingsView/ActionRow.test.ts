@@ -11,6 +11,7 @@ vi.mock("../../services/ipc", () => ({
   deleteRecording: vi.fn(),
   refireHook: vi.fn(),
   retranscribeRecording: vi.fn(),
+  rerunCleanup: vi.fn(),
 }));
 
 import * as tauriCore from "@tauri-apps/api/core";
@@ -21,13 +22,15 @@ beforeEach(() => {
   vi.mocked(tauriCore.invoke).mockReset();
   vi.mocked(ipcServices.retranscribeRecording).mockReset();
   vi.mocked(ipcServices.refireHook).mockReset();
-  
+  vi.mocked(ipcServices.rerunCleanup).mockReset();
+
   // mock default read_config response
   vi.mocked(tauriCore.invoke).mockImplementation(async (cmd) => {
     if (cmd === "read_config") {
       return {
         whisper: { provider: "local", model_path: "ggml-medium.bin" },
-        hook: { run_on_transcribe: true, commands: ["echo 123", "python process.py"] }
+        hook: { run_on_transcribe: true, commands: ["echo 123", "python process.py"] },
+        llm_post_process: { enabled: true, provider: "ollama", model: "llama3.2:3b" },
       };
     }
     if (cmd === "wizard_list_downloaded_models") {
@@ -35,7 +38,7 @@ beforeEach(() => {
     }
     return null;
   });
-  
+
   document.body.innerHTML = "";
 });
 
@@ -43,7 +46,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("ActionRow dropdowns", () => {
+describe("ActionRow Re-run menu", () => {
   const cbs = {
     onTogglePlay: vi.fn(),
     onRefresh: vi.fn(),
@@ -51,108 +54,155 @@ describe("ActionRow dropdowns", () => {
     getAudioPath: () => "mock audio.wav"
   };
 
-  it("toggles the re-transcribe dropdown menu on clicking the caret", async () => {
-    const row = new ActionRow(document.body, "rec-1", cbs);
-    const element = document.querySelector("ph-action-row") as any;
-    await vi.waitFor(() => {
-      expect(element.config).toBeTruthy();
-      expect(element.availableModels.length).toBeGreaterThan(0);
-    });
-    
-    // Check initial state
-    expect(element.querySelector(".custom-dropdown")).toBeFalsy();
-    
-    // Find the caret button for Re-transcribe (it is the second button in action-row, within split-btn)
-    const carets = element.querySelectorAll(".split-caret");
-    expect(carets).toHaveLength(2);
-    
-    const retransCaret = carets[0] as HTMLButtonElement;
-    retransCaret.click();
-    await element.updateComplete;
-    
-    // Check that dropdown menu is now rendered
-    expect(element.querySelector(".custom-dropdown")).toBeTruthy();
-    
-    // Check title in dropdown
-    const title = element.querySelector(".custom-dropdown h4")!;
-    expect(title.textContent).toBe("Re-transcribe Options");
-    
-    // Check default model select has options loaded
-    const select = element.querySelector(".custom-dropdown select") as HTMLSelectElement;
-    expect(select).toBeTruthy();
-    expect(select.options).toHaveLength(3); // ggml-tiny, ggml-base, and current path (current)
-    
-    // Check close dropdown by clicking caret again
-    retransCaret.click();
-    await element.updateComplete;
-    expect(element.querySelector(".custom-dropdown")).toBeFalsy();
-  });
-
-  it("calls retranscribeRecording with selected options on clicking Run", async () => {
+  async function mountReady() {
     new ActionRow(document.body, "rec-1", cbs);
     const element = document.querySelector("ph-action-row") as any;
     await vi.waitFor(() => {
       expect(element.config).toBeTruthy();
       expect(element.availableModels.length).toBeGreaterThan(0);
     });
-    
-    // Open menu
-    (element.querySelectorAll(".split-caret")[0] as HTMLButtonElement).click();
+    return element;
+  }
+
+  it("opens and closes the unified Re-run menu via the trigger", async () => {
+    const element = await mountReady();
+
+    // Only one trigger replaces the former two split-buttons.
+    expect(element.querySelectorAll(".split-caret")).toHaveLength(0);
+    expect(element.querySelector(".rerun-trigger")).toBeTruthy();
+    expect(element.querySelector(".custom-dropdown")).toBeFalsy();
+
+    const trigger = element.querySelector(".rerun-trigger") as HTMLButtonElement;
+    trigger.click();
     await element.updateComplete;
+
     expect(element.querySelector(".custom-dropdown")).toBeTruthy();
-    
-    // Toggle the hook checkbox to unchecked
+    const title = element.querySelector(".custom-dropdown h4")!;
+    expect(title.textContent).toBe("Re-run");
+
+    // Step selector offers all three steps.
+    const stepSelect = element.querySelector(".rerun-step-select") as HTMLSelectElement;
+    expect(stepSelect).toBeTruthy();
+    expect(stepSelect.options).toHaveLength(3);
+
+    // Closes again on a second click of the trigger.
+    trigger.click();
+    await element.updateComplete;
+    expect(element.querySelector(".custom-dropdown")).toBeFalsy();
+  });
+
+  it("runs Transcribe with the selected model and hook option", async () => {
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    // Default step is Transcribe — model select should be populated.
+    const modelSelect = element.querySelector(".rerun-model-select") as HTMLSelectElement;
+    expect(modelSelect).toBeTruthy();
+    expect(modelSelect.options).toHaveLength(3); // ggml-tiny, ggml-base, current path
+
+    // Uncheck "run hooks after transcribing".
     const checkbox = element.querySelector(".custom-dropdown input[type='checkbox']") as HTMLInputElement;
-    checkbox.click(); // Uncheck
+    checkbox.click();
     await element.updateComplete;
-    
-    // Click Run
-    const runBtn = element.querySelector(".custom-dropdown button.primary") as HTMLButtonElement;
-    runBtn.click();
+
+    (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
     await element.updateComplete;
-    
+
     expect(ipcServices.retranscribeRecording).toHaveBeenCalledWith("rec-1", "ggml-medium.bin", false);
   });
 
-  it("toggles the re-fire hook dropdown menu and shows command options", async () => {
-    new ActionRow(document.body, "rec-1", cbs);
-    const element = document.querySelector("ph-action-row") as any;
-    await vi.waitFor(() => {
-      expect(element.config).toBeTruthy();
-      expect(element.configuredHookCommands.length).toBeGreaterThan(0);
-    });
-    
-    const refireCaret = element.querySelectorAll(".split-caret")[1] as HTMLButtonElement;
-    refireCaret.click();
+  it("runs Cleanup against the stored transcript with a one-time model override", async () => {
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
     await element.updateComplete;
-    
-    expect(element.querySelector(".custom-dropdown")).toBeTruthy();
-    
-    const title = element.querySelector(".custom-dropdown h4")!;
-    expect(title.textContent).toBe("Re-fire Hook Options");
-    
-    const select = element.querySelector(".custom-dropdown select") as HTMLSelectElement;
-    expect(select).toBeTruthy();
-    // Options: all, echo 123, python process.py, and custom
-    expect(select.options).toHaveLength(4);
+
+    // Switch to the Cleanup step.
+    const stepSelect = element.querySelector(".rerun-step-select") as HTMLSelectElement;
+    stepSelect.value = "cleanup";
+    stepSelect.dispatchEvent(new Event("change"));
+    await element.updateComplete;
+
+    // Cleanup model input is prefilled from config.
+    const modelInput = element.querySelector(".rerun-cleanup-model") as HTMLInputElement;
+    expect(modelInput).toBeTruthy();
+    expect(element.cleanupModel).toBe("llama3.2:3b");
+
+    // Override it for this one run.
+    modelInput.value = "gpt-4o-mini";
+    modelInput.dispatchEvent(new Event("input"));
+    await element.updateComplete;
+
+    (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    expect(ipcServices.rerunCleanup).toHaveBeenCalledWith("rec-1", "gpt-4o-mini");
+    // Cleanup must never trigger a re-transcription.
+    expect(ipcServices.retranscribeRecording).not.toHaveBeenCalled();
   });
 
-  it("closes dropdowns when clicking outside", async () => {
-    new ActionRow(document.body, "rec-1", cbs);
-    const element = document.querySelector("ph-action-row") as any;
-    await vi.waitFor(() => {
-      expect(element.config).toBeTruthy();
+  it("disables Cleanup when LLM post-processing is off", async () => {
+    vi.mocked(tauriCore.invoke).mockImplementation(async (cmd) => {
+      if (cmd === "read_config") {
+        return {
+          whisper: { provider: "local", model_path: "ggml-medium.bin" },
+          hook: { run_on_transcribe: true, commands: ["echo 123"] },
+          llm_post_process: { enabled: false, provider: "none", model: "" },
+        };
+      }
+      if (cmd === "wizard_list_downloaded_models") return ["ggml-tiny.bin"];
+      return null;
     });
-    
-    // Open re-transcribe
-    (element.querySelectorAll(".split-caret")[0] as HTMLButtonElement).click();
+
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    const stepSelect = element.querySelector(".rerun-step-select") as HTMLSelectElement;
+    stepSelect.value = "cleanup";
+    stepSelect.dispatchEvent(new Event("change"));
+    await element.updateComplete;
+
+    // No model input, and the Re-run button is disabled.
+    expect(element.querySelector(".rerun-cleanup-model")).toBeFalsy();
+    const submit = element.querySelector(".rerun-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+  });
+
+  it("runs the Hook step with the chosen configured command", async () => {
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    const stepSelect = element.querySelector(".rerun-step-select") as HTMLSelectElement;
+    stepSelect.value = "hook";
+    stepSelect.dispatchEvent(new Event("change"));
+    await element.updateComplete;
+
+    const hookSelect = element.querySelector(".rerun-hook-select") as HTMLSelectElement;
+    expect(hookSelect).toBeTruthy();
+    // Options: all, echo 123, python process.py, custom.
+    expect(hookSelect.options).toHaveLength(4);
+
+    hookSelect.value = "python process.py";
+    hookSelect.dispatchEvent(new Event("change"));
+    await element.updateComplete;
+
+    (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    expect(ipcServices.refireHook).toHaveBeenCalledWith("rec-1", "python process.py");
+  });
+
+  it("closes the menu when clicking outside", async () => {
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
     await element.updateComplete;
     expect(element.querySelector(".custom-dropdown")).toBeTruthy();
-    
-    // Click body background
+
     document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await element.updateComplete;
-    
+
     expect(element.querySelector(".custom-dropdown")).toBeFalsy();
   });
 });
