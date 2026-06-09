@@ -19,6 +19,7 @@ export type DaemonEvent =
   | { event: "retention_warning"; count: number; hours: number }
   | { event: "transcript_updated"; id: string }
   | { event: "summary_updated"; id: string }
+  | { event: "summary_failed"; id: string; error: string }
   | { event: "notes_updated"; id: string }
   | { event: "tag_created"; id: number }
   | { event: "tag_updated"; id: number }

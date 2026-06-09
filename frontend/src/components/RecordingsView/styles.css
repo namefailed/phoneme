@@ -839,6 +839,46 @@ ph-sidebar {
 }
 @keyframes queueSpin { to { transform: rotate(360deg); } }
 
+/* Tag chips inside the list's Tags column. */
+.rec-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow: hidden;
+  align-content: center;
+}
+.rec-tag-chip {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cute, centered ✓ for boolean columns (Diarized / Edited). */
+.rec-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rec-check-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
 /* Sidebar resize handle (between the sidebar and the recordings list). */
 .rv-sidebar-resizer {
   width: 4px;

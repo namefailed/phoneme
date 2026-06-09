@@ -1127,7 +1127,7 @@ async fn rerun_summary(
                     .await
                 {
                     tracing::error!(error = %e, "rerun_summary: failed to persist summary");
-                    task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                    task_state.events.emit(DaemonEvent::SummaryFailed {
                         id,
                         error: e.to_string(),
                     });
@@ -1136,9 +1136,9 @@ async fn rerun_summary(
                 task_state.events.emit(DaemonEvent::SummaryUpdated { id });
             }
             None => {
-                task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                task_state.events.emit(DaemonEvent::SummaryFailed {
                     id,
-                    error: "summary generation failed".into(),
+                    error: "summary generation failed (check the AI provider)".into(),
                 });
             }
         }

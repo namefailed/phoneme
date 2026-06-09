@@ -89,11 +89,26 @@ async fn maybe_auto_summarize(
     if !cfg.summary.auto {
         return;
     }
-    if let Some((summary, model)) = generate_summary(state, cfg, transcript).await {
-        if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
-            tracing::warn!(error = %e, "failed to persist auto summary");
-        } else {
-            tracing::info!(id = %id.as_str(), "auto summary saved");
+    match generate_summary(state, cfg, transcript).await {
+        Some((summary, model)) => {
+            if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
+                tracing::warn!(error = %e, "failed to persist auto summary");
+                state.events.emit(DaemonEvent::SummaryFailed {
+                    id: id.clone(),
+                    error: e.to_string(),
+                });
+            } else {
+                tracing::info!(id = %id.as_str(), "auto summary saved");
+                state.events.emit(DaemonEvent::SummaryUpdated { id: id.clone() });
+            }
+        }
+        None => {
+            // Auto-summary failed — surface it distinctly (the transcript itself
+            // is fine; only the optional summary step failed).
+            state.events.emit(DaemonEvent::SummaryFailed {
+                id: id.clone(),
+                error: "summary generation failed (check the AI provider)".into(),
+            });
         }
     }
 }

@@ -103,6 +103,8 @@ export class HeaderBarElement extends LitElement {
         this.isPaused = false;
       } else if (eventName === "whisper_status_changed") {
         this.whisperReachable = p.reachable as boolean;
+      } else if (eventName === "summary_failed") {
+        showToast(`Summary failed: ${p.error ?? "check the AI provider in Settings"}`, "error");
       } else if (eventName === "queue_depth_changed") {
         this.queuePending = (p.pending as number) ?? 0;
         this.queueProcessing = (p.processing as number) ?? 0;

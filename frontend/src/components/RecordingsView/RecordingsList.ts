@@ -16,6 +16,7 @@ import {
   escapeHtml,
 } from "../../utils/format";
 import { groupRecordings, visibleRecordings, trackLabel } from "./grouping";
+import { getContrastColor } from "./TagChips";
 import "../shared/styles.css";
 import "./styles.css";
 
@@ -560,12 +561,16 @@ export class RecordingsListElement extends LitElement {
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
-      tags: html`<span class="rec-tags" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.tags?.map((t: any) => t.name).join(", ") || ""}</span>`,
+      tags: html`<span class="rec-tags">${
+        (r.tags ?? []).length
+          ? r.tags!.map((t: any) => html`<span class="rec-tag-chip" style=${t.color ? `background:${t.color}; color:${getContrastColor(t.color)};` : ""}>${t.name}</span>`)
+          : nothing
+      }</span>`,
       model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,
       cleanup_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.cleanup_model || ""}</span>`,
       summary_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.summary_model || ""}</span>`,
-      user_edited: html`<span class="rec-edited" style="color: var(--fg-muted); text-align: center; display: block;" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? "✓" : ""}</span>`,
-      diarized: html`<span class="rec-diarized" style="color: var(--fg-muted); text-align: center; display: block;">${r.diarized ? "✓" : ""}</span>`,
+      user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
+      diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 

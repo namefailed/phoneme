@@ -327,6 +327,12 @@ pub enum DaemonEvent {
     SummaryUpdated {
         id: RecordingId,
     },
+    /// Summary generation failed. Distinct from `TranscriptionFailed` — the
+    /// transcript itself is fine; only the (optional) summary step failed.
+    SummaryFailed {
+        id: RecordingId,
+        error: String,
+    },
     NotesUpdated {
         id: RecordingId,
     },
