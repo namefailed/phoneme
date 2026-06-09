@@ -75,23 +75,18 @@ export class SectionInterface {
   private renderColumns() {
     const host = this.container.querySelector<HTMLElement>("#col-list");
     if (!host) return;
-    const btn = "background:none; border:1px solid var(--border-subtle); color:var(--fg-muted); border-radius:4px; width:20px; height:16px; line-height:1; font-size:9px; cursor:pointer; padding:0;";
     host.innerHTML = this.order
-      .map((value, i) => {
-        const up = i === 0 ? "disabled style=\"" + btn + "opacity:0.3; cursor:default;\"" : `data-i="${i}" style="${btn}"`;
-        const down = i === this.order.length - 1 ? "disabled style=\"" + btn + "opacity:0.3; cursor:default;\"" : `data-i="${i}" style="${btn}"`;
-        return `
-          <div class="col-row" data-col="${value}" style="display:flex; align-items:center; gap:10px;">
-            <span style="display:inline-flex; flex-direction:column; gap:2px;">
-              <button class="col-up" title="Move up" ${up}>▲</button>
-              <button class="col-down" title="Move down" ${down}>▼</button>
+      .map((value, i) => `
+          <div class="col-row" data-col="${value}">
+            <span class="col-move">
+              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
+              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}>▼</button>
             </span>
-            <label style="display:flex; align-items:center; gap:8px; font-weight:normal; cursor:pointer;">
+            <label class="col-label">
               <input type="checkbox" class="col-toggle" value="${value}" ${this.visible.has(value) ? "checked" : ""} />
-              ${this.label(value)}
+              <span>${this.label(value)}</span>
             </label>
-          </div>`;
-      })
+          </div>`)
       .join("");
 
     host.querySelectorAll<HTMLButtonElement>(".col-up").forEach((b) =>
@@ -113,6 +108,22 @@ export class SectionInterface {
     const config = this.config;
     this.container.innerHTML = `
       <div class="settings-section">
+        <style>
+          #col-list .col-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 3px 6px; border-radius: 6px; transition: background 0.12s ease;
+          }
+          #col-list .col-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+          #col-list .col-move { display: inline-flex; flex-direction: column; gap: 1px; }
+          #col-list .col-move button {
+            background: transparent; border: none; color: var(--fg-faded);
+            width: 22px; height: 14px; line-height: 1; font-size: 9px; padding: 0;
+            border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+          }
+          #col-list .col-move button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+          #col-list .col-move button:disabled { opacity: 0.25; cursor: default; }
+          #col-list .col-label { display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; }
+        </style>
         <h3>Interface</h3>
 
         <div class="settings-field">
