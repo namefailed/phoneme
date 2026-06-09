@@ -958,7 +958,8 @@ export class FirstRunWizardElement extends LitElement {
       "ggml-base.en.bin": "Base",
       "ggml-small.en.bin": "Small",
       "ggml-medium.en.bin": "Medium",
-      "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo",
+      "ggml-large-v3-turbo.bin": "Large v3 Turbo",
+      "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
       "ggml-large-v3.bin": "Large v3",
     };
     return map[file] ?? file;

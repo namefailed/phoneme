@@ -141,7 +141,8 @@ export class ActionRowElement extends LitElement {
               "ggml-small.en.bin": "Small (English)",
               "ggml-medium.en.bin": "Medium (English)",
               "ggml-large-v3.bin": "Large v3",
-              "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo",
+              "ggml-large-v3-turbo.bin": "Large v3 Turbo",
+              "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
             };
             return { value: file, label: map[name] ?? name };
           });
