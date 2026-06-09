@@ -343,7 +343,8 @@ export class SectionPostProcessing {
           Generate a short AI summary of each transcript. You can always summarize a single
           recording on demand with the <b>View summary</b> button in its detail view — enabling
           this just runs it automatically as the <b>last step</b> of every recording's pipeline.
-          Summaries reuse the AI provider configured above.
+          By default summaries reuse your post-processing provider; point them at a different
+          provider and model below if you want.
         </p>
 
         <div class="settings-field">
