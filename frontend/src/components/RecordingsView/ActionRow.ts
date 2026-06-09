@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { deleteRecording, refireHook, retranscribeRecording } from "../../services/ipc";
@@ -126,7 +127,7 @@ export class ActionRowElement extends LitElement {
       showToast("Queued for re-transcription", "info");
       this.cbs.onRefresh();
     } catch (e) {
-      showToast(`Re-transcribe failed: ${e}`, "error");
+      showToast(`Re-transcribe failed: ${errText(e)}`, "error");
     }
   }
 
@@ -159,7 +160,7 @@ export class ActionRowElement extends LitElement {
       showToast("Hook queued", "info");
       this.cbs.onRefresh();
     } catch (e) {
-      showToast(`Re-fire hook failed: ${e}`, "error");
+      showToast(`Re-fire hook failed: ${errText(e)}`, "error");
     }
   }
 
@@ -217,7 +218,7 @@ export class ActionRowElement extends LitElement {
       this.copyText = "✅ Copied!";
       setTimeout(() => { this.copyText = "📋 Copy"; }, 2000);
     } catch (e) {
-      showToast(`Clipboard copy failed: ${e}`, "error");
+      showToast(`Clipboard copy failed: ${errText(e)}`, "error");
     }
   }
 
@@ -237,7 +238,7 @@ export class ActionRowElement extends LitElement {
         showToast("Transcript exported", "success");
       }
     } catch (e) {
-      showToast(`Export failed: ${e}`, "error");
+      showToast(`Export failed: ${errText(e)}`, "error");
     }
   }
 
@@ -245,7 +246,7 @@ export class ActionRowElement extends LitElement {
     try {
       await invoke("reveal_file", { path: this.cbs.getAudioPath() });
     } catch (e) {
-      showToast(`Reveal failed: ${e}`, "error");
+      showToast(`Reveal failed: ${errText(e)}`, "error");
     }
   }
 
@@ -257,7 +258,7 @@ export class ActionRowElement extends LitElement {
         showToast("Recording deleted", "success");
         this.cbs.onRefresh();
       } catch (e) {
-        showToast(`Delete failed: ${e}`, "error");
+        showToast(`Delete failed: ${errText(e)}`, "error");
       }
     }
   }

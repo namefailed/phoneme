@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { addTag, attachTag, detachTag, listAllTags, tagsFor, type Tag } from "../../services/ipc";
@@ -48,7 +49,7 @@ export class TagChipsElement extends LitElement {
       this.allTags = await listAllTags();
       this.attached = await tagsFor(this.recordingId);
     } catch (e) {
-      showToast(`Failed to load tags: ${e}`, "error");
+      showToast(`Failed to load tags: ${errText(e)}`, "error");
     }
   }
 
@@ -57,7 +58,7 @@ export class TagChipsElement extends LitElement {
       await detachTag(this.recordingId, tagId);
       await this.load();
     } catch (e) {
-      showToast(`Failed to remove tag: ${e}`, "error");
+      showToast(`Failed to remove tag: ${errText(e)}`, "error");
     }
   }
 
@@ -72,7 +73,7 @@ export class TagChipsElement extends LitElement {
       
       await this.load();
     } catch (e) {
-      showToast(`Failed to add tag: ${e}`, "error");
+      showToast(`Failed to add tag: ${errText(e)}`, "error");
     }
   }
 

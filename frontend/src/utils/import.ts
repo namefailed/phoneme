@@ -1,3 +1,4 @@
+import { errText } from "./error";
 /**
  * Audio-file import helpers shared by the "Import audio…" button (file dialog)
  * and the window drag-drop handler. Both ultimately call the `import_recording`
@@ -36,7 +37,7 @@ export async function importAudioPaths(paths: string[]): Promise<number> {
       showToast(`Importing ${basename(path)}…`, "success");
       imported++;
     } catch (e) {
-      showToast(`Import failed for ${basename(path)}: ${e}`, "error");
+      showToast(`Import failed for ${basename(path)}: ${errText(e)}`, "error");
     }
   }
   return imported;
@@ -62,7 +63,7 @@ export async function pickAndImportAudio(): Promise<void> {
       ],
     });
   } catch (e) {
-    showToast(`Could not open file dialog: ${e}`, "error");
+    showToast(`Could not open file dialog: ${errText(e)}`, "error");
     return;
   }
   if (selected == null) return; // user cancelled

@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { updateTranscript } from "../../services/ipc";
@@ -189,7 +190,7 @@ export class TranscriptEditorElement extends LitElement {
       this.dispatchEvent(new CustomEvent('dirty-change', { detail: false }));
       showToast("Transcript saved", "success");
     } catch (e) {
-      showToast(`Failed to save transcript: ${e}`, "error");
+      showToast(`Failed to save transcript: ${errText(e)}`, "error");
     }
   }
 

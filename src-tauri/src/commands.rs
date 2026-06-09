@@ -12,22 +12,69 @@ use tauri::{Emitter, State};
 
 type Br<'r> = State<'r, Option<Bridge>>;
 
-async fn forward(bridge: &Option<Bridge>, req: Request) -> Result<Value, String> {
+/// Structured error returned by Tauri commands. Serializes to `{ kind, message }`
+/// so the WebView can branch on `kind` (e.g. tell `whisper_timeout` apart from
+/// `not_found`) instead of parsing a flattened `"kind: message"` string. (A-H6)
+///
+/// `From<String>`/`From<&str>` map ad-hoc errors (config IO, validation) to a
+/// generic `"error"` kind, so a command body's `?` on a `Result<_, String>`
+/// helper still converts cleanly.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CommandError {
+    pub kind: String,
+    pub message: String,
+}
+
+impl CommandError {
+    fn new(kind: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for CommandError {
+    fn from(message: String) -> Self {
+        Self {
+            kind: "error".into(),
+            message,
+        }
+    }
+}
+
+impl From<&str> for CommandError {
+    fn from(message: &str) -> Self {
+        Self {
+            kind: "error".into(),
+            message: message.into(),
+        }
+    }
+}
+
+async fn forward(bridge: &Option<Bridge>, req: Request) -> Result<Value, CommandError> {
     let bridge = bridge.as_ref().ok_or_else(|| {
-        "daemon not reachable; start it with `phoneme daemon --start`".to_string()
+        CommandError::new(
+            "daemon_not_running",
+            "daemon not reachable; start it with `phoneme daemon --start`",
+        )
     })?;
     match bridge.request(req).await {
         Ok(Response::Ok(v)) => Ok(v),
-        Ok(Response::Err(e)) => Err(format!("{}: {}", json_kind(&e.kind), e.message)),
-        Err(e) => Err(format!("transport error: {e}")),
+        Ok(Response::Err(e)) => Err(CommandError::new(json_kind(&e.kind), e.message)),
+        Err(e) => Err(CommandError::new(
+            "transport",
+            format!("transport error: {e}"),
+        )),
     }
 }
 
 /// Validate a frontend-supplied recording id. A malformed id reaching the
 /// daemon would risk a panic in `RecordingId`'s fixed-offset slicing
 /// accessors; reject it here with a clean error instead.
-fn parse_id(id: &str) -> Result<RecordingId, String> {
-    RecordingId::parse(id).ok_or_else(|| format!("invalid recording id: {id:?}"))
+fn parse_id(id: &str) -> Result<RecordingId, CommandError> {
+    RecordingId::parse(id)
+        .ok_or_else(|| CommandError::new("invalid_config", format!("invalid recording id: {id:?}")))
 }
 
 fn json_kind(k: &phoneme_ipc::IpcErrorKind) -> &'static str {
@@ -51,20 +98,27 @@ fn json_kind(k: &phoneme_ipc::IpcErrorKind) -> &'static str {
 /// Fetch a filtered list of all audio recordings.
 /// Forwards a `ListRecordings` request to the background daemon.
 #[tauri::command]
-pub async fn list_recordings(bridge: Br<'_>, filter: Option<ListFilter>) -> Result<Value, String> {
+pub async fn list_recordings(
+    bridge: Br<'_>,
+    filter: Option<ListFilter>,
+) -> Result<Value, CommandError> {
     let filter = filter.unwrap_or_default();
     forward(&bridge, Request::ListRecordings { filter }).await
 }
 
 /// Perform a semantic search across transcripts.
 #[tauri::command]
-pub async fn semantic_search(bridge: Br<'_>, query: String, limit: usize) -> Result<Value, String> {
+pub async fn semantic_search(
+    bridge: Br<'_>,
+    query: String,
+    limit: usize,
+) -> Result<Value, CommandError> {
     forward(&bridge, Request::SemanticSearch { query, limit }).await
 }
 
 /// Fetch the details, tags, and transcript for a specific recording by its ID.
 #[tauri::command]
-pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, String> {
+pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::GetRecording { id }).await
 }
@@ -73,7 +127,7 @@ pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, String> 
 /// linked by a shared `meeting_id`), ordered by track then start time. Used by
 /// the recordings list to render a meeting as one collapsible group.
 #[tauri::command]
-pub async fn list_meeting(bridge: Br<'_>, meeting_id: String) -> Result<Value, String> {
+pub async fn list_meeting(bridge: Br<'_>, meeting_id: String) -> Result<Value, CommandError> {
     forward(&bridge, Request::ListMeeting { meeting_id }).await
 }
 
@@ -84,7 +138,7 @@ pub async fn delete_recording(
     bridge: Br<'_>,
     id: String,
     keep_audio: bool,
-) -> Result<Value, String> {
+) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::DeleteRecording { id, keep_audio }).await
 }
@@ -93,7 +147,7 @@ pub async fn delete_recording(
 /// The `mode` dictates whether this is a continuous push-to-talk (`hold`), a `oneshot`,
 /// or a fixed duration recording (`duration:X`).
 #[tauri::command]
-pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, String> {
+pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, CommandError> {
     let mode = match mode.as_str() {
         "hold" => RecordMode::Hold,
         "oneshot" => RecordMode::Oneshot,
@@ -102,7 +156,7 @@ pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, String>
                 let secs: u32 = secs.parse().map_err(|_| "bad duration")?;
                 RecordMode::Duration { secs }
             } else {
-                return Err(format!("unknown mode: {other}"));
+                return Err(format!("unknown mode: {other}").into());
             }
         }
     };
@@ -118,13 +172,13 @@ pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, String>
 
 /// Signal the daemon to cleanly stop the current recording and begin transcription.
 #[tauri::command]
-pub async fn record_stop(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn record_stop(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RecordStop).await
 }
 
 /// Signal the daemon to immediately abort the current recording and discard the audio buffer.
 #[tauri::command]
-pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RecordCancel).await
 }
 
@@ -132,26 +186,26 @@ pub async fn record_cancel(bridge: Br<'_>) -> Result<Value, String> {
 /// microphone AND the system audio (WASAPI loopback) concurrently as two
 /// separate recordings linked by a shared `meeting_id`. Returns `{ meeting_id }`.
 #[tauri::command]
-pub async fn start_meeting(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn start_meeting(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::StartMeeting).await
 }
 
 /// Stop the active meeting. Both tracks are finalized and transcribed.
 #[tauri::command]
-pub async fn stop_meeting(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn stop_meeting(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::StopMeeting).await
 }
 
 /// Signal the daemon to pause the current recording. Audio captured while
 /// paused is discarded; recording continues into the same file on resume.
 #[tauri::command]
-pub async fn record_pause(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn record_pause(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RecordPause).await
 }
 
 /// Signal the daemon to resume a previously paused recording.
 #[tauri::command]
-pub async fn record_resume(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn record_resume(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RecordResume).await
 }
 
@@ -161,7 +215,7 @@ pub async fn retranscribe_recording(
     id: String,
     model: Option<String>,
     run_hooks: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(
         &bridge,
@@ -178,7 +232,7 @@ pub async fn retranscribe_recording(
 /// decodes it to a canonical WAV and runs it through the normal transcription
 /// pipeline. Returns `{ id }` for the new recording.
 #[tauri::command]
-pub async fn import_recording(bridge: Br<'_>, path: String) -> Result<Value, String> {
+pub async fn import_recording(bridge: Br<'_>, path: String) -> Result<Value, CommandError> {
     forward(&bridge, Request::ImportRecording { path }).await
 }
 
@@ -188,14 +242,18 @@ pub async fn refire_hook(
     bridge: Br<'_>,
     id: String,
     command: Option<String>,
-) -> Result<Value, String> {
+) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::RefireHook { id, command }).await
 }
 
 /// Manually update the transcript text for a specific recording.
 #[tauri::command]
-pub async fn update_transcript(bridge: Br<'_>, id: String, text: String) -> Result<Value, String> {
+pub async fn update_transcript(
+    bridge: Br<'_>,
+    id: String,
+    text: String,
+) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::UpdateTranscript { id, text }).await
 }
@@ -205,13 +263,13 @@ pub async fn update_meeting_name(
     bridge: Br<'_>,
     meeting_id: String,
     name: Option<String>,
-) -> Result<Value, String> {
+) -> Result<Value, CommandError> {
     forward(&bridge, Request::UpdateMeetingName { meeting_id, name }).await
 }
 
 /// Fetch the preserved original (machine) transcript for a recording, if any.
 #[tauri::command]
-pub async fn get_original_transcript(bridge: Br<'_>, id: String) -> Result<Value, String> {
+pub async fn get_original_transcript(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::GetOriginalTranscript { id }).await
 }
@@ -219,7 +277,11 @@ pub async fn get_original_transcript(bridge: Br<'_>, id: String) -> Result<Value
 /// Update the free-form user notes for a specific recording. Independent of the
 /// transcript; never affected by (re-)transcription.
 #[tauri::command]
-pub async fn update_notes(bridge: Br<'_>, id: String, notes: String) -> Result<Value, String> {
+pub async fn update_notes(
+    bridge: Br<'_>,
+    id: String,
+    notes: String,
+) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::UpdateNotes { id, notes }).await
 }
@@ -227,7 +289,7 @@ pub async fn update_notes(bridge: Br<'_>, id: String, notes: String) -> Result<V
 /// Check the background daemon's current runtime status.
 /// Returns whether the daemon is actively running and its process ID.
 #[tauri::command]
-pub async fn daemon_status(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn daemon_status(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::DaemonStatus).await
 }
 
@@ -235,14 +297,14 @@ pub async fn daemon_status(bridge: Br<'_>) -> Result<Value, String> {
 /// Lets the UI re-sync its record/meeting buttons after a reload, since the
 /// daemon outlives the app window and a meeting may already be in progress.
 #[tauri::command]
-pub async fn record_status(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn record_status(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RecordStatus).await
 }
 
 /// Read the application configuration directly from the local `config.toml` file.
 #[tauri::command]
-pub fn read_config() -> Result<Config, String> {
-    config_io::read().map_err(|e| e.to_string())
+pub fn read_config() -> Result<Config, CommandError> {
+    config_io::read().map_err(|e| CommandError::from(e.to_string()))
 }
 
 /// Write a new configuration state to `config.toml`.
@@ -256,12 +318,12 @@ pub async fn write_config(
     app: tauri::AppHandle,
     bridge: Br<'_>,
     config: Config,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let cfg = config.clone();
     tokio::task::spawn_blocking(move || config_io::write(&cfg))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CommandError::from(e.to_string()))?
+        .map_err(|e| CommandError::from(e.to_string()))?;
 
     apply_config(&app, &bridge, &config).await;
     Ok(())
@@ -356,7 +418,7 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
 
     // Tell daemon to reload
     if let Err(e) = forward(bridge, Request::ReloadConfig).await {
-        tracing::warn!("failed to reload daemon config: {e}");
+        tracing::warn!("failed to reload daemon config: {e:?}");
     }
 
     // Dynamically reload hotkeys in the frontend: drop the old set, then
@@ -371,15 +433,15 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
 
 /// List the names of all saved config profiles.
 #[tauri::command]
-pub fn list_profiles() -> Result<Vec<String>, String> {
-    phoneme_core::profiles::list_profiles().map_err(|e| e.to_string())
+pub fn list_profiles() -> Result<Vec<String>, CommandError> {
+    phoneme_core::profiles::list_profiles().map_err(|e| CommandError::from(e.to_string()))
 }
 
 /// Snapshot the CURRENT `config.toml` and save it as a profile named `name`.
 #[tauri::command]
-pub fn save_profile(name: String) -> Result<(), String> {
-    let cfg = config_io::read().map_err(|e| e.to_string())?;
-    phoneme_core::profiles::save_profile(&name, &cfg).map_err(|e| e.to_string())
+pub fn save_profile(name: String) -> Result<(), CommandError> {
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
+    phoneme_core::profiles::save_profile(&name, &cfg).map_err(|e| CommandError::from(e.to_string()))
 }
 
 /// Switch the active config to profile `name`: load the profile, write it as
@@ -390,14 +452,15 @@ pub async fn switch_profile(
     app: tauri::AppHandle,
     bridge: Br<'_>,
     name: String,
-) -> Result<(), String> {
-    let config = tokio::task::spawn_blocking(move || -> Result<Config, String> {
-        let cfg = phoneme_core::profiles::load_profile(&name).map_err(|e| e.to_string())?;
-        config_io::write(&cfg).map_err(|e| e.to_string())?;
+) -> Result<(), CommandError> {
+    let config = tokio::task::spawn_blocking(move || -> Result<Config, CommandError> {
+        let cfg = phoneme_core::profiles::load_profile(&name)
+            .map_err(|e| CommandError::from(e.to_string()))?;
+        config_io::write(&cfg).map_err(|e| CommandError::from(e.to_string()))?;
         Ok(cfg)
     })
     .await
-    .map_err(|e| e.to_string())??;
+    .map_err(|e| CommandError::from(e.to_string()))??;
 
     apply_config(&app, &bridge, &config).await;
     Ok(())
@@ -405,8 +468,8 @@ pub async fn switch_profile(
 
 /// Delete the saved profile named `name`. Does not touch the live config.
 #[tauri::command]
-pub fn delete_profile(name: String) -> Result<(), String> {
-    phoneme_core::profiles::delete_profile(&name).map_err(|e| e.to_string())
+pub fn delete_profile(name: String) -> Result<(), CommandError> {
+    phoneme_core::profiles::delete_profile(&name).map_err(|e| CommandError::from(e.to_string()))
 }
 
 /// Check if a `config.toml` file already exists on disk.
@@ -417,24 +480,24 @@ pub fn config_exists() -> bool {
 
 /// Resolve the absolute path to the user's `config.toml` file.
 #[tauri::command]
-pub fn config_path() -> Result<String, String> {
+pub fn config_path() -> Result<String, CommandError> {
     config_io::config_path()
         .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|e| e.to_string())
+        .map_err(|e| CommandError::from(e.to_string()))
 }
 
 /// Execute local system checks for the Doctor utility (e.g. assessing audio devices).
 #[tauri::command]
-pub fn doctor_local_checks() -> Result<Vec<CheckResult>, String> {
-    let cfg = config_io::read().map_err(|e| e.to_string())?;
+pub fn doctor_local_checks() -> Result<Vec<CheckResult>, CommandError> {
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
     Ok(crate::doctor::run_local_checks(&cfg))
 }
 
 /// Probe remote backends (Whisper, Ollama) for reachability.
 /// Uses 3-second timeouts per endpoint so the Doctor UI stays responsive.
 #[tauri::command]
-pub async fn doctor_backend_checks() -> Result<Vec<CheckResult>, String> {
-    let cfg = config_io::read().map_err(|e| e.to_string())?;
+pub async fn doctor_backend_checks() -> Result<Vec<CheckResult>, CommandError> {
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
     Ok(crate::doctor::run_backend_checks(&cfg).await)
 }
 
@@ -447,11 +510,11 @@ pub async fn doctor_backend_checks() -> Result<Vec<CheckResult>, String> {
 /// spawns and waits for readiness; subsequent commands that call `forward()`
 /// will reconnect automatically on first use via `Bridge::request`'s retry path.
 #[tauri::command]
-pub async fn start_daemon(bridge: Br<'_>) -> Result<(), String> {
-    let cfg = config_io::read().map_err(|e| e.to_string())?;
+pub async fn start_daemon(bridge: Br<'_>) -> Result<(), CommandError> {
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
     crate::auto_spawn::ensure_running(&cfg)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CommandError::from(e.to_string()))?;
     // If a bridge connection already existed, force a reconnect so the
     // existing transport is fresh after the daemon restart.
     if let Some(b) = bridge.as_ref() {
@@ -461,7 +524,7 @@ pub async fn start_daemon(bridge: Br<'_>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn wizard_test_whisper(url: String) -> Result<TestConnectResult, String> {
+pub async fn wizard_test_whisper(url: String) -> Result<TestConnectResult, CommandError> {
     Ok(crate::wizard::test_whisper_endpoint(&url).await)
 }
 
@@ -469,23 +532,28 @@ pub async fn wizard_test_whisper(url: String) -> Result<TestConnectResult, Strin
 pub async fn wizard_test_hook(
     bridge: Br<'_>,
     custom_command: Option<String>,
-) -> Result<TestConnectResult, String> {
+) -> Result<TestConnectResult, CommandError> {
     Ok(crate::wizard::test_hook(bridge.as_ref(), custom_command).await)
 }
 
 #[tauri::command]
-pub fn list_input_devices() -> Result<Vec<String>, String> {
-    let devices = phoneme_audio::list_input_devices().map_err(|e| e.to_string())?;
+pub fn list_input_devices() -> Result<Vec<String>, CommandError> {
+    let devices =
+        phoneme_audio::list_input_devices().map_err(|e| CommandError::from(e.to_string()))?;
     Ok(devices.into_iter().map(|d| d.name).collect())
 }
 
 #[tauri::command]
-pub async fn list_tags(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn list_tags(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::ListTags).await
 }
 
 #[tauri::command]
-pub async fn add_tag(bridge: Br<'_>, name: String, color: Option<String>) -> Result<Value, String> {
+pub async fn add_tag(
+    bridge: Br<'_>,
+    name: String,
+    color: Option<String>,
+) -> Result<Value, CommandError> {
     forward(&bridge, Request::AddTag { name, color }).await
 }
 
@@ -494,7 +562,7 @@ pub async fn attach_tag(
     bridge: Br<'_>,
     recording_id: String,
     tag_id: i64,
-) -> Result<Value, String> {
+) -> Result<Value, CommandError> {
     let recording_id = parse_id(&recording_id)?;
     forward(
         &bridge,
@@ -511,7 +579,7 @@ pub async fn detach_tag(
     bridge: Br<'_>,
     recording_id: String,
     tag_id: i64,
-) -> Result<Value, String> {
+) -> Result<Value, CommandError> {
     let recording_id = parse_id(&recording_id)?;
     forward(
         &bridge,
@@ -524,7 +592,7 @@ pub async fn detach_tag(
 }
 
 #[tauri::command]
-pub async fn tags_for(bridge: Br<'_>, recording_id: String) -> Result<Value, String> {
+pub async fn tags_for(bridge: Br<'_>, recording_id: String) -> Result<Value, CommandError> {
     let recording_id = parse_id(&recording_id)?;
     forward(&bridge, Request::TagsFor { recording_id }).await
 }
@@ -532,7 +600,7 @@ pub async fn tags_for(bridge: Br<'_>, recording_id: String) -> Result<Value, Str
 /// Return ALL tags (including orphaned ones with no recordings attached).
 /// Used by the Tag Manager settings UI.
 #[tauri::command]
-pub async fn list_all_tags(bridge: Br<'_>) -> Result<Value, String> {
+pub async fn list_all_tags(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::ListAllTags).await
 }
 
@@ -543,13 +611,13 @@ pub async fn update_tag(
     id: i64,
     name: String,
     color: Option<String>,
-) -> Result<Value, String> {
+) -> Result<Value, CommandError> {
     forward(&bridge, Request::UpdateTag { id, name, color }).await
 }
 
 /// Delete a tag by ID and detach it from all recordings.
 #[tauri::command]
-pub async fn delete_tag(bridge: Br<'_>, id: i64) -> Result<Value, String> {
+pub async fn delete_tag(bridge: Br<'_>, id: i64) -> Result<Value, CommandError> {
     forward(&bridge, Request::DeleteTag { id }).await
 }
 
@@ -564,9 +632,9 @@ pub async fn wizard_download_model(
     window: tauri::Window,
     url: String,
     filename: String,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
-        return Err("Invalid filename".to_string());
+        return Err(CommandError::from("Invalid filename"));
     }
 
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
@@ -598,10 +666,7 @@ pub async fn wizard_download_model(
         .map_err(|e| format!("request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "download failed with status: {}",
-            response.status()
-        ));
+        return Err(format!("download failed with status: {}", response.status()).into());
     }
 
     let total = response.content_length();
@@ -614,13 +679,13 @@ pub async fn wizard_download_model(
             Err(e) => {
                 drop(file);
                 let _ = tokio::fs::remove_file(&dest_path).await;
-                return Err(format!("stream error: {}", e));
+                return Err(format!("stream error: {}", e).into());
             }
         };
         if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
             drop(file);
             let _ = tokio::fs::remove_file(&dest_path).await;
-            return Err(format!("write error: {}", e));
+            return Err(format!("write error: {}", e).into());
         }
         downloaded += chunk.len() as u64;
 
@@ -631,7 +696,7 @@ pub async fn wizard_download_model(
 }
 
 #[tauri::command]
-pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<String, String> {
+pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<String, CommandError> {
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| "could not resolve project directories".to_string())?;
     let semantic_dir = dirs.data_local_dir().join("models").join("semantic");
@@ -673,10 +738,7 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
             .map_err(|e| format!("request failed: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!(
-                "download failed with status: {}",
-                response.status()
-            ));
+            return Err(format!("download failed with status: {}", response.status()).into());
         }
 
         let total = response.content_length();
@@ -689,13 +751,13 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
                 Err(e) => {
                     drop(file);
                     let _ = tokio::fs::remove_file(&dest_path).await;
-                    return Err(format!("stream error: {}", e));
+                    return Err(format!("stream error: {}", e).into());
                 }
             };
             if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
                 drop(file);
                 let _ = tokio::fs::remove_file(&dest_path).await;
-                return Err(format!("write error: {}", e));
+                return Err(format!("write error: {}", e).into());
             }
             downloaded += chunk.len() as u64;
 
@@ -710,7 +772,7 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
 }
 
 #[tauri::command]
-pub async fn wizard_download_diarization_model(window: tauri::Window) -> Result<(), String> {
+pub async fn wizard_download_diarization_model(window: tauri::Window) -> Result<(), CommandError> {
     // Diarization uses speakrs which downloads models automatically via hf-hub
     // Since hf-hub blocks, we run it in a blocking task.
     // The UI handles this as an indeterminate progress bar (total = null).
@@ -781,7 +843,7 @@ pub fn wizard_get_system_info() -> SystemInfo {
 }
 
 #[tauri::command]
-pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, String> {
+pub async fn wizard_list_downloaded_models() -> Result<Vec<String>, CommandError> {
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| "could not resolve project directories".to_string())?;
     let models_dir = dirs.data_local_dir().join("models");
@@ -815,7 +877,7 @@ fn path_within(child: &std::path::Path, root: &std::path::Path) -> bool {
 }
 
 #[tauri::command]
-pub fn reveal_file(path: String) -> Result<(), String> {
+pub fn reveal_file(path: String) -> Result<(), CommandError> {
     // Security: the renderer can pass any string here and we hand it to
     // `explorer /select`. Restrict the target to the configured audio directory
     // (the only thing the UI ever reveals — a recording's WAV or the folder
@@ -844,7 +906,7 @@ pub fn reveal_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn read_file_string(path: String) -> Result<String, String> {
+pub fn read_file_string(path: String) -> Result<String, CommandError> {
     // Security: this command exists only to load the user's configured external
     // vimrc. Restrict it to exactly that file (canonicalized) so a compromised
     // renderer cannot read arbitrary files like ~/.ssh/id_rsa.
@@ -854,16 +916,17 @@ pub fn read_file_string(path: String) -> Result<String, String> {
     }
     let allowed =
         std::fs::canonicalize(&cfg.editor.vimrc_path).map_err(|e| format!("config error: {e}"))?;
-    let requested =
-        std::fs::canonicalize(&path).map_err(|e| format!("failed to read {}: {}", path, e))?;
+    let requested = std::fs::canonicalize(&path)
+        .map_err(|e| CommandError::from(format!("failed to read {}: {}", path, e)))?;
     if requested != allowed {
         return Err("path not permitted".into());
     }
-    std::fs::read_to_string(&requested).map_err(|e| format!("failed to read {}: {}", path, e))
+    std::fs::read_to_string(&requested)
+        .map_err(|e| CommandError::from(format!("failed to read {}: {}", path, e)))
 }
 
 #[tauri::command]
-pub async fn wizard_download_server(window: tauri::Window) -> Result<String, String> {
+pub async fn wizard_download_server(window: tauri::Window) -> Result<String, CommandError> {
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
         .ok_or_else(|| "could not resolve project directories".to_string())?;
     let bin_dir = dirs.data_local_dir().join("bin");
@@ -897,10 +960,7 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
         .map_err(|e| format!("request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "download failed with status: {}",
-            response.status()
-        ));
+        return Err(format!("download failed with status: {}", response.status()).into());
     }
 
     let total = response.content_length();
@@ -913,13 +973,13 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
             Err(e) => {
                 drop(file);
                 let _ = tokio::fs::remove_file(&temp_zip).await;
-                return Err(format!("stream error: {}", e));
+                return Err(format!("stream error: {}", e).into());
             }
         };
         if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
             drop(file);
             let _ = tokio::fs::remove_file(&temp_zip).await;
-            return Err(format!("write error: {}", e));
+            return Err(format!("write error: {}", e).into());
         }
         downloaded += chunk.len() as u64;
 
@@ -932,14 +992,14 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Str
     // Explicitly sync and drop to ensure file is completely written before unzip
     if let Err(e) = file.sync_all().await {
         let _ = tokio::fs::remove_file(&temp_zip).await;
-        return Err(format!("failed to flush zip file: {}", e));
+        return Err(format!("failed to flush zip file: {}", e).into());
     }
     drop(file);
 
     let zip_path = temp_zip.clone();
     let bin_path = bin_dir.clone();
 
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
+    tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
         let zip_file = std::fs::File::open(&zip_path)
             .map_err(|e| format!("failed to open downloaded zip: {}", e))?;
 
@@ -989,11 +1049,11 @@ mod tests {
     #[tokio::test]
     async fn forward_none_bridge_returns_descriptive_error() {
         let result = forward(&None, Request::DaemonStatus).await;
-        assert!(result.is_err());
-        let msg = result.unwrap_err();
+        let err = result.unwrap_err();
+        assert_eq!(err.kind, "daemon_not_running");
         assert!(
-            msg.contains("daemon not reachable"),
-            "expected daemon-not-reachable message, got: {msg}"
+            err.message.contains("daemon not reachable"),
+            "expected daemon-not-reachable message, got: {err:?}"
         );
     }
 
@@ -1007,7 +1067,7 @@ mod tests {
     #[test]
     fn parse_id_rejects_garbage() {
         let err = parse_id("not-an-id").unwrap_err();
-        assert!(err.contains("invalid recording id"));
+        assert!(err.message.contains("invalid recording id"));
     }
 
     #[test]
@@ -1047,11 +1107,11 @@ mod tests {
 }
 
 #[tauri::command]
-pub async fn wizard_ping_ollama() -> Result<bool, String> {
+pub async fn wizard_ping_ollama() -> Result<bool, CommandError> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CommandError::from(e.to_string()))?;
     match client
         .get("http://127.0.0.1:11434/api/version")
         .send()
@@ -1063,7 +1123,7 @@ pub async fn wizard_ping_ollama() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn wizard_detect_deps() -> Result<serde_json::Value, String> {
+pub async fn wizard_detect_deps() -> Result<serde_json::Value, CommandError> {
     let mut has_ollama = false;
 
     // Check if `ollama` CLI is in PATH
@@ -1113,7 +1173,10 @@ pub struct OllamaPullProgress {
 }
 
 #[tauri::command]
-pub async fn wizard_pull_ollama_model(window: tauri::Window, model: String) -> Result<(), String> {
+pub async fn wizard_pull_ollama_model(
+    window: tauri::Window,
+    model: String,
+) -> Result<(), CommandError> {
     let client = reqwest::Client::new();
     let body = serde_json::json!({ "name": model });
     let response = client
@@ -1124,7 +1187,7 @@ pub async fn wizard_pull_ollama_model(window: tauri::Window, model: String) -> R
         .map_err(|e| format!("request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("pull failed with status: {}", response.status()));
+        return Err(format!("pull failed with status: {}", response.status()).into());
     }
 
     use futures::StreamExt;
@@ -1186,12 +1249,14 @@ pub async fn wizard_download_file(
     window: tauri::Window,
     url: String,
     filename: String,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
-        return Err("Invalid filename".to_string());
+        return Err(CommandError::from("Invalid filename"));
     }
     if !is_allowed_download_url(&url) {
-        return Err("Download URL is not from an allowed host".to_string());
+        return Err(CommandError::from(
+            "Download URL is not from an allowed host",
+        ));
     }
 
     let dest_path = std::env::temp_dir().join(&filename);
@@ -1205,7 +1270,7 @@ pub async fn wizard_download_file(
         .map_err(|e| format!("request failed: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("download failed: {}", response.status()));
+        return Err(format!("download failed: {}", response.status()).into());
     }
 
     let total = response.content_length();
@@ -1220,13 +1285,13 @@ pub async fn wizard_download_file(
             Err(e) => {
                 drop(file);
                 let _ = tokio::fs::remove_file(&dest_path).await;
-                return Err(format!("stream error: {}", e));
+                return Err(format!("stream error: {}", e).into());
             }
         };
         if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await {
             drop(file);
             let _ = tokio::fs::remove_file(&dest_path).await;
-            return Err(format!("write error: {}", e));
+            return Err(format!("write error: {}", e).into());
         }
         downloaded += chunk.len() as u64;
 
@@ -1237,13 +1302,15 @@ pub async fn wizard_download_file(
 }
 
 #[tauri::command]
-pub fn wizard_run_installer(path: String) -> Result<(), String> {
+pub fn wizard_run_installer(path: String) -> Result<(), CommandError> {
     let p = std::path::Path::new(&path);
     if !p.starts_with(std::env::temp_dir()) {
-        return Err("Execution is restricted to the temporary directory".to_string());
+        return Err(CommandError::from(
+            "Execution is restricted to the temporary directory",
+        ));
     }
     if !p.exists() {
-        return Err("Installer file does not exist".to_string());
+        return Err(CommandError::from("Installer file does not exist"));
     }
 
     #[cfg(target_os = "windows")]
@@ -1256,9 +1323,9 @@ pub fn wizard_run_installer(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn open_file(path: String) -> Result<(), String> {
+pub fn open_file(path: String) -> Result<(), CommandError> {
     if !std::path::Path::new(&path).exists() {
-        return Err(format!("File does not exist: {}", path));
+        return Err(format!("File does not exist: {}", path).into());
     }
     #[cfg(target_os = "windows")]
     {

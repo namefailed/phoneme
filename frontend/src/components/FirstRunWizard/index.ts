@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
@@ -74,7 +75,7 @@ export class FirstRunWizardElement extends LitElement {
       await invoke("write_config", { config: cleanConfig });
       this.onComplete();
     } catch (e) {
-      showToast(`Failed to save setup: ${e}`, "error");
+      showToast(`Failed to save setup: ${errText(e)}`, "error");
     }
   }
 
@@ -91,7 +92,7 @@ export class FirstRunWizardElement extends LitElement {
       await invoke("write_config", { config: cleanConfig });
       this.onComplete();
     } catch (e) {
-      showToast(`Failed to save setup: ${e}`, "error");
+      showToast(`Failed to save setup: ${errText(e)}`, "error");
     }
   }
 
@@ -289,7 +290,7 @@ export class FirstRunWizardElement extends LitElement {
       }
     } catch (e) {
       console.error(e);
-      showToast(`Error during setup: ${e}`, "error");
+      showToast(`Error during setup: ${errText(e)}`, "error");
     } finally {
       this.isDownloading = false;
       this.go("next");
@@ -696,7 +697,7 @@ export class FirstRunWizardElement extends LitElement {
           try {
             await invoke("record_start", { mode: "oneshot" });
           } catch (e) {
-            showToast(`Failed to start recording: ${e}`, "error");
+            showToast(`Failed to start recording: ${errText(e)}`, "error");
           }
         }}>●</button>
       </div>
