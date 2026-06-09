@@ -424,8 +424,12 @@ mark.search-hit {
 @keyframes thinkingPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .thinking-popout {
   z-index: 201;
-  width: 360px;
-  max-height: 360px;
+  width: 380px;
+  height: 420px;
+  min-width: 300px;
+  min-height: 220px;
+  max-width: 92vw;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-elevated);
@@ -433,6 +437,8 @@ mark.search-hit {
   border-radius: 10px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
   overflow: hidden;
+  /* Drag the bottom-right corner to resize; the size is remembered. */
+  resize: both;
 }
 .thinking-head {
   display: flex;
@@ -443,13 +449,23 @@ mark.search-hit {
   font-weight: 600;
   color: var(--fg-default);
   border-bottom: 1px solid var(--border-subtle);
-  cursor: move;
   user-select: none;
 }
 .thinking-close { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 13px; }
 .thinking-close:hover { color: var(--accent); }
-.thinking-body { overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+.thinking-body { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .thinking-empty { font-size: 11px; color: var(--fg-faded); line-height: 1.5; }
+/* One AI-activity log entry. */
+.thinking-entry {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+}
+.thinking-entry.live { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.thinking-entry-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.thinking-entry-stage { font-size: 11px; font-weight: 700; color: var(--accent); }
+.thinking-entry-meta { font-size: 10px; color: var(--fg-faded); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .thinking-stage-title { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
 .thinking-prompt { font-size: 11px; color: var(--fg-muted); }
 .thinking-prompt summary { cursor: pointer; }
