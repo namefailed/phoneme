@@ -64,7 +64,7 @@ export class SectionStorage {
             <button class="inline-button" id="btn-export-all">⬇ Export All…</button>
             <span id="export-status" style="font-size:11px; color: var(--fg-muted);"></span>
           </div>
-          <p style="font-size: 11px; color: var(--fg-muted); margin-top: 6px;">
+          <p style="font-size: 11px; color: var(--fg-muted); margin-top: 6px; white-space: nowrap;">
             Exports all recordings and their transcripts to a single file.
           </p>
         </div>
