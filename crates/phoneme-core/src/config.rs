@@ -631,11 +631,15 @@ impl Config {
         self.preview_whisper.as_ref().unwrap_or(&self.whisper)
     }
 
-    /// True when the live preview runs on its OWN local bundled server (a
-    /// distinct model/port from the final), so the daemon must supervise a
-    /// second whisper-server. False when preview reuses the main provider or
-    /// uses a cloud API (no extra server needed).
+    /// True when the daemon must supervise a SECOND whisper-server for the live
+    /// preview: live preview is enabled AND `preview_whisper` is a local bundled
+    /// model on its own port. False when preview is off, reuses the main
+    /// provider, or uses a cloud API (no extra server needed) — so the second
+    /// server never spawns unless the live preview is actually turned on.
     pub fn preview_needs_own_server(&self) -> bool {
+        if !self.recording.streaming_preview {
+            return false;
+        }
         match &self.preview_whisper {
             Some(p) => {
                 p.provider == TranscriptionBackend::Local
@@ -941,8 +945,10 @@ mod tests {
         );
         assert!(!cfg.preview_needs_own_server());
 
-        // Dedicated local model on its own server → needs a 2nd server.
+        // Dedicated local model on its own server → needs a 2nd server (only
+        // when live preview is actually enabled).
         let mut local = Config::default();
+        local.recording.streaming_preview = true;
         let mut pv = local.whisper.clone();
         pv.mode = WhisperMode::BundledModel;
         pv.model_path = "C:/models/ggml-tiny.en.bin".into();
@@ -951,8 +957,14 @@ mod tests {
         assert!(local.preview_needs_own_server());
         assert_eq!(local.preview_provider_config().bundled_server_port, 5810);
 
+        // Same local config but preview OFF → no second server spawns.
+        let mut off = local.clone();
+        off.recording.streaming_preview = false;
+        assert!(!off.preview_needs_own_server());
+
         // Cloud API preview → independent provider, but NO second local server.
         let mut api = Config::default();
+        api.recording.streaming_preview = true;
         let mut pv = api.whisper.clone();
         pv.provider = TranscriptionBackend::Groq;
         pv.mode = WhisperMode::External;
