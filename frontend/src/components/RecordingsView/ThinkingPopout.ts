@@ -1,6 +1,16 @@
 import { LitElement, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
+import { showToast } from "../../utils/toast";
+
+/** A right-pointing chevron that rotates to point down when its <details> is
+ *  open (see `.thinking-chevron` CSS) — replaces the native disclosure triangle. */
+const CHEVRON = html`<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+  stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>`;
+/** A small clipboard glyph for the per-section copy buttons. */
+const COPY_ICON = html`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+  stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 
 /** One AI-activity session: a single (recording, stage) run with its streamed
  *  prompt + response. Each prompt-start begins a NEW entry, so re-runs of the
@@ -259,19 +269,53 @@ export class ThinkingPopoutElement extends LitElement {
     else this.applyPosition(panel);
   }
 
+  /** Copy a section's text without toggling its <details> (preventDefault stops
+   *  the summary click from opening/closing the fold). */
+  private async copy(ev: MouseEvent, text: string, what: string) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`Copied ${what}`, "success");
+    } catch {
+      showToast(`Couldn't copy ${what}`, "error");
+    }
+  }
+
+  /** One collapsible section (Prompt / Response). The literal `open` attribute is
+   *  static, so lit never re-applies it on the streaming re-renders — once the
+   *  user folds/unfolds a section it stays that way. `kind` drives extra styling
+   *  (the response gets a scroll cap). */
+  private foldSection(label: string, kind: string, body: string, defaultOpen: boolean) {
+    const head = html`
+      <summary class="thinking-fold-sum">
+        <span class="thinking-chevron" aria-hidden="true">${CHEVRON}</span>
+        <span class="thinking-fold-label">${label}</span>
+        <button class="thinking-copy" title="Copy ${label.toLowerCase()}"
+          @click=${(ev: MouseEvent) => this.copy(ev, body, label.toLowerCase())}>${COPY_ICON}</button>
+      </summary>
+      <pre class="thinking-pre thinking-pre--${kind}">${body}</pre>`;
+    return defaultOpen
+      ? html`<details class="thinking-fold" open>${head}</details>`
+      : html`<details class="thinking-fold">${head}</details>`;
+  }
+
   private renderEntry(e: ActivityEntry) {
     const time = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const mine = e.id === this.recordingId;
     return html`
       <div class="thinking-entry ${e.done ? "" : "live"}">
         <div class="thinking-entry-head">
-          <span class="thinking-entry-stage">${stageLabel(e.stage)}${e.done ? "" : " ⟳"}</span>
-          <span class="thinking-entry-meta">${mine ? "● " : ""}#${e.id.slice(0, 6)} · ${time}</span>
+          <span class="thinking-entry-stage">
+            ${e.done ? "" : html`<span class="thinking-spin" aria-hidden="true"></span>`}
+            ${stageLabel(e.stage)}
+          </span>
+          <span class="thinking-entry-meta">
+            ${mine ? html`<span class="thinking-mine-dot" title="This recording"></span>` : ""}<span class="thinking-id">#${e.id.slice(0, 6)}</span> · ${time}
+          </span>
         </div>
-        ${e.prompt
-          ? html`<details class="thinking-prompt"><summary>Prompt</summary><pre>${e.prompt}</pre></details>`
-          : ""}
-        <pre class="thinking-response">${e.response || "…"}</pre>
+        ${e.prompt ? this.foldSection("Prompt", "prompt", e.prompt, false) : ""}
+        ${this.foldSection("Response", "response", e.response || "…", true)}
       </div>
     `;
   }
@@ -298,7 +342,7 @@ export class ThinkingPopoutElement extends LitElement {
               <div class="thinking-body">
                 ${entries.length === 0
                   ? html`<div class="thinking-empty">No AI activity yet. Transcribe, clean up, or summarize a recording (or re-run one) and the prompt + response will stream here. Everything since you opened the app is kept in this list.</div>`
-                  : entries.map((e) => this.renderEntry(e))}
+                  : repeat(entries, (e) => e.seq, (e) => this.renderEntry(e))}
               </div>
               <span class="thinking-rz thinking-rz-n" @mousedown=${(e: MouseEvent) => this.startResize(e, "n")}></span>
               <span class="thinking-rz thinking-rz-s" @mousedown=${(e: MouseEvent) => this.startResize(e, "s")}></span>
