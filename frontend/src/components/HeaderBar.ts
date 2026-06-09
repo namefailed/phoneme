@@ -499,8 +499,10 @@ export class HeaderBarElement extends LitElement {
       </div>
       <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"
         title="Live transcription preview — updates as you speak while recording">
-        <span class="hb-preview-pulse" aria-hidden="true"></span>
-        <span class="hb-preview-label">Live</span>
+        <span class="hb-preview-live">
+          <span class="hb-preview-pulse" aria-hidden="true"></span>
+          <span class="hb-preview-label">Live</span>
+        </span>
         <span class="hb-preview-text">${this.previewText ?? ''}</span>
       </div>
     `;

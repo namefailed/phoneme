@@ -269,12 +269,21 @@ option {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+/* The dot + "LIVE" label, kept together and vertically centered on the text's
+   first line (min-height matches the text line-height) so they align cleanly
+   instead of relying on hand-tuned per-element top margins. */
+.hb-preview .hb-preview-live {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 1.45em;
+}
 /* Pulsing record indicator. */
 .hb-preview .hb-preview-pulse {
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  margin-top: 5px;
   border-radius: 50%;
   background: var(--err);
   animation: hbPreviewPulse 1.5s ease-out infinite;
@@ -286,7 +295,6 @@ option {
 }
 .hb-preview .hb-preview-label {
   flex: 0 0 auto;
-  margin-top: 1px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.07em;
