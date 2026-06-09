@@ -60,6 +60,7 @@ export class HeaderBarElement extends LitElement {
 
     void this.loadTags();
     void this.syncStatusFromDaemon();
+    void this.initSemanticDefault();
 
     this.unsubEvent = await listen<any>("daemon-event", async (e) => {
       const p = e.payload;
@@ -228,8 +229,31 @@ export class HeaderBarElement extends LitElement {
     filterStore.set({ ...this.filterState, search: q || null });
   }
 
+  /**
+   * Initialize the semantic-search toggle. If the user previously set it, honor
+   * that (persisted in localStorage). Otherwise default it ON when semantic
+   * search is configured/installed in Settings — so it "just works" out of the
+   * box for users who set it up.
+   */
+  private async initSemanticDefault() {
+    const stored = localStorage.getItem("phoneme.semanticSearch");
+    if (stored === "true" || stored === "false") {
+      filterStore.set({ ...filterStore.get(), semantic: stored === "true" });
+      return;
+    }
+    try {
+      const cfg = await invoke<any>("read_config");
+      if (cfg?.semantic_search?.enabled) {
+        filterStore.set({ ...filterStore.get(), semantic: true });
+      }
+    } catch { /* leave default off */ }
+  }
+
   private toggleSemantic() {
-    filterStore.set({ ...this.filterState, semantic: !this.filterState.semantic });
+    const next = !this.filterState.semantic;
+    // Remember the user's explicit choice across sessions.
+    localStorage.setItem("phoneme.semanticSearch", String(next));
+    filterStore.set({ ...this.filterState, semantic: next });
   }
 
   private formatLocalIso(dateStr: string, endOfDay: boolean) {

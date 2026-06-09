@@ -19,6 +19,19 @@ const LLM_PROVIDERS: ProviderOption[] = [
   { value: "anthropic", label: "Anthropic Claude (cloud)" },
 ];
 
+/** Size/speed rank for ordering whisper models smallest→largest. Turbo (a
+ *  distilled large model, faster than Large v3) sorts just before Large v3. */
+function whisperRank(path: string): number {
+  const f = path.replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? "";
+  if (f.includes("tiny")) return 0;
+  if (f.includes("base")) return 1;
+  if (f.includes("small")) return 2;
+  if (f.includes("medium")) return 3;
+  if (f.includes("turbo")) return 4;
+  if (f.includes("large")) return 5;
+  return 6;
+}
+
 function localModelLabel(path: string): string {
   const file = path.replace(/\\/g, "/").split("/").pop() ?? path;
   const map: Record<string, string> = {
@@ -146,7 +159,11 @@ export class ModelPickerElement extends LitElement {
 
   private async loadDownloadedModels() {
     try {
-      this.downloadedModels = await invoke("wizard_list_downloaded_models");
+      const models = await invoke<string[]>("wizard_list_downloaded_models");
+      // Order by size/speed tier so the dropdown reads smallest→largest. Turbo
+      // is a distilled large model — faster than Large v3 — so it sits just
+      // before it (Tiny < Base < Small < Medium < Turbo < Large v3).
+      this.downloadedModels = [...models].sort((a, b) => whisperRank(a) - whisperRank(b));
     } catch {
       this.downloadedModels = [];
     }

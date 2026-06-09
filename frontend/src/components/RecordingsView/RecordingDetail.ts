@@ -231,7 +231,7 @@ export class RecordingDetail {
       resetPeek();
       editorEl.style.display = "none";
       el.style.display = "block";
-      if (btn) btn.textContent = "Back to current transcript";
+      if (btn) btn.textContent = "← Back";
       activePeek = kind;
       if (kind === "summary") this.summaryPeeking = true;
     };

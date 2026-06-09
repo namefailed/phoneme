@@ -279,10 +279,14 @@ mark.search-hit {
 .transcript-history {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+.transcript-history .inline-button {
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .transcript-block {
   /* Tighter bottom margin: it sits directly above the notes block, so this is
