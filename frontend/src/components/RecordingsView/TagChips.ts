@@ -124,12 +124,15 @@ export class TagChipsElement extends LitElement {
       let tag = this.allTags.find((t) => t.name === name);
       if (!tag) tag = await addTag(name);
       await attachTag(this.recordingId, tag.id);
-      
-      const input = this.renderRoot.querySelector<HTMLInputElement>(".tag-add");
-      if (input) input.value = "";
       this.tagQuery = "";
-
+      this.activeIndex = -1;
       await this.load();
+      // Keep the picker open with the cursor in the box so several tags can be
+      // added in a row; it only closes when the input loses focus (blur).
+      this._showDropdown = true;
+      await this.updateComplete;
+      const input = this.renderRoot.querySelector<HTMLInputElement>(".tag-add");
+      if (input) { input.value = ""; input.focus(); }
     } catch (e) {
       showToast(`Failed to add tag: ${errText(e)}`, "error");
     }
@@ -176,9 +179,8 @@ export class TagChipsElement extends LitElement {
       e.preventDefault();
       // A highlighted suggestion wins; otherwise create/attach the typed name.
       if (this._showDropdown && this.activeIndex >= 0 && this.activeIndex < tags.length) {
+        // attachByName keeps the picker open + refocuses for adding more.
         void this.attachByName(tags[this.activeIndex].name);
-        this._showDropdown = false;
-        this.activeIndex = -1;
         return;
       }
       const input = e.target as HTMLInputElement;
@@ -261,7 +263,7 @@ export class TagChipsElement extends LitElement {
                   <div class="tag-dropdown-item ${i === this.activeIndex ? 'active' : ''}" data-index=${i}
                     role="option" aria-selected=${i === this.activeIndex ? "true" : "false"}
                     @mouseenter=${() => this.activeIndex = i}
-                    @mousedown=${(e: Event) => { e.preventDefault(); this.attachByName(t.name); this._showDropdown = false; }}>
+                    @mousedown=${(e: Event) => { e.preventDefault(); void this.attachByName(t.name); }}>
                     <span class="tag-dropdown-dot" style="background: ${t.color || 'var(--accent)'}"></span>
                     ${t.name}
                   </div>
