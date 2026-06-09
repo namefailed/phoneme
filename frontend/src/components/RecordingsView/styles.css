@@ -59,7 +59,9 @@
 .rec-row.active,
 .rec-row.active:hover,
 .rec-row--track.active,
-.rec-row--track.active:hover {
+.rec-row--track.active:hover,
+.rec-row.multi-selected.active,
+.rec-row.multi-selected.active:hover {
   background: color-mix(in srgb, var(--accent) 32%, transparent);
   border-left-color: var(--accent);
   box-shadow:
@@ -650,13 +652,16 @@ mark.search-hit {
   border-color: var(--accent);
 }
 
-/* ── Multi-selected row highlight ─────────────────────────────────────────── */
+/* Checkbox multi-select: a faint fill only — the checkbox is the real
+   indicator. NO left bar here: the left edge is reserved for the meeting rail,
+   otherwise select-all paints every row with a meeting-looking edge. The
+   active row's rule has higher specificity (.multi-selected.active) so a
+   selected row keeps its strong highlight even while checkbox-selected. */
 .rec-row.multi-selected {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border-left-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 .rec-row.multi-selected:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 17%, transparent);
 }
 
 /* ── Bulk action bar ─────────────────────────────────────────────────────── */
@@ -891,12 +896,16 @@ mark.search-hit {
    apart at a glance. The active-row rule (higher specificity) still wins when
    a track is selected. */
 .rec-row--track {
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  border-left-color: var(--accent);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  /* The SOLID left rail is the meeting signal — a vertical accent bar reads
+     instantly and, being a box-shadow, survives multi-select (which sets no
+     box-shadow) so the meeting cluster stays identifiable even when every row
+     is checkbox-selected. The tint is kept light so it never competes with the
+     selection fill. */
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  box-shadow: inset 4px 0 0 var(--accent);
 }
 .rec-row--track:hover {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 .rec-track-badge {
   display: inline-block;
