@@ -265,6 +265,15 @@ pub async fn rerun_cleanup(
     api_key: Option<String>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
+    // A masked key means "use the configured cleanup key" — resolve it here so
+    // the real secret is never round-tripped through the WebView.
+    let api_key = if api_key.as_deref() == Some(MASKED_SECRET) {
+        config_io::read()
+            .ok()
+            .map(|c| c.llm_post_process.api_key_str().to_owned())
+    } else {
+        api_key
+    };
     forward(
         &bridge,
         Request::RerunCleanup {
@@ -405,10 +414,60 @@ pub async fn record_status(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RecordStatus).await
 }
 
-/// Read the application configuration directly from the local `config.toml` file.
+/// Placeholder the WebView sees in place of any saved API key, so secrets never
+/// leave the daemon/tray process (S-H2). When the WebView writes config back, an
+/// unchanged key arrives as this sentinel and we restore the real on-disk value
+/// instead of clobbering it. The frontend mirrors this constant.
+const MASKED_SECRET: &str = "__phoneme_secret_kept__";
+
+/// Replace every non-empty API key in a serialized config with the mask.
+fn mask_config_secrets(v: &mut Value) {
+    for section in ["whisper", "llm_post_process", "summary", "preview_whisper"] {
+        if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
+            if key.as_str().is_some_and(|k| !k.is_empty()) {
+                *key = Value::String(MASKED_SECRET.to_string());
+            }
+        }
+    }
+}
+
+/// Restore any masked key in an incoming config from the current on-disk config,
+/// so saving without changing a key keeps it rather than writing the placeholder.
+fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
+    if incoming.whisper.api_key_str() == MASKED_SECRET {
+        incoming.whisper.set_api_key(current.whisper.api_key_str().to_owned());
+    }
+    if incoming.llm_post_process.api_key_str() == MASKED_SECRET {
+        incoming
+            .llm_post_process
+            .set_api_key(current.llm_post_process.api_key_str().to_owned());
+    }
+    if incoming.summary.api_key_str() == MASKED_SECRET {
+        incoming
+            .summary
+            .set_api_key(current.summary.api_key_str().to_owned());
+    }
+    if let Some(pw) = incoming.preview_whisper.as_mut() {
+        if pw.api_key_str() == MASKED_SECRET {
+            let cur = current
+                .preview_whisper
+                .as_ref()
+                .map(|c| c.api_key_str().to_owned())
+                .unwrap_or_default();
+            pw.set_api_key(cur);
+        }
+    }
+}
+
+/// Read the config for the WebView with all API keys masked, so secrets never
+/// cross the IPC boundary into the renderer (S-H2). Tray/daemon code that needs
+/// the real keys reads `config_io::read()` directly instead.
 #[tauri::command]
-pub fn read_config() -> Result<Config, CommandError> {
-    config_io::read().map_err(|e| CommandError::from(e.to_string()))
+pub fn read_config() -> Result<Value, CommandError> {
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
+    let mut json = serde_json::to_value(&cfg).map_err(|e| CommandError::from(e.to_string()))?;
+    mask_config_secrets(&mut json);
+    Ok(json)
 }
 
 /// Write a new configuration state to `config.toml`.
@@ -421,8 +480,12 @@ pub fn read_config() -> Result<Config, CommandError> {
 pub async fn write_config(
     app: tauri::AppHandle,
     bridge: Br<'_>,
-    config: Config,
+    mut config: Config,
 ) -> Result<(), CommandError> {
+    // The WebView only ever held masked keys; restore any unchanged secret from
+    // the current on-disk config so saving doesn't overwrite it with the mask.
+    let current = config_io::read().unwrap_or_default();
+    unmask_config_secrets(&mut config, &current);
     let cfg = config.clone();
     tokio::task::spawn_blocking(move || config_io::write(&cfg))
         .await
@@ -1185,6 +1248,36 @@ mod tests {
             err.message.contains("daemon not reachable"),
             "expected daemon-not-reachable message, got: {err:?}"
         );
+    }
+
+    // ── config secret masking (S-H2) ──────────────────────────────────────
+
+    #[test]
+    fn mask_replaces_only_nonempty_keys() {
+        let mut cfg = Config::default();
+        cfg.llm_post_process.set_api_key("sk-secret-123");
+        let mut json = serde_json::to_value(&cfg).unwrap();
+        mask_config_secrets(&mut json);
+        assert_eq!(json["llm_post_process"]["api_key"], MASKED_SECRET);
+        // Whisper has no key by default — an empty key stays empty (not masked).
+        assert_eq!(json["whisper"]["api_key"], "");
+    }
+
+    #[test]
+    fn unmask_restores_unchanged_key_and_keeps_a_changed_one() {
+        let mut current = Config::default();
+        current.llm_post_process.set_api_key("real-cleanup-key");
+        current.summary.set_api_key("real-summary-key");
+
+        let mut incoming = current.clone();
+        // Unchanged field arrives masked → restore from disk.
+        incoming.llm_post_process.set_api_key(MASKED_SECRET);
+        // Changed field carries the new key → keep it.
+        incoming.summary.set_api_key("new-summary-key");
+
+        unmask_config_secrets(&mut incoming, &current);
+        assert_eq!(incoming.llm_post_process.api_key_str(), "real-cleanup-key");
+        assert_eq!(incoming.summary.api_key_str(), "new-summary-key");
     }
 
     // ── parse_id ──────────────────────────────────────────────────────────

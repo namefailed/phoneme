@@ -12,6 +12,13 @@
  */
 export type LlmProvider = "ollama" | "openai" | "groq" | "anthropic";
 
+/**
+ * Sentinel the daemon substitutes for a saved API key when handing config to
+ * the WebView (mirrors `MASKED_SECRET` in src-tauri/commands.rs). The renderer
+ * never sees real keys, so it must never send this placeholder to a provider.
+ */
+export const MASKED_SECRET = "__phoneme_secret_kept__";
+
 /** Providers that talk to a remote API and therefore need a key/URL. */
 export function isApiLlmProvider(provider: string): provider is Exclude<LlmProvider, "ollama"> {
   return provider === "openai" || provider === "groq" || provider === "anthropic";
@@ -74,6 +81,13 @@ export async function fetchLlmModels(
   apiUrl: string = "",
   apiKey: string = "",
 ): Promise<string[]> {
+  // A saved cloud key arrives masked — we can't list models with the
+  // placeholder, so report "none" (callers fall back to manual model entry).
+  // Local providers (Ollama) need no key, so they still fetch.
+  if (apiKey === MASKED_SECRET) {
+    if (isApiLlmProvider(provider)) return [];
+    apiKey = "";
+  }
   const { endpoint, headers } = resolveModelsEndpoint(provider, apiUrl, apiKey);
   const res = await fetch(endpoint, { headers });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

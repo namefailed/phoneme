@@ -197,6 +197,12 @@ impl LlmPostProcessConfig {
     pub fn set_api_key(&mut self, key: impl Into<String>) {
         self.api_key = SecretString::from(key.into());
     }
+
+    /// The API key as a plain `&str`, so callers outside this crate can read it
+    /// without depending on `secrecy` (e.g. masking config for the WebView).
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
 }
 
 fn default_llm_post_process() -> LlmPostProcessConfig {
@@ -423,6 +429,16 @@ impl PartialEq for WhisperConfig {
 }
 
 impl WhisperConfig {
+    /// Replace the API key from a plain string (encapsulates `SecretString`).
+    pub fn set_api_key(&mut self, key: impl Into<String>) {
+        self.api_key = SecretString::from(key.into());
+    }
+
+    /// The API key as a plain `&str` (for masking config for the WebView).
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
+
     /// OpenAI-compatible Whisper server base URL (no trailing path).
     pub fn server_base_url(&self) -> String {
         match self.mode {
