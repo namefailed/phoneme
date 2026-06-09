@@ -28,9 +28,6 @@ export class HeaderBarElement extends LitElement {
     (localStorage.getItem("phoneme.recordMode") as "recording" | "meeting") || "recording";
   @state() private modeMenuOpen = false;
   @state() private previewText: string | null = null;
-  @state() private whisperReachable: boolean | null = null;
-  @state() private queuePending = 0;
-  @state() private queueProcessing = 0;
   @state() private filterState: UiFilter = filterStore.get();
   private previewDebounceTimer: number | null = null;
 
@@ -101,13 +98,8 @@ export class HeaderBarElement extends LitElement {
         this.isPaused = true;
       } else if (eventName === "recording_resumed") {
         this.isPaused = false;
-      } else if (eventName === "whisper_status_changed") {
-        this.whisperReachable = p.reachable as boolean;
       } else if (eventName === "summary_failed") {
         showToast(`Summary failed: ${p.error ?? "check the AI provider in Settings"}`, "error");
-      } else if (eventName === "queue_depth_changed") {
-        this.queuePending = (p.pending as number) ?? 0;
-        this.queueProcessing = (p.processing as number) ?? 0;
       } else if (eventName === "retention_warning") {
         try {
           const { isPermissionGranted, requestPermission, sendNotification } = await import("@tauri-apps/plugin-notification");
@@ -358,8 +350,6 @@ export class HeaderBarElement extends LitElement {
     const actionTitle = this.recordMode === "meeting"
       ? "Meeting Mode: record your mic and the system audio as two linked tracks"
       : "Start/Stop a single recording (or use your global hotkey)";
-    const totalQueue = this.queuePending + this.queueProcessing;
-
     return html`
       <div class="headerbar" data-tauri-drag-region>
         <style>
@@ -410,11 +400,7 @@ export class HeaderBarElement extends LitElement {
           <option value="hook_failed" ?selected=${f.status === "hook_failed"}>Hook Failed</option>
         </select>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
-          <span class="hb-whisper-dot ${this.whisperReachable === true ? 'reachable' : this.whisperReachable === false ? 'unreachable' : ''}"
-            title=${this.whisperReachable === true ? 'Whisper: connected' : this.whisperReachable === false ? 'Whisper: unreachable' : 'Whisper status unknown'}></span>
-          <span class="hb-queue-badge" style="display:${totalQueue > 0 ? "inline-flex" : "none"}"
-            title="${this.queueProcessing} processing, ${this.queuePending} queued">${totalQueue || ""}</span>
-          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" 
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;"
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
           <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" 
             title="Cancel recording and discard audio" @click=${this.cancelRecording}>✕ Cancel</button>

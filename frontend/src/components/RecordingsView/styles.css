@@ -434,6 +434,10 @@ mark.search-hit {
 .rv-shell {
   height: 100%;
   display: grid;
+  /* A single full-height row so every column (incl. the sidebar) stretches to
+     the bottom — without this the implicit `auto` row can collapse to content,
+     leaving the sidebar (and its pinned queue panel) short of the bottom. */
+  grid-template-rows: minmax(0, 1fr);
 }
 .rv-list {
   height: 100%;
@@ -740,9 +744,11 @@ ph-sidebar {
   flex-direction: column;
   height: 100%;
 }
-/* Library + Tags scroll; the queue panel below stays pinned to the bottom. */
+/* Library + Tags scroll; the queue panel below stays pinned to the bottom.
+   flex-basis:0 lets this area absorb all leftover height so the (content-sized)
+   queue panel sits flush at the bottom. */
 .rv-sidebar-scroll {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
 }
@@ -757,11 +763,10 @@ ph-sidebar {
      panel grows upward instead of off the bottom edge. */
   flex-direction: column-reverse;
 }
-/* Collapsed: just the header pinned at the bottom. Expanded: grow to fill the
-   sidebar's free space (the list scrolls), so it reads as a real panel rather
-   than a thin strip with a gap above it. */
-.queue-panel.collapsed { flex: 0 0 auto; }
-.queue-panel.expanded { flex: 1 1 auto; min-height: 0; max-height: 70%; }
+/* Content-sized and pinned at the very bottom (the sidebar scroll area above
+   takes all remaining space). The header therefore always sits flush at the
+   sidebar bottom; the list grows upward from it, capped + scrollable. */
+.queue-panel { flex: 0 0 auto; }
 /* Separator between the list (above) and the pinned header (below). */
 .queue-panel.expanded .queue-header { border-top: 1px solid var(--border-subtle); }
 .queue-header {
@@ -794,18 +799,15 @@ ph-sidebar {
 }
 .queue-count.idle { background: transparent; color: var(--fg-faded); font-weight: 500; }
 .queue-list {
-  flex: 1 1 auto;
-  min-height: 0;
+  /* Sized to its content, capped so it shows a healthy number of items and
+     scrolls beyond. The header below stays pinned to the sidebar bottom. */
+  max-height: min(60vh, 520px);
   overflow-y: auto;
   padding: 6px 8px 8px;
   display: flex;
   flex-direction: column;
-  /* Items hug the bottom (just above the pinned header) and grow upward, so a
-     short queue doesn't leave an awkward gap between the items and the header. */
-  justify-content: flex-end;
   gap: 4px;
 }
-.queue-empty { margin-top: auto; }
 .queue-empty {
   font-size: 11px;
   color: var(--fg-faded);
