@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { listRecordings, semanticSearch, updateMeetingName, type Recording } from "../../services/ipc";
@@ -109,7 +110,7 @@ export class RecordingsListElement extends LitElement {
       this.multiSelected = nextMulti;
       this.store.set({ ...this.store.get(), recordings: rows, loading: false });
     } catch (e) {
-      this.store.set({ ...this.store.get(), error: String(e), loading: false });
+      this.store.set({ ...this.store.get(), error: errText(e), loading: false });
     }
   }
 
@@ -132,7 +133,7 @@ export class RecordingsListElement extends LitElement {
         });
       }
     } catch (e) {
-      this.store.set({ ...this.store.get(), error: String(e) });
+      this.store.set({ ...this.store.get(), error: errText(e) });
     } finally {
       this.loadingMore = false;
     }

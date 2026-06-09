@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
@@ -181,7 +182,7 @@ export class SectionHook {
         const custom_command = input ? input.value : undefined;
         const result = await invoke<{ ok: boolean; message: string }>("wizard_test_hook", {
           customCommand: custom_command,
-        }).catch((e) => ({ ok: false, message: String(e) }));
+        }).catch((e) => ({ ok: false, message: errText(e) }));
         el.className = `test-result ${result.ok ? "ok" : "err"}`;
         el.textContent = result.message;
       });

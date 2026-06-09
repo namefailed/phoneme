@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { listSession, type Recording } from "../../services/ipc";
@@ -40,7 +41,7 @@ export class MergedConversationDetail extends LitElement {
     try {
       this.recordings = await listSession(this.meetingId);
     } catch (e) {
-      this.error = String(e);
+      this.error = errText(e);
       this.recordings = [];
     }
   }
@@ -81,7 +82,7 @@ export class MergedConversationDetail extends LitElement {
       await updateMeetingName(this.meetingId, newName.trim());
       await this.loadSession();
     } catch (e) {
-      this.error = String(e);
+      this.error = errText(e);
     }
   }
 

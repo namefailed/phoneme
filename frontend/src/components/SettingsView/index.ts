@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
@@ -50,7 +51,7 @@ export class SettingsViewElement extends LitElement {
       window.addEventListener("config:saved", this.onConfigSaved);
     } catch (e) {
       console.error(e);
-      showToast(`Failed to load settings: ${e}`, "error");
+      showToast(`Failed to load settings: ${errText(e)}`, "error");
     }
   }
 
@@ -96,7 +97,7 @@ export class SettingsViewElement extends LitElement {
       showToast("Settings saved", "success");
       this.onClose();
     } catch (e) {
-      showToast(`Save failed: ${e}`, "error");
+      showToast(`Save failed: ${errText(e)}`, "error");
     }
   }
 
