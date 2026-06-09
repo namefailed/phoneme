@@ -653,3 +653,47 @@ select[data-key="daemon.log_level"] {
   color: var(--accent-fg);
 }
 .tag-mgr-row .tag-mgr-save:disabled { opacity: 0.4; cursor: default; }
+.tag-mgr-row button:disabled { opacity: 0.45; cursor: default; }
+
+/* ── Profile Manager rows (built on the tag-manager row chrome) ──────────── */
+.profile-icon {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.profile-id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+.profile-name {
+  font-size: 13px;
+  color: var(--fg-default);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-meta {
+  font-size: 11px;
+  color: var(--fg-faded);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* The last-applied profile gets a subtle accent highlight. */
+.tag-mgr-row.profile-active {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+/* Switch is the primary action — give it the accent treatment. */
+.tag-mgr-row .profile-switch {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tag-mgr-row .profile-switch:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}

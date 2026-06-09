@@ -268,6 +268,8 @@ pub fn run() {
             commands::save_profile,
             commands::switch_profile,
             commands::delete_profile,
+            commands::list_profiles_detailed,
+            commands::rename_profile,
             commands::doctor_local_checks,
             commands::doctor_backend_checks,
             commands::start_daemon,

@@ -48,6 +48,15 @@ fn profile_path(dir: &std::path::Path, name: &str) -> Result<PathBuf> {
     Ok(dir.join(format!("{name}.toml")))
 }
 
+/// Metadata about a saved profile, for the richer Settings Profile Manager.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ProfileInfo {
+    pub name: String,
+    /// Last-modified time of the profile file, in milliseconds since the Unix
+    /// epoch. `None` if the timestamp couldn't be read.
+    pub modified_ms: Option<u64>,
+}
+
 /// List the saved profile names (the `.toml` file stems in `profiles/`),
 /// sorted case-insensitively. Returns an empty list if the directory does
 /// not exist yet.
@@ -76,6 +85,20 @@ pub fn delete_profile(name: &str) -> Result<()> {
     let dir = profiles_dir()
         .ok_or_else(|| Error::Internal("could not resolve profiles directory".into()))?;
     delete_profile_in(&dir, name)
+}
+
+/// Like [`list_profiles`] but includes each profile's last-modified time.
+pub fn list_profiles_detailed() -> Result<Vec<ProfileInfo>> {
+    let dir = profiles_dir()
+        .ok_or_else(|| Error::Internal("could not resolve profiles directory".into()))?;
+    list_profiles_detailed_in(&dir)
+}
+
+/// Rename profile `from` to `to`. Fails if `from` is missing or `to` exists.
+pub fn rename_profile(from: &str, to: &str) -> Result<()> {
+    let dir = profiles_dir()
+        .ok_or_else(|| Error::Internal("could not resolve profiles directory".into()))?;
+    rename_profile_in(&dir, from, to)
 }
 
 // ── Directory-parameterized cores (testable without touching the real
@@ -131,6 +154,38 @@ fn delete_profile_in(dir: &std::path::Path, name: &str) -> Result<()> {
         });
     }
     std::fs::remove_file(&path)?;
+    Ok(())
+}
+
+fn list_profiles_detailed_in(dir: &std::path::Path) -> Result<Vec<ProfileInfo>> {
+    let names = list_profiles_in(dir)?;
+    let mut out = Vec::with_capacity(names.len());
+    for name in names {
+        let path = dir.join(format!("{name}.toml"));
+        let modified_ms = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64);
+        out.push(ProfileInfo { name, modified_ms });
+    }
+    Ok(out)
+}
+
+fn rename_profile_in(dir: &std::path::Path, from: &str, to: &str) -> Result<()> {
+    let from_path = profile_path(dir, from)?;
+    let to_path = profile_path(dir, to)?;
+    if !from_path.exists() {
+        return Err(Error::NotFound {
+            id: format!("profile {from:?}"),
+        });
+    }
+    if to_path.exists() {
+        return Err(Error::InvalidConfig(format!(
+            "a profile named {to:?} already exists"
+        )));
+    }
+    std::fs::rename(&from_path, &to_path)?;
     Ok(())
 }
 
@@ -226,5 +281,46 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let err = save_profile_in(dir.path(), "../escape", &Config::default()).unwrap_err();
         assert!(matches!(err, Error::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn rename_moves_profile() {
+        let dir = TempDir::new().unwrap();
+        save_profile_in(dir.path(), "old", &Config::default()).unwrap();
+        rename_profile_in(dir.path(), "old", "new").unwrap();
+        assert_eq!(list_profiles_in(dir.path()).unwrap(), vec!["new"]);
+    }
+
+    #[test]
+    fn rename_missing_source_is_not_found() {
+        let dir = TempDir::new().unwrap();
+        let err = rename_profile_in(dir.path(), "ghost", "new").unwrap_err();
+        assert!(matches!(err, Error::NotFound { .. }));
+    }
+
+    #[test]
+    fn rename_onto_existing_target_fails() {
+        let dir = TempDir::new().unwrap();
+        save_profile_in(dir.path(), "a", &Config::default()).unwrap();
+        save_profile_in(dir.path(), "b", &Config::default()).unwrap();
+        let err = rename_profile_in(dir.path(), "a", "b").unwrap_err();
+        assert!(matches!(err, Error::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn rename_rejects_traversal_target() {
+        let dir = TempDir::new().unwrap();
+        save_profile_in(dir.path(), "ok", &Config::default()).unwrap();
+        let err = rename_profile_in(dir.path(), "ok", "../escape").unwrap_err();
+        assert!(matches!(err, Error::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn detailed_list_includes_names() {
+        let dir = TempDir::new().unwrap();
+        save_profile_in(dir.path(), "work", &Config::default()).unwrap();
+        let infos = list_profiles_detailed_in(dir.path()).unwrap();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name, "work");
     }
 }

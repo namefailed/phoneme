@@ -574,6 +574,18 @@ pub fn delete_profile(name: String) -> Result<(), CommandError> {
     phoneme_core::profiles::delete_profile(&name).map_err(|e| CommandError::from(e.to_string()))
 }
 
+/// List saved profiles with metadata (last-modified time) for the Profile Manager.
+#[tauri::command]
+pub fn list_profiles_detailed() -> Result<Vec<phoneme_core::profiles::ProfileInfo>, CommandError> {
+    phoneme_core::profiles::list_profiles_detailed().map_err(|e| CommandError::from(e.to_string()))
+}
+
+/// Rename a saved profile. Fails if the source is missing or the target exists.
+#[tauri::command]
+pub fn rename_profile(from: String, to: String) -> Result<(), CommandError> {
+    phoneme_core::profiles::rename_profile(&from, &to).map_err(|e| CommandError::from(e.to_string()))
+}
+
 /// Check if a `config.toml` file already exists on disk.
 #[tauri::command]
 pub fn config_exists() -> bool {

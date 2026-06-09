@@ -346,6 +346,23 @@ export async function listProfiles(): Promise<string[]> {
   return await tauriInvoke<string[]>("list_profiles");
 }
 
+/** A saved profile with metadata, for the Profile Manager. */
+export type ProfileInfo = {
+  name: string;
+  /** Last-modified time in ms since the Unix epoch, or null if unreadable. */
+  modified_ms: number | null;
+};
+
+/** List saved profiles with their last-modified time. */
+export async function listProfilesDetailed(): Promise<ProfileInfo[]> {
+  return await tauriInvoke<ProfileInfo[]>("list_profiles_detailed");
+}
+
+/** Rename a saved profile. Fails if the source is missing or the target exists. */
+export async function renameProfile(from: string, to: string): Promise<void> {
+  await tauriInvoke("rename_profile", { from, to });
+}
+
 /** Snapshot the current config.toml under the given profile name. */
 export async function saveProfile(name: string): Promise<void> {
   await tauriInvoke("save_profile", { name });
