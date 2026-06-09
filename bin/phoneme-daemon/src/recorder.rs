@@ -1208,6 +1208,11 @@ mod tests {
         std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
         let mut cfg = Config::default();
         cfg.recording.audio_dir = tmp.join("audio").to_string_lossy().into_owned();
+        // Disable idle pre-roll: it opens a real microphone via cpal, which
+        // crashes (STATUS_ACCESS_VIOLATION) on a headless CI runner with no audio
+        // device — the long-standing CI failure. Tests use synthetic sources and
+        // must never touch real capture hardware.
+        cfg.recording.pre_roll_ms = 0;
         AppState::new(cfg).await.expect("build test AppState")
     }
 
