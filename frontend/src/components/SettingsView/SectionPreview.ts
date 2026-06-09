@@ -11,6 +11,21 @@ const PREVIEW_MODELS = [
 ];
 const HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
+/** Friendly label for a downloaded whisper model filename. */
+function prettyModel(path: string): string {
+  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  const map: Record<string, string> = {
+    "ggml-tiny.en.bin": "Tiny (English)",
+    "ggml-base.en.bin": "Base (English)",
+    "ggml-small.en.bin": "Small (English)",
+    "ggml-medium.en.bin": "Medium (English)",
+    "ggml-large-v3.bin": "Large v3",
+    "ggml-large-v3-turbo.bin": "Large v3 Turbo",
+    "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
+  };
+  return map[name] ?? name;
+}
+
 /** Cloud providers that work well for a fast preview (final stays separate). */
 const PREVIEW_API_PROVIDERS = [
   { value: "groq", label: "Groq (fast, recommended)" },
@@ -161,11 +176,25 @@ export class SectionPreview {
 
     if (src === "local") {
       const current = this.config.preview_whisper?.model_path ?? "";
+      const currentNorm = current.replace(/\\/g, "/");
+      // Auto-detected dropdown of ALL downloaded models (full choice, not just
+      // the recommended presets). Any whisper model you've downloaded — via the
+      // main Transcription section or a preset below — is selectable here.
+      const options = this.downloaded.length
+        ? this.downloaded
+            .map((p) => {
+              const sel = currentNorm && currentNorm.endsWith(p.replace(/\\/g, "/").split("/").pop() ?? "") ? "selected" : "";
+              return `<option value="${p.replace(/"/g, "&quot;")}" ${sel}>${prettyModel(p)}</option>`;
+            })
+            .join("")
+        : `<option value="">No models downloaded yet</option>`;
+
+      // Recommended small/fast preview models — download in one click if absent.
       const rows = PREVIEW_MODELS.map((m) => {
         const path = this.downloadedPath(m.filename);
-        const selected = current && current.replace(/\\/g, "/").endsWith(m.filename);
+        const selected = current && currentNorm.endsWith(m.filename);
         const action = path
-          ? `<button class="inline-button" data-pick="${path}">${selected ? "Selected" : "Use"}</button>`
+          ? `<button class="inline-button" data-pick="${path.replace(/"/g, "&quot;")}">${selected ? "Selected" : "Use"}</button>`
           : `<button class="inline-button" data-dl="${m.filename}">Download</button>`;
         return `<div class="settings-field" style="border:0; padding:6px 0;">
             <label style="font-weight:normal;">${m.name} <span style="color:var(--fg-faded);">${m.size}</span><br>
@@ -173,11 +202,26 @@ export class SectionPreview {
             <div>${action}</div>
           </div>`;
       }).join("");
+
       host.innerHTML = `
         <p style="font-size:12px; color:var(--fg-muted); padding:4px 0;">
           Runs on a second whisper-server (thread-limited so it can't lag your machine).</p>
+        <div class="settings-field">
+          <label>Preview model</label>
+          <div><select id="prev-local-model" style="width:100%;">${options}</select></div>
+        </div>
+        <p style="font-size:11px; color:var(--fg-muted); margin:10px 0 2px;">
+          Recommended small models for a snappy overlay — download one if you don't have it:</p>
         ${rows}
         ${current ? "" : `<p style="font-size:12px; color:var(--err);">Pick or download a model above.</p>`}`;
+
+      host.querySelector<HTMLSelectElement>("#prev-local-model")?.addEventListener("change", (e) => {
+        const path = (e.target as HTMLSelectElement).value;
+        if (path) {
+          this.setLocal(path);
+          this.render();
+        }
+      });
 
       host.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach((b) =>
         b.addEventListener("click", () => {
