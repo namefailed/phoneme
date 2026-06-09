@@ -1,4 +1,5 @@
 import { renderField, bindFieldEvents } from "./form";
+import { mountModelField } from "./modelField";
 import {
   LOCAL_LLM_PRESETS,
   CLOUD_LLM_PRESETS,
@@ -416,13 +417,10 @@ export class SectionPostProcessing {
 
         <div class="settings-field">
           <label>Summary model (optional)</label>
-          <div>${renderField(
-            { key: "summary.model", label: "", kind: "text" },
-            config.summary.model || "",
-          )}</div>
+          <div id="summary-model-host"></div>
           <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
-            Leave blank to reuse the post-processing model. Override to summarize with a different
-            model (e.g. a smaller/faster one).
+            Leave on "Same as cleanup model" to reuse the post-processing model, or pick a different
+            one (e.g. a smaller/faster model just for summaries).
           </span>
         </div>
 
@@ -505,6 +503,27 @@ export class SectionPostProcessing {
     // Summary provider: show/hide the API key + URL fields based on the chosen
     // provider. Inherit ("") hides everything (it reuses the cleanup connection);
     // local Ollama needs only a URL; cloud providers need a key too.
+    // Summary model field: live-fetch the effective provider's models (the
+    // summary provider, or the inherited cleanup provider when blank).
+    const summaryEff = (which: "provider" | "api_url" | "api_key") => {
+      const s = (config.summary[which] ?? "").toString().trim();
+      return s || (config.llm_post_process[which] ?? "").toString();
+    };
+    const summaryModelHost = container.querySelector<HTMLElement>("#summary-model-host");
+    const mountSummaryModel = () => {
+      if (!summaryModelHost) return;
+      mountModelField(summaryModelHost, {
+        mode: "llm",
+        blankLabel: "Same as cleanup model",
+        getProvider: () => summaryEff("provider"),
+        getApiUrl: () => summaryEff("api_url"),
+        getApiKey: () => summaryEff("api_key"),
+        getModel: () => config.summary.model || "",
+        setModel: (m) => { config.summary.model = m; },
+      });
+    };
+    mountSummaryModel();
+
     const summaryProviderSelect = container.querySelector<HTMLSelectElement>("[data-key='summary.provider']");
     const updateSummaryProviderVisibility = () => {
       const provider = summaryProviderSelect?.value || "";
@@ -520,7 +539,10 @@ export class SectionPostProcessing {
       if (presetRow) presetRow.style.display = "grid";
     };
     if (summaryProviderSelect) {
-      summaryProviderSelect.addEventListener("change", updateSummaryProviderVisibility);
+      summaryProviderSelect.addEventListener("change", () => {
+        updateSummaryProviderVisibility();
+        mountSummaryModel(); // provider changed → re-fetch its model list
+      });
       updateSummaryProviderVisibility();
     }
 
@@ -535,15 +557,12 @@ export class SectionPostProcessing {
       summaryProviderSelect.value = preset.kind;
       summaryProviderSelect.dispatchEvent(new Event("change", { bubbles: true }));
       const urlInput = container.querySelector<HTMLInputElement>(".summary-needs-url [data-key='summary.api_url']");
-      const modelInput = container.querySelector<HTMLInputElement>("[data-key='summary.model']");
       if (urlInput) {
         urlInput.value = preset.apiUrl;
         urlInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      if (modelInput) {
-        modelInput.value = preset.defaultModel;
-        modelInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+      config.summary.model = preset.defaultModel;
+      mountSummaryModel(); // re-fetch for the new provider + show its default model
       summaryProviderPreset.value = "";
     });
 

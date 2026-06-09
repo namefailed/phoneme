@@ -126,3 +126,20 @@ export const STT_CUSTOM_PRESETS: SttCustomPreset[] = [
 export function findSttCustomPreset(id: string): SttCustomPreset | undefined {
   return STT_CUSTOM_PRESETS.find((p) => p.id === id);
 }
+
+/**
+ * Curated model lists per cloud STT provider. Unlike LLM providers, most STT
+ * APIs (Deepgram, AssemblyAI, ElevenLabs) don't expose a "list models"
+ * endpoint, so we ship a known-good list for a dropdown + free-text fallback.
+ */
+export const STT_CURATED_MODELS: Record<string, string[]> = {
+  openai: ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"],
+  groq: ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"],
+  deepgram: ["nova-3", "nova-2", "enhanced", "base"],
+  assemblyai: ["best", "nano"],
+  elevenlabs: ["scribe_v1"],
+};
+
+export function curatedSttModels(provider: string): string[] {
+  return STT_CURATED_MODELS[provider] ?? [];
+}
