@@ -23,9 +23,8 @@ Where Phoneme reads and writes state on disk. Paths assume Windows defaults; `co
 │   ├── done\            # Successfully processed
 │   └── failed\          # Permanent failures
 ├── logs\
-│   ├── daemon.log       # Rotating tracing output
-│   └── hook.log         # Hook stderr aggregation
-├── models\              # GGUF, ONNX, diarization weights
+│   └── daemon.log       # Rotating tracing output (hook results logged here too)
+├── models\              # GGML, ONNX, diarization weights
 └── bin\                 # Downloaded whisper-server.exe, etc.
 ```
 
@@ -57,12 +56,12 @@ When a recording stops, the daemon writes a JSON file to `inbox/pending/`:
 
 | Table / index | Purpose |
 |---------------|---------|
-| `recordings` | Core rows: status, transcript, original_transcript, notes, meeting_id, track |
-| FTS5 virtual table | Keyword search |
-| Vector / embedding store | Semantic search (when enabled) |
+| `recordings` | Core rows: status; the three transcript layers (`transcript`, `clean_transcript`, `original_transcript`); `summary` / `summary_model`; `notes`; `meeting_id` / `meeting_name` / `track`; `cleanup_model`; `in_place`; `diarized` |
+| `recordings_fts` (FTS5) | Keyword search over transcripts |
+| `embeddings` | Semantic-search vectors (when enabled) |
 | `tags` / `recording_tags` | Many-to-many tagging |
 
-Migrations live in `phoneme-core` catalog module.
+Migrations live in `crates/phoneme-core/migrations`.
 
 ## Logs
 

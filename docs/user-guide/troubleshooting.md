@@ -59,9 +59,9 @@ backoff, capped at 5 minutes between attempts).
 
 ## ⚠️ Hook fails or times out
 
-Check the hook log:
+Check the daemon log (hook activity is logged there; a failed hook also stores its last ~4 KB of stderr on the recording):
 ```
-%LOCALAPPDATA%\phoneme\logs\hook.log
+%LOCALAPPDATA%\phoneme\logs\daemon.log
 ```
 
 Test the hook directly:

@@ -11,8 +11,8 @@ A "Hook" in Phoneme is simply an executable script (PowerShell, Python, Bash, No
 | Channel | Direction | Content |
 |---|---|---|
 | `stdin` | daemon → hook | One JSON object terminated by EOF |
-| `stdout` | hook → daemon | Ignored by the daemon (but captured to `hook.log`) |
-| `stderr` | hook → daemon | Captured to `hook.log`; last 4 KB stored in catalog on failure |
+| `stdout` | hook → daemon | Drained (so the hook can't deadlock on a full pipe) but otherwise unused |
+| `stderr` | hook → daemon | On failure, the last ~4 KB is stored in the catalog row's `error_message`; hook activity is also logged to the daemon log |
 | exit code | hook → daemon | `0` = success; non-zero = failure |
 
 ### 🏛️ Architecture Flow
@@ -41,8 +41,7 @@ Every hook receives a JSON payload that looks like this:
 {
   "id": "20260519T143500823",
   "timestamp": "2026-05-19T14:35:00.823-05:00",
-  "transcript": "The cleaned, polished transcription text",
-  "original_transcript": "The raw whisper output before Smart Cleanup",
+  "transcript": "The final transcript (cleaned, if Smart Cleanup is on)",
   "audio_path": "C:\\Users\\name\\Documents\\phoneme\\audio\\2026-05-19\\143500823.wav",
   "duration_ms": 8470,
   "model": "ggml-base.en",
@@ -52,6 +51,8 @@ Every hook receives a JSON payload that looks like this:
   }
 }
 ```
+
+The exact shape is the `HookPayload` struct in `crates/phoneme-core/src/types.rs`. The `transcript` is the final text (cleaned if cleanup is enabled). The original/unedited transcripts and the summary are **not** in the payload — fetch them over IPC (`get_original_transcript`, `get_clean_transcript`, `get_recording`) if a hook needs them.
 
 ## 🎁 Included Reference Hooks
 

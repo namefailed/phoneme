@@ -1,33 +1,95 @@
-# 🧠 Native Whisper & Offline Diarization
+# 🧠 Whisper Transcription & Offline Diarization
 
-Phoneme v1.8 completely overhauls the internal transcription pipeline, migrating from a Python-based sub-process architecture to a pure-Rust, lightning-fast native integration.
+Phoneme transcribes locally by default and never sends your audio anywhere
+unless you explicitly choose a cloud provider. This page explains how the local
+Whisper engine is provisioned, the cloud alternatives, and offline speaker
+diarization.
 
-## ⚡ Native Whisper Engine
+## ⚡ The local Whisper engine
 
-Instead of relying on external binaries or HTTP servers, Phoneme now links directly against `whisper.cpp` via the `whisper-rs` crate. This fundamentally changes how recordings are transcribed.
+By default (`whisper.provider = local`), Phoneme runs a bundled
+**`whisper.cpp`** server (`whisper-server.exe`) as a child process and talks to
+it over HTTP using the OpenAI-compatible `/v1/audio/transcriptions` contract.
+The daemon supervises that process for you — starting, monitoring, and
+restarting it as needed.
 
-### 🌊 Word-by-Word Streaming
+There are three local provisioning modes (`whisper.mode`):
 
-With the native engine, audio is fed into the Whisper model as it is recorded. You will see words appear in the UI in real-time, often with less than 500ms of latency.
+| Mode | What it does |
+|------|--------------|
+| `bundled_download` *(default)* | Downloads an optimized GGML model on first run and runs the bundled server against it. |
+| `bundled_model` | Runs the bundled server against a GGML model file you already have on disk (`whisper.model_path`). |
+| `external` | Connects to an OpenAI-compatible transcription server you manage yourself at `whisper.external_url`. |
 
-- **Offline by Default:** Everything runs locally on your machine.
-- **Hardware Agnostic:** Phoneme uses the optimized `whisper.cpp` engine which accelerates using your CPU, or offloads to your GPU if supported.
-- **Model Sizes:** Through the First Run Wizard, Phoneme detects your system RAM/VRAM and automatically recommends the best Whisper model. You can always change this later in **Settings -> Whisper**.
-
-## 🗣️ Offline Speaker Diarization (speakrs)
-
-When you capture audio using Meeting Mode (recording both your mic and the system audio), Phoneme has enough data to accurately reconstruct the conversation. But what if multiple people are speaking on the system audio track?
-
-Enter **speakrs**.
-
-Phoneme integrates the powerful speakrs ONNX model for offline speaker diarization. This means it can listen to a track and separate out different speakers entirely locally.
-
-### ⚙️ How it Works
-1. **Recording:** You start a Meeting. Phoneme captures `Mic` and `System` as two separate files.
-2. **Diarization Pipeline:** Before transcription, Phoneme pipes the audio through the speakrs ONNX model.
-3. **Speaker Tagging:** The model emits timestamps of who spoke when.
-4. **Transcription:** Phoneme uses Whisper to transcribe those specific time-slices.
-5. **Merging:** The final transcript neatly identifies `[Speaker 1]`, `[Speaker 2]`, and your own `[Mic]` track.
+- **Offline by default:** audio never leaves your machine.
+- **Hardware-aware:** `whisper.cpp` uses your CPU and offloads to a supported GPU
+  build when available.
+- **Model sizes:** the [First Run Wizard](getting_started.md) inspects your
+  RAM/VRAM and recommends a model size. Change it any time in
+  **Settings → Transcription**.
 
 > [!NOTE]
-> Diarization requires a dedicated ONNX model which you can download via the First Run Wizard or Settings menu. Because it runs locally, processing a 30-minute meeting might take a few minutes on older hardware, but it is 100% private.
+> Transcription runs **after** a recording stops — the authoritative transcript
+> is produced by the post-stop pipeline. The optional
+> [Live Preview](streaming_preview_and_preroll.md) shows partial text *while* you
+> record, but it works by periodically re-transcribing the audio captured so far
+> (the whisper.cpp endpoint returns a full transcript per request; it is not a
+> token-streaming endpoint). Live Preview is **off by default**.
+
+### Optional: native in-process Whisper
+
+Phoneme can also be built with an optional `native-whisper` Cargo feature, which
+links `whisper.cpp` directly in-process via the `whisper-rs` crate (no separate
+server process). This is a build-time option and is **not** enabled in the
+standard release — the default and recommended setup is the bundled
+`whisper-server`.
+
+## ☁️ Cloud transcription providers
+
+If you prefer speed over locality, set `whisper.provider` to a cloud backend and
+supply an API key. Supported transcription providers:
+
+| Provider (`whisper.provider`) | Default model | Notes |
+|------|------|------|
+| `local` | — | Bundled whisper.cpp (offline, default) |
+| `openai` | `whisper-1` | OpenAI Whisper API |
+| `groq` | `whisper-large-v3` | Fast, OpenAI-compatible |
+| `deepgram` | `nova-2` | Deepgram speech-to-text |
+| `assemblyai` | `best` | Async upload + poll |
+| `elevenlabs` | `scribe_v1` | ElevenLabs Scribe |
+| `custom` | — | Any OpenAI-compatible `/v1/audio/transcriptions` endpoint (`whisper.api_url` required) |
+
+Cloud providers send your audio to the provider's servers. See the
+[Providers & Models](providers_and_models.md) guide for setup, keys, and how to
+pick a different provider for transcription, cleanup, summary, and live preview
+independently.
+
+## 🗣️ Offline speaker diarization
+
+When you record with [Meeting Mode](meeting_mode.md), Phoneme already separates
+*you* (the mic track) from *everyone else* (the system-audio track). Diarization
+goes further and labels the distinct speakers **within** a track.
+
+Phoneme supports several diarization backends (`diarization.provider`):
+
+| Backend | Where it runs |
+|---------|---------------|
+| `none` *(default)* | Diarization disabled |
+| `local` | Local **speakrs** ONNX segmentation model (offline) — set `diarization.local_model_path` |
+| `deepgram` | Cloud diarization via Deepgram |
+| `assemblyai` | Cloud diarization via AssemblyAI |
+
+### How local diarization works
+
+1. **Capture:** a meeting records `mic` and `system` as two linked tracks.
+2. **Segment:** the audio is run through the local ONNX segmentation model, which
+   emits timestamps of who spoke when.
+3. **Transcribe:** Whisper transcribes the time-slices.
+4. **Merge:** the transcript identifies the distinct speakers.
+
+> [!NOTE]
+> Local diarization needs an ONNX model, which you can install from the First
+> Run Wizard or **Settings → Transcription → Diarization**. It runs entirely on
+> your machine, so a long meeting may take a few minutes on older hardware — but
+> it stays 100% private. Cloud diarization (Deepgram/AssemblyAI) sends audio
+> off-device.

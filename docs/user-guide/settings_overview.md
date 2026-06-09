@@ -4,7 +4,20 @@ Phoneme stores all preferences in `%APPDATA%\phoneme\config.toml`. The Settings 
 
 Open Settings from the cog icon in the header or **Tray → Settings**.
 
-## Whisper
+The settings are grouped into six tabs in the left sidebar, with a **search box** at the top: start typing and Settings shows every matching field across all sections, with a live results count.
+
+| Tab | Sections it contains |
+|-----|----------------------|
+| 🗣️ **Transcription** | Whisper / transcription provider, Live Preview, Diarization |
+| 🎙️ **Capture** | Recording, Hotkeys |
+| 🎨 **Appearance** | Interface, Editor |
+| 🏷️ **Tags** | Tag manager |
+| ✨ **Post-Processing** | AI cleanup + Auto Summary, Hooks |
+| ⚙️ **System** | Storage & retention, Profiles, Tray, Advanced |
+
+---
+
+## 🗣️ Transcription
 
 ![Whisper settings](../screenshots/settings-whisper.png)
 
@@ -13,86 +26,92 @@ Open Settings from the cog icon in the header or **Tray → Settings**.
 | **Provider** | Local whisper.cpp, OpenAI, Groq, Deepgram, AssemblyAI, ElevenLabs, or custom OpenAI-compatible endpoint |
 | **Model manager** | Download GGML sizes (tiny → large-v3); hardware recommendation badge |
 | **Language** | BCP-47 hint (`en`, `es`, …) or auto-detect |
-| **Bundled server** | Port, model path, extra server args when running local whisper-server |
-| **Timeout** | How long to wait for transcription before retrying |
+| **Bundled server** | Port, model path, extra server args when running the local whisper-server |
+| **Timeout** | How long to wait for transcription before giving up |
 
-See [Diarization & Whisper](diarization_and_whisper.md) for provider details.
+See [Providers & Models](providers_and_models.md) and [Whisper & Diarization](diarization_and_whisper.md).
 
-## Recording
+### Live Preview
+
+An independent transcription provider just for the live partial-transcript preview, so it never contends with the final transcription. Leave it unset to reuse the main provider, or point it at a small/fast local model on its own server or a fast cloud API (Groq, OpenAI, Deepgram). See [Live Preview & Pre-Roll](streaming_preview_and_preroll.md).
+
+### Diarization
+
+Speaker diarization backend: `none`, local ONNX, Deepgram, or AssemblyAI, plus the local model path. See [Whisper & Diarization](diarization_and_whisper.md).
+
+## 🎙️ Capture
 
 ![Recording settings](../screenshots/settings-recording.png)
 
 | Area | What it controls |
 |------|------------------|
 | **Audio directory** | Where `.wav` files are stored (default `~/Documents/phoneme/audio`) |
-| **Input device** | Microphone selection or `default` |
-| **Silence threshold** | dBFS level for oneshot auto-stop |
+| **Input device / source** | Microphone selection (or `default`), and microphone vs. system-audio capture |
+| **Auto-stop on silence** | Whether the Record button auto-stops on a quiet mic (off = manual start/stop toggle) |
+| **Silence threshold / window** | dBFS level and duration for silence auto-stop |
 | **Max duration** | Hard cap per recording (seconds) |
 | **Pre-roll** | Milliseconds of idle mic buffer prepended on record start (anti-clip) |
 | **Streaming preview** | Live partial transcript while recording (opt-in) |
 
-## Smart Cleanup (post-processing)
-
-![Post-processing settings](../screenshots/settings-post-processing.png)
-
-LLM cleanup after Whisper: Ollama, OpenAI, Groq, Anthropic, or OpenAI-compatible local servers. Preset prompts (clean, summarize, action items, translate). See [Smart Cleanup](smart_cleanup.md).
-
-## Hooks
-
-![Hook settings](../screenshots/settings-action-hook.png)
-
-Scripts that run after transcription, optional webhook URL, keyword rules, and **Re-fire hook** behavior. See [Plugins & Hooks](../developer-guide/plugins_and_hooks.md).
-
-## Hotkeys
+### Hotkeys
 
 ![Hotkey settings](../screenshots/settings-hotkey.png)
 
-Enable and configure global combos for record, transcribe-in-place, and meeting mode. See [Hotkeys & Recording Modes](hotkeys_and_recording_modes.md).
+Enable and configure global combos for record, transcribe-in-place, and meeting mode (each can be Hold or Toggle). See [Hotkeys & Recording Modes](hotkeys_and_recording_modes.md).
 
-## Interface
+## 🎨 Appearance
 
 ![Interface settings](../screenshots/settings-interface.png)
 
-Theme (Catppuccin Mocha default), 24-hour time, visible list columns, column widths, title bar stripping.
+Theme (Catppuccin Mocha default), 24-hour time, visible list columns (reorderable / toggleable), column widths, and title-bar stripping.
 
-## Storage & retention
+![Editor settings](../screenshots/settings-editor.png)
+
+Optional Vim keybindings (with inline or external `vimrc`) for the transcript editor.
+
+## 🏷️ Tags
+
+Rename, recolor, and delete tags. See [Search & Organization](search_and_organization.md).
+
+## ✨ Post-Processing
+
+![Post-processing settings](../screenshots/settings-post-processing.png)
+
+- **AI Post-Processing (cleanup):** LLM cleanup after Whisper, with one-click presets for many local and cloud providers, a live model picker, preset prompts, and a request timeout.
+- **Auto AI Summary:** optional per-recording summary with its own provider/model/prompt (or inherit the cleanup connection).
+- **Hooks:** scripts that run after transcription, optional webhook URL, keyword rules, and **Re-fire hook** behavior.
+
+See [Smart Cleanup](smart_cleanup.md), [Providers & Models](providers_and_models.md), and [Plugins & Hooks](../developer-guide/plugins_and_hooks.md).
+
+## ⚙️ System
+
+### Storage & retention
 
 ![Storage settings](../screenshots/settings-storage.png)
 
-Auto-delete by age or count, optional audio-only deletion (keep searchable metadata). See [Storage, Paths & Retention](storage_paths_and_retention.md).
+Audio directory, auto-delete by age or count, optional audio-only deletion (keep searchable metadata), and export. See [Storage, Paths & Retention](storage_paths_and_retention.md).
 
-## System tray
+### Profiles
+
+Switch named TOML profiles without hand-editing files. See [Config Profiles](config_profiles.md).
+
+### System tray
 
 ![Tray settings](../screenshots/settings-system-tray.png)
 
 Show window on startup, minimize to tray on close, start at Windows login.
 
-## Editor
-
-![Editor settings](../screenshots/settings-editor.png)
-
-Optional Vim keybindings for the transcript editor.
-
-## Advanced
+### Advanced
 
 ![Advanced settings](../screenshots/settings-advanced.png)
 
-Daemon log level, pipe name, diarization provider, semantic search model path, and other power-user options.
-
-## Tag Manager
-
-Not a separate screenshot — open from **Settings → Tag Manager**. Rename, recolor, and delete tags cluster-wide. See [Search & Organization](search_and_organization.md).
-
-## Config profiles
-
-Switch named TOML profiles from the tray menu without hand-editing files. See [Config Profiles](config_profiles.md).
+Daemon log level, pipe name, semantic-search model path, re-run the First Run Wizard, and other power-user options.
 
 ## Manual editing
 
-Power users can edit `config.toml` directly. Validate with:
+Power users can edit `config.toml` directly. After editing, tell the daemon to reload:
 
 ```powershell
-phoneme config validate
 phoneme config reload
 ```
 

@@ -23,7 +23,7 @@ Phoneme runs **100% offline** by default. No cloud required, no subscriptions, n
 | Principle | What It Means |
 |-----------|---------------|
 | **🔒 Privacy First** | Voice never leaves your machine. No forced updates, no tracking. |
-| **⚡ Flexible** | Local Whisper for privacy, or cloud APIs (OpenAI/Groq) for speed. Your choice. |
+| **⚡ Flexible** | Local Whisper + Ollama for privacy, or cloud APIs (OpenAI, Anthropic, Groq, Gemini, Deepgram, and more) for speed. Each step picks its own provider. |
 | **🔌 Extensible** | JSON output → your scripts. Obsidian, Notion, Jira, Discord, Python—wherever you want. |
 
 ## 🎯 Why Voice?
@@ -75,10 +75,12 @@ flowchart TD
 
 ## ✨ Core Features
 
-- **👥 Meeting Mode (Dual-Track Capture)**: Instantly capture both your microphone and your computer's audio. Let Phoneme separate the tracks and apply local speakrs **Speaker Diarization** to build a perfect chronological transcript of any Zoom, Teams, or Google Meet call.
-- **⌨️ Transcribe-in-Place (`Ctrl+Alt+I`)**: Press a global hotkey to speak, and Phoneme will use OS-level keystroke simulation to instantly type your dictated words into any active application (Word, Slack, Chrome, VSCode).
-- **✨ Smart Cleanup**: Pipe your raw transcripts through a Large Language Model (locally via Ollama, or via the cloud) to automatically fix stutters, translate languages, or generate perfect meeting summaries.
-- **🔍 Lightning Fast Semantic Search**: Easily manage 10,000+ recordings instantly using SQLite's FTS5 Full-Text Search, or search by *meaning* using our offline ONNX semantic embedding index.
+- **🎙️ Local transcription by default**: A bundled `whisper.cpp` server runs on your machine — audio never leaves your PC. The First Run Wizard detects your RAM/VRAM and picks the right model.
+- **🔌 Bring-your-own provider**: Transcription, live preview, cleanup, and summary each pick their own provider+model **independently**. Local whisper.cpp/Ollama for privacy, or cloud APIs (OpenAI, Anthropic, Groq, Gemini, Deepgram, AssemblyAI, ElevenLabs, and many more) for speed. One-click presets, live model lists.
+- **👥 Meeting Mode (Dual-Track Capture)**: Capture both your microphone and your computer's audio as two linked tracks sharing a wall-clock timeline. Optional **speaker diarization** (offline ONNX, or cloud) labels who spoke on any Zoom, Teams, or Meet call.
+- **⌨️ Transcribe-in-Place (`Ctrl+Alt+I`)**: Speak with a global hotkey and Phoneme types your dictated words into the focused application (Word, Slack, Chrome, VS Code) via OS-level keystroke simulation.
+- **✨ Smart Cleanup & AI Summary**: Pipe raw transcripts through an LLM to fix stutters, reformat, or translate — and optionally generate a per-recording summary, on demand or automatically. Three transcript layers (raw → cleaned → edited) are kept so nothing is lost.
+- **🔍 Keyword + Semantic Search**: Manage thousands of recordings with SQLite FTS5 full-text search, or search by *meaning* using an offline ONNX embedding index.
 - **💻 CLI is a Peer**: Every GUI action is a CLI command (`phoneme record --start`). Bind it to AutoHotkey, Stream Deck, or Kanata.
 
 ---
@@ -103,10 +105,11 @@ Phoneme isn't for everyone, and that's fine. If one of these fits your needs bet
 | Guide | Topic |
 |-------|--------|
 | [Getting Started](docs/user-guide/getting_started.md) | Install, wizard, first recording |
+| [Providers & Models](docs/user-guide/providers_and_models.md) | Pick STT/LLM providers, keys, local vs cloud |
 | [Meeting Mode](docs/user-guide/meeting_mode.md) | Dual-track capture + wall-clock sync |
 | [Hotkeys & Recording Modes](docs/user-guide/hotkeys_and_recording_modes.md) | Hold, toggle, CLI bindings |
 | [Settings Overview](docs/user-guide/settings_overview.md) | Every settings screen (with screenshots) |
-| [Smart Cleanup](docs/user-guide/smart_cleanup.md) | LLM post-processing |
+| [Smart Cleanup & Summary](docs/user-guide/smart_cleanup.md) | LLM post-processing + AI summary |
 | [Semantic Search](docs/user-guide/semantic_search.md) | Meaning-based recall |
 | [FAQ](docs/user-guide/faq.md) | Common questions |
 | [Troubleshooting](docs/user-guide/troubleshooting.md) | Fixes and diagnostics |

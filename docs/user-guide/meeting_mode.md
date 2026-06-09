@@ -32,7 +32,7 @@ When system audio starts late (you speak first, then share a video at 5 s), Phon
 
 ## ✨ Why Dual-Track is Magic
 
-When the meeting ends, Phoneme transcribes both tracks independently. Because they share a wall-clock timeline, the **Merged Conversation View** can interleave them chronologically.
+When the meeting ends, Phoneme transcribes both tracks independently. Because they share a wall-clock timeline, you can review them together in one place.
 
 ```mermaid
 %%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': false}, 'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
@@ -56,16 +56,19 @@ flowchart LR
         L --> M
     end
     
-    M --> V[Timeline View]
+    M --> V[Meeting View]
 ```
 
-Instead of a giant block of text, you get a beautiful, chronological timeline of the conversation, exactly as it happened:
+In the recordings list, a meeting's two tracks are grouped under one entry. Open the **merged conversation** view to see both tracks together — each with its own transcript, waveform, and editor — sharing the meeting's wall-clock timeline.
 
-Expand a meeting group in the recordings list, then open the **merged conversation** view to see mic and system lines interleaved by timestamp.
+> [!NOTE]
+> Today the merged view shows the two tracks together (mic and system); a single
+> chronologically-interleaved "You / Meeting" transcript is on the
+> [roadmap](../../ROADMAP.md).
 
 ### 🗣️ Adding Speaker Diarization
 
-If you want to take this to the next level, you can enable **Offline Speaker Diarization** in **Settings → Whisper**.
+If you want to take this to the next level, you can enable **Offline Speaker Diarization** in **Settings → Transcription → Diarization**.
 
 By default, the System Track is just one long transcript of everyone on the call. But with Diarization enabled, Phoneme uses a powerful AI model (speakrs) to analyze the System Track and separate the different voices.
 

@@ -67,10 +67,13 @@ Channel cheat-sheet (in `phoneme-audio`/daemon `recorder`):
 5. **Transcribe** — the configured `TranscriptionProvider` runs; the raw output
    is preserved as `original_transcript`.
 6. **Post-process** — optional LLM cleanup; the cleaned text becomes the live
-   `transcript` while the raw stays in `original_transcript`.
+   `transcript`, is also preserved as `clean_transcript`, while the raw stays in
+   `original_transcript`.
 7. **Hooks** — unless `hook.run_on_transcribe` is off, the always-on `commands`
    run, then any matching `keyword_rules`, then the webhook fires.
-8. **Done** — status → `done`, the payload moves to `inbox/done/`.
+8. **Summary** — if `summary.auto` is on, an LLM summary is generated as the final
+   step and stored in `summary` / `summary_model`.
+9. **Done** — status → `done`, the payload moves to `inbox/done/`.
 
 Imported files (`ImportRecording`) skip 1–3: the file is decoded to canonical
 form, copied into the audio dir, and enters at step 4.
@@ -106,15 +109,28 @@ A single SQLite database, accessed with `sqlx` and versioned migrations
 `wal_autocheckpoint`, and a `journal_size_limit` cap; the daemon also checkpoints
 on idle to bound WAL growth.
 
-- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`,
-  `audio_path`, `transcript`, `original_transcript`, `model`, `status`, hook
-  result columns, `notes`, and the meeting-link columns `meeting_id` + `track`.
-- **FTS5** — a full-text index mirrors the transcript so `list` search is fast.
+- **`recordings`** — the central table. Beyond `id`, `started_at`,
+  `duration_ms`, `audio_path`, `model`, `status`, and the hook-result columns, it
+  carries:
+  - **Three transcript layers:** `original_transcript` (raw machine output,
+    pre-cleanup), `clean_transcript` (pipeline output — transcribed + cleaned —
+    pre-hand-edit), and `transcript` (the current, possibly user-edited text).
+  - **Summary:** `summary` and `summary_model` (the AI summary and the model that
+    produced it; null until generated).
+  - **Meeting link:** `meeting_id`, `meeting_name`, `track` (`mic` / `system`).
+    Standalone recordings have a null `meeting_id`.
+  - Plus `notes`, `cleanup_model`, `in_place`, and `diarized`.
+- **FTS5** — `recordings_fts` mirrors the transcript so `list` search is fast.
   It's kept in sync with the `recordings` table via triggers, so an insert /
   update / delete automatically updates the index. User search text is sanitised
   into a robust `term* AND term*` prefix query before it ever reaches SQLite
   (`sanitize_fts5_query`), so odd input can't crash the matcher.
 - **`tags`** / **`recording_tags`** — colour-coded tags, many-to-many.
+- **`embeddings`** — per-recording ONNX embedding vectors (BLOB) for semantic
+  search; cascades on recording delete.
+
+Schema is defined in `crates/phoneme-core/migrations` (initial schema + additive
+`add_summary` and `add_clean_transcript` migrations).
 
 Audio lives on disk under a date-foldered directory, **not** in the DB — the
 SQLite file stays small and copyable.
@@ -123,17 +139,25 @@ SQLite file stays small and copyable.
 
 - **Transport** — a Windows named pipe (`\\.\pipe\phoneme-daemon`), framed as
   **newline-delimited JSON** (`JsonLineCodec`): one JSON value per line.
-- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case):
-  `record_start`, `start_meeting`, `list_recordings`, `get_recording`,
-  `list_meeting`, `retranscribe_recording`, `import_recording`, `update_notes`,
-  `reload_config`, `shutdown`, … plus tag ops.
+- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case).
+  Recording/meeting control (`record_start`, `record_toggle`, `record_pause`,
+  `start_meeting`, `meeting_toggle`, …), catalog queries (`list_recordings`,
+  `get_recording`, `list_meeting`), import (`import_recording`), re-processing
+  (`retranscribe_recording`, `rerun_cleanup`, `rerun_summary`, `refire_hook`),
+  editing (`update_transcript`, `update_notes`, `update_meeting_name`),
+  the preserved-transcript fetches (`get_original_transcript`,
+  `get_clean_transcript`), tags, semantic search (`semantic_search`), and
+  lifecycle (`reload_config`, `shutdown`, `subscribe_events`). The re-processing
+  requests carry one-time overrides (model/provider/prompt/url/key) that are never
+  persisted to config.
 - **`Response`** — daemon → client, tagged on `"status"`: `Ok(value)` or
   `Err(IpcError)`. `IpcError` carries a machine-readable `kind`
   (`already_recording`, `not_found`, `whisper_unreachable`, …) + a human message.
 - **`DaemonEvent`** — daemon → all subscribers, tagged on `"event"`
-  (`recording_started`, `transcription_partial`, `queue_depth_changed`,
-  `notes_updated`, …). Clients send `subscribe_events` and then receive the
-  one-way stream.
+  (`recording_started`, `transcription_partial`, `transcription_done`,
+  `summary_updated`, `transcript_updated`, `queue_depth_changed`,
+  `notes_updated`, tag events, …). Clients send `subscribe_events` and then
+  receive the one-way stream.
 - **`Transport` trait** — abstracts the wire so a future `HttpTransport` (v2.0
   mobile/REST) can be added without touching `schema.rs`.
 

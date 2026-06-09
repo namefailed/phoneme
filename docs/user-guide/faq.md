@@ -54,7 +54,7 @@ Yes — select a recording → **Re-transcribe** → pick a model. Original tran
 
 ### Does Phoneme support languages other than English?
 
-Yes. Set **Settings → Whisper → Language** to a BCP-47 code or leave auto-detect.
+Yes. Set **Settings → Transcription → Language** to a BCP-47 code or leave auto-detect.
 
 ---
 

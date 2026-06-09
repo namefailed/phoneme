@@ -12,45 +12,55 @@ When Smart Cleanup is enabled, the pipeline intercepts your raw transcript right
 %%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': false}, 'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
 flowchart TD
     Input[🎤 Speak] --> W{Whisper}
-    W -->|Raw| L{LLM}
+    W -->|Raw| L{Cleanup LLM}
     L -->|Cleaned| Out[Polished]
+    Out --> Sum{Summary LLM\nif summary.auto}
     Out --> S[(SQLite)]
     Out --> H[[Hooks]]
+    Sum -.-> S
 ```
 
-*(Note: Phoneme always preserves the `original_transcript` in the database, so if the AI ever makes a mistake, your original words are perfectly safe).*
+The raw output is always saved as `original_transcript`; the cleaned text becomes the live `transcript` and is also kept as `clean_transcript` (the pre-edit version). The summary, if generated, is saved to the `summary` column.
+
+*(Note: Phoneme preserves both the raw machine transcript (`original_transcript`) and the cleaned-but-unedited transcript (`clean_transcript`) in the database. If the AI ever makes a mistake, you can **Restore raw transcript** or **Restore unedited transcript** from the detail view — see [the three transcript layers](getting_started.md#the-three-transcript-layers).)*
 
 ## ☁️ Provider Options
 
-In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. You can configure this under **Settings → Smart Cleanup (AI)**.
+In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. Configure cleanup under **Settings → Post-Processing → AI Post-Processing**.
 
-![Smart Cleanup settings](../screenshots/settings-post-processing.png)
+![Post-processing settings](../screenshots/settings-post-processing.png)
+
+Phoneme ships **one-click presets** for a long list of providers (Ollama, LM Studio, Jan, llama.cpp, OpenAI, Anthropic, Groq, Gemini, Mistral, DeepSeek, OpenRouter, Together, xAI, Cerebras, Fireworks, DeepInfra, Perplexity, Nebius, Hyperbolic). A preset sets the provider, endpoint, and a default model in one click — you just add a key (cloud only). For the full list and details, see [Providers & Models](providers_and_models.md).
 
 ### 🏠 Local AI (Free, Offline, Private)
 
-For the ultimate privacy-respecting, local-first experience, you can run the LLM locally on your own hardware using Ollama.
+For the ultimate privacy-respecting, local-first experience, run the LLM locally with Ollama (or LM Studio / Jan / any local OpenAI-compatible server).
 
 1. Download and install [Ollama](https://ollama.com/).
-2. Open your terminal and run: `ollama run llama3.2:3b`. This will download a highly capable, fast, 3-billion parameter model.
-3. In Phoneme's Settings:
-   - Check **Enable Smart Cleanup**
-   - **AI Provider**: `Local Ollama`
+2. Open your terminal and run: `ollama run llama3.2:3b` (a fast, capable 3B model).
+3. In Phoneme's Settings → Post-Processing:
+   - Check **Enable AI Post-Processing**
+   - **Quick preset**: `Ollama (local)` (or pick **Local Ollama** as the provider)
    - **Model Name**: `llama3.2:3b`
-   - **API Key**: Leave blank.
+   - **API Key**: leave blank.
 
-### 🌩️ Cloud Providers (OpenAI, Anthropic, Groq)
+The model field has a **Refresh** button that fetches your installed Ollama models.
 
-If you don't have the hardware to run Ollama smoothly, or want the absolute best reasoning capabilities (like Claude 3.5 Sonnet or GPT-4o), you can plug in your own API keys:
+### 🌩️ Cloud Providers
 
-1. Select your **AI Provider** (`OpenAI`, `Anthropic`, `Groq`, or `Custom OpenAI-Compatible`).
-2. Enter the Model Name (e.g., `gpt-4o`, `claude-3-5-sonnet-latest`, `llama-3.1-8b-instant`).
-3. Enter your API Key.
+If you don't have the hardware to run a local model, or want the best reasoning quality, plug in your own API key:
+
+1. Pick a **Quick preset** (e.g. OpenAI, Anthropic, Groq, Gemini…) or set the **AI Provider** manually.
+2. Enter the **Model Name** (the model field can fetch the live list via **Refresh**, or type any model).
+3. Enter your **API Key**.
+
+A **timeout** (seconds) controls how long Phoneme waits for the LLM before falling back to the un-cleaned transcript.
 
 ## 📝 Prompts & Presets
 
 The magic of the LLM is in the prompt. You can select one of our default presets, or write your own to teach the AI exactly how you want your notes formatted.
 
-<!-- SCREENSHOT PLACEHOLDER: Settings -> Smart Cleanup showing the prompt text area -->
+<!-- SCREENSHOT PLACEHOLDER: Settings -> Post-Processing showing the prompt text area -->
 
 > [!WARNING]
 > You **must** instruct the AI to reply ONLY with the final text. Otherwise, the AI might add conversational filler like *"Here is your cleaned transcript:"* which will ruin your notes!
@@ -74,3 +84,24 @@ The magic of the LLM is in the prompt. You can select one of our default presets
 > This is a multi-speaker transcript. Provide a concise summary of the decisions made, and list the action items assigned to each speaker. Output ONLY the summary and action items.
 
 Enjoy perfectly polished transcripts!
+
+## 🧾 Auto AI Summary
+
+Separately from cleanup, Phoneme can produce a short **AI summary** of each recording.
+
+- **On demand:** click **View summary** in any recording's detail view to generate (or regenerate) a summary.
+- **Automatic:** enable **Summarize every recording** (`summary.auto`) under Settings → Post-Processing → Auto AI Summary, and a summary is generated as the **last step** of every recording's pipeline.
+
+The summary uses its **own** provider, model, and prompt (`[summary]`). Leave the summary provider on **inherit** (blank) to reuse your cleanup connection, or pick a completely different provider+model — for example, clean up locally with Ollama but summarize with Claude. The stored summary lives in the `summary` column alongside the model that produced it (`summary_model`).
+
+Built-in summary presets include bullet-point summary, 2–3 sentence summary, action items & decisions, a TL;DR paragraph, and meeting minutes.
+
+## 🔁 Re-running cleanup & summary
+
+You can re-process an existing recording without re-recording, using one-time overrides that are **never** saved to your config:
+
+- **Re-transcribe** — re-runs transcription (optionally with a different model, and optionally skipping cleanup for that run).
+- **Re-run cleanup** — re-runs only the LLM cleanup step against the preserved original transcript, optionally with a one-off provider / model / prompt / endpoint / key. Because it always starts from the raw original, it's idempotent — re-run it as many times as you like.
+- **Regenerate summary** — re-runs the summary with an optional one-off model / prompt.
+
+These live in each recording's **Re-run** menu. See [Providers & Models](providers_and_models.md#one-time-overrides-re-run-menu).

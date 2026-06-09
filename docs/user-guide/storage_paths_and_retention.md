@@ -11,9 +11,8 @@ Phoneme splits data between **roaming config** (`%APPDATA%`) and **local machine
 | **Hook templates (read-only)** | `Program Files\Phoneme\hooks-templates\` | Source for defaults |
 | **Catalog database** | `%LOCALAPPDATA%\phoneme\catalog.db` | SQLite + FTS5 + embeddings |
 | **Inbox queue** | `%LOCALAPPDATA%\phoneme\inbox\` | `pending/`, `done/`, `failed/` |
-| **Daemon logs** | `%LOCALAPPDATA%\phoneme\logs\` | Rotated by size |
-| **Hook log** | `%LOCALAPPDATA%\phoneme\logs\hook.log` | Per-hook stderr/stdout |
-| **Whisper / ONNX models** | `%LOCALAPPDATA%\phoneme\models\` | GGUF, embedding models |
+| **Daemon logs** | `%LOCALAPPDATA%\phoneme\logs\daemon.log` | Rotated by size; hook activity logged here too |
+| **Whisper / ONNX models** | `%LOCALAPPDATA%\phoneme\models\` | GGML / embedding / diarization models |
 | **Bundled binaries** | `%LOCALAPPDATA%\phoneme\bin\` | whisper-server.exe, etc. |
 | **Audio files** | `%USERPROFILE%\Documents\phoneme\audio\` | Configurable; organized by date |
 
@@ -23,7 +22,7 @@ Meeting Mode creates **pairs** of files with sequential IDs and a shared `meetin
 
 ## Retention policy
 
-Automatic cleanup runs hourly when configured in **Settings → Storage** or:
+Automatic cleanup runs hourly when configured in **Settings → System → Storage** or:
 
 ```toml
 [retention]

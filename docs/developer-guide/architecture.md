@@ -60,9 +60,10 @@ Understanding one recording's journey explains most of the daemon:
 3. **Live feedback.** While capturing, the daemon emits `RecordingStarted`; if the streaming preview is enabled, a periodic loop snapshots the in-progress buffer, transcribes it, and emits `TranscriptionPartial` events.
 4. **Finalize.** On `RecordStop` the capture task drains its tail, writes a `.wav` to the audio directory, and updates the row's duration.
 5. **Transcribe.** The recording is handed to the configured `TranscriptionProvider`. The daemon emits `TranscriptionStarted`, then `TranscriptionDone` (or `TranscriptionFailed`). The raw provider output is preserved as `original_transcript`.
-6. **Post-process (optional).** If LLM post-processing is configured, the transcript is cleaned/formatted/translated; the cleaned text becomes the live `transcript` while the raw text stays in `original_transcript`.
+6. **Post-process (optional).** If LLM post-processing is configured, the transcript is cleaned/formatted/translated; the cleaned text becomes the live `transcript` and is also preserved as `clean_transcript`, while the raw text stays in `original_transcript`.
 7. **Hooks.** The final transcript is delivered to the user's hook scripts as JSON on stdin (and optionally POSTed to a webhook). The daemon emits `HookStarted` / `HookDone` / `HookFailed`.
-8. **Retention.** An hourly sweep enforces the optional auto-delete policy, emitting a `RetentionWarning` before anything is removed.
+8. **Summary (optional).** If `summary.auto` is enabled, an LLM summary is generated as the final step and stored in `summary` / `summary_model` (`SummaryUpdated`).
+9. **Retention.** An hourly sweep enforces the optional auto-delete policy, emitting a `RetentionWarning` before anything is removed.
 
 Imported files skip steps 1–4: the file is decoded to the canonical format, copied into the audio directory, and enters the pipeline at step 5.
 
@@ -81,8 +82,9 @@ Because the schema lives in one shared crate, the CLI, GUI backend, and daemon c
 
 The catalog is a single SQLite database (WAL mode, with an FTS5 full-text index over transcripts), managed through `sqlx` with versioned migrations in `phoneme-core/migrations`.
 
-- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`, `audio_path`, `transcript`, `original_transcript`, `model`, `status`, hook result columns, `notes`, and the meeting-link columns `meeting_id` + `track`. Standalone recordings have a null `meeting_id`; the two tracks of a meeting share one non-null `meeting_id` and differ by `track` (`mic` / `system`).
+- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`, `audio_path`, `model`, `status`, hook result columns, `notes`, plus the three transcript layers (`original_transcript`, `clean_transcript`, `transcript`), the summary (`summary`, `summary_model`), and the meeting-link columns (`meeting_id`, `meeting_name`, `track`). Standalone recordings have a null `meeting_id`; the two tracks of a meeting share one non-null `meeting_id` and differ by `track` (`mic` / `system`).
 - **`tags`** and **`recording_tags`** — colour-coded tags and their many-to-many attachments.
+- **`embeddings`** — per-recording semantic-search vectors.
 - **FTS5 mirror** — kept in sync via triggers so `list_recordings` can do prefix search safely (the query string is sanitised into a robust `term* AND term*` form before it ever reaches SQLite).
 
 Audio is stored on disk under a date-foldered directory, not in the database — the SQLite file stays small and copyable.

@@ -4,7 +4,7 @@ Phoneme supports several ways to start and stop capture. You can use the UI butt
 
 ## Global hotkeys (defaults)
 
-Configure under **Settings → Hotkeys**. All hotkeys are **disabled by default** until you enable them in the wizard or settings.
+Configure under **Settings → Capture → Hotkeys**. All hotkeys are **disabled by default** until you enable them in the wizard or settings.
 
 | Hotkey | Default combo | Default mode | Purpose |
 |--------|---------------|--------------|---------|
@@ -26,8 +26,8 @@ You do not have to use Phoneme's built-in listener. Many users bind **AutoHotkey
 ```powershell
 phoneme record --start
 phoneme record --stop
-phoneme meeting --start
-phoneme meeting --stop
+phoneme meeting start
+phoneme meeting stop
 ```
 
 See [CLI Reference](../developer-guide/cli_reference.md) for the full command set.
@@ -36,14 +36,11 @@ See [CLI Reference](../developer-guide/cli_reference.md) for the full command se
 
 ### Standard record
 
-Click **Record** or use the record hotkey. Modes in **Settings → Recording**:
+Click **Record** or use the record hotkey.
 
-| Mode | Behavior |
-|------|----------|
-| **Hold** | Stop when you release the hotkey (if using built-in hotkey) |
-| **Toggle** | Stop on second press |
-| **Oneshot** | Auto-stops after ~3 s of silence (configurable via `silence_window_ms`) |
-| **Duration** | Stops after a fixed number of seconds |
+- **GUI Record button** — by default a manual **start/stop toggle**: click to start, click again to stop; it never cuts off on a quiet mic. Enable **Auto-stop on silence** (`recording.auto_stop_on_silence`) in **Settings → Capture** to have it stop automatically after the silence window (`silence_window_ms`, default ~3 s).
+- **Built-in record hotkey** — Hold or Toggle, per **Settings → Capture → Hotkeys**. Hold is always hold-to-record regardless of the auto-stop setting.
+- **CLI** — additionally supports one-shot (`--oneshot`, stop on silence) and fixed-duration (`--duration N`) recording.
 
 ### Pause / resume
 
@@ -67,10 +64,10 @@ Both tracks share a **wall-clock timeline** so scrubbing to the same timestamp o
 | UI action | CLI |
 |-----------|-----|
 | Start / stop mic | `phoneme record --start` / `--stop` |
-| Toggle mic | `phoneme record --toggle` |
+| In-place dictation | `phoneme record --start --in-place` |
 | Oneshot (silence-stop) | `phoneme record --oneshot` |
 | Fixed duration | `phoneme record --duration 30` |
-| Start / stop meeting | `phoneme meeting --start` / `--stop` |
+| Start / stop meeting | `phoneme meeting start` / `stop` |
 | Cancel | `phoneme record --cancel` |
 
 ## Tips
