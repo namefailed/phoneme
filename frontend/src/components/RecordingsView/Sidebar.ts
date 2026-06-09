@@ -2,7 +2,7 @@ import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { listTags, type Tag } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
-import { filterStore, type UiFilter } from "../../state/filter";
+import { filterStore, type UiFilter, type RecordingKind } from "../../state/filter";
 
 @customElement('ph-sidebar')
 export class SidebarElement extends LitElement {
@@ -55,7 +55,26 @@ export class SidebarElement extends LitElement {
   }
 
   private setTagFilter(id: number | null) {
-    filterStore.set({ ...this.filterState, tag_id: id });
+    // A tag is a cross-cutting lens; selecting one resets the kind filter so the
+    // user sees every recording with that tag.
+    filterStore.set({ ...this.filterState, tag_id: id, kind: "all" });
+  }
+
+  /** Set the Library type-filter; clears any tag so the kind is the active lens. */
+  private setKind(kind: RecordingKind) {
+    filterStore.set({ ...this.filterState, kind, tag_id: null });
+  }
+
+  /** A Library type-filter row. Active when its kind matches and no tag is set. */
+  private renderKindItem(kind: RecordingKind, icon: string, label: string) {
+    const f = this.filterState;
+    const active = !f.tag_id && (f.kind ?? "all") === kind;
+    return html`
+      <div class="sidebar-item ${active ? "active" : ""}" @click=${() => this.setKind(kind)}>
+        <span class="sidebar-icon">${icon}</span>
+        <span>${label}</span>
+      </div>
+    `;
   }
 
   render() {
@@ -65,10 +84,9 @@ export class SidebarElement extends LitElement {
       <div class="rv-sidebar">
         <div class="sidebar-header">Library</div>
         <div class="sidebar-list">
-          <div class="sidebar-item ${!f.tag_id ? 'active' : ''}" @click=${() => this.setTagFilter(null)}>
-            <span class="sidebar-icon">📚</span>
-            <span>All Notes</span>
-          </div>
+          ${this.renderKindItem("all", "📚", "All Recordings")}
+          ${this.renderKindItem("single", "🎙️", "Voice Notes")}
+          ${this.renderKindItem("meeting", "👥", "Meetings")}
         </div>
 
         <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);">Tags</div>

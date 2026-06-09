@@ -4,7 +4,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { listRecordings, semanticSearch, updateMeetingName, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
-import { filterStore } from "../../state/filter";
+import { filterStore, type RecordingKind } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
 import { formatDay } from "../../utils/date";
 import {
@@ -84,6 +84,18 @@ export class RecordingsListElement extends LitElement {
     window.removeEventListener("config:saved", this.onConfigSaved);
   }
 
+  /**
+   * Client-side Library type-filter. Single recordings have no `meeting_id`;
+   * meeting tracks have one. NOTE: applied after pagination, so with very large
+   * libraries a page may contain few of the chosen kind (acceptable for typical
+   * use; a server-side filter is the follow-up if needed).
+   */
+  private filterByKind(rows: Recording[], kind?: RecordingKind): Recording[] {
+    if (!kind || kind === "all") return rows;
+    if (kind === "single") return rows.filter((r) => !r.meeting_id);
+    return rows.filter((r) => !!r.meeting_id);
+  }
+
   async refresh() {
     this.offset = 0;
     this.reachedEnd = false;
@@ -102,6 +114,7 @@ export class RecordingsListElement extends LitElement {
         rows = await listRecordings({ ...f, limit: this.pageSize, offset: 0 });
         this.reachedEnd = rows.length < this.pageSize;
       }
+      rows = this.filterByKind(rows, f.kind);
       const ids = new Set(rows.map((r) => r.id));
       const nextMulti = new Set<string>();
       this.multiSelected.forEach((id) => {
@@ -120,7 +133,10 @@ export class RecordingsListElement extends LitElement {
     try {
       const f = filterStore.get();
       const nextOffset = this.offset + this.pageSize;
-      const rows = await listRecordings({ ...f, limit: this.pageSize, offset: nextOffset });
+      const rows = this.filterByKind(
+        await listRecordings({ ...f, limit: this.pageSize, offset: nextOffset }),
+        f.kind,
+      );
       this.offset = nextOffset;
       if (rows.length < this.pageSize) this.reachedEnd = true;
       if (rows.length > 0) {
