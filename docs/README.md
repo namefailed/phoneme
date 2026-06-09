@@ -50,6 +50,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Architecture Overview](developer-guide/architecture.md) — Daemon / CLI / tray triad
 - [Internals](developer-guide/internals.md) — Async topology, audio path, pipeline, meeting alignment
 - [Data Directories](developer-guide/data_directories.md) — Config, catalog, inbox, logs, models
+- [Threat Model](developer-guide/threat_model.md) — Trust boundaries, mitigations, open hardening items
 
 ### Integration
 - [CLI Reference](developer-guide/cli_reference.md) — Every `phoneme` subcommand
