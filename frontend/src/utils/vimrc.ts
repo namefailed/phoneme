@@ -3,6 +3,29 @@ export interface VimMock {
   map: (keys: string, target: string, ctx: string) => void;
 }
 
+/** Custom DOM event fired when the user runs `:w` (or `:wq`/`:x`) in a vim editor. */
+export const VIM_SAVE_EVENT = "phoneme:vim-save";
+
+let vimWriteDefined = false;
+/**
+ * Make `:w` / `:write` / `:wq` / `:x` save in any CodeMirror vim editor. The Ex
+ * command is global to the Vim singleton, so we define it once and dispatch a
+ * DOM event; the focused editor handles it and saves itself.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function defineVimWrite(Vim: any) {
+  if (vimWriteDefined) return;
+  const fire = () => document.dispatchEvent(new CustomEvent(VIM_SAVE_EVENT));
+  try {
+    Vim.defineEx("write", "w", fire);
+    Vim.defineEx("wq", "wq", fire);
+    Vim.defineEx("xit", "x", fire);
+    vimWriteDefined = true;
+  } catch {
+    /* older vim build without defineEx — silently skip */
+  }
+}
+
 export function applyVimrc(vimrc: string, vimInstance: VimMock) {
   if (!vimrc) return;
   const lines = vimrc.split("\n");

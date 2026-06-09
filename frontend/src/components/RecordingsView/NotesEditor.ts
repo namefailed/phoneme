@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { updateNotes } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { applyVimrc } from "../../utils/vimrc";
+import { applyVimrc, defineVimWrite, VIM_SAVE_EVENT } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
@@ -28,6 +28,10 @@ export class NotesEditor {
   private vimMode = false;
   private vimCurrentMode = "NORMAL";
   private vimBadgeElement: HTMLElement | null = null;
+  private saveBtn: HTMLButtonElement | null = null;
+  private vimSaveHandler = () => {
+    if (this.view?.hasFocus) void this.save();
+  };
 
   constructor(container: HTMLElement, id: string, initial: string) {
     this.container = container;
@@ -72,6 +76,8 @@ export class NotesEditor {
             ? `<span id="notes-vim-badge" style="color: var(--accent); font-size: 9px; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">NORMAL</span>`
             : ""
         }
+        <span style="flex: 1;"></span>
+        <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">Save Changes</button>
       </div>
       <div id="notes-cm-root" class="notes-cm-root"></div>
     `;
@@ -80,6 +86,8 @@ export class NotesEditor {
     if (!root) return;
 
     this.vimBadgeElement = this.container.querySelector<HTMLElement>("#notes-vim-badge");
+    this.saveBtn = this.container.querySelector<HTMLButtonElement>("#notes-save-btn");
+    this.saveBtn?.addEventListener("click", () => void this.save());
 
     const theme = EditorView.theme({
       "&": {
@@ -137,6 +145,7 @@ export class NotesEditor {
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         this.current = update.state.doc.toString();
+        this.updateSaveBtn();
         saveHandler();
       }
     });
@@ -162,6 +171,7 @@ export class NotesEditor {
     if (vimMode) {
       extensions.unshift(vim());
       applyVimrc(vimrc, Vim);
+      defineVimWrite(Vim);
     }
 
     this.view = new EditorView({
@@ -171,6 +181,8 @@ export class NotesEditor {
       }),
       parent: root,
     });
+
+    document.addEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
 
     // Reflect the REAL vim mode in the badge via the editor's own mode-change
     // events, not a keystroke heuristic. (No-op when vim mode is off.)
@@ -184,12 +196,18 @@ export class NotesEditor {
     }
   }
 
+  /** Show the "Save Changes" button only when there are unsaved edits. */
+  private updateSaveBtn() {
+    if (this.saveBtn) this.saveBtn.style.display = this.current !== this.lastSaved ? "" : "none";
+  }
+
   private async save() {
     const value = this.current;
     if (value === this.lastSaved) return;
     try {
       await updateNotes(this.id, value);
       this.lastSaved = value;
+      this.updateSaveBtn();
     } catch (e) {
       showToast(`Failed to save notes: ${errText(e)}`, "error");
     }
@@ -197,6 +215,7 @@ export class NotesEditor {
 
   dispose() {
     if (this.debounce) clearTimeout(this.debounce);
+    document.removeEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
     if (this.view) {
       this.view.destroy();
       this.view = null;

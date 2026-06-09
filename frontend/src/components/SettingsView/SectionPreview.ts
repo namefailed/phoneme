@@ -1,6 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { showToast } from "../../utils/toast";
-import { errText } from "../../utils/error";
 import { PREVIEW_STT_PROVIDERS, curatedSttModels } from "../../services/sttProviders";
 import { mountModelField } from "./modelField";
 
@@ -146,9 +144,12 @@ export class SectionPreview {
       const v = (e.target as HTMLSelectElement).value as PreviewSource;
       if (v === "same") this.setSame();
       else if (v === "local") {
-        // Default to the first already-downloaded preview model, else clear path
-        // (the daemon waits until a model is selected/downloaded).
-        const first = PREVIEW_MODELS.map((m) => this.downloadedPath(m.filename)).find(Boolean) ?? "";
+        // Prefer a small downloaded model (Tiny/Base/Small) for a snappy preview;
+        // else fall back to any downloaded model; else leave blank (the daemon
+        // waits until one is picked — downloads happen in the Whisper section).
+        const first = PREVIEW_MODELS.map((m) => this.downloadedPath(m.filename)).find(Boolean)
+          ?? this.downloaded[0]
+          ?? "";
         this.setLocal(first);
       } else this.setApi("groq");
       this.render();
@@ -162,18 +163,22 @@ export class SectionPreview {
     if (!host) return;
 
     if (src === "same") {
-      host.innerHTML = `<p style="font-size:12px; color:var(--fg-muted); padding:8px 0;">
-        Preview reuses your final model on the same server. Simplest, but on a heavy
-        model the live text can lag. Pick a dedicated model or API for a snappy overlay.</p>`;
+      host.innerHTML = `
+        <div class="settings-field">
+          <label></label>
+          <div style="font-size:12px; color:var(--fg-muted); line-height:1.5;">
+            Preview reuses your final model on the same server. Simplest, but on a heavy model the
+            live text can lag — pick a dedicated local model or a cloud API for a snappy overlay.
+          </div>
+        </div>`;
       return;
     }
 
     if (src === "local") {
       const current = this.config.preview_whisper?.model_path ?? "";
       const currentNorm = current.replace(/\\/g, "/");
-      // Auto-detected dropdown of ALL downloaded models (full choice, not just
-      // the recommended presets). Any whisper model you've downloaded — via the
-      // main Transcription section or a preset below — is selectable here.
+      // Dropdown of every downloaded model. Downloading new models is handled in
+      // the Whisper section above — this just picks which one drives the preview.
       const options = this.downloaded.length
         ? this.downloaded
             .map((p) => {
@@ -183,31 +188,16 @@ export class SectionPreview {
             .join("")
         : `<option value="">No models downloaded yet</option>`;
 
-      // Recommended small/fast preview models — download in one click if absent.
-      const rows = PREVIEW_MODELS.map((m) => {
-        const path = this.downloadedPath(m.filename);
-        const selected = current && currentNorm.endsWith(m.filename);
-        const action = path
-          ? `<button class="inline-button" data-pick="${path.replace(/"/g, "&quot;")}">${selected ? "Selected" : "Use"}</button>`
-          : `<button class="inline-button" data-dl="${m.filename}">Download</button>`;
-        return `<div class="settings-field" style="border:0; padding:6px 0;">
-            <label style="font-weight:normal;">${m.name} <span style="color:var(--fg-faded);">${m.size}</span><br>
-              <span style="font-size:11px; color:var(--fg-muted);">${m.desc}</span></label>
-            <div>${action}</div>
-          </div>`;
-      }).join("");
-
       host.innerHTML = `
-        <p style="font-size:12px; color:var(--fg-muted); padding:4px 0;">
-          Runs on a second whisper-server (thread-limited so it can't lag your machine).</p>
         <div class="settings-field">
           <label>Preview model</label>
-          <div><select id="prev-local-model" style="width:100%;">${options}</select></div>
+          <div><select id="prev-local-model" style="width:100%; max-width:400px;">${options}</select></div>
+          <span class="settings-help-text" style="grid-column:2;">
+            Runs on a second, thread-limited whisper-server so it never lags your machine. Smaller
+            models (Tiny / Base) give the snappiest overlay.${this.downloaded.length ? "" : " Download a model in the <b>Whisper</b> section above first."}
+          </span>
         </div>
-        <p style="font-size:11px; color:var(--fg-muted); margin:10px 0 2px;">
-          Recommended small models for a snappy overlay — download one if you don't have it:</p>
-        ${rows}
-        ${current ? "" : `<p style="font-size:12px; color:var(--err);">Pick or download a model above.</p>`}`;
+        ${current || !this.downloaded.length ? "" : `<div class="settings-field"><label></label><div style="font-size:12px; color:var(--err);">Pick a model above.</div></div>`}`;
 
       host.querySelector<HTMLSelectElement>("#prev-local-model")?.addEventListener("change", (e) => {
         const path = (e.target as HTMLSelectElement).value;
@@ -216,34 +206,6 @@ export class SectionPreview {
           this.render();
         }
       });
-
-      host.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach((b) =>
-        b.addEventListener("click", () => {
-          this.setLocal(b.dataset.pick!);
-          this.render();
-        }),
-      );
-      host.querySelectorAll<HTMLButtonElement>("[data-dl]").forEach((b) =>
-        b.addEventListener("click", async () => {
-          const filename = b.dataset.dl!;
-          b.disabled = true;
-          b.textContent = "Downloading…";
-          try {
-            const path = await invoke<string>("wizard_download_model", {
-              url: `${HF_BASE}/${filename}`,
-              filename,
-            });
-            this.downloaded.push(path);
-            this.setLocal(path);
-            showToast(`Downloaded ${filename}`, "success");
-            this.render();
-          } catch (e) {
-            showToast(`Download failed: ${errText(e)}`, "error");
-            b.disabled = false;
-            b.textContent = "Download";
-          }
-        }),
-      );
       return;
     }
 
