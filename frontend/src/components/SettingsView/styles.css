@@ -394,7 +394,9 @@ select[data-key="daemon.log_level"] {
 }
 .ai-prompt-controls textarea {
   width: 100%;
-  max-width: 100%;
+  /* Constrain to the panel's wide-field width instead of spanning the whole
+     row, so the prompt boxes match the other settings fields. */
+  max-width: 580px;
   min-height: 220px;
   resize: vertical;
   font-size: 13px;
