@@ -5,16 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../../utils/toast";
 import { CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
+import { CLOUD_STT_PROVIDERS } from "../../services/sttProviders";
 import "./styles.css";
-
-/** Cloud speech-to-text providers offered in the wizard's connect step. */
-const STT_CLOUD_PROVIDERS: { value: string; label: string; model: string }[] = [
-  { value: "openai", label: "OpenAI (Whisper)", model: "whisper-1" },
-  { value: "groq", label: "Groq (Whisper, fast)", model: "whisper-large-v3" },
-  { value: "deepgram", label: "Deepgram", model: "nova-2" },
-  { value: "assemblyai", label: "AssemblyAI", model: "best" },
-  { value: "elevenlabs", label: "ElevenLabs Scribe", model: "scribe" },
-];
 
 
 export type WizardStep = "welcome" | "mode" | "configure" | "connect" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
@@ -605,13 +597,13 @@ export class FirstRunWizardElement extends LitElement {
             <div class="wizard-feature-body" style="display:flex; flex-direction:column; gap:10px;">
               <select style=${inputStyle} @change=${(e: Event) => {
                 const v = (e.target as HTMLSelectElement).value;
-                const p = STT_CLOUD_PROVIDERS.find((x) => x.value === v);
+                const p = CLOUD_STT_PROVIDERS.find((x) => x.value === v);
                 c.whisper.provider = v || "local";
-                if (p) c.whisper.model = p.model;
+                if (p) c.whisper.model = p.defaultModel;
                 this.requestUpdate();
               }}>
                 <option value="">— Choose a transcription provider —</option>
-                ${STT_CLOUD_PROVIDERS.map((p) => html`<option value=${p.value} ?selected=${c.whisper.provider === p.value}>${p.label}</option>`)}
+                ${CLOUD_STT_PROVIDERS.map((p) => html`<option value=${p.value} ?selected=${c.whisper.provider === p.value}>${p.label}</option>`)}
               </select>
               <input type="password" placeholder="API key" style=${inputStyle}
                 .value=${c.whisper.api_key || ""} @input=${(e: Event) => c.whisper.api_key = (e.target as HTMLInputElement).value} />

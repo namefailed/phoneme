@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";
 import { errText } from "../../utils/error";
+import { PREVIEW_STT_PROVIDERS } from "../../services/sttProviders";
 
 /** Small, fast models suitable for the live preview (the final transcript keeps
  *  whatever the Transcription section is set to). */
@@ -25,14 +26,6 @@ function prettyModel(path: string): string {
   };
   return map[name] ?? name;
 }
-
-/** Cloud providers that work well for a fast preview (final stays separate). */
-const PREVIEW_API_PROVIDERS = [
-  { value: "groq", label: "Groq (fast, recommended)" },
-  { value: "openai", label: "OpenAI" },
-  { value: "deepgram", label: "Deepgram" },
-  { value: "custom", label: "Custom (OpenAI-compatible)" },
-];
 
 type PreviewSource = "same" | "local" | "api";
 
@@ -259,7 +252,7 @@ export class SectionPreview {
       <div class="settings-field">
         <label>API provider</label>
         <div><select id="prev-api-provider">
-          ${PREVIEW_API_PROVIDERS.map(
+          ${PREVIEW_STT_PROVIDERS.map(
             (p) => `<option value="${p.value}" ${pv.provider === p.value ? "selected" : ""}>${p.label}</option>`,
           ).join("")}
         </select></div>

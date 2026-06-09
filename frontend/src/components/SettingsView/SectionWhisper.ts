@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
+import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, sttMeta } from "../../services/sttProviders";
 
 const HELP =
   "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
@@ -165,15 +166,7 @@ export class SectionWhisper {
               key: "whisper.provider",
               label: "",
               kind: "select",
-              options: [
-                { value: "local", label: "Local — whisper.cpp (offline, default)" },
-                { value: "openai", label: "OpenAI (cloud)" },
-                { value: "groq", label: "Groq (cloud)" },
-                { value: "deepgram", label: "Deepgram (cloud)" },
-                { value: "assemblyai", label: "AssemblyAI (cloud)" },
-                { value: "elevenlabs", label: "ElevenLabs Scribe (cloud)" },
-                { value: "custom", label: "Custom (OpenAI-compatible endpoint)" },
-              ],
+              options: STT_PROVIDERS.map((p) => ({ value: p.value, label: p.label })),
             },
             this.config.whisper.provider ?? "local",
           )}</div>
@@ -192,7 +185,7 @@ export class SectionWhisper {
             <div>
               <select id="stt-preset-select">
                 <option value="">— Pick a provider preset —</option>
-                <option value="fireworks">Fireworks</option>
+                ${STT_CUSTOM_PRESETS.map((p) => `<option value="${p.id}">${p.label}</option>`).join("")}
               </select>
             </div>
             <span style="${HELP}">
@@ -330,16 +323,8 @@ export class SectionWhisper {
         : "";
       if (isLocal) return;
 
-      // provider metadata is from a fixed set, not user input — safe in innerHTML.
-      const meta: Record<string, { name: string; host: string; model: string }> = {
-        openai: { name: "OpenAI", host: "api.openai.com", model: "whisper-1" },
-        groq: { name: "Groq", host: "api.groq.com", model: "whisper-large-v3" },
-        deepgram: { name: "Deepgram", host: "api.deepgram.com", model: "nova-2" },
-        assemblyai: { name: "AssemblyAI", host: "api.assemblyai.com", model: "best" },
-        elevenlabs: { name: "ElevenLabs", host: "api.elevenlabs.io", model: "scribe_v1" },
-        custom: { name: "your custom endpoint", host: "the URL you set below", model: "(optional)" },
-      };
-      const { name, host, model: defaultModel } = meta[provider] ?? meta.openai;
+      // provider metadata is from the shared STT catalog, not user input.
+      const { name, host, model: defaultModel } = sttMeta(provider);
       container.querySelector<HTMLElement>("#cloud-warning")!.innerHTML =
         `⚠️ <b>Cloud transcription.</b> Selecting ${name} uploads your recorded audio to ` +
         `${host} for processing — your audio leaves your machine. Switch back to ` +
@@ -362,12 +347,9 @@ export class SectionWhisper {
     // Transcription provider presets — map onto the existing `custom`
     // (OpenAI-compatible) provider and prefill the base URL + default model.
     // Frontend-only: the backend appends /v1/audio/transcriptions.
-    const STT_PRESETS: Record<string, { apiUrl: string; model: string }> = {
-      fireworks: { apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
-    };
     const sttPresetSelect = container.querySelector<HTMLSelectElement>("#stt-preset-select");
     sttPresetSelect?.addEventListener("change", () => {
-      const preset = STT_PRESETS[sttPresetSelect.value];
+      const preset = findSttCustomPreset(sttPresetSelect.value);
       if (!preset || !providerSelect) return;
       providerSelect.value = "custom";
       providerSelect.dispatchEvent(new Event("change", { bubbles: true }));

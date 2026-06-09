@@ -6,30 +6,9 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 import { invoke } from '@tauri-apps/api/core';
 import { showToast } from '../utils/toast';
 import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from '../services/llmProviders';
+import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset } from '../services/sttProviders';
 
 type ProviderOption = { value: string; label: string };
-
-type Preset = {
-  id: string;
-  label: string;
-  provider: string;
-  apiUrl: string;
-  model: string;
-};
-
-const STT_PRESETS: Preset[] = [
-  { id: "preset:fireworks", label: "Fireworks", provider: "custom", apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
-];
-
-const STT_PROVIDERS: ProviderOption[] = [
-  { value: "local", label: "Local — whisper.cpp (offline, default)" },
-  { value: "openai", label: "OpenAI (cloud)" },
-  { value: "groq", label: "Groq (cloud)" },
-  { value: "deepgram", label: "Deepgram (cloud)" },
-  { value: "assemblyai", label: "AssemblyAI (cloud)" },
-  { value: "elevenlabs", label: "ElevenLabs Scribe (cloud)" },
-  { value: "custom", label: "Custom (OpenAI-compatible endpoint)" },
-];
 
 const LLM_PROVIDERS: ProviderOption[] = [
   { value: "none", label: "None" },
@@ -214,11 +193,13 @@ export class ModelPickerElement extends LitElement {
 
   private onSttProviderChange() {
     const v = this.sttProviderSelect.value;
-    const preset = STT_PRESETS.find((p) => p.id === v);
-    if (preset) {
-      this.sttRealProvider = preset.provider;
-      this.sttUrl = preset.apiUrl;
-      this.sttModel = preset.model;
+    if (v.startsWith("preset:")) {
+      const preset = findSttCustomPreset(v.slice("preset:".length));
+      if (preset) {
+        this.sttRealProvider = "custom";
+        this.sttUrl = preset.apiUrl;
+        this.sttModel = preset.model;
+      }
     } else {
       this.sttRealProvider = v;
     }
@@ -248,7 +229,7 @@ export class ModelPickerElement extends LitElement {
     const isLlmOllama = this.llmRealProvider === "ollama";
 
     const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
-    const sttPresetOpts = STT_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
+    const sttPresetOpts = STT_CUSTOM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`);
     const llmRealOpts = LLM_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.llmRealProvider}>${p.label}</option>`);
     const llmPresetOpts = html`
       <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`)}</optgroup>
