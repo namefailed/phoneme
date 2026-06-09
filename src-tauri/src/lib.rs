@@ -244,6 +244,7 @@ pub fn run() {
             commands::retranscribe_recording,
             commands::import_recording,
             commands::refire_hook,
+            commands::rerun_cleanup,
             commands::update_transcript,
             commands::update_meeting_name,
             commands::get_original_transcript,

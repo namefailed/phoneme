@@ -542,6 +542,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::RerunCleanup { id, model } => rerun_cleanup(state, id, model).await,
         // Unlike RefireHook, HookTest intentionally runs a caller-supplied
         // command: it is the Hook Manager's "test this command" affordance, used
         // to validate a hook the user is editing but has not saved yet. That is a
@@ -762,6 +763,155 @@ fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
         return false;
     }
     p.starts_with(audio_dir)
+}
+
+/// Re-run ONLY the LLM post-processing ("cleanup") step on a recording's
+/// already-stored transcript, without re-transcribing the audio.
+///
+/// Design mirrors `RefireHook`: validate up front on the IPC connection (the
+/// recording must exist and have a transcript), then do the slow work — the LLM
+/// call, which can take its full timeout — OFF the connection in a spawned task,
+/// reporting progress via the same `DaemonEvent`s the UI already consumes. This
+/// keeps the single-connection Tauri bridge responsive.
+///
+/// Input baseline: the preserved **original** (raw Whisper) transcript when one
+/// exists, falling back to the live transcript for recordings predating that
+/// column. Running cleanup against the original — not the already-cleaned live
+/// text — keeps the operation idempotent (re-running with a different model
+/// re-cleans the same source rather than compounding edits) and lets us reuse
+/// `update_transcript`, which re-asserts the original alongside the new live
+/// text. The original column is therefore preserved by construction.
+///
+/// An optional `model` overrides the configured cleanup model for THIS run only;
+/// it is never written back to config (unlike `RetranscribeRecording`, which
+/// must restart the whisper server). The post-processing provider is built from
+/// a cloned config with just the model field swapped.
+async fn rerun_cleanup(
+    state: &AppState,
+    id: phoneme_core::RecordingId,
+    model: Option<String>,
+) -> Response {
+    let recording = match state.catalog.get(&id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::NotFound,
+                message: format!("recording {id} not found"),
+            });
+        }
+        Err(e) => {
+            return Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            });
+        }
+    };
+
+    // Cleanup operates on text — there must be something to clean.
+    if recording.transcript.is_none() {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::Internal,
+            message: "no transcript to run cleanup on".into(),
+        });
+    }
+
+    // Build a cleanup config with the optional one-time model override applied.
+    // Cloning the live config and swapping only `model` keeps every other
+    // setting (provider, api key/url, prompt, timeout) intact, and — crucially —
+    // never persists the override the way RetranscribeRecording does.
+    let mut llm_cfg = state.config.load().llm_post_process.clone();
+    if let Some(m) = model {
+        let m = m.trim();
+        if !m.is_empty() {
+            llm_cfg.model = m.to_string();
+        }
+    }
+
+    // Require post-processing to actually be configured. `provider()` returns
+    // None when disabled or the provider is `none`/unrecognized — in that case
+    // there is nothing to run, so report it rather than silently no-op'ing.
+    if state.llm.provider(&llm_cfg).is_none() {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::InvalidConfig,
+            message: "LLM post-processing is not enabled (set [llm_post_process] provider)".into(),
+        });
+    }
+
+    // Choose the cleanup INPUT: prefer the preserved original (raw machine
+    // output) so cleanup is idempotent; fall back to the current transcript for
+    // older rows that have no original stored.
+    let source = match state.catalog.get_original_transcript(&id).await {
+        Ok(Some(original)) if !original.is_empty() => original,
+        // No original (or empty): fall back to the live transcript. Safe to
+        // unwrap — we returned above if it was None.
+        _ => recording.transcript.clone().unwrap_or_default(),
+    };
+
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        // Re-build the provider inside the task from the (already-validated)
+        // config so the heavy work — the network call to the LLM — happens off
+        // the IPC connection. We re-check `provider()` only to obtain the boxed
+        // provider; the None branch is unreachable in practice but handled
+        // defensively rather than unwrapped.
+        let Some(provider) = task_state.llm.provider(&llm_cfg) else {
+            return;
+        };
+
+        match provider.process(&llm_cfg.prompt, &source).await {
+            Ok(cleaned) => {
+                // Re-assert the original alongside the freshly cleaned live text.
+                // Reusing `update_transcript` (the same call the pipeline makes)
+                // keeps `original_transcript` pinned to the raw source we cleaned.
+                if let Err(e) = task_state
+                    .catalog
+                    .update_transcript(&id, &cleaned, &source, &llm_cfg.model)
+                    .await
+                {
+                    tracing::error!(error = %e, "rerun_cleanup: failed to update transcript");
+                    task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                        id,
+                        error: e.to_string(),
+                    });
+                    return;
+                }
+                // Record which cleanup model ran (diarization state is unchanged
+                // by a text-only re-clean, so preserve whatever was stored).
+                if let Err(e) = task_state
+                    .catalog
+                    .update_processing_meta(&id, Some(&llm_cfg.model), recording.diarized)
+                    .await
+                {
+                    tracing::warn!(error = %e, "rerun_cleanup: failed to update processing meta");
+                }
+
+                // Re-embed the new text so semantic search stays consistent,
+                // mirroring the pipeline and UpdateTranscript paths.
+                let embedder_guard = task_state.embedder.read().await;
+                if let Some(embedder) = embedder_guard.as_ref() {
+                    if let Ok(vec) = embedder.embed(&cleaned) {
+                        let _ = task_state.catalog.upsert_embedding(&id, &vec).await;
+                    }
+                }
+                drop(embedder_guard);
+
+                // Emit the same event the UI already listens for after a manual
+                // transcript change so the detail/list views refresh in place.
+                task_state
+                    .events
+                    .emit(DaemonEvent::TranscriptUpdated { id });
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "rerun_cleanup: LLM post-processing failed");
+                task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                    id,
+                    error: e.to_string(),
+                });
+            }
+        }
+    });
+
+    Response::Ok(serde_json::Value::Null)
 }
 
 /// Import an existing audio file: decode it to a canonical WAV under the audio

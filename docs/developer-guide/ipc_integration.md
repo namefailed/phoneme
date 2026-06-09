@@ -46,6 +46,7 @@ Phoneme supports the following commands (snake_case):
 - `list_meeting`: Fetch all recordings sharing a `meeting_id`.
 - `update_meeting_name`: Rename a meeting.
 - `retranscribe_recording`: Re-queue a recording through the transcription pipeline.
+- `rerun_cleanup`: Re-run ONLY the LLM post-processing step on a recording's stored transcript (no re-transcription); the preserved original transcript is the input, so the original is never lost.
 - `import_recording`: Feed a `.wav`/`.mp3`/`.m4a` file into the transcription pipeline.
 - `update_notes`: Update the free-form notes field for a recording.
 - `reload_config`: Tell the daemon to hot-reload `config.toml`.
