@@ -635,7 +635,6 @@ mark.search-hit {
   font-weight: 600;
   color: var(--fg-default);
   transition: background 0.15s ease-out;
-  margin-top: 4px;
 }
 .rec-group-head:hover {
   background: color-mix(in srgb, var(--accent) 15%, transparent);

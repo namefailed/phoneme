@@ -422,6 +422,18 @@ export class ActionRowElement extends LitElement {
     }
 
     if (this.rerunStep === "summarize") {
+      // Summaries reuse the post-processing LLM connection — with no AI provider
+      // configured there's nothing to summarize with, so link to Settings.
+      if (!this.llmPostProcessEnabled) {
+        return html`
+          <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
+            No AI provider is configured, so there's nothing to summarize with. Set one up to use this.
+          </p>
+          <button class="rerun-enable-summary" type="button"
+            style="align-self: flex-start; padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
+            @click=${this.openCleanupSettings}>Set up AI in Settings →</button>
+        `;
+      }
       return html`
         <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
           Regenerates the AI summary from the current transcript using your configured summary model. The transcript itself isn't changed.
@@ -565,9 +577,12 @@ export class ActionRowElement extends LitElement {
     // Cleanup is blocked when post-processing is off (nothing to re-fire — the
     // step shows an "Enable in Settings" shortcut instead), or when no model has
     // been chosen yet. The daemon also validates and reports an unusable config.
-    const runDisabled = this.rerunStep === "cleanup"
-      && (!this.llmPostProcessEnabled
-        || (this.cleanupModel.trim() === "" && this.cleanupModelOptions.length === 0));
+    const runDisabled =
+      (this.rerunStep === "cleanup"
+        && (!this.llmPostProcessEnabled
+          || (this.cleanupModel.trim() === "" && this.cleanupModelOptions.length === 0)))
+      // Summarize needs an AI provider too (summaries reuse the LLM connection).
+      || (this.rerunStep === "summarize" && !this.llmPostProcessEnabled);
     return html`
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
