@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { listQueue, cancelQueued, type QueueEntry } from "../../services/ipc";
+import { listQueue, cancelQueued, reorderQueue, type QueueEntry } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { formatTime, formatDuration } from "../../utils/format";
 import { showToast } from "../../utils/toast";
@@ -68,6 +68,28 @@ export class QueuePanelElement extends LitElement {
     }
   }
 
+  /** Move a pending item up (-1) or down (+1) and persist the new claim order. */
+  private async move(id: string, dir: -1 | 1) {
+    const pending = this.items.filter((i) => i.state === "pending");
+    const idx = pending.findIndex((i) => i.id === id);
+    const j = idx + dir;
+    if (idx < 0 || j < 0 || j >= pending.length) return;
+    [pending[idx], pending[j]] = [pending[j], pending[idx]];
+    // Optimistic: reflect immediately; the poll/event reconciles.
+    this.items = [...this.items.filter((i) => i.state === "processing"), ...pending];
+    try {
+      await reorderQueue(pending.map((i) => i.id));
+    } catch (e) {
+      showToast(`Couldn't reorder: ${errText(e)}`, "error");
+      void this.load();
+    }
+  }
+
+  /** Open this recording in the main list to watch its progress. */
+  private select(id: string) {
+    window.dispatchEvent(new CustomEvent("phoneme:select-recording", { detail: { id } }));
+  }
+
   private toggle() {
     this.collapsed = !this.collapsed;
     localStorage.setItem("phoneme.queuePanelCollapsed", String(this.collapsed));
@@ -90,22 +112,32 @@ export class QueuePanelElement extends LitElement {
           ? null
           : html`
               <div class="queue-list">
-                ${items.length === 0
-                  ? html`<div class="queue-empty">Nothing queued — recordings transcribe as they arrive.</div>`
-                  : items.map(
-                      (it) => html`
-                        <div class="queue-item ${it.state}">
-                          <span class="queue-item-icon">${it.state === "processing" ? "⟳" : "•"}</span>
-                          <div class="queue-item-main">
-                            <div class="queue-item-title">${formatTime(it.timestamp, false)} · ${formatDuration(it.duration_ms)}</div>
-                            <div class="queue-item-sub">${it.state === "processing" ? "Transcribing…" : "Queued"}</div>
+                ${(() => {
+                  const pendingIds = items.filter((i) => i.state === "pending").map((i) => i.id);
+                  return items.length === 0
+                    ? html`<div class="queue-empty">Nothing queued — recordings transcribe as they arrive.</div>`
+                    : items.map((it) => {
+                        const pIdx = pendingIds.indexOf(it.id);
+                        return html`
+                          <div class="queue-item ${it.state}">
+                            <span class="queue-item-icon">${it.state === "processing" ? "⟳" : "•"}</span>
+                            <div class="queue-item-main" title="Open this recording" @click=${() => this.select(it.id)}>
+                              <div class="queue-item-title">${formatTime(it.timestamp, false)} · ${formatDuration(it.duration_ms)}</div>
+                              <div class="queue-item-sub">${it.state === "processing" ? "Transcribing…" : "Queued"}</div>
+                            </div>
+                            ${it.state === "pending"
+                              ? html`
+                                  <span class="queue-reorder">
+                                    <button class="queue-move" title="Move up" ?disabled=${pIdx <= 0} @click=${() => this.move(it.id, -1)}>▲</button>
+                                    <button class="queue-move" title="Move down" ?disabled=${pIdx === pendingIds.length - 1} @click=${() => this.move(it.id, 1)}>▼</button>
+                                  </span>
+                                  <button class="queue-cancel" title="Remove from queue" @click=${() => this.cancel(it.id)}>✕</button>
+                                `
+                              : html`<span class="queue-spin" aria-hidden="true"></span>`}
                           </div>
-                          ${it.state === "pending"
-                            ? html`<button class="queue-cancel" title="Remove from queue" @click=${() => this.cancel(it.id)}>✕</button>`
-                            : html`<span class="queue-spin" aria-hidden="true"></span>`}
-                        </div>
-                      `,
-                    )}
+                        `;
+                      });
+                })()}
               </div>
             `}
       </div>

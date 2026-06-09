@@ -435,26 +435,31 @@ export class HeaderBarElement extends LitElement {
             <style>
               .hb-mode-menu { animation: hbMenuIn 0.12s ease-out; }
               @keyframes hbMenuIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+              .hb-mode-menu .hb-mode-cap { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 3px; }
               .hb-mode-item {
-                display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                display: flex; align-items: center; gap: 10px;
                 width: 100%; text-align: left; background: none; border: none;
-                color: var(--fg-default); padding: 8px 10px; border-radius: 7px;
+                color: var(--fg-default); padding: 9px 12px; border-radius: 8px;
                 cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
               }
               .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-              .hb-mode-item.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-              .hb-mode-item .hb-mode-label { display: flex; align-items: center; gap: 9px; }
+              .hb-mode-item.selected { color: var(--accent); }
+              .hb-mode-item .hb-mode-ico { font-size: 15px; width: 20px; text-align: center; flex: 0 0 auto; }
+              .hb-mode-item .hb-mode-label { flex: 1; }
               .hb-mode-item .hb-mode-check { color: var(--accent); font-weight: 700; }
             </style>
             <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
-              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:200px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
+              <div class="hb-mode-cap">Record as</div>
               <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
-                <span class="hb-mode-label">🎙️ Voice note</span>
-                <span class="hb-mode-check" style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
+                <span class="hb-mode-ico">🎙️</span>
+                <span class="hb-mode-label">Voice note</span>
+                ${this.recordMode === 'recording' ? html`<span class="hb-mode-check">✓</span>` : ""}
               </button>
               <button class="hb-mode-item ${this.recordMode === 'meeting' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'meeting'} @click=${(e: Event) => this.selectMode('meeting', e)}>
-                <span class="hb-mode-label">👥 Meeting</span>
-                <span class="hb-mode-check" style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
+                <span class="hb-mode-ico">👥</span>
+                <span class="hb-mode-label">Meeting</span>
+                ${this.recordMode === 'meeting' ? html`<span class="hb-mode-check">✓</span>` : ""}
               </button>
             </div>
           </div>

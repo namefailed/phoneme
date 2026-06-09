@@ -831,7 +831,16 @@ ph-sidebar {
 }
 .queue-item-icon { flex: 0 0 auto; color: var(--fg-faded); font-size: 11px; }
 .queue-item.processing .queue-item-icon { color: var(--accent); }
-.queue-item-main { flex: 1; min-width: 0; }
+.queue-item-main { flex: 1; min-width: 0; cursor: pointer; }
+.queue-item-main:hover .queue-item-title { color: var(--accent); }
+.queue-reorder { flex: 0 0 auto; display: inline-flex; flex-direction: column; gap: 1px; }
+.queue-move {
+  background: transparent; border: none; color: var(--fg-faded);
+  width: 20px; height: 13px; line-height: 1; font-size: 9px; padding: 0;
+  border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+}
+.queue-move:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.queue-move:disabled { opacity: 0.25; cursor: default; }
 .queue-item-title { font-size: 12px; color: var(--fg-default); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .queue-item-sub { font-size: 10px; color: var(--fg-faded); }
 .queue-cancel {

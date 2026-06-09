@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+/// Filename of the pending-queue order manifest (a JSON array of recording ids
+/// in desired claim order). Deliberately has no `.json` extension so the
+/// payload scan ignores it.
+const ORDER_FILE: &str = ".queue-order";
+
 /// Which directory of the inbox a payload lives in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InboxState {
@@ -84,8 +89,61 @@ impl InboxQueue {
         Ok(())
     }
 
-    /// Claim the oldest pending payload (moving it to `processing/`).
-    /// Returns `None` if there's nothing pending.
+    /// Pending payload files in effective claim order: any user-defined order
+    /// (from the `.queue-order` manifest) first, then remaining files by
+    /// filename (chronological). The manifest is a plain JSON array of ids; it
+    /// has no `.json` extension so the payload scan ignores it.
+    async fn ordered_pending(&self) -> Result<Vec<PathBuf>> {
+        let pending = self.root.join("pending");
+        let files = read_json_entries_sorted(&pending).await?; // chronological
+        let order = self.read_order().await;
+        let mut ordered: Vec<PathBuf> = Vec::new();
+        let mut placed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // 1. Files explicitly ordered by the user, in that order.
+        for id in &order {
+            if let Some(p) = files.iter().find(|f| {
+                f.file_stem().and_then(|s| s.to_str()) == Some(id.as_str())
+            }) {
+                ordered.push(p.clone());
+                placed.insert(id.clone());
+            }
+        }
+        // 2. Everything else (newly enqueued, never reordered) chronologically.
+        for f in &files {
+            if let Some(stem) = f.file_stem().and_then(|s| s.to_str()) {
+                if !placed.contains(stem) {
+                    ordered.push(f.clone());
+                }
+            }
+        }
+        Ok(ordered)
+    }
+
+    /// Read the `.queue-order` manifest (list of ids in desired claim order).
+    async fn read_order(&self) -> Vec<String> {
+        let p = self.root.join("pending").join(ORDER_FILE);
+        match fs::read(&p).await {
+            Ok(bytes) => serde_json::from_slice::<Vec<String>>(&bytes).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Set the desired claim order for pending items (user drag/up-down). Ids
+    /// not present are ignored when claiming; missing ids fall back to
+    /// chronological order. Persisted atomically.
+    pub async fn set_order(&self, ids: &[RecordingId]) -> Result<()> {
+        let list: Vec<String> = ids.iter().map(|i| i.as_str().to_string()).collect();
+        let json = serde_json::to_vec(&list)?;
+        let dir = self.root.join("pending");
+        let final_path = dir.join(ORDER_FILE);
+        let temp_path = dir.join(format!("{ORDER_FILE}.tmp"));
+        fs::write(&temp_path, &json).await?;
+        fs::rename(&temp_path, &final_path).await?;
+        Ok(())
+    }
+
+    /// Claim the next pending payload in effective order (moving it to
+    /// `processing/`). Returns `None` if there's nothing pending.
     ///
     /// A corrupt (unparseable) payload is claimed exactly once, quarantined to
     /// `failed/`, and reported as `Ok(None)` so the caller simply tries the
@@ -93,8 +151,8 @@ impl InboxQueue {
     /// we parsed first, a single corrupt file at the head of the queue would
     /// fail every `claim_next()` call forever and starve every file behind it.
     pub async fn claim_next(&self) -> Result<Option<HookPayload>> {
-        let pending = self.root.join("pending");
-        let entries = read_json_entries_sorted(&pending).await?;
+        // Honor the user-defined order (manifest) first, then chronological.
+        let entries = self.ordered_pending().await?;
         // Walk the queue oldest-first and return the first file we can actually
         // claim. Crucially, a file we *can't* claim (malformed name, OS-level
         // rename failure from an AV/dangling-handle lock, or a corrupt payload)
@@ -230,7 +288,8 @@ impl InboxQueue {
     /// will be claimed). Unparseable files are skipped (not surfaced to the UI).
     pub async fn list_pending(&self) -> Result<Vec<HookPayload>> {
         let mut out = vec![];
-        for path in read_json_entries_sorted(&self.root.join("pending")).await? {
+        // Same effective order the worker will claim in (manifest, then chrono).
+        for path in self.ordered_pending().await? {
             if let Ok(p) = read_payload(&path).await {
                 out.push(p);
             }

@@ -310,6 +310,13 @@ pub async fn cancel_queued(bridge: Br<'_>, id: String) -> Result<Value, CommandE
     forward(&bridge, Request::CancelQueued { id }).await
 }
 
+/// Set the pending queue's claim order (full ordered id list).
+#[tauri::command]
+pub async fn reorder_queue(bridge: Br<'_>, ids: Vec<String>) -> Result<Value, CommandError> {
+    let parsed: Result<Vec<_>, _> = ids.iter().map(|s| parse_id(s)).collect();
+    forward(&bridge, Request::ReorderQueue { ids: parsed? }).await
+}
+
 /// Manually update the transcript text for a specific recording.
 #[tauri::command]
 pub async fn update_transcript(

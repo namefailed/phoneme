@@ -685,6 +685,7 @@ export class RecordingsListElement extends LitElement {
               <button
                 class="rec-icon-btn"
                 title="Change icon"
+                @mousedown=${(e: Event) => e.preventDefault()}
                 @click=${(e: Event) => { e.stopPropagation(); this.iconPickerOpen = !this.iconPickerOpen; this.requestUpdate(); }}
               >${this.editingIcon}</button>
               <input
@@ -712,6 +713,7 @@ export class RecordingsListElement extends LitElement {
                     <button
                       class="rec-icon-choice ${ic === this.editingIcon ? "sel" : ""}"
                       title="Use ${ic}"
+                      @mousedown=${(e: Event) => e.preventDefault()}
                       @click=${(e: Event) => {
                         e.stopPropagation();
                         this.editingIcon = ic;

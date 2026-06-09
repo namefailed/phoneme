@@ -212,6 +212,11 @@ export async function cancelQueued(id: string): Promise<void> {
   await tauriInvoke("cancel_queued", { id });
 }
 
+/** Set the pending queue's claim order (full ordered list of recording ids). */
+export async function reorderQueue(ids: string[]): Promise<void> {
+  await tauriInvoke("reorder_queue", { ids });
+}
+
 /** One Doctor health-check result. */
 export type DoctorCheck = {
   name: string;

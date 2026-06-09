@@ -48,6 +48,7 @@ export class RecordingsView {
   private unsub: (() => void) | null = null;
   private splitter: Splitter;
   private keydownHandler: (e: KeyboardEvent) => void;
+  private selectHandler: ((e: Event) => void) | null = null;
 
   /** Current multi-selection. Empty when no checkboxes are checked. */
   private multiSelected = new Set<string>();
@@ -108,6 +109,13 @@ export class RecordingsView {
     void this.subscribeToEvents();
     this.keydownHandler = this.handleKeydown.bind(this);
     document.addEventListener("keydown", this.keydownHandler);
+    // Clicking a queue-panel item selects that recording so the user can watch
+    // it (the detail pane updates as it transcribes).
+    this.selectHandler = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+      if (typeof id === "string") this.onSelect(id);
+    };
+    window.addEventListener("phoneme:select-recording", this.selectHandler);
   }
 
   async refresh() {
@@ -142,6 +150,7 @@ export class RecordingsView {
     }
     this.splitter.dispose();
     document.removeEventListener("keydown", this.keydownHandler);
+    if (this.selectHandler) window.removeEventListener("phoneme:select-recording", this.selectHandler);
   }
 
   private applyLayout() {

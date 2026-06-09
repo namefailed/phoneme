@@ -158,6 +158,12 @@ pub enum Request {
     CancelQueued {
         id: RecordingId,
     },
+    /// Set the desired claim order of pending queue items (full ordered id
+    /// list). The worker claims in this order; unknown/absent ids fall back to
+    /// chronological order.
+    ReorderQueue {
+        ids: Vec<RecordingId>,
+    },
 
     /// Run all health checks (local filesystem + backend reachability) and
     /// return the results for the GUI Doctor view. Each result carries a name,

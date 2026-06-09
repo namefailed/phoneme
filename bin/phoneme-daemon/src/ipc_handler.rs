@@ -619,6 +619,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::ReorderQueue { ids } => match state.inbox.set_order(&ids).await {
+            Ok(()) => {
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::Value::Null)
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::CancelQueued { id } => match state.inbox.cancel_pending(&id).await {
             Ok(true) => {
                 // Leave the recording in a terminal state so it isn't stuck
