@@ -627,17 +627,27 @@ mark.search-hit {
   overflow: hidden;
 }
 .rec-group-chevron {
-  color: var(--accent);
-  font-size: 18px;
-  width: 24px;
+  color: var(--fg-muted);
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
-  display: inline-block;
-  transition: transform 0.2s ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Rotate the whole centered glyph box so it pivots cleanly about its middle,
+     not around a triangle's tip. Slight overshoot for a polished feel. */
+  transition: transform 0.18s cubic-bezier(0.34, 1.3, 0.7, 1), color 0.15s ease;
   transform-origin: center;
-  font-weight: bold;
+}
+.rec-group-chevron svg {
+  display: block;
 }
 .rec-group-chevron.expanded {
   transform: rotate(90deg);
+  color: var(--accent);
+}
+.rec-group-head:hover .rec-group-chevron {
+  color: var(--accent);
 }
 .rec-group-title {
   font-weight: 600;
