@@ -204,7 +204,19 @@ export class HeaderBarElement extends LitElement {
       if (this.isRecording) {
         await invoke("record_stop");
       } else {
-        await invoke("record_start", { mode: "oneshot" });
+        // The GUI Record button is a Start/Stop toggle by default ("hold"): it
+        // records until the user clicks stop, so a quiet mic or a natural pause
+        // never cuts it off. Only when the user has opted into auto-stop on
+        // silence do we use "oneshot" (stops once the silence window is quiet).
+        // Read the flag at click-time so the latest saved setting always wins
+        // without HeaderBar subscribing to config changes; fall back to the
+        // safe toggle behavior if the config read fails.
+        let mode = "hold";
+        try {
+          const cfg = await invoke<any>("read_config");
+          if (cfg?.recording?.auto_stop_on_silence) mode = "oneshot";
+        } catch { /* keep toggle (hold) */ }
+        await invoke("record_start", { mode });
       }
     } catch (e) {
       showToast(`Recording toggle failed: ${errText(e)}`, "error");

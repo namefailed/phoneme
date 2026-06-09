@@ -605,7 +605,7 @@ export class RecordingsListElement extends LitElement {
               @blur=${(e: FocusEvent) => this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value)}
             />
           ` : html`
-            <span class="rec-group-title">🎙 ${meetingName}</span>
+            <span class="rec-group-title">👥 ${meetingName}</span>
             <button
               class="rec-group-rename"
               title="Rename meeting"
