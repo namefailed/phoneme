@@ -7,6 +7,87 @@ use phoneme_core::config::{Config, LlmPostProcessConfig};
 use phoneme_core::error::Result;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
 use phoneme_ipc::{DaemonEvent, PipelineStage};
+
+/// Coalesce streamed deltas until this many chars accumulate, then flush one
+/// LlmActivity event — keeps the event bus from being flooded token-by-token.
+const DELTA_FLUSH_CHARS: usize = 48;
+/// Cap on total response chars forwarded to the UI per stage (the full result
+/// is still returned and stored; only the live "thinking" view is bounded).
+const MAX_STREAMED_CHARS: usize = 16 * 1024;
+
+/// Run one LLM stage (cleanup or summary) through the streaming path, emitting
+/// `DaemonEvent::LlmActivity` so the GUI can show the exact prompt and the
+/// response as it streams. Returns the final (normalized) text.
+pub(crate) async fn run_llm_stage(
+    state: &AppState,
+    id: &RecordingId,
+    stage: PipelineStage,
+    provider: &dyn phoneme_core::LlmProvider,
+    prompt: &str,
+    text: &str,
+) -> Result<String> {
+    // (1) Start event carrying the verbatim prompt.
+    state.events.emit(DaemonEvent::LlmActivity {
+        id: id.clone(),
+        stage,
+        prompt: provider.exact_prompt(prompt, text),
+        delta: String::new(),
+        done: false,
+    });
+
+    // (2) Stream deltas, coalesced and capped.
+    let mut pending = String::new();
+    let mut streamed = 0usize;
+    let result = {
+        let mut on_delta = |d: &str| {
+            if streamed >= MAX_STREAMED_CHARS {
+                return;
+            }
+            let remaining = MAX_STREAMED_CHARS - streamed;
+            let slice = if d.len() > remaining {
+                let mut end = remaining;
+                while end > 0 && !d.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &d[..end]
+            } else {
+                d
+            };
+            pending.push_str(slice);
+            streamed += slice.len();
+            if pending.len() >= DELTA_FLUSH_CHARS {
+                state.events.emit(DaemonEvent::LlmActivity {
+                    id: id.clone(),
+                    stage,
+                    prompt: String::new(),
+                    delta: std::mem::take(&mut pending),
+                    done: false,
+                });
+            }
+        };
+        provider.process_streaming(prompt, text, &mut on_delta).await
+    };
+
+    // (3) Flush any tail and the terminal `done` marker (regardless of outcome).
+    if !pending.is_empty() {
+        state.events.emit(DaemonEvent::LlmActivity {
+            id: id.clone(),
+            stage,
+            prompt: String::new(),
+            delta: std::mem::take(&mut pending),
+            done: false,
+        });
+    }
+    state.events.emit(DaemonEvent::LlmActivity {
+        id: id.clone(),
+        stage,
+        prompt: String::new(),
+        delta: String::new(),
+        done: true,
+    });
+
+    result
+}
 use std::time::Duration;
 
 /// Build the effective LLM config for summaries: start from `[llm_post_process]`
@@ -47,6 +128,7 @@ pub fn summary_llm_config(cfg: &Config) -> LlmPostProcessConfig {
 pub async fn generate_summary(
     state: &AppState,
     cfg: &Config,
+    id: &RecordingId,
     transcript: &str,
 ) -> Option<(String, String)> {
     if transcript.trim().is_empty() {
@@ -64,7 +146,7 @@ pub async fn generate_summary(
             return None;
         }
     };
-    match llm.process(&cfg.summary.prompt, transcript).await {
+    match run_llm_stage(state, id, PipelineStage::Summarizing, &*llm, &cfg.summary.prompt, transcript).await {
         Ok(summary) if !summary.trim().is_empty() => Some((summary, model)),
         Ok(_) => {
             tracing::warn!("summary LLM returned empty output");
@@ -93,7 +175,7 @@ async fn maybe_auto_summarize(
         id: id.clone(),
         stage: PipelineStage::Summarizing,
     });
-    match generate_summary(state, cfg, transcript).await {
+    match generate_summary(state, cfg, id, transcript).await {
         Some((summary, model)) => {
             if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
                 tracing::warn!(error = %e, "failed to persist auto summary");
@@ -179,7 +261,16 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
             id: id.clone(),
             stage: PipelineStage::CleaningUp,
         });
-        match llm.process(&cfg.llm_post_process.prompt, &transcript).await {
+        match run_llm_stage(
+            state,
+            &id,
+            PipelineStage::CleaningUp,
+            &*llm,
+            &cfg.llm_post_process.prompt,
+            &transcript,
+        )
+        .await
+        {
             Ok(processed) => {
                 tracing::info!("LLM post-processing succeeded");
                 transcript = processed;

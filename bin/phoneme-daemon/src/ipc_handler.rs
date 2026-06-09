@@ -1062,7 +1062,16 @@ async fn rerun_cleanup(
             stage: PipelineStage::CleaningUp,
         });
 
-        match provider.process(&llm_cfg.prompt, &source).await {
+        match crate::pipeline::run_llm_stage(
+            &task_state,
+            &id,
+            PipelineStage::CleaningUp,
+            &*provider,
+            &llm_cfg.prompt,
+            &source,
+        )
+        .await
+        {
             Ok(cleaned) => {
                 // Re-assert the original alongside the freshly cleaned live text.
                 // Reusing `update_transcript` (the same call the pipeline makes)
@@ -1188,7 +1197,7 @@ async fn rerun_summary(
             id: id.clone(),
             stage: PipelineStage::Summarizing,
         });
-        match crate::pipeline::generate_summary(&task_state, &cfg, &transcript).await {
+        match crate::pipeline::generate_summary(&task_state, &cfg, &id, &transcript).await {
             Some((summary, model)) => {
                 if let Err(e) = task_state
                     .catalog

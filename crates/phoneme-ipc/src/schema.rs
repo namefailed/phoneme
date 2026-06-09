@@ -345,6 +345,22 @@ pub enum DaemonEvent {
         id: RecordingId,
         stage: PipelineStage,
     },
+    /// Live AI activity for one LLM stage (cleanup or summary), so the GUI can
+    /// show the exact prompt and the response as it streams. Lifecycle per
+    /// stage: (1) one event with the full `prompt` (`done=false`), (2) zero or
+    /// more `delta` chunks as the response streams (Ollama) or one full delta
+    /// (non-streaming providers), (3) a final `done=true` event. Deltas are
+    /// coalesced and capped so a long generation can't flood the bus.
+    LlmActivity {
+        id: RecordingId,
+        stage: PipelineStage,
+        #[serde(default)]
+        prompt: String,
+        #[serde(default)]
+        delta: String,
+        #[serde(default)]
+        done: bool,
+    },
     HookStarted {
         id: RecordingId,
     },
