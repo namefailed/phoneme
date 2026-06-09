@@ -94,7 +94,7 @@ same-user malware or a malicious IPC client. Ordered by priority.*
 **Hygiene**
 - [ ] **`cargo audit` + `pnpm audit` in CI** (non-blocking first, then gate core crates). *(also in tech-debt backlog)*
 - [ ] Hook `HookTest` stderr may contain secrets — redact before returning.
-- [ ] A short **threat-model doc** capturing these boundaries.
+- [x] A short **threat-model doc** capturing these boundaries. → [docs/developer-guide/threat_model.md](docs/developer-guide/threat_model.md)
 
 ---
 
