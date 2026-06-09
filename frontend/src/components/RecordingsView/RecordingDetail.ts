@@ -385,10 +385,11 @@ function formatDate(iso: string): string {
   return `${dateObj} at ${timeObj}`;
 }
 
-/** Compact "transcription · cleanup" model line for the detail footer. */
+/** Compact "transcription · cleanup · summary" model line for the detail footer. */
 function modelsLine(r: Recording): string {
   const parts: string[] = [];
   if (r.model) parts.push(`🗣 ${escapeHtml(r.model)}`);
   if (r.cleanup_model) parts.push(`✨ ${escapeHtml(r.cleanup_model)}`);
+  if (r.summary_model) parts.push(`📝 ${escapeHtml(r.summary_model)}`);
   return parts.join("  ·  ");
 }

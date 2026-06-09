@@ -51,8 +51,10 @@
 .rec-row.active {
   background: rgba(203, 166, 247, 0.08);
   background-image: linear-gradient(to right, rgba(203, 166, 247, 0.04), transparent);
+  /* Border is a constant 3px on every row (transparent → accent here), so the
+     padding must stay identical too — otherwise selecting shifts the row's
+     content sideways. */
   border-left-color: var(--accent);
-  padding-left: 13px;
 }
 .rec-row.kbd-focused {
   outline: none;
