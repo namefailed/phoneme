@@ -437,9 +437,22 @@ mark.search-hit {
   border-radius: 10px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
   overflow: hidden;
-  /* Drag the bottom-right corner to resize; the size is remembered. */
-  resize: both;
+  /* Resized via custom handles on all four edges + corners (see .thinking-rz). */
 }
+/* Resize handles — thin strips on each edge and small squares at the corners.
+   Placed last in the DOM so they sit above the content and are grabbable
+   anywhere along the edge. */
+.thinking-rz { position: absolute; z-index: 6; }
+.thinking-rz-n { top: 0; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.thinking-rz-s { bottom: 0; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.thinking-rz-e { right: 0; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.thinking-rz-w { left: 0; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.thinking-rz-ne { top: 0; right: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+.thinking-rz-nw { top: 0; left: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.thinking-rz-se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.thinking-rz-sw { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+/* Keep the close button clickable above the (DOM-later) handles. */
+.thinking-close { position: relative; z-index: 7; }
 .thinking-head {
   display: flex;
   align-items: center;

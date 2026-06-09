@@ -43,13 +43,15 @@ export class ThinkingPopoutElement extends LitElement {
   private seq = 0;
   private unsub: (() => void) | null = null;
 
-  private panelWired = false;
-  private resizeObs: ResizeObserver | null = null;
-  private sizeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** User-set panel geometry from edge/corner resizing; null = auto-anchored to
+   *  the FAB at the default size. Once the user resizes, this takes over. */
+  private geom: { left: number; top: number; width: number; height: number } | null = null;
 
   private static readonly FAB_LS = "phoneme.thinkingFabPos";
   private static readonly OPEN_LS = "phoneme.thinkingFabOpen";
-  private static readonly SIZE_LS = "phoneme.thinkingPanelSize";
+  private static readonly GEOM_LS = "phoneme.thinkingPanelGeom";
+  private static readonly MIN_W = 300;
+  private static readonly MIN_H = 220;
   /** Generous cap so the log is "complete" for a session without unbounded growth. */
   private static readonly MAX_ENTRIES = 200;
   /** A not-done entry older than this stops counting as "live" (guards against a
@@ -72,6 +74,13 @@ export class ThinkingPopoutElement extends LitElement {
     } catch { /* ignore */ }
     try {
       this.open = localStorage.getItem(ThinkingPopoutElement.OPEN_LS) === "true";
+    } catch { /* ignore */ }
+    try {
+      const raw = localStorage.getItem(ThinkingPopoutElement.GEOM_LS);
+      if (raw) {
+        const g = JSON.parse(raw);
+        if (["left", "top", "width", "height"].every((k) => typeof g?.[k] === "number")) this.geom = g;
+      }
     } catch { /* ignore */ }
     this.unsub = await subscribe((event: DaemonEvent) => {
       if (event.event !== "llm_activity") return;
@@ -112,8 +121,6 @@ export class ThinkingPopoutElement extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this.unsub) this.unsub();
-    this.resizeObs?.disconnect();
-    this.resizeObs = null;
   }
 
   private liveCount(): number {
@@ -194,49 +201,68 @@ export class ThinkingPopoutElement extends LitElement {
     panel.style.bottom = "auto";
   }
 
-  private restoreSize(panel: HTMLElement) {
-    try {
-      const raw = localStorage.getItem(ThinkingPopoutElement.SIZE_LS);
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (typeof s?.w === "number" && typeof s?.h === "number") {
-          panel.style.width = `${s.w}px`;
-          panel.style.height = `${s.h}px`;
-        }
-      }
-    } catch { /* ignore */ }
+  /** Apply the user's saved geometry (from edge/corner resizing), clamped to the
+   *  viewport so it's always on-screen and reachable. */
+  private applyGeom(panel: HTMLElement) {
+    if (!this.geom) return;
+    const m = 8;
+    const width = Math.max(ThinkingPopoutElement.MIN_W, Math.min(this.geom.width, window.innerWidth * 0.92));
+    const height = Math.max(ThinkingPopoutElement.MIN_H, Math.min(this.geom.height, window.innerHeight * 0.85));
+    const left = Math.max(m, Math.min(this.geom.left, window.innerWidth - width - m));
+    const top = Math.max(m, Math.min(this.geom.top, window.innerHeight - height - m));
+    panel.style.position = "fixed";
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+    panel.style.width = `${width}px`;
+    panel.style.height = `${height}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
   }
 
-  private observeSize(panel: HTMLElement) {
-    this.resizeObs = new ResizeObserver(() => {
-      if (this.sizeTimer) clearTimeout(this.sizeTimer);
-      // Persist only (no setState) so this never feeds back into a render loop.
-      this.sizeTimer = setTimeout(() => {
-        try {
-          localStorage.setItem(
-            ThinkingPopoutElement.SIZE_LS,
-            JSON.stringify({ w: panel.offsetWidth, h: panel.offsetHeight }),
-          );
-        } catch { /* ignore */ }
-      }, 300);
-    });
-    this.resizeObs.observe(panel);
+  /** Drag a resize handle. `dir` contains any of n/s/e/w; corners combine two.
+   *  Resizing from a top/left edge moves that edge while keeping the opposite
+   *  edge fixed. The resulting geometry takes over from FAB-anchoring. */
+  private startResize(e: MouseEvent, dir: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    const panel = this.renderRoot.querySelector<HTMLElement>(".thinking-popout");
+    if (!panel) return;
+    const r = panel.getBoundingClientRect();
+    const sl = r.left, st = r.top, sw = r.width, sh = r.height;
+    const mx = e.clientX, my = e.clientY;
+    const minW = ThinkingPopoutElement.MIN_W, minH = ThinkingPopoutElement.MIN_H;
+    const maxW = window.innerWidth * 0.92, maxH = window.innerHeight * 0.85;
+    const onMove = (mv: MouseEvent) => {
+      const dx = mv.clientX - mx, dy = mv.clientY - my;
+      let left = sl, top = st, width = sw, height = sh;
+      if (dir.includes("e")) width = sw + dx;
+      if (dir.includes("w")) width = sw - dx;
+      if (dir.includes("s")) height = sh + dy;
+      if (dir.includes("n")) height = sh - dy;
+      width = Math.max(minW, Math.min(maxW, width));
+      height = Math.max(minH, Math.min(maxH, height));
+      if (dir.includes("w")) left = sl + (sw - width);   // keep the right edge fixed
+      if (dir.includes("n")) top = st + (sh - height);    // keep the bottom edge fixed
+      left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+      top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+      this.geom = { left, top, width, height };
+      this.applyGeom(panel);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try { localStorage.setItem(ThinkingPopoutElement.GEOM_LS, JSON.stringify(this.geom)); } catch { /* ignore */ }
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   }
 
   updated() {
     const panel = this.renderRoot.querySelector<HTMLElement>(".thinking-popout");
-    if (panel) {
-      if (!this.panelWired) {
-        this.panelWired = true;
-        this.restoreSize(panel);
-        this.observeSize(panel);
-      }
-      this.applyPosition(panel);
-    } else if (this.panelWired) {
-      this.panelWired = false;
-      this.resizeObs?.disconnect();
-      this.resizeObs = null;
-    }
+    if (!panel) return;
+    // Once the user has resized, honor their geometry; otherwise anchor to the FAB.
+    if (this.geom) this.applyGeom(panel);
+    else this.applyPosition(panel);
   }
 
   private renderEntry(e: ActivityEntry) {
@@ -280,6 +306,14 @@ export class ThinkingPopoutElement extends LitElement {
                   ? html`<div class="thinking-empty">No AI activity yet. Transcribe, clean up, or summarize a recording (or re-run one) and the prompt + response will stream here. Everything since you opened the app is kept in this list.</div>`
                   : entries.map((e) => this.renderEntry(e))}
               </div>
+              <span class="thinking-rz thinking-rz-n" @mousedown=${(e: MouseEvent) => this.startResize(e, "n")}></span>
+              <span class="thinking-rz thinking-rz-s" @mousedown=${(e: MouseEvent) => this.startResize(e, "s")}></span>
+              <span class="thinking-rz thinking-rz-e" @mousedown=${(e: MouseEvent) => this.startResize(e, "e")}></span>
+              <span class="thinking-rz thinking-rz-w" @mousedown=${(e: MouseEvent) => this.startResize(e, "w")}></span>
+              <span class="thinking-rz thinking-rz-ne" @mousedown=${(e: MouseEvent) => this.startResize(e, "ne")}></span>
+              <span class="thinking-rz thinking-rz-nw" @mousedown=${(e: MouseEvent) => this.startResize(e, "nw")}></span>
+              <span class="thinking-rz thinking-rz-se" @mousedown=${(e: MouseEvent) => this.startResize(e, "se")}></span>
+              <span class="thinking-rz thinking-rz-sw" @mousedown=${(e: MouseEvent) => this.startResize(e, "sw")}></span>
             </div>
           `
         : ""}
