@@ -64,6 +64,13 @@ impl Transcriber {
         diarization: &crate::config::DiarizationConfig,
     ) -> Box<dyn TranscriptionProvider> {
         let timeout = Duration::from_secs(whisper.timeout_secs);
+        // Local (pyannote) diarization is a separate ONNX pass over the audio —
+        // it doesn't require *local* transcription, only segment timestamps. So
+        // enable it for every OpenAI-compatible backend (local whisper.cpp,
+        // OpenAI, Groq, Custom), each of which returns segments via verbose_json.
+        // Cloud diarization (Deepgram/AssemblyAI) is intrinsic to those APIs and
+        // only applies when that same provider does the transcription.
+        let local_diar = diarization.provider == crate::config::DiarizationBackend::Local;
         match whisper.provider {
             TranscriptionBackend::Local => {
                 #[cfg(feature = "native-whisper")]
@@ -85,7 +92,7 @@ impl Transcriber {
                     None,
                     None,
                     timeout,
-                    diarization.provider == crate::config::DiarizationBackend::Local,
+                    local_diar,
                 ))
             }
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
@@ -94,7 +101,9 @@ impl Transcriber {
                 non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-1")),
                 timeout,
-                false, // OpenAI API doesn't support segment-level timestamp output out-of-box with audio/transcriptions without weird params
+                // whisper-1 returns segments with verbose_json; enables local
+                // diarization on OpenAI transcripts.
+                local_diar,
             )),
             TranscriptionBackend::Groq => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
@@ -102,7 +111,7 @@ impl Transcriber {
                 non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-large-v3")),
                 timeout,
-                false,
+                local_diar,
             )),
 
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
@@ -136,7 +145,10 @@ impl Transcriber {
                 non_empty(whisper.api_key.expose_secret()),
                 non_empty(&whisper.model),
                 timeout,
-                false,
+                // Custom OpenAI-compatible endpoints that return verbose_json
+                // segments get local diarization too; ones that don't simply
+                // fall back to the plain transcript (no hard failure).
+                local_diar,
             )),
         }
     }

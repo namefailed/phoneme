@@ -3,6 +3,31 @@ import { renderField, bindFieldEvents } from "./form";
 const HELP =
   "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
 
+/**
+ * Returns a warning string when the chosen diarization provider can't run with
+ * the current transcription backend, or null when the combo works. Local
+ * diarization is a separate pass that runs on any OpenAI-compatible transcription
+ * (Local/OpenAI/Groq/Custom); cloud diarization is part of that provider's own
+ * transcription API, so it only runs when that same provider transcribes.
+ */
+export function diarizationMismatch(diar: string, stt: string): string | null {
+  if (!diar || diar === "none") return null;
+  if (diar === "local") {
+    const ok = ["local", "openai", "groq", "custom"];
+    if (!ok.includes(stt)) {
+      return `Local diarization runs with Local, OpenAI, Groq, or Custom transcription — but your transcription is set to "${stt}", which doesn't return the segment timing it needs, so diarization won't run. Switch transcription to one of those, or use ${stt}'s own diarization (select "${stt}" above if listed).`;
+    }
+    return null;
+  }
+  if (diar === "deepgram" && stt !== "deepgram") {
+    return `Deepgram diarization only runs when Deepgram also does the transcription (it's part of Deepgram's API). Your transcription is "${stt}". Set transcription to Deepgram in the Whisper section, or choose Local diarization.`;
+  }
+  if (diar === "assemblyai" && stt !== "assemblyai") {
+    return `AssemblyAI diarization only runs when AssemblyAI also does the transcription. Your transcription is "${stt}". Set transcription to AssemblyAI in the Whisper section, or choose Local diarization.`;
+  }
+  return null;
+}
+
 export class SectionDiarization {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(
@@ -36,6 +61,14 @@ export class SectionDiarization {
           <span style="${HELP}">
             Identifies who spoke when (e.g., [Speaker 0], [Speaker 1]).
           </span>
+        </div>
+
+        <div class="settings-field" id="diarize-warn" style="display:none">
+          <label></label>
+          <div style="border:1px solid var(--warn, #f9e2af); border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.45; background: color-mix(in srgb, var(--warn, #f9e2af) 12%, transparent); color: var(--fg-default);">
+            ⚠️ <b>Won't run with your current transcription provider.</b>
+            <div id="diarize-warn-text" style="margin-top:4px; color: var(--fg-muted);"></div>
+          </div>
         </div>
 
         <div id="diarize-local" style="display:none">
@@ -75,6 +108,17 @@ export class SectionDiarization {
         provider === "local" ? "" : "none";
       container.querySelector<HTMLElement>("#diarize-cloud")!.style.display =
         (provider === "deepgram" || provider === "assemblyai") ? "" : "none";
+
+      // Warn when this diarization provider can't run with the configured
+      // transcription backend (turns the silent mismatch into a visible note).
+      const stt = (this.config.whisper?.provider ?? "local").toString().toLowerCase();
+      const warning = diarizationMismatch(provider, stt);
+      const warnBox = container.querySelector<HTMLElement>("#diarize-warn");
+      const warnText = container.querySelector<HTMLElement>("#diarize-warn-text");
+      if (warnBox && warnText) {
+        warnBox.style.display = warning ? "" : "none";
+        warnText.textContent = warning ?? "";
+      }
     };
 
     const providerSelect = container.querySelector<HTMLSelectElement>(
