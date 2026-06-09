@@ -1076,3 +1076,10 @@ ph-sidebar {
   border-radius: 50%;
   margin-right: 6px;
 }
+/* "All Tags" gets a rainbow dot since it represents every tag at once. */
+.sidebar-dot-rainbow {
+  background: conic-gradient(
+    from 0deg,
+    #ff5d5d, #ffae4a, #ffe24a, #5dd85d, #4ab6ff, #8a7bff, #ff6ad5, #ff5d5d
+  );
+}

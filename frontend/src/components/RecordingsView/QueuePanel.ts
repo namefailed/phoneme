@@ -136,7 +136,7 @@ export class QueuePanelElement extends LitElement {
 
   private toggle() {
     this.collapsed = !this.collapsed;
-    localStorage.setItem("phoneme.queuePanelCollapsed", String(this.collapsed));
+    try { localStorage.setItem("phoneme.queuePanelCollapsed", String(this.collapsed)); } catch { /* private mode */ }
   }
 
   /**

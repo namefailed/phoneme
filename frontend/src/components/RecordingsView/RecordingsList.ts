@@ -96,6 +96,10 @@ export class RecordingsListElement extends LitElement {
   @state() private editingName = "";
   @state() private editingIcon = DEFAULT_MEETING_ICON;
   @state() private iconPickerOpen = false;
+  /** Viewport coords for the icon picker popover. It renders position:fixed so
+   *  it escapes the recordings list's overflow clipping (the old absolute
+   *  popover was clipped to the row and appeared to "not open" at all). */
+  @state() private iconPickerPos: { x: number; y: number } | null = null;
   
   private offset = 0;
   private readonly pageSize = 100;
@@ -686,7 +690,14 @@ export class RecordingsListElement extends LitElement {
                 class="rec-icon-btn"
                 title="Change icon"
                 @mousedown=${(e: Event) => e.preventDefault()}
-                @click=${(e: Event) => { e.stopPropagation(); this.iconPickerOpen = !this.iconPickerOpen; this.requestUpdate(); }}
+                @click=${(e: Event) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  // Anchor below the button; clamp so a near-bottom row's popover
+                  // doesn't run off-screen (the grid is ~6 rows tall).
+                  this.iconPickerPos = { x: r.left, y: Math.min(r.bottom + 6, window.innerHeight - 180) };
+                  this.iconPickerOpen = !this.iconPickerOpen;
+                }}
               >${this.editingIcon}</button>
               <input
                 type="text"
@@ -708,7 +719,7 @@ export class RecordingsListElement extends LitElement {
                 }}
               />
               ${this.iconPickerOpen ? html`
-                <div class="rec-icon-popover" @click=${(e: Event) => e.stopPropagation()}>
+                <div class="rec-icon-popover" style="position:fixed; left:${this.iconPickerPos?.x ?? 0}px; top:${this.iconPickerPos?.y ?? 0}px; z-index:9999;" @click=${(e: Event) => e.stopPropagation()}>
                   ${MEETING_ICON_CHOICES.map((ic) => html`
                     <button
                       class="rec-icon-choice ${ic === this.editingIcon ? "sel" : ""}"
