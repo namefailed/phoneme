@@ -258,7 +258,14 @@ export class RecordingsView {
         eventName === "hook_failed" ||
         eventName === "recording_deleted" ||
         eventName === "transcript_updated" ||
-        eventName === "summary_updated"
+        eventName === "summary_updated" ||
+        // Tag mutations change the Tags column — refresh so it updates live
+        // instead of needing a manual reload.
+        eventName === "tag_attached" ||
+        eventName === "tag_detached" ||
+        eventName === "tag_updated" ||
+        eventName === "tag_deleted" ||
+        eventName === "tag_created"
       ) {
         void this.refresh();
       }
