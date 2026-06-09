@@ -4606,6 +4606,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "which 6.0.3",
  "whisper-rs",
  "wiremock",
 ]
