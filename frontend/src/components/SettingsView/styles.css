@@ -322,9 +322,14 @@ select[data-key="daemon.log_level"] {
 }
 .model-actions button {
   width: auto;
+  /* Uniform, compact width so Select / Download / Use / Selected line up and
+     read consistently with the rest of the UI's buttons (was content-width
+     with roomy padding, which looked a touch long). */
+  min-width: 82px;
+  text-align: center;
   align-self: flex-end;
   white-space: nowrap;
-  padding: 5px 12px;
+  padding: 5px 10px;
   font-size: 12px;
   font-weight: 500;
   border-radius: 6px;

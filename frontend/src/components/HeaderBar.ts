@@ -336,6 +336,23 @@ export class HeaderBarElement extends LitElement {
 
     return html`
       <div class="headerbar" data-tauri-drag-region>
+        <style>
+          /* Consistent control height across every top-bar element. */
+          .headerbar .icon-btn,
+          .headerbar .record-btn,
+          .headerbar .filter-pill,
+          .headerbar .hb-status-select,
+          .headerbar .search-group,
+          .headerbar .search,
+          .headerbar select,
+          .headerbar input[type="search"],
+          .headerbar input[type="date"] {
+            height: 32px;
+            box-sizing: border-box;
+          }
+          .headerbar .icon-btn, .headerbar .record-btn { display: inline-flex; align-items: center; justify-content: center; }
+          .headerbar .hb-date-range, .headerbar .hb-status-cluster, .headerbar .hb-rec-group { align-items: center; }
+        </style>
         <button class="icon-btn" aria-label="Toggle Sidebar" title="Toggle Sidebar" @click=${() => this.callbacks?.onToggleSidebar?.()}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
         </button>
@@ -343,7 +360,7 @@ export class HeaderBarElement extends LitElement {
           title=${f.sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}>
           ${f.sort_desc === false ? "↑ Oldest" : "↓ Newest"}
         </button>
-        <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:2 1 360px; min-width:240px; max-width:620px;">
+        <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:1 100 220px; min-width:170px;">
           <input type="search" class="search" style="flex:1;" placeholder="Search transcripts…" 
             .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />
           <button class="icon-btn ${f.semantic ? 'active' : ''}" 
@@ -366,7 +383,7 @@ export class HeaderBarElement extends LitElement {
           <option value="transcribe_failed" ?selected=${f.status === "transcribe_failed"}>Transcription Failed</option>
           <option value="hook_failed" ?selected=${f.status === "hook_failed"}>Hook Failed</option>
         </select>
-        <div class="hb-status-cluster" style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
+        <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
           <span class="hb-whisper-dot ${this.whisperReachable === true ? 'reachable' : this.whisperReachable === false ? 'unreachable' : ''}"
             title=${this.whisperReachable === true ? 'Whisper: connected' : this.whisperReachable === false ? 'Whisper: unreachable' : 'Whisper status unknown'}></span>
           <span class="hb-queue-badge" style="display:${totalQueue > 0 ? "inline-flex" : "none"}"
