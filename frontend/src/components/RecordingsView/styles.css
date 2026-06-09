@@ -622,8 +622,8 @@ mark.search-hit {
 .rec-group-label {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
+  gap: 8px;
+  padding: 0 4px;
   overflow: hidden;
 }
 .rec-group-chevron {
