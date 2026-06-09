@@ -3,6 +3,7 @@ import { LitElement, html, css, PropertyValues, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { deleteRecording, refireHook, retranscribeRecording, rerunCleanup } from "../../services/ipc";
 import { fetchLlmModels, isApiLlmProvider } from "../../services/llmModels";
+import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -229,6 +230,20 @@ export class ActionRowElement extends LitElement {
     void this.fetchCleanupModels();
   }
 
+  /** One-click: apply a shared preset's protocol kind, endpoint, and model. */
+  private handleCleanupPreset(e: Event) {
+    const sel = e.target as HTMLSelectElement;
+    const preset = findLlmPreset(sel.value);
+    sel.value = ""; // reset to placeholder
+    if (!preset) return;
+    this.cleanupProvider = preset.kind;
+    this.cleanupApiUrl = preset.apiUrl;
+    this.cleanupModel = preset.defaultModel;
+    this.cleanupModelOptions = [];
+    this.requestUpdate();
+    void this.fetchCleanupModels();
+  }
+
   private handleCleanupModelSelect(e: Event) {
     this.cleanupModel = (e.target as HTMLSelectElement).value;
   }
@@ -423,6 +438,19 @@ export class ActionRowElement extends LitElement {
         <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
           Re-cleans the original transcript with the LLM (re-transcription is skipped). These overrides apply to this run only and aren't saved.${this.llmPostProcessEnabled ? "" : " Cleanup is off in Settings — picking a provider here runs it just this once."}
         </p>
+
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style=${labelStyle}>Quick preset</label>
+          <select class="rerun-cleanup-preset" style=${inputStyle} @change=${this.handleCleanupPreset}>
+            <option value="">— Pick a provider —</option>
+            <optgroup label="Local / offline">
+              ${LOCAL_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
+            </optgroup>
+            <optgroup label="Cloud (API key)">
+              ${CLOUD_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
+            </optgroup>
+          </select>
+        </div>
 
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label style=${labelStyle}>Provider</label>
