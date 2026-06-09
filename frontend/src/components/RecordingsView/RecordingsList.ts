@@ -88,6 +88,10 @@ export class RecordingsListElement extends LitElement {
   @property({ type: Object }) onSelectionChangeCb!: (ids: Set<string>) => void;
 
   @state() private listState: RecordingsListState = { recordings: [], selectedId: null, loading: false, error: null };
+
+  /** Per-recording semantic relevance score (cosine ~0–1), populated only while
+   *  a semantic search is active; empty otherwise. Drives the relevance chip. */
+  private semanticScores = new Map<string, number>();
   @state() private config: any = null;
   @state() private currentWidths: string[] | null = null;
   @state() private focusedIndex = -1;
@@ -166,10 +170,14 @@ export class RecordingsListElement extends LitElement {
       if (f.search && f.semantic) {
         const results = await semanticSearch(f.search, this.pageSize);
         rows = results.map((r) => r.recording);
+        // Keep each result's relevance score so the row can surface it. Cleared
+        // in the non-semantic branch so stale scores never bleed across modes.
+        this.semanticScores = new Map(results.map((r) => [r.recording.id, r.score]));
         this.reachedEnd = true;
       } else {
         rows = await listRecordings({ ...f, limit: this.pageSize, offset: 0 });
         this.reachedEnd = rows.length < this.pageSize;
+        this.semanticScores.clear();
       }
       rows = this.filterByKind(rows, f.kind);
       const ids = new Set(rows.map((r) => r.id));
@@ -612,6 +620,13 @@ export class RecordingsListElement extends LitElement {
       ? html`<span class="rec-track-badge">${trackLabel(track)}</span> `
       : nothing;
 
+    // Semantic relevance chip — shown only while a semantic search is active.
+    // The score is a cosine similarity (~0–1); render it as a percentage.
+    const score = this.semanticScores.get(r.id);
+    const scoreBadge = score != null
+      ? html`<span class="rec-score" title="Semantic relevance to your search">${Math.round(score * 100)}%</span> `
+      : nothing;
+
     const cellMap: Record<string, unknown> = {
       day: html`<span class="rec-time">${day}</span>`,
       time: html`<span class="rec-time">${time}</span>`,
@@ -628,7 +643,7 @@ export class RecordingsListElement extends LitElement {
       user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span><span class="rec-source-label">${sourceLabel}</span></span>`,
-      transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
+      transcript: html`<span class="rec-preview">${scoreBadge}${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
     const cells = visibleCols.map((c) => cellMap[c] || nothing);

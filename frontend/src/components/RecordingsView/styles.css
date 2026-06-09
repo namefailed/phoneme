@@ -955,6 +955,21 @@ mark.search-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+/* Semantic-relevance chip prefixed to the transcript preview during a semantic
+   search. Monospaced numerals keep the percentages aligned row-to-row. */
+.rec-score {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  vertical-align: middle;
+}
+
 /* Source column: a plain icon + label per track ("Microphone" / "System
    audio"). The earlier pill was too wide for the column — its edge touched the
    divider and clipped the text. Bare icon + text reads cleaner and fits; both
