@@ -5,13 +5,15 @@ import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../
 type StageActivity = { prompt: string; response: string; done: boolean };
 
 /**
- * A draggable floating popout showing the live AI "thinking" for the selected
- * recording: the exact prompt sent to the LLM and the response as it streams
- * (token-by-token for Ollama; whole-response for non-streaming providers).
+ * A draggable floating popout showing live AI "thinking": the exact prompt sent
+ * to the LLM and the response as it streams (token-by-token for Ollama;
+ * whole-response for non-streaming providers), per stage (cleanup / summary).
  *
- * Mounted once by RecordingsView; `recordingId` tracks the current selection so
- * clicking a queue item (which selects it) shows that file's activity. Listens
- * for `llm_activity` daemon events.
+ * It captures activity for EVERY recording as it streams (keyed by id), and
+ * displays the selected recording's activity — or, if the selection has none,
+ * whatever is currently/most-recently streaming. So clicking the 🧠 button
+ * always shows the latest AI activity, whether or not you pre-selected the row.
+ * The button is drag-to-move; the panel anchors to it.
  */
 @customElement("ph-thinking-popout")
 export class ThinkingPopoutElement extends LitElement {
@@ -22,17 +24,18 @@ export class ThinkingPopoutElement extends LitElement {
   @property({ type: String }) recordingId = "";
 
   @state() private open = false;
-  /** Whether activity is currently streaming (drives the button's "live" glow). */
-  @state() private live = false;
-  /** Per-stage prompt + accumulated response for the current recording. */
-  @state() private stages = new Map<PipelineStage, StageActivity>();
-  /** Panel floating position; null = anchored to the FAB. */
-  @state() private pos: { x: number; y: number } | null = null;
   /** FAB (button) position, draggable + persisted; null = default bottom-right. */
   @state() private fabPos: { x: number; y: number } | null = null;
+  /** Bumped on every activity event to force a re-render (the data lives in a Map). */
+  @state() private rev = 0;
 
+  /** AI activity per recording id → per stage. Bounded to the last few recordings. */
+  private byRecording = new Map<string, Map<PipelineStage, StageActivity>>();
+  /** Id of the recording that most recently streamed (for the no-selection case). */
+  private activeId = "";
   private unsub: (() => void) | null = null;
   private static readonly FAB_LS = "phoneme.thinkingFabPos";
+  private static readonly MAX_TRACKED = 6;
 
   async connectedCallback() {
     super.connectedCallback();
@@ -45,14 +48,23 @@ export class ThinkingPopoutElement extends LitElement {
     } catch { /* ignore */ }
     this.unsub = await subscribe((event: DaemonEvent) => {
       if (event.event !== "llm_activity") return;
-      if (event.id !== this.recordingId) return;
-      const cur = this.stages.get(event.stage) ?? { prompt: "", response: "", done: false };
+      let rec = this.byRecording.get(event.id);
+      if (!rec) {
+        rec = new Map();
+        this.byRecording.set(event.id, rec);
+        // Bound memory: drop the oldest tracked recording.
+        if (this.byRecording.size > ThinkingPopoutElement.MAX_TRACKED) {
+          const oldest = this.byRecording.keys().next().value;
+          if (oldest !== undefined) this.byRecording.delete(oldest);
+        }
+      }
+      const cur = rec.get(event.stage) ?? { prompt: "", response: "", done: false };
       if (event.prompt) cur.prompt = event.prompt;
       if (event.delta) cur.response += event.delta;
       if (event.done) cur.done = true;
-      this.stages.set(event.stage, cur);
-      this.live = !event.done || [...this.stages.values()].some((s) => !s.done);
-      this.requestUpdate();
+      rec.set(event.stage, cur);
+      if (!event.done) this.activeId = event.id; // currently streaming
+      this.rev++;
     });
   }
 
@@ -61,37 +73,26 @@ export class ThinkingPopoutElement extends LitElement {
     if (this.unsub) this.unsub();
   }
 
-  updated(changed: Map<string, unknown>) {
-    // Reset accumulated activity when the selection changes.
-    if (changed.has("recordingId")) {
-      this.stages = new Map();
-      this.live = false;
-    }
+  /** Which recording's activity to show: the selected one if it has activity,
+   *  otherwise whatever is currently/most-recently streaming. */
+  private displayId(): string {
+    if (this.recordingId && this.byRecording.has(this.recordingId)) return this.recordingId;
+    return this.activeId;
+  }
+
+  private stagesFor(id: string): [PipelineStage, StageActivity][] {
+    const rec = this.byRecording.get(id);
+    return rec ? [...rec.entries()] : [];
+  }
+
+  private isLive(id: string): boolean {
+    const rec = this.byRecording.get(id);
+    return !!rec && [...rec.values()].some((s) => !s.done);
   }
 
   /** Current FAB top-left (resolved default = bottom-right with a 20px margin). */
   private fabXY(): { x: number; y: number } {
     return this.fabPos ?? { x: window.innerWidth - 60, y: window.innerHeight - 60 };
-  }
-
-  /** Drag the panel by its header (fine-tune position independently of the FAB). */
-  private startDrag(e: MouseEvent) {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const base = this.pos ?? { x: window.innerWidth - 380, y: window.innerHeight - 400 };
-    const onMove = (m: MouseEvent) => {
-      this.pos = {
-        x: Math.max(8, Math.min(window.innerWidth - 80, base.x + (m.clientX - startX))),
-        y: Math.max(8, Math.min(window.innerHeight - 60, base.y + (m.clientY - startY))),
-      };
-    };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
   }
 
   /** Press-drag-or-click on the FAB: a drag moves (and persists) the button; a
@@ -107,8 +108,6 @@ export class ThinkingPopoutElement extends LitElement {
       const dy = m.clientY - startY;
       if (!dragged && Math.hypot(dx, dy) < 4) return; // tolerance: still a click
       dragged = true;
-      // Reset the panel's manual position so it re-anchors to the FAB.
-      this.pos = null;
       this.fabPos = {
         x: Math.max(8, Math.min(window.innerWidth - 48, base.x + dx)),
         y: Math.max(8, Math.min(window.innerHeight - 48, base.y + dy)),
@@ -127,40 +126,38 @@ export class ThinkingPopoutElement extends LitElement {
     document.addEventListener("mouseup", onUp);
   }
 
-  /** Panel position: the user's manual drag (this.pos) wins; otherwise anchor it
-   *  to the FAB — above it, or below if the FAB sits near the top of the screen. */
+  /** Panel position: anchored to the FAB — above it, or below if the FAB sits
+   *  near the top of the screen. The popout always tracks the button. */
   private panelStyle(): string {
-    if (this.pos) return `position:fixed; left:${this.pos.x}px; top:${this.pos.y}px;`;
     const { x, y } = this.fabXY();
     const left = Math.max(8, Math.min(window.innerWidth - 368, x + 40 - 360));
-    if (y < 420) {
-      // FAB near the top — open the panel below it.
-      return `position:fixed; left:${left}px; top:${y + 48}px;`;
-    }
+    if (y < 420) return `position:fixed; left:${left}px; top:${y + 48}px;`;
     return `position:fixed; left:${left}px; bottom:${window.innerHeight - y + 8}px;`;
   }
 
   render() {
-    const hasActivity = this.stages.size > 0;
+    void this.rev; // re-render on activity
     const { x: fabX, y: fabY } = this.fabXY();
-    const panelStyle = this.panelStyle();
+    const id = this.displayId();
+    const stages = id ? this.stagesFor(id) : [];
+    const live = id ? this.isLive(id) : false;
     return html`
-      <button class="thinking-fab ${this.live ? "live" : ""}" title="AI activity / thinking — drag to move"
+      <button class="thinking-fab ${live ? "live" : ""}" title="AI activity / thinking — drag to move"
         style="position:fixed; left:${fabX}px; top:${fabY}px; right:auto; bottom:auto;"
         @mousedown=${(e: MouseEvent) => this.startFabPress(e)}>
-        🧠${this.live ? html`<span class="thinking-dot"></span>` : ""}
+        🧠${live ? html`<span class="thinking-dot"></span>` : ""}
       </button>
       ${this.open
         ? html`
-            <div class="thinking-popout" style=${panelStyle}>
-              <div class="thinking-head" @mousedown=${(e: MouseEvent) => this.startDrag(e)}>
-                <span>AI activity${this.live ? " · live" : ""}</span>
+            <div class="thinking-popout" style=${this.panelStyle()}>
+              <div class="thinking-head">
+                <span>AI activity${live ? " · live" : ""}</span>
                 <button class="thinking-close" @click=${() => (this.open = false)} title="Close">✕</button>
               </div>
               <div class="thinking-body">
-                ${!hasActivity
-                  ? html`<div class="thinking-empty">No AI activity yet. Run a cleanup or summary (or re-run one) to see the prompt and response stream here.</div>`
-                  : [...this.stages.entries()].map(
+                ${stages.length === 0
+                  ? html`<div class="thinking-empty">No AI activity yet. Run a cleanup or summary (or re-run one), or record with auto-cleanup/summary on, and the prompt + response will stream here.</div>`
+                  : stages.map(
                       ([stage, a]) => html`
                         <div class="thinking-stage">
                           <div class="thinking-stage-title">${stageLabel(stage)}${a.done ? "" : " ⟳"}</div>

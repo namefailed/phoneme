@@ -35,7 +35,7 @@ export class BulkActionBarElement extends LitElement {
   /** Floating position; null = default (bottom-center). Persisted per device. */
   @state() private pos: { x: number; y: number } | null = null;
   @state() private allTags: Tag[] = [];
-  @state() private openMenu: "tag" | "export" | null = null;
+  @state() private openMenu: "rerun" | "tag" | "export" | null = null;
 
   private docClick = (e: MouseEvent) => {
     // Close an open dropdown when clicking outside the bar.
@@ -206,7 +206,7 @@ export class BulkActionBarElement extends LitElement {
     await this.runOverSelection((r) => deleteRecording(r.id, false), "Deleted");
   }
 
-  private toggleMenu(menu: "tag" | "export", e: Event) {
+  private toggleMenu(menu: "rerun" | "tag" | "export", e: Event) {
     e.stopPropagation();
     this.openMenu = this.openMenu === menu ? null : menu;
   }
@@ -224,9 +224,15 @@ export class BulkActionBarElement extends LitElement {
         <span class="bulk-grip" title="Drag to move" @mousedown=${(e: MouseEvent) => this.startDrag(e)}>⠿</span>
         <span class="bulk-count">${this.busy ? "Working…" : `${n} selected`}</span>
         <div class="bulk-actions">
-          <button class="bulk-btn" title="Re-transcribe selected" .disabled=${this.busy} @click=${this.handleRetranscribe}>↺ Re-transcribe</button>
-          <button class="bulk-btn" title="Re-run LLM cleanup on selected" .disabled=${this.busy} @click=${this.handleCleanup}>✨ Cleanup</button>
-          <button class="bulk-btn" title="Regenerate summaries for selected" .disabled=${this.busy} @click=${this.handleSummarize}>📝 Summarize</button>
+          <span class="bulk-menu-wrap">
+            <button class="bulk-btn" title="Re-run a step on the selected recordings" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("rerun", e)}>↻ Re-run ▾</button>
+            ${this.openMenu === "rerun" ? html`
+              <div class="bulk-menu" @click=${(e: Event) => e.stopPropagation()}>
+                <button class="bulk-menu-item" @click=${this.handleRetranscribe}>↺ Re-transcribe (everything)</button>
+                <button class="bulk-menu-item" @click=${this.handleCleanup}>✨ Re-run cleanup</button>
+                <button class="bulk-menu-item" @click=${this.handleSummarize}>📝 Re-summarize</button>
+              </div>` : null}
+          </span>
 
           <span class="bulk-menu-wrap">
             <button class="bulk-btn" title="Add a tag to selected" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("tag", e)}>🏷 Tag ▾</button>
