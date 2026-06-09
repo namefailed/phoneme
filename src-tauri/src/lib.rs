@@ -284,6 +284,7 @@ pub fn run() {
             commands::wizard_run_installer,
             commands::reveal_file,
             commands::open_file,
+            commands::open_hooks_folder,
             commands::read_file_string,
         ]);
 

@@ -83,9 +83,9 @@ export class DoctorViewElement extends LitElement {
           break;
         }
         case "open_hooks_folder": {
-          await invoke("open_file", {
-            path: "%LOCALAPPDATA%\\phoneme\\hooks-templates",
-          }).catch(() => invoke("open_file", { path: "%APPDATA%\\phoneme\\hooks" }));
+          // Resolves the real per-user hooks dir daemon-side and opens it.
+          // (The old env-var string path was never expanded, so it failed.)
+          await invoke("open_hooks_folder").catch(() => {});
           break;
         }
       }

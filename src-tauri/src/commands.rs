@@ -1339,3 +1339,27 @@ pub fn open_file(path: String) -> Result<(), CommandError> {
     }
     Ok(())
 }
+
+/// Open the user's hooks directory in the file manager, creating it if missing.
+///
+/// The Doctor "Fix" button previously passed literal `%LOCALAPPDATA%`/`%APPDATA%`
+/// strings to `open_file`, which does no env-var expansion — so the path never
+/// existed and nothing opened. Resolve the real directory here instead: it lives
+/// under the per-user config dir (`config_dir()/hooks`), matching where the
+/// daemon's first-run copy writes the reference hooks.
+#[tauri::command]
+pub fn open_hooks_folder() -> Result<(), CommandError> {
+    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| CommandError::from("could not resolve project directories"))?;
+    let hooks_dir = dirs.config_dir().join("hooks");
+    std::fs::create_dir_all(&hooks_dir)
+        .map_err(|e| CommandError::from(format!("failed to create hooks dir: {e}")))?;
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&hooks_dir)
+            .spawn()
+            .map_err(|e| CommandError::from(format!("failed to open hooks folder: {e}")))?;
+    }
+    Ok(())
+}
