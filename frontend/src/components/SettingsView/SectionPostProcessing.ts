@@ -1,4 +1,18 @@
 import { renderField, bindFieldEvents } from "./form";
+import {
+  LOCAL_LLM_PRESETS,
+  CLOUD_LLM_PRESETS,
+  findLlmPreset,
+  type LlmPreset,
+} from "../../services/llmProviders";
+
+/** Grouped <option> list (Local / Cloud) for a provider-preset dropdown. */
+function presetOptionsHtml(): string {
+  const opt = (p: LlmPreset) => `<option value="${p.id}">${p.label}${p.needsKey ? "" : ""}</option>`;
+  return `
+    <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(opt).join("")}</optgroup>
+    <optgroup label="Cloud (API key)">${CLOUD_LLM_PRESETS.map(opt).join("")}</optgroup>`;
+}
 
 export class SectionPostProcessing {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -172,19 +186,12 @@ export class SectionPostProcessing {
           <label>Quick preset</label>
           <div>
             <select id="llm-preset-select" style="max-width: 400px;">
-              <option value="">— Pick a provider preset —</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="mistral">Mistral</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="together">Together</option>
-              <option value="xai">xAI / Grok</option>
-              <option value="cerebras">Cerebras</option>
-              <option value="lmstudio">LM Studio (local)</option>
+              <option value="">— Pick a provider —</option>
+              ${presetOptionsHtml()}
             </select>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
-            Sets provider to <b>OpenAI-Compatible Endpoint</b> and fills in the API URL and a default model. Add your own API key below.
+            One click sets the provider, endpoint, and a default model. Just add your API key (cloud only).
           </span>
         </div>
 
@@ -376,19 +383,12 @@ export class SectionPostProcessing {
           <label>Quick preset</label>
           <div>
             <select id="summary-provider-preset" style="max-width: 400px;">
-              <option value="">— Pick an OpenAI-compatible provider —</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="mistral">Mistral</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="together">Together</option>
-              <option value="xai">xAI / Grok</option>
-              <option value="cerebras">Cerebras</option>
-              <option value="lmstudio">LM Studio (local)</option>
+              <option value="">— Pick a provider —</option>
+              ${presetOptionsHtml()}
             </select>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
-            Sets the summary provider to <b>OpenAI-Compatible</b> and fills the API URL + a default model.
+            One click sets the summary provider, endpoint, and a default model. Add your API key (cloud only).
           </span>
         </div>
 
@@ -529,9 +529,10 @@ export class SectionPostProcessing {
     // presets, but writes to the summary.* keys).
     const summaryProviderPreset = container.querySelector<HTMLSelectElement>("#summary-provider-preset");
     summaryProviderPreset?.addEventListener("change", () => {
-      const preset = LLM_PRESETS[summaryProviderPreset.value];
+      const preset = findLlmPreset(summaryProviderPreset.value);
       if (!preset || !summaryProviderSelect) return;
-      summaryProviderSelect.value = "openai";
+      // Apply the preset's protocol kind, endpoint, and default model.
+      summaryProviderSelect.value = preset.kind;
       summaryProviderSelect.dispatchEvent(new Event("change", { bubbles: true }));
       const urlInput = container.querySelector<HTMLInputElement>(".summary-needs-url [data-key='summary.api_url']");
       const modelInput = container.querySelector<HTMLInputElement>("[data-key='summary.model']");
@@ -540,7 +541,7 @@ export class SectionPostProcessing {
         urlInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
       if (modelInput) {
-        modelInput.value = preset.model;
+        modelInput.value = preset.defaultModel;
         modelInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
       summaryProviderPreset.value = "";
@@ -576,40 +577,31 @@ export class SectionPostProcessing {
       updateProviderVisibility(); // Initial run
     }
 
-    // Provider presets — map a named entry onto the OpenAI-compatible provider
-    // and prefill the endpoint + a default model. Frontend-only: the backend
-    // already speaks OpenAI-compatible /v1/chat/completions.
-    const LLM_PRESETS: Record<string, { apiUrl: string; model: string }> = {
-      gemini: { apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-flash-latest" },
-      mistral: { apiUrl: "https://api.mistral.ai/v1/chat/completions", model: "mistral-small-latest" },
-      deepseek: { apiUrl: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" },
-      openrouter: { apiUrl: "https://openrouter.ai/api/v1/chat/completions", model: "meta-llama/llama-3.3-70b-instruct:free" },
-      together: { apiUrl: "https://api.together.xyz/v1/chat/completions", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
-      xai: { apiUrl: "https://api.x.ai/v1/chat/completions", model: "grok-2-latest" },
-      cerebras: { apiUrl: "https://api.cerebras.ai/v1/chat/completions", model: "llama-3.3-70b" },
-      lmstudio: { apiUrl: "http://localhost:1234/v1/chat/completions", model: "" },
-    };
+    // Provider presets — one click applies a named provider from the shared
+    // catalog: its protocol kind, endpoint, and a default model. The user only
+    // needs to add an API key (cloud) or have the local server running.
     const llmPresetSelect = container.querySelector<HTMLSelectElement>("#llm-preset-select");
     llmPresetSelect?.addEventListener("change", () => {
-      const preset = LLM_PRESETS[llmPresetSelect.value];
+      const preset = findLlmPreset(llmPresetSelect.value);
       if (!preset || !providerSelect) return;
-      providerSelect.value = "openai";
+      // Write the config directly so the model survives the panel's async model
+      // fetch (which repopulates the per-provider <select> on provider change).
+      config.llm_post_process.provider = preset.kind;
+      config.llm_post_process.api_url = preset.apiUrl;
+      config.llm_post_process.model = preset.defaultModel;
+      providerSelect.value = preset.kind;
       providerSelect.dispatchEvent(new Event("change", { bubbles: true }));
-      // The api_url + model inputs live inside the now-visible openai panel.
+      // Reflect the endpoint in the now-visible panel's URL input.
       const urlInput = container.querySelector<HTMLInputElement>(
-        ".provider-settings[data-provider='openai'] [data-key='llm_post_process.api_url']",
-      );
-      const modelInput = container.querySelector<HTMLInputElement>(
-        ".provider-settings[data-provider='openai'] [data-key='llm_post_process.model']",
+        `.provider-settings[data-provider='${preset.kind}'] [data-key='llm_post_process.api_url']`,
       );
       if (urlInput) {
         urlInput.value = preset.apiUrl;
         urlInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      if (modelInput) {
-        modelInput.value = preset.model;
-        modelInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+      // Re-render the model <select> so the preset's default model shows even
+      // before a live fetch returns.
+      updateProviderSelect(preset.kind);
       llmPresetSelect.value = ""; // reset to placeholder after applying
     });
 
