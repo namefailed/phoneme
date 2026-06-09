@@ -328,7 +328,7 @@ export class HeaderBarElement extends LitElement {
     const actionLabel = this.isMeeting ? "⏹ End Meeting"
                       : this.isRecording ? "⏹ Stop"
                       : this.recordMode === "meeting" ? "👥 Meeting"
-                      : "🎙️ Record";
+                      : "🔴 Record";
     const actionTitle = this.recordMode === "meeting"
       ? "Meeting Mode: record your mic and the system audio as two linked tracks"
       : "Start/Stop a single recording (or use your global hotkey)";
@@ -343,7 +343,7 @@ export class HeaderBarElement extends LitElement {
           title=${f.sort_desc === false ? "Sort: oldest first — click for newest first" : "Sort: newest first — click for oldest first"}>
           ${f.sort_desc === false ? "↑ Oldest" : "↓ Newest"}
         </button>
-        <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:1; max-width:300px;">
+        <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:2 1 360px; min-width:240px; max-width:620px;">
           <input type="search" class="search" style="flex:1;" placeholder="Search transcripts…" 
             .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />
           <button class="icon-btn ${f.semantic ? 'active' : ''}" 

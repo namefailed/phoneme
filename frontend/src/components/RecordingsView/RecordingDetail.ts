@@ -137,9 +137,9 @@ export class RecordingDetail {
         <div id="tags"></div>
         <div class="transcript-block">
           <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
-          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto;">
+          <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
+          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; align-items: flex-end;">
             <button class="inline-button" id="view-original">View original transcript</button>
-            <div id="original-box" style="display: none; margin-top: 6px;"></div>
           </div>
         </div>
         <div class="notes-block" style="margin-top: 6px;">
@@ -178,35 +178,43 @@ export class RecordingDetail {
       });
     }
 
-    // Transcript history: lazily fetch the preserved original on demand and
-    // offer a one-click restore.
+    // Transcript history: "peek" the preserved original by temporarily
+    // hijacking the transcript box — hide the editor and show the read-only
+    // original in the same slot — rather than opening a separate panel. Toggling
+    // back restores the editor. A "Restore this version" action is offered while
+    // peeking.
     const viewOriginalBtn = this.container.querySelector<HTMLButtonElement>("#view-original");
+    const editorEl = this.container.querySelector<HTMLElement>("#editor");
+    const peekEl = this.container.querySelector<HTMLElement>("#original-peek");
+    let peeking = false;
     viewOriginalBtn?.addEventListener("click", async () => {
-      const box = this.container.querySelector<HTMLElement>("#original-box")!;
-      if (box.style.display !== "none") {
-        box.style.display = "none";
-        if (viewOriginalBtn) viewOriginalBtn.textContent = "View original transcript";
+      if (!editorEl || !peekEl) return;
+      if (peeking) {
+        peekEl.style.display = "none";
+        editorEl.style.display = "flex";
+        viewOriginalBtn.textContent = "View original transcript";
+        peeking = false;
         return;
       }
       const original = await getOriginalTranscript(r.id);
-      box.style.display = "block";
-      if (viewOriginalBtn) viewOriginalBtn.textContent = "Hide original transcript";
       if (original == null) {
-        box.innerHTML = `<div style="font-size: 11px; color: var(--fg-muted);">No earlier version saved for this recording.</div>`;
+        showToast("No earlier version was saved for this recording.", "info");
         return;
       }
-      box.innerHTML = `
-        <div style="border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px;">
-          <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 4px;">Original (machine) transcript</div>
-          <div style="white-space: pre-wrap;">${escapeHtml(original)}</div>
-          <button class="inline-button" id="restore-original" style="margin-top: 6px;">Restore this version</button>
-        </div>`;
-      box.querySelector("#restore-original")?.addEventListener("click", async () => {
+      peekEl.innerHTML = `
+        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">Original (machine) transcript — read-only</div>
+        <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(original)}</div>
+        <button class="inline-button" id="restore-original" style="margin-top: 10px;">Restore this version</button>`;
+      peekEl.querySelector("#restore-original")?.addEventListener("click", async () => {
         await updateTranscript(r.id, original);
         showToast("Transcript restored to the original.", "success");
         this.onRefresh();
         void this.show(r.id);
       });
+      editorEl.style.display = "none";
+      peekEl.style.display = "block";
+      viewOriginalBtn.textContent = "Back to current transcript";
+      peeking = true;
     });
 
     // Notes: CodeMirror editor (respects editor.vim_mode like the transcript
