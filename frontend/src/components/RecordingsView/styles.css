@@ -1043,11 +1043,18 @@ ph-sidebar {
 }
 .sidebar-header:hover { color: var(--accent); }
 .sidebar-chevron {
-  font-size: 10px;
   color: var(--fg-faded);
-  transition: transform 0.15s ease;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, color 0.15s ease;
 }
-.sidebar-chevron.open { transform: rotate(90deg); }
+.sidebar-chevron svg { display: block; }
+.sidebar-chevron.open { transform: rotate(90deg); color: var(--accent); }
+.sidebar-header:hover .sidebar-chevron { color: var(--accent); }
 .sidebar-list {
   display: flex;
   flex-direction: column;

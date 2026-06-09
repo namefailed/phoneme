@@ -96,7 +96,7 @@ export class SidebarElement extends LitElement {
       <div class="rv-sidebar">
         <div class="rv-sidebar-scroll">
           <div class="sidebar-header" @click=${() => this.toggleSection("library")} title="Collapse / expand">
-            <span class="sidebar-chevron ${this.libraryOpen ? "open" : ""}">▸</span>Library
+            <span class="sidebar-chevron ${this.libraryOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Library
           </div>
           ${this.libraryOpen ? html`
             <div class="sidebar-list">
@@ -108,7 +108,7 @@ export class SidebarElement extends LitElement {
 
           <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
             @click=${() => this.toggleSection("tags")} title="Collapse / expand">
-            <span class="sidebar-chevron ${this.tagsOpen ? "open" : ""}">▸</span>Tags
+            <span class="sidebar-chevron ${this.tagsOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Tags
           </div>
           ${this.tagsOpen ? html`
             <div class="sidebar-list">
