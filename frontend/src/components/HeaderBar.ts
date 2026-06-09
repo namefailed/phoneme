@@ -89,7 +89,10 @@ export class HeaderBarElement extends LitElement {
             clearTimeout(this.previewDebounceTimer);
           }
           this.previewDebounceTimer = window.setTimeout(() => {
-            this.previewText = typeof p.text === "string" && p.text.trim() ? p.text.trim() : null;
+            const t = typeof p.text === "string" ? p.text.trim() : "";
+            // Keep only a trailing window — the preview is a one-line ticker that
+            // scrolls to show the newest words, so older text is cycled out.
+            this.previewText = t ? t.slice(-600) : null;
             this.previewDebounceTimer = null;
           }, 100);
         }
@@ -146,6 +149,15 @@ export class HeaderBarElement extends LitElement {
     if (this.previewDebounceTimer !== null) {
       clearTimeout(this.previewDebounceTimer);
       this.previewDebounceTimer = null;
+    }
+  }
+
+  protected updated() {
+    // Keep the single-line live preview scrolled to its end so the newest words
+    // are always visible while older text scrolls off the left.
+    if (this.previewText) {
+      const el = this.renderRoot.querySelector<HTMLElement>(".hb-preview-text");
+      if (el) el.scrollLeft = el.scrollWidth;
     }
   }
 
