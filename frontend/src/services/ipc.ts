@@ -322,6 +322,23 @@ export async function tagsFor(recordingId: string): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("tags_for", { recordingId });
 }
 
+/**
+ * Map of tag id → number of recordings it's attached to. Tags with no
+ * attachments are absent from the map (treat as 0). Powers the Tag Manager's
+ * usage counts. Keys arrive as strings (JSON object keys).
+ */
+export async function tagUsageCounts(): Promise<Record<string, number>> {
+  return await tauriInvoke<Record<string, number>>("tag_usage_counts");
+}
+
+/**
+ * Merge one tag into another: every recording tagged `fromId` is re-tagged
+ * `intoId` (de-duplicated), then `fromId` is deleted. A no-op if equal.
+ */
+export async function mergeTags(fromId: number, intoId: number): Promise<void> {
+  await tauriInvoke("merge_tags", { fromId, intoId });
+}
+
 // ── Config profiles ─────────────────────────────────────────────────────────
 
 /** List the names of all saved config profiles. */

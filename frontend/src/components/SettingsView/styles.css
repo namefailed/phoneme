@@ -540,3 +540,116 @@ select[data-key="daemon.log_level"] {
 .tag-mgr-add-row button.primary:hover {
   opacity: 0.85;
 }
+
+/* ── Tag Manager — power features (stats / toolbar / merge) ───────────────── */
+
+.tag-mgr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 24px;
+}
+
+/* Stats summary bar (full Settings view only). */
+.tag-mgr-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-bottom: 14px;
+}
+.tag-mgr-stats-num {
+  font-weight: 700;
+  color: var(--fg-default);
+}
+.tag-mgr-stats-dot { color: var(--fg-faded); }
+.tag-mgr-stats-warn { color: var(--warn, #f9e2af); font-weight: 600; }
+.tag-mgr-bulk-delete {
+  margin-left: auto;
+  background: rgba(243, 139, 168, 0.08);
+  border: 1px solid rgba(243, 139, 168, 0.3);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--err);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tag-mgr-bulk-delete:hover {
+  background: rgba(243, 139, 168, 0.16);
+  border-color: var(--err);
+}
+
+/* Toolbar: search + sort + status filter. */
+.tag-mgr-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.tag-mgr-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 6px 12px;
+}
+.tag-mgr-search:focus-within { border-color: var(--accent); }
+.tag-mgr-search input {
+  background: none;
+  border: none;
+  outline: none;
+  width: 100%;
+  color: var(--fg-default);
+  font-size: 13px;
+}
+.tag-mgr-search input::placeholder { color: var(--fg-faded); }
+.tag-mgr-search-clear {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+.tag-mgr-search-clear:hover { color: var(--fg-default); }
+.tag-mgr-select {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--fg-default);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.tag-mgr-select:focus { outline: none; border-color: var(--accent); }
+.tag-mgr-select:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+
+/* Inline merge control row. */
+.tag-mgr-row.merging {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.tag-mgr-merge-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 240px;
+}
+.tag-mgr-row .tag-mgr-save {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tag-mgr-row .tag-mgr-save:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.tag-mgr-row .tag-mgr-save:disabled { opacity: 0.4; cursor: default; }

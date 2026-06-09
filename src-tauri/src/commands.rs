@@ -723,6 +723,20 @@ pub async fn delete_tag(bridge: Br<'_>, id: i64) -> Result<Value, CommandError> 
     forward(&bridge, Request::DeleteTag { id }).await
 }
 
+/// Map of tag id → number of recordings it's attached to. Powers the Tag
+/// Manager usage counts.
+#[tauri::command]
+pub async fn tag_usage_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::TagUsageCounts).await
+}
+
+/// Merge one tag into another: re-point all of `from_id`'s recordings onto
+/// `into_id`, then delete `from_id`.
+#[tauri::command]
+pub async fn merge_tags(bridge: Br<'_>, from_id: i64, into_id: i64) -> Result<Value, CommandError> {
+    forward(&bridge, Request::MergeTags { from_id, into_id }).await
+}
+
 #[derive(serde::Serialize, Clone)]
 struct DownloadProgress {
     downloaded: u64,

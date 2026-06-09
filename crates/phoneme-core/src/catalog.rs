@@ -675,6 +675,54 @@ impl Catalog {
         Ok(())
     }
 
+    /// Number of recordings each tag is attached to, keyed by tag id. Tags with
+    /// no attachments are simply absent from the map (treated as zero by callers).
+    /// Powers the Tag Manager usage counts.
+    pub async fn tag_usage_counts(&self) -> Result<std::collections::HashMap<i64, i64>> {
+        let rows = sqlx::query(
+            "SELECT tag_id, COUNT(*) AS cnt FROM recording_tags GROUP BY tag_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut map = std::collections::HashMap::with_capacity(rows.len());
+        for r in rows {
+            let id: i64 = r.try_get("tag_id")?;
+            let cnt: i64 = r.try_get("cnt")?;
+            map.insert(id, cnt);
+        }
+        Ok(map)
+    }
+
+    /// Merge `from_id` into `into_id`: every recording tagged `from_id` becomes
+    /// tagged `into_id` (de-duplicated), then `from_id` is deleted. A no-op when
+    /// the two ids are equal. Used by the Tag Manager's merge action.
+    pub async fn merge_tags(&self, from_id: i64, into_id: i64) -> Result<()> {
+        if from_id == into_id {
+            return Ok(());
+        }
+        let mut tx = self.pool.begin().await?;
+        // Re-point every link from the source tag onto the target, skipping rows
+        // that would collide with an existing (recording_id, into_id) pair.
+        sqlx::query(
+            "INSERT OR IGNORE INTO recording_tags (recording_id, tag_id) \
+             SELECT recording_id, ? FROM recording_tags WHERE tag_id = ?",
+        )
+        .bind(into_id)
+        .bind(from_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM recording_tags WHERE tag_id = ?")
+            .bind(from_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM tags WHERE id = ?")
+            .bind(from_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Apply the configured retention policy, removing eligible recordings from
     /// the catalog and returning their `audio_path` values so the caller can
     /// delete the files from disk.

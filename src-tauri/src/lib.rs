@@ -282,6 +282,8 @@ pub fn run() {
             commands::attach_tag,
             commands::detach_tag,
             commands::tags_for,
+            commands::tag_usage_counts,
+            commands::merge_tags,
             commands::wizard_download_model,
             commands::wizard_download_semantic_model,
             commands::wizard_download_diarization_model,

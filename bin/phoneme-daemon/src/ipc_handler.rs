@@ -858,6 +858,26 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::TagUsageCounts => match state.catalog.tag_usage_counts().await {
+            Ok(counts) => Response::Ok(serde_json::to_value(counts).unwrap_or_default()),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::MergeTags { from_id, into_id } => {
+            match state.catalog.merge_tags(from_id, into_id).await {
+                Ok(()) => {
+                    // The source tag is gone; consumers refresh on TagDeleted.
+                    state.events.emit(DaemonEvent::TagDeleted { id: from_id });
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::ReloadConfig => {
             tracing::info!("reloading config via IPC");
             match crate::load_config() {

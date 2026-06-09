@@ -223,6 +223,13 @@ pub enum Request {
     TagsFor {
         recording_id: RecordingId,
     },
+    /// Number of recordings attached to each tag, keyed by tag id.
+    TagUsageCounts,
+    /// Merge one tag into another: re-point all recordings, then delete `from_id`.
+    MergeTags {
+        from_id: i64,
+        into_id: i64,
+    },
 
     // Semantic Search
     SemanticSearch {
