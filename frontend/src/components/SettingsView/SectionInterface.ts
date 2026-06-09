@@ -89,8 +89,8 @@ export class SectionInterface {
               <span>${this.label(value)}</span>
             </label>
             <span class="col-move">
-              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
-              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}>▼</button>
+              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg></button>
+              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             </span>
           </div>`)
       .join("");
@@ -186,7 +186,7 @@ export class SectionInterface {
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
             <div id="col-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
             <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-              Check a column to show it; use ▲▼ to reorder. Columns appear left-to-right in this order.
+              Check a column to show it; use the up/down chevrons to reorder. Columns appear left-to-right in this order.
             </span>
           </div>
         </div>

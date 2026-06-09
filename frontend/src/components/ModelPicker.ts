@@ -253,7 +253,7 @@ export class ModelPickerElement extends LitElement {
         <div style="display:flex; gap:8px;">
           <input id="mp-llm-model" class="mp-input" type="text" .value=${cur} placeholder="Model id"
             @input=${(e: Event) => this.llmModel = (e.target as HTMLInputElement).value} />
-          <button class="modal-btn" @click=${() => { this.llmModelOther = false; }}>▾ List</button>
+          <button class="modal-btn" @click=${() => { this.llmModelOther = false; }}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg> List</button>
         </div>`;
     }
     return html`
@@ -285,7 +285,7 @@ export class ModelPickerElement extends LitElement {
         <div style="display:flex; gap:8px;">
           <input id="mp-stt-model" class="mp-input" type="text" .value=${cur} placeholder="Leave blank for provider default"
             @input=${(e: Event) => this.sttModel = (e.target as HTMLInputElement).value} />
-          ${list.length ? html`<button class="modal-btn" @click=${() => { this.sttModelOther = false; }}>▾ List</button>` : ""}
+          ${list.length ? html`<button class="modal-btn" @click=${() => { this.sttModelOther = false; }}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg> List</button>` : ""}
         </div>`;
     }
     const known = new Set(list);

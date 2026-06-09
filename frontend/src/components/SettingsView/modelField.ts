@@ -48,7 +48,7 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
       host.innerHTML = `
         <div style="display:flex; gap:8px; align-items:center;">
           <input type="text" class="mf-text" style="${inputStyle}" value="${(current || "").replace(/"/g, "&quot;")}" placeholder="Model id" />
-          <button type="button" class="inline-button mf-list" style="padding:6px 10px;" title="Back to the model list">▾ List</button>
+          <button type="button" class="inline-button mf-list" style="padding:6px 10px;" title="Back to the model list"><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg> List</button>
         </div>`;
       const input = host.querySelector<HTMLInputElement>(".mf-text")!;
       input.addEventListener("input", () => opts.setModel(input.value));
