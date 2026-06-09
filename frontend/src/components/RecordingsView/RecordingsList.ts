@@ -627,7 +627,7 @@ export class RecordingsListElement extends LitElement {
       summary_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.summary_model || ""}</span>`,
       user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
-      source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span>${sourceLabel}</span>`,
+      source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span><span class="rec-source-label">${sourceLabel}</span></span>`,
       transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 

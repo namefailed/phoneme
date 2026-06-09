@@ -204,7 +204,11 @@ export class RecordingsView {
     if (resizer) resizer.style.display = "";
 
     if (this.detailVisible) {
-      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} ${this.splitPercent}% 3px minmax(0, 1fr)`;
+      // The detail (right) pane is the percentage track and the list is the
+      // flexible 1fr track, so collapsing the sidebar grows the LIST and leaves
+      // the detail pane's width unchanged (detail% is of the constant shell
+      // width). The splitter drag is delta-based, so this stays consistent.
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} minmax(0, 1fr) 3px ${100 - this.splitPercent}%`;
     } else {
       shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} 1fr 0 0`;
     }

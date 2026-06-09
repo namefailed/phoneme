@@ -33,6 +33,8 @@ export class TagChipsElement extends LitElement {
   @state() private _showDropdown = false;
   /** Current text in the "+ add tag" box, used to fuzzy-filter the dropdown. */
   @state() private tagQuery = "";
+  /** Highlighted dropdown item for keyboard nav; -1 = none (type-to-create). */
+  @state() private activeIndex = -1;
   /** id of the tag whose inline name/color editor is open, or null. */
   @state() private editingTagId: number | null = null;
   @state() private editName = "";
@@ -133,8 +135,52 @@ export class TagChipsElement extends LitElement {
     }
   }
 
+  /** Tags not yet attached, fuzzy-filtered by the current query. Shared by the
+   *  render and the keyboard handler so arrow-nav matches what's on screen. */
+  private filteredTags(): Tag[] {
+    const attachedIds = new Set(this.attached.map((a) => a.id));
+    return fuzzyFilter(
+      this.tagQuery,
+      this.allTags.filter((t) => !attachedIds.has(t.id)),
+      (t) => t.name,
+    );
+  }
+
+  private scrollActiveIntoView() {
+    void this.updateComplete.then(() => {
+      const el = this.renderRoot.querySelector<HTMLElement>(`.tag-dropdown-item[data-index="${this.activeIndex}"]`);
+      el?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
   private onInputKeydown(e: KeyboardEvent) {
+    const tags = this.filteredTags();
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      this._showDropdown = true;
+      if (tags.length) this.activeIndex = Math.min(this.activeIndex + 1, tags.length - 1);
+      this.scrollActiveIntoView();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (tags.length) this.activeIndex = Math.max(this.activeIndex - 1, 0);
+      this.scrollActiveIntoView();
+      return;
+    }
+    if (e.key === "Escape") {
+      if (this._showDropdown) { e.preventDefault(); e.stopPropagation(); this._showDropdown = false; this.activeIndex = -1; }
+      return;
+    }
     if (e.key === "Enter") {
+      e.preventDefault();
+      // A highlighted suggestion wins; otherwise create/attach the typed name.
+      if (this._showDropdown && this.activeIndex >= 0 && this.activeIndex < tags.length) {
+        void this.attachByName(tags[this.activeIndex].name);
+        this._showDropdown = false;
+        this.activeIndex = -1;
+        return;
+      }
       const input = e.target as HTMLInputElement;
       const name = input.value.trim();
       if (name) void this.attachByName(name);
@@ -149,12 +195,7 @@ export class TagChipsElement extends LitElement {
   }
 
   render() {
-    const attachedIds = new Set(this.attached.map((a) => a.id));
-    const availableTags = fuzzyFilter(
-      this.tagQuery,
-      this.allTags.filter((t) => !attachedIds.has(t.id)),
-      (t) => t.name,
-    );
+    const availableTags = this.filteredTags();
     const showDropdown = this._showDropdown && availableTags.length > 0;
     
     return html`
@@ -205,16 +246,22 @@ export class TagChipsElement extends LitElement {
             class="tag-add"
             placeholder="+ add tag"
             .value=${this.tagQuery}
-            @focus=${() => this._showDropdown = true}
-            @blur=${() => setTimeout(() => this._showDropdown = false, 150)}
-            @input=${(e: Event) => this.tagQuery = (e.target as HTMLInputElement).value}
+            role="combobox"
+            aria-expanded=${showDropdown ? "true" : "false"}
+            aria-controls="tag-dropdown-list"
+            @focus=${() => { this._showDropdown = true; this.activeIndex = -1; }}
+            @blur=${() => setTimeout(() => { this._showDropdown = false; this.activeIndex = -1; }, 150)}
+            @input=${(e: Event) => { this.tagQuery = (e.target as HTMLInputElement).value; this.activeIndex = -1; }}
             @keydown=${this.onInputKeydown}
           />
           ${showDropdown ? html`
-            <div class="tag-dropdown">
-              ${availableTags.map((t) => {
+            <div class="tag-dropdown" id="tag-dropdown-list" role="listbox">
+              ${availableTags.map((t, i) => {
                 return html`
-                  <div class="tag-dropdown-item" @mousedown=${(e: Event) => { e.preventDefault(); this.attachByName(t.name); this._showDropdown = false; }}>
+                  <div class="tag-dropdown-item ${i === this.activeIndex ? 'active' : ''}" data-index=${i}
+                    role="option" aria-selected=${i === this.activeIndex ? "true" : "false"}
+                    @mouseenter=${() => this.activeIndex = i}
+                    @mousedown=${(e: Event) => { e.preventDefault(); this.attachByName(t.name); this._showDropdown = false; }}>
                     <span class="tag-dropdown-dot" style="background: ${t.color || 'var(--accent)'}"></span>
                     ${t.name}
                   </div>
