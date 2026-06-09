@@ -91,6 +91,6 @@ update this file in the same PR.
   the whisper-server zip and model files. *(S-H7.)*
 - **Redact hook test stderr** — `HookTest` output may echo secrets from the
   command's environment; redact before returning to the UI.
-- **`cargo audit` + `pnpm audit` in CI** — dependency-vulnerability gate.
+- ~~**`cargo audit` + `pnpm audit` in CI** — dependency-vulnerability gate.~~ *Done — non-blocking advisory job added in PR #66.*
 
 See [ROADMAP.md](../../ROADMAP.md) → *Security & privacy hardening* for status.
