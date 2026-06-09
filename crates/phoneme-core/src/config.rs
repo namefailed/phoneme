@@ -800,7 +800,11 @@ impl Default for Config {
             },
             hook: HookConfig {
                 commands: vec![
-                    "powershell -File ~/AppData/Roaming/phoneme/hooks/to-stdout.ps1".into(),
+                    // Safe, inert default: echo the transcript to stdout (captured
+                    // to hook.log). `-NoProfile` avoids loading the user's profile
+                    // and `-ExecutionPolicy Bypass` lets the bundled, unsigned
+                    // script run regardless of the machine's execution policy.
+                    "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1".into(),
                 ],
                 timeout_secs: 30,
                 webhook_url: None,
