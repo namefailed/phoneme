@@ -73,7 +73,7 @@ export class QueuePanelElement extends LitElement {
     const active = items.filter((i) => i.state === "processing").length;
     const pending = items.length - active;
     return html`
-      <div class="queue-panel">
+      <div class="queue-panel ${this.collapsed ? "collapsed" : "expanded"}">
         <div class="queue-header" @click=${() => this.toggle()} title="Transcription pipeline queue">
           <span class="queue-chevron ${this.collapsed ? "" : "open"}">▸</span>
           <span class="queue-title">Queue</span>

@@ -749,20 +749,21 @@ ph-sidebar {
 
 /* ── Pipeline queue panel (bottom of sidebar) ──────────────────────────────── */
 .queue-panel {
-  flex: 0 0 auto;
   border-top: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
   display: flex;
   /* column-reverse keeps the "QUEUE" header pinned at the very bottom of the
      sidebar; the list (DOM order: header then list) renders ABOVE it, so the
-     panel grows upward when expanded instead of off the bottom edge. */
+     panel grows upward instead of off the bottom edge. */
   flex-direction: column-reverse;
-  max-height: 50%;
 }
-/* When expanded, separate the list (above) from the pinned header (below). */
-.queue-panel .queue-list {
-  border-bottom: 1px solid var(--border-subtle);
-}
+/* Collapsed: just the header pinned at the bottom. Expanded: grow to fill the
+   sidebar's free space (the list scrolls), so it reads as a real panel rather
+   than a thin strip with a gap above it. */
+.queue-panel.collapsed { flex: 0 0 auto; }
+.queue-panel.expanded { flex: 1 1 auto; min-height: 0; max-height: 70%; }
+/* Separator between the list (above) and the pinned header (below). */
+.queue-panel.expanded .queue-header { border-top: 1px solid var(--border-subtle); }
 .queue-header {
   display: flex;
   align-items: center;
@@ -793,12 +794,18 @@ ph-sidebar {
 }
 .queue-count.idle { background: transparent; color: var(--fg-faded); font-weight: 500; }
 .queue-list {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 2px 8px 8px;
+  padding: 6px 8px 8px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  /* Items hug the bottom (just above the pinned header) and grow upward, so a
+     short queue doesn't leave an awkward gap between the items and the header. */
+  justify-content: flex-end;
+  gap: 4px;
 }
+.queue-empty { margin-top: auto; }
 .queue-empty {
   font-size: 11px;
   color: var(--fg-faded);
