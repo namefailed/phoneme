@@ -63,9 +63,25 @@ export class SettingsViewElement extends LitElement {
     window.removeEventListener("config:saved", this.onConfigSaved);
   }
 
+  private searchDebounce?: ReturnType<typeof setTimeout>;
+
   protected updated(changedProperties: Map<string, any>) {
-    if (changedProperties.has('activeTab') || changedProperties.has('config') || changedProperties.has('searchQuery')) {
+    const prevQuery: string = changedProperties.get('searchQuery') ?? "";
+    const wasSearching = prevQuery.trim().length > 0;
+    const isSearching = this.searchQuery.trim().length > 0;
+
+    // Full (re)mount only when the tab or config changes, or when we ENTER/EXIT
+    // search mode. While already searching, a query change just re-filters the
+    // already-mounted sections in place — no teardown/rebuild — so typing is
+    // instant and doesn't flash between the previous tab and the results.
+    if (
+      changedProperties.has('activeTab') ||
+      changedProperties.has('config') ||
+      (changedProperties.has('searchQuery') && wasSearching !== isSearching)
+    ) {
       this.mountSection();
+    } else if (changedProperties.has('searchQuery') && isSearching) {
+      this.applySearchFilter();
     }
   }
 
@@ -137,27 +153,15 @@ export class SettingsViewElement extends LitElement {
     };
 
     if (isSearching) {
+      // Results count header above the (once-mounted) sections.
+      const header = document.createElement("div");
+      header.id = "settings-search-header";
+      header.style.cssText = "padding: 2px 2px 14px; font-size: 12px; color: var(--fg-muted); font-style: italic;";
+      sectionHost.appendChild(header);
+      // Mount every section ONCE; later keystrokes only re-filter in place
+      // (see updated()), so typing stays instant and flicker-free.
       mountAll();
-      const query = this.searchQuery.toLowerCase();
-      const sections = sectionHost.querySelectorAll('.settings-section');
-      sections.forEach(sec => {
-        let sectionHasMatch = false;
-        const fields = sec.querySelectorAll('.settings-field');
-        fields.forEach(field => {
-          if (field.textContent?.toLowerCase().includes(query)) {
-            (field as HTMLElement).style.display = "";
-            sectionHasMatch = true;
-          } else {
-            (field as HTMLElement).style.display = "none";
-          }
-        });
-        const title = sec.querySelector('h3');
-        if (title?.textContent?.toLowerCase().includes(query)) {
-          sectionHasMatch = true;
-          fields.forEach(f => (f as HTMLElement).style.display = "");
-        }
-        (sec as HTMLElement).style.display = sectionHasMatch ? "" : "none";
-      });
+      this.applySearchFilter();
     } else {
       switch (this.activeTab) {
         case "transcription":
@@ -192,6 +196,42 @@ export class SettingsViewElement extends LitElement {
     }
   }
 
+  /**
+   * Filter the already-mounted search results in place (show/hide fields and
+   * their sections) and update the results-count header. Called on every
+   * (debounced) keystroke while in search mode — no teardown/remount, so it's
+   * instant and flicker-free.
+   */
+  private applySearchFilter() {
+    if (!this.bodyEl) return;
+    const query = this.searchQuery.trim().toLowerCase();
+    const sections = this.bodyEl.querySelectorAll<HTMLElement>(".settings-section");
+    let visibleSections = 0;
+    let visibleFields = 0;
+    sections.forEach((sec) => {
+      const titleMatch = sec.querySelector("h3")?.textContent?.toLowerCase().includes(query) ?? false;
+      const fields = sec.querySelectorAll<HTMLElement>(".settings-field");
+      let sectionHasMatch = false;
+      fields.forEach((field) => {
+        const show = titleMatch || (field.textContent?.toLowerCase().includes(query) ?? false);
+        field.style.display = show ? "" : "none";
+        if (show) {
+          sectionHasMatch = true;
+          visibleFields++;
+        }
+      });
+      sec.style.display = sectionHasMatch ? "" : "none";
+      if (sectionHasMatch) visibleSections++;
+    });
+    const header = this.bodyEl.querySelector<HTMLElement>("#settings-search-header");
+    if (header) {
+      header.textContent =
+        visibleFields === 0
+          ? `No settings match “${this.searchQuery}”.`
+          : `${visibleFields} setting${visibleFields === 1 ? "" : "s"} across ${visibleSections} section${visibleSections === 1 ? "" : "s"} match “${this.searchQuery}”.`;
+    }
+  }
+
   private switchTab(tab: string) {
     if (this.activeTab !== tab) {
       this.activeTab = tab;
@@ -202,7 +242,13 @@ export class SettingsViewElement extends LitElement {
   }
 
   private handleSearch(e: Event) {
-    this.searchQuery = (e.target as HTMLInputElement).value;
+    const value = (e.target as HTMLInputElement).value;
+    // Debounce so each keystroke doesn't trigger a reactive update; ~140ms
+    // keeps typing snappy while collapsing rapid input into one filter pass.
+    if (this.searchDebounce) clearTimeout(this.searchDebounce);
+    this.searchDebounce = setTimeout(() => {
+      this.searchQuery = value;
+    }, 140);
   }
 
   render() {
