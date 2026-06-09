@@ -20,6 +20,7 @@ export class QueuePanelElement extends LitElement {
   @state() private items: QueueEntry[] = [];
   @state() private collapsed = false;
   private unsub: (() => void) | null = null;
+  private pollTimer: number | null = null;
 
   async connectedCallback() {
     super.connectedCallback();
@@ -39,11 +40,15 @@ export class QueuePanelElement extends LitElement {
         void this.load();
       }
     });
+    // Belt-and-suspenders: a light poll so the queue stays fresh even if an
+    // event is missed (rapid enqueues, claim races, etc.). Cheap local IPC.
+    this.pollTimer = window.setInterval(() => void this.load(), 3000);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this.unsub) this.unsub();
+    if (this.pollTimer !== null) clearInterval(this.pollTimer);
   }
 
   private async load() {

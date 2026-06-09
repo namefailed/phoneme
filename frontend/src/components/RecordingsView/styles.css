@@ -968,7 +968,20 @@ ph-sidebar {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 1px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.12s ease;
 }
+.sidebar-header:hover { color: var(--accent); }
+.sidebar-chevron {
+  font-size: 10px;
+  color: var(--fg-faded);
+  transition: transform 0.15s ease;
+}
+.sidebar-chevron.open { transform: rotate(90deg); }
 .sidebar-list {
   display: flex;
   flex-direction: column;

@@ -27,6 +27,7 @@ export class HeaderBarElement extends LitElement {
   @state() private recordMode: "recording" | "meeting" =
     (localStorage.getItem("phoneme.recordMode") as "recording" | "meeting") || "recording";
   @state() private modeMenuOpen = false;
+  @state() private settingsMenuOpen = false;
   @state() private previewText: string | null = null;
   @state() private filterState: UiFilter = filterStore.get();
   private previewDebounceTimer: number | null = null;
@@ -38,12 +39,10 @@ export class HeaderBarElement extends LitElement {
   constructor() {
     super();
     this.docClickHandler = (e: MouseEvent) => {
-      if (!this.modeMenuOpen) return;
       const path = e.composedPath();
-      const isInsideMenu = path.some(node => (node as Element)?.classList?.contains('hb-rec-group'));
-      if (!isInsideMenu) {
-        this.modeMenuOpen = false;
-      }
+      const inside = (cls: string) => path.some(node => (node as Element)?.classList?.contains(cls));
+      if (this.modeMenuOpen && !inside('hb-rec-group')) this.modeMenuOpen = false;
+      if (this.settingsMenuOpen && !inside('hb-settings-group')) this.settingsMenuOpen = false;
     };
   }
 
@@ -286,15 +285,32 @@ export class HeaderBarElement extends LitElement {
     filterStore.set({ ...this.filterState, sort_desc: newDesc });
   }
 
-  private async openModels(e: Event) {
-    const target = e.currentTarget as HTMLElement;
+  private toggleSettingsMenu(e: Event) {
+    e.stopPropagation();
+    this.settingsMenuOpen = !this.settingsMenuOpen;
+  }
+
+  private async openModels() {
+    this.settingsMenuOpen = false;
     const { openModelPicker } = await import("./ModelPicker");
-    await openModelPicker("transcription", target);
+    await openModelPicker("transcription");
   }
 
   private async openDoctor() {
+    this.settingsMenuOpen = false;
     const { openDoctor } = await import("./DoctorModal");
     await openDoctor();
+  }
+
+  /** Jump straight to a Settings tab via the app's navigation event. */
+  private jumpSettings(section: string) {
+    this.settingsMenuOpen = false;
+    window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view: "settings", section } }));
+  }
+
+  private openAllSettings() {
+    this.settingsMenuOpen = false;
+    this.callbacks?.onOpenSettings();
   }
 
   private handleActionClick() {
@@ -443,9 +459,34 @@ export class HeaderBarElement extends LitElement {
             </div>
           </div>
         </div>
-        <button class="icon-btn" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models" @click=${this.openModels}>🎛 Models</button>
-        <button class="icon-btn" aria-label="Doctor" title="Health check — daemon, whisper, providers, models" @click=${this.openDoctor}>🩺</button>
-        <button class="icon-btn" aria-label="Settings" title="Open application settings" @click=${() => this.callbacks?.onOpenSettings()}>⚙</button>
+        <div class="hb-settings-group" style="position: relative; display: inline-flex;">
+          <style>
+            .hb-settings-menu { animation: hbMenuIn 0.12s ease-out; }
+            .hb-menu-item {
+              display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+              background: none; border: none; color: var(--fg-default); padding: 8px 12px;
+              border-radius: 7px; cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
+            }
+            .hb-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+            .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
+            .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
+          </style>
+          <button class="icon-btn ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Settings & quick actions" aria-haspopup="menu"
+            aria-expanded=${this.settingsMenuOpen} title="Settings & quick actions" @click=${this.toggleSettingsMenu}>⚙ ▾</button>
+          <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
+            style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+            <button class="hb-menu-item" role="menuitem" @click=${this.openModels}>🎛 Quick model switch…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}>🩺 Doctor — health check</button>
+            <div class="hb-menu-sep"></div>
+            <div class="hb-menu-label">Jump to settings</div>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}>🗣️ Transcription</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("postprocessing")}>✨ Post-Processing</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}>🎙️ Capture &amp; hotkeys</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}>🎨 Appearance</button>
+            <div class="hb-menu-sep"></div>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}>⚙ All settings…</button>
+          </div>
+        </div>
       </div>
       <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"
         title="Live transcription preview — updates as you speak while recording">
