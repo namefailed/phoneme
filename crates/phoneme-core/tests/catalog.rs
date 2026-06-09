@@ -27,6 +27,8 @@ fn sample_recording(id: RecordingId) -> Recording {
         track: None,
         cleanup_model: None,
         diarized: false,
+        summary: None,
+        summary_model: None,
         tags: vec![],
     }
 }
@@ -88,6 +90,27 @@ async fn update_transcript_persists_text() {
     let got = catalog.get(&rec.id).await.unwrap().unwrap();
     assert_eq!(got.transcript.as_deref(), Some("hello world"));
     assert_eq!(got.model.as_deref(), Some("gemma-4-E4B"));
+}
+
+#[tokio::test]
+async fn update_summary_persists_text_and_model() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+    // Defaults to absent until generated.
+    let before = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(before.summary, None);
+    assert_eq!(before.summary_model, None);
+
+    catalog
+        .update_summary(&rec.id, "- key point\n- action item", Some("gemma3:4b"))
+        .await
+        .unwrap();
+    let got = catalog.get(&rec.id).await.unwrap().unwrap();
+    assert_eq!(got.summary.as_deref(), Some("- key point\n- action item"));
+    assert_eq!(got.summary_model.as_deref(), Some("gemma3:4b"));
+    // A summary must not disturb the stored transcript.
+    assert_eq!(got.transcript, None);
 }
 
 #[tokio::test]

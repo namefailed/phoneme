@@ -277,6 +277,20 @@ pub async fn rerun_cleanup(
     .await
 }
 
+/// Generate (or regenerate) an LLM summary of a recording's current transcript
+/// on demand. `model`/`prompt` override the configured summary model/prompt for
+/// this run only. The summary arrives via the `SummaryUpdated` daemon event.
+#[tauri::command]
+pub async fn rerun_summary(
+    bridge: Br<'_>,
+    id: String,
+    model: Option<String>,
+    prompt: Option<String>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::RerunSummary { id, model, prompt }).await
+}
+
 /// Manually update the transcript text for a specific recording.
 #[tauri::command]
 pub async fn update_transcript(

@@ -113,6 +113,18 @@ pub enum Request {
         #[serde(default)]
         api_key: Option<String>,
     },
+    /// Generate (or regenerate) an LLM summary of a recording's current
+    /// transcript on demand, and store it. The summary reuses the configured
+    /// `[llm_post_process]` provider connection; `model` and `prompt` optionally
+    /// override the configured summary model/prompt for this run only (never
+    /// persisted). Returns the generated summary text.
+    RerunSummary {
+        id: RecordingId,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        prompt: Option<String>,
+    },
     UpdateTranscript {
         id: RecordingId,
         text: String,
@@ -294,6 +306,10 @@ pub enum DaemonEvent {
         id: RecordingId,
     },
     TranscriptUpdated {
+        id: RecordingId,
+    },
+    /// A recording's LLM summary was (re)generated and stored.
+    SummaryUpdated {
         id: RecordingId,
     },
     NotesUpdated {

@@ -3,6 +3,7 @@ import {
   getRecording,
   updateTranscript,
   getOriginalTranscript,
+  rerunSummary,
   type Recording,
 } from "../../services/ipc";
 import {
@@ -32,6 +33,10 @@ export class RecordingDetail {
    *  down and remounting the waveform (which caused it to flicker/clear). */
   private renderedId: string | null = null;
   private renderedAudioPath: string | null = null;
+  /** Whether the summary "peek" is currently hijacking the transcript box. */
+  private summaryPeeking = false;
+  /** Guards against overlapping summary-generation polls. */
+  private summaryPolling = false;
 
   constructor(container: HTMLElement, onRefresh: () => void) {
     this.container = container;
@@ -138,7 +143,9 @@ export class RecordingDetail {
         <div class="transcript-block">
           <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; align-items: flex-end;">
+          <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
+          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end;">
+            <button class="inline-button" id="view-summary">View summary</button>
             <button class="inline-button" id="view-original">View original transcript</button>
           </div>
         </div>
@@ -184,15 +191,26 @@ export class RecordingDetail {
     // back restores the editor. A "Restore this version" action is offered while
     // peeking.
     const viewOriginalBtn = this.container.querySelector<HTMLButtonElement>("#view-original");
+    const viewSummaryBtn = this.container.querySelector<HTMLButtonElement>("#view-summary");
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
     const peekEl = this.container.querySelector<HTMLElement>("#original-peek");
+    const summaryPeekEl = this.container.querySelector<HTMLElement>("#summary-peek");
+
+    // Only one of {editor, original peek, summary peek} is visible at a time.
+    // Reset to the editor and restore both button labels.
+    const resetPeek = () => {
+      if (peekEl) peekEl.style.display = "none";
+      if (summaryPeekEl) summaryPeekEl.style.display = "none";
+      if (editorEl) editorEl.style.display = "flex";
+      if (viewOriginalBtn) viewOriginalBtn.textContent = "View original transcript";
+      if (viewSummaryBtn) viewSummaryBtn.textContent = "View summary";
+    };
+
     let peeking = false;
     viewOriginalBtn?.addEventListener("click", async () => {
       if (!editorEl || !peekEl) return;
       if (peeking) {
-        peekEl.style.display = "none";
-        editorEl.style.display = "flex";
-        viewOriginalBtn.textContent = "View original transcript";
+        resetPeek();
         peeking = false;
         return;
       }
@@ -211,10 +229,38 @@ export class RecordingDetail {
         this.onRefresh();
         void this.show(r.id);
       });
+      resetPeek();
+      this.summaryPeeking = false;
       editorEl.style.display = "none";
       peekEl.style.display = "block";
       viewOriginalBtn.textContent = "Back to current transcript";
       peeking = true;
+    });
+
+    // Summary peek: shows the stored AI summary in the transcript box. If none
+    // exists yet, generates one on demand (RerunSummary) and shows a pending
+    // state — `requestSummary` polls for the result and fills the peek in place.
+    viewSummaryBtn?.addEventListener("click", async () => {
+      if (!editorEl || !summaryPeekEl) return;
+      if (this.summaryPeeking) {
+        resetPeek();
+        this.summaryPeeking = false;
+        return;
+      }
+      resetPeek();
+      peeking = false;
+      if (r.summary && r.summary.trim()) {
+        this.fillSummaryPeek(summaryPeekEl, r);
+      } else {
+        summaryPeekEl.innerHTML = `
+          <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
+          <div style="color: var(--fg-muted); line-height: 1.6;">Generating summary…</div>`;
+        void this.requestSummary(r.id);
+      }
+      editorEl.style.display = "none";
+      summaryPeekEl.style.display = "block";
+      viewSummaryBtn.textContent = "Back to current transcript";
+      this.summaryPeeking = true;
     });
 
     // Notes: CodeMirror editor (respects editor.vim_mode like the transcript
@@ -224,6 +270,74 @@ export class RecordingDetail {
       this.notesEditor?.dispose();
       this.notesEditor = new NotesEditor(notesRoot, r.id, r.notes ?? "");
     }
+  }
+
+  /** Render the stored summary into the peek box and wire its Regenerate button. */
+  private fillSummaryPeek(peekEl: HTMLElement, r: Recording) {
+    const text = r.summary ?? "";
+    const modelNote = r.summary_model
+      ? ` · <span style="opacity: 0.8;">${escapeHtml(r.summary_model)}</span>`
+      : "";
+    peekEl.innerHTML = `
+      <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary${modelNote} (read-only)</div>
+      <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(text)}</div>
+      <button class="inline-button" id="regen-summary" style="margin-top: 10px;" title="Generate a fresh summary from the current transcript">Regenerate summary</button>`;
+    peekEl.querySelector("#regen-summary")?.addEventListener("click", () => {
+      peekEl.innerHTML = `
+        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
+        <div style="color: var(--fg-muted); line-height: 1.6;">Regenerating summary…</div>`;
+      void this.requestSummary(r.id);
+    });
+  }
+
+  /** Kick off on-demand summary generation, then poll for the result and fill
+   *  the peek box in place. Summaries are produced asynchronously by the daemon
+   *  (RerunSummary spawns a task and emits SummaryUpdated), so polling keeps the
+   *  flow self-contained without depending on event re-renders. */
+  async requestSummary(id: string, model: string | null = null, prompt: string | null = null) {
+    const prev = this.recording?.summary ?? null;
+    try {
+      await rerunSummary(id, model, prompt);
+    } catch (e) {
+      showToast(`Couldn't generate summary: ${errText(e)}`, "error");
+      const peekEl = this.container.querySelector<HTMLElement>("#summary-peek");
+      if (peekEl && peekEl.style.display !== "none") {
+        peekEl.innerHTML = `<div style="color: var(--accent-danger, #e66); line-height: 1.6;">Summary failed — check the post-processing provider in Settings.</div>`;
+      }
+      return;
+    }
+    if (this.summaryPolling) return;
+    this.summaryPolling = true;
+    const deadline = Date.now() + 90_000;
+    const tick = async () => {
+      if (Date.now() > deadline) {
+        this.summaryPolling = false;
+        return;
+      }
+      let rec: Recording;
+      try {
+        rec = await getRecording(id);
+      } catch {
+        window.setTimeout(() => void tick(), 1500);
+        return;
+      }
+      // Bail if the user navigated to a different recording while polling.
+      if (this.recording?.id !== id) {
+        this.summaryPolling = false;
+        return;
+      }
+      if (rec.summary && rec.summary.trim() && rec.summary !== prev) {
+        this.recording = rec;
+        this.summaryPolling = false;
+        const peekEl = this.container.querySelector<HTMLElement>("#summary-peek");
+        if (peekEl && peekEl.style.display !== "none") {
+          this.fillSummaryPeek(peekEl, rec);
+        }
+        return;
+      }
+      window.setTimeout(() => void tick(), 1500);
+    };
+    window.setTimeout(() => void tick(), 1500);
   }
 
   hasDirtyEdits(): boolean {

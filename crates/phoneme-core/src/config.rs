@@ -80,6 +80,9 @@ pub struct Config {
     /// Settings for the optional LLM-powered transcript cleanup/post-processing pipeline.
     #[serde(default = "default_llm_post_process")]
     pub llm_post_process: LlmPostProcessConfig,
+    /// Auto-summary settings (an LLM summary of each transcript).
+    #[serde(default)]
+    pub summary: SummaryConfig,
     /// Optional semantic search indexing and querying parameters.
     #[serde(default)]
     pub semantic_search: SemanticSearchConfig,
@@ -206,6 +209,37 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
         timeout_secs: 30,
     }
+}
+
+/// Auto-summary settings. The summary is generated on demand (via the UI/CLI)
+/// or — when `auto` is true — automatically as the FINAL pipeline step. It
+/// reuses the [`LlmPostProcessConfig`] provider connection (endpoint/key); only
+/// the model and prompt are summary-specific.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SummaryConfig {
+    /// Summarize automatically as the last pipeline step on every recording.
+    #[serde(default)]
+    pub auto: bool,
+    /// Model used for summaries. Empty → fall back to the cleanup model.
+    #[serde(default)]
+    pub model: String,
+    /// Prompt instructing the LLM how to summarize the transcript.
+    #[serde(default = "default_summary_prompt")]
+    pub prompt: String,
+}
+
+impl Default for SummaryConfig {
+    fn default() -> Self {
+        Self {
+            auto: false,
+            model: String::new(),
+            prompt: default_summary_prompt(),
+        }
+    }
+}
+
+fn default_summary_prompt() -> String {
+    "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.".into()
 }
 
 fn default_llm_timeout_secs() -> u64 {
@@ -761,6 +795,7 @@ impl Default for Config {
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
                 timeout_secs: 30,
             },
+            summary: SummaryConfig::default(),
             semantic_search: SemanticSearchConfig::default(),
             retention: RetentionConfig::default(),
         }

@@ -16,6 +16,17 @@ export class SectionPostProcessing {
       };
     }
 
+    // Auto-summary settings. Reuses the post-processing provider connection;
+    // only the model (optional — falls back to the cleanup model) and prompt are
+    // summary-specific.
+    if (!config.summary) {
+      config.summary = {
+        auto: false,
+        model: "",
+        prompt: "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.",
+      };
+    }
+
     // State for provider models
     const providerModels: Record<string, string[]> = { ollama: [], openai: [], groq: [], anthropic: [] };
     const fetchingModels: Record<string, boolean> = { ollama: false, openai: false, groq: false, anthropic: false };
@@ -313,6 +324,63 @@ export class SectionPostProcessing {
             </span>
           </div>
         </div>
+
+        <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 20px 0 16px;" />
+
+        <h3 style="margin-bottom: 4px;">Auto AI Summary</h3>
+        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+          Generate a short AI summary of each transcript. You can always summarize a single
+          recording on demand with the <b>View summary</b> button in its detail view — enabling
+          this just runs it automatically as the <b>last step</b> of every recording's pipeline.
+          Summaries reuse the AI provider configured above.
+        </p>
+
+        <div class="settings-field">
+          <label>Summarize every recording</label>
+          <div>${renderField(
+            { key: "summary.auto", label: "", kind: "checkbox" },
+            config.summary.auto,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            When off, summaries are still available on demand per recording.
+          </span>
+        </div>
+
+        <div class="settings-field">
+          <label>Summary model (optional)</label>
+          <div>${renderField(
+            { key: "summary.model", label: "", kind: "text" },
+            config.summary.model || "",
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Leave blank to reuse the post-processing model above. Override here to summarize with a
+            different model (e.g. a smaller/faster one).
+          </span>
+        </div>
+
+        <div class="settings-field ai-prompt-field">
+          <label>Summary instructions</label>
+          <div class="ai-prompt-controls">
+            <div class="ai-preset-row">
+              <select id="summary-preset-select" class="ai-preset-select">
+                <option value="">— Choose a preset —</option>
+                <option value="Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.">Bullet-point summary (Default)</option>
+                <option value="Summarize the core message of this transcript in 2-3 sentences. Output only the summary.">2-3 sentence summary</option>
+                <option value="Extract only the action items and decisions from this transcript as a checklist. Output only the list.">Action items &amp; decisions</option>
+                <option value="Write a short paragraph (TL;DR) summarizing what this transcript is about. Output only the paragraph.">TL;DR paragraph</option>
+                <option value="Summarize this meeting transcript: list attendees/speakers if identifiable, key discussion points, decisions made, and action items with owners. Output only the structured summary.">Meeting minutes</option>
+              </select>
+              <span class="ai-preset-hint">Presets auto-fill the field below</span>
+            </div>
+            ${renderField(
+              { key: "summary.prompt", label: "", kind: "textarea" },
+              config.summary.prompt || "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.",
+            )}
+            <span class="settings-help-text">
+              How the AI should summarize the transcript.
+            </span>
+          </div>
+        </div>
       </div>
     `;
 
@@ -350,6 +418,18 @@ export class SectionPostProcessing {
           promptArea.value = presetSelect.value;
           promptArea.dispatchEvent(new Event("input"));
           presetSelect.value = ""; // Reset dropdown to placeholder after applying
+        }
+      });
+    }
+
+    const summaryPresetSelect = container.querySelector<HTMLSelectElement>("#summary-preset-select");
+    const summaryPromptArea = container.querySelector<HTMLTextAreaElement>("[data-key='summary.prompt']");
+    if (summaryPresetSelect && summaryPromptArea) {
+      summaryPresetSelect.addEventListener("change", () => {
+        if (summaryPresetSelect.value) {
+          summaryPromptArea.value = summaryPresetSelect.value;
+          summaryPromptArea.dispatchEvent(new Event("input"));
+          summaryPresetSelect.value = "";
         }
       });
     }

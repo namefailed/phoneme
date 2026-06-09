@@ -30,6 +30,10 @@ export type Recording = {
   cleanup_model?: string | null;
   /** Whether speaker diarization was applied */
   diarized?: boolean;
+  /** LLM-generated summary of the transcript, if one has been produced. */
+  summary?: string | null;
+  /** The LLM model used to produce `summary`, if any. */
+  summary_model?: string | null;
   /** Tags associated with this recording */
   tags?: Array<{ id: number; name: string; color?: string | null }>;
 };
@@ -168,6 +172,21 @@ export async function rerunCleanup(
   apiKey: string | null = null,
 ): Promise<void> {
   await tauriInvoke("rerun_cleanup", { id, model, provider, prompt, apiUrl, apiKey });
+}
+
+/**
+ * Generate (or regenerate) an LLM summary of a recording's current transcript
+ * on demand, and store it. Reuses the configured `[llm_post_process]` provider
+ * connection; `model`/`prompt` override the configured summary model/prompt for
+ * this run only (never persisted). The summary text arrives via the
+ * `SummaryUpdated` daemon event — re-fetch the recording when it fires.
+ */
+export async function rerunSummary(
+  id: string,
+  model: string | null = null,
+  prompt: string | null = null,
+): Promise<void> {
+  await tauriInvoke("rerun_summary", { id, model, prompt });
 }
 
 /**

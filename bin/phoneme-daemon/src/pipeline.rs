@@ -3,10 +3,79 @@
 //! Called by the queue worker per claimed payload.
 
 use crate::app_state::AppState;
+use phoneme_core::config::Config;
 use phoneme_core::error::Result;
-use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus};
+use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
 use phoneme_ipc::DaemonEvent;
 use std::time::Duration;
+
+/// Generate an LLM summary of `transcript`, returning `(summary, model)` on
+/// success or `None` when summarization can't run (no usable provider) or
+/// fails. Non-fatal: callers log and continue.
+///
+/// Summaries reuse the `[llm_post_process]` provider connection (endpoint, API
+/// key, provider type); only the model and prompt are summary-specific. The
+/// post-processor's `enabled` flag is irrelevant here — summarization is gated
+/// by its own switch — so we force a working config clone with the summary
+/// model/prompt swapped in.
+pub async fn generate_summary(
+    state: &AppState,
+    cfg: &Config,
+    transcript: &str,
+) -> Option<(String, String)> {
+    if transcript.trim().is_empty() {
+        return None;
+    }
+    let mut llm_cfg = cfg.llm_post_process.clone();
+    llm_cfg.enabled = true;
+    // Summary-specific model; fall back to the cleanup model when unset.
+    if !cfg.summary.model.trim().is_empty() {
+        llm_cfg.model = cfg.summary.model.clone();
+    }
+    let model = llm_cfg.model.clone();
+    let llm = match state.llm.provider(&llm_cfg) {
+        Some(llm) => llm,
+        None => {
+            tracing::warn!(
+                provider = %llm_cfg.provider,
+                "summary requested but no usable LLM provider is configured"
+            );
+            return None;
+        }
+    };
+    match llm.process(&cfg.summary.prompt, transcript).await {
+        Ok(summary) if !summary.trim().is_empty() => Some((summary, model)),
+        Ok(_) => {
+            tracing::warn!("summary LLM returned empty output");
+            None
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "summary generation failed");
+            None
+        }
+    }
+}
+
+/// Generate a summary (if `summary.auto`) and persist it. Runs as the final
+/// pipeline step, after post-processing/cleanup, so it summarizes the text the
+/// user will actually see.
+async fn maybe_auto_summarize(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+) {
+    if !cfg.summary.auto {
+        return;
+    }
+    if let Some((summary, model)) = generate_summary(state, cfg, transcript).await {
+        if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
+            tracing::warn!(error = %e, "failed to persist auto summary");
+        } else {
+            tracing::info!(id = %id.as_str(), "auto summary saved");
+        }
+    }
+}
 
 /// Process a single claimed payload through the full pipeline.
 ///
@@ -146,6 +215,9 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     // lets a re-transcription update the text without re-triggering side effects
     // (e.g. re-appending to an Obsidian daily note).
     if !cfg.hook.run_on_transcribe {
+        // Auto-summary is the final step — runs after post-processing so it
+        // summarizes the text the user actually sees.
+        maybe_auto_summarize(state, &cfg, &id, &transcript).await;
         state
             .catalog
             .update_status(&id, RecordingStatus::Done)
@@ -243,6 +315,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
             }
         }
     }
+
+    // Auto-summary is the final step — runs after post-processing and hooks so
+    // it summarizes the text the user actually sees.
+    maybe_auto_summarize(state, &cfg, &id, &payload.transcript).await;
 
     state
         .catalog

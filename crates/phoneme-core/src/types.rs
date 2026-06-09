@@ -110,6 +110,13 @@ pub struct Recording {
     /// Whether speaker diarization was applied to this recording.
     #[serde(default)]
     pub diarized: bool,
+    /// LLM-generated summary of the transcript, if one has been produced
+    /// (on demand or as the final pipeline step). `None` until generated.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// The LLM model used to produce `summary`, if any.
+    #[serde(default)]
+    pub summary_model: Option<String>,
     /// Tags attached to this recording. Populated by `Catalog::list`/`get`;
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]
