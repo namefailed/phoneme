@@ -248,6 +248,7 @@ pub fn run() {
             commands::rerun_summary,
             commands::list_queue,
             commands::cancel_queued,
+            commands::run_doctor,
             commands::update_transcript,
             commands::update_meeting_name,
             commands::get_original_transcript,

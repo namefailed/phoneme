@@ -212,6 +212,20 @@ export async function cancelQueued(id: string): Promise<void> {
   await tauriInvoke("cancel_queued", { id });
 }
 
+/** One Doctor health-check result. */
+export type DoctorCheck = {
+  name: string;
+  ok: boolean;
+  detail: string;
+  /** Opaque token the GUI maps to a "Fix" action (e.g. open_config). */
+  fix_action?: string | null;
+};
+
+/** Run all health checks (local + backend reachability) for the Doctor view. */
+export async function runDoctor(): Promise<DoctorCheck[]> {
+  return await tauriInvoke<DoctorCheck[]>("run_doctor");
+}
+
 /**
  * Manually update the text transcript of a specific recording.
  */

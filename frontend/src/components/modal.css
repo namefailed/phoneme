@@ -160,3 +160,48 @@
   border-color: var(--err);
   color: var(--err);
 }
+
+/* ── Doctor (health check) modal ───────────────────────────────────────────── */
+.doctor-dialog { width: 520px; max-width: 92vw; }
+.doctor-summary {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+.doctor-summary.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.doctor-summary.bad { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.doctor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.doctor-empty { padding: 24px; text-align: center; color: var(--fg-muted); font-size: 13px; }
+.doctor-empty.err { color: var(--err); }
+.doctor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+.doctor-row.bad { border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+.doctor-icon {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  font-size: 12px; font-weight: 700;
+}
+.doctor-row.ok .doctor-icon { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.doctor-row.bad .doctor-icon { color: var(--err); background: color-mix(in srgb, var(--err) 16%, transparent); }
+.doctor-main { flex: 1; min-width: 0; }
+.doctor-name { font-size: 13px; font-weight: 600; color: var(--fg-default); }
+.doctor-detail { font-size: 11px; color: var(--fg-muted); word-break: break-word; }
+.doctor-fix { flex: 0 0 auto; }

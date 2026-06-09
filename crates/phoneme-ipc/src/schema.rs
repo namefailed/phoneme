@@ -159,6 +159,11 @@ pub enum Request {
         id: RecordingId,
     },
 
+    /// Run all health checks (local filesystem + backend reachability) and
+    /// return the results for the GUI Doctor view. Each result carries a name,
+    /// ok flag, detail string, and optional `fix_action`.
+    RunDoctor,
+
     // Daemon control
     DaemonStatus,
     Shutdown,

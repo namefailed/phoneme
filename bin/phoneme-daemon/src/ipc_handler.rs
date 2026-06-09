@@ -586,6 +586,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RerunSummary { id, model, prompt } => {
             rerun_summary(state, id, model, prompt).await
         }
+        Request::RunDoctor => {
+            let cfg = state.config.load();
+            let mut checks = phoneme_core::doctor::run_local_checks(&cfg);
+            checks.extend(phoneme_core::doctor::run_backend_checks(&cfg).await);
+            serialize_response(checks)
+        }
         Request::ListQueue => {
             let pending = state.inbox.list_pending().await;
             let processing = state.inbox.list_processing().await;

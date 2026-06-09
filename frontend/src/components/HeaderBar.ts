@@ -292,6 +292,11 @@ export class HeaderBarElement extends LitElement {
     await openModelPicker("transcription", target);
   }
 
+  private async openDoctor() {
+    const { openDoctor } = await import("./DoctorModal");
+    await openDoctor();
+  }
+
   private handleActionClick() {
     if (this.isMeeting || (!this.isRecording && this.recordMode === "meeting")) {
       void this.toggleMeeting();
@@ -439,6 +444,7 @@ export class HeaderBarElement extends LitElement {
           </div>
         </div>
         <button class="icon-btn" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models" @click=${this.openModels}>🎛 Models</button>
+        <button class="icon-btn" aria-label="Doctor" title="Health check — daemon, whisper, providers, models" @click=${this.openDoctor}>🩺</button>
         <button class="icon-btn" aria-label="Settings" title="Open application settings" @click=${() => this.callbacks?.onOpenSettings()}>⚙</button>
       </div>
       <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"

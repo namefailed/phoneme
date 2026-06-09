@@ -297,6 +297,12 @@ pub async fn list_queue(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::ListQueue).await
 }
 
+/// Run all health checks for the GUI Doctor view.
+#[tauri::command]
+pub async fn run_doctor(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RunDoctor).await
+}
+
 /// Remove a still-pending recording from the queue.
 #[tauri::command]
 pub async fn cancel_queued(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
