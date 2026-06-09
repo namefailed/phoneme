@@ -7,8 +7,22 @@ import { showToast } from "../../utils/toast";
 import "./styles.css";
 
 
-export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "done";
-const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "preview", "summary", "hook", "hotkey", "done"];
+export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
+const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "preview", "summary", "hook", "hotkey", "review", "done"];
+
+/** Short human label per step, shown in the progress stepper. */
+const STEP_LABELS: Record<WizardStep, string> = {
+  welcome: "Welcome",
+  mode: "Features",
+  configure: "Setting up",
+  mic: "Microphone",
+  preview: "Live Preview",
+  summary: "Auto Summary",
+  hook: "Destination",
+  hotkey: "Hotkeys",
+  review: "Review",
+  done: "Done",
+};
 
 const DEFAULT_SUMMARY_PROMPT =
   "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.";
@@ -102,13 +116,19 @@ export class FirstRunWizardElement extends LitElement {
     }
   }
 
-  private renderDots() {
+  private renderProgress() {
     const idx = ALL_STEPS.indexOf(this.step);
+    const pct = ALL_STEPS.length > 1 ? (idx / (ALL_STEPS.length - 1)) * 100 : 0;
     return html`
+      <div class="wizard-header-top">
+        <span class="wizard-brand">🎙 Phoneme — Setup</span>
+        <span class="wizard-steplabel">Step <b>${idx + 1}</b> of ${ALL_STEPS.length} · <b>${STEP_LABELS[this.step]}</b></span>
+      </div>
+      <div class="wizard-progress"><div class="wizard-progress-fill" style="width: ${pct}%"></div></div>
       <div class="wizard-dots">
         ${ALL_STEPS.map((s, i) => {
           const klass = i < idx ? "done" : i === idx ? "active" : "";
-          return html`<span class="wizard-dot ${klass}" title="${s}"></span>`;
+          return html`<span class="wizard-dot ${klass}" title="${STEP_LABELS[s]}"></span>`;
         })}
       </div>
     `;
@@ -125,11 +145,10 @@ export class FirstRunWizardElement extends LitElement {
           <li>Emits the transcript as JSON to your hook script</li>
         </ul>
         
-        <div style="margin-top: 1.5rem; padding: 1rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2);">
-          <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">Interface Theme</label>
-          <select style="width: 100%; padding: 8px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; color: white; cursor: pointer;"
-                  .value=${this.config?.interface?.theme || "catppuccin-mocha"} 
-                  @change=${(e: Event) => { 
+        <div class="wizard-theme-card">
+          <label>Interface theme</label>
+          <select .value=${this.config?.interface?.theme || "catppuccin-mocha"}
+                  @change=${(e: Event) => {
                     if (this.config) {
                       if (!this.config.interface) this.config.interface = {};
                       this.config.interface.theme = (e.target as HTMLSelectElement).value; 
@@ -197,79 +216,88 @@ export class FirstRunWizardElement extends LitElement {
       else this.config._ollama_model_choice = "llama3.2:3b";
     }
 
+    const gb = Math.round(this.systemRamMb / 1024);
+    const sw = (id: string, checked: boolean, handler: (e: Event) => void) => html`
+      <label class="wizard-switch" title="Toggle">
+        <input type="checkbox" id=${id} .checked=${checked} @change=${handler}>
+        <span class="track"></span><span class="thumb"></span>
+      </label>`;
     return html`
       <div class="wizard-body">
-        <h2 class="wizard-title">System Optimizer</h2>
+        <h2 class="wizard-title">Choose your features</h2>
         <p class="wizard-subtitle">
-          We detected ${Math.round(this.systemRamMb / 1024)}GB of RAM. We've pre-selected the best local AI features for your hardware, but you can customize everything below. Unchecked features can use Cloud APIs instead.
+          We detected <b>${gb}GB</b> of RAM${this.systemVramMb > 0 ? html` and <b>${Math.round(this.systemVramMb / 1024)}GB</b> of VRAM` : ""}
+          and pre-selected what runs best on your machine. Everything runs <b>locally</b> by default —
+          turn anything off here and you can wire up a cloud API later in Settings.
         </p>
 
-        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-            <input type="checkbox" id="setup-whisper" .checked=${this.config._setup_whisper} @change=${(e: Event) => { this.config._setup_whisper = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
-            <label for="setup-whisper" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">🎙️ Local Speech-to-Text (Whisper)</label>
+        <div class="wizard-feature ${this.config._setup_whisper ? "on" : ""}">
+          <div class="wizard-feature-head">
+            <span class="wizard-feature-title">🎙️ Speech-to-Text <span class="wizard-feature-rec">Required</span></span>
+            ${sw("setup-whisper", this.config._setup_whisper, (e) => { this.config._setup_whisper = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
           </div>
           ${this.config._setup_whisper ? html`
-            <select style="width: 100%; margin-top: 0.5rem; padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: white;" .value=${this.config._whisper_model_choice} @change=${(e: Event) => { this.config._whisper_model_choice = (e.target as HTMLSelectElement).value; }}>
-              <option value="ggml-base.en.bin">Base (Fastest, ~140MB, 4GB RAM)</option>
-              <option value="ggml-small.en.bin">Small (Balanced, ~480MB, 8GB RAM)</option>
-              <option value="ggml-medium.en.bin">Medium (Accurate, ~1.5GB, 16GB RAM)</option>
-              <option value="ggml-large-v3-turbo-q5_0.bin">Large v3 Turbo (Fastest & Accurate, ~1.1GB, 16GB+ RAM)</option>
-              <option value="ggml-large-v3.bin">Large v3 (Best Accuracy, ~3.1GB, 32GB RAM)</option>
-            </select>
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
-              <input type="checkbox" id="setup-native-streaming" .checked=${this.config._setup_native_streaming} @change=${(e: Event) => { this.config._setup_native_streaming = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
-              <label for="setup-native-streaming" style="font-weight: 400; cursor: pointer; font-size: 0.9em;">Enable ultra-fast real-time streaming (Word-by-Word)</label>
+            <div class="wizard-feature-body">
+              <select .value=${this.config._whisper_model_choice} @change=${(e: Event) => { this.config._whisper_model_choice = (e.target as HTMLSelectElement).value; this.requestUpdate(); }}
+                style="width:100%; padding:8px 10px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default);">
+                <option value="ggml-base.en.bin">Base · fastest · ~140 MB · 4 GB RAM</option>
+                <option value="ggml-small.en.bin">Small · balanced · ~480 MB · 8 GB RAM</option>
+                <option value="ggml-medium.en.bin">Medium · accurate · ~1.5 GB · 16 GB RAM</option>
+                <option value="ggml-large-v3-turbo-q5_0.bin">Large v3 Turbo · fast & accurate · ~1.1 GB · 16 GB+ RAM</option>
+                <option value="ggml-large-v3.bin">Large v3 · best accuracy · ~3.1 GB · 32 GB RAM</option>
+              </select>
+              <div class="wizard-feature-head" style="margin-top:12px;">
+                <span style="font-size:13px; color:var(--fg-default);">⚡ Real-time streaming (word-by-word)</span>
+                ${sw("setup-native-streaming", this.config._setup_native_streaming, (e) => { this.config._setup_native_streaming = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
+              </div>
             </div>
-          ` : html`
-            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud APIs (Deepgram/AssemblyAI/OpenAI).</div>
-          `}
+          ` : html`<div class="wizard-feature-note">Off — you'll need a cloud transcription API (Deepgram / AssemblyAI / OpenAI) configured in Settings.</div>`}
         </div>
 
-        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-            <input type="checkbox" id="setup-diarization" .checked=${this.config._setup_diarization} @change=${(e: Event) => { this.config._setup_diarization = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
-            <label for="setup-diarization" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">👥 Local Speaker Diarization</label>
-          </div>
-          ${this.config._setup_diarization ? html`
-            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem; color: #ffb86c;">⚠️ Downloads a ~500MB speakrs model. Requires 16GB+ RAM for stable transcription.</div>
-          ` : html`
-            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud APIs or disable speaker separation.</div>
-          `}
-        </div>
-
-        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-            <input type="checkbox" id="setup-ollama" .checked=${this.config._setup_ollama} @change=${(e: Event) => { this.config._setup_ollama = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
-            <label for="setup-ollama" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">🧠 Local LLM Post-processing (Ollama)</label>
+        <div class="wizard-feature ${this.config._setup_ollama ? "on" : ""}">
+          <div class="wizard-feature-head">
+            <span class="wizard-feature-title">🧠 AI Cleanup & Summaries</span>
+            ${sw("setup-ollama", this.config._setup_ollama, (e) => { this.config._setup_ollama = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
           </div>
           ${this.config._setup_ollama ? html`
-            <select style="width: 100%; margin-top: 0.5rem; padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: white;" .value=${this.config._ollama_model_choice} @change=${(e: Event) => { this.config._ollama_model_choice = (e.target as HTMLSelectElement).value; }}>
-              <option value="llama3.2:3b">Llama 3.2 3B (Fastest, 8GB RAM)</option>
-              <option value="llama3.1:8b">Llama 3.1 8B (Balanced, 16GB RAM)</option>
-              <option value="qwen2.5:32b">Qwen 2.5 32B (Accurate, 32GB RAM)</option>
-              <option value="llama3.3:70b">Llama 3.3 70B (Best, 64GB RAM)</option>
-            </select>
-          ` : html`
-            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Will rely on Cloud LLMs (OpenAI/Anthropic) for formatting.</div>
-          `}
+            <div class="wizard-feature-body">
+              <select .value=${this.config._ollama_model_choice} @change=${(e: Event) => { this.config._ollama_model_choice = (e.target as HTMLSelectElement).value; }}
+                style="width:100%; padding:8px 10px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default);">
+                <option value="llama3.2:3b">Llama 3.2 3B · fastest · 8 GB RAM</option>
+                <option value="llama3.1:8b">Llama 3.1 8B · balanced · 16 GB RAM</option>
+                <option value="qwen2.5:32b">Qwen 2.5 32B · accurate · 32 GB RAM</option>
+                <option value="llama3.3:70b">Llama 3.3 70B · best · 64 GB RAM</option>
+              </select>
+              <div class="wizard-feature-note">Polishes transcripts and powers auto-summaries via local Ollama.</div>
+            </div>
+          ` : html`<div class="wizard-feature-note">Off — cleanup & summaries can use a cloud LLM (OpenAI / Anthropic / Groq) set up in Settings.</div>`}
         </div>
 
-        <div class="wizard-field" style="margin-top: 1rem; background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px;">
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <input type="checkbox" id="semantic-search" .checked=${this.config.semantic_search?.enabled} @change=${(e: Event) => { this.config.semantic_search.enabled = (e.target as HTMLInputElement).checked; this.requestUpdate(); }}>
-            <label for="semantic-search" style="font-weight: 500; cursor: pointer; font-size: 1.1em;">🔍 Local Semantic Search</label>
+        <div class="wizard-feature ${this.config._setup_diarization ? "on" : ""}">
+          <div class="wizard-feature-head">
+            <span class="wizard-feature-title">👥 Speaker Diarization</span>
+            ${sw("setup-diarization", this.config._setup_diarization, (e) => { this.config._setup_diarization = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
           </div>
-          ${this.config.semantic_search?.enabled ? html`
-            <div class="mode-desc" style="font-size: 0.85em; opacity: 0.8; margin-left: 1.5rem;">Downloads a ~90MB ONNX embedding model to search your transcripts by meaning.</div>
-          ` : ''}
+          ${this.config._setup_diarization
+            ? html`<div class="wizard-feature-note warn">⚠️ Downloads a ~500 MB speakrs model. Best with 16 GB+ RAM for stable transcription.</div>`
+            : html`<div class="wizard-feature-note">Off — labels who-spoke-when in meetings. Can be enabled later.</div>`}
+        </div>
+
+        <div class="wizard-feature ${this.config.semantic_search?.enabled ? "on" : ""}">
+          <div class="wizard-feature-head">
+            <span class="wizard-feature-title">🔍 Semantic Search</span>
+            ${sw("semantic-search", this.config.semantic_search?.enabled, (e) => { this.config.semantic_search.enabled = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
+          </div>
+          ${this.config.semantic_search?.enabled
+            ? html`<div class="wizard-feature-note">Downloads a ~90 MB embedding model so you can search transcripts by meaning, not just keywords.</div>`
+            : html`<div class="wizard-feature-note">Off — search falls back to plain keyword matching.</div>`}
         </div>
 
       </div>
       <div class="wizard-footer">
         <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
         <span class="spacer"></span>
-        <button class="wizard-btn" @click=${this.skip}>Skip setup</button>
+        <button class="wizard-btn ghost" @click=${this.skip}>Skip setup</button>
         <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
       </div>
     `;
@@ -507,8 +535,8 @@ export class FirstRunWizardElement extends LitElement {
       <div class="wizard-body">
         <h2 class="wizard-title" id="download-title">${this.downloadTitle}</h2>
         <p class="wizard-subtitle" id="download-subtitle">${this.downloadSubtitle}</p>
-        <div style="margin: 32px 0;">
-          <progress id="progress" style="width: 100%; height: 24px;" 
+        <div class="wizard-progress-block">
+          <progress id="progress" style="width: 100%; height: 24px;"
                     .max=${this.progressMax} 
                     .value=${this.progressValue ?? undefined}>
           </progress>
@@ -602,16 +630,19 @@ export class FirstRunWizardElement extends LitElement {
           never slows down your final transcription. You can change this anytime in
           Settings → Live Preview (including a cloud API like Groq).
         </p>
-        <div class="wizard-field" style="display:flex; flex-direction:column; gap:8px;">
+        <div class="wizard-choice">
           <button class="wizard-btn ${choice === "local" ? "primary" : ""}" ?disabled=${this.previewDownloading}
             @click=${() => this.setPreviewLocal()}>
-            ${this.previewDownloading ? "Downloading Tiny…" : "Fast local model (Tiny · ~75 MB) — recommended"}
+            <span class="opt-title">${this.previewDownloading ? "Downloading Tiny…" : "Fast local model · Recommended"}</span>
+            <span class="opt-sub">A dedicated Tiny model (~75 MB) on its own server — never slows your final transcript.</span>
           </button>
           <button class="wizard-btn ${choice === "same" ? "primary" : ""}" @click=${() => this.setPreviewSame()}>
-            Use my main model (simplest; can lag on heavy models)
+            <span class="opt-title">Use my main model</span>
+            <span class="opt-sub">Simplest — no extra download, but can lag on heavier models.</span>
           </button>
           <button class="wizard-btn ${choice === "off" ? "primary" : ""}" @click=${() => this.setPreviewOff()}>
-            Off
+            <span class="opt-title">Off</span>
+            <span class="opt-sub">No live words while recording.</span>
           </button>
         </div>
         ${choice === "local" && pv?.model_path
@@ -646,14 +677,16 @@ export class FirstRunWizardElement extends LitElement {
           AI model you set up for cleanup and are fully configurable in
           Settings → AI Post-Processing (including a different provider/model).
         </p>
-        <div class="wizard-field" style="display:flex; flex-direction:column; gap:8px;">
-          <button class="wizard-btn ${on ? "" : "primary"}"
-            @click=${() => { this.config.summary.auto = false; this.requestUpdate(); }}>
-            Off — summarize on demand only
-          </button>
+        <div class="wizard-choice">
           <button class="wizard-btn ${on ? "primary" : ""}"
             @click=${() => { this.config.summary.auto = true; this.requestUpdate(); }}>
-            On — summarize every recording automatically
+            <span class="opt-title">On — automatic</span>
+            <span class="opt-sub">Summarize every recording as the last pipeline step.</span>
+          </button>
+          <button class="wizard-btn ${on ? "" : "primary"}"
+            @click=${() => { this.config.summary.auto = false; this.requestUpdate(); }}>
+            <span class="opt-title">On demand only · Recommended</span>
+            <span class="opt-sub">No auto-summaries; tap “View summary” on any note when you want one.</span>
           </button>
         </div>
         ${on && !hasLlm ? html`
@@ -818,11 +851,76 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
-  private renderDone() {
+  private prettyWhisper(file: string): string {
+    const map: Record<string, string> = {
+      "ggml-base.en.bin": "Base",
+      "ggml-small.en.bin": "Small",
+      "ggml-medium.en.bin": "Medium",
+      "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo",
+      "ggml-large-v3.bin": "Large v3",
+    };
+    return map[file] ?? file;
+  }
+
+  private renderReview() {
+    const c = this.config;
+    const stt = c._setup_whisper
+      ? `Local · ${this.prettyWhisper(c._whisper_model_choice)}`
+      : "Cloud API (set up in Settings)";
+    const cleanup = c._setup_ollama
+      ? `Local Ollama · ${c._ollama_model_choice}`
+      : (c.llm_post_process?.enabled ? `Cloud · ${c.llm_post_process.provider}` : "Off");
+    const mic = c.recording?.input_device && c.recording.input_device !== "default"
+      ? c.recording.input_device : "System default";
+    const preview = !c.recording?.streaming_preview
+      ? "Off"
+      : (c.preview_whisper ? (c.preview_whisper.provider === "local" ? "Local Tiny model" : "Cloud API") : "Main model");
+    const dest = (c.hook?.commands && c.hook.commands[0]?.trim()) ? c.hook.commands[0].trim() : "Show in Phoneme";
+    const hotkeys = [
+      c.hotkey?.combo ? `Record: ${c.hotkey.combo}` : null,
+      c.meeting_hotkey?.combo ? `Meeting: ${c.meeting_hotkey.combo}` : null,
+      c.in_place_hotkey?.combo ? `In-place: ${c.in_place_hotkey.combo}` : null,
+    ].filter(Boolean).join("  ·  ") || "None set";
+
+    // [key, value, isOff]
+    const rows: [string, string, boolean][] = [
+      ["Speech-to-text", stt, !c._setup_whisper],
+      ["Real-time streaming", c._setup_whisper && c._setup_native_streaming ? "On" : "Off", !(c._setup_whisper && c._setup_native_streaming)],
+      ["AI cleanup", cleanup, cleanup === "Off"],
+      ["Auto summary", c.summary?.auto ? "On — every recording" : "On demand only", !c.summary?.auto],
+      ["Speaker diarization", c._setup_diarization ? "On (local)" : "Off", !c._setup_diarization],
+      ["Semantic search", c.semantic_search?.enabled ? "On" : "Off", !c.semantic_search?.enabled],
+      ["Microphone", mic, false],
+      ["Live preview", preview, preview === "Off"],
+      ["Destination", dest, dest === "Show in Phoneme"],
+      ["Hotkeys", hotkeys, hotkeys === "None set"],
+    ];
+
     return html`
       <div class="wizard-body">
-        <h2 class="wizard-title">You're set up</h2>
-        <p class="wizard-subtitle">Try saying something now.</p>
+        <h2 class="wizard-title">Review your setup</h2>
+        <p class="wizard-subtitle">Here's what Phoneme will use. You can change any of this anytime in Settings.</p>
+        <div class="review-list">
+          ${rows.map(([k, v, off]) => html`
+            <div class="review-row">
+              <span class="review-key">${k}</span>
+              <span class="review-val ${off ? "off" : ""}">${v}</span>
+            </div>`)}
+        </div>
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
+        <span class="spacer"></span>
+        <button class="wizard-btn primary" @click=${() => this.go("next")}>Looks good →</button>
+      </div>
+    `;
+  }
+
+  private renderDone() {
+    return html`
+      <div class="wizard-body" style="text-align:center;">
+        <h2 class="wizard-title">You're all set 🎉</h2>
+        <p class="wizard-subtitle">Tap the button and say something — or just use your hotkey from anywhere.</p>
         <button class="wizard-record-big" id="record" @click=${async () => {
           try {
             await invoke("record_start", { mode: "oneshot" });
@@ -845,8 +943,7 @@ export class FirstRunWizardElement extends LitElement {
     return html`
       <div class="wizard-shell">
         <div class="wizard-header">
-          <div class="wizard-brand">🎙 Phoneme — Setup</div>
-          ${this.renderDots()}
+          ${this.renderProgress()}
         </div>
         ${this.step === 'welcome' ? this.renderWelcome() : ''}
         ${this.step === 'mode' ? this.renderModePicker() : ''}
@@ -856,6 +953,7 @@ export class FirstRunWizardElement extends LitElement {
         ${this.step === 'summary' ? this.renderSummary() : ''}
         ${this.step === 'hook' ? this.renderHook() : ''}
         ${this.step === 'hotkey' ? this.renderHotkey() : ''}
+        ${this.step === 'review' ? this.renderReview() : ''}
         ${this.step === 'done' ? this.renderDone() : ''}
       </div>
     `;
