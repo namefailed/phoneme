@@ -441,6 +441,11 @@ mark.search-hit {
      leaving the sidebar (and its pinned queue panel) short of the bottom. */
   grid-template-rows: minmax(0, 1fr);
 }
+/* Smooth sidebar open/close. The class is added only during a toggle (not while
+   dragging the splitter or sidebar-resizer), so drags stay instant/non-laggy. */
+.rv-shell.rv-animate-sidebar {
+  transition: grid-template-columns 0.2s ease;
+}
 .rv-list {
   height: 100%;
   overflow: hidden;

@@ -15,6 +15,16 @@
   position: relative;
   z-index: 50;
 }
+/* Shared dropdown-caret chevron (matches the rotating SVG chevrons used in the
+   sidebar headers and meeting rows). Replaces the old ▾ text glyph on split
+   buttons. Add `.open` to flip it 180° while its menu is open. */
+.ph-caret-ico {
+  vertical-align: middle;
+  transition: transform 0.15s ease;
+}
+.ph-caret-ico.open {
+  transform: rotate(180deg);
+}
 .headerbar .search {
   background-color: var(--bg-deep);
   background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236c7086' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E");

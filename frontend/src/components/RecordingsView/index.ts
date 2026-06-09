@@ -181,11 +181,13 @@ export class RecordingsView {
     const shell = this.container.querySelector<HTMLElement>("#rv-shell");
     if (!shell) return;
     
-    // Also toggle visibility class on sidebar for animation/display
+    // Keep the sidebar clipped at all times so the grid-column width animation
+    // reads as a smooth slide/collapse. Don't toggle `visibility` — that would
+    // pop the content away instantly instead of letting it animate out with the
+    // shrinking column.
     const sidebar = this.container.querySelector<HTMLElement>("ph-sidebar");
     if (sidebar) {
-      sidebar.style.visibility = this.sidebarVisible ? "visible" : "hidden";
-      sidebar.style.overflow = this.sidebarVisible ? "" : "hidden";
+      sidebar.style.overflow = "hidden";
     }
 
     const sidebarWidth = this.sidebarVisible ? `${this.sidebarWidth}px` : "0px";
@@ -236,6 +238,14 @@ export class RecordingsView {
   toggleSidebar() {
     this.sidebarVisible = !this.sidebarVisible;
     try { localStorage.setItem(LS_SIDEBAR, String(this.sidebarVisible)); } catch { /* private mode */ }
+    // Animate only the toggle (not splitter/resizer drags): add the transition
+    // class for the duration of the slide, then strip it so subsequent drags
+    // stay instant.
+    const shell = this.container.querySelector<HTMLElement>("#rv-shell");
+    if (shell) {
+      shell.classList.add("rv-animate-sidebar");
+      window.setTimeout(() => shell.classList.remove("rv-animate-sidebar"), 260);
+    }
     this.applyLayout();
   }
 
