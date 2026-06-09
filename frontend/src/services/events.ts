@@ -29,6 +29,7 @@ export type DaemonEvent =
   | { event: "transcription_done"; id: string; transcript: string }
   | { event: "transcription_failed"; id: string; error: string }
   | { event: "pipeline_stage_changed"; id: string; stage: PipelineStage }
+  | { event: "llm_activity"; id: string; stage: PipelineStage; prompt: string; delta: string; done: boolean }
   | { event: "hook_started"; id: string }
   | { event: "hook_done"; id: string; exit_code: number }
   | { event: "hook_failed"; id: string; error: string }

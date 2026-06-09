@@ -359,6 +359,85 @@ mark.search-hit {
   opacity: 0.7;
   font-size: 10px;
 }
+
+/* ── AI activity / "thinking" popout ──────────────────────────────────────── */
+.thinking-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 200;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  color: var(--fg-default);
+  cursor: pointer;
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.thinking-fab:hover { transform: translateY(-1px); border-color: var(--accent); }
+.thinking-fab.live { border-color: var(--accent); }
+.thinking-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: thinkingPulse 1s ease-in-out infinite;
+}
+@keyframes thinkingPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.thinking-popout {
+  z-index: 201;
+  width: 360px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.thinking-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-default);
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: move;
+  user-select: none;
+}
+.thinking-close { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 13px; }
+.thinking-close:hover { color: var(--accent); }
+.thinking-body { overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+.thinking-empty { font-size: 11px; color: var(--fg-faded); line-height: 1.5; }
+.thinking-stage-title { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.thinking-prompt { font-size: 11px; color: var(--fg-muted); }
+.thinking-prompt summary { cursor: pointer; }
+.thinking-prompt pre,
+.thinking-response {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.45;
+  background: var(--bg-deep);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px 0 0;
+  color: var(--fg-default);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+}
+.thinking-response { max-height: 190px; overflow-y: auto; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 12px; }
 .tag-chip {
   transition: all 0.15s ease-out;

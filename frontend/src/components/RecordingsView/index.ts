@@ -8,6 +8,7 @@ import { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
 import "./Sidebar";
+import "./ThinkingPopout";
 import "./styles.css";
 
 // Per-device UI layout prefs persisted in localStorage (NOT config.toml — these
@@ -83,6 +84,7 @@ export class RecordingsView {
           <ph-merged-conversation-detail id="rv-merged-detail" style="display:none; height: 100%;"></ph-merged-conversation-detail>
         </div>
       </div>
+      <ph-thinking-popout id="rv-thinking"></ph-thinking-popout>
     `;
 
     const listRoot = this.container.querySelector<HTMLElement>("#rv-list-inner")!;
@@ -252,6 +254,10 @@ export class RecordingsView {
   private onSelect(id: string) {
     this.state.set({ ...this.state.get(), selectedId: id });
     try { localStorage.setItem(LS_SELECTED, id); } catch { /* private mode */ }
+    // Point the AI-activity popout at the selected single recording (sessions
+    // have no per-recording LLM activity of their own).
+    const tp = this.container.querySelector<HTMLElement & { recordingId: string }>("#rv-thinking");
+    if (tp) tp.recordingId = id.startsWith("session:") ? "" : id;
     const singleContainer = this.container.querySelector<HTMLElement>("#rv-single-detail")!;
     if (id.startsWith("session:")) {
       singleContainer.style.display = "none";
