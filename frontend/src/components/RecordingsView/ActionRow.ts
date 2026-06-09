@@ -541,7 +541,7 @@ export class ActionRowElement extends LitElement {
           <button class="rerun-trigger" title="Re-run a step on this recording" aria-haspopup="menu" aria-expanded=${this.rerunMenuOpen ? "true" : "false"} @click=${this.toggleRerunMenu}>↻ Re-run… <svg class="ph-caret-ico ${this.rerunMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 
           ${this.rerunMenuOpen ? html`
-            <div class="custom-dropdown" role="menu" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 280px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
+            <div class="custom-dropdown" role="menu" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100; width: 280px; background: var(--bg-elevated); border: var(--popup-border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
               <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-run</h4>
 
               <div style="display: flex; flex-direction: column; gap: 4px;">

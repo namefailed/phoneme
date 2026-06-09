@@ -22,7 +22,7 @@
 
 .modal-dialog {
   background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  border: var(--popup-border);
   border-radius: 10px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.04);
   padding: 24px 28px;

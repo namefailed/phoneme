@@ -449,7 +449,7 @@ export class HeaderBarElement extends LitElement {
               .hb-mode-item .hb-mode-check { color: var(--accent); font-weight: 700; }
             </style>
             <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
-              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:200px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:200px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
               <div class="hb-mode-cap">Record as</div>
               <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
                 <span class="hb-mode-ico">🎙️</span>
@@ -483,7 +483,7 @@ export class HeaderBarElement extends LitElement {
             style="padding:6px 7px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
             @click=${this.toggleSettingsMenu}><svg class="ph-caret-ico ${this.settingsMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
           <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
-            style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+            style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
             <button class="hb-menu-item" role="menuitem" @click=${this.openModels}>🎛 Quick model switch…</button>
             <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}>🩺 Doctor — health check</button>
             <div class="hb-menu-sep"></div>

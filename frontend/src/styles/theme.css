@@ -13,6 +13,10 @@
   --warn: #f9e2af;
   --err: #f38ba8;
   --info: #89b4fa;
+  /* Shared border for popups/dropdowns/modals — matches the subtle accent-tinted
+     border the buttons use. Defined once on :root; resolves var(--accent) per
+     theme at use time, so it stays correct across all themes. */
+  --popup-border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 html[data-theme="catppuccin-macchiato"] {
