@@ -8,6 +8,28 @@ use chrono::{DateTime, Local};
 use phoneme_core::{ListFilter, RecordMode, RecordingId};
 use serde::{Deserialize, Serialize};
 
+/// One-time overrides for a Re-run → "All" (whole-pipeline) run, carried on
+/// [`Request::RetranscribeRecording`]. When present, the daemon forces the
+/// cleanup and auto-summary steps ON for this run and layers these values into
+/// the temporary in-memory config (never persisted). `None` fields fall back to
+/// the configured `[llm_post_process]` / `[summary]` values. The API key is
+/// intentionally NOT included — cleanup/summary reuse the configured key.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RerunAllOverrides {
+    #[serde(default)]
+    pub cleanup_provider: Option<String>,
+    #[serde(default)]
+    pub cleanup_model: Option<String>,
+    #[serde(default)]
+    pub cleanup_prompt: Option<String>,
+    #[serde(default)]
+    pub cleanup_api_url: Option<String>,
+    #[serde(default)]
+    pub summary_model: Option<String>,
+    #[serde(default)]
+    pub summary_prompt: Option<String>,
+}
+
 /// All operations a client can ask the daemon to perform.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -82,6 +104,11 @@ pub enum Request {
         /// machine transcript. Never persisted to config.
         #[serde(default)]
         post_process: Option<bool>,
+        /// When set, this is a Re-run → "All": force cleanup + auto-summary on
+        /// for this run and layer these one-time overrides into the temporary
+        /// config. `None` = a plain re-transcription (existing behavior).
+        #[serde(default)]
+        all_overrides: Option<RerunAllOverrides>,
     },
     RefireHook {
         id: RecordingId,

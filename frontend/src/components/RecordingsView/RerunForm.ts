@@ -269,8 +269,20 @@ export class RerunFormElement extends LitElement {
       case "hook":
         return { step: "hook", command: this.selectedHookCommand === "" ? null : this.selectedHookCommand };
       case "all":
-      default:
-        return { step: "all", model: this.selectedModel || null };
+      default: {
+        const isApi = isApiLlmProvider(this.cleanupProvider);
+        // Only carry cleanup/summary overrides when an AI provider is set up;
+        // otherwise "All" is just transcribe + hooks (overrides = null).
+        const overrides = this.llmPostProcessEnabled ? {
+          cleanupProvider: this.cleanupProvider || null,
+          cleanupModel: orNull(this.cleanupModel),
+          cleanupPrompt: this.cleanupPrompt.trim() === "" ? null : this.cleanupPrompt,
+          cleanupApiUrl: isApi ? orNull(this.cleanupApiUrl) : null,
+          summaryModel: orNull(this.summaryModel),
+          summaryPrompt: this.summaryPrompt.trim() === "" ? null : this.summaryPrompt,
+        } : null;
+        return { step: "all", model: this.selectedModel || null, overrides };
+      }
     }
   }
 
@@ -289,9 +301,95 @@ export class RerunFormElement extends LitElement {
     this.dispatchEvent(new CustomEvent("cancel", { bubbles: true, composed: true }));
   }
 
+  /** Summary model + instructions inputs (shared by the Summarize and All steps). */
+  private renderSummaryPanel() {
+    const sInput = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
+    const sLabel = "font-size: 11px; color: var(--fg-muted);";
+    return html`
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <label style=${sLabel}>Summary model</label>
+        <input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
+          placeholder="Leave blank to use the configured summary model"
+          @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <label style=${sLabel}>Summary instructions</label>
+        <textarea class="rerun-summary-prompt" rows="3" style="${sInput} resize: vertical; font-family: inherit;"
+          .value=${this.summaryPrompt} placeholder="Leave blank to use the configured summary prompt"
+          @input=${(e: Event) => this.summaryPrompt = (e.target as HTMLTextAreaElement).value}></textarea>
+      </div>
+    `;
+  }
+
+  /** Cleanup provider/preset/model/prompt panel (shared by the Cleanup and All steps). */
+  private renderCleanupPanel() {
+    const inputStyle = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
+    const labelStyle = "font-size: 11px; color: var(--fg-muted);";
+    const isApi = isApiLlmProvider(this.cleanupProvider);
+    return html`
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <label style=${labelStyle}>Quick preset</label>
+        <select class="rerun-cleanup-preset" style=${inputStyle} @change=${this.handleCleanupPreset}>
+          <option value="">— Pick a provider —</option>
+          <optgroup label="Local / offline">
+            ${LOCAL_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
+          </optgroup>
+          <optgroup label="Cloud (API key)">
+            ${CLOUD_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
+          </optgroup>
+        </select>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <label style=${labelStyle}>Provider</label>
+        <select class="rerun-cleanup-provider" style=${inputStyle} @change=${this.handleCleanupProviderChange}>
+          ${CLEANUP_PROVIDERS.map(p => html`<option value=${p} ?selected=${p === this.cleanupProvider}>${p}</option>`)}
+        </select>
+      </div>
+      ${isApi ? html`
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style=${labelStyle}>API URL (blank = provider default)</label>
+          <input type="text" class="rerun-cleanup-url" style=${inputStyle}
+            .value=${this.cleanupApiUrl} @input=${this.handleCleanupApiUrlInput} @change=${() => this.fetchCleanupModels()} placeholder="Provider default" />
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style=${labelStyle}>API key</label>
+          <input type="password" class="rerun-cleanup-key" style=${inputStyle}
+            .value=${this.cleanupApiKey} @input=${this.handleCleanupApiKeyInput} @change=${() => this.fetchCleanupModels()} placeholder="Configured key" />
+        </div>
+      ` : nothing}
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <label style="display: flex; justify-content: space-between; align-items: center; ${labelStyle}">
+          <span>Model</span>
+          <button type="button" class="rerun-cleanup-refresh" title="Refresh model list"
+            style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0;"
+            ?disabled=${this.cleanupModelsLoading} @click=${() => this.fetchCleanupModels()}>↻ Refresh</button>
+        </label>
+        ${this.cleanupModelOptions.length > 0
+          ? html`<select class="rerun-cleanup-model-select" style=${inputStyle} @change=${this.handleCleanupModelSelect}>
+              ${this.cleanupModelOptions.map(m => html`<option value=${m} ?selected=${m === this.cleanupModel}>${m}</option>`)}
+            </select>`
+          : html`<input type="text" class="rerun-cleanup-model" style=${inputStyle}
+              .value=${this.cleanupModel} @input=${this.handleCleanupModelInput} placeholder="Model id" />`}
+        ${this.cleanupModelsLoading
+          ? html`<p style="margin: 0; ${labelStyle}">Loading models…</p>`
+          : this.cleanupModelOptions.length === 0
+            ? html`<p style="margin: 0; ${labelStyle}">${this.cleanupModelsError
+                ? `Couldn't list models (${this.cleanupModelsError}). Type a model id or Refresh.`
+                : "No models listed — type one or click Refresh."}</p>`
+            : nothing}
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <label style=${labelStyle}>Prompt</label>
+        <textarea class="rerun-cleanup-prompt" rows="3" style="${inputStyle} resize: vertical; font-family: inherit;"
+          .value=${this.cleanupPrompt} @input=${this.handleCleanupPromptInput} placeholder="Cleanup instructions"></textarea>
+      </div>
+    `;
+  }
+
   /** The per-step options block shown inside the Re-run menu. */
   private renderStepOptions() {
     if (this.rerunStep === "all") {
+      const sectionStyle = "font-size: 10px; font-weight: 700; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border-subtle);";
       return html`
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label style="font-size: 11px; color: var(--fg-muted);">Transcription model</label>
@@ -301,9 +399,22 @@ export class RerunFormElement extends LitElement {
             `)}
           </select>
         </div>
-        <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
-          Re-transcribes the audio, then re-runs cleanup, the AI summary (if enabled in Settings), and your hooks.
-        </p>
+        ${this.llmPostProcessEnabled ? html`
+          <div style=${sectionStyle}>Cleanup</div>
+          ${this.renderCleanupPanel()}
+          <div style=${sectionStyle}>Summary</div>
+          ${this.renderSummaryPanel()}
+          <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
+            Re-transcribes, then re-runs cleanup and the AI summary with these one-time settings, then your hooks. Overrides apply to this run only and aren't saved.
+          </p>
+        ` : html`
+          <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
+            Re-transcribes the audio and runs your hooks. Set up an AI provider to also include cleanup &amp; summary here.
+          </p>
+          <button class="rerun-enable-cleanup" type="button"
+            style="align-self: flex-start; padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
+            @click=${this.openCleanupSettings}>Set up AI in Settings →</button>
+        `}
       `;
     }
 
@@ -318,24 +429,11 @@ export class RerunFormElement extends LitElement {
             @click=${this.openCleanupSettings}>Set up AI in Settings →</button>
         `;
       }
-      const sInput = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
-      const sLabel = "font-size: 11px; color: var(--fg-muted);";
       return html`
         <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
           Regenerates the AI summary from the current transcript. Overrides apply to this run only and aren't saved; the transcript itself isn't changed.
         </p>
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style=${sLabel}>Summary model</label>
-          <input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
-            placeholder="Leave blank to use the configured summary model"
-            @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style=${sLabel}>Summary instructions</label>
-          <textarea class="rerun-summary-prompt" rows="3" style="${sInput} resize: vertical; font-family: inherit;"
-            .value=${this.summaryPrompt} placeholder="Leave blank to use the configured summary prompt"
-            @input=${(e: Event) => this.summaryPrompt = (e.target as HTMLTextAreaElement).value}></textarea>
-        </div>
+        ${this.renderSummaryPanel()}
       `;
     }
 
@@ -365,8 +463,6 @@ export class RerunFormElement extends LitElement {
     }
 
     if (this.rerunStep === "cleanup") {
-      const inputStyle = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
-      const labelStyle = "font-size: 11px; color: var(--fg-muted);";
       if (!this.llmPostProcessEnabled) {
         return html`
           <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
@@ -377,72 +473,11 @@ export class RerunFormElement extends LitElement {
             @click=${this.openCleanupSettings}>Enable cleanup in Settings →</button>
         `;
       }
-      const isApi = isApiLlmProvider(this.cleanupProvider);
       return html`
         <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
           Re-cleans the original transcript with the LLM (re-transcription is skipped). These overrides apply to this run only and aren't saved.
         </p>
-
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style=${labelStyle}>Quick preset</label>
-          <select class="rerun-cleanup-preset" style=${inputStyle} @change=${this.handleCleanupPreset}>
-            <option value="">— Pick a provider —</option>
-            <optgroup label="Local / offline">
-              ${LOCAL_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
-            </optgroup>
-            <optgroup label="Cloud (API key)">
-              ${CLOUD_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
-            </optgroup>
-          </select>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style=${labelStyle}>Provider</label>
-          <select class="rerun-cleanup-provider" style=${inputStyle} @change=${this.handleCleanupProviderChange}>
-            ${CLEANUP_PROVIDERS.map(p => html`<option value=${p} ?selected=${p === this.cleanupProvider}>${p}</option>`)}
-          </select>
-        </div>
-
-        ${isApi ? html`
-          <div style="display: flex; flex-direction: column; gap: 4px;">
-            <label style=${labelStyle}>API URL (blank = provider default)</label>
-            <input type="text" class="rerun-cleanup-url" style=${inputStyle}
-              .value=${this.cleanupApiUrl} @input=${this.handleCleanupApiUrlInput} @change=${() => this.fetchCleanupModels()} placeholder="Provider default" />
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 4px;">
-            <label style=${labelStyle}>API key</label>
-            <input type="password" class="rerun-cleanup-key" style=${inputStyle}
-              .value=${this.cleanupApiKey} @input=${this.handleCleanupApiKeyInput} @change=${() => this.fetchCleanupModels()} placeholder="Configured key" />
-          </div>
-        ` : nothing}
-
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style="display: flex; justify-content: space-between; align-items: center; ${labelStyle}">
-            <span>Model</span>
-            <button type="button" class="rerun-cleanup-refresh" title="Refresh model list"
-              style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0;"
-              ?disabled=${this.cleanupModelsLoading} @click=${() => this.fetchCleanupModels()}>↻ Refresh</button>
-          </label>
-          ${this.cleanupModelOptions.length > 0
-            ? html`<select class="rerun-cleanup-model-select" style=${inputStyle} @change=${this.handleCleanupModelSelect}>
-                ${this.cleanupModelOptions.map(m => html`<option value=${m} ?selected=${m === this.cleanupModel}>${m}</option>`)}
-              </select>`
-            : html`<input type="text" class="rerun-cleanup-model" style=${inputStyle}
-                .value=${this.cleanupModel} @input=${this.handleCleanupModelInput} placeholder="Model id" />`}
-          ${this.cleanupModelsLoading
-            ? html`<p style="margin: 0; ${labelStyle}">Loading models…</p>`
-            : this.cleanupModelOptions.length === 0
-              ? html`<p style="margin: 0; ${labelStyle}">${this.cleanupModelsError
-                  ? `Couldn't list models (${this.cleanupModelsError}). Type a model id or Refresh.`
-                  : "No models listed — type one or click Refresh."}</p>`
-              : nothing}
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style=${labelStyle}>Prompt</label>
-          <textarea class="rerun-cleanup-prompt" rows="3" style="${inputStyle} resize: vertical; font-family: inherit;"
-            .value=${this.cleanupPrompt} @input=${this.handleCleanupPromptInput} placeholder="Cleanup instructions"></textarea>
-        </div>
+        ${this.renderCleanupPanel()}
       `;
     }
 

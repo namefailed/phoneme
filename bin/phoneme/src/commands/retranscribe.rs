@@ -41,6 +41,7 @@ pub async fn run(args: RetranscribeArgs, cfg: &Config) -> ExitCode {
             model: args.model,
             run_hooks,
             post_process,
+            all_overrides: None,
         })
         .await
     {

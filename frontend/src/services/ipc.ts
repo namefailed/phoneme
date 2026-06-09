@@ -133,13 +133,30 @@ export async function stopMeeting(): Promise<{ meeting_id: string }> {
   return await tauriInvoke<{ meeting_id: string }>("stop_meeting");
 }
 
+/**
+ * One-time whole-pipeline overrides for a Re-run → "All". Keys are snake_case
+ * to match the daemon's `RerunAllOverrides` (Tauri only camelCases the top-level
+ * command args, not nested object keys). The API key is intentionally absent —
+ * cleanup/summary reuse the configured key. When present, cleanup + auto-summary
+ * are forced on for this one run.
+ */
+export type RerunAllOverrides = {
+  cleanup_provider?: string | null;
+  cleanup_model?: string | null;
+  cleanup_prompt?: string | null;
+  cleanup_api_url?: string | null;
+  summary_model?: string | null;
+  summary_prompt?: string | null;
+};
+
 export async function retranscribeRecording(
   id: string,
   model: string | null = null,
   runHooks: boolean | null = null,
   postProcess: boolean | null = null,
+  allOverrides: RerunAllOverrides | null = null,
 ): Promise<void> {
-  await tauriInvoke("retranscribe_recording", { id, model, runHooks, postProcess });
+  await tauriInvoke("retranscribe_recording", { id, model, runHooks, postProcess, allOverrides });
 }
 
 /**

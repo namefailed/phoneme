@@ -6,11 +6,22 @@
  */
 import { retranscribeRecording, rerunCleanup, rerunSummary, refireHook } from "../../services/ipc";
 
+/** Whole-pipeline one-time overrides for the "All" step (camelCase; mapped to
+ *  the daemon's snake_case shape in applyRerun). Null = use configured values. */
+export type RerunAllParams = {
+  cleanupProvider: string | null;
+  cleanupModel: string | null;
+  cleanupPrompt: string | null;
+  cleanupApiUrl: string | null;
+  summaryModel: string | null;
+  summaryPrompt: string | null;
+};
+
 export type RerunPayload =
   | { step: "transcribe"; model: string | null; runHooks: boolean; postProcess: boolean }
   | { step: "cleanup"; model: string | null; provider: string | null; prompt: string | null; apiUrl: string | null; apiKey: string | null }
   | { step: "summarize"; model: string | null; prompt: string | null }
-  | { step: "all"; model: string | null }
+  | { step: "all"; model: string | null; overrides: RerunAllParams | null }
   | { step: "hook"; command: string | null };
 
 /** Apply a Re-run payload to a single recording id. */
@@ -26,9 +37,17 @@ export async function applyRerun(id: string, p: RerunPayload): Promise<void> {
       await rerunSummary(id, p.model, p.prompt);
       break;
     case "all":
-      // Re-fire the whole pipeline: re-transcribe, then configured cleanup,
-      // auto-summary, and hooks (post-process + hooks both forced on).
-      await retranscribeRecording(id, p.model, true, true);
+      // Re-fire the whole pipeline: re-transcribe, then cleanup, auto-summary,
+      // and hooks (all forced on). `overrides` carries one-time cleanup/summary
+      // settings; null = use the configured pipeline.
+      await retranscribeRecording(id, p.model, true, true, p.overrides ? {
+        cleanup_provider: p.overrides.cleanupProvider,
+        cleanup_model: p.overrides.cleanupModel,
+        cleanup_prompt: p.overrides.cleanupPrompt,
+        cleanup_api_url: p.overrides.cleanupApiUrl,
+        summary_model: p.overrides.summaryModel,
+        summary_prompt: p.overrides.summaryPrompt,
+      } : null);
       break;
     case "hook":
       await refireHook(id, p.command);

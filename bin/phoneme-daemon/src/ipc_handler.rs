@@ -366,10 +366,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             model,
             run_hooks,
             post_process,
+            all_overrides,
         } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 let mut cfg = state.config.load().as_ref().clone();
                 let mut changed = false;
+                // Track whisper-model changes separately: only those require
+                // waiting for the whisper-server supervisor to restart. Cleanup
+                // / summary overrides don't touch the server, so don't pay the
+                // 500ms restart delay (or risk thrashing) for them.
+                let mut whisper_changed = false;
                 if let Some(m) = model {
                     if cfg.whisper.provider == phoneme_core::config::TranscriptionBackend::Local {
                         cfg.whisper.model_path = m;
@@ -377,6 +383,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         cfg.whisper.model = m;
                     }
                     changed = true;
+                    whisper_changed = true;
                 }
                 if let Some(rh) = run_hooks {
                     cfg.hook.run_on_transcribe = rh;
@@ -392,10 +399,38 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     cfg.llm_post_process.enabled = false;
                     changed = true;
                 }
+                // Re-run → "All": force the whole pipeline on and layer the
+                // one-time cleanup + summary overrides into the temp config.
+                // (Applied after the post_process opt-out so cleanup stays on.)
+                if let Some(ov) = all_overrides {
+                    cfg.llm_post_process.enabled = true;
+                    if let Some(p) = ov.cleanup_provider {
+                        cfg.llm_post_process.provider = p;
+                    }
+                    if let Some(m) = ov.cleanup_model {
+                        cfg.llm_post_process.model = m;
+                    }
+                    if let Some(p) = ov.cleanup_prompt {
+                        cfg.llm_post_process.prompt = p;
+                    }
+                    if let Some(u) = ov.cleanup_api_url {
+                        cfg.llm_post_process.api_url = u;
+                    }
+                    cfg.summary.auto = true;
+                    if let Some(m) = ov.summary_model {
+                        cfg.summary.model = m;
+                    }
+                    if let Some(p) = ov.summary_prompt {
+                        cfg.summary.prompt = p;
+                    }
+                    changed = true;
+                }
                 if changed {
                     state.config.store(std::sync::Arc::new(cfg));
-                    // Wait a moment for the supervisor to restart the server
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    if whisper_changed {
+                        // Wait a moment for the supervisor to restart the server.
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
                 }
                 let payload = HookPayload {
                     id: r.id,

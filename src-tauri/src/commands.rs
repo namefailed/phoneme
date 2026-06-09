@@ -216,6 +216,7 @@ pub async fn retranscribe_recording(
     model: Option<String>,
     run_hooks: Option<bool>,
     post_process: Option<bool>,
+    all_overrides: Option<phoneme_ipc::RerunAllOverrides>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(
@@ -225,6 +226,7 @@ pub async fn retranscribe_recording(
             model,
             run_hooks,
             post_process,
+            all_overrides,
         },
     )
     .await
