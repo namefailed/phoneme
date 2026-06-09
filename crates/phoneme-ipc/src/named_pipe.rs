@@ -21,6 +21,82 @@ pub fn pipe_path(name: &str) -> String {
     format!(r"\\.\pipe\{name}")
 }
 
+/// SDDL for the IPC pipe: a **protected** DACL (`P` — no inherited ACEs)
+/// granting `GENERIC_ALL` to the object **owner** (the user who launched the
+/// daemon) and to `LocalSystem`, and to no one else.
+///
+/// A named pipe created with the default security descriptor inherits the
+/// token's default DACL, which on a normal interactive logon also grants every
+/// other session `GENERIC_READ` — enough to read the daemon's event stream
+/// (live transcripts) and, depending on configuration, to drive it. Pinning an
+/// owner-only descriptor removes that exposure. (audit S-C1)
+///
+/// Note: `OW` (owner) resolves to the creating user for a normal, non-elevated
+/// process — which is how Phoneme runs (a per-user app). It does not by itself
+/// stop *same-user* code (that needs an auth token, tracked separately); it
+/// closes the cross-user / cross-session hole.
+const PIPE_SDDL: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
+
+/// Create a pipe-server instance whose kernel object carries [`PIPE_SDDL`]
+/// instead of the permissive default descriptor.
+///
+/// Builds a `SECURITY_DESCRIPTOR` from the SDDL, points a `SECURITY_ATTRIBUTES`
+/// at it, and hands that to tokio's raw constructor. The descriptor is
+/// `LocalAlloc`'d by the conversion call and freed immediately after `create`
+/// (which copies it into the new object).
+fn create_secured_server(opts: &ServerOptions, path: &str) -> std::io::Result<NamedPipeServer> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+
+    let sddl_w: Vec<u16> = std::ffi::OsStr::new(PIPE_SDDL)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut psd: *mut core::ffi::c_void = std::ptr::null_mut();
+    // SAFETY: `sddl_w` is a valid NUL-terminated UTF-16 string; on success the
+    // call writes a freshly `LocalAlloc`'d descriptor into `psd`.
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl_w.as_ptr(),
+            SDDL_REVISION_1,
+            &mut psd,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let mut sa = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: psd,
+        bInheritHandle: 0,
+    };
+
+    // SAFETY: `sa` is a valid SECURITY_ATTRIBUTES whose descriptor stays live
+    // until after this call; tokio passes it straight to CreateNamedPipeW, which
+    // copies the descriptor into the kernel object.
+    let result = unsafe {
+        opts.create_with_security_attributes_raw(
+            path,
+            &mut sa as *mut SECURITY_ATTRIBUTES as *mut core::ffi::c_void,
+        )
+    };
+
+    // SAFETY: `psd` was allocated by the conversion call above and is no longer
+    // referenced after `create` returns.
+    unsafe {
+        LocalFree(psd as _);
+    }
+
+    result
+}
+
 /// Server-side: a single accepted connection. Use [`NamedPipeListener`] to
 /// produce these.
 pub struct NamedPipeConnection {
@@ -75,18 +151,17 @@ impl NamedPipeListener {
     /// semantics: first creator wins).
     pub fn bind(name: &str) -> TransportResult<Self> {
         let path = pipe_path(name);
-        let server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&path)
-            .map_err(|e| {
-                // ERROR_ACCESS_DENIED (5) or ERROR_PIPE_BUSY (231)
-                // → another instance owns this pipe name.
-                if matches!(e.raw_os_error(), Some(5) | Some(231)) {
-                    IpcTransportError::AlreadyInUse
-                } else {
-                    IpcTransportError::Connect(e)
-                }
-            })?;
+        let mut opts = ServerOptions::new();
+        opts.first_pipe_instance(true);
+        let server = create_secured_server(&opts, &path).map_err(|e| {
+            // ERROR_ACCESS_DENIED (5) or ERROR_PIPE_BUSY (231)
+            // → another instance owns this pipe name.
+            if matches!(e.raw_os_error(), Some(5) | Some(231)) {
+                IpcTransportError::AlreadyInUse
+            } else {
+                IpcTransportError::Connect(e)
+            }
+        })?;
         Ok(Self {
             name: name.to_string(),
             current: Some(server),
@@ -102,9 +177,8 @@ impl NamedPipeListener {
             .ok_or_else(|| IpcTransportError::Internal("listener empty".into()))?;
         server.connect().await?;
 
-        // Immediately create the next listener instance.
-        let next = ServerOptions::new()
-            .create(pipe_path(&self.name))
+        // Immediately create the next listener instance — same owner-only ACL.
+        let next = create_secured_server(&ServerOptions::new(), &pipe_path(&self.name))
             .map_err(IpcTransportError::Connect)?;
         self.current = Some(next);
 
