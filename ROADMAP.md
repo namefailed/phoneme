@@ -72,9 +72,10 @@ same-user malware or a malicious IPC client. Ordered by priority.*
   on every pipe instance removes the default cross-session `GENERIC_READ` (which
   exposed the transcript event stream). Same-user isolation (an auth token)
   remains open. *(audit S-C1/S-H8)*
-- [ ] **Hook execution allowlist over IPC** — `RefireHook`/`HookTest` accept
-  arbitrary commands; restrict to the hooks already in config rather than
-  running anything a caller sends. *(S-C2)*
+- [x] **Hook execution allowlist over IPC** — `RefireHook` now only runs a
+  command already in the configured hook allowlist (arbitrary IPC commands are
+  rejected). `HookTest` intentionally still runs a typed command — it's the Hook
+  Manager's test affordance, gated by the owner-only pipe (S-C1). *(S-C2)*
 - [x] **IPC frame size cap** (`codec.rs`) — NDJSON frames are bounded at 8 MiB;
   an unterminated over-cap frame errors instead of growing the buffer. *(S-H6)*
 - [x] **Path guards** — `reveal_file` restricts the target to `audio_dir`;
