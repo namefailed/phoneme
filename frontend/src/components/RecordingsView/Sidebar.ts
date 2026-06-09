@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { listTags, type Tag } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, type UiFilter, type RecordingKind } from "../../state/filter";
+import "./QueuePanel";
 
 @customElement('ph-sidebar')
 export class SidebarElement extends LitElement {
@@ -81,29 +82,33 @@ export class SidebarElement extends LitElement {
 
     return html`
       <div class="rv-sidebar">
-        <div class="sidebar-header">Library</div>
-        <div class="sidebar-list">
-          ${this.renderKindItem("all", "📚", "All Recordings")}
-          ${this.renderKindItem("single", "🎙️", "Voice Notes")}
-          ${this.renderKindItem("meeting", "👥", "Meetings")}
+        <div class="rv-sidebar-scroll">
+          <div class="sidebar-header">Library</div>
+          <div class="sidebar-list">
+            ${this.renderKindItem("all", "📚", "All Recordings")}
+            ${this.renderKindItem("single", "🎙️", "Voice Notes")}
+            ${this.renderKindItem("meeting", "👥", "Meetings")}
+          </div>
+
+          <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);">Tags</div>
+          <div class="sidebar-list">
+            <div class="sidebar-item ${!f.tag_id ? 'active' : ''}" @click=${() => this.setTagFilter(null)}>
+              <span class="sidebar-icon" style="color: var(--accent);">#</span>
+              <span>All Tags</span>
+            </div>
+            ${this.tags.length === 0 ? html`
+              <div style="padding: 12px; font-size: 11px; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a note's detail view.</div>
+            ` : this.tags.map(t => html`
+              <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
+                <span class="sidebar-icon" style="color: var(--accent);">#</span>
+                <span>${t.name}</span>
+                <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
+              </div>
+            `)}
+          </div>
         </div>
 
-        <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);">Tags</div>
-        <div class="sidebar-list">
-          <div class="sidebar-item ${!f.tag_id ? 'active' : ''}" @click=${() => this.setTagFilter(null)}>
-            <span class="sidebar-icon" style="color: var(--accent);">#</span>
-            <span>All Tags</span>
-          </div>
-          ${this.tags.length === 0 ? html`
-            <div style="padding: 12px; font-size: 11px; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a note's detail view.</div>
-          ` : this.tags.map(t => html`
-            <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
-              <span class="sidebar-icon" style="color: var(--accent);">#</span>
-              <span>${t.name}</span>
-              <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
-            </div>
-          `)}
-        </div>
+        <ph-queue-panel></ph-queue-panel>
       </div>
     `;
   }

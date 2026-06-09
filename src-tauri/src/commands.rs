@@ -291,6 +291,19 @@ pub async fn rerun_summary(
     forward(&bridge, Request::RerunSummary { id, model, prompt }).await
 }
 
+/// List the transcription pipeline queue (pending + processing items).
+#[tauri::command]
+pub async fn list_queue(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListQueue).await
+}
+
+/// Remove a still-pending recording from the queue.
+#[tauri::command]
+pub async fn cancel_queued(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::CancelQueued { id }).await
+}
+
 /// Manually update the transcript text for a specific recording.
 #[tauri::command]
 pub async fn update_transcript(

@@ -226,6 +226,42 @@ impl InboxQueue {
         Ok(recovered)
     }
 
+    /// List the payloads currently in `pending/`, oldest-first (the order they
+    /// will be claimed). Unparseable files are skipped (not surfaced to the UI).
+    pub async fn list_pending(&self) -> Result<Vec<HookPayload>> {
+        let mut out = vec![];
+        for path in read_json_entries_sorted(&self.root.join("pending")).await? {
+            if let Ok(p) = read_payload(&path).await {
+                out.push(p);
+            }
+        }
+        Ok(out)
+    }
+
+    /// List the payloads currently in `processing/` (normally at most one — the
+    /// item the worker is actively transcribing).
+    pub async fn list_processing(&self) -> Result<Vec<HookPayload>> {
+        let mut out = vec![];
+        for path in read_json_entries_sorted(&self.root.join("processing")).await? {
+            if let Ok(p) = read_payload(&path).await {
+                out.push(p);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Remove a still-pending payload from the queue (user-initiated cancel).
+    /// Returns `true` if it was present and removed; `false` if it was already
+    /// claimed/gone (so the caller can report that it couldn't be cancelled).
+    pub async fn cancel_pending(&self, id: &RecordingId) -> Result<bool> {
+        let path = self.root.join("pending").join(format!("{id}.json"));
+        if fs::try_exists(&path).await.unwrap_or(false) {
+            fs::remove_file(&path).await?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Count files in each inbox subdirectory.
     pub async fn counts(&self) -> Result<InboxCounts> {
         Ok(InboxCounts {

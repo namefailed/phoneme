@@ -586,6 +586,57 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RerunSummary { id, model, prompt } => {
             rerun_summary(state, id, model, prompt).await
         }
+        Request::ListQueue => {
+            let pending = state.inbox.list_pending().await;
+            let processing = state.inbox.list_processing().await;
+            match (pending, processing) {
+                (Ok(pending), Ok(processing)) => {
+                    let entry = |p: &phoneme_core::HookPayload, queue_state: &str| {
+                        serde_json::json!({
+                            "id": p.id,
+                            "timestamp": p.timestamp,
+                            "audio_path": p.audio_path,
+                            "duration_ms": p.duration_ms,
+                            "model": p.model,
+                            "state": queue_state,
+                        })
+                    };
+                    let mut items: Vec<serde_json::Value> = Vec::new();
+                    // The actively-processing item(s) first, then the pending queue.
+                    items.extend(processing.iter().map(|p| entry(p, "processing")));
+                    items.extend(pending.iter().map(|p| entry(p, "pending")));
+                    Response::Ok(serde_json::Value::Array(items))
+                }
+                (Err(e), _) | (_, Err(e)) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::CancelQueued { id } => match state.inbox.cancel_pending(&id).await {
+            Ok(true) => {
+                // Leave the recording in a terminal state so it isn't stuck
+                // showing "transcribing"; the user can re-run it later.
+                let _ = state
+                    .catalog
+                    .update_status(&id, RecordingStatus::TranscribeFailed)
+                    .await;
+                state
+                    .events
+                    .emit(DaemonEvent::RecordingCancelled { id: id.clone() });
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::Value::Null)
+            }
+            Ok(false) => Response::Err(IpcError {
+                kind: IpcErrorKind::NotFound,
+                message: "recording is not in the pending queue (already processing or finished)"
+                    .into(),
+            }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         // Unlike RefireHook, HookTest intentionally runs a caller-supplied
         // command: it is the Hook Manager's "test this command" affordance, used
         // to validate a hook the user is editing but has not saved yet. That is a

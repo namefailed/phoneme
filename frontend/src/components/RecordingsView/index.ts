@@ -14,11 +14,20 @@ import "./styles.css";
 // are window-layout preferences, like the record-mode dropdown's key).
 const LS_SPLIT = "phoneme.layout.splitPercent";
 const LS_SIDEBAR = "phoneme.layout.sidebarOpen";
+const LS_SIDEBAR_WIDTH = "phoneme.layout.sidebarWidth";
+const SIDEBAR_MIN = 160;
+const SIDEBAR_MAX = 480;
 
 /** Persisted list/detail split %, clamped to a sane range (default 61). */
 function readStoredSplit(): number {
   const n = Number(localStorage.getItem(LS_SPLIT));
   return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 61;
+}
+
+/** Persisted sidebar width in px, clamped (default 200). */
+function readStoredSidebarWidth(): number {
+  const n = Number(localStorage.getItem(LS_SIDEBAR_WIDTH));
+  return Number.isFinite(n) && n >= SIDEBAR_MIN && n <= SIDEBAR_MAX ? n : 200;
 }
 
 /** Persisted sidebar open state (default open). */
@@ -35,6 +44,7 @@ export class RecordingsView {
   private splitPercent = readStoredSplit();
   private detailVisible = true;
   private sidebarVisible = readStoredSidebar();
+  private sidebarWidth = readStoredSidebarWidth();
   private unsub: (() => void) | null = null;
   private splitter: Splitter;
   private keydownHandler: (e: KeyboardEvent) => void;
@@ -56,6 +66,7 @@ export class RecordingsView {
     this.container.innerHTML = `
       <div class="rv-shell" id="rv-shell">
         <ph-sidebar></ph-sidebar>
+        <div class="rv-sidebar-resizer" id="rv-sidebar-resize"></div>
         <div class="rv-list" id="rv-list">
           <div id="rv-list-inner" style="height:100%; overflow:hidden;"></div>
           <div id="rv-bulk-bar" style="display:none;"></div>
@@ -92,6 +103,7 @@ export class RecordingsView {
     });
 
     this.applyLayout();
+    this.setupSidebarResize();
     void this.refresh();
     void this.subscribeToEvents();
     this.keydownHandler = this.handleKeydown.bind(this);
@@ -143,13 +155,43 @@ export class RecordingsView {
       sidebar.style.overflow = this.sidebarVisible ? "" : "hidden";
     }
 
-    const sidebarWidth = this.sidebarVisible ? "200px" : "0px";
+    const sidebarWidth = this.sidebarVisible ? `${this.sidebarWidth}px` : "0px";
+    const resizerWidth = this.sidebarVisible ? "4px" : "0px";
+    const resizer = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
+    if (resizer) resizer.style.display = this.sidebarVisible ? "" : "none";
 
     if (this.detailVisible) {
-      shell.style.gridTemplateColumns = `${sidebarWidth} ${this.splitPercent}% 3px minmax(0, 1fr)`;
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} ${this.splitPercent}% 3px minmax(0, 1fr)`;
     } else {
-      shell.style.gridTemplateColumns = `${sidebarWidth} 1fr 0 0`;
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} 1fr 0 0`;
     }
+  }
+
+  /** Drag-to-resize the left sidebar; width persists per device. */
+  private setupSidebarResize() {
+    const handle = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
+    if (!handle) return;
+    handle.addEventListener("mousedown", (e: MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = this.sidebarWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      const onMove = (m: MouseEvent) => {
+        const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + (m.clientX - startX)));
+        this.sidebarWidth = w;
+        this.applyLayout();
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        try { localStorage.setItem(LS_SIDEBAR_WIDTH, String(this.sidebarWidth)); } catch { /* private mode */ }
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
   }
 
   toggleSidebar() {

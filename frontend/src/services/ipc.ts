@@ -191,6 +191,27 @@ export async function rerunSummary(
   await tauriInvoke("rerun_summary", { id, model, prompt });
 }
 
+/** One entry in the transcription pipeline queue. */
+export type QueueEntry = {
+  id: string;
+  timestamp: string;
+  audio_path: string;
+  duration_ms: number;
+  model: string;
+  /** "processing" = actively transcribing; "pending" = waiting in line. */
+  state: "pending" | "processing";
+};
+
+/** List the transcription pipeline queue (processing item(s) first, then pending). */
+export async function listQueue(): Promise<QueueEntry[]> {
+  return await tauriInvoke<QueueEntry[]>("list_queue");
+}
+
+/** Remove a still-pending recording from the queue. */
+export async function cancelQueued(id: string): Promise<void> {
+  await tauriInvoke("cancel_queued", { id });
+}
+
 /**
  * Manually update the text transcript of a specific recording.
  */

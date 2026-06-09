@@ -149,6 +149,16 @@ pub enum Request {
         notes: String,
     },
 
+    /// List the transcription pipeline queue: items waiting in `pending/` (in
+    /// claim order) plus the one currently `processing/`. Returns queue entries
+    /// with id, timestamp, audio path, duration, and state.
+    ListQueue,
+    /// Remove a still-pending recording from the queue before it's transcribed.
+    /// No-op (reported) if it was already claimed/processing.
+    CancelQueued {
+        id: RecordingId,
+    },
+
     // Daemon control
     DaemonStatus,
     Shutdown,

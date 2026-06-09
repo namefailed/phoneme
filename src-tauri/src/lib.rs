@@ -246,6 +246,8 @@ pub fn run() {
             commands::refire_hook,
             commands::rerun_cleanup,
             commands::rerun_summary,
+            commands::list_queue,
+            commands::cancel_queued,
             commands::update_transcript,
             commands::update_meeting_name,
             commands::get_original_transcript,
