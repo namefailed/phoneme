@@ -8,7 +8,7 @@
 - [ ] Uninstall any existing Phoneme.
 - [ ] Delete `%APPDATA%\phoneme\` and `%LOCALAPPDATA%\phoneme\`.
 - [ ] Have a whisper-server reachable at `http://127.0.0.1:5809` (or use
-      bundled-server mode with a known-good GGUF, e.g. `ggml-base.en.bin`).
+      bundled-server mode with a known-good GGML model, e.g. `ggml-base.en.bin`).
 
 ## Install + wizard
 
