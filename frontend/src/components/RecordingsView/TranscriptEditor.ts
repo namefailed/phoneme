@@ -7,7 +7,7 @@ import { applyVimrc } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
-import { vim, Vim } from "@replit/codemirror-vim";
+import { vim, Vim, getCM } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
 @customElement('ph-transcript-editor')
@@ -76,22 +76,29 @@ export class TranscriptEditorElement extends LitElement {
   private mountEditor(vimrc: string) {
     const theme = EditorView.theme({
       "&": {
-        background: "transparent",
+        // Match the Notes editor: a rounded bordered field that fills its block
+        // and turns accent on focus. height:100% lets it grow to fill the
+        // flex:1 transcript-block instead of sitting at content height.
+        background: "var(--bg-surface)",
         color: "var(--fg-default)",
-        height: "auto",
+        height: "100%",
         minHeight: "150px",
         fontFamily: "inherit",
         fontSize: "14px",
+        borderRadius: "8px",
+        border: "1px solid var(--border-subtle)",
+        padding: "8px 6px",
       },
       ".cm-content": {
         caretColor: "var(--accent)",
-        padding: "8px 0",
+        padding: "8px 12px",
       },
       ".cm-cursor": {
         borderLeftColor: "var(--accent)"
       },
       "&.cm-focused": {
-        outline: "none"
+        outline: "none",
+        borderColor: "var(--accent)",
       },
       ".cm-activeLine": {
         backgroundColor: "rgba(255, 255, 255, 0.02)"
@@ -124,24 +131,10 @@ export class TranscriptEditorElement extends LitElement {
       }
     });
 
-    // Track vim mode changes using a custom extension
-    const vimModeTracker = EditorView.domEventHandlers({
-      keydown: (e) => {
-        if (!this.vimMode) return;
-        // Simple heuristic: if typing a character, we're in insert mode
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          this.vimCurrentMode = "INSERT";
-        } else if (e.key === "Escape") {
-          this.vimCurrentMode = "NORMAL";
-        }
-      }
-    });
-
     const extensions = [
       theme,
       EditorView.lineWrapping,
       updateListener,
-      vimModeTracker,
       drawSelection({ cursorBlinkRate: 1200 }),
       keymap.of(standardKeymap),
     ];
@@ -158,6 +151,20 @@ export class TranscriptEditorElement extends LitElement {
       }),
       parent: this.editorRoot,
     });
+
+    // Reflect the REAL vim mode in the badge by subscribing to the editor's
+    // own mode-change events, rather than guessing from keystrokes. The legacy
+    // CodeMirror adapter from `getCM` emits "vim-mode-change" with the actual
+    // mode ("normal" | "insert" | "visual" | ...).
+    if (this.vimMode) {
+      const cm = getCM(this.view);
+      cm?.on("vim-mode-change", (e: { mode?: string; subMode?: string }) => {
+        const mode = (e?.mode ?? "normal").toUpperCase();
+        // Distinguish visual sub-modes (e.g. VISUAL LINE / VISUAL BLOCK).
+        this.vimCurrentMode = e?.subMode ? `${mode} ${e.subMode.toUpperCase()}` : mode;
+        this.requestUpdate();
+      });
+    }
   }
 
   private isDirty(): boolean {
@@ -198,13 +205,26 @@ export class TranscriptEditorElement extends LitElement {
     return html`
       <style>
         ph-transcript-editor {
-          display: block;
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+          min-height: 0;
+        }
+        ph-transcript-editor #cm-editor-root {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+        ph-transcript-editor #cm-editor-root .cm-editor {
+          flex: 1;
         }
         ph-transcript-editor .header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           margin-bottom: 8px;
+          flex: 0 0 auto;
         }
         ph-transcript-editor .title {
           font-size: 11px;

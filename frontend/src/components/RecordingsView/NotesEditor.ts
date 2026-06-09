@@ -5,7 +5,7 @@ import { applyVimrc } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
-import { vim, Vim } from "@replit/codemirror-vim";
+import { vim, Vim, getCM } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
@@ -86,7 +86,7 @@ export class NotesEditor {
         background: "var(--bg-surface)",
         color: "var(--fg-default)",
         height: "auto",
-        minHeight: "72px",
+        minHeight: "90px",
         fontFamily: "inherit",
         fontSize: "13px",
         borderRadius: "8px",
@@ -137,23 +137,6 @@ export class NotesEditor {
       }
     });
 
-    // Track vim mode changes using a custom extension
-    const vimModeTracker = EditorView.domEventHandlers({
-      keydown: (e) => {
-        if (!this.vimMode) return;
-        // Simple heuristic: if typing a character, we're in insert mode
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          this.vimCurrentMode = "INSERT";
-        } else if (e.key === "Escape") {
-          this.vimCurrentMode = "NORMAL";
-        }
-        // Update badge
-        if (this.vimBadgeElement) {
-          this.vimBadgeElement.textContent = this.vimCurrentMode;
-        }
-      }
-    });
-
     // Blur-on-focusout: flush the debounce immediately.
     const blurListener = EditorView.domEventHandlers({
       blur: () => {
@@ -167,7 +150,6 @@ export class NotesEditor {
       theme,
       EditorView.lineWrapping,
       updateListener,
-      vimModeTracker,
       blurListener,
       drawSelection({ cursorBlinkRate: 1200 }),
       keymap.of(standardKeymap),
@@ -185,6 +167,17 @@ export class NotesEditor {
       }),
       parent: root,
     });
+
+    // Reflect the REAL vim mode in the badge via the editor's own mode-change
+    // events, not a keystroke heuristic. (No-op when vim mode is off.)
+    if (vimMode) {
+      const cm = getCM(this.view);
+      cm?.on("vim-mode-change", (e: { mode?: string; subMode?: string }) => {
+        const mode = (e?.mode ?? "normal").toUpperCase();
+        this.vimCurrentMode = e?.subMode ? `${mode} ${e.subMode.toUpperCase()}` : mode;
+        if (this.vimBadgeElement) this.vimBadgeElement.textContent = this.vimCurrentMode;
+      });
+    }
   }
 
   private async save() {
