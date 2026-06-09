@@ -4,17 +4,28 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../../utils/toast";
+import { CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
 import "./styles.css";
 
+/** Cloud speech-to-text providers offered in the wizard's connect step. */
+const STT_CLOUD_PROVIDERS: { value: string; label: string; model: string }[] = [
+  { value: "openai", label: "OpenAI (Whisper)", model: "whisper-1" },
+  { value: "groq", label: "Groq (Whisper, fast)", model: "whisper-large-v3" },
+  { value: "deepgram", label: "Deepgram", model: "nova-2" },
+  { value: "assemblyai", label: "AssemblyAI", model: "best" },
+  { value: "elevenlabs", label: "ElevenLabs Scribe", model: "scribe" },
+];
 
-export type WizardStep = "welcome" | "mode" | "configure" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
-const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "mic", "preview", "summary", "hook", "hotkey", "review", "done"];
+
+export type WizardStep = "welcome" | "mode" | "configure" | "connect" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
+const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "connect", "mic", "preview", "summary", "hook", "hotkey", "review", "done"];
 
 /** Short human label per step, shown in the progress stepper. */
 const STEP_LABELS: Record<WizardStep, string> = {
   welcome: "Welcome",
   mode: "Features",
   configure: "Setting up",
+  connect: "Connect AI",
   mic: "Microphone",
   preview: "Live Preview",
   summary: "Auto Summary",
@@ -552,6 +563,105 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
+  /**
+   * Unified "connect your AI providers" step. Shown only when a chosen feature
+   * needs a cloud key: transcription (no local Whisper) and/or AI cleanup &
+   * summaries (no local Ollama). Each uses the shared provider catalog so a
+   * non-technical user just picks a name and pastes a key. Fully skippable.
+   */
+  private renderConnect() {
+    const c = this.config;
+    if (!c.whisper) c.whisper = {};
+    if (!c.llm_post_process) c.llm_post_process = {};
+    const needsStt = !c._setup_whisper;
+    const offerCleanup = !c._setup_ollama;
+
+    // Nothing cloud to set up — everything is local. Auto-advance.
+    if (!needsStt && !offerCleanup) {
+      setTimeout(() => this.go("next"), 0);
+      return html`<div class="wizard-body"><p class="wizard-subtitle">All local — no API keys needed.</p></div>`;
+    }
+
+    const inputStyle =
+      "width:100%; padding:9px 12px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default); font-size:13px;";
+    const cleanupOn = !!c.llm_post_process.enabled;
+    const currentCleanupPreset = cleanupOn
+      ? (CLOUD_LLM_PRESETS.find((p) => p.apiUrl === (c.llm_post_process.api_url || ""))?.id ?? "")
+      : "";
+
+    return html`
+      <div class="wizard-body">
+        <h2 class="wizard-title">Connect your AI providers</h2>
+        <p class="wizard-subtitle">
+          These features will use a cloud API. Paste your keys now — or skip and add them anytime in
+          Settings. Keys are stored locally on your machine.
+        </p>
+
+        ${needsStt ? html`
+          <div class="wizard-feature on">
+            <div class="wizard-feature-head">
+              <span class="wizard-feature-title">🎙️ Transcription</span>
+            </div>
+            <div class="wizard-feature-body" style="display:flex; flex-direction:column; gap:10px;">
+              <select style=${inputStyle} @change=${(e: Event) => {
+                const v = (e.target as HTMLSelectElement).value;
+                const p = STT_CLOUD_PROVIDERS.find((x) => x.value === v);
+                c.whisper.provider = v || "local";
+                if (p) c.whisper.model = p.model;
+                this.requestUpdate();
+              }}>
+                <option value="">— Choose a transcription provider —</option>
+                ${STT_CLOUD_PROVIDERS.map((p) => html`<option value=${p.value} ?selected=${c.whisper.provider === p.value}>${p.label}</option>`)}
+              </select>
+              <input type="password" placeholder="API key" style=${inputStyle}
+                .value=${c.whisper.api_key || ""} @input=${(e: Event) => c.whisper.api_key = (e.target as HTMLInputElement).value} />
+              <input type="text" placeholder="Model (optional — leave blank for default)" style=${inputStyle}
+                .value=${c.whisper.model || ""} @input=${(e: Event) => c.whisper.model = (e.target as HTMLInputElement).value} />
+              <span class="wizard-feature-note">Required — without local Whisper, transcription needs a cloud provider.</span>
+            </div>
+          </div>` : ""}
+
+        ${offerCleanup ? html`
+          <div class="wizard-feature ${cleanupOn ? "on" : ""}">
+            <div class="wizard-feature-head">
+              <span class="wizard-feature-title">🧠 AI Cleanup & Summaries <span class="wizard-feature-rec" style="background:none; color:var(--fg-faded);">optional</span></span>
+            </div>
+            <div class="wizard-feature-body" style="display:flex; flex-direction:column; gap:10px;">
+              <select style=${inputStyle} @change=${(e: Event) => {
+                const id = (e.target as HTMLSelectElement).value;
+                if (!id) {
+                  c.llm_post_process.enabled = false;
+                } else {
+                  const preset = findLlmPreset(id);
+                  if (preset) {
+                    c.llm_post_process.enabled = true;
+                    c.llm_post_process.provider = preset.kind;
+                    c.llm_post_process.api_url = preset.apiUrl;
+                    c.llm_post_process.model = preset.defaultModel;
+                  }
+                }
+                this.requestUpdate();
+              }}>
+                <option value="" ?selected=${!cleanupOn}>Off — no cleanup</option>
+                ${CLOUD_LLM_PRESETS.map((p) => html`<option value=${p.id} ?selected=${p.id === currentCleanupPreset}>${p.label}</option>`)}
+              </select>
+              ${cleanupOn ? html`
+                <input type="password" placeholder="API key" style=${inputStyle}
+                  .value=${c.llm_post_process.api_key || ""} @input=${(e: Event) => c.llm_post_process.api_key = (e.target as HTMLInputElement).value} />
+                <span class="wizard-feature-note">Cleans up transcripts and powers auto-summaries. Summaries reuse this provider (change per-feature in Settings).</span>
+              ` : html`<span class="wizard-feature-note">Skip to keep transcripts raw. You can connect a provider later in Settings.</span>`}
+            </div>
+          </div>` : ""}
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
+        <span class="spacer"></span>
+        <button class="wizard-btn ghost" @click=${this.skip}>Skip setup</button>
+        <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
+      </div>
+    `;
+  }
+
   private renderMic() {
     if (!this.config.recording) this.config.recording = {};
     return html`
@@ -866,7 +976,9 @@ export class FirstRunWizardElement extends LitElement {
     const c = this.config;
     const stt = c._setup_whisper
       ? `Local · ${this.prettyWhisper(c._whisper_model_choice)}`
-      : "Cloud API (set up in Settings)";
+      : (c.whisper?.provider && c.whisper.provider !== "local"
+          ? `Cloud · ${c.whisper.provider}`
+          : "Cloud API (set up in Settings)");
     const cleanup = c._setup_ollama
       ? `Local Ollama · ${c._ollama_model_choice}`
       : (c.llm_post_process?.enabled ? `Cloud · ${c.llm_post_process.provider}` : "Off");
@@ -948,6 +1060,7 @@ export class FirstRunWizardElement extends LitElement {
         ${this.step === 'welcome' ? this.renderWelcome() : ''}
         ${this.step === 'mode' ? this.renderModePicker() : ''}
         ${this.step === 'configure' ? this.renderConfigure() : ''}
+        ${this.step === 'connect' ? this.renderConnect() : ''}
         ${this.step === 'mic' ? this.renderMic() : ''}
         ${this.step === 'preview' ? this.renderPreview() : ''}
         ${this.step === 'summary' ? this.renderSummary() : ''}
