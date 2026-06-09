@@ -259,9 +259,11 @@ export class QueuePanelElement extends LitElement {
             ? html`
                 <span class="queue-actions">
                   <button class="queue-action ${this.paused ? "active" : ""}" title=${this.paused ? "Resume the queue" : "Pause the queue (finishes the current item)"}
-                    @click=${(e: Event) => this.togglePause(e)}>${this.paused ? "▶" : "⏸"}</button>
+                    @click=${(e: Event) => this.togglePause(e)}>${this.paused
+                      ? html`<svg class="qa-ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="7 4 20 12 7 20"></polygon></svg>`
+                      : html`<svg class="qa-ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>`}</button>
                   <button class="queue-action" title="Clear all pending items" ?disabled=${pending === 0}
-                    @click=${(e: Event) => this.clearAll(e)}>🗑</button>
+                    @click=${(e: Event) => this.clearAll(e)}><svg class="qa-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg></button>
                 </span>`
             : null}
         </div>

@@ -1025,6 +1025,8 @@ ph-sidebar {
 .queue-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .queue-action.active { color: var(--warn); }
 .queue-action:disabled { opacity: 0.35; cursor: default; }
+/* Crisp SVG glyphs (replacing emoji) so pause/play and trash share exact metrics. */
+.qa-ico { width: 13px; height: 13px; display: block; }
 .queue-list {
   /* Sized to its content, capped so it shows a healthy number of items and
      scrolls beyond. The header below stays pinned to the sidebar bottom. The

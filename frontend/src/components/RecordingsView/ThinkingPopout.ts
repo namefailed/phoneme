@@ -127,10 +127,17 @@ export class ThinkingPopoutElement extends LitElement {
   }
 
   /** Panel position: anchored to the FAB — above it, or below if the FAB sits
-   *  near the top of the screen. The popout always tracks the button. */
+   *  near the top of the screen; opening to the left of the button by default,
+   *  or to the right when the button hugs the left edge. Always tracks it. */
   private panelStyle(): string {
     const { x, y } = this.fabXY();
-    const left = Math.max(8, Math.min(window.innerWidth - 368, x + 40 - 360));
+    const PANEL_W = 360;
+    // Prefer the panel's right edge near the FAB (opens leftward). If the button
+    // is too close to the left edge for that to fit, open rightward instead.
+    const leftAnchored = x + 40 - PANEL_W;
+    const left = leftAnchored >= 8
+      ? Math.min(leftAnchored, window.innerWidth - PANEL_W - 8)
+      : Math.max(8, Math.min(x, window.innerWidth - PANEL_W - 8));
     if (y < 420) return `position:fixed; left:${left}px; top:${y + 48}px;`;
     return `position:fixed; left:${left}px; bottom:${window.innerHeight - y + 8}px;`;
   }
