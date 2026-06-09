@@ -28,7 +28,7 @@ export class SectionStorage {
           </div>
         </div>
 
-        <div class="settings-field stacked" style="margin-top: 24px; border-top: 1px solid var(--border-subtle); padding-top: 20px;">
+        <div class="settings-field stacked">
           <label>Auto-Delete Policy</label>
           <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
             <div style="display: flex; align-items: center; gap: 10px;">
@@ -53,7 +53,7 @@ export class SectionStorage {
           </p>
         </div>
 
-        <div class="settings-field" style="margin-top: 24px; border-top: 1px solid var(--border-subtle); padding-top: 20px;">
+        <div class="settings-field">
           <label>Export Recordings</label>
           <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
             <select id="export-format" style="max-width: 110px;">
