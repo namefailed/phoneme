@@ -107,3 +107,37 @@ jobs:
         # Override createUpdaterArtifacts so CI doesn't need TAURI_SIGNING_PRIVATE_KEY.
         # Signing only happens in the release workflow where the secret is available.
         run: cargo tauri build --debug --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+  deps-audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    # Advisory only for now: surfaces RUSTSEC / npm advisories without blocking
+    # merges (`continue-on-error`). Promote to a required gate on the core crates
+    # once the known-noise advisories are triaged. (audit hygiene)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: pnpm audit (frontend)
+        working-directory: frontend
+        run: pnpm audit
