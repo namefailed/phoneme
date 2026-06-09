@@ -1,3 +1,4 @@
+import { errText } from "../utils/error";
 import { LitElement, html } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 
@@ -183,7 +184,7 @@ export class HeaderBarElement extends LitElement {
         this.previewText = null;
         showToast("Meeting stopped — both tracks are transcribing", "info");
       } catch (e) {
-        showToast(`Meeting toggle failed: ${e}`, "error");
+        showToast(`Meeting toggle failed: ${errText(e)}`, "error");
       }
     } else {
       this.isMeeting = true;
@@ -193,7 +194,7 @@ export class HeaderBarElement extends LitElement {
         showToast("Meeting started — recording mic + system audio", "info");
       } catch (e) {
         this.isMeeting = false;
-        showToast(`Meeting toggle failed: ${e}`, "error");
+        showToast(`Meeting toggle failed: ${errText(e)}`, "error");
       }
     }
   }
@@ -206,7 +207,7 @@ export class HeaderBarElement extends LitElement {
         await invoke("record_start", { mode: "oneshot" });
       }
     } catch (e) {
-      showToast(`Recording toggle failed: ${e}`, "error");
+      showToast(`Recording toggle failed: ${errText(e)}`, "error");
     }
   }
 
@@ -287,7 +288,7 @@ export class HeaderBarElement extends LitElement {
       await invoke("record_cancel");
       showToast("Recording cancelled", "info");
     } catch (e) {
-      showToast(`Cancel failed: ${e}`, "error");
+      showToast(`Cancel failed: ${errText(e)}`, "error");
     }
   }
 
@@ -305,7 +306,7 @@ export class HeaderBarElement extends LitElement {
     } catch (e) {
       // Revert state on error
       this.isPaused = !this.isPaused;
-      showToast(`Toggle pause failed: ${e}`, "error");
+      showToast(`Toggle pause failed: ${errText(e)}`, "error");
     }
   }
 

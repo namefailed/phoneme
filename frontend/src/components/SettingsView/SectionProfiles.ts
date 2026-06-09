@@ -1,3 +1,4 @@
+import { errText } from "../../utils/error";
 import { invoke } from "@tauri-apps/api/core";
 import {
   listProfiles,
@@ -32,7 +33,7 @@ export class SectionProfiles {
     try {
       this.profiles = await listProfiles();
     } catch (e) {
-      showToast(`Failed to load profiles: ${e}`, "error");
+      showToast(`Failed to load profiles: ${errText(e)}`, "error");
       this.profiles = [];
     }
     this.render();
@@ -117,7 +118,7 @@ export class SectionProfiles {
         if (nameInput) nameInput.value = "";
         await this.load();
       } catch (e) {
-        showToast(`Failed to save profile: ${e}`, "error");
+        showToast(`Failed to save profile: ${errText(e)}`, "error");
       }
     };
 
@@ -138,7 +139,7 @@ export class SectionProfiles {
       const config = await invoke("read_config");
       window.dispatchEvent(new CustomEvent("config:saved", { detail: config }));
     } catch (e) {
-      showToast(`Failed to switch profile: ${e}`, "error");
+      showToast(`Failed to switch profile: ${errText(e)}`, "error");
     }
   }
 
@@ -156,7 +157,7 @@ export class SectionProfiles {
       showToast(`Profile "${name}" deleted`, "success");
       await this.load();
     } catch (e) {
-      showToast(`Failed to delete profile: ${e}`, "error");
+      showToast(`Failed to delete profile: ${errText(e)}`, "error");
     }
   }
 }
