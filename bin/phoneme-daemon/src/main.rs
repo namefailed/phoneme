@@ -106,6 +106,22 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Second supervisor for the optional dedicated live-preview server. Idles
+    // unless `preview_whisper` is configured as a local bundled model on its own
+    // port; never touches the main server above.
+    let preview_sup_state = state.clone();
+    let preview_sup_signal = state.shutdown.signal.clone();
+    // Keep the handle so shutdown can AWAIT it — otherwise the process could exit
+    // before run_preview kills its child, orphaning the 2nd whisper-server. Not
+    // in the crash-detection select below: a preview-server crash must not take
+    // down the daemon (preview is non-critical).
+    let preview_supervisor_handle = tokio::spawn(async move {
+        if let Err(e) = whisper_supervisor::run_preview(preview_sup_state, preview_sup_signal).await
+        {
+            tracing::error!(error = %e, "preview whisper supervisor terminated");
+        }
+    });
+
     let retention_state = state.clone();
     let retention_shutdown = state.shutdown.signal.clone_receiver();
     tokio::spawn(async move {
@@ -144,6 +160,9 @@ async fn main() -> Result<()> {
     state.shutdown.trigger();
     let _ = worker_handle.await;
     let _ = supervisor_handle.await;
+    // Wait for the preview supervisor too, so its dedicated whisper-server (if
+    // any) is killed before we exit — same cleanup guarantee as the main server.
+    let _ = preview_supervisor_handle.await;
 
     server_result
 }

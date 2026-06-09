@@ -155,6 +155,163 @@ pub async fn run_with(
     }
 }
 
+/// Conservative thread count for the preview server: half the cores (min 1) so
+/// the live preview can't pin every core and lag the machine or the final
+/// transcription. Used only when the preview args don't already set `-t`.
+fn preview_thread_cap() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| (n.get() / 2).max(1))
+        .unwrap_or(2)
+}
+
+/// Supervises a SECOND whisper-server dedicated to the live preview — used only
+/// when the user configures `preview_whisper` as a local bundled model on its
+/// own port (see [`phoneme_core::Config::preview_needs_own_server`]). Otherwise
+/// (preview reuses the main provider, uses a cloud API, or is off) this idles.
+///
+/// Kept entirely separate from [`run`]/[`run_with`] so the critical
+/// final-transcription server path is never affected. Mirrors the main loop's
+/// spawn/monitor/restart/backoff behavior, plus a thread cap.
+pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
+    let mut backoff = RESTART_BACKOFF_INITIAL;
+
+    loop {
+        if shutdown.is_shutting_down() {
+            return Ok(());
+        }
+
+        // Unexpanded snapshot for stable change-detection; expanded copy for the
+        // actual paths we spawn with.
+        let raw = state.config.load();
+        let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
+
+        if !cfg.preview_needs_own_server() {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                _ = shutdown.wait() => return Ok(()),
+            }
+        }
+        // Safe: preview_needs_own_server() implies preview_whisper is Some.
+        let Some(pv) = cfg.preview_whisper.as_ref() else {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        };
+
+        let server_path = match locate_bundled_server() {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!(error = %e, "preview: whisper-server binary not found, waiting...");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                    _ = shutdown.wait() => return Ok(()),
+                }
+            }
+        };
+
+        if pv.model_path.is_empty() || !std::path::Path::new(&pv.model_path).exists() {
+            tracing::info!("preview model_path empty or missing, waiting for download...");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                _ = shutdown.wait() => return Ok(()),
+            }
+        }
+
+        let mut command = Command::new(&server_path);
+        command
+            .arg("-m")
+            .arg(&pv.model_path)
+            .arg("--port")
+            .arg(pv.bundled_server_port.to_string())
+            .arg("--host")
+            .arg("127.0.0.1")
+            .arg("--inference-path")
+            .arg("/v1/audio/transcriptions")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        // Cap threads unless the user explicitly set one in the preview args.
+        let mut args = pv.bundled_server_args.clone();
+        if !args.iter().any(|a| a == "-t" || a == "--threads") {
+            args.push("-t".into());
+            args.push(preview_thread_cap().to_string());
+        }
+        for extra in &args {
+            command.arg(extra);
+        }
+
+        let mut child = match command.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to spawn preview whisper-server");
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
+                continue;
+            }
+        };
+        tracing::info!(
+            pid = child.id().unwrap_or(0),
+            port = pv.bundled_server_port,
+            "preview whisper-server spawned"
+        );
+        let spawned_at = Instant::now();
+        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
+        check_interval.tick().await;
+
+        // Watch the (unexpanded) preview fields for changes.
+        let watch = raw.preview_whisper.clone();
+
+        let mut exited = false;
+        loop {
+            tokio::select! {
+                wait = child.wait() => {
+                    match wait {
+                        Ok(status) => tracing::warn!(?status, "preview whisper-server exited"),
+                        Err(e) => tracing::warn!(error = %e, "wait on preview whisper-server failed"),
+                    }
+                    if spawned_at.elapsed() >= Duration::from_secs(60) {
+                        backoff = RESTART_BACKOFF_INITIAL;
+                    }
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
+                    exited = true;
+                    break;
+                }
+                _ = check_interval.tick() => {
+                    let cur = state.config.load();
+                    let spec_changed = match (cur.preview_whisper.as_ref(), watch.as_ref()) {
+                        (Some(c), Some(w)) => {
+                            c.model_path != w.model_path
+                                || c.bundled_server_port != w.bundled_server_port
+                                || c.mode != w.mode
+                        }
+                        _ => true,
+                    };
+                    if spec_changed || !cur.preview_needs_own_server() {
+                        tracing::info!("preview whisper-server config changed; restarting");
+                        let _ = kill_gracefully(&mut child).await;
+                        backoff = RESTART_BACKOFF_INITIAL;
+                        break;
+                    }
+                }
+                _ = shutdown.wait() => {
+                    tracing::info!("shutdown — killing preview whisper-server");
+                    let _ = kill_gracefully(&mut child).await;
+                    return Ok(());
+                }
+            }
+        }
+        if exited {
+            continue;
+        }
+    }
+}
+
 async fn kill_gracefully(child: &mut Child) -> std::io::Result<()> {
     let _ = child.start_kill();
     let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
