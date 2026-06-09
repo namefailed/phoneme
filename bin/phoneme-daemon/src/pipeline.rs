@@ -6,7 +6,7 @@ use crate::app_state::AppState;
 use phoneme_core::config::{Config, LlmPostProcessConfig};
 use phoneme_core::error::Result;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
-use phoneme_ipc::DaemonEvent;
+use phoneme_ipc::{DaemonEvent, PipelineStage};
 use std::time::Duration;
 
 /// Build the effective LLM config for summaries: start from `[llm_post_process]`
@@ -89,6 +89,10 @@ async fn maybe_auto_summarize(
     if !cfg.summary.auto {
         return;
     }
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Summarizing,
+    });
     match generate_summary(state, cfg, transcript).await {
         Some((summary, model)) => {
             if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
@@ -121,6 +125,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     state
         .events
         .emit(DaemonEvent::TranscriptionStarted { id: id.clone() });
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Transcribing,
+    });
 
     // Transcribe — reuse the process-wide client (AppState) so the HTTP
     // connection pool to the local whisper-server stays warm across items.
@@ -167,6 +175,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
     if let Some(llm) = state.llm.provider(&cfg.llm_post_process) {
+        state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: id.clone(),
+            stage: PipelineStage::CleaningUp,
+        });
         match llm.process(&cfg.llm_post_process.prompt, &transcript).await {
             Ok(processed) => {
                 tracing::info!("LLM post-processing succeeded");
@@ -286,6 +298,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     state
         .events
         .emit(DaemonEvent::HookStarted { id: id.clone() });
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::RunningHook,
+    });
     payload.metadata = HookMetadata::current();
 
     let mut final_exit_code = 0;

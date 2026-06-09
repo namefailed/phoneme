@@ -264,6 +264,27 @@ pub enum IpcErrorKind {
     Internal,
 }
 
+/// A pipeline processing stage, reported via [`DaemonEvent::PipelineStageChanged`]
+/// so the UI can show which step of the transcribe → cleanup → summary → hook
+/// flow a recording is currently in (and surface re-runs in the queue, not just
+/// fresh transcriptions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineStage {
+    /// Running speech-to-text (whisper / cloud STT).
+    Transcribing,
+    /// Running the LLM post-processing ("cleanup") step.
+    CleaningUp,
+    /// Running the LLM summary step.
+    Summarizing,
+    /// Running an action hook.
+    RunningHook,
+    /// All work finished successfully.
+    Done,
+    /// The work failed at some stage.
+    Failed,
+}
+
 /// Events broadcast by the daemon on `SubscribeEvents`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -314,6 +335,15 @@ pub enum DaemonEvent {
     TranscriptionFailed {
         id: RecordingId,
         error: String,
+    },
+    /// Pipeline stage transition for a recording being processed. The UI shows
+    /// the current step (Transcribing / CleaningUp / Summarizing / RunningHook)
+    /// on the queue item and clears it on a terminal stage (Done / Failed).
+    /// Emitted by `pipeline::run` and by every re-run handler, so re-runs surface
+    /// in the queue just like fresh transcriptions.
+    PipelineStageChanged {
+        id: RecordingId,
+        stage: PipelineStage,
     },
     HookStarted {
         id: RecordingId,

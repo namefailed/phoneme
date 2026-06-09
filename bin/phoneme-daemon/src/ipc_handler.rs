@@ -11,7 +11,9 @@
 
 use crate::app_state::AppState;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus};
-use phoneme_ipc::{DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, Request, Response};
+use phoneme_ipc::{
+    DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, PipelineStage, Request, Response,
+};
 
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
@@ -479,6 +481,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     let hook_id = payload.id.clone();
                     task_state.events.emit(DaemonEvent::HookStarted {
                         id: hook_id.clone(),
+                    });
+                    // Surface this re-run in the queue as an active "Running hook…" item.
+                    task_state.events.emit(DaemonEvent::PipelineStageChanged {
+                        id: hook_id.clone(),
+                        stage: PipelineStage::RunningHook,
                     });
 
                     // Mirror pipeline::run: execute every configured hook in
@@ -1049,6 +1056,12 @@ async fn rerun_cleanup(
             return;
         };
 
+        // Surface this re-run in the queue as an active "Cleaning up…" item.
+        task_state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: id.clone(),
+            stage: PipelineStage::CleaningUp,
+        });
+
         match provider.process(&llm_cfg.prompt, &source).await {
             Ok(cleaned) => {
                 // Re-assert the original alongside the freshly cleaned live text.
@@ -1170,6 +1183,11 @@ async fn rerun_summary(
 
     let task_state = state.clone();
     tokio::spawn(async move {
+        // Surface this re-run in the queue as an active "Summarizing…" item.
+        task_state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: id.clone(),
+            stage: PipelineStage::Summarizing,
+        });
         match crate::pipeline::generate_summary(&task_state, &cfg, &transcript).await {
             Some((summary, model)) => {
                 if let Err(e) = task_state

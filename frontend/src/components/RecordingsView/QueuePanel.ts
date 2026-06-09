@@ -1,7 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, type QueueEntry } from "../../services/ipc";
-import { subscribe, type DaemonEvent } from "../../services/events";
+import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, getRecording, type QueueEntry } from "../../services/ipc";
+import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
 import { formatTime, formatDuration } from "../../utils/format";
 import { showToast } from "../../utils/toast";
 import { errText } from "../../utils/error";
@@ -26,8 +26,23 @@ export class QueuePanelElement extends LitElement {
   private unsub: (() => void) | null = null;
   private pollTimer: number | null = null;
 
+  /** Live, non-terminal pipeline stage per recording id (drives the stage
+   *  label AND lets re-runs that aren't in the inbox queue still show here). */
+  private stages = new Map<string, PipelineStage>();
+  /** Synthetic queue rows for active stage items NOT in the inbox (e.g. a
+   *  cleanup/summary re-run), keyed by id; fetched on first stage event. */
+  private extraEntries = new Map<string, QueueEntry>();
+
   /** Min/max drag bounds for the queue list height. */
   private static readonly MIN_H = 120;
+
+  /** Forget any live-stage tracking for a recording (terminal/completed). */
+  private clearStage(id: string) {
+    let changed = false;
+    if (this.stages.delete(id)) changed = true;
+    if (this.extraEntries.delete(id)) changed = true;
+    if (changed) this.requestUpdate();
+  }
 
   async connectedCallback() {
     super.connectedCallback();
@@ -36,16 +51,31 @@ export class QueuePanelElement extends LitElement {
     this.listHeight = Number.isFinite(h) && h >= QueuePanelElement.MIN_H ? h : null;
     void this.load();
     this.unsub = await subscribe((event: DaemonEvent) => {
-      const name = (event as { event: string }).event;
+      if (event.event === "pipeline_stage_changed") {
+        void this.onStageChanged(event.id, event.stage);
+        return;
+      }
+      // A re-run's stage tracking ends when its completion event fires (these
+      // don't all go through the inbox, so the stage map is how re-runs clear).
       if (
-        name === "queue_depth_changed" ||
-        name === "recording_stopped" ||
-        name === "transcription_started" ||
-        name === "transcription_done" ||
-        name === "transcription_failed" ||
-        name === "recording_cancelled" ||
-        name === "recording_deleted"
+        event.event === "transcript_updated" ||
+        event.event === "summary_updated" ||
+        event.event === "summary_failed" ||
+        event.event === "hook_done" ||
+        event.event === "hook_failed"
       ) {
+        this.clearStage(event.id);
+      }
+      if (
+        event.event === "queue_depth_changed" ||
+        event.event === "recording_stopped" ||
+        event.event === "transcription_started" ||
+        event.event === "transcription_done" ||
+        event.event === "transcription_failed" ||
+        event.event === "recording_cancelled" ||
+        event.event === "recording_deleted"
+      ) {
+        if ("id" in event) this.clearStage(event.id);
         void this.load();
       }
     });
@@ -70,6 +100,36 @@ export class QueuePanelElement extends LitElement {
       this.paused = await queuePaused();
     } catch {
       /* leave last-known paused state */
+    }
+  }
+
+  /** Handle a live pipeline-stage event: update the stage label and, for an
+   *  active item that isn't an inbox row (a cleanup/summary/hook re-run), add a
+   *  synthetic row so the re-run shows in the queue too. */
+  private async onStageChanged(id: string, stage: PipelineStage) {
+    if (stage === "done" || stage === "failed") {
+      this.clearStage(id);
+      return;
+    }
+    this.stages.set(id, stage);
+    this.requestUpdate();
+    // If this id isn't already an inbox row and we haven't fetched it yet,
+    // pull its basics so we can render a labeled row for the re-run.
+    if (!this.items.some((i) => i.id === id) && !this.extraEntries.has(id)) {
+      try {
+        const r = await getRecording(id);
+        this.extraEntries.set(id, {
+          id: r.id,
+          timestamp: r.started_at,
+          audio_path: r.audio_path,
+          duration_ms: r.duration_ms,
+          model: r.model ?? "",
+          state: "processing",
+        });
+        this.requestUpdate();
+      } catch {
+        /* recording vanished — ignore */
+      }
     }
   }
 
@@ -170,7 +230,10 @@ export class QueuePanelElement extends LitElement {
   }
 
   render() {
-    const items = this.items;
+    // Merge inbox rows with synthetic rows for active re-runs (cleanup/summary/
+    // hook) that aren't in the inbox, so every running step shows in the queue.
+    const extras = [...this.extraEntries.values()].filter((e) => !this.items.some((i) => i.id === e.id));
+    const items = [...this.items, ...extras];
     const active = items.filter((i) => i.state === "processing").length;
     const pending = items.length - active;
     return html`
@@ -206,7 +269,7 @@ export class QueuePanelElement extends LitElement {
                             <span class="queue-item-icon">${it.state === "processing" ? "⟳" : "•"}</span>
                             <div class="queue-item-main" title="Open this recording" @click=${() => this.select(it.id)}>
                               <div class="queue-item-title">${formatTime(it.timestamp, false)} · ${formatDuration(it.duration_ms)}</div>
-                              <div class="queue-item-sub">${it.state === "processing" ? "Transcribing…" : "Queued"}</div>
+                              <div class="queue-item-sub">${this.stages.has(it.id) ? stageLabel(this.stages.get(it.id)!) : (it.state === "processing" ? "Transcribing…" : "Queued")}</div>
                             </div>
                             ${it.state === "pending"
                               ? html`
