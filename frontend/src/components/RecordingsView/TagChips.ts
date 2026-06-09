@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { addTag, attachTag, detachTag, listAllTags, tagsFor, type Tag } from "../../services/ipc";
+import { addTag, attachTag, detachTag, listAllTags, tagsFor, updateTag, type Tag } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 
 export function getContrastColor(hexColor: string): string {
@@ -30,11 +30,30 @@ export class TagChipsElement extends LitElement {
   @state() private attached: Tag[] = [];
   @state() private allTags: Tag[] = [];
   @state() private _showDropdown = false;
+  /** id of the tag whose inline name/color editor is open, or null. */
+  @state() private editingTagId: number | null = null;
+  @state() private editName = "";
+  @state() private editColor = "#cba6f7";
+  private docClickHandler: ((e: MouseEvent) => void) | null = null;
 
   connectedCallback() {
     super.connectedCallback();
     if (this.recordingId) {
       void this.load();
+    }
+    // Close the inline tag editor when clicking anywhere outside it. Clicks on
+    // the chip / popover call stopPropagation, so they never reach here.
+    this.docClickHandler = () => {
+      if (this.editingTagId !== null) this.editingTagId = null;
+    };
+    document.addEventListener("click", this.docClickHandler);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.docClickHandler) {
+      document.removeEventListener("click", this.docClickHandler);
+      this.docClickHandler = null;
     }
   }
 
@@ -59,6 +78,39 @@ export class TagChipsElement extends LitElement {
       await this.load();
     } catch (e) {
       showToast(`Failed to remove tag: ${errText(e)}`, "error");
+    }
+  }
+
+  private startEdit(t: Tag, e: Event) {
+    e.stopPropagation();
+    this.editingTagId = t.id;
+    this.editName = t.name;
+    this.editColor = t.color ?? "#cba6f7";
+    // Focus + select the name field once the popover renders.
+    setTimeout(() => {
+      const input = this.renderRoot.querySelector<HTMLInputElement>(".tag-edit-name");
+      input?.focus();
+      input?.select();
+    }, 0);
+  }
+
+  private cancelEdit() {
+    this.editingTagId = null;
+  }
+
+  /** Persist a renamed/recolored tag globally (affects every recording using it). */
+  private async saveEdit(id: number) {
+    const name = this.editName.trim();
+    if (!name) {
+      showToast("Tag name can't be empty", "error");
+      return;
+    }
+    try {
+      await updateTag(id, name, this.editColor);
+      this.editingTagId = null;
+      await this.load();
+    } catch (e) {
+      showToast(`Failed to update tag: ${errText(e)}`, "error");
     }
   }
 
@@ -101,9 +153,41 @@ export class TagChipsElement extends LitElement {
         ${this.attached.map((t) => {
           const contrast = t.color ? getContrastColor(t.color) : '';
           const style = t.color ? `--tag-color: ${t.color}; color: ${contrast};` : '';
+          const editing = this.editingTagId === t.id;
           return html`
-            <span class="tag-chip" data-tag-id="${t.id}" style="${style}">
-              ${t.name} <button class="tag-x" @click=${() => this.detach(t.id)}>×</button>
+            <span class="tag-chip-wrap" style="position: relative; display: inline-flex;">
+              <span class="tag-chip" data-tag-id="${t.id}" style="${style} cursor: pointer;"
+                title="Click to rename or recolor this tag"
+                @click=${(e: Event) => this.startEdit(t, e)}>
+                ${t.name}
+                <button class="tag-x" title="Remove this tag from this recording"
+                  @click=${(e: Event) => { e.stopPropagation(); void this.detach(t.id); }}>×</button>
+              </span>
+              ${editing ? html`
+                <div class="tag-edit-pop" @click=${(e: Event) => e.stopPropagation()}
+                  style="position:absolute; top:calc(100% + 6px); left:0; z-index:70;
+                    display:flex; align-items:center; gap:8px; padding:8px;
+                    background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.12));
+                    border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+                  <input type="color" class="tag-edit-color" .value=${this.editColor}
+                    title="Tag color"
+                    @input=${(e: Event) => this.editColor = (e.target as HTMLInputElement).value}
+                    style="width:28px; height:28px; padding:0; border:none; background:none; cursor:pointer;" />
+                  <input class="tag-edit-name" .value=${this.editName}
+                    placeholder="Tag name"
+                    @input=${(e: Event) => this.editName = (e.target as HTMLInputElement).value}
+                    @keydown=${(e: KeyboardEvent) => {
+                      if (e.key === "Enter") { e.preventDefault(); void this.saveEdit(t.id); }
+                      else if (e.key === "Escape") { e.preventDefault(); this.cancelEdit(); }
+                    }}
+                    style="width:140px; padding:5px 8px; border-radius:6px; font-size:13px;
+                      background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);" />
+                  <button class="inline-button" title="Save changes" @click=${() => void this.saveEdit(t.id)}
+                    style="padding:5px 10px;">Save</button>
+                  <button class="inline-button" title="Cancel" @click=${() => this.cancelEdit()}
+                    style="padding:5px 8px;">✕</button>
+                </div>
+              ` : null}
             </span>
           `;
         })}

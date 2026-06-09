@@ -810,6 +810,46 @@ async fn user_edit_preserves_original_transcript() {
     );
 }
 
+/// The "unedited" (clean) transcript snapshots the pipeline output and must
+/// survive user edits, so "View unedited transcript" shows transcribed+cleaned
+/// text even after the user changes the live transcript.
+#[tokio::test]
+async fn user_edit_preserves_clean_transcript() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let rec = sample_recording(RecordingId::new());
+    catalog.insert(&rec).await.unwrap();
+
+    // Pipeline: raw machine output → original_transcript, cleaned → transcript +
+    // clean_transcript.
+    catalog
+        .update_transcript(&rec.id, "We talked about the thing.", "um so like the thing", "m")
+        .await
+        .unwrap();
+
+    // User edits the live transcript.
+    catalog
+        .update_user_transcript(&rec.id, "We discussed the proposal.")
+        .await
+        .unwrap();
+
+    // Raw (pre-cleanup) version untouched.
+    assert_eq!(
+        catalog.get_original_transcript(&rec.id).await.unwrap().as_deref(),
+        Some("um so like the thing"),
+    );
+    // Unedited (cleaned, pre-edit) version untouched.
+    assert_eq!(
+        catalog.get_clean_transcript(&rec.id).await.unwrap().as_deref(),
+        Some("We talked about the thing."),
+        "clean_transcript must survive user edits",
+    );
+    // Live transcript reflects the user edit.
+    assert_eq!(
+        catalog.get(&rec.id).await.unwrap().unwrap().transcript.as_deref(),
+        Some("We discussed the proposal."),
+    );
+}
+
 /// When LLM post-processing is active the pipeline stores the LLM-cleaned
 /// text as `transcript` but the raw Whisper output as `original_transcript`.
 /// This test simulates that by passing different values to `update_transcript`.

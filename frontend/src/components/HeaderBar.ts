@@ -429,8 +429,11 @@ export class HeaderBarElement extends LitElement {
         <button class="icon-btn" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models" @click=${this.openModels}>🎛 Models</button>
         <button class="icon-btn" aria-label="Settings" title="Open application settings" @click=${() => this.callbacks?.onOpenSettings()}>⚙</button>
       </div>
-      <div class="hb-preview" style="display:${this.previewText ? 'block' : 'none'}" title="Live transcription preview (updates while recording)">
-        ${this.previewText ? html`<span class="hb-preview-label">live</span> ${this.previewText}` : ''}
+      <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"
+        title="Live transcription preview — updates as you speak while recording">
+        <span class="hb-preview-pulse" aria-hidden="true"></span>
+        <span class="hb-preview-label">Live</span>
+        <span class="hb-preview-text">${this.previewText ?? ''}</span>
       </div>
     `;
   }

@@ -162,12 +162,17 @@ impl Catalog {
     ) -> Result<()> {
         sqlx::query(
             r#"UPDATE recordings
-               SET transcript = ?, original_transcript = ?, model = ?,
+               SET transcript = ?, original_transcript = ?, clean_transcript = ?, model = ?,
                    transcribed_at = datetime('now'), updated_at = datetime('now')
                WHERE id = ?"#,
         )
         .bind(transcript)
         .bind(original_transcript)
+        // `clean_transcript` snapshots the pipeline output (transcribed + cleaned)
+        // so "View unedited transcript" can show it even after the user edits the
+        // live transcript. User edits go through `update_user_transcript`, which
+        // leaves this column untouched.
+        .bind(transcript)
         .bind(model)
         .bind(id.as_str())
         .execute(&self.pool)
@@ -242,6 +247,21 @@ impl Catalog {
             .await?;
         match row {
             Some(r) => Ok(r.try_get::<Option<String>, _>("original_transcript")?),
+            None => Ok(None),
+        }
+    }
+
+    /// The preserved "unedited" transcript — the pipeline output (machine
+    /// transcription + any LLM cleanup) before the user made hand edits. `None`
+    /// for recordings transcribed before this column existed, or never
+    /// transcribed.
+    pub async fn get_clean_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT clean_transcript FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok(r.try_get::<Option<String>, _>("clean_transcript")?),
             None => Ok(None),
         }
     }

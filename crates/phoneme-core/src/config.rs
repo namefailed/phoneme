@@ -212,14 +212,31 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
 }
 
 /// Auto-summary settings. The summary is generated on demand (via the UI/CLI)
-/// or — when `auto` is true — automatically as the FINAL pipeline step. It
-/// reuses the [`LlmPostProcessConfig`] provider connection (endpoint/key); only
-/// the model and prompt are summary-specific.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// or — when `auto` is true — automatically as the FINAL pipeline step.
+///
+/// Summaries can use a **fully independent** LLM provider: `provider`,
+/// `api_url`, `api_key`, and `model` each fall back to the corresponding
+/// `[llm_post_process]` value when left empty, so a user can summarize with a
+/// completely different provider+model than their cleanup step — or just reuse
+/// the cleanup connection by leaving these blank.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SummaryConfig {
     /// Summarize automatically as the last pipeline step on every recording.
     #[serde(default)]
     pub auto: bool,
+    /// Provider for summaries: `ollama`, `openai`, `groq`, `anthropic`. Empty →
+    /// inherit the `[llm_post_process]` provider.
+    #[serde(default)]
+    pub provider: String,
+    /// API key for the summary provider. Empty → inherit the cleanup key.
+    #[serde(
+        default = "default_secret_string",
+        serialize_with = "serialize_secret_string"
+    )]
+    pub api_key: SecretString,
+    /// Base URL for the summary provider. Empty → inherit / provider default.
+    #[serde(default)]
+    pub api_url: String,
     /// Model used for summaries. Empty → fall back to the cleanup model.
     #[serde(default)]
     pub model: String,
@@ -228,10 +245,51 @@ pub struct SummaryConfig {
     pub prompt: String,
 }
 
+impl SummaryConfig {
+    /// Replace the API key from a plain string (encapsulates `SecretString`).
+    pub fn set_api_key(&mut self, key: impl Into<String>) {
+        self.api_key = SecretString::from(key.into());
+    }
+
+    /// The summary API key as a plain `&str`, so callers outside this crate can
+    /// read it without depending on `secrecy`.
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for SummaryConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SummaryConfig")
+            .field("auto", &self.auto)
+            .field("provider", &self.provider)
+            .field("api_key", &redact_key(self.api_key.expose_secret()))
+            .field("api_url", &self.api_url)
+            .field("model", &self.model)
+            .field("prompt", &self.prompt)
+            .finish()
+    }
+}
+
+impl PartialEq for SummaryConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.auto == other.auto
+            && self.provider == other.provider
+            && self.api_key.expose_secret() == other.api_key.expose_secret()
+            && self.api_url == other.api_url
+            && self.model == other.model
+            && self.prompt == other.prompt
+    }
+}
+
 impl Default for SummaryConfig {
     fn default() -> Self {
         Self {
             auto: false,
+            provider: String::new(),
+            api_key: SecretString::from(String::new()),
+            api_url: String::new(),
             model: String::new(),
             prompt: default_summary_prompt(),
         }

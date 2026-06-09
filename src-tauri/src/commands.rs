@@ -318,6 +318,13 @@ pub async fn get_original_transcript(bridge: Br<'_>, id: String) -> Result<Value
     forward(&bridge, Request::GetOriginalTranscript { id }).await
 }
 
+/// Fetch the preserved "unedited" transcript (pipeline output before user edits).
+#[tauri::command]
+pub async fn get_clean_transcript(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetCleanTranscript { id }).await
+}
+
 /// Update the free-form user notes for a specific recording. Independent of the
 /// transcript; never affected by (re-)transcription.
 #[tauri::command]

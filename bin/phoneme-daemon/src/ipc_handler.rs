@@ -339,6 +339,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::GetCleanTranscript { id } => {
+            match state.catalog.get_clean_transcript(&id).await {
+                Ok(clean) => serialize_response(clean),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::NotesUpdated { id });
@@ -1047,15 +1056,11 @@ async fn rerun_summary(
     // Require a usable LLM provider up front so the user gets a clear error
     // rather than a silent no-op. `generate_summary` re-checks defensively.
     {
-        let mut probe = cfg.llm_post_process.clone();
-        probe.enabled = true;
-        if !cfg.summary.model.trim().is_empty() {
-            probe.model = cfg.summary.model.clone();
-        }
+        let probe = crate::pipeline::summary_llm_config(&cfg);
         if state.llm.provider(&probe).is_none() {
             return Response::Err(IpcError {
                 kind: IpcErrorKind::InvalidConfig,
-                message: "no LLM provider configured for summaries (set [llm_post_process] provider)"
+                message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)"
                     .into(),
             });
         }

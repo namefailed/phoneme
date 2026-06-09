@@ -3,6 +3,7 @@ import {
   getRecording,
   updateTranscript,
   getOriginalTranscript,
+  getCleanTranscript,
   rerunSummary,
   type Recording,
 } from "../../services/ipc";
@@ -143,10 +144,12 @@ export class RecordingDetail {
         <div class="transcript-block">
           <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
+          <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end;">
+          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end; flex-wrap: wrap;">
             <button class="inline-button" id="view-summary">View summary</button>
-            <button class="inline-button" id="view-original">View original transcript</button>
+            <button class="inline-button" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">View unedited transcript</button>
+            <button class="inline-button" id="view-original" title="The raw machine transcript, before AI cleanup">View original transcript</button>
           </div>
         </div>
         <div class="notes-block" style="margin-top: 6px;">
@@ -185,82 +188,108 @@ export class RecordingDetail {
       });
     }
 
-    // Transcript history: "peek" the preserved original by temporarily
-    // hijacking the transcript box — hide the editor and show the read-only
-    // original in the same slot — rather than opening a separate panel. Toggling
-    // back restores the editor. A "Restore this version" action is offered while
-    // peeking.
-    const viewOriginalBtn = this.container.querySelector<HTMLButtonElement>("#view-original");
-    const viewSummaryBtn = this.container.querySelector<HTMLButtonElement>("#view-summary");
+    // Transcript history: "peek" an earlier version by temporarily hijacking the
+    // transcript box — hide the editor and show the read-only version in the same
+    // slot — rather than opening a separate panel. Three peeks are available:
+    //   • original  — raw machine transcript, before AI cleanup
+    //   • unedited   — transcribed + cleaned, before the user's hand edits
+    //   • summary    — AI summary (generated on demand if absent)
+    // Exactly one of {editor, original, unedited, summary} is visible at a time.
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
-    const peekEl = this.container.querySelector<HTMLElement>("#original-peek");
-    const summaryPeekEl = this.container.querySelector<HTMLElement>("#summary-peek");
-
-    // Only one of {editor, original peek, summary peek} is visible at a time.
-    // Reset to the editor and restore both button labels.
-    const resetPeek = () => {
-      if (peekEl) peekEl.style.display = "none";
-      if (summaryPeekEl) summaryPeekEl.style.display = "none";
-      if (editorEl) editorEl.style.display = "flex";
-      if (viewOriginalBtn) viewOriginalBtn.textContent = "View original transcript";
-      if (viewSummaryBtn) viewSummaryBtn.textContent = "View summary";
+    type PeekKind = "original" | "unedited" | "summary";
+    const peeks: Record<PeekKind, { btn: HTMLButtonElement | null; el: HTMLElement | null; idle: string }> = {
+      original: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
+        el: this.container.querySelector<HTMLElement>("#original-peek"),
+        idle: "View original transcript",
+      },
+      unedited: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-unedited"),
+        el: this.container.querySelector<HTMLElement>("#unedited-peek"),
+        idle: "View unedited transcript",
+      },
+      summary: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-summary"),
+        el: this.container.querySelector<HTMLElement>("#summary-peek"),
+        idle: "View summary",
+      },
     };
 
-    let peeking = false;
-    viewOriginalBtn?.addEventListener("click", async () => {
-      if (!editorEl || !peekEl) return;
-      if (peeking) {
-        resetPeek();
-        peeking = false;
-        return;
-      }
+    let activePeek: PeekKind | null = null;
+    const resetPeek = () => {
+      (Object.keys(peeks) as PeekKind[]).forEach((k) => {
+        if (peeks[k].el) peeks[k].el!.style.display = "none";
+        if (peeks[k].btn) peeks[k].btn!.textContent = peeks[k].idle;
+      });
+      if (editorEl) editorEl.style.display = "flex";
+      activePeek = null;
+      this.summaryPeeking = false;
+    };
+    const openPeek = (kind: PeekKind) => {
+      const { btn, el } = peeks[kind];
+      if (!editorEl || !el) return;
+      resetPeek();
+      editorEl.style.display = "none";
+      el.style.display = "block";
+      if (btn) btn.textContent = "Back to current transcript";
+      activePeek = kind;
+      if (kind === "summary") this.summaryPeeking = true;
+    };
+
+    peeks.original.btn?.addEventListener("click", async () => {
+      if (activePeek === "original") return resetPeek();
       const original = await getOriginalTranscript(r.id);
       if (original == null) {
-        showToast("No earlier version was saved for this recording.", "info");
+        showToast("No raw machine version was saved for this recording.", "info");
         return;
       }
-      peekEl.innerHTML = `
+      peeks.original.el!.innerHTML = `
         <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">Raw transcript — straight from the model, <b>before</b> AI cleanup (read-only)</div>
         <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(original)}</div>
-        <button class="inline-button" id="restore-original" style="margin-top: 10px;" title="Replace the current (cleaned/edited) transcript with this raw version">Restore raw transcript</button>`;
-      peekEl.querySelector("#restore-original")?.addEventListener("click", async () => {
+        <button class="inline-button" id="restore-original" style="margin-top: 10px;" title="Replace the current transcript with this raw machine version">Restore raw transcript</button>`;
+      peeks.original.el!.querySelector("#restore-original")?.addEventListener("click", async () => {
         await updateTranscript(r.id, original);
-        showToast("Transcript restored to the original.", "success");
+        showToast("Transcript restored to the raw machine version.", "success");
         this.onRefresh();
         void this.show(r.id);
       });
-      resetPeek();
-      this.summaryPeeking = false;
-      editorEl.style.display = "none";
-      peekEl.style.display = "block";
-      viewOriginalBtn.textContent = "Back to current transcript";
-      peeking = true;
+      openPeek("original");
     });
 
-    // Summary peek: shows the stored AI summary in the transcript box. If none
-    // exists yet, generates one on demand (RerunSummary) and shows a pending
-    // state — `requestSummary` polls for the result and fills the peek in place.
-    viewSummaryBtn?.addEventListener("click", async () => {
-      if (!editorEl || !summaryPeekEl) return;
-      if (this.summaryPeeking) {
-        resetPeek();
-        this.summaryPeeking = false;
+    peeks.unedited.btn?.addEventListener("click", async () => {
+      if (activePeek === "unedited") return resetPeek();
+      const clean = await getCleanTranscript(r.id);
+      if (clean == null) {
+        showToast("No pre-edit version was saved for this recording.", "info");
         return;
       }
-      resetPeek();
-      peeking = false;
+      peeks.unedited.el!.innerHTML = `
+        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">Unedited transcript — transcribed <b>and</b> AI-cleaned, before <b>your</b> edits (read-only)</div>
+        <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(clean)}</div>
+        <button class="inline-button" id="restore-unedited" style="margin-top: 10px;" title="Discard your edits and restore the cleaned (unedited) version">Restore unedited transcript</button>`;
+      peeks.unedited.el!.querySelector("#restore-unedited")?.addEventListener("click", async () => {
+        await updateTranscript(r.id, clean);
+        showToast("Transcript restored to the unedited (cleaned) version.", "success");
+        this.onRefresh();
+        void this.show(r.id);
+      });
+      openPeek("unedited");
+    });
+
+    // Summary peek: shows the stored AI summary. If none exists yet, generates
+    // one on demand (RerunSummary) and shows a pending state — `requestSummary`
+    // polls for the result and fills the peek in place.
+    peeks.summary.btn?.addEventListener("click", async () => {
+      if (activePeek === "summary") return resetPeek();
       if (r.summary && r.summary.trim()) {
-        this.fillSummaryPeek(summaryPeekEl, r);
+        this.fillSummaryPeek(peeks.summary.el!, r);
       } else {
-        summaryPeekEl.innerHTML = `
+        peeks.summary.el!.innerHTML = `
           <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
           <div style="color: var(--fg-muted); line-height: 1.6;">Generating summary…</div>`;
         void this.requestSummary(r.id);
       }
-      editorEl.style.display = "none";
-      summaryPeekEl.style.display = "block";
-      viewSummaryBtn.textContent = "Back to current transcript";
-      this.summaryPeeking = true;
+      openPeek("summary");
     });
 
     // Notes: CodeMirror editor (respects editor.vim_mode like the transcript

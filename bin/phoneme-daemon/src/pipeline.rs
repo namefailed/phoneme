@@ -3,11 +3,37 @@
 //! Called by the queue worker per claimed payload.
 
 use crate::app_state::AppState;
-use phoneme_core::config::Config;
+use phoneme_core::config::{Config, LlmPostProcessConfig};
 use phoneme_core::error::Result;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
 use phoneme_ipc::DaemonEvent;
 use std::time::Duration;
+
+/// Build the effective LLM config for summaries: start from `[llm_post_process]`
+/// and overlay any summary-specific provider / URL / key / model the user set.
+/// Each blank summary field inherits the cleanup value, so summaries can run on
+/// a fully independent provider+model or simply reuse the cleanup connection.
+/// Always `enabled` — summaries have their own on/off gate (`summary.auto` /
+/// the explicit on-demand request).
+pub fn summary_llm_config(cfg: &Config) -> LlmPostProcessConfig {
+    let mut llm = cfg.llm_post_process.clone();
+    llm.enabled = true;
+    let s = &cfg.summary;
+    if !s.provider.trim().is_empty() {
+        llm.provider = s.provider.clone();
+    }
+    if !s.api_url.trim().is_empty() {
+        llm.api_url = s.api_url.clone();
+    }
+    let key = s.api_key_str();
+    if !key.trim().is_empty() {
+        llm.set_api_key(key.to_string());
+    }
+    if !s.model.trim().is_empty() {
+        llm.model = s.model.clone();
+    }
+    llm
+}
 
 /// Generate an LLM summary of `transcript`, returning `(summary, model)` on
 /// success or `None` when summarization can't run (no usable provider) or
@@ -26,12 +52,7 @@ pub async fn generate_summary(
     if transcript.trim().is_empty() {
         return None;
     }
-    let mut llm_cfg = cfg.llm_post_process.clone();
-    llm_cfg.enabled = true;
-    // Summary-specific model; fall back to the cleanup model when unset.
-    if !cfg.summary.model.trim().is_empty() {
-        llm_cfg.model = cfg.summary.model.clone();
-    }
+    let llm_cfg = summary_llm_config(cfg);
     let model = llm_cfg.model.clone();
     let llm = match state.llm.provider(&llm_cfg) {
         Some(llm) => llm,

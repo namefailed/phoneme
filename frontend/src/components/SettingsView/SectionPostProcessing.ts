@@ -16,12 +16,15 @@ export class SectionPostProcessing {
       };
     }
 
-    // Auto-summary settings. Reuses the post-processing provider connection;
-    // only the model (optional — falls back to the cleanup model) and prompt are
-    // summary-specific.
+    // Auto-summary settings. Each provider field falls back to the cleanup
+    // connection when left blank, so summaries can run on a fully independent
+    // provider+model or just reuse the post-processing provider above.
     if (!config.summary) {
       config.summary = {
         auto: false,
+        provider: "",
+        api_key: "",
+        api_url: "",
         model: "",
         prompt: "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.",
       };
@@ -347,14 +350,79 @@ export class SectionPostProcessing {
         </div>
 
         <div class="settings-field">
+          <label>Summary provider</label>
+          <div>${renderField(
+            {
+              key: "summary.provider",
+              label: "",
+              kind: "select",
+              options: [
+                { value: "", label: "Same as AI Post-Processing (inherit)" },
+                { value: "ollama", label: "Local Ollama (http://127.0.0.1:11434)" },
+                { value: "openai", label: "OpenAI-Compatible Endpoint" },
+                { value: "groq", label: "Groq (cloud)" },
+                { value: "anthropic", label: "Anthropic Claude (cloud)" }
+              ]
+            },
+            config.summary.provider || "",
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Summarize with a completely different provider + model than your cleanup step, or leave
+            on <b>inherit</b> to reuse the provider configured above.
+          </span>
+        </div>
+
+        <div class="settings-field summary-preset-row">
+          <label>Quick preset</label>
+          <div>
+            <select id="summary-provider-preset" style="max-width: 400px;">
+              <option value="">— Pick an OpenAI-compatible provider —</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="mistral">Mistral</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="together">Together</option>
+              <option value="xai">xAI / Grok</option>
+              <option value="cerebras">Cerebras</option>
+              <option value="lmstudio">LM Studio (local)</option>
+            </select>
+          </div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Sets the summary provider to <b>OpenAI-Compatible</b> and fills the API URL + a default model.
+          </span>
+        </div>
+
+        <div class="settings-field summary-provider-field summary-needs-key">
+          <label>Summary API key</label>
+          <div>${renderField(
+            { key: "summary.api_key", label: "", kind: "text", type: "password" },
+            config.summary.api_key || "",
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Leave blank to reuse the cleanup provider's API key.
+          </span>
+        </div>
+
+        <div class="settings-field summary-provider-field summary-needs-url">
+          <label>Summary API URL</label>
+          <div>${renderField(
+            { key: "summary.api_url", label: "", kind: "text" },
+            config.summary.api_url || "",
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Optional — leave blank for the provider's default endpoint.
+          </span>
+        </div>
+
+        <div class="settings-field">
           <label>Summary model (optional)</label>
           <div>${renderField(
             { key: "summary.model", label: "", kind: "text" },
             config.summary.model || "",
           )}</div>
           <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
-            Leave blank to reuse the post-processing model above. Override here to summarize with a
-            different model (e.g. a smaller/faster one).
+            Leave blank to reuse the post-processing model. Override to summarize with a different
+            model (e.g. a smaller/faster one).
           </span>
         </div>
 
@@ -433,6 +501,50 @@ export class SectionPostProcessing {
         }
       });
     }
+
+    // Summary provider: show/hide the API key + URL fields based on the chosen
+    // provider. Inherit ("") hides everything (it reuses the cleanup connection);
+    // local Ollama needs only a URL; cloud providers need a key too.
+    const summaryProviderSelect = container.querySelector<HTMLSelectElement>("[data-key='summary.provider']");
+    const updateSummaryProviderVisibility = () => {
+      const provider = summaryProviderSelect?.value || "";
+      const isCloud = provider === "openai" || provider === "groq" || provider === "anthropic";
+      const needsUrl = provider !== "";
+      container.querySelectorAll<HTMLElement>(".summary-needs-key").forEach((el) => {
+        el.style.display = isCloud ? "grid" : "none";
+      });
+      container.querySelectorAll<HTMLElement>(".summary-needs-url").forEach((el) => {
+        el.style.display = needsUrl ? "grid" : "none";
+      });
+      const presetRow = container.querySelector<HTMLElement>(".summary-preset-row");
+      if (presetRow) presetRow.style.display = "grid";
+    };
+    if (summaryProviderSelect) {
+      summaryProviderSelect.addEventListener("change", updateSummaryProviderVisibility);
+      updateSummaryProviderVisibility();
+    }
+
+    // Summary provider presets — map a named entry onto the OpenAI-compatible
+    // provider and prefill the endpoint + a default model (mirrors the cleanup
+    // presets, but writes to the summary.* keys).
+    const summaryProviderPreset = container.querySelector<HTMLSelectElement>("#summary-provider-preset");
+    summaryProviderPreset?.addEventListener("change", () => {
+      const preset = LLM_PRESETS[summaryProviderPreset.value];
+      if (!preset || !summaryProviderSelect) return;
+      summaryProviderSelect.value = "openai";
+      summaryProviderSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      const urlInput = container.querySelector<HTMLInputElement>(".summary-needs-url [data-key='summary.api_url']");
+      const modelInput = container.querySelector<HTMLInputElement>("[data-key='summary.model']");
+      if (urlInput) {
+        urlInput.value = preset.apiUrl;
+        urlInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (modelInput) {
+        modelInput.value = preset.model;
+        modelInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      summaryProviderPreset.value = "";
+    });
 
     const providerSelect = container.querySelector<HTMLSelectElement>("[data-key='llm_post_process.provider']");
     const providerSettings = container.querySelectorAll<HTMLElement>(".provider-settings");

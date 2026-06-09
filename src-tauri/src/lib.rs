@@ -249,6 +249,7 @@ pub fn run() {
             commands::update_transcript,
             commands::update_meeting_name,
             commands::get_original_transcript,
+            commands::get_clean_transcript,
             commands::update_notes,
             commands::daemon_status,
             commands::read_config,

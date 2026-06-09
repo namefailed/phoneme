@@ -202,6 +202,15 @@ export async function getOriginalTranscript(id: string): Promise<string | null> 
 }
 
 /**
+ * The preserved "unedited" transcript — the pipeline output (transcribed +
+ * cleaned) before the user made any hand edits. `null` if none was saved (e.g.
+ * recordings transcribed before this was tracked).
+ */
+export async function getCleanTranscript(id: string): Promise<string | null> {
+  return await tauriInvoke<string | null>("get_clean_transcript", { id });
+}
+
+/**
  * Update the free-form user notes for a recording. Notes are stored separately
  * from the transcript and are never affected by (re-)transcription.
  */

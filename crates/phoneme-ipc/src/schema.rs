@@ -137,6 +137,11 @@ pub enum Request {
     GetOriginalTranscript {
         id: RecordingId,
     },
+    /// Fetch the preserved "unedited" transcript — the pipeline output
+    /// (transcribed + cleaned) before the user made hand edits, if any.
+    GetCleanTranscript {
+        id: RecordingId,
+    },
     /// Update the free-form user notes for a recording. Independent of the
     /// transcript; never affected by (re-)transcription.
     UpdateNotes {
