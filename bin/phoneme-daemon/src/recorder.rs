@@ -307,8 +307,12 @@ impl DaemonRecorder {
         let log_id = id.clone();
         let task = tokio::spawn(async move {
             let cfg = state.config.load();
+            // The live preview uses its own provider when configured
+            // (`preview_whisper`) — a fast local model on a second server, or a
+            // cloud API — so it never contends with the final transcription.
+            // Falls back to the main provider when unset (unchanged behavior).
             let provider = state.transcription.provider(
-                &cfg.whisper,
+                cfg.preview_provider_config(),
                 &phoneme_core::config::DiarizationConfig::default(),
             );
             let is_native = provider.is_native();
