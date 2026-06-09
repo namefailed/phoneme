@@ -48,18 +48,24 @@
   transform: translateX(2px);
   color: var(--accent);
 }
-.rec-row.active {
-  /* Make the selected row unmistakable: a strong accent tint, a bold accent
-     left bar, and a clear full-row ring. Everything here is background /
-     box-shadow / color only — never border-width, padding, or margin — so
-     selecting a row never shifts content (the base border-left stays 3px on
-     every row, alignment is preserved). */
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
+/* Make the selected row unmistakable: a strong fill, a bold accent left bar,
+   and a BRIGHT ring (accent lifted toward white) that pops even on top of the
+   accent-tinted meeting rows. The `:hover` variants are listed explicitly so a
+   selected meeting track keeps the full selected look when hovered — otherwise
+   `.rec-row--track:hover` (equal specificity, declared later) would override
+   the selection's background. Everything here is background / box-shadow /
+   color only — never border-width, padding, or margin — so selection never
+   shifts content and alignment is preserved. */
+.rec-row.active,
+.rec-row.active:hover,
+.rec-row--track.active,
+.rec-row--track.active:hover {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
   border-left-color: var(--accent);
   box-shadow:
     inset 4px 0 0 var(--accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent),
-    0 1px 10px color-mix(in srgb, var(--accent) 22%, transparent);
+    inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, white),
+    0 2px 16px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 /* Keep the selected row's text bright (don't let the muted time/duration
    columns wash it out) so the active row reads as clearly "current". */
