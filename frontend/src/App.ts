@@ -5,6 +5,7 @@ import { DoctorView } from "./components/DoctorView";
 import { FirstRunWizard } from "./components/FirstRunWizard";
 import { Router, type ViewName } from "./router";
 import { onNav } from "./services/events";
+import { initKeyboard } from "./services/keyboard";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -71,8 +72,15 @@ export class App {
       if (detail.view === "settings") {
         this.pendingSettingsTab = typeof detail.section === "string" ? detail.section : null;
         this.router.go("settings");
+      } else if (detail.view === "recordings") {
+        this.router.go("recordings");
+      } else if (detail.view === "doctor") {
+        this.router.go("doctor");
       }
     });
+
+    // Global keyboard shortcuts (focus search, navigate, "?" cheat-sheet).
+    initKeyboard();
 
     // Tray menu recording commands.
     void listen("menu:record", async () => {
