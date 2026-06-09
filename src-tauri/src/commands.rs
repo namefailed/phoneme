@@ -215,6 +215,7 @@ pub async fn retranscribe_recording(
     id: String,
     model: Option<String>,
     run_hooks: Option<bool>,
+    post_process: Option<bool>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(
@@ -223,6 +224,7 @@ pub async fn retranscribe_recording(
             id,
             model,
             run_hooks,
+            post_process,
         },
     )
     .await

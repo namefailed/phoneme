@@ -30,6 +30,11 @@ export class ActionRowElement extends LitElement {
   @state() private availableModels: { value: string; label: string }[] = [];
   @state() private selectedModel = "";
   @state() private runHooksAfterTranscribing = true;
+  // One-time toggle for the Transcribe step: run the LLM cleanup /
+  // post-processing after re-transcribing. Defaults on so a re-transcription
+  // produces the same finished transcript a fresh recording would; the user
+  // can turn it off to get the raw machine transcript for this run only.
+  @state() private postProcessOnTranscribe = true;
 
   // Unified "Re-run…" menu. One control replaces the former standalone
   // Re-transcribe + Re-fire hook split-buttons; the user picks a step
@@ -191,7 +196,15 @@ export class ActionRowElement extends LitElement {
     try {
       switch (this.rerunStep) {
         case "transcribe":
-          await retranscribeRecording(this.recordingId, this.selectedModel, this.runHooksAfterTranscribing);
+          await retranscribeRecording(
+            this.recordingId,
+            this.selectedModel,
+            this.runHooksAfterTranscribing,
+            // Only meaningful when cleanup is configured; when it isn't, the
+            // daemon skips post-processing regardless, so sending the flag is
+            // harmless.
+            this.postProcessOnTranscribe,
+          );
           showToast("Queued for re-transcription", "info");
           break;
         case "cleanup": {
@@ -279,8 +292,15 @@ export class ActionRowElement extends LitElement {
           </select>
         </div>
 
+        ${this.llmPostProcessEnabled ? html`
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
+            <input type="checkbox" class="rerun-postprocess-cb" ?checked=${this.postProcessOnTranscribe} @change=${(e: Event) => this.postProcessOnTranscribe = (e.target as HTMLInputElement).checked} />
+            Run cleanup (post-processing) after transcribing
+          </label>
+        ` : nothing}
+
         <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
-          <input type="checkbox" ?checked=${this.runHooksAfterTranscribing} @change=${(e: Event) => this.runHooksAfterTranscribing = (e.target as HTMLInputElement).checked} />
+          <input type="checkbox" class="rerun-hooks-cb" ?checked=${this.runHooksAfterTranscribing} @change=${(e: Event) => this.runHooksAfterTranscribing = (e.target as HTMLInputElement).checked} />
           Run hooks after transcribing
         </label>
       `;

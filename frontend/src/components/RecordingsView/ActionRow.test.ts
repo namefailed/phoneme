@@ -101,15 +101,37 @@ describe("ActionRow Re-run menu", () => {
     expect(modelSelect).toBeTruthy();
     expect(modelSelect.options).toHaveLength(3); // ggml-tiny, ggml-base, current path
 
-    // Uncheck "run hooks after transcribing".
-    const checkbox = element.querySelector(".custom-dropdown input[type='checkbox']") as HTMLInputElement;
-    checkbox.click();
+    // With cleanup enabled in config, both the post-processing and the hooks
+    // toggles are present (defaulting on). Uncheck "run hooks" only.
+    const hooksCb = element.querySelector(".rerun-hooks-cb") as HTMLInputElement;
+    expect(hooksCb).toBeTruthy();
+    expect(element.querySelector(".rerun-postprocess-cb")).toBeTruthy();
+    hooksCb.click();
     await element.updateComplete;
 
     (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
     await element.updateComplete;
 
-    expect(ipcServices.retranscribeRecording).toHaveBeenCalledWith("rec-1", "ggml-medium.bin", false);
+    // run_hooks=false, post_process stays true (default).
+    expect(ipcServices.retranscribeRecording).toHaveBeenCalledWith("rec-1", "ggml-medium.bin", false, true);
+  });
+
+  it("can opt out of post-processing for a one-time re-transcription", async () => {
+    const element = await mountReady();
+    (element.querySelector(".rerun-trigger") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    // Uncheck "run cleanup (post-processing)".
+    const ppCb = element.querySelector(".rerun-postprocess-cb") as HTMLInputElement;
+    expect(ppCb).toBeTruthy();
+    ppCb.click();
+    await element.updateComplete;
+
+    (element.querySelector(".rerun-submit") as HTMLButtonElement).click();
+    await element.updateComplete;
+
+    // post_process=false; run_hooks stays true (default).
+    expect(ipcServices.retranscribeRecording).toHaveBeenCalledWith("rec-1", "ggml-medium.bin", true, false);
   });
 
   it("runs Cleanup against the stored transcript with a one-time model override", async () => {

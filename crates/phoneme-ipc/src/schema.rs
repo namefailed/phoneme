@@ -75,6 +75,13 @@ pub enum Request {
         model: Option<String>,
         #[serde(default)]
         run_hooks: Option<bool>,
+        /// One-time override for whether the LLM cleanup / post-processing step
+        /// runs as part of this re-transcription. `None` = use the configured
+        /// behavior (post-process if `[llm_post_process]` is enabled);
+        /// `Some(false)` = skip cleanup for this run only, producing the raw
+        /// machine transcript. Never persisted to config.
+        #[serde(default)]
+        post_process: Option<bool>,
     },
     RefireHook {
         id: RecordingId,

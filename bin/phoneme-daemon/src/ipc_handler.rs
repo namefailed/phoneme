@@ -354,6 +354,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             id,
             model,
             run_hooks,
+            post_process,
         } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 let mut cfg = state.config.load().as_ref().clone();
@@ -368,6 +369,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }
                 if let Some(rh) = run_hooks {
                     cfg.hook.run_on_transcribe = rh;
+                    changed = true;
+                }
+                // One-time post-processing opt-out: disabling cleanup in this
+                // temporary in-memory config makes the pipeline's
+                // `llm.provider(...)` return `None`, so the run yields the raw
+                // machine transcript. The queue worker reloads config from disk
+                // after the job, so this never persists (the configured cleanup
+                // behavior is restored for the next recording).
+                if post_process == Some(false) {
+                    cfg.llm_post_process.enabled = false;
                     changed = true;
                 }
                 if changed {
