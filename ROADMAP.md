@@ -68,9 +68,10 @@ trust boundary. Fit for a single trusted Windows user; not hardened against
 same-user malware or a malicious IPC client. Ordered by priority.*
 
 **Near-term (the trust boundary)**
-- [ ] **Named-pipe access control** — the IPC pipe is unauthenticated, so any
-  same-user process can drive record/delete/hooks/shutdown and read transcripts
-  off the event stream. Set an owner-only SDDL on the pipe; optional auth token. *(audit S-C1/S-H8)*
+- [x] **Named-pipe access control** — owner-only SDDL (`D:P(A;;GA;;;OW)(A;;GA;;;SY)`)
+  on every pipe instance removes the default cross-session `GENERIC_READ` (which
+  exposed the transcript event stream). Same-user isolation (an auth token)
+  remains open. *(audit S-C1/S-H8)*
 - [ ] **Hook execution allowlist over IPC** — `RefireHook`/`HookTest` accept
   arbitrary commands; restrict to the hooks already in config rather than
   running anything a caller sends. *(S-C2)*
