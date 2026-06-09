@@ -53,4 +53,12 @@ input, textarea {
 }
 #main {
   overflow: hidden;
+  /* Establish a stacking context so the recordings view's internal splitters
+     (.rv-splitter / .rv-sidebar-resizer at z-index:100) stay trapped BELOW the
+     header. Without this, #main is not a stacking context and those z-index:100
+     elements escape to the root, painting over the header's dropdown menus.
+     `isolation:isolate` makes the context without forcing a z-index value. */
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
 }
