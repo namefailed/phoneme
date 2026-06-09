@@ -5,6 +5,7 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 
 import { invoke } from '@tauri-apps/api/core';
 import { showToast } from '../utils/toast';
+import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from '../services/llmProviders';
 
 type ProviderOption = { value: string; label: string };
 
@@ -15,17 +16,6 @@ type Preset = {
   apiUrl: string;
   model: string;
 };
-
-const LLM_PRESETS: Preset[] = [
-  { id: "preset:gemini", label: "Google Gemini", provider: "openai", apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-flash-latest" },
-  { id: "preset:mistral", label: "Mistral", provider: "openai", apiUrl: "https://api.mistral.ai/v1/chat/completions", model: "mistral-small-latest" },
-  { id: "preset:deepseek", label: "DeepSeek", provider: "openai", apiUrl: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat" },
-  { id: "preset:openrouter", label: "OpenRouter", provider: "openai", apiUrl: "https://openrouter.ai/api/v1/chat/completions", model: "meta-llama/llama-3.3-70b-instruct:free" },
-  { id: "preset:together", label: "Together", provider: "openai", apiUrl: "https://api.together.xyz/v1/chat/completions", model: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
-  { id: "preset:xai", label: "xAI / Grok", provider: "openai", apiUrl: "https://api.x.ai/v1/chat/completions", model: "grok-2-latest" },
-  { id: "preset:cerebras", label: "Cerebras", provider: "openai", apiUrl: "https://api.cerebras.ai/v1/chat/completions", model: "llama-3.3-70b" },
-  { id: "preset:lmstudio", label: "LM Studio (local)", provider: "openai", apiUrl: "http://localhost:1234/v1/chat/completions", model: "" },
-];
 
 const STT_PRESETS: Preset[] = [
   { id: "preset:fireworks", label: "Fireworks", provider: "custom", apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
@@ -236,11 +226,13 @@ export class ModelPickerElement extends LitElement {
 
   private onLlmProviderChange() {
     const v = this.llmProviderSelect.value;
-    const preset = LLM_PRESETS.find((p) => p.id === v);
-    if (preset) {
-      this.llmRealProvider = preset.provider;
-      this.llmUrl = preset.apiUrl;
-      this.llmModel = preset.model;
+    if (v.startsWith("preset:")) {
+      const preset = findLlmPreset(v.slice("preset:".length));
+      if (preset) {
+        this.llmRealProvider = preset.kind;
+        this.llmUrl = preset.apiUrl;
+        this.llmModel = preset.defaultModel;
+      }
     } else {
       this.llmRealProvider = v;
     }
@@ -258,7 +250,9 @@ export class ModelPickerElement extends LitElement {
     const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
     const sttPresetOpts = STT_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
     const llmRealOpts = LLM_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.llmRealProvider}>${p.label}</option>`);
-    const llmPresetOpts = LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`);
+    const llmPresetOpts = html`
+      <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`)}</optgroup>
+      <optgroup label="Cloud (API key)">${CLOUD_LLM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`)}</optgroup>`;
 
     const hasDownloaded = this.downloadedModels.length > 0;
     const currentDownloadedOpts = hasDownloaded ? this.downloadedModels.map(p => html`<option value=${p} ?selected=${p === this.sttLocalModel}>${localModelLabel(p)}</option>`) : html`<option value="">No models downloaded — get one in Settings → Whisper</option>`;
@@ -320,7 +314,7 @@ export class ModelPickerElement extends LitElement {
             <label class="mp-label" for="mp-llm-provider">Provider</label>
             <select id="mp-llm-provider" class="mp-input" @change=${this.onLlmProviderChange}>
               ${llmRealOpts}
-              <optgroup label="Presets">${llmPresetOpts}</optgroup>
+              ${llmPresetOpts}
             </select>
 
             <div class="mp-row" style="display:${isLlmCloud ? '' : 'none'}">
