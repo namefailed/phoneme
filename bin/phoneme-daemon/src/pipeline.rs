@@ -257,18 +257,66 @@ pub async fn run(
     // streaming preview backs off and can't starve it (the "Whisper timed out
     // after 60s" bug). Acquiring waits for any in-flight preview tick to finish.
     let _whisper_permit = state.whisper_sem.acquire().await;
+
+    // Report transcription to the unified AI-activity ("brain") popout via the
+    // Transcribing stage of LlmActivity: a start event naming the model/file,
+    // then a done event with timing + size once it finishes. This lets the same
+    // popout that shows cleanup/summary also surface what the STT engine is up to.
+    let model_label = {
+        use phoneme_core::config::TranscriptionBackend as TB;
+        match cfg.whisper.provider {
+            TB::Local => std::path::Path::new(&cfg.whisper.model_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("local model")
+                .to_string(),
+            _ => cfg.whisper.model.clone(),
+        }
+    };
+    let provider_label = format!("{:?}", cfg.whisper.provider).to_lowercase();
+    let file_label = audio_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    state.events.emit(DaemonEvent::LlmActivity {
+        id: id.clone(),
+        stage: PipelineStage::Transcribing,
+        prompt: format!(
+            "Transcribing with {provider_label} · {model_label}\nfile: {file_label}\nlanguage: {}",
+            language.as_deref().unwrap_or("auto-detect")
+        ),
+        delta: String::new(),
+        done: false,
+    });
+    let transcribe_started = std::time::Instant::now();
+
     // Race transcription against cancellation. Dropping the transcribe future on
     // cancel tears down the in-flight HTTP request (reqwest futures are
     // cancel-safe); the native path stops at the next stage boundary.
     let transcript = tokio::select! {
         biased;
         _ = cancel.cancelled() => {
+            state.events.emit(DaemonEvent::LlmActivity {
+                id: id.clone(),
+                stage: PipelineStage::Transcribing,
+                prompt: String::new(),
+                delta: "✕ canceled".into(),
+                done: true,
+            });
             finalize_canceled(state, &id).await;
             return Ok(());
         }
         res = provider.transcribe(&audio_path, language.as_deref()) => match res {
             Ok(t) => t,
             Err(e) => {
+                state.events.emit(DaemonEvent::LlmActivity {
+                    id: id.clone(),
+                    stage: PipelineStage::Transcribing,
+                    prompt: String::new(),
+                    delta: format!("✕ failed: {e}"),
+                    done: true,
+                });
                 state
                     .catalog
                     .update_status(&id, RecordingStatus::TranscribeFailed)
@@ -290,6 +338,20 @@ pub async fn run(
     if cancel.is_cancelled() {
         finalize_canceled(state, &id).await;
         return Ok(());
+    }
+
+    // Finish the Transcribing activity entry with timing + size for the popout.
+    {
+        let secs = transcribe_started.elapsed().as_secs_f32();
+        let chars = transcript.chars().count();
+        let words = transcript.split_whitespace().count();
+        state.events.emit(DaemonEvent::LlmActivity {
+            id: id.clone(),
+            stage: PipelineStage::Transcribing,
+            prompt: String::new(),
+            delta: format!("✓ {words} words · {chars} chars in {secs:.1}s"),
+            done: true,
+        });
     }
 
     // Release the whisper-server permit now that transcription is done — LLM
