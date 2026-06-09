@@ -7,13 +7,13 @@ use phoneme_audio::device::resolve_input_device;
 use phoneme_audio::format::SampleRate;
 use phoneme_audio::meeting_align::{align_meeting_tracks, TrackAlignInput};
 use phoneme_audio::preroll::PreRollBuffer;
-use phoneme_audio::recorder::{Recorder, RecorderConfig, RecordingMode as AudioMode};
+use phoneme_audio::recorder::{Recorder, RecorderConfig};
 use phoneme_audio::source::{CpalSource, GeneratorSource, Source};
 use phoneme_audio::wav;
 use phoneme_core::config::CaptureSource;
 use phoneme_core::error::{Error, Result};
 use phoneme_core::{
-    HookMetadata, HookPayload, MeetingTrack, Recording, RecordingId, RecordingStatus,
+    HookMetadata, HookPayload, MeetingTrack, RecordMode, Recording, RecordingId, RecordingStatus,
 };
 use phoneme_ipc::DaemonEvent;
 use std::path::PathBuf;
@@ -56,23 +56,6 @@ fn make_source(open_cpal: impl FnOnce() -> Result<CpalSource>) -> Result<Box<dyn
         return Ok(Box::new(GeneratorSource::new(1_600)));
     }
     Ok(Box::new(open_cpal()?))
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum RecordMode {
-    Hold,
-    Oneshot,
-    Duration { secs: u32 },
-}
-
-impl From<phoneme_core::RecordMode> for RecordMode {
-    fn from(m: phoneme_core::RecordMode) -> Self {
-        match m {
-            phoneme_core::RecordMode::Hold => RecordMode::Hold,
-            phoneme_core::RecordMode::Oneshot => RecordMode::Oneshot,
-            phoneme_core::RecordMode::Duration { secs } => RecordMode::Duration { secs },
-        }
-    }
 }
 
 // `mode` and `audio_path` aren't read directly off the snapshot yet, but the
@@ -534,13 +517,10 @@ impl DaemonRecorder {
                 }
             }
         };
-        let audio_mode = match mode {
-            RecordMode::Hold => AudioMode::Hold,
-            RecordMode::Oneshot => AudioMode::Oneshot,
-            RecordMode::Duration { secs } => AudioMode::Duration { secs },
-        };
         let recorder_cfg = RecorderConfig {
-            mode: audio_mode,
+            // `RecorderConfig::mode` is `phoneme_core::RecordMode` (re-exported
+            // by phoneme-audio as `RecordingMode`), so no conversion is needed.
+            mode,
             max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
             silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
             silence_window_ms: state.config.load().recording.silence_window_ms,
@@ -968,7 +948,7 @@ impl DaemonRecorder {
             // A meeting always records in Hold mode — it ends only when the
             // user stops it (no silence auto-stop, no fixed duration).
             let recorder_cfg = RecorderConfig {
-                mode: AudioMode::Hold,
+                mode: RecordMode::Hold,
                 max_duration_ms: state.config.load().recording.max_duration_secs as u64 * 1000,
                 silence_threshold_dbfs: state.config.load().recording.silence_threshold_dbfs,
                 silence_window_ms: state.config.load().recording.silence_window_ms,
@@ -1470,7 +1450,7 @@ mod tests {
         let recorder = Recorder::start(
             Box::new(src),
             RecorderConfig {
-                mode: AudioMode::Hold,
+                mode: RecordMode::Hold,
                 ..Default::default()
             },
             None,

@@ -36,15 +36,13 @@ fn block_has_content(block: &[i16]) -> bool {
 }
 
 /// How the recorder should decide to stop.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RecordingMode {
-    /// Stop only when an external caller invokes `stop_and_finalize`.
-    Hold,
-    /// Auto-stop when silence is detected.
-    Oneshot,
-    /// Auto-stop after exactly N seconds.
-    Duration { secs: u32 },
-}
+///
+/// This is [`phoneme_core::RecordMode`], re-exported under the audio crate's
+/// historical name. There is one record-mode enum across the workspace (audit
+/// A-H4) instead of three structurally-identical copies (core, this crate, and
+/// the daemon). Variants: `Hold` (stop only on explicit `stop_and_finalize`),
+/// `Oneshot` (auto-stop on silence), `Duration { secs }` (auto-stop after N s).
+pub use phoneme_core::RecordMode as RecordingMode;
 
 #[derive(Debug)]
 pub struct RecorderConfig {

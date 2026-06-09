@@ -90,7 +90,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }))
         }
         Request::RecordStart { mode, in_place } => {
-            match state.recorder.start(state, mode.into(), in_place).await {
+            match state.recorder.start(state, mode, in_place).await {
                 Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
@@ -143,7 +143,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             } else {
                 match state
                     .recorder
-                    .start(state, phoneme_core::RecordMode::Hold.into(), in_place)
+                    .start(state, phoneme_core::RecordMode::Hold, in_place)
                     .await
                 {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
