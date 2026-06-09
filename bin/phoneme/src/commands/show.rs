@@ -18,6 +18,31 @@ pub async fn run(args: ShowArgs, cfg: &Config, json: bool) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
+
+    // Transcript variants fetch a single string from a dedicated request.
+    if args.original || args.unedited {
+        let req = if args.original {
+            Request::GetOriginalTranscript { id }
+        } else {
+            Request::GetCleanTranscript { id }
+        };
+        let value = match client.send(req).await {
+            Ok(v) => v,
+            Err(code) => return code,
+        };
+        // The daemon returns either a string or null when no variant exists.
+        let text = value.as_str().unwrap_or_default();
+        if json {
+            output::print_json(&value);
+        } else if text.is_empty() {
+            eprintln!("error: no transcript variant available for this recording");
+            return ExitCode::from(exit::NOT_FOUND);
+        } else {
+            println!("{text}");
+        }
+        return ExitCode::SUCCESS;
+    }
+
     let value = match client.send(Request::GetRecording { id }).await {
         Ok(v) => v,
         Err(code) => return code,
