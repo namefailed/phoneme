@@ -386,8 +386,15 @@ pub(crate) async fn diarize_transcript(
         };
 
     let (labeled, num_speakers) = crate::diarization::assign_speakers(&segments, &speakers);
-    // Only present speaker labels when more than one speaker was actually found;
-    // a single-speaker recording reads better as plain prose.
+    // Surface the assignment result so "why isn't this diarized?" is answerable
+    // from the log: a recording is only labeled when ≥2 distinct speakers are
+    // found (a single voice reads better as plain prose, so it stays unlabeled).
+    tracing::info!(
+        turns = speakers.len(),
+        speakers = num_speakers,
+        labeled = num_speakers > 1,
+        "local diarization assignment",
+    );
     if num_speakers <= 1 {
         plain_text
     } else {
