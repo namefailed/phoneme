@@ -62,10 +62,12 @@
 .rec-row--track.active:hover,
 .rec-row.multi-selected.active,
 .rec-row.multi-selected.active:hover {
+  /* Selection = strong fill + bright full-row ring + lift glow. NO left bar —
+     the accent left rail is reserved for meetings, so a selected meeting track
+     still shows its rail (inherited from .rec-row--track) plus this ring, while
+     a selected single recording gets the ring only. */
   background: color-mix(in srgb, var(--accent) 32%, transparent);
-  border-left-color: var(--accent);
   box-shadow:
-    inset 4px 0 0 var(--accent),
     inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, white),
     0 2px 16px color-mix(in srgb, var(--accent) 30%, transparent);
 }
@@ -804,7 +806,9 @@ mark.search-hit {
   gap: 0;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
+  /* 3px to match the track rows' reserved left border exactly, so the meeting
+     rail and the checkbox column line up between the header and its tracks. */
+  border-left: 3px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   cursor: pointer;
   font-size: 13px;
@@ -896,13 +900,12 @@ mark.search-hit {
    apart at a glance. The active-row rule (higher specificity) still wins when
    a track is selected. */
 .rec-row--track {
-  /* The SOLID left rail is the meeting signal — a vertical accent bar reads
-     instantly and, being a box-shadow, survives multi-select (which sets no
-     box-shadow) so the meeting cluster stays identifiable even when every row
-     is checkbox-selected. The tint is kept light so it never competes with the
-     selection fill. */
+  /* Meeting rail: color the 3px reserved left border. No layout shift, and it
+     lines up exactly with the group header's matching 3px accent border.
+     Multi-select and hover don't touch border-left-color, so the rail always
+     shows; the active ring composes on top of it. */
   background: color-mix(in srgb, var(--accent) 5%, transparent);
-  box-shadow: inset 4px 0 0 var(--accent);
+  border-left-color: var(--accent);
 }
 .rec-row--track:hover {
   background: color-mix(in srgb, var(--accent) 11%, transparent);
@@ -923,8 +926,8 @@ mark.search-hit {
 
 /* Source column: a plain icon + label per track ("Microphone" / "System
    audio"). The earlier pill was too wide for the column — its edge touched the
-   divider and clipped the text. Bare icon+text reads cleaner, fits, and the
-   accent color (system) carries the distinction without a box. */
+   divider and clipped the text. Bare icon + text reads cleaner and fits; both
+   sources share identical styling (only the icon glyph and label differ). */
 .rec-source {
   display: inline-flex;
   align-items: center;
@@ -947,11 +950,10 @@ mark.search-hit {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* System audio stands out with the accent color; mic stays neutral. */
-.rec-source--system { color: var(--accent); }
-.rec-source--system .rec-source-ico { opacity: 1; }
-.rec-row:hover .rec-source--mic { color: var(--fg-default); }
-.rec-row.active .rec-source--mic { color: var(--fg-default); }
+/* System audio and microphone are styled identically — only the icon glyph and
+   label text differ. Both brighten together on hover / selection. */
+.rec-row:hover .rec-source,
+.rec-row.active .rec-source { color: var(--fg-default); }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 ph-sidebar {
