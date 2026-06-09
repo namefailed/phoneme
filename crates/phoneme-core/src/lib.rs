@@ -3,6 +3,7 @@
 pub mod catalog;
 pub mod config;
 pub mod diarization;
+pub mod doctor;
 pub mod embed;
 pub mod error;
 pub mod hook;
