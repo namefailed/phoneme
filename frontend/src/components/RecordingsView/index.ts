@@ -10,15 +10,31 @@ import { Splitter } from "./Splitter";
 import "./Sidebar";
 import "./styles.css";
 
+// Per-device UI layout prefs persisted in localStorage (NOT config.toml — these
+// are window-layout preferences, like the record-mode dropdown's key).
+const LS_SPLIT = "phoneme.layout.splitPercent";
+const LS_SIDEBAR = "phoneme.layout.sidebarOpen";
+
+/** Persisted list/detail split %, clamped to a sane range (default 61). */
+function readStoredSplit(): number {
+  const n = Number(localStorage.getItem(LS_SPLIT));
+  return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 61;
+}
+
+/** Persisted sidebar open state (default open). */
+function readStoredSidebar(): boolean {
+  return localStorage.getItem(LS_SIDEBAR) !== "false";
+}
+
 export class RecordingsView {
   private container: HTMLElement;
   private list: RecordingsList;
   private detail: RecordingDetail;
   private mergedDetail: MergedConversationDetail;
   private state: Store<RecordingsListState>;
-  private splitPercent = 61;
+  private splitPercent = readStoredSplit();
   private detailVisible = true;
-  private sidebarVisible = true;
+  private sidebarVisible = readStoredSidebar();
   private unsub: (() => void) | null = null;
   private splitter: Splitter;
   private keydownHandler: (e: KeyboardEvent) => void;
@@ -71,6 +87,7 @@ export class RecordingsView {
     };
     this.splitter = new Splitter(splitRoot, this.splitPercent, (pct) => {
       this.splitPercent = pct;
+      try { localStorage.setItem(LS_SPLIT, String(pct)); } catch { /* private mode */ }
       this.applyLayout();
     });
 
@@ -137,6 +154,7 @@ export class RecordingsView {
 
   toggleSidebar() {
     this.sidebarVisible = !this.sidebarVisible;
+    try { localStorage.setItem(LS_SIDEBAR, String(this.sidebarVisible)); } catch { /* private mode */ }
     this.applyLayout();
   }
 
