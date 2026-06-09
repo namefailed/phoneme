@@ -6,6 +6,14 @@
   gap: 10px;
   align-items: center;
   flex-shrink: 0;
+  position: relative;
+}
+/* Lift the whole header column above the main view so its dropdowns paint over
+   the list/detail splitter (which sits in #main, a later sibling, and would
+   otherwise show through/over the open menus). */
+#hdr {
+  position: relative;
+  z-index: 50;
 }
 .headerbar .search {
   background-color: var(--bg-deep);

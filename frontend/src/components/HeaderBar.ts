@@ -476,8 +476,12 @@ export class HeaderBarElement extends LitElement {
             .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
             .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
-          <button class="icon-btn ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Settings & quick actions" aria-haspopup="menu"
-            aria-expanded=${this.settingsMenuOpen} title="Settings & quick actions" @click=${this.toggleSettingsMenu}>⚙ ▾</button>
+          <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
+            style="border-top-right-radius:0; border-bottom-right-radius:0;" @click=${this.openAllSettings}>⚙</button>
+          <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings & actions" aria-haspopup="menu"
+            aria-expanded=${this.settingsMenuOpen} title="Quick settings & actions"
+            style="padding:6px 7px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
+            @click=${this.toggleSettingsMenu}>▾</button>
           <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
             style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
             <button class="hb-menu-item" role="menuitem" @click=${this.openModels}>🎛 Quick model switch…</button>

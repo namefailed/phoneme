@@ -19,12 +19,19 @@ export class QueuePanelElement extends LitElement {
 
   @state() private items: QueueEntry[] = [];
   @state() private collapsed = false;
+  /** Per-device override for the queue list's max height (px); null = CSS default. */
+  @state() private listHeight: number | null = null;
   private unsub: (() => void) | null = null;
   private pollTimer: number | null = null;
+
+  /** Min/max drag bounds for the queue list height. */
+  private static readonly MIN_H = 120;
 
   async connectedCallback() {
     super.connectedCallback();
     this.collapsed = localStorage.getItem("phoneme.queuePanelCollapsed") === "true";
+    const h = Number(localStorage.getItem("phoneme.queueListHeight"));
+    this.listHeight = Number.isFinite(h) && h >= QueuePanelElement.MIN_H ? h : null;
     void this.load();
     this.unsub = await subscribe((event: DaemonEvent) => {
       const name = (event as { event: string }).event;
@@ -95,6 +102,36 @@ export class QueuePanelElement extends LitElement {
     localStorage.setItem("phoneme.queuePanelCollapsed", String(this.collapsed));
   }
 
+  /**
+   * Drag the top splitter to resize the queue list. The panel is laid out
+   * column-reverse (list grows upward), so dragging UP must INCREASE the
+   * height — hence `startH - dy`. Height is clamped and persisted per device.
+   */
+  private startResize(e: MouseEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const list = this.querySelector<HTMLElement>(".queue-list");
+    const startH = list ? list.getBoundingClientRect().height : QueuePanelElement.MIN_H;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (m: MouseEvent) => {
+      const maxH = Math.max(QueuePanelElement.MIN_H, window.innerHeight * 0.8);
+      const next = Math.min(maxH, Math.max(QueuePanelElement.MIN_H, startH - (m.clientY - startY)));
+      this.listHeight = Math.round(next);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      if (this.listHeight != null) {
+        try { localStorage.setItem("phoneme.queueListHeight", String(this.listHeight)); } catch { /* private mode */ }
+      }
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
   render() {
     const items = this.items;
     const active = items.filter((i) => i.state === "processing").length;
@@ -111,7 +148,7 @@ export class QueuePanelElement extends LitElement {
         ${this.collapsed
           ? null
           : html`
-              <div class="queue-list">
+              <div class="queue-list" style=${this.listHeight != null ? `max-height:${this.listHeight}px` : ""}>
                 ${(() => {
                   const pendingIds = items.filter((i) => i.state === "pending").map((i) => i.id);
                   return items.length === 0
@@ -139,6 +176,9 @@ export class QueuePanelElement extends LitElement {
                       });
                 })()}
               </div>
+              ${items.length
+                ? html`<div class="queue-resizer" title="Drag to resize the queue" @mousedown=${(e: MouseEvent) => this.startResize(e)}></div>`
+                : null}
             `}
       </div>
     `;
