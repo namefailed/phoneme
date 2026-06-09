@@ -10,6 +10,11 @@ use tokio::fs;
 /// payload scan ignores it.
 const ORDER_FILE: &str = ".queue-order";
 
+/// Sentinel marking the queue as paused. When present in the inbox root the
+/// worker stops claiming new pending items (the in-flight item, if any, still
+/// finishes). No `.json` extension so payload scans ignore it.
+const PAUSE_FILE: &str = ".queue-paused";
+
 /// Which directory of the inbox a payload lives in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InboxState {
@@ -319,6 +324,52 @@ impl InboxQueue {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// Pause or resume the queue. Pausing drops a sentinel file the worker
+    /// checks before each claim; resuming removes it. The currently-processing
+    /// item is never interrupted — only new claims are gated.
+    pub async fn set_paused(&self, paused: bool) -> Result<()> {
+        let path = self.root.join(PAUSE_FILE);
+        if paused {
+            fs::write(&path, b"").await?;
+        } else if fs::try_exists(&path).await.unwrap_or(false) {
+            fs::remove_file(&path).await?;
+        }
+        Ok(())
+    }
+
+    /// Whether the queue is currently paused (the worker should not claim).
+    pub async fn is_paused(&self) -> bool {
+        fs::try_exists(self.root.join(PAUSE_FILE))
+            .await
+            .unwrap_or(false)
+    }
+
+    /// Remove ALL still-pending payloads from the queue (user-initiated
+    /// "clear queue"). The in-flight `processing/` item is left untouched. Also
+    /// clears the order manifest. Returns the ids of the removed items so the
+    /// caller can mark them terminal in the catalog.
+    pub async fn cancel_all_pending(&self) -> Result<Vec<RecordingId>> {
+        let mut removed = Vec::new();
+        for path in read_json_entries_sorted(&self.root.join("pending")).await? {
+            let id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(RecordingId::parse);
+            if fs::remove_file(&path).await.is_ok() {
+                if let Some(id) = id {
+                    removed.push(id);
+                }
+            }
+        }
+        // The manifest now references nothing; drop it so a future enqueue
+        // starts clean.
+        let order = self.root.join("pending").join(ORDER_FILE);
+        if fs::try_exists(&order).await.unwrap_or(false) {
+            let _ = fs::remove_file(&order).await;
+        }
+        Ok(removed)
     }
 
     /// Count files in each inbox subdirectory.

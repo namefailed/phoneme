@@ -800,6 +800,28 @@ ph-sidebar {
   color: var(--accent);
 }
 .queue-count.idle { background: transparent; color: var(--fg-faded); font-weight: 500; }
+.queue-count.paused { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+/* Pause / clear controls on the right of the queue header. */
+.queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+.queue-action {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 6px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.queue-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.queue-action.active { color: var(--warn); }
+.queue-action:disabled { opacity: 0.35; cursor: default; }
 .queue-list {
   /* Sized to its content, capped so it shows a healthy number of items and
      scrolls beyond. The header below stays pinned to the sidebar bottom. The

@@ -21,6 +21,17 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
             return Ok(());
         }
 
+        // When the user has paused the queue, don't claim new work — just idle
+        // and poll. The currently-processing item (already claimed) is never
+        // interrupted; only the next claim is gated.
+        if state.inbox.is_paused().await {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                _ = shutdown.changed() => return Ok(()),
+            }
+            continue;
+        }
+
         // A transient I/O error (antivirus lock, NTFS journal flush) must not
         // permanently kill the worker — retry with the same backoff the Whisper
         // path uses. `?` here would silently stop all transcription.

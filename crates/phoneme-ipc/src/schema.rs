@@ -164,6 +164,16 @@ pub enum Request {
     ReorderQueue {
         ids: Vec<RecordingId>,
     },
+    /// Pause or resume the transcription queue. While paused the worker stops
+    /// claiming new pending items (the in-flight item still finishes).
+    SetQueuePaused {
+        paused: bool,
+    },
+    /// Query whether the queue is currently paused.
+    QueuePaused,
+    /// Remove ALL still-pending items from the queue at once ("clear queue").
+    /// The currently-processing item is left untouched.
+    CancelAllQueued,
 
     /// Run all health checks (local filesystem + backend reachability) and
     /// return the results for the GUI Doctor view. Each result carries a name,

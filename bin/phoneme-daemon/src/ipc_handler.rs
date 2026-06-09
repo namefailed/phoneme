@@ -653,6 +653,41 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::SetQueuePaused { paused } => match state.inbox.set_paused(paused).await {
+            Ok(()) => {
+                // Nudge the panel so the pause state reflects immediately.
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::json!({ "paused": paused }))
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::QueuePaused => {
+            Response::Ok(serde_json::json!({ "paused": state.inbox.is_paused().await }))
+        }
+        Request::CancelAllQueued => match state.inbox.cancel_all_pending().await {
+            Ok(ids) => {
+                // Mark each cancelled recording terminal so it isn't stuck
+                // showing "transcribing", mirroring single-item CancelQueued.
+                for id in &ids {
+                    let _ = state
+                        .catalog
+                        .update_status(id, RecordingStatus::TranscribeFailed)
+                        .await;
+                    state
+                        .events
+                        .emit(DaemonEvent::RecordingCancelled { id: id.clone() });
+                }
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::json!({ "removed": ids.len() }))
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         // Unlike RefireHook, HookTest intentionally runs a caller-supplied
         // command: it is the Hook Manager's "test this command" affordance, used
         // to validate a hook the user is editing but has not saved yet. That is a

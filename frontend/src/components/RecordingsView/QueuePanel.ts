@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { listQueue, cancelQueued, reorderQueue, type QueueEntry } from "../../services/ipc";
+import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, type QueueEntry } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { formatTime, formatDuration } from "../../utils/format";
 import { showToast } from "../../utils/toast";
@@ -21,6 +21,8 @@ export class QueuePanelElement extends LitElement {
   @state() private collapsed = false;
   /** Per-device override for the queue list's max height (px); null = CSS default. */
   @state() private listHeight: number | null = null;
+  /** Whether the daemon's queue worker is paused (gated from claiming new work). */
+  @state() private paused = false;
   private unsub: (() => void) | null = null;
   private pollTimer: number | null = null;
 
@@ -63,6 +65,41 @@ export class QueuePanelElement extends LitElement {
       this.items = await listQueue();
     } catch {
       this.items = [];
+    }
+    try {
+      this.paused = await queuePaused();
+    } catch {
+      /* leave last-known paused state */
+    }
+  }
+
+  /** Toggle the queue between paused and running. */
+  private async togglePause(e: Event) {
+    e.stopPropagation();
+    const next = !this.paused;
+    this.paused = next; // optimistic
+    try {
+      this.paused = await setQueuePaused(next);
+    } catch (err) {
+      this.paused = !next;
+      showToast(`Couldn't ${next ? "pause" : "resume"} queue: ${errText(err)}`, "error");
+    }
+  }
+
+  /** Remove every pending item from the queue (the in-flight one keeps going). */
+  private async clearAll(e: Event) {
+    e.stopPropagation();
+    const pending = this.items.filter((i) => i.state === "pending").length;
+    if (pending === 0) return;
+    if (!window.confirm(`Remove ${pending} pending recording${pending === 1 ? "" : "s"} from the queue? The one currently transcribing will finish.`)) {
+      return;
+    }
+    try {
+      const removed = await cancelAllQueued();
+      await this.load();
+      showToast(`Cleared ${removed} from the queue`, "info");
+    } catch (err) {
+      showToast(`Couldn't clear queue: ${errText(err)}`, "error");
     }
   }
 
@@ -143,7 +180,16 @@ export class QueuePanelElement extends LitElement {
           <span class="queue-title">Queue</span>
           ${items.length
             ? html`<span class="queue-count">${pending}${active ? ` +${active}⟳` : ""}</span>`
-            : html`<span class="queue-count idle">idle</span>`}
+            : html`<span class="queue-count ${this.paused ? "paused" : "idle"}">${this.paused ? "paused" : "idle"}</span>`}
+          ${!this.collapsed
+            ? html`
+                <span class="queue-actions">
+                  <button class="queue-action ${this.paused ? "active" : ""}" title=${this.paused ? "Resume the queue" : "Pause the queue (finishes the current item)"}
+                    @click=${(e: Event) => this.togglePause(e)}>${this.paused ? "▶" : "⏸"}</button>
+                  <button class="queue-action" title="Clear all pending items" ?disabled=${pending === 0}
+                    @click=${(e: Event) => this.clearAll(e)}>🗑</button>
+                </span>`
+            : null}
         </div>
         ${this.collapsed
           ? null

@@ -317,6 +317,24 @@ pub async fn reorder_queue(bridge: Br<'_>, ids: Vec<String>) -> Result<Value, Co
     forward(&bridge, Request::ReorderQueue { ids: parsed? }).await
 }
 
+/// Pause or resume the transcription queue.
+#[tauri::command]
+pub async fn set_queue_paused(bridge: Br<'_>, paused: bool) -> Result<Value, CommandError> {
+    forward(&bridge, Request::SetQueuePaused { paused }).await
+}
+
+/// Query whether the transcription queue is currently paused.
+#[tauri::command]
+pub async fn queue_paused(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::QueuePaused).await
+}
+
+/// Remove ALL still-pending items from the queue ("clear queue").
+#[tauri::command]
+pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::CancelAllQueued).await
+}
+
 /// Manually update the transcript text for a specific recording.
 #[tauri::command]
 pub async fn update_transcript(

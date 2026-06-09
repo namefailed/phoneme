@@ -217,6 +217,24 @@ export async function reorderQueue(ids: string[]): Promise<void> {
   await tauriInvoke("reorder_queue", { ids });
 }
 
+/** Pause or resume the transcription queue. Returns the new paused state. */
+export async function setQueuePaused(paused: boolean): Promise<boolean> {
+  const r = await tauriInvoke<{ paused: boolean }>("set_queue_paused", { paused });
+  return r.paused;
+}
+
+/** Whether the transcription queue is currently paused. */
+export async function queuePaused(): Promise<boolean> {
+  const r = await tauriInvoke<{ paused: boolean }>("queue_paused");
+  return r.paused;
+}
+
+/** Remove ALL still-pending items from the queue. Returns how many were removed. */
+export async function cancelAllQueued(): Promise<number> {
+  const r = await tauriInvoke<{ removed: number }>("cancel_all_queued");
+  return r.removed;
+}
+
 /** One Doctor health-check result. */
 export type DoctorCheck = {
   name: string;
