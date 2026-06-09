@@ -97,6 +97,11 @@ export class NotesEditor {
         caretColor: "var(--accent)",
         padding: "2px 0",
       },
+      // Align the first character with the "NOTES" header label above.
+      ".cm-line": {
+        paddingLeft: "0",
+        paddingRight: "0",
+      },
       ".cm-cursor": {
         borderLeftColor: "var(--accent)",
       },

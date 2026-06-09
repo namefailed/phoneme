@@ -94,6 +94,12 @@ export class TranscriptEditorElement extends LitElement {
         // Minimal padding — horizontal alignment comes from the block's padding.
         padding: "2px 0",
       },
+      // Zero CodeMirror's default 2px line padding so the first character lines
+      // up exactly with the "TRANSCRIPT" header label above it.
+      ".cm-line": {
+        paddingLeft: "0",
+        paddingRight: "0",
+      },
       ".cm-cursor": {
         borderLeftColor: "var(--accent)"
       },
