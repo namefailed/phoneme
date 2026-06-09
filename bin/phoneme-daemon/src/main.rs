@@ -111,7 +111,11 @@ async fn main() -> Result<()> {
     // port; never touches the main server above.
     let preview_sup_state = state.clone();
     let preview_sup_signal = state.shutdown.signal.clone();
-    tokio::spawn(async move {
+    // Keep the handle so shutdown can AWAIT it — otherwise the process could exit
+    // before run_preview kills its child, orphaning the 2nd whisper-server. Not
+    // in the crash-detection select below: a preview-server crash must not take
+    // down the daemon (preview is non-critical).
+    let mut preview_supervisor_handle = tokio::spawn(async move {
         if let Err(e) = whisper_supervisor::run_preview(preview_sup_state, preview_sup_signal).await
         {
             tracing::error!(error = %e, "preview whisper supervisor terminated");
@@ -156,6 +160,9 @@ async fn main() -> Result<()> {
     state.shutdown.trigger();
     let _ = worker_handle.await;
     let _ = supervisor_handle.await;
+    // Wait for the preview supervisor too, so its dedicated whisper-server (if
+    // any) is killed before we exit — same cleanup guarantee as the main server.
+    let _ = preview_supervisor_handle.await;
 
     server_result
 }
