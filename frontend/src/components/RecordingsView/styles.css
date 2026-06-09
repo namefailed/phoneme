@@ -685,6 +685,8 @@ mark.search-hit {
 }
 .bulk-grip:hover { color: var(--accent); }
 .bulk-menu-wrap { position: relative; display: inline-flex; }
+/* The shared Re-run form floats above the bar; the form carries its own card. */
+.bulk-rerun-pop { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 6; }
 .bulk-menu {
   position: absolute;
   bottom: calc(100% + 6px);

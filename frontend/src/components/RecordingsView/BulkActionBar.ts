@@ -2,15 +2,14 @@ import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import {
   deleteRecording,
-  retranscribeRecording,
-  rerunCleanup,
-  rerunSummary,
   listTags,
   attachTag,
   type Recording,
   type Tag,
 } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
+import "./RerunForm";
+import { applyRerun, rerunToastMessage, type RerunPayload } from "./rerunActions";
 
 export type BulkActionCallbacks = {
   onRefresh: () => void;
@@ -125,16 +124,26 @@ export class BulkActionBarElement extends LitElement {
     this.callbacks.onRefresh();
   }
 
-  private handleRetranscribe() {
-    void this.runOverSelection((r) => retranscribeRecording(r.id), "Queued for re-transcription:");
-  }
-
-  private handleCleanup() {
-    void this.runOverSelection((r) => rerunCleanup(r.id), "Re-running cleanup on", false);
-  }
-
-  private handleSummarize() {
-    void this.runOverSelection((r) => rerunSummary(r.id), "Summarizing", false);
+  /** Apply the shared Re-run form's chosen step+options to every selected
+   *  recording. Identical form/logic to the single-recording detail panel. */
+  private async onRerun(e: Event) {
+    if (this.busy) return;
+    const payload = (e as CustomEvent<RerunPayload>).detail;
+    this.openMenu = null;
+    this.busy = true;
+    const recs = this.selectedRecordings();
+    let ok = 0;
+    let failed = 0;
+    for (const r of recs) {
+      try { await applyRerun(r.id, payload); ok++; } catch { failed++; }
+    }
+    this.busy = false;
+    if (failed === 0) showToast(rerunToastMessage(payload, ok), "info");
+    else showToast(`${ok} ok, ${failed} failed.`, "error");
+    // Transcribe/all re-queue the audio (clear the selection); cleanup/summary/
+    // hook act in place, so keep the selection for follow-up actions.
+    if (payload.step === "transcribe" || payload.step === "all") this.callbacks.onClear();
+    this.callbacks.onRefresh();
   }
 
   private async handleTag(tag: Tag) {
@@ -227,10 +236,8 @@ export class BulkActionBarElement extends LitElement {
           <span class="bulk-menu-wrap">
             <button class="bulk-btn" title="Re-run a step on the selected recordings" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("rerun", e)}>↻ Re-run <svg class="ph-caret-ico ${this.openMenu === "rerun" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             ${this.openMenu === "rerun" ? html`
-              <div class="bulk-menu" @click=${(e: Event) => e.stopPropagation()}>
-                <button class="bulk-menu-item" @click=${this.handleRetranscribe}>↺ Re-transcribe (everything)</button>
-                <button class="bulk-menu-item" @click=${this.handleCleanup}>✨ Re-run cleanup</button>
-                <button class="bulk-menu-item" @click=${this.handleSummarize}>📝 Re-summarize</button>
+              <div class="bulk-rerun-pop" @click=${(e: Event) => e.stopPropagation()}>
+                <ph-rerun-form .busy=${this.busy} .submitLabel=${`Re-run · ${n}`} @rerun=${this.onRerun} @cancel=${() => { this.openMenu = null; }}></ph-rerun-form>
               </div>` : null}
           </span>
 
