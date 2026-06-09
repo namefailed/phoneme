@@ -97,17 +97,6 @@ export class SectionRecording {
             <b>0 disables it</b> (default). When set above 0, Phoneme keeps your <b>microphone open continuously</b> between recordings, holding the most recent audio in a rolling in-memory buffer that is constantly discarded. Nothing is written to disk unless you actually start a recording. Microphone source only — ignored for system audio.
           </span>
         </div>
-        <div class="settings-field">
-          <label>Live transcription preview</label>
-          <div>${renderField(
-            { key: "recording.streaming_preview", label: "", kind: "checkbox" },
-            this.config.recording.streaming_preview ?? false,
-          )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-            Shows a <b>live, updating transcript</b> under the header bar while you record, instead of waiting until you stop. <b>Off by default.</b><br/>
-            Phoneme re-transcribes the audio captured so far every couple of seconds, so this uses extra CPU (or cloud requests, if you use a cloud provider) during recording. The preview is approximate — the final transcript is still produced normally after you stop.
-          </span>
-        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);

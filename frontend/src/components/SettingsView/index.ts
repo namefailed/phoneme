@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";
 
 import { SectionWhisper } from "./SectionWhisper";
+import { SectionPreview } from "./SectionPreview";
 import { SectionDiarization } from "./SectionDiarization";
 import { SectionRecording } from "./SectionRecording";
 import { SectionHotkey } from "./SectionHotkey";
@@ -118,6 +119,7 @@ export class SettingsViewElement extends LitElement {
 
     const mountAll = () => {
       new SectionWhisper(createSubHost(), this.config);
+      new SectionPreview(createSubHost(), this.config);
       new SectionDiarization(createSubHost(), this.config);
       new SectionRecording(createSubHost(), this.config);
       new SectionHotkey(createSubHost(), this.config);
