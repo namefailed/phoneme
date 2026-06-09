@@ -38,21 +38,21 @@ move at least one of these personas closer to "done":
 
 Landing now as focused PRs (each tested, `clippy -D warnings` clean):
 
-- [ ] **Live preview no longer O(n²)** — the streaming preview re-transcribed the
+- [x] **Live preview no longer O(n²)** — the streaming preview re-transcribed the
   *entire* growing buffer every tick; now bounded to a rolling 15 s window.
-- [ ] **Diarization speaker mapping fixed** — pyannote `"SPEAKER_00"` labels were
+- [x] **Diarization speaker mapping fixed** — pyannote `"SPEAKER_00"` labels were
   `parse::<u8>()`'d and collapsed everyone to one speaker; now mapped to stable
   indices with gap handling, and run off the async runtime.
-- [ ] **Semantic search hardened** — dimension check, relevance floor (drop noise),
+- [x] **Semantic search hardened** — dimension check, relevance floor (drop noise),
   and meeting-track dedupe.
-- [ ] **Embedding input truncated** to the model's 256-token limit (long transcripts
+- [x] **Embedding input truncated** to the model's 256-token limit (long transcripts
   silently failed to embed → became unsearchable).
-- [ ] **In-place dictation surfaces errors** instead of panicking / silently no-op'ing.
-- [ ] **Meeting tracks stay synced across silence** — loopback (system audio) is
+- [x] **In-place dictation surfaces errors** instead of panicking / silently no-op'ing.
+- [x] **Meeting tracks stay synced across silence** — loopback (system audio) is
   captured continuously by filling real silence for wall-clock gaps, so pausing
   a video mid-meeting no longer collapses the gap and desyncs the tracks; the
   fill is pause-aware (a meeting pause freezes both tracks, no back-filled silence).
-- [ ] **Transcriptions no longer time out under live preview** — a whisper-server
+- [x] **Transcriptions no longer time out under live preview** — a whisper-server
   semaphore makes the preview yield to the real transcription, fixing the
   `"Whisper timed out after 60s"` failures on long recordings / meetings.
 
