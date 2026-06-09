@@ -49,6 +49,25 @@ pub async fn run(args: TagArgs, cfg: &Config, is_json: bool) -> ExitCode {
             }
             Err(e) => e,
         },
+        TagAction::Update { id, name, color } => {
+            match conn.send(Request::UpdateTag { id, name, color }).await {
+                Ok(val) => {
+                    if is_json {
+                        match serde_json::to_string_pretty(&val) {
+                            Ok(s) => println!("{}", s),
+                            Err(e) => {
+                                eprintln!("error formatting JSON: {e}");
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                    } else {
+                        println!("updated tag");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => e,
+            }
+        }
         TagAction::Delete { id } => match conn.send(Request::DeleteTag { id }).await {
             Ok(_) => ExitCode::SUCCESS,
             Err(e) => e,

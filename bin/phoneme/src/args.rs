@@ -35,7 +35,17 @@ pub enum Command {
     Show(ShowArgs),
     /// Re-transcribe a saved recording.
     #[command(alias = "replay")]
-    Retranscribe(IdArgs),
+    Retranscribe(RetranscribeArgs),
+    /// Re-run only the LLM cleanup step on a stored transcript.
+    Cleanup(CleanupArgs),
+    /// Generate (or regenerate) an LLM summary of a recording.
+    Summarize(SummarizeArgs),
+    /// Get or set a recording's free-form notes.
+    Notes(NotesArgs),
+    /// Replace a recording's transcript text (hand edit).
+    Edit(EditArgs),
+    /// Semantic (embedding) search over transcripts.
+    Search(SearchArgs),
     /// Delete a recording.
     Delete(DeleteArgs),
     /// Health check.
@@ -103,15 +113,25 @@ pub struct ListArgs {
     /// Skip the first N results (pagination; pairs with --limit).
     #[arg(long, value_name = "N")]
     pub offset: Option<u32>,
-    /// ISO 8601 date (e.g. 2026-05-19).
+    /// ISO 8601 date (e.g. 2026-05-19). Lower bound (inclusive).
     #[arg(long)]
     pub since: Option<String>,
+    /// ISO 8601 date (e.g. 2026-05-19). Upper bound (inclusive).
+    #[arg(long)]
+    pub until: Option<String>,
     /// Filter by status.
     #[arg(long)]
     pub status: Option<String>,
+    /// Filter by tag id or name.
+    #[arg(long, value_name = "ID|NAME")]
+    pub tag: Option<String>,
     /// Search transcripts via FTS5.
     #[arg(long)]
     pub search: Option<String>,
+    /// Run a semantic (embedding) search with this query instead of an
+    /// FTS5/list query. Uses --limit (default 20) as the result cap.
+    #[arg(long, value_name = "QUERY")]
+    pub semantic: Option<String>,
     /// Filter by recording type: `all` (default), `single` (voice notes — no
     /// meeting) or `meeting` (multi-track meeting recordings). Mirrors the GUI
     /// Library filter.
@@ -125,11 +145,90 @@ pub struct ShowArgs {
     /// Print only the audio path (useful for shell piping).
     #[arg(long)]
     pub audio_path_only: bool,
+    /// Print the preserved original (machine) transcript instead.
+    #[arg(long, conflicts_with_all = ["audio_path_only", "unedited"])]
+    pub original: bool,
+    /// Print the unedited pipeline transcript (before hand edits) instead.
+    #[arg(long, conflicts_with_all = ["audio_path_only", "original"])]
+    pub unedited: bool,
 }
 
 #[derive(Debug, clap::Args)]
 pub struct IdArgs {
     pub id: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct RetranscribeArgs {
+    pub id: String,
+    /// Override the transcription model for this run only.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Run post-transcription hooks (overrides the configured behavior).
+    #[arg(long, overrides_with = "no_run_hooks")]
+    pub run_hooks: bool,
+    /// Do not run post-transcription hooks (overrides the configured behavior).
+    #[arg(long)]
+    pub no_run_hooks: bool,
+    /// Skip the LLM cleanup / post-processing step for this run only.
+    #[arg(long)]
+    pub no_post_process: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct CleanupArgs {
+    pub id: String,
+    /// Override the cleanup provider for this run only (also forces cleanup on).
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Override the cleanup model for this run only.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Override the cleanup prompt for this run only.
+    #[arg(long)]
+    pub prompt: Option<String>,
+    /// Override the cleanup API URL for this run only.
+    #[arg(long)]
+    pub api_url: Option<String>,
+    /// Override the cleanup API key for this run only.
+    #[arg(long)]
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SummarizeArgs {
+    pub id: String,
+    /// Override the summary model for this run only.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Override the summary prompt for this run only.
+    #[arg(long)]
+    pub prompt: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct NotesArgs {
+    pub id: String,
+    /// Set the notes to this text. Without --set, the current notes are printed.
+    #[arg(long, value_name = "TEXT")]
+    pub set: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct EditArgs {
+    pub id: String,
+    /// New transcript text. If omitted, the text is read from stdin.
+    #[arg(long)]
+    pub text: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SearchArgs {
+    /// The semantic search query.
+    pub query: String,
+    /// Maximum number of results.
+    #[arg(long, value_name = "N", default_value_t = 20)]
+    pub limit: usize,
 }
 
 #[derive(Debug, clap::Args)]
@@ -210,6 +309,15 @@ pub enum TagAction {
         #[arg(long)]
         color: Option<String>,
     },
+    /// Rename and/or recolor an existing tag.
+    Update {
+        id: i64,
+        /// New tag name.
+        name: String,
+        /// New tag color (hex, e.g. #4caf50).
+        #[arg(long)]
+        color: Option<String>,
+    },
     Delete {
         id: i64,
     },
@@ -233,6 +341,8 @@ pub struct ProfileArgs {
 pub enum ProfileAction {
     /// List saved profiles.
     List,
+    /// Save the current config as a named profile snapshot.
+    Save { name: String },
     /// Switch the active config to a saved profile and reload the daemon.
     Use { name: String },
 }

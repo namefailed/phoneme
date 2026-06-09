@@ -13,6 +13,11 @@ Commands:
   list          List recordings
   show          Show one recording
   retranscribe  Re-transcribe a saved recording
+  cleanup       Re-run only the LLM cleanup step on a stored transcript
+  summarize     Generate (or regenerate) an LLM summary of a recording
+  notes         Get or set a recording's free-form notes
+  edit          Replace a recording's transcript text (hand edit)
+  search        Semantic (embedding) search over transcripts
   delete        Delete a recording
   doctor        Health check
   config        Configuration management
