@@ -157,7 +157,14 @@ pub fn run_local_diarization(audio_path: &Path) -> Result<Vec<SpeakerSpan>> {
     let mut pipeline = OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?;
     let audio = load_audio_mono_16khz(audio_path)?;
     let result = pipeline.run(&audio)?;
-    let segments = result.discrete_diarization.to_segments(1.0, 1.0);
+    // Use the pipeline's merged, time-stamped speaker turns directly. The old
+    // `discrete_diarization.to_segments(1.0, 1.0)` passed a frame STEP/DURATION
+    // of 1.0 s, but the model's real frame geometry is ~16.9 ms / ~61.9 ms — so
+    // it inflated every timestamp by ~59×, pushing the turns far past the end of
+    // the audio so they never overlapped the Whisper segments in
+    // `assign_speakers` (local diarization effectively produced no usable speaker
+    // labels). `result.segments` already carries correctly-scaled, merged turns.
+    let segments = result.segments;
 
     Ok(segments
         .into_iter()
