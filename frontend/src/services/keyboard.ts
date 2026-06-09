@@ -35,6 +35,15 @@ const HELP_GROUPS: HelpGroup[] = [
       { combo: "Esc", label: "Clear the multi-selection" },
     ],
   },
+  {
+    title: "Open recording",
+    items: [
+      { combo: "p", label: "Play / pause" },
+      { combo: "c", label: "Copy transcript" },
+      { combo: "e", label: "Export transcript" },
+      { combo: "r", label: "Open the Re-run menu" },
+    ],
+  },
 ];
 
 let helpOpen = false;
@@ -62,6 +71,11 @@ function focusList() {
 
 function navigate(view: string) {
   window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view } }));
+}
+
+/** Ask the open recording's action row to run an action (no-op if none open). */
+function dispatchAction(action: string) {
+  window.dispatchEvent(new CustomEvent("phoneme:action", { detail: { action } }));
 }
 
 function clearPendingG() {
@@ -165,6 +179,12 @@ function onKeyDown(e: KeyboardEvent) {
       pendingG = true;
       pendingGTimer = setTimeout(clearPendingG, 1000);
       return;
+    // Actions on the currently-open recording (no-op when none is open). These
+    // letters don't collide with the list's arrow/Enter/Space navigation.
+    case "p": e.preventDefault(); dispatchAction("play"); return;
+    case "c": e.preventDefault(); dispatchAction("copy"); return;
+    case "e": e.preventDefault(); dispatchAction("export"); return;
+    case "r": e.preventDefault(); dispatchAction("rerun"); return;
   }
 }
 

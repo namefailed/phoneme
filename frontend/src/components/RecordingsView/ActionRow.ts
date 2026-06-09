@@ -30,6 +30,16 @@ export class ActionRowElement extends LitElement {
   @state() private rerunMenuOpen = false;
 
   private docClickHandler: ((e: MouseEvent) => void) | null = null;
+  /** Global keyboard-shortcut bridge (keyboard.ts dispatches phoneme:action). */
+  private actionHandler = (e: Event) => {
+    const action = (e as CustomEvent).detail?.action;
+    switch (action) {
+      case "play": this.handlePlay(); break;
+      case "copy": void this.handleCopy(); break;
+      case "export": void this.handleExport(); break;
+      case "rerun": this.rerunMenuOpen = true; break;
+    }
+  };
 
   connectedCallback() {
     super.connectedCallback();
@@ -41,6 +51,7 @@ export class ActionRowElement extends LitElement {
       }
     };
     document.addEventListener("click", this.docClickHandler);
+    window.addEventListener("phoneme:action", this.actionHandler);
   }
 
   disconnectedCallback() {
@@ -48,6 +59,7 @@ export class ActionRowElement extends LitElement {
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }
+    window.removeEventListener("phoneme:action", this.actionHandler);
   }
 
   private handlePlay() {
