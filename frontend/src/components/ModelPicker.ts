@@ -11,6 +11,9 @@ import { fetchLlmModels } from '../services/llmModels';
 
 type ProviderOption = { value: string; label: string };
 
+/** Every surface where a model can be switched from the quick picker. */
+type MpTab = "transcription" | "postprocessing" | "summary" | "preview";
+
 const LLM_PROVIDERS: ProviderOption[] = [
   { value: "none", label: "None" },
   { value: "ollama", label: "Local Ollama (http://127.0.0.1:11434)" },
@@ -50,11 +53,11 @@ function localModelLabel(path: string): string {
 export class ModelPickerElement extends LitElement {
   protected createRenderRoot() { return this; }
 
-  @property({ type: String }) initialTab: "transcription" | "postprocessing" = "transcription";
+  @property({ type: String }) initialTab: MpTab = "transcription";
   @property({ type: Object }) anchor?: HTMLElement;
   @property({ type: Object }) config: any = null;
 
-  @state() private activeTab: "transcription" | "postprocessing" = "transcription";
+  @state() private activeTab: MpTab = "transcription";
   @state() private downloadedModels: string[] = [];
   @state() private sttRealProvider = "local";
   @state() private sttUrl = "";
@@ -71,6 +74,26 @@ export class ModelPickerElement extends LitElement {
   @state() private fetchingLlm = false;
   @state() private llmModelOther = false;
   @state() private sttModelOther = false;
+
+  // Summary model (config.summary). Empty provider = inherit the post-processing
+  // (cleanup) connection.
+  @state() private sumProvider = "";
+  @state() private sumUrl = "";
+  @state() private sumModel = "";
+  @state() private sumKey = "";
+  @state() private sumModels: string[] = [];
+  @state() private fetchingSum = false;
+  @state() private sumModelOther = false;
+
+  // Live-preview transcription model (config.preview_whisper). When "dedicated"
+  // is off, the preview reuses the main transcription provider.
+  @state() private prevDedicated = false;
+  @state() private prevProvider = "local";
+  @state() private prevUrl = "";
+  @state() private prevModel = "";
+  @state() private prevKey = "";
+  @state() private prevLocalModel = "";
+  @state() private prevModelOther = false;
 
   @query('.mp-dialog') dialog!: HTMLElement;
   @query('#mp-stt-provider') sttProviderSelect!: HTMLSelectElement;
@@ -134,8 +157,50 @@ export class ModelPickerElement extends LitElement {
     const d = this.config.diarization || {};
     this.diarizationEnabled = d.provider !== "none";
 
+    const s = this.config.summary || {};
+    this.sumProvider = String(s.provider ?? "");
+    this.sumUrl = String(s.api_url ?? "");
+    this.sumModel = String(s.model ?? "");
+    this.sumKey = String(s.api_key ?? "");
+
+    const pv = this.config.preview_whisper;
+    this.prevDedicated = !!pv;
+    if (pv) {
+      this.prevProvider = String(pv.provider ?? "local");
+      this.prevUrl = String(pv.api_url ?? "");
+      this.prevModel = String(pv.model ?? "");
+      this.prevKey = String(pv.api_key ?? "");
+      this.prevLocalModel = String(pv.model_path ?? "");
+    } else {
+      // Seed from the main transcription model so toggling "dedicated" on starts
+      // from sensible values.
+      this.prevProvider = this.sttRealProvider;
+      this.prevLocalModel = this.sttLocalModel;
+    }
+
     if (this.llmRealProvider !== "none") {
       void this.fetchLlmModelList();
+    }
+    if (this.sumProvider && this.sumProvider !== "none") {
+      void this.fetchSumModelList();
+    }
+  }
+
+  /** Fetch the model list for the current summary provider (Ollama or cloud). */
+  private async fetchSumModelList() {
+    const provider = this.sumProvider;
+    if (!provider || provider === "none") {
+      this.sumModels = [];
+      return;
+    }
+    this.fetchingSum = true;
+    try {
+      this.sumModels = await fetchLlmModels(provider, this.sumUrl, this.sumKey);
+    } catch (e) {
+      console.warn("Failed to fetch summary models:", e);
+      this.sumModels = [];
+    } finally {
+      this.fetchingSum = false;
     }
   }
 
@@ -201,6 +266,32 @@ export class ModelPickerElement extends LitElement {
     if (!this.config.diarization) this.config.diarization = {};
     this.config.diarization.provider = this.diarizationEnabled ? "local" : "none";
 
+    // Summary model — keep the existing auto/prompt; an empty provider inherits
+    // the post-processing connection (the daemon falls back to it).
+    if (!this.config.summary) this.config.summary = {};
+    this.config.summary.provider = this.sumProvider.trim();
+    this.config.summary.model = this.sumModel.trim();
+    this.config.summary.api_key = this.sumKey;
+    this.config.summary.api_url = this.sumUrl.trim();
+
+    // Live-preview model. Off → reuse the main provider (null). On → clone the
+    // main whisper config (so every required field is present) and override the
+    // provider + model fields for this dedicated preview provider.
+    if (!this.prevDedicated) {
+      this.config.preview_whisper = null;
+    } else {
+      const base = { ...(this.config.whisper || {}) };
+      base.provider = this.prevProvider;
+      base.api_key = this.prevKey;
+      base.api_url = this.prevUrl.trim();
+      if (this.prevProvider === "local") {
+        base.model_path = this.prevLocalModel;
+      } else {
+        base.model = this.prevModel.trim();
+      }
+      this.config.preview_whisper = base;
+    }
+
     try {
       await invoke("write_config", { config: this.config });
       window.dispatchEvent(new CustomEvent("config:saved", { detail: this.config }));
@@ -241,6 +332,47 @@ export class ModelPickerElement extends LitElement {
     if (this.llmRealProvider !== "none") {
       void this.fetchLlmModelList();
     }
+  }
+
+  private onSumProviderChange(e: Event) {
+    this.sumProvider = (e.target as HTMLSelectElement).value;
+    this.sumModelOther = false;
+    if (this.sumProvider && this.sumProvider !== "none") void this.fetchSumModelList();
+    else this.sumModels = [];
+  }
+
+  /** Summary model control: live-fetched dropdown + Refresh + "Other…". */
+  private renderSumModel() {
+    const cur = this.sumModel;
+    const known = new Set(this.sumModels);
+    if (cur) known.add(cur);
+    if (this.sumModelOther) {
+      return html`
+        <div style="display:flex; gap:8px;">
+          <input class="mp-input" type="text" .value=${cur} placeholder="Model id"
+            @input=${(e: Event) => this.sumModel = (e.target as HTMLInputElement).value} />
+          <button class="modal-btn" @click=${() => { this.sumModelOther = false; }}>List</button>
+        </div>`;
+    }
+    return html`
+      <div style="display:flex; gap:8px;">
+        <select class="mp-input" @change=${(e: Event) => {
+          const v = (e.target as HTMLSelectElement).value;
+          if (v === "__other__") this.sumModelOther = true; else this.sumModel = v;
+        }}>
+          <option value="" ?selected=${!cur}>(provider default)</option>
+          ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
+          <option value="__other__">Other… (type a model id)</option>
+        </select>
+        <button class="modal-btn" ?disabled=${this.fetchingSum} title="Fetch available models"
+          @click=${() => void this.fetchSumModelList()}>↻</button>
+      </div>
+      ${this.fetchingSum ? html`<p class="mp-hint">Loading models…</p>` : ""}`;
+  }
+
+  private onPrevProviderChange(e: Event) {
+    this.prevProvider = (e.target as HTMLSelectElement).value;
+    this.prevModelOther = false;
   }
 
   /** LLM model control: live-fetched dropdown + Refresh + "Other…" free-text. */
@@ -305,6 +437,9 @@ export class ModelPickerElement extends LitElement {
     const isSttLocal = this.sttRealProvider === "local";
     const isLlmCloud = this.llmRealProvider === "openai" || this.llmRealProvider === "groq" || this.llmRealProvider === "anthropic";
     const isLlmOllama = this.llmRealProvider === "ollama";
+    const isSumCloud = this.sumProvider === "openai" || this.sumProvider === "groq" || this.sumProvider === "anthropic";
+    const isPrevLocal = this.prevProvider === "local";
+    const prevNeedsCurrent = this.prevLocalModel && !this.downloadedModels.includes(this.prevLocalModel);
 
     const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
     const sttPresetOpts = STT_CUSTOM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`);
@@ -329,6 +464,8 @@ export class ModelPickerElement extends LitElement {
           <div class="mp-tabs" role="tablist">
             <button class="mp-tab ${this.activeTab === 'transcription' ? 'active' : ''}" @click=${() => this.activeTab = 'transcription'} role="tab">Transcription</button>
             <button class="mp-tab ${this.activeTab === 'postprocessing' ? 'active' : ''}" @click=${() => this.activeTab = 'postprocessing'} role="tab">Post-processing</button>
+            <button class="mp-tab ${this.activeTab === 'summary' ? 'active' : ''}" @click=${() => this.activeTab = 'summary'} role="tab">Summary</button>
+            <button class="mp-tab ${this.activeTab === 'preview' ? 'active' : ''}" @click=${() => this.activeTab = 'preview'} role="tab">Live preview</button>
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'transcription'}>
@@ -394,6 +531,62 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Local Ollama</b> keeps everything offline.</p>
           </div>
 
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'summary'}>
+            <label class="mp-label" for="mp-sum-provider">Provider</label>
+            <select id="mp-sum-provider" class="mp-input" @change=${this.onSumProviderChange}>
+              <option value="" ?selected=${!this.sumProvider}>Same as post-processing</option>
+              <option value="ollama" ?selected=${this.sumProvider === 'ollama'}>Local Ollama</option>
+              <option value="openai" ?selected=${this.sumProvider === 'openai'}>OpenAI-Compatible Endpoint</option>
+              <option value="groq" ?selected=${this.sumProvider === 'groq'}>Groq (cloud)</option>
+              <option value="anthropic" ?selected=${this.sumProvider === 'anthropic'}>Anthropic Claude (cloud)</option>
+            </select>
+
+            <div class="mp-row" style="display:${isSumCloud ? '' : 'none'}">
+              <label class="mp-label" for="mp-sum-key">API key</label>
+              <input id="mp-sum-key" class="mp-input" type="password" .value=${this.sumKey} @input=${(e: Event) => this.sumKey = (e.target as HTMLInputElement).value} />
+              <label class="mp-label" for="mp-sum-url">API URL (optional)</label>
+              <input id="mp-sum-url" class="mp-input" type="text" .value=${this.sumUrl} @input=${(e: Event) => this.sumUrl = (e.target as HTMLInputElement).value} />
+            </div>
+
+            <div style="display:${this.sumProvider ? '' : 'none'}">
+              <label class="mp-label">Model</label>
+              ${this.renderSumModel()}
+            </div>
+            <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
+          </div>
+
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'preview'}>
+            <label class="mp-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" .checked=${this.prevDedicated} @change=${(e: Event) => this.prevDedicated = (e.target as HTMLInputElement).checked} />
+              Use a dedicated live-preview model
+            </label>
+            <p class="mp-hint">Off → the live preview reuses your main transcription model. On → run the preview through a separate (usually small/fast, e.g. Tiny or Base) model so it stays snappy while a larger model does the final transcript. Enable the live preview itself in <b>Settings → Transcription</b>.</p>
+
+            <div style="display:${this.prevDedicated ? '' : 'none'}">
+              <label class="mp-label" for="mp-prev-provider">Provider</label>
+              <select id="mp-prev-provider" class="mp-input" @change=${this.onPrevProviderChange}>
+                ${STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.prevProvider}>${p.label}</option>`)}
+              </select>
+
+              <div class="mp-row" style="display:${isPrevLocal ? '' : 'none'}">
+                <label class="mp-label" for="mp-prev-local">Local model</label>
+                <select id="mp-prev-local" class="mp-input" .value=${this.prevLocalModel} @change=${(e: Event) => this.prevLocalModel = (e.target as HTMLSelectElement).value}>
+                  ${prevNeedsCurrent ? html`<option value=${this.prevLocalModel} selected>${localModelLabel(this.prevLocalModel)} (current)</option>` : ''}
+                  ${hasDownloaded ? this.downloadedModels.map(p => html`<option value=${p} ?selected=${p === this.prevLocalModel}>${localModelLabel(p)}</option>`) : html`<option value="">No models downloaded — get one in Settings → Whisper</option>`}
+                </select>
+              </div>
+
+              <div class="mp-row" style="display:${!isPrevLocal ? '' : 'none'}">
+                <label class="mp-label" for="mp-prev-key">API key</label>
+                <input id="mp-prev-key" class="mp-input" type="password" .value=${this.prevKey} @input=${(e: Event) => this.prevKey = (e.target as HTMLInputElement).value} />
+                <label class="mp-label" for="mp-prev-url">API URL (optional)</label>
+                <input id="mp-prev-url" class="mp-input" type="text" .value=${this.prevUrl} @input=${(e: Event) => this.prevUrl = (e.target as HTMLInputElement).value} />
+                <label class="mp-label" for="mp-prev-model">Model</label>
+                <input id="mp-prev-model" class="mp-input" type="text" .value=${this.prevModel} placeholder="Leave blank for provider default" @input=${(e: Event) => this.prevModel = (e.target as HTMLInputElement).value} />
+              </div>
+            </div>
+          </div>
+
           <div class="modal-actions">
             <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
             <button id="mp-save" class="modal-btn modal-btn-primary" @click=${this.save}>Save</button>
@@ -405,7 +598,7 @@ export class ModelPickerElement extends LitElement {
 }
 
 export async function openModelPicker(
-  initialTab: "transcription" | "postprocessing" = "transcription",
+  initialTab: MpTab = "transcription",
   anchor?: HTMLElement,
 ): Promise<boolean> {
   let config: any;
