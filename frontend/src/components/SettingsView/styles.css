@@ -16,10 +16,33 @@
   font-size: 18px;
   color: var(--fg-default);
 }
-/* Search box: replace the harsh default focus outline with a soft accent ring
-   that matches the rest of the app's inputs. */
+/* ── Settings search box ──────────────────────────────────────────────────── */
+.sv-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 16px 16px;
+}
+.sv-search-ico {
+  position: absolute;
+  left: 11px;
+  color: var(--fg-faded);
+  pointer-events: none;
+}
 .settings-search {
+  width: 100%;
+  /* Room for the magnifier (left) and our own clear button (right). */
+  padding: 8px 30px 8px 32px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--fg-default);
+  font-size: 13px;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.settings-search::placeholder {
+  color: var(--fg-faded);
 }
 .settings-search:focus,
 .settings-search:focus-visible {
@@ -27,8 +50,117 @@
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
+/* Hide the native clear affordance — we render our own ✕ so it can sit inside
+   the padded box and match the app's styling. */
 .settings-search::-webkit-search-cancel-button {
+  display: none;
+}
+.sv-search-clear {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-faded);
+  font-size: 11px;
+  line-height: 1;
   cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.sv-search-clear:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--fg-default);
+}
+.sv-search-clear.is-hidden {
+  display: none;
+}
+
+/* ── Search results: highlight, results bar, empty state, breadcrumbs ─────── */
+mark.settings-hit {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+#settings-search-header.sv-search-count {
+  padding: 2px 2px 14px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+#settings-search-header.sv-search-count strong {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+.sv-search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 56px 24px;
+  text-align: center;
+}
+.sv-empty-icon {
+  font-size: 30px;
+  opacity: 0.5;
+}
+.sv-empty-title {
+  font-size: 15px;
+  color: var(--fg-default);
+  font-weight: 600;
+}
+.sv-empty-hint {
+  font-size: 12px;
+  color: var(--fg-faded);
+  max-width: 360px;
+  line-height: 1.5;
+}
+.sv-result-host {
+  position: relative;
+}
+.sv-result-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px 2px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.sv-result-breadcrumb:hover {
+  border-color: var(--accent);
+  color: var(--fg-default);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.sv-bc-tab {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.sv-bc-go {
+  color: var(--accent);
+  font-weight: 500;
+}
+/* Brief pulse on the section you jumped to from a search result. */
+@keyframes sv-flash-pulse {
+  0% {
+    box-shadow: 0 0 0 2px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.settings-section.sv-flash {
+  animation: sv-flash-pulse 1.2s ease-out;
 }
 .sv-tab {
   padding: 10px 20px;
