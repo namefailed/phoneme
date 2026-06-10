@@ -64,10 +64,12 @@ const VIM_HELP_GROUP: HelpGroup = {
   items: [
     { combo: "h   l", label: "Move focus between sidebar / list / detail" },
     { combo: "j   k", label: "Move down / up (list or sidebar)" },
+    { combo: "k / ↑ at top", label: "Up into the search bar (↓ to come back)" },
     { combo: "g g", label: "Jump to the first recording" },
     { combo: "G", label: "Jump to the last recording" },
     { combo: "Enter", label: "Open recording · apply sidebar filter" },
     { combo: "i / Enter", label: "Edit transcript (in the detail pane)" },
+    { combo: "Shift + Esc", label: "Leave the transcript editor" },
     { combo: "d d", label: "Delete the focused recording (with Undo)" },
     { combo: "Esc", label: "Step back out a level" },
   ],
@@ -127,6 +129,24 @@ function dispatchVim(action: string) {
 function activeWithin(selector: string): boolean {
   const el = document.activeElement as HTMLElement | null;
   return !!el && typeof el.closest === "function" && !!el.closest(selector);
+}
+
+/** Move focus to the next (`dir:1`) / previous (`dir:-1`) focusable control in
+ *  the header bar — vim h/l (and ←/→) stepping through the "search bar options"
+ *  (search box + the toggle/sort/status/record/settings controls). */
+function focusAdjacentHeaderControl(dir: 1 | -1) {
+  const bar = document.querySelector(".headerbar");
+  if (!bar) return;
+  const sel =
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const items = [...bar.querySelectorAll<HTMLElement>(sel)].filter((el) => el.offsetParent !== null);
+  if (!items.length) return;
+  const idx = items.indexOf(document.activeElement as HTMLElement);
+  const next =
+    idx < 0
+      ? items[dir === 1 ? 0 : items.length - 1]
+      : items[Math.max(0, Math.min(items.length - 1, idx + dir))];
+  next?.focus();
 }
 
 function clearPendingG() {
@@ -198,12 +218,26 @@ function onKeyDown(e: KeyboardEvent) {
   // transcript editor's own vim mode (when focused) keeps Esc too, by virtue of
   // this early return — the system-wide layer never steals it.
   if (isTypingTarget(document.activeElement)) {
+    const active = document.activeElement as HTMLElement;
+    const isSearch = active.classList.contains("search");
     if (e.key === "Escape") {
-      const active = document.activeElement as HTMLElement;
-      if (active.classList.contains("search")) {
+      if (isSearch) {
         active.blur();
         focusList();
       }
+      return;
+    }
+    // Header search box (vim nav): ↓ drops into the list, and ←/→ at the text
+    // edges step to the adjacent header control. Letters still type normally
+    // (so you can search for "h" / "j"), so the keyboard nav never traps you.
+    if (vimNav && isSearch) {
+      const input = active as HTMLInputElement;
+      const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
+      const atEnd =
+        input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+      if (e.key === "ArrowDown") { e.preventDefault(); dispatchVim("focus-list"); return; }
+      if (e.key === "ArrowRight" && atEnd) { e.preventDefault(); focusAdjacentHeaderControl(1); return; }
+      if (e.key === "ArrowLeft" && atStart) { e.preventDefault(); focusAdjacentHeaderControl(-1); return; }
     }
     return;
   }
@@ -249,6 +283,30 @@ function onKeyDown(e: KeyboardEvent) {
   // so non-vim users are completely unaffected. Pane movement (h/l) works from
   // anywhere; the list/edit/delete keys require the relevant pane to hold focus.
   if (vimNav) {
+    // Header strip: when focus is on a header control (a button — the search box
+    // is a typing target handled above), h/l move across the header's controls
+    // and j/↓ drop into the list. Completes the "k at the top of the list →
+    // header → h/l through the options → j back into the recordings" loop.
+    if (activeWithin(".headerbar")) {
+      switch (e.key) {
+        case "h":
+        case "ArrowLeft":
+          e.preventDefault();
+          focusAdjacentHeaderControl(-1);
+          return;
+        case "l":
+        case "ArrowRight":
+          e.preventDefault();
+          focusAdjacentHeaderControl(1);
+          return;
+        case "j":
+        case "ArrowDown":
+          e.preventDefault();
+          dispatchVim("focus-list");
+          return;
+        // Enter / Space activate the focused control natively.
+      }
+    }
     switch (e.key) {
       case "h":
         e.preventDefault();

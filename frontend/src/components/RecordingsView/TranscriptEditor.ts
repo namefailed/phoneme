@@ -6,7 +6,7 @@ import { showToast } from "../../utils/toast";
 import { applyVimrc, defineVimWrite, VIM_SAVE_EVENT } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
-import { standardKeymap } from "@codemirror/commands";
+import { standardKeymap, history, historyKeymap } from "@codemirror/commands";
 import { vim, Vim, getCM } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -146,10 +146,13 @@ export class TranscriptEditorElement extends LitElement {
 
     const extensions = [
       theme,
+      // REQUIRED for undo/redo to exist at all — without the history state field,
+      // both vim's `u` (normal mode) and Ctrl+Z call `undo` against nothing.
+      history(),
       EditorView.lineWrapping,
       updateListener,
       drawSelection({ cursorBlinkRate: 1200 }),
-      keymap.of(standardKeymap),
+      keymap.of([...historyKeymap, ...standardKeymap]),
     ];
 
     if (this.vimMode) {
@@ -200,6 +203,15 @@ export class TranscriptEditorElement extends LitElement {
     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
       e.preventDefault();
       void this.save();
+      return;
+    }
+    // Shift+Esc leaves the editor and hands focus back to the keyboard-nav layer
+    // (the detail pane), so h/l/j/k work again. Plain Esc can't do this here —
+    // it's bound to the editor's own vim normal mode.
+    if (e.shiftKey && e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } }));
     }
   }
 

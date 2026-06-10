@@ -373,6 +373,12 @@ export class RecordingsListElement extends LitElement {
       this.scrollFocusedIntoView();
     } else if (key === "ArrowUp") {
       e.preventDefault();
+      // With vim nav on, pressing up (k) at the very top steps OUT of the list
+      // into the header search box — ArrowDown / Esc there come back down.
+      if (vim && this.focusedIndex <= 0) {
+        window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-search" } }));
+        return;
+      }
       const prev = Math.max(this.focusedIndex - 1, 0);
       if (e.shiftKey) {
         if (this.anchorIndex < 0) this.anchorIndex = this.focusedIndex;
@@ -412,6 +418,21 @@ export class RecordingsListElement extends LitElement {
   getFocusedId(): string | null {
     if (this.focusedIndex < 0) return null;
     return this.lastVisibleRows[this.focusedIndex]?.id ?? null;
+  }
+
+  /** When the list pane takes keyboard focus (vim h/l), make sure a cursor row
+   *  is visible — land on the open recording if there is one, else the top — so
+   *  it's immediately obvious what j/k will move. No-op if a cursor is already
+   *  set; the focus-scoped CSS hides the cursor whenever the list isn't focused. */
+  ensureCursor() {
+    const rows = this.lastVisibleRows;
+    if (!rows.length) return;
+    if (this.focusedIndex >= 0 && this.focusedIndex < rows.length) return;
+    const selId = this.listState.selectedId;
+    const idx = selId ? rows.findIndex((r) => r.id === selId) : -1;
+    this.focusedIndex = idx >= 0 ? idx : 0;
+    this.scrollFocusedIntoView();
+    this.requestUpdate();
   }
 
   private handleRowClick(e: MouseEvent, id: string, index: number, visibleRows: Recording[]) {
@@ -938,5 +959,9 @@ export class RecordingsList {
 
   setPendingDelete(ids: string[], pending: boolean) {
     this.element.setPendingDelete(ids, pending);
+  }
+
+  ensureCursor() {
+    this.element.ensureCursor();
   }
 }

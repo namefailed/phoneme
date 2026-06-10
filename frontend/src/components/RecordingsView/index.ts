@@ -277,6 +277,8 @@ export class RecordingsView {
     if (pane === "list") {
       // The list owns j/k/Enter/Space when its scroll container is focused.
       (el.querySelector<HTMLElement>(".rec-table") ?? el).focus({ preventScroll: true });
+      // Land a visible cursor immediately so it's obvious what j/k will move.
+      this.list.ensureCursor();
     } else {
       // Focus the pane container itself (not the editor) so h/l keep working;
       // `i`/Enter then drops into the transcript editor.
@@ -307,7 +309,25 @@ export class RecordingsView {
       case "sidebar-down": this.moveSidebarCursor(1); break;
       case "sidebar-up": this.moveSidebarCursor(-1); break;
       case "sidebar-activate": this.activateSidebarItem(); break;
+      // Shift+Esc out of the transcript editor → back to the detail pane nav.
+      case "exit-editor": this.focusPane("detail"); break;
+      // ArrowDown from the header search box → drop into the list.
+      case "focus-list": this.focusPane("list"); break;
+      // k at the top of the list → up into the header search box.
+      case "focus-search": this.focusSearchBar(); break;
     }
+  }
+
+  /** Leave the panes for the header search box (vim k at the top of the list).
+   *  Clears the pane focus ring + sidebar cursor since the header isn't one of
+   *  our panes; ArrowDown / Esc from the search box come back to the list. */
+  private focusSearchBar() {
+    this.focusedPane = null;
+    for (const p of ["sidebar", "list", "detail"] as const) {
+      this.paneEl(p)?.classList.remove("rv-pane-focused");
+    }
+    this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
+    document.querySelector<HTMLInputElement>(".headerbar input.search")?.focus();
   }
 
   /** The sidebar's clickable filter rows (Library kinds + tags), in order. */

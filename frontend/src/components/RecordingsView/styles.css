@@ -93,14 +93,17 @@
 .rec-row.active .rec-preview {
   color: var(--fg-default);
 }
-/* Keyboard-focus ring only matters on rows that AREN'T the selected one —
-   otherwise this (equal specificity, declared after .rec-row.active) would
-   override the much stronger selected look, which is the "selection reverts to
-   a faint border" bug. The active row keeps its full highlight. */
-.rec-row.kbd-focused:not(.active) {
+/* Keyboard cursor row. Scoped to `.rec-table:focus-within` so it shows ONLY
+   while the list actually holds focus — it clears the instant you move to
+   another pane (vim h/l) or click away, instead of lingering and making it
+   ambiguous which pane is active. A left accent bar + ring + tint make the
+   cursor unmistakable while you're in the list. Rows that are the SELECTED one
+   keep their full selected look (`:not(.active)` never overrides it). */
+.rec-table:focus-within .rec-row.kbd-focused:not(.active) {
   outline: none;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
-  background: rgba(203, 166, 247, 0.05);
+  box-shadow: inset 3px 0 0 var(--accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .rec-table:focus {
   outline: none;
@@ -906,7 +909,10 @@ mark.search-hit {
    users never see it. An INSET shadow (not an outline) so the panes'
    `overflow:hidden` can't clip it and it never bleeds over the splitter. */
 .rv-pane-focused {
-  box-shadow: inset 0 0 0 2px var(--accent);
+  /* A 2px accent border plus a soft inner glow so the active pane reads clearly
+     at a glance — the ring alone was easy to miss across a busy list. */
+  box-shadow: inset 0 0 0 2px var(--accent),
+    inset 0 0 16px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 /* The list scroll-area and the detail/sidebar containers take focus (tabindex)
    so h/l can move between them; suppress the browser's own focus outline in
