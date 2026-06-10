@@ -51,6 +51,17 @@ export class HeaderBarElement extends LitElement {
   private unsubEvent: UnlistenFn | null = null;
   private unsubFilter: (() => void) | null = null;
   private docClickHandler: ((e: MouseEvent) => void) | null = null;
+  /** Escape closes an open Record/Settings dropdown — capture-phase +
+   *  stopPropagation so it doesn't fall through to the list (which would close
+   *  the open recording). */
+  private escHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && (this.modeMenuOpen || this.settingsMenuOpen)) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.modeMenuOpen = false;
+      this.settingsMenuOpen = false;
+    }
+  };
 
   constructor() {
     super();
@@ -65,7 +76,8 @@ export class HeaderBarElement extends LitElement {
   async connectedCallback() {
     super.connectedCallback();
     document.addEventListener("click", this.docClickHandler!);
-    
+    document.addEventListener("keydown", this.escHandler, true);
+
     this.unsubFilter = filterStore.subscribe((f) => {
       this.filterState = f;
     });
@@ -148,6 +160,7 @@ export class HeaderBarElement extends LitElement {
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }
+    document.removeEventListener("keydown", this.escHandler, true);
     if (this.unsubEvent) {
       this.unsubEvent();
       this.unsubEvent = null;

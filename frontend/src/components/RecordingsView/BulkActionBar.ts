@@ -41,6 +41,16 @@ export class BulkActionBarElement extends LitElement {
       this.openMenu = null;
     }
   };
+  /** Escape closes the open menu/modal (rerun · tag · export) — capture-phase +
+   *  stopPropagation so it never reaches the list (which would clear the
+   *  selection) or close the recording. */
+  private onEsc = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && this.openMenu) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.openMenu = null;
+    }
+  };
 
   connectedCallback() {
     super.connectedCallback();
@@ -53,11 +63,13 @@ export class BulkActionBarElement extends LitElement {
     } catch { /* ignore */ }
     void this.loadTags();
     document.addEventListener("click", this.docClick);
+    document.addEventListener("keydown", this.onEsc, true);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("click", this.docClick);
+    document.removeEventListener("keydown", this.onEsc, true);
   }
 
   private async loadTags() {

@@ -663,6 +663,11 @@ export class RecordingsView {
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
+    // A modal/popup is open: it owns the keyboard (Escape closes IT, not the
+    // recording). This view-level handler runs before the modal's own listener,
+    // so the overlay is still in the DOM here — bail and let the modal handle it.
+    if (document.querySelector(".modal-overlay")) return;
+
     // Escape: exit focus mode if active, otherwise clear the selection (which
     // collapses the detail pane). Not while typing in the transcript/notes editor
     // (CodeMirror's contenteditable, where Esc is vim's normal-mode).
