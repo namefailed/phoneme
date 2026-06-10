@@ -191,6 +191,7 @@ export class SettingsViewElement extends LitElement {
           break;
         case "system":
           new SectionStorage(createSubHost(), this.config);
+          new SectionSemantic(createSubHost(), this.config);
           new SectionProfiles(createSubHost(), this.config);
           new SectionTray(createSubHost(), this.config);
           new SectionAdvanced(createSubHost(), this.config, this.onNavigateToWizard);
