@@ -86,7 +86,7 @@ export class SectionInterface {
       .map((value, i) => `
           <div class="col-row" data-col="${value}">
             <label class="col-label">
-              <input type="checkbox" class="col-toggle" value="${value}" ${this.visible.has(value) ? "checked" : ""} />
+              <input type="checkbox" class="col-toggle toggle-switch" value="${value}" ${this.visible.has(value) ? "checked" : ""} />
               <span>${this.label(value)}</span>
             </label>
             <span class="col-move">

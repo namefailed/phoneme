@@ -45,6 +45,61 @@ input, textarea {
   background: transparent;
 }
 
+/* ── Themed toggle switch ───────────────────────────────────────────────────
+   App-wide replacement for plain boolean checkboxes. Add class="toggle-switch"
+   to a real <input type="checkbox"> — it stays a focusable, label-associated
+   form control (so bindings reading input.checked keep working), but renders as
+   a sliding pill switch. The input itself is the track; ::before is the thumb.
+   Uses theme tokens: --accent when on, --border/--bg-deep when off. */
+input[type="checkbox"].toggle-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--border);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.2s ease;
+}
+input[type="checkbox"].toggle-switch::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+input[type="checkbox"].toggle-switch:checked {
+  background: var(--accent);
+}
+input[type="checkbox"].toggle-switch:checked::before {
+  transform: translateX(18px);
+}
+input[type="checkbox"].toggle-switch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+input[type="checkbox"].toggle-switch:checked:hover:not(:disabled) {
+  background: var(--accent);
+}
+input[type="checkbox"].toggle-switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+input[type="checkbox"].toggle-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ── App shell layout ───────────────────────────────────────────────────── */
 .app-shell {
   display: grid;

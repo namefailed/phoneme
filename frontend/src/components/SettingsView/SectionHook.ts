@@ -220,7 +220,7 @@ export class SectionHook {
           <input class="kw-command" type="text" placeholder="Command to run…" value="${escapeAttr(r.command)}"
             style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
           <label title="Case-sensitive match" style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted); white-space: nowrap;">
-            <input type="checkbox" class="kw-cs" ${r.case_sensitive ? "checked" : ""} /> Aa
+            <input type="checkbox" class="kw-cs toggle-switch" ${r.case_sensitive ? "checked" : ""} /> Aa
           </label>
           <button class="inline-button kw-remove" title="Remove rule" style="padding: 4px 8px;">✕</button>
         </div>`,

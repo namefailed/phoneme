@@ -497,7 +497,7 @@ export class ModelPickerElement extends LitElement {
 
             <div class="mp-row">
               <label class="mp-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" .checked=${this.diarizationEnabled} @change=${(e: Event) => this.diarizationEnabled = (e.target as HTMLInputElement).checked} />
+                <input type="checkbox" class="toggle-switch" .checked=${this.diarizationEnabled} @change=${(e: Event) => this.diarizationEnabled = (e.target as HTMLInputElement).checked} />
                 Enable speaker diarization
               </label>
               <p class="mp-hint">Identifies who spoke when (e.g., [Speaker 0], [Speaker 1]). Requires additional model download in Settings if not already configured.</p>
@@ -557,7 +557,7 @@ export class ModelPickerElement extends LitElement {
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'preview'}>
             <label class="mp-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-              <input type="checkbox" .checked=${this.prevDedicated} @change=${(e: Event) => this.prevDedicated = (e.target as HTMLInputElement).checked} />
+              <input type="checkbox" class="toggle-switch" .checked=${this.prevDedicated} @change=${(e: Event) => this.prevDedicated = (e.target as HTMLInputElement).checked} />
               Use a dedicated live-preview model
             </label>
             <p class="mp-hint">Off → the live preview reuses your main transcription model. On → run the preview through a separate (usually small/fast, e.g. Tiny or Base) model so it stays snappy while a larger model does the final transcript. Enable the live preview itself in <b>Settings → Transcription</b>.</p>

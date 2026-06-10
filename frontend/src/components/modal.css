@@ -68,7 +68,8 @@
   line-height: 1.55;
 }
 
-/* Checkbox row — uses the same styled checkbox as SettingsView */
+/* Checkbox row — the boolean uses the app-wide themed toggle switch
+   (.toggle-switch, styled globally in styles/reset.css). */
 .modal-checkbox-row {
   display: flex;
   align-items: center;
@@ -76,43 +77,6 @@
   margin-bottom: 20px;
   cursor: pointer;
   user-select: none;
-}
-
-.modal-checkbox {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--border-subtle);
-  border-radius: 4px;
-  background: var(--bg-surface);
-  cursor: pointer;
-  flex-shrink: 0;
-  position: relative;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.modal-checkbox:checked {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.modal-checkbox:checked::after {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 0px;
-  width: 5px;
-  height: 9px;
-  border: solid var(--accent-fg);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-.modal-checkbox:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .modal-checkbox-label {

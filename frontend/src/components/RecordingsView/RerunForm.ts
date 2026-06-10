@@ -450,13 +450,13 @@ export class RerunFormElement extends LitElement {
 
         ${this.llmPostProcessEnabled ? html`
           <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
-            <input type="checkbox" class="rerun-postprocess-cb" ?checked=${this.postProcessOnTranscribe} @change=${(e: Event) => this.postProcessOnTranscribe = (e.target as HTMLInputElement).checked} />
+            <input type="checkbox" class="rerun-postprocess-cb toggle-switch" ?checked=${this.postProcessOnTranscribe} @change=${(e: Event) => this.postProcessOnTranscribe = (e.target as HTMLInputElement).checked} />
             Run cleanup (post-processing) after transcribing
           </label>
         ` : nothing}
 
         <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
-          <input type="checkbox" class="rerun-hooks-cb" ?checked=${this.runHooksAfterTranscribing} @change=${(e: Event) => this.runHooksAfterTranscribing = (e.target as HTMLInputElement).checked} />
+          <input type="checkbox" class="rerun-hooks-cb toggle-switch" ?checked=${this.runHooksAfterTranscribing} @change=${(e: Event) => this.runHooksAfterTranscribing = (e.target as HTMLInputElement).checked} />
           Run hooks after transcribing
         </label>
       `;

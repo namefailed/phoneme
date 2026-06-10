@@ -122,7 +122,7 @@ export class SectionPreview {
 
         <div class="settings-field">
           <label>Enable live preview</label>
-          <div><input type="checkbox" id="prev-enabled" ${enabled ? "checked" : ""} /></div>
+          <div><input type="checkbox" class="toggle-switch" id="prev-enabled" ${enabled ? "checked" : ""} /></div>
         </div>
 
         <div class="settings-field">
@@ -133,7 +133,7 @@ export class SectionPreview {
             </span>
           </label>
           <div style="display:flex; align-items:center; gap:10px;">
-            <input type="checkbox" id="prev-overlay" ${overlay ? "checked" : ""} ${enabled ? "" : "disabled"} />
+            <input type="checkbox" class="toggle-switch" id="prev-overlay" ${overlay ? "checked" : ""} ${enabled ? "" : "disabled"} />
             <button class="inline-button" id="prev-overlay-test" ${overlay ? "" : "disabled"}>Preview</button>
           </div>
         </div>

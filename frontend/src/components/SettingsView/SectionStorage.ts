@@ -50,7 +50,7 @@ export class SectionStorage {
         <div class="settings-field">
           <label>Delete audio only</label>
           <div>
-            <input type="checkbox" id="ret-delete-audio" ${this.config.retention?.delete_audio ? "checked" : ""} />
+            <input type="checkbox" class="toggle-switch" id="ret-delete-audio" ${this.config.retention?.delete_audio ? "checked" : ""} />
           </div>
           <span>When pruning, remove the audio file but keep the transcript. Auto-delete runs on
             startup and hourly; only completed recordings are affected — in-progress ones are always preserved.</span>
