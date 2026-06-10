@@ -365,6 +365,37 @@ graduate someday live in the [Idea Parking Lot](docs/IDEAS.md) instead.)
 
 ---
 
+## 🔬 Audit follow-ups (June 2026 code audits)
+
+Two line-by-line audits (a combined module pass + a net-new pass on the newest
+code). Full findings, locations, and fixes:
+[docs/audits/2026-06-code-audit.md](docs/audits/2026-06-code-audit.md). **Not
+started** — these land in waves once kicked off. *Already resolved:* DPAPI
+at-rest, the masked-config WebView boundary, diarization coalescing, list-pane
+fill + scroll-extend, the detail-pane overhaul. The transcript-diff,
+saved-searches, and curated-models features audited **clean**.
+
+**Wave 1 — High (correctness & security)**
+- [ ] whisper-server stdout/stderr never drained → pipe fills (~64 KB) → hung transcription / false timeout (`whisper_supervisor.rs`) *(A2-H1)*
+- [ ] `native-whisper` won't compile — `model_path` (a `String`) used as an `Option` (`transcription.rs:78`) *(A2-H2)*
+- [ ] tray `Bridge` stays `None` after a down-at-launch daemon; no real reconnect (`commands.rs` / `lib.rs`) *(A2-H3)*
+- [ ] `wizard_download_model` / `wizard_run_installer` lack a URL allowlist + canonicalize (`commands.rs`) *(A2-H4/H5)*
+- [ ] Delete key sends `session:<id>` to `deleteRecording` (`RecordingsView/index.ts:366`) *(A1-H1)*
+- [ ] PostProcessing cloud `/models` fetch sends the masked sentinel key (`SectionPostProcessing.ts`) *(A1-H2)*
+- [ ] `open_file` has no path allowlist (`commands.rs`) *(A1-H3)*
+- [ ] Import enqueue failure orphans a catalog row (`ipc_handler.rs`) *(A1-H4)*
+- [ ] Whisper transient failure never requeues; model-override readiness races (`pipeline.rs` / `queue_worker.rs`) *(A1-H5 / A2-M7)*
+
+**Wave 2 — Perf & UX correctness** — embed read-lock contention + `spawn_blocking` + diarizer pipeline cache (A2-M8), cancel → distinct status (not `TranscribeFailed`), meeting-stop best-effort per track (A2-M6), poisoned model download (A2-M1), per-request retranscribe override (A2-M21), server-side `kind` filter for sparse pages.
+
+**Wave 3 — CLI / doctor / config** — `config set` atomicity + validate + resolved path (A2-M3), `status` without auto-spawn (A2-M4), doctor resolved-path + per-provider probes (A2-M5/M15), preview-config validate/expand (A2-M13/M14), pipe-busy connect deadline (A2-M9), fix stale `ActionRow.test.ts` (A2-M22).
+
+**Wave 4 — Hardening & data integrity** — queue crash-dup window (A2-M12), retention in a transaction (A2-M20), U16 capture path (A2-M10), import OOM cap (A2-M11), bounded LLM/webhook error bodies (A2-M16/M17), profile-switch re-registers all hotkeys (A2-M18), overlay capability split (A2-M19), webhook SSRF guard + queue-IPC integration tests.
+
+**Wave 5 — Low / docs / DX** — ~25 low-severity items + doc drift (CHANGELOG v1.8.x, smoke-test steps, `building_from_source` LLVM, `frontend/README`), populate `docs/screenshots/`, a `config validate` CLI, ESLint in CI. See the audit doc.
+
+---
+
 ## 🧰 Engineering & tech-debt backlog
 
 *Not user-facing features — internal quality work, pulled in opportunistically
