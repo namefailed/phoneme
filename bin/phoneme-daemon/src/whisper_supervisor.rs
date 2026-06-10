@@ -106,8 +106,13 @@ pub async fn run_with(
             .arg("127.0.0.1")
             .arg("--inference-path")
             .arg("/v1/audio/transcriptions")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            // Discard the whisper-server's stdout/stderr: we never read them, and
+            // a piped-but-undrained child blocks once the OS pipe buffer (~64 KB)
+            // fills — which hangs transcription / live preview until the daemon is
+            // restarted. The preview server hits this fast (it re-transcribes every
+            // ~1-2s), so the live preview is what breaks first. (audit A2-H1)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
 
         #[cfg(windows)]
         {
@@ -268,8 +273,13 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
             .arg("127.0.0.1")
             .arg("--inference-path")
             .arg("/v1/audio/transcriptions")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            // Discard the whisper-server's stdout/stderr: we never read them, and
+            // a piped-but-undrained child blocks once the OS pipe buffer (~64 KB)
+            // fills — which hangs transcription / live preview until the daemon is
+            // restarted. The preview server hits this fast (it re-transcribes every
+            // ~1-2s), so the live preview is what breaks first. (audit A2-H1)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
 
         #[cfg(windows)]
         {
