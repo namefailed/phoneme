@@ -163,8 +163,8 @@ let headerSub: HeaderSub | null = null;
 
 function highlightHeaderSub() {
   document
-    .querySelectorAll(".headerbar .kbd-cursor, [role='menu'] .kbd-cursor")
-    .forEach((el) => el.classList.remove("kbd-cursor"));
+    .querySelectorAll(".headerbar .kbd-cursor, .headerbar .kbd-cycle, [role='menu'] .kbd-cursor")
+    .forEach((el) => el.classList.remove("kbd-cursor", "kbd-cycle"));
   if (!headerSub) return;
   if (headerSub.kind === "menu") {
     const el = headerSub.items[headerSub.index];
@@ -173,7 +173,9 @@ function highlightHeaderSub() {
       el.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   } else {
-    headerSub.el.classList.add("kbd-cursor");
+    // A native <select> can't pop its options from JS, so signal "you're now
+    // cycling this" with a bolder border (.kbd-cycle) on top of the cursor ring.
+    headerSub.el.classList.add("kbd-cursor", "kbd-cycle");
   }
 }
 
@@ -187,7 +189,7 @@ function closeHeaderSub(closeMenu: boolean) {
 
 function highlightHeaderCursor() {
   const items = headerControls();
-  items.forEach((el) => el.classList.remove("kbd-cursor"));
+  items.forEach((el) => el.classList.remove("kbd-cursor", "kbd-cycle"));
   const el = items[headerCursor];
   if (el) {
     el.classList.add("kbd-cursor");
@@ -294,7 +296,9 @@ function onKeyDown(e: KeyboardEvent) {
     const active = document.activeElement as HTMLElement;
     const isSearch = active.classList.contains("search");
     if (e.key === "Escape") {
-      if (isSearch) {
+      // Escape backs out of ANY header input (search box, the date filters) —
+      // blur it and drop to the list so the user is never trapped in a field.
+      if (active.closest(".headerbar")) {
         active.blur();
         focusList();
       }

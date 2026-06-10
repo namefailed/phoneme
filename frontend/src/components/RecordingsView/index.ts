@@ -721,6 +721,14 @@ export class RecordingsView {
     // so the overlay is still in the DOM here — bail and let the modal handle it.
     if (document.querySelector(".modal-overlay")) return;
 
+    // The header bar owns its own keyboard nav while focused (roving cursor +
+    // the status-select / Record / Settings dropdown cycling). Don't let this
+    // view act on those keys — e.g. Escape leaving the status cycle must NOT
+    // also close the open recording. Also stand down if someone already handled
+    // the key (keyboard.ts preventDefaults the keys it owns).
+    if (document.activeElement?.closest(".headerbar")) return;
+    if (e.defaultPrevented) return;
+
     // Escape: exit focus mode if active, otherwise clear the selection (which
     // collapses the detail pane). Not while typing in the transcript/notes editor
     // (CodeMirror's contenteditable, where Esc is vim's normal-mode).
