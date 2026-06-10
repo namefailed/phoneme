@@ -1016,7 +1016,8 @@ ph-sidebar:focus-visible,
 /* Floating, draggable bulk-action popup (position set inline by the component). */
 .bulk-bar {
   pointer-events: all;
-  z-index: 150;
+  /* Above the list↔detail splitter (100) and the AI-activity button (200). */
+  z-index: 300;
   display: flex;
   align-items: center;
   gap: 8px;

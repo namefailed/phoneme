@@ -103,7 +103,6 @@ export class RecordingsView {
         <div class="rv-sidebar-resizer" id="rv-sidebar-resize"></div>
         <div class="rv-list" id="rv-list">
           <div id="rv-list-inner" style="height:100%; overflow:hidden;"></div>
-          <div id="rv-bulk-bar" style="display:none;"></div>
         </div>
         <div class="rv-splitter" id="rv-split"></div>
         <div class="rv-detail" id="rv-detail">
@@ -111,6 +110,9 @@ export class RecordingsView {
           <ph-merged-conversation-detail id="rv-merged-detail" style="display:none; height: 100%;"></ph-merged-conversation-detail>
         </div>
       </div>
+      <!-- Bulk bar lives OUTSIDE the shell/list so the list↔detail splitter
+           (a grid item with its own stacking context) can't paint over it. -->
+      <div id="rv-bulk-bar" style="display:none;"></div>
       <ph-thinking-popout id="rv-thinking"></ph-thinking-popout>
     `;
 
