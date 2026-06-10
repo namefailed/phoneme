@@ -53,12 +53,12 @@ pub fn unprotect(stored: &str) -> String {
     #[cfg(windows)]
     {
         match hex_decode(hex).and_then(|ct| dpapi_unprotect(&ct)) {
-            Some(plaintext) => return String::from_utf8_lossy(&plaintext).into_owned(),
+            Some(plaintext) => String::from_utf8_lossy(&plaintext).into_owned(),
             None => {
                 tracing::warn!(
                     "DPAPI decrypt failed (config from another user/machine?); treating the API key as unset"
                 );
-                return String::new();
+                String::new()
             }
         }
     }
@@ -79,7 +79,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())
