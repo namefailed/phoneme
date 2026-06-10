@@ -1928,3 +1928,86 @@ ph-sidebar {
   font-style: italic;
   color: var(--fg-faded);
 }
+/* Swap-sides button between the two version pickers. */
+.tdiff-swap {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.tdiff-swap:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Diff stats (left of the legend) — +N added / −M removed by word count. */
+.tdiff-spacer { flex: 1 1 auto; }
+.tdiff-stat { font-weight: 600; }
+.tdiff-stat-add { color: color-mix(in srgb, var(--ok) 85%, var(--fg-default)); }
+.tdiff-stat-del { color: color-mix(in srgb, var(--err) 85%, var(--fg-default)); }
+.tdiff-stat-same { color: var(--fg-faded); font-style: italic; }
+
+/* "Compare versions" modal — a roomy home for the diff (the in-pane peek was
+   far too cramped). The .tdiff inside fills the body and scrolls. */
+.tdiff-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 4vw;
+  animation: speakersFadeIn 0.12s ease-out;
+}
+.tdiff-modal {
+  width: min(960px, 100%);
+  height: min(80vh, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.tdiff-modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.tdiff-modal-close {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 15px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.tdiff-modal-close:hover { background: var(--bg-surface); color: var(--accent); }
+.tdiff-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 18px;
+  overflow: hidden;
+}
+.tdiff-loading {
+  color: var(--fg-muted);
+  font-size: 13px;
+}

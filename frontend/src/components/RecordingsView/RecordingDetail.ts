@@ -162,7 +162,6 @@ export class RecordingDetail {
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div id="compare-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div class="transcript-history">
             <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
             <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
@@ -216,7 +215,7 @@ export class RecordingDetail {
     //   • summary    — AI summary (generated on demand if absent)
     // Exactly one of {editor, original, unedited, summary} is visible at a time.
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
-    type PeekKind = "original" | "unedited" | "summary" | "compare";
+    type PeekKind = "original" | "unedited" | "summary";
     const peeks: Record<PeekKind, { btn: HTMLButtonElement | null; el: HTMLElement | null; idle: string }> = {
       original: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
@@ -232,11 +231,6 @@ export class RecordingDetail {
         btn: this.container.querySelector<HTMLButtonElement>("#view-summary"),
         el: this.container.querySelector<HTMLElement>("#summary-peek"),
         idle: "✨ Summary",
-      },
-      compare: {
-        btn: this.container.querySelector<HTMLButtonElement>("#view-compare"),
-        el: this.container.querySelector<HTMLElement>("#compare-peek"),
-        idle: "🆚 Compare",
       },
     };
 
@@ -317,27 +311,11 @@ export class RecordingDetail {
       openPeek("summary");
     });
 
-    // Compare peek (v1.10): a read-only diff between any two of the three
-    // transcript layers — original (raw machine), clean (LLM-cleaned, pre-edit),
-    // and current. The raw/clean layers are fetched on demand (the same IPC the
-    // other peeks use); current comes straight from the loaded recording. Missing
-    // layers are handled inside TranscriptDiff (shows a clear "n/a" state).
-    peeks.compare.btn?.addEventListener("click", async () => {
-      if (activePeek === "compare") return resetPeek();
-      const el = peeks.compare.el;
-      if (!el) return;
-      el.innerHTML = `<div style="color: var(--fg-muted); line-height: 1.6;">Loading versions…</div>`;
-      openPeek("compare");
-      const [original, clean] = await Promise.all([
-        getOriginalTranscript(r.id).catch(() => null),
-        getCleanTranscript(r.id).catch(() => null),
-      ]);
-      // Bail if the user navigated away or closed the peek while we were loading
-      // (the peek box is hidden again once another peek/editor takes over).
-      if (this.recording?.id !== r.id || el.style.display === "none") return;
-      el.innerHTML = "";
-      new TranscriptDiff(el, { original, clean, current: r.transcript ?? "" });
-    });
+    // Compare versions: opens a roomy, full-feature diff modal (a peek box was
+    // far too cramped for a real side-by-side diff).
+    this.container
+      .querySelector<HTMLButtonElement>("#view-compare")
+      ?.addEventListener("click", () => this.openCompareModal(r));
 
     // Notes: CodeMirror editor (respects editor.vim_mode like the transcript
     // editor). Auto-saves on change (debounced) and on blur.
@@ -368,6 +346,50 @@ export class RecordingDetail {
     }
 
     this.renderSpeakers(r);
+  }
+
+  /** Open the full "Compare versions" modal — a roomy diff of any two of the
+   *  three transcript layers (a peek box was too cramped for a real diff). The
+   *  raw/clean layers are fetched on demand; `current` comes from the recording.
+   *  Read-only; TranscriptDiff owns the picker/swap/mode/stats UI + the diff. */
+  private async openCompareModal(r: Recording) {
+    const overlay = document.createElement("div");
+    overlay.className = "tdiff-modal-overlay";
+    overlay.innerHTML = `
+      <div class="tdiff-modal" role="dialog" aria-modal="true" aria-label="Compare transcript versions">
+        <div class="tdiff-modal-header">
+          <span>Compare versions</span>
+          <button class="tdiff-modal-close" aria-label="Close">✕</button>
+        </div>
+        <div class="tdiff-modal-body" id="tdiff-modal-body">
+          <div class="tdiff-loading">Loading versions…</div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKey);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close();
+    });
+    overlay.querySelector(".tdiff-modal-close")?.addEventListener("click", close);
+
+    const [original, clean] = await Promise.all([
+      getOriginalTranscript(r.id).catch(() => null),
+      getCleanTranscript(r.id).catch(() => null),
+    ]);
+    // Bail if the modal was closed or the selection changed while loading.
+    if (!overlay.isConnected || this.recording?.id !== r.id) return;
+    const body = overlay.querySelector<HTMLElement>("#tdiff-modal-body");
+    if (body) {
+      body.innerHTML = "";
+      new TranscriptDiff(body, { original, clean, current: r.transcript ?? "" });
+    }
   }
 
   /** Show the "Rename speakers" button when this recording is diarized (carries

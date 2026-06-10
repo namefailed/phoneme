@@ -77,7 +77,7 @@ export class TranscriptDiff {
         <div class="tdiff-bar">
           <div class="tdiff-pickers">
             ${this.selectHtml("left", this.left)}
-            <span class="tdiff-arrow" aria-hidden="true">→</span>
+            <button class="tdiff-swap" title="Swap sides" aria-label="Swap the two versions">⇄</button>
             ${this.selectHtml("right", this.right)}
           </div>
           <div class="tdiff-modes" role="group" aria-label="Diff granularity">
@@ -86,9 +86,10 @@ export class TranscriptDiff {
           </div>
         </div>
         <div class="tdiff-legend">
+          <span class="tdiff-stat" id="tdiff-stats">${this.statsHtml()}</span>
+          <span class="tdiff-spacer"></span>
           <span class="tdiff-key tdiff-del">removed</span>
           <span class="tdiff-key tdiff-ins">added</span>
-          <span class="tdiff-hint">Comparing the left version against the right (read-only)</span>
         </div>
         <div class="tdiff-body" id="tdiff-body">${this.bodyHtml()}</div>
       </div>
@@ -145,10 +146,29 @@ export class TranscriptDiff {
       .join("");
   }
 
-  /** Re-render only the diff body (after a picker/mode change). */
-  private refreshBody() {
+  /** A short "+N added · −M removed" (by word count) summary of the diff. */
+  private statsHtml(): string {
+    if (this.left === this.right || !this.hasContent(this.left) || !this.hasContent(this.right)) {
+      return "";
+    }
+    const ops = diffText(this.valueOf(this.left) ?? "", this.valueOf(this.right) ?? "", this.mode);
+    const words = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+    let added = 0;
+    let removed = 0;
+    for (const op of ops) {
+      if (op.type === "insert") added += words(op.value);
+      else if (op.type === "delete") removed += words(op.value);
+    }
+    if (added === 0 && removed === 0) return `<span class="tdiff-stat-same">No differences</span>`;
+    return `<span class="tdiff-stat-add">+${added} added</span> · <span class="tdiff-stat-del">−${removed} removed</span>`;
+  }
+
+  /** Re-render the diff body + the stats (after a picker/mode/swap change). */
+  private refresh() {
     const body = this.container.querySelector<HTMLElement>("#tdiff-body");
     if (body) body.innerHTML = this.bodyHtml();
+    const stats = this.container.querySelector<HTMLElement>("#tdiff-stats");
+    if (stats) stats.innerHTML = this.statsHtml();
   }
 
   private wire() {
@@ -158,8 +178,12 @@ export class TranscriptDiff {
         const key = sel.value as LayerKey;
         if (side === "left") this.left = key;
         else this.right = key;
-        this.refreshBody();
+        this.refresh();
       });
+    });
+    this.container.querySelector<HTMLButtonElement>(".tdiff-swap")?.addEventListener("click", () => {
+      [this.left, this.right] = [this.right, this.left];
+      this.render();
     });
     this.container.querySelectorAll<HTMLButtonElement>(".tdiff-mode").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -167,10 +191,10 @@ export class TranscriptDiff {
         if (next === this.mode) return;
         this.mode = next;
         // Toggle the active class without a full re-render so the pickers keep
-        // their state, then refresh the diff body.
+        // their state, then refresh the diff body + stats.
         this.container.querySelectorAll(".tdiff-mode").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        this.refreshBody();
+        this.refresh();
       });
     });
   }
