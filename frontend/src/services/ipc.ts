@@ -38,7 +38,15 @@ export type Recording = {
   summary_model?: string | null;
   /** Tags associated with this recording */
   tags?: Array<{ id: number; name: string; color?: string | null }>;
+  /** Custom display names for this recording's diarized speaker labels, e.g.
+   *  `[Speaker 1]` → "Sarah". Applied at display/export time; the stored
+   *  transcript keeps its `[Speaker N]` markers. Empty when none are set. */
+  speaker_names?: SpeakerName[];
 };
+
+/** A custom display name for one diarized speaker label within a recording.
+ *  `speaker_label` is the 1-based index from a `[Speaker N]` marker. */
+export type SpeakerName = { speaker_label: number; name: string };
 
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
 
@@ -322,6 +330,21 @@ export async function getCleanTranscript(id: string): Promise<string | null> {
  */
 export async function updateNotes(id: string, notes: string): Promise<void> {
   await tauriInvoke("update_notes", { id, notes });
+}
+
+/**
+ * Set (or clear) the custom display name for one diarized speaker label of a
+ * recording. `speakerLabel` is the 1-based `[Speaker N]` index; pass an empty
+ * `name` to clear the mapping (reverts to "Speaker N"). The stored transcript
+ * is never rewritten — names are applied at display/export time. Re-fetch the
+ * recording (or listen for `SpeakerNameUpdated`) to pick up the new map.
+ */
+export async function setSpeakerName(
+  id: string,
+  speakerLabel: number,
+  name: string,
+): Promise<void> {
+  await tauriInvoke("set_speaker_name", { id, speakerLabel, name });
 }
 
 export async function daemonStatus(): Promise<{ running: boolean; pid: number }> {

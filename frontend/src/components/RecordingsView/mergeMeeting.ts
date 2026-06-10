@@ -16,7 +16,62 @@
  * future time-interleaved upgrade (a different block ORDER, same block SHAPE) a
  * drop-in.
  */
-import type { Recording } from "../../services/ipc";
+import type { Recording, SpeakerName } from "../../services/ipc";
+
+/**
+ * Resolve a 1-based speaker index to its display name: the user's custom name
+ * for that label if one is set, otherwise the default `Speaker N`. `null`/empty
+ * indices (un-diarized text) have no speaker label and are handled by callers.
+ *
+ * This is the single mapping point from the canonical `[Speaker N]` marker to
+ * what the user sees, so renames apply everywhere (detail view, merged meeting
+ * view, copy/export) without ever rewriting the stored transcript.
+ */
+export function speakerDisplayName(
+  speakerNames: SpeakerName[] | undefined,
+  label: number,
+): string {
+  const custom = speakerNames?.find((s) => s.speaker_label === label)?.name?.trim();
+  return custom && custom.length > 0 ? custom : `Speaker ${label}`;
+}
+
+/**
+ * Apply a recording's custom speaker names to a raw transcript for copy/export,
+ * rewriting each `[Speaker N]:` turn marker to `Name:` when a custom name is set
+ * for that label (markers with no custom name are left as `Speaker N:`). This is
+ * a DISPLAY/EXPORT transform only — the stored transcript is unchanged — so the
+ * single-recording copy/export carries renamed speakers, mirroring the merged
+ * view's `mergedPlainText`. Returns the input unchanged when no names are set.
+ */
+export function applySpeakerNames(
+  transcript: string,
+  speakerNames: SpeakerName[] | undefined,
+): string {
+  if (!transcript || !speakerNames || speakerNames.length === 0) return transcript;
+  return transcript.replace(/\[Speaker (\d+)\]:/g, (whole, n: string) => {
+    const label = Number(n);
+    const custom = speakerNames.find((s) => s.speaker_label === label)?.name?.trim();
+    // Keep the bracketed default when no custom name; use "Name:" otherwise.
+    return custom && custom.length > 0 ? `${custom}:` : whole;
+  });
+}
+
+/**
+ * The distinct 1-based speaker indices present in a transcript's `[Speaker N]`
+ * markers, in ascending order. Empty when the transcript carries no markers
+ * (single voice / no diarization). Drives the rename UI in the single-recording
+ * detail view — one renamable entry per speaker that actually appears.
+ */
+export function speakerLabelsIn(transcript: string | null | undefined): number[] {
+  if (!transcript) return [];
+  const re = /\[Speaker (\d+)\]:/g;
+  const seen = new Set<number>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(transcript)) !== null) {
+    seen.add(Number(m[1]));
+  }
+  return [...seen].sort((a, b) => a - b);
+}
 
 /** Which track a block came from, plus how to label it. */
 export type MergedSource = {
@@ -33,10 +88,17 @@ export type MergedSource = {
 export type MergedBlock = {
   /** Stable key for list rendering (recording id + turn index). */
   key: string;
+  /** The track (recording) this block came from. The renderer needs it to
+   *  persist a speaker rename against the right recording. */
+  recordingId: string;
   source: MergedSource;
   /** 1-based speaker index parsed from a `[Speaker N]:` marker, or null when
    *  the track carries no speaker labels (single voice / no diarization). */
   speaker: number | null;
+  /** The display name for `speaker`: the recording's custom name for that label
+   *  if set, else `Speaker N`. `null` when the block has no speaker. Resolved
+   *  here so renderers and `mergedPlainText` show names without re-deriving. */
+  displayName: string | null;
   /** The spoken text for this turn, with the marker stripped. */
   text: string;
 };
@@ -112,8 +174,12 @@ export function mergeMeeting(tracks: Recording[]): MergedBlock[] {
     turns.forEach((turn, i) => {
       blocks.push({
         key: `${rec.id}:${i}`,
+        recordingId: rec.id,
         source,
         speaker: turn.speaker,
+        // Resolve the per-track custom name (if any) for this speaker label.
+        displayName:
+          turn.speaker != null ? speakerDisplayName(rec.speaker_names, turn.speaker) : null,
         text: turn.text,
       });
     });
@@ -133,7 +199,9 @@ export function mergeMeeting(tracks: Recording[]): MergedBlock[] {
 export function mergedPlainText(blocks: MergedBlock[]): string {
   return blocks
     .map((b) => {
-      const speaker = b.speaker != null ? ` · Speaker ${b.speaker}` : "";
+      // Use the resolved custom name (falls back to "Speaker N") so exports
+      // carry renamed speakers, not the raw index.
+      const speaker = b.displayName != null ? ` · ${b.displayName}` : "";
       return `${b.source.icon} ${b.source.label}${speaker}: ${b.text}`;
     })
     .join("\n\n");

@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
-use crate::types::{ListFilter, Recording, RecordingStatus};
+use crate::types::{ListFilter, Recording, RecordingStatus, SpeakerName};
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
@@ -316,7 +316,16 @@ impl Catalog {
             .bind(id.as_str())
             .fetch_optional(&self.pool)
             .await?;
-        row.map(row_to_recording).transpose()
+        let mut rec = match row.map(row_to_recording).transpose()? {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        // Populate the speaker-name map so a single-recording fetch (the daemon's
+        // GetRecording, which backs the detail view) can render custom names.
+        // Tags are intentionally NOT loaded here — the detail view fetches those
+        // separately via `tags_for`, matching prior behavior.
+        rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
+        Ok(Some(rec))
     }
 
     /// Upsert the semantic embedding vector for a recording.
@@ -813,9 +822,11 @@ impl Catalog {
             .into_iter()
             .map(row_to_recording)
             .collect::<Result<_>>()?;
-        // Populate tags for each recording (N+1 query; acceptable for desktop UI scale)
+        // Populate tags + custom speaker names for each recording (N+1 query;
+        // acceptable for desktop UI scale).
         for rec in &mut recs {
             rec.tags = self.tags_for(&rec.id).await.unwrap_or_default();
+            rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
         }
         Ok(recs)
     }
@@ -835,7 +846,16 @@ impl Catalog {
         .bind(meeting_id)
         .fetch_all(&self.pool)
         .await?;
-        rows.into_iter().map(row_to_recording).collect()
+        let mut recs: Vec<Recording> = rows
+            .into_iter()
+            .map(row_to_recording)
+            .collect::<Result<_>>()?;
+        // The merged meeting view maps `[Speaker N]` → custom names per track, so
+        // each track must carry its own speaker-name map.
+        for rec in &mut recs {
+            rec.speaker_names = self.speaker_names_for(&rec.id).await.unwrap_or_default();
+        }
+        Ok(recs)
     }
 
     pub async fn delete(&self, id: &RecordingId) -> Result<()> {
@@ -1119,6 +1139,68 @@ impl Catalog {
             })
             .collect()
     }
+
+    /// Set (or clear) the custom display name for one diarized speaker label.
+    ///
+    /// `speaker_label` is the 1-based index from the transcript's `[Speaker N]`
+    /// marker. A non-empty `name` upserts the mapping; a blank/whitespace-only
+    /// `name` deletes it (the label reverts to the default "Speaker N"). The
+    /// stored transcript is never touched — names are applied at display/export
+    /// time — so renaming is fully reversible. The recording is expected to
+    /// exist; a foreign-key violation surfaces as an error.
+    pub async fn set_speaker_name(
+        &self,
+        recording_id: &RecordingId,
+        speaker_label: i64,
+        name: &str,
+    ) -> Result<()> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            sqlx::query(
+                "DELETE FROM speaker_names WHERE recording_id = ? AND speaker_label = ?",
+            )
+            .bind(recording_id.as_str())
+            .bind(speaker_label)
+            .execute(&self.pool)
+            .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO speaker_names (recording_id, speaker_label, name) VALUES (?, ?, ?) \
+                 ON CONFLICT(recording_id, speaker_label) DO UPDATE SET name = excluded.name",
+            )
+            .bind(recording_id.as_str())
+            .bind(speaker_label)
+            .bind(trimmed)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// All custom speaker names for a recording, ordered by speaker index. Empty
+    /// when none have been set. Used to populate `Recording::speaker_names` and
+    /// by the IPC layer so the frontend can map `[Speaker N]` → name at display
+    /// and export time.
+    pub async fn speaker_names_for(
+        &self,
+        recording_id: &RecordingId,
+    ) -> Result<Vec<SpeakerName>> {
+        let rows = sqlx::query(
+            "SELECT speaker_label, name FROM speaker_names \
+             WHERE recording_id = ? ORDER BY speaker_label",
+        )
+        .bind(recording_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(SpeakerName {
+                    speaker_label: r.try_get("speaker_label")?,
+                    name: r.try_get("name")?,
+                })
+            })
+            .collect()
+    }
 }
 
 fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
@@ -1157,6 +1239,8 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         summary: row.try_get("summary").unwrap_or(None),
         summary_model: row.try_get("summary_model").unwrap_or(None),
         tags: Vec::new(),
+        // Populated separately (joined from `speaker_names`) by list/get/list_by_meeting.
+        speaker_names: Vec::new(),
     })
 }
 
@@ -1258,6 +1342,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         }
     }
 
@@ -1679,6 +1764,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         db.insert(&r).await.expect("insert");
 
@@ -1739,6 +1825,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         db.insert(&r).await.expect("insert");
 
@@ -1798,6 +1885,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         db.insert(&r).await.expect("insert");
 
@@ -1876,6 +1964,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         let mic = make("mic");
         let system = make("system");
@@ -1920,6 +2009,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         db.insert(&solo).await.expect("insert solo");
         let got_solo = db.get(&solo.id).await.unwrap().unwrap();
@@ -1933,5 +2023,103 @@ mod tests {
             .filter(|r| r.meeting_id.as_deref() == Some("meeting-abc123"))
             .collect();
         assert_eq!(with_session.len(), 2, "both meeting tracks must be listed");
+    }
+
+    // ── Named speakers ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn speaker_names_set_get_rename_and_clear() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+
+        // No names initially.
+        assert!(db.speaker_names_for(&r.id).await.unwrap().is_empty());
+
+        // Set two distinct speaker names; they come back ordered by index.
+        db.set_speaker_name(&r.id, 1, "Sarah").await.unwrap();
+        db.set_speaker_name(&r.id, 2, "Alex").await.unwrap();
+        let names = db.speaker_names_for(&r.id).await.unwrap();
+        assert_eq!(
+            names,
+            vec![
+                SpeakerName { speaker_label: 1, name: "Sarah".into() },
+                SpeakerName { speaker_label: 2, name: "Alex".into() },
+            ]
+        );
+
+        // Re-setting the same label updates in place (upsert, not a duplicate row).
+        db.set_speaker_name(&r.id, 1, "Sarah Connor").await.unwrap();
+        let names = db.speaker_names_for(&r.id).await.unwrap();
+        assert_eq!(names.len(), 2, "rename must not add a row");
+        assert_eq!(names[0].name, "Sarah Connor");
+
+        // Names are trimmed on the way in.
+        db.set_speaker_name(&r.id, 2, "  Alex P.  ").await.unwrap();
+        assert_eq!(db.speaker_names_for(&r.id).await.unwrap()[1].name, "Alex P.");
+
+        // A blank/whitespace name clears the mapping (reverts to "Speaker N").
+        db.set_speaker_name(&r.id, 1, "   ").await.unwrap();
+        let names = db.speaker_names_for(&r.id).await.unwrap();
+        assert_eq!(
+            names,
+            vec![SpeakerName { speaker_label: 2, name: "Alex P.".into() }],
+            "clearing speaker 1 leaves only speaker 2"
+        );
+    }
+
+    #[tokio::test]
+    async fn speaker_names_are_populated_by_get_and_list() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+        db.set_speaker_name(&r.id, 1, "Sarah").await.unwrap();
+
+        // get() carries the speaker-name map (backs the detail view).
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(
+            got.speaker_names,
+            vec![SpeakerName { speaker_label: 1, name: "Sarah".into() }]
+        );
+
+        // list() carries it too.
+        let listed = db.list(&ListFilter::default()).await.unwrap();
+        let row = listed.iter().find(|x| x.id == r.id).unwrap();
+        assert_eq!(row.speaker_names.len(), 1);
+        assert_eq!(row.speaker_names[0].name, "Sarah");
+    }
+
+    #[tokio::test]
+    async fn speaker_names_populated_per_track_by_list_by_meeting() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let mic = embedded_recording(Some("m-1"));
+        let sys = embedded_recording(Some("m-1"));
+        db.insert(&mic).await.unwrap();
+        db.insert(&sys).await.unwrap();
+        // Each track keeps its own per-recording speaker names.
+        db.set_speaker_name(&mic.id, 1, "Me").await.unwrap();
+        db.set_speaker_name(&sys.id, 1, "Caller").await.unwrap();
+
+        let tracks = db.list_by_meeting("m-1").await.unwrap();
+        assert_eq!(tracks.len(), 2);
+        for t in &tracks {
+            let expected = if t.id == mic.id { "Me" } else { "Caller" };
+            assert_eq!(t.speaker_names, vec![SpeakerName { speaker_label: 1, name: expected.into() }]);
+        }
+    }
+
+    #[tokio::test]
+    async fn speaker_names_cascade_deleted_with_recording() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+        db.set_speaker_name(&r.id, 1, "Sarah").await.unwrap();
+
+        db.delete(&r.id).await.unwrap();
+        // The FK ON DELETE CASCADE must drop the orphaned name rows.
+        assert!(
+            db.speaker_names_for(&r.id).await.unwrap().is_empty(),
+            "speaker names must be cascade-deleted with their recording"
+        );
     }
 }

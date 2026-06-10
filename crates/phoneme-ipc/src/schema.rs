@@ -175,6 +175,19 @@ pub enum Request {
         id: RecordingId,
         notes: String,
     },
+    /// Set (or clear) the custom display name for one diarized speaker label of
+    /// a recording. `speaker_label` is the 1-based index from the transcript's
+    /// `[Speaker N]` marker. A blank `name` clears the mapping (the label
+    /// reverts to the default "Speaker N"). The stored transcript is never
+    /// rewritten — names are applied at display/export time — so a rename is
+    /// reversible. The updated name map is delivered back to clients via the
+    /// recording DTO (`Recording::speaker_names` on `GetRecording`/`ListRecordings`/
+    /// `ListMeeting`); a `SpeakerNameUpdated` event signals the change.
+    SetSpeakerName {
+        id: RecordingId,
+        speaker_label: i64,
+        name: String,
+    },
 
     /// List the transcription pipeline queue: items waiting in `pending/` (in
     /// claim order) plus the one currently `processing/`. Returns queue entries
@@ -490,6 +503,11 @@ pub enum DaemonEvent {
         error: String,
     },
     NotesUpdated {
+        id: RecordingId,
+    },
+    /// A recording's custom speaker-name map changed (a label was renamed or
+    /// cleared). Clients re-fetch the recording to pick up the new names.
+    SpeakerNameUpdated {
         id: RecordingId,
     },
     MeetingNameUpdated {

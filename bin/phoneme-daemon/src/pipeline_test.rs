@@ -45,6 +45,7 @@ async fn seed_recording(state: &AppState, tmp: &std::path::Path) -> (RecordingId
         summary: None,
         summary_model: None,
         tags: vec![],
+        speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
     (id, audio_path)
@@ -135,6 +136,7 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         summary: None,
         summary_model: None,
         tags: vec![],
+        speaker_names: vec![],
     };
     state.catalog.insert(&row).await.unwrap();
 

@@ -420,6 +420,30 @@ pub async fn update_notes(
     forward(&bridge, Request::UpdateNotes { id, notes }).await
 }
 
+/// Set (or clear) the custom display name for one diarized speaker label of a
+/// recording. `speaker_label` is the 1-based `[Speaker N]` index; a blank `name`
+/// clears the mapping. The stored transcript is never rewritten — names are
+/// applied at display/export time. The updated map is reflected on the next
+/// `get_recording`/`list_recordings`; a `SpeakerNameUpdated` event also fires.
+#[tauri::command]
+pub async fn set_speaker_name(
+    bridge: Br<'_>,
+    id: String,
+    speaker_label: i64,
+    name: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::SetSpeakerName {
+            id,
+            speaker_label,
+            name,
+        },
+    )
+    .await
+}
+
 /// Check the background daemon's current runtime status.
 /// Returns whether the daemon is actively running and its process ID.
 #[tauri::command]

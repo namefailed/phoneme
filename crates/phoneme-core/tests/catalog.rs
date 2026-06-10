@@ -31,6 +31,7 @@ fn sample_recording(id: RecordingId) -> Recording {
         summary: None,
         summary_model: None,
         tags: vec![],
+        speaker_names: vec![],
     }
 }
 

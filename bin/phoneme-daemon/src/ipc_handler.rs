@@ -424,6 +424,34 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::SetSpeakerName {
+            id,
+            speaker_label,
+            name,
+        } => {
+            // Speaker indices are 1-based (`[Speaker 1]`, …); reject a non-positive
+            // label rather than writing a row that can never match a marker.
+            if speaker_label < 1 {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!("invalid speaker label {speaker_label} (must be >= 1)"),
+                });
+            }
+            match state
+                .catalog
+                .set_speaker_name(&id, speaker_label, &name)
+                .await
+            {
+                Ok(()) => {
+                    state.events.emit(DaemonEvent::SpeakerNameUpdated { id });
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::ImportRecording { path } => import_recording(state, path).await,
         Request::RetranscribeRecording {
             id,
@@ -1523,6 +1551,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         summary: None,
         summary_model: None,
         tags: vec![],
+        speaker_names: vec![],
     };
     if let Err(e) = state.catalog.insert(&row).await {
         // Clean up the WAV we just wrote — no row means it's orphaned.
@@ -1695,6 +1724,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         state.catalog.insert(&row).await.unwrap();
         id

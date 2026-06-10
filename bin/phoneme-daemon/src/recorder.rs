@@ -584,6 +584,7 @@ impl DaemonRecorder {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         if let Err(e) = state.catalog.insert(&row).await {
             *self.active.lock().await = None;
@@ -1044,6 +1045,7 @@ impl DaemonRecorder {
                 summary: None,
                 summary_model: None,
                 tags: vec![],
+                speaker_names: vec![],
             };
             // Insert the catalog row. If it fails, roll back every track already
             // started so we never leave orphaned `recording`-status rows or live
@@ -1653,6 +1655,7 @@ mod tests {
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         state.catalog.insert(&row).await.unwrap();
 

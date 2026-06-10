@@ -37,4 +37,5 @@ pub use transcription::{
 };
 pub use types::{
     HookMetadata, HookPayload, ListFilter, MeetingTrack, RecordMode, Recording, RecordingStatus,
+    SpeakerName,
 };

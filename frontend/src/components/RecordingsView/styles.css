@@ -354,6 +354,74 @@ mark.search-hit {
 .notes-block:focus-within {
   border-color: var(--accent);
 }
+/* Speakers panel — one renamable row per diarized [Speaker N] label. Matches
+   the transcript/notes boxes so it reads as part of the same stack. */
+.speakers-block {
+  margin: 0 18px 9px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+}
+.speakers-block .speakers-header {
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+.speakers-block .speakers-hint {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-bottom: 10px;
+}
+.speakers-block .speakers-hint code {
+  font-size: 10px;
+  background: var(--bg-elevated);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.speakers-block .speakers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.speakers-block .speaker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.speakers-block .speaker-tag {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.speakers-block .speaker-arrow {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.speakers-block .speaker-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg-elevated);
+  color: var(--fg-default);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.speakers-block .speaker-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-surface);
+}
 .cm-editor-root, .cm-editor {
   flex: 1;
   height: 100%;
@@ -1584,6 +1652,31 @@ ph-sidebar {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* The speaker chip is a click-to-rename button. Inherit the chip look and add a
+   pointer + hover so it reads as interactive without changing the layout. */
+.merged-speaker-button {
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.merged-speaker-button:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border-color: var(--accent);
+}
+.merged-speaker-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Inline rename field — same pill footprint as the chip, sized to fit a name. */
+.merged-speaker-input {
+  width: 12ch;
+  font-family: inherit;
+  outline: none;
+}
+.merged-speaker-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-surface);
 }
 .merged-text {
   color: var(--fg-default);

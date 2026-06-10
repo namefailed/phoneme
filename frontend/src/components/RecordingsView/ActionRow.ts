@@ -1,17 +1,22 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { deleteRecording } from "../../services/ipc";
+import { deleteRecording, type SpeakerName } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import "./RerunForm";
 import { applyRerun, rerunToastMessage, type RerunPayload } from "./rerunActions";
+import { applySpeakerNames } from "./mergeMeeting";
 
 export type ActionRowCallbacks = {
   onTogglePlay: () => void;
   onRefresh: () => void;
   getTranscript: () => string;
   getAudioPath: () => string;
+  /** Custom speaker names for the current recording, applied to copy/export so
+   *  renamed speakers carry through. Optional — omitted/empty leaves the raw
+   *  `[Speaker N]` markers in place. */
+  getSpeakerNames?: () => SpeakerName[];
 };
 
 @customElement('ph-action-row')
@@ -88,9 +93,14 @@ export class ActionRowElement extends LitElement {
     this.rerunMenuOpen = false;
   }
 
+  /** The transcript with any custom speaker names applied, for copy/export. */
+  private transcriptForExport(): string {
+    return applySpeakerNames(this.cbs.getTranscript(), this.cbs.getSpeakerNames?.());
+  }
+
   private async handleCopy() {
     try {
-      await navigator.clipboard.writeText(this.cbs.getTranscript());
+      await navigator.clipboard.writeText(this.transcriptForExport());
       this.copyText = "✅ Copied!";
       setTimeout(() => { this.copyText = "📋 Copy"; }, 2000);
     } catch (e) {
@@ -110,7 +120,7 @@ export class ActionRowElement extends LitElement {
         ],
       });
       if (dest) {
-        await writeTextFile(dest, this.cbs.getTranscript());
+        await writeTextFile(dest, this.transcriptForExport());
         showToast("Transcript exported", "success");
       }
     } catch (e) {

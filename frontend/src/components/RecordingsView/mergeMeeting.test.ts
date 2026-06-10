@@ -1,12 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { mergeMeeting, mergedPlainText, sourceFor } from "./mergeMeeting";
-import type { Recording } from "../../services/ipc";
+import {
+  mergeMeeting,
+  mergedPlainText,
+  sourceFor,
+  speakerDisplayName,
+  speakerLabelsIn,
+  applySpeakerNames,
+} from "./mergeMeeting";
+import type { Recording, SpeakerName } from "../../services/ipc";
 
 function track(
   id: string,
   trackName: string,
   transcript: string | null,
   startedAt = "2026-05-19T14:00:00Z",
+  speakerNames?: SpeakerName[],
 ): Recording {
   return {
     id,
@@ -19,6 +27,7 @@ function track(
     meeting_id: "m1",
     meeting_name: "Standup",
     track: trackName,
+    speaker_names: speakerNames,
   };
 }
 
@@ -199,5 +208,89 @@ describe("mergedPlainText", () => {
   it("labels unknown-track blocks with the generic glyph", () => {
     const text = mergedPlainText(mergeMeeting([track("a", "aux", "side channel")]));
     expect(text).toBe("🎙️ aux: side channel");
+  });
+});
+
+describe("speakerDisplayName", () => {
+  it("returns the custom name when one is set for the label", () => {
+    const names: SpeakerName[] = [
+      { speaker_label: 1, name: "Sarah" },
+      { speaker_label: 2, name: "Alex" },
+    ];
+    expect(speakerDisplayName(names, 1)).toBe("Sarah");
+    expect(speakerDisplayName(names, 2)).toBe("Alex");
+  });
+  it("falls back to 'Speaker N' for unnamed labels, empties, or no map", () => {
+    expect(speakerDisplayName([], 3)).toBe("Speaker 3");
+    expect(speakerDisplayName(undefined, 1)).toBe("Speaker 1");
+    expect(speakerDisplayName([{ speaker_label: 1, name: "   " }], 1)).toBe("Speaker 1");
+  });
+});
+
+describe("speakerLabelsIn", () => {
+  it("returns the distinct speaker indices in ascending order", () => {
+    expect(
+      speakerLabelsIn("[Speaker 2]: a\n\n[Speaker 1]: b\n\n[Speaker 2]: c"),
+    ).toEqual([1, 2]);
+  });
+  it("parses multi-digit indices and dedupes", () => {
+    expect(speakerLabelsIn("[Speaker 10]: x\n\n[Speaker 10]: y")).toEqual([10]);
+  });
+  it("is empty for transcripts with no markers or no text", () => {
+    expect(speakerLabelsIn("just prose, no speakers")).toEqual([]);
+    expect(speakerLabelsIn(null)).toEqual([]);
+    expect(speakerLabelsIn(undefined)).toEqual([]);
+  });
+});
+
+describe("applySpeakerNames", () => {
+  it("rewrites named markers to 'Name:' and leaves unnamed ones as 'Speaker N:'", () => {
+    const t = "[Speaker 1]: hello\n\n[Speaker 2]: hi";
+    expect(applySpeakerNames(t, [{ speaker_label: 1, name: "Sarah" }])).toBe(
+      "Sarah: hello\n\n[Speaker 2]: hi",
+    );
+  });
+  it("returns the transcript unchanged when there are no names", () => {
+    const t = "[Speaker 1]: hello";
+    expect(applySpeakerNames(t, [])).toBe(t);
+    expect(applySpeakerNames(t, undefined)).toBe(t);
+  });
+  it("ignores a whitespace-only custom name (keeps the default marker)", () => {
+    const t = "[Speaker 1]: hello";
+    expect(applySpeakerNames(t, [{ speaker_label: 1, name: "   " }])).toBe(t);
+  });
+});
+
+describe("mergeMeeting speaker names", () => {
+  it("resolves displayName per block from the track's custom names", () => {
+    const sys = track(
+      "y",
+      "system",
+      "[Speaker 1]: hi\n\n[Speaker 2]: yo\n\n[Speaker 1]: bye",
+      "2026-05-19T14:00:00Z",
+      [{ speaker_label: 1, name: "Sarah" }],
+    );
+    const blocks = mergeMeeting([sys]);
+    expect(blocks.map((b) => b.displayName)).toEqual(["Sarah", "Speaker 2", "Sarah"]);
+    // recordingId is threaded through so the renderer can persist a rename.
+    expect(blocks.every((b) => b.recordingId === "y")).toBe(true);
+  });
+
+  it("un-diarized blocks have a null displayName", () => {
+    const blocks = mergeMeeting([track("m", "mic", "just one voice")]);
+    expect(blocks[0].displayName).toBeNull();
+  });
+
+  it("mergedPlainText uses custom names per track", () => {
+    const mic = track("m", "mic", "[Speaker 1]: my line", "2026-05-19T14:00:00Z", [
+      { speaker_label: 1, name: "Me" },
+    ]);
+    const sys = track("y", "system", "[Speaker 1]: their line", "2026-05-19T14:01:00Z", [
+      { speaker_label: 1, name: "Caller" },
+    ]);
+    const text = mergedPlainText(mergeMeeting([mic, sys]));
+    expect(text).toBe(
+      "🎤 Microphone · Me: my line\n\n🔊 System audio · Caller: their line",
+    );
   });
 });

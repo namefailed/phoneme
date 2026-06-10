@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listSession, type Recording } from "../../services/ipc";
+import { listSession, setSpeakerName, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { formatDuration } from "../../utils/format";
 import { mergeMeeting, mergedPlainText, type MergedBlock } from "./mergeMeeting";
@@ -31,6 +31,9 @@ export class MergedConversationDetail extends LitElement {
   @state() private error: string | null = null;
   @state() private loading = false;
   @state() private copyLabel = "📋 Copy";
+  /** The speaker chip currently being renamed (which track + which 1-based
+   *  label), or null when none. Click a chip to edit; commit on Enter/blur. */
+  @state() private editing: { recordingId: string; label: number } | null = null;
 
   async updated(changedProperties: PropertyValues) {
     if (changedProperties.has("meetingId")) {
@@ -39,6 +42,15 @@ export class MergedConversationDetail extends LitElement {
       } else {
         this.recordings = [];
         this.error = null;
+      }
+    }
+    // When a speaker chip enters edit mode, focus + select its input so the
+    // user can type the name immediately.
+    if (changedProperties.has("editing") && this.editing) {
+      const input = this.querySelector<HTMLInputElement>(".merged-speaker-input");
+      if (input) {
+        input.focus();
+        input.select();
       }
     }
   }
@@ -85,6 +97,30 @@ export class MergedConversationDetail extends LitElement {
     if (e.key === "Enter") {
       e.preventDefault();
       (e.target as HTMLElement).blur();
+    }
+  }
+
+  /** Commit a speaker rename for `(recordingId, label)`. An empty value clears
+   *  the custom name (reverts to "Speaker N"). Persists via IPC, then reloads
+   *  the tracks so every occurrence of that speaker re-renders with the name. */
+  private async commitSpeakerName(recordingId: string, label: number, value: string) {
+    this.editing = null;
+    try {
+      await setSpeakerName(recordingId, label, value.trim());
+      await this.loadSession();
+      this.onRefresh?.();
+    } catch (e) {
+      showToast(`Couldn't rename speaker: ${errText(e)}`, "error");
+    }
+  }
+
+  private onSpeakerInputKeyDown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      (e.target as HTMLInputElement).blur();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      this.editing = null; // cancel without saving
     }
   }
 
@@ -188,11 +224,43 @@ export class MergedConversationDetail extends LitElement {
           </div>`
         : nothing}
       <div class="merged-turn">
-        ${b.speaker != null
-          ? html`<span class="merged-speaker">Speaker ${b.speaker}</span>`
-          : nothing}
+        ${b.speaker != null ? this.renderSpeakerChip(b) : nothing}
         <span class="merged-text">${b.text}</span>
       </div>
     `;
+  }
+
+  /** The clickable speaker label for a turn. Shows the custom name (or
+   *  "Speaker N"); clicking swaps it for an inline text input that persists the
+   *  rename on Enter/blur. Renaming applies to every turn of that speaker in the
+   *  track because the stored mapping — not the per-block text — is the source
+   *  of truth. */
+  private renderSpeakerChip(b: MergedBlock) {
+    const label = b.speaker as number;
+    const isEditing =
+      this.editing?.recordingId === b.recordingId && this.editing?.label === label;
+    if (isEditing) {
+      // Start from the custom name if one is set, else blank so the user types
+      // a fresh name rather than editing the "Speaker N" placeholder.
+      const current = b.displayName === `Speaker ${label}` ? "" : (b.displayName ?? "");
+      return html`<input
+        class="merged-speaker merged-speaker-input"
+        .value=${current}
+        placeholder=${`Speaker ${label}`}
+        spellcheck="false"
+        aria-label=${`Rename Speaker ${label}`}
+        @keydown=${this.onSpeakerInputKeyDown}
+        @blur=${(e: Event) =>
+          this.commitSpeakerName(b.recordingId, label, (e.target as HTMLInputElement).value)}
+      />`;
+    }
+    return html`<button
+      class="merged-speaker merged-speaker-button"
+      type="button"
+      title="Click to rename this speaker"
+      @click=${() => (this.editing = { recordingId: b.recordingId, label })}
+    >
+      ${b.displayName ?? `Speaker ${label}`}
+    </button>`;
   }
 }
