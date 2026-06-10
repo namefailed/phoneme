@@ -80,7 +80,14 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                     }
                 }
 
-                // Restore any temporarily overridden config settings (e.g. temporary model used for re-transcription).
+                // Restore any temporarily overridden config settings layered in
+                // by a re-run (one-time hook toggle / cleanup / summary overrides
+                // from RetranscribeRecording). NOTE: this no longer touches the
+                // whisper MODEL — a model override is now applied per-job in the
+                // pipeline via `whisper_model_override`, never via the global
+                // config, so reloading here can't trigger a whisper-server restart
+                // (the double-restart that thrashed the server, #49). It only
+                // reverts the server-independent temp settings.
                 match crate::load_config() {
                     Ok(cfg) => {
                         state.config.store(std::sync::Arc::new(cfg));

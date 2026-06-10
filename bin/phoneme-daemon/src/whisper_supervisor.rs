@@ -11,6 +11,20 @@ use tokio::process::{Child, Command};
 const RESTART_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
 const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(60);
 
+/// The model file the bundled whisper-server should be running right now: a
+/// one-job-scoped override (from a model-override re-transcription) when present,
+/// otherwise the configured `whisper.model_path`. Centralizing this is what lets
+/// an override drive exactly one restart-to-override / restore cycle WITHOUT the
+/// override ever entering the process-global config — the global-mutation
+/// approach is what made the server thrash and mass-fail other jobs (#49). Pure
+/// so it can be unit-tested without spawning a server.
+fn effective_model_path(configured_model_path: &str, override_model: Option<&str>) -> String {
+    match override_model {
+        Some(m) if !m.trim().is_empty() => m.to_string(),
+        _ => configured_model_path.to_string(),
+    }
+}
+
 /// Test-injection-friendly configuration. `binary_override` lets integration
 /// tests substitute a stub for the real `whisper-server.exe`.
 #[allow(dead_code)]
@@ -67,10 +81,15 @@ pub async fn run_with(
             },
         };
 
-        if cfg.whisper.model_path.is_empty()
-            || !std::path::Path::new(&cfg.whisper.model_path).exists()
-        {
-            tracing::info!("whisper.model_path is empty or missing, waiting for download...");
+        // Spawn with the EFFECTIVE model: a one-job override if a model-override
+        // re-transcription has requested one, else the configured model. The
+        // override is read here (not merged into the global config) so previews
+        // and other jobs keep seeing the configured model.
+        let spawned_override = state.whisper_model_override.get();
+        let model_to_run = effective_model_path(&cfg.whisper.model_path, spawned_override.as_deref());
+
+        if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
+            tracing::info!("whisper model file is empty or missing, waiting for download...");
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
                 _ = shutdown.wait() => return Ok(()),
@@ -80,7 +99,7 @@ pub async fn run_with(
         let mut command = Command::new(&server_path);
         command
             .arg("-m")
-            .arg(&cfg.whisper.model_path)
+            .arg(&model_to_run)
             .arg("--port")
             .arg(cfg.whisper.bundled_server_port.to_string())
             .arg("--host")
@@ -114,6 +133,23 @@ pub async fn run_with(
         let mut check_interval = tokio::time::interval(Duration::from_secs(1));
         check_interval.tick().await; // consume first tick
 
+        // Restart iff the EFFECTIVE spec (configured model + one-job override),
+        // the port, or the mode differs from what this child was spawned with.
+        // Comparing the effective model — not the raw config — is what makes a
+        // model-override re-transcription produce exactly ONE restart-to-override
+        // and ONE restore (when the pipeline clears the override), instead of the
+        // old config-mutation + blanket-reload double restart that thrashed the
+        // server (#49).
+        let spec_changed = |child_model: &str| -> bool {
+            let current_cfg = state.config.load();
+            let current_override = state.whisper_model_override.get();
+            let current_model =
+                effective_model_path(&current_cfg.whisper.model_path, current_override.as_deref());
+            current_model != child_model
+                || current_cfg.whisper.bundled_server_port != cfg.whisper.bundled_server_port
+                || current_cfg.whisper.mode != cfg.whisper.mode
+        };
+
         let mut exited = false;
         loop {
             tokio::select! {
@@ -130,12 +166,18 @@ pub async fn run_with(
                     exited = true;
                     break;
                 }
+                // React promptly to a set/clear of the one-job model override so
+                // the override job doesn't wait out the 1s poll for its model.
+                _ = state.whisper_model_override.changed.notified() => {
+                    if spec_changed(&model_to_run) {
+                        tracing::info!("whisper-server model override changed; restarting");
+                        let _ = kill_gracefully(&mut child).await;
+                        backoff = RESTART_BACKOFF_INITIAL;
+                        break;
+                    }
+                }
                 _ = check_interval.tick() => {
-                    let current_cfg = state.config.load();
-                    if current_cfg.whisper.model_path != cfg.whisper.model_path
-                        || current_cfg.whisper.bundled_server_port != cfg.whisper.bundled_server_port
-                        || current_cfg.whisper.mode != cfg.whisper.mode
-                    {
+                    if spec_changed(&model_to_run) {
                         tracing::info!("whisper-server config changed; restarting");
                         let _ = kill_gracefully(&mut child).await;
                         backoff = RESTART_BACKOFF_INITIAL;
@@ -359,4 +401,43 @@ fn locate_bundled_server() -> anyhow::Result<PathBuf> {
         }
     }
     anyhow::bail!("whisper-server binary not found")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_model_path;
+
+    #[test]
+    fn effective_model_prefers_override_when_present() {
+        // A one-job override wins over the configured model so that re-transcribe
+        // job loads its requested model.
+        assert_eq!(
+            effective_model_path("C:/models/base.bin", Some("C:/models/large.bin")),
+            "C:/models/large.bin"
+        );
+    }
+
+    #[test]
+    fn effective_model_falls_back_to_config_when_no_override() {
+        // No override (the steady state) → the configured model, unchanged. This
+        // is the value previews and every non-override job run against.
+        assert_eq!(
+            effective_model_path("C:/models/base.bin", None),
+            "C:/models/base.bin"
+        );
+    }
+
+    #[test]
+    fn effective_model_ignores_blank_override() {
+        // A blank/whitespace override is treated as "no override" rather than
+        // spawning the server with an empty `-m`.
+        assert_eq!(
+            effective_model_path("C:/models/base.bin", Some("   ")),
+            "C:/models/base.bin"
+        );
+        assert_eq!(
+            effective_model_path("C:/models/base.bin", Some("")),
+            "C:/models/base.bin"
+        );
+    }
 }

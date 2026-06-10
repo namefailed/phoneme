@@ -435,19 +435,29 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(Some(r)) => {
                 let mut cfg = state.config.load().as_ref().clone();
                 let mut changed = false;
-                // Track whisper-model changes separately: only those require
-                // waiting for the whisper-server supervisor to restart. Cleanup
-                // / summary overrides don't touch the server, so don't pay the
-                // 500ms restart delay (or risk thrashing) for them.
-                let mut whisper_changed = false;
+                // A per-recording model override is NO LONGER written into the
+                // process-global config. Doing so made the whisper supervisor
+                // (which polls the global config) restart the server, and the
+                // queue worker's blanket post-run reload restart it again — a
+                // thrash that mass-failed other queued/preview jobs reading the
+                // same global config (#49). Instead we record the requested model
+                // against this recording id; the pipeline applies it to that one
+                // job only (a single serialized server model-swap for the local
+                // bundled backend, or a per-job config clone for cloud backends),
+                // then restores. See `pipeline::run`.
                 if let Some(m) = model {
-                    if cfg.whisper.provider == phoneme_core::config::TranscriptionBackend::Local {
-                        cfg.whisper.model_path = m;
+                    let m = m.trim();
+                    if m.is_empty() {
+                        // Empty = "use the configured model"; clear any stale
+                        // request so a prior override can't leak onto this run.
+                        state.pending_overrides.lock().unwrap().remove(&id);
                     } else {
-                        cfg.whisper.model = m;
+                        state
+                            .pending_overrides
+                            .lock()
+                            .unwrap()
+                            .insert(id.clone(), m.to_string());
                     }
-                    changed = true;
-                    whisper_changed = true;
                 }
                 if let Some(rh) = run_hooks {
                     cfg.hook.run_on_transcribe = rh;
@@ -490,11 +500,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     changed = true;
                 }
                 if changed {
+                    // NOTE: this temp-global config carries only server-independent
+                    // overrides (hooks / cleanup / summary). The whisper model is
+                    // deliberately NOT here — see the per-recording override above.
                     state.config.store(std::sync::Arc::new(cfg));
-                    if whisper_changed {
-                        // Wait a moment for the supervisor to restart the server.
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    }
                 }
                 let payload = HookPayload {
                     id: r.id,
@@ -1642,5 +1651,144 @@ mod tests {
             "/data/phoneme/audio/../../etc/passwd",
             dir
         ));
+    }
+
+    // ── RetranscribeRecording model override (#49 regression) ──────────────
+
+    use crate::app_state::AppState;
+    use phoneme_core::config::{Config, TranscriptionBackend, WhisperMode};
+    use phoneme_core::types::{Recording, RecordingStatus};
+    use phoneme_core::RecordingId;
+
+    async fn override_test_state(tmp: &std::path::Path, cfg: Config) -> AppState {
+        std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
+        AppState::new(cfg).await.expect("build test AppState")
+    }
+
+    /// Insert a minimal Done recording row so a retranscribe has something to act
+    /// on, and return its id.
+    async fn insert_done_recording(state: &AppState) -> RecordingId {
+        let id = RecordingId::new();
+        let row = Recording {
+            id: id.clone(),
+            started_at: chrono::Local::now(),
+            duration_ms: 1000,
+            audio_path: "C:/phoneme/audio/x.wav".into(),
+            transcript: Some("hello".into()),
+            model: Some("ggml-base.en".into()),
+            status: RecordingStatus::Done,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+            meeting_id: None,
+            meeting_name: None,
+            track: None,
+            in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            user_edited: false,
+            summary: None,
+            summary_model: None,
+            tags: vec![],
+        };
+        state.catalog.insert(&row).await.unwrap();
+        id
+    }
+
+    /// THE #49 REGRESSION: a model-override re-transcription for a Local
+    /// (bundled) recording must NOT mutate the process-global whisper config.
+    /// The old code wrote the override model into the shared config, which the
+    /// whisper supervisor polls and restarts on — and which the queue worker's
+    /// post-run reload reverted, restarting it again. That double restart raced
+    /// every other queued/preview transcription (which read the same global
+    /// config) and mass-failed them. The override must instead be recorded for
+    /// just this one job in `pending_overrides`.
+    #[tokio::test]
+    async fn model_override_retranscribe_does_not_mutate_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "C:/models/ggml-base.en.bin".into();
+        cfg.whisper.bundled_server_port = 5809;
+        let state = override_test_state(tmp.path(), cfg).await;
+
+        let id = insert_done_recording(&state).await;
+        // Snapshot the configured model BEFORE the request.
+        let model_path_before = state.config.load().whisper.model_path.clone();
+        let port_before = state.config.load().whisper.bundled_server_port;
+
+        let resp = handle_request(
+            Request::RetranscribeRecording {
+                id: id.clone(),
+                model: Some("C:/models/ggml-large-v3.bin".into()),
+                run_hooks: None,
+                post_process: None,
+                all_overrides: None,
+            },
+            &state,
+        )
+        .await;
+        assert!(matches!(resp, Response::Ok(_)), "retranscribe should be accepted");
+
+        // The GLOBAL config is untouched — this is the crux of the fix. The
+        // supervisor never sees a model change here, so it never thrashes.
+        let after = state.config.load();
+        assert_eq!(
+            after.whisper.model_path, model_path_before,
+            "global whisper.model_path must NOT change on a model-override retranscribe"
+        );
+        assert_eq!(
+            after.whisper.bundled_server_port, port_before,
+            "global whisper port must be unchanged"
+        );
+
+        // The override is instead recorded against just this recording id, to be
+        // applied by the pipeline when this single job runs.
+        let pending = state.pending_overrides.lock().unwrap();
+        assert_eq!(
+            pending.get(&id).map(String::as_str),
+            Some("C:/models/ggml-large-v3.bin"),
+            "the per-job override should be queued for this recording only"
+        );
+
+        // And the recording was put back into the transcribing state + enqueued.
+        let rec = state.catalog.get(&id).await.unwrap().unwrap();
+        assert_eq!(rec.status, RecordingStatus::Transcribing);
+    }
+
+    /// A retranscribe WITHOUT a model override must not create a phantom override
+    /// entry (so a plain re-run always uses the configured model).
+    #[tokio::test]
+    async fn retranscribe_without_model_records_no_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "C:/models/ggml-base.en.bin".into();
+        let state = override_test_state(tmp.path(), cfg).await;
+
+        let id = insert_done_recording(&state).await;
+        let resp = handle_request(
+            Request::RetranscribeRecording {
+                id: id.clone(),
+                model: None,
+                run_hooks: Some(false),
+                post_process: Some(false),
+                all_overrides: None,
+            },
+            &state,
+        )
+        .await;
+        assert!(matches!(resp, Response::Ok(_)));
+        assert!(
+            state.pending_overrides.lock().unwrap().get(&id).is_none(),
+            "no model override should be recorded when none was requested"
+        );
     }
 }

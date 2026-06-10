@@ -2,11 +2,14 @@
 //!
 //! Called by the queue worker per claimed payload.
 
-use crate::app_state::AppState;
-use phoneme_core::config::{Config, LlmPostProcessConfig};
+use crate::app_state::{AppState, WhisperModelOverride};
+use phoneme_core::config::{
+    Config, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
+};
 use phoneme_core::error::Result;
 use phoneme_core::{Catalog, Embedder, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
 use phoneme_ipc::{DaemonEvent, PipelineStage};
+use std::sync::Arc;
 
 /// Coalesce streamed deltas until this many chars accumulate, then flush one
 /// LlmActivity event — keeps the event bus from being flooded token-by-token.
@@ -14,6 +17,136 @@ const DELTA_FLUSH_CHARS: usize = 48;
 /// Cap on total response chars forwarded to the UI per stage (the full result
 /// is still returned and stored; only the live "thinking" view is bounded).
 const MAX_STREAMED_CHARS: usize = 16 * 1024;
+
+/// Longest we wait for the bundled whisper-server to come back up after a
+/// one-job model-override swap before transcribing anyway. A model load can take
+/// several seconds (large models, cold disk); if it overruns this the transcribe
+/// attempt fails with `WhisperUnreachable`, which the queue worker already
+/// retries with backoff — so this bound only avoids a needless first failure, it
+/// is never a correctness requirement.
+const WHISPER_READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Restores the configured whisper model when a one-job model override goes out
+/// of scope. Dropping it pings the supervisor to swap the bundled server back,
+/// so the override is undone on EVERY pipeline exit path (success, transcribe
+/// error, cancel) without each path having to remember to clear it. A no-op
+/// (`inner = None`) when the job had no override or used a cloud backend (no
+/// server to restore).
+struct WhisperOverrideGuard {
+    inner: Option<Arc<WhisperModelOverride>>,
+}
+
+impl Drop for WhisperOverrideGuard {
+    fn drop(&mut self) {
+        if let Some(o) = self.inner.take() {
+            // Clear the override → supervisor restarts the bundled server back
+            // onto the configured model for subsequent jobs.
+            o.set(None);
+        }
+    }
+}
+
+/// Apply a recording's one-time whisper model override for THIS job only,
+/// returning the per-job [`WhisperConfig`] to build the provider from plus a
+/// guard that restores the configured model on drop.
+///
+/// - No override (or a blank one): returns the configured config unchanged with
+///   a no-op guard — the steady-state path, byte-for-byte the prior behavior.
+/// - Local bundled backend: the override is a model FILE the single shared
+///   server must load, so we publish it to the supervisor (which performs one
+///   controlled restart), wait for the server to report ready, and pin the
+///   per-job `model_path` to the override for labels/stored model. The override
+///   never touches the process-global config, so previews and other jobs keep
+///   running the configured model. The returned guard clears the override.
+/// - Cloud / custom backend: the override is just a model id sent in the HTTP
+///   request, so we swap it into a per-job config clone — no server, no
+///   supervisor, no guard work needed.
+///
+/// Runs while the caller holds the `whisper_sem` permit, so for the local case
+/// the restart + readiness wait is serialized against the preview and any other
+/// final transcription.
+async fn apply_model_override(
+    state: &AppState,
+    configured: &WhisperConfig,
+    requested: Option<String>,
+) -> (WhisperConfig, WhisperOverrideGuard) {
+    let model = match requested {
+        Some(m) if !m.trim().is_empty() => m.trim().to_string(),
+        _ => {
+            return (
+                configured.clone(),
+                WhisperOverrideGuard { inner: None },
+            )
+        }
+    };
+
+    let mut whisper_cfg = configured.clone();
+    match configured.provider {
+        TranscriptionBackend::Local => {
+            tracing::info!(model = %model, "re-transcribe: applying one-job whisper model override");
+            // Publish the override; the supervisor swaps the server's model.
+            state.whisper_model_override.set(Some(model.clone()));
+            // Pin the per-job model_path so the activity label and the stored
+            // `model` reflect the override (the local provider talks to the
+            // server over HTTP and ignores model_path itself).
+            whisper_cfg.model_path = model;
+            // Only the bundled server is ours to wait on; External is a
+            // user-managed endpoint we never restart.
+            if matches!(configured.mode, WhisperMode::BundledModel | WhisperMode::BundledDownload) {
+                wait_for_whisper_ready(&whisper_cfg.server_base_url(), WHISPER_READY_TIMEOUT).await;
+            }
+            (
+                whisper_cfg,
+                WhisperOverrideGuard {
+                    inner: Some(state.whisper_model_override.clone()),
+                },
+            )
+        }
+        // Cloud / custom: the model is a request parameter, not a server model.
+        _ => {
+            tracing::info!(model = %model, "re-transcribe: applying one-job cloud model override");
+            whisper_cfg.model = model;
+            (whisper_cfg, WhisperOverrideGuard { inner: None })
+        }
+    }
+}
+
+/// Best-effort wait until the bundled whisper-server answers `GET {base}/health`
+/// with success, or `timeout` elapses. Used right after a one-job model-override
+/// restart so the transcription doesn't fire at a server that's still loading
+/// the model. Never errors: on timeout it logs and returns, letting the normal
+/// transcribe attempt (and the queue worker's `WhisperUnreachable` retry) take
+/// over.
+async fn wait_for_whisper_ready(base_url: &str, timeout: Duration) {
+    let health = format!("{}/health", base_url.trim_end_matches('/'));
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not build health-probe client; skipping readiness wait");
+            return;
+        }
+    };
+    let deadline = std::time::Instant::now() + timeout;
+    let mut poll = tokio::time::interval(Duration::from_millis(200));
+    loop {
+        if let Ok(resp) = client.get(&health).send().await {
+            if resp.status().is_success() {
+                return;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!(
+                url = %health,
+                "whisper-server not ready within timeout after model-override swap; transcribing anyway"
+            );
+            return;
+        }
+        poll.tick().await;
+    }
+}
 
 /// Run one LLM stage (cleanup or summary) through the streaming path, emitting
 /// `DaemonEvent::LlmActivity` so the GUI can show the exact prompt and the
@@ -288,11 +421,24 @@ pub async fn run(
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
     // Filter empty string to None — frontend sends "" for "auto-detect"
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
-    let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
+
     // Hold the whisper-server permit for the whole final transcription so the
     // streaming preview backs off and can't starve it (the "Whisper timed out
     // after 60s" bug). Acquiring waits for any in-flight preview tick to finish.
+    // Crucially, a model-override swap (below) happens UNDER this permit, so the
+    // preview and any other final transcription never run while the bundled
+    // server is mid-restart for a one-job model override (#49).
     let _whisper_permit = state.whisper_sem.acquire().await;
+
+    // Apply this recording's one-time model override (if any), scoped to JUST
+    // this job. `override_guard` restores the configured model on every exit
+    // path (success, error, cancel) via Drop, so the override can never leak
+    // onto a later job or persist in config. `whisper_cfg` is the per-job
+    // transcription config the provider is built from.
+    let requested_override = state.pending_overrides.lock().unwrap().remove(&id);
+    let (whisper_cfg, override_guard) =
+        apply_model_override(state, &cfg.whisper, requested_override).await;
+    let provider = state.transcription.provider(&whisper_cfg, &cfg.diarization);
 
     // Report transcription to the unified AI-activity ("brain") popout via the
     // Transcribing stage of LlmActivity: a start event naming the model/file,
@@ -300,16 +446,16 @@ pub async fn run(
     // popout that shows cleanup/summary also surface what the STT engine is up to.
     let model_label = {
         use phoneme_core::config::TranscriptionBackend as TB;
-        match cfg.whisper.provider {
-            TB::Local => std::path::Path::new(&cfg.whisper.model_path)
+        match whisper_cfg.provider {
+            TB::Local => std::path::Path::new(&whisper_cfg.model_path)
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or("local model")
                 .to_string(),
-            _ => cfg.whisper.model.clone(),
+            _ => whisper_cfg.model.clone(),
         }
     };
-    let provider_label = format!("{:?}", cfg.whisper.provider).to_lowercase();
+    let provider_label = format!("{:?}", whisper_cfg.provider).to_lowercase();
     let file_label = audio_path
         .file_name()
         .and_then(|s| s.to_str())
@@ -390,6 +536,15 @@ pub async fn run(
         });
     }
 
+    // Restore the configured whisper model (if this job overrode it) BEFORE
+    // releasing the permit, so the bundled server is swapped back while the
+    // preview is still gated — the resumed preview then runs the configured
+    // model, not this job's one-time override. Dropping the guard pings the
+    // supervisor; for non-override jobs it's a no-op. (Both early-return paths
+    // above — cancel and transcribe error — drop this guard implicitly, so the
+    // model is always restored.)
+    drop(override_guard);
+
     // Release the whisper-server permit now that transcription is done — LLM
     // post-processing and hooks below don't touch the server, so the preview
     // can resume immediately.
@@ -437,10 +592,10 @@ pub async fn run(
     }
 
     payload.transcript = transcript.clone();
-    // The whisper-server supervisor (Task 12) will publish the actually-loaded
-    // model name; until then, fall back to the configured model_path's file
-    // stem or "unknown".
-    payload.model = std::path::Path::new(&cfg.whisper.model_path)
+    // Record the model that actually ran. Use the per-job whisper config so a
+    // one-time model-override re-transcription stores the override's model file
+    // stem (for the local backend) rather than the configured default.
+    payload.model = std::path::Path::new(&whisper_cfg.model_path)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown")
