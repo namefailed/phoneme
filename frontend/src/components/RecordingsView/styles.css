@@ -2011,6 +2011,46 @@ ph-sidebar {
   font-size: 14px;
   color: var(--fg-default);
 }
+/* Line-numbered unified view: old + new gutters, a marker, then the content. */
+.tdiff-text--numbered {
+  white-space: normal;
+  font-size: 13px;
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  line-height: 1.55;
+}
+.tdiff-row {
+  display: flex;
+  align-items: flex-start;
+}
+.tdiff-row .tdiff-ln {
+  flex: 0 0 auto;
+  width: 38px;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--fg-faded);
+  user-select: none;
+  border-right: 1px solid var(--border-subtle);
+}
+.tdiff-row .tdiff-mark {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  color: var(--fg-faded);
+  user-select: none;
+}
+.tdiff-row .tdiff-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 8px;
+}
+.tdiff-row--add { background: color-mix(in srgb, var(--ok) 9%, transparent); }
+.tdiff-row--add .tdiff-mark { color: var(--ok); }
+.tdiff-row--del { background: color-mix(in srgb, var(--err) 9%, transparent); }
+.tdiff-row--del .tdiff-mark { color: var(--err); }
+.tdiff-row--mod { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.tdiff-row--mod .tdiff-mark { color: var(--accent); }
 .tdiff-eq {
   color: var(--fg-default);
 }
