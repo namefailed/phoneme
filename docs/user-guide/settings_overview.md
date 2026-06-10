@@ -33,7 +33,7 @@ See [Providers & Models](providers_and_models.md) and [Whisper & Diarization](di
 
 ### Live Preview
 
-An independent transcription provider just for the live partial-transcript preview, so it never contends with the final transcription. Leave it unset to reuse the main provider, or point it at a small/fast local model on its own server or a fast cloud API (Groq, OpenAI, Deepgram). See [Live Preview & Pre-Roll](streaming_preview_and_preroll.md).
+An independent transcription provider just for the live partial-transcript preview, so it never contends with the final transcription. Leave it unset to reuse the main provider, or point it at a small/fast local model on its own server or a fast cloud API (Groq, OpenAI, Deepgram). A **System-wide overlay** checkbox additionally floats the live caption in an always-on-top window over the whole desktop (requires Streaming preview). See [Live Preview & Pre-Roll](streaming_preview_and_preroll.md).
 
 ### Diarization
 
@@ -89,7 +89,7 @@ See [Smart Cleanup](smart_cleanup.md), [Providers & Models](providers_and_models
 
 ![Storage settings](../screenshots/settings-storage.png)
 
-Audio directory, auto-delete by age or count, optional audio-only deletion (keep searchable metadata), and export. See [Storage, Paths & Retention](storage_paths_and_retention.md).
+Audio directory, auto-delete by age or count, optional audio-only deletion (keep searchable metadata), an **Import audio** button (bring a `.wav`/`.mp3`/`.m4a` into the pipeline), and export. See [Storage, Paths & Retention](storage_paths_and_retention.md) and [Importing Audio](importing_audio.md).
 
 ### Profiles
 
@@ -105,7 +105,15 @@ Show window on startup, minimize to tray on close, start at Windows login.
 
 ![Advanced settings](../screenshots/settings-advanced.png)
 
-Daemon log level, pipe name, semantic-search model path, re-run the First Run Wizard, and other power-user options.
+Daemon log level, pipe name, re-run the First Run Wizard, and other power-user options.
+
+### Semantic Search
+
+Enable meaning-based search, set the embedding model directory and its knobs (max tokens, pooling, `token_type_ids`, query/passage prefixes), and **Re-embed all recordings** after a model change. See [Semantic Search](semantic_search.md).
+
+> [!NOTE]
+> This section currently has no dedicated sidebar tab — reach it by typing
+> **"Semantic"** into the Settings search box.
 
 ## Manual editing
 

@@ -17,9 +17,9 @@ This means:
 
 ## 🧠 Semantic search (meaning-based)
 
-Keyword search only matches words you actually said. **Semantic search** uses offline ONNX embeddings to find recordings by *concept* — paraphrases, related ideas, vague memories.
+Keyword search only matches words you actually said. **Semantic search** uses offline ONNX embeddings to find recordings by *concept* — paraphrases, related ideas, vague memories. Transcripts are embedded per sentence-aware chunk, and the semantic ranking is fused with the FTS5 keyword ranking (RRF) so a query finds the recording whether you remember the gist or the one distinctive word. Each hit shows a calibrated relevance chip.
 
-Enable in **Settings → System → Advanced** (`semantic_search.enabled = true`). Full guide: [Semantic Search](semantic_search.md).
+Enable it from the **Semantic Search** settings section (search Settings for "Semantic", or set `semantic_search.enabled = true`). Full guide: [Semantic Search](semantic_search.md).
 
 ## 🏷️ Organizing with Tags
 

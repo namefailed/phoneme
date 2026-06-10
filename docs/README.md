@@ -49,9 +49,14 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 
 ### Architecture
 - [Architecture Overview](developer-guide/architecture.md) — Daemon / CLI / tray triad
-- [Internals](developer-guide/internals.md) — Async topology, audio path, pipeline, meeting alignment
+- [Internals](developer-guide/internals.md) — Async topology, audio path, pipeline, semantic search, meeting alignment
 - [Data Directories](developer-guide/data_directories.md) — Config, catalog, inbox, logs, models
 - [Threat Model](developer-guide/threat_model.md) — Trust boundaries, mitigations, open hardening items
+
+### Design notes & audits
+- [Merged meeting view](design/merged-meeting-view.md) — Why the merge is coarse (for now)
+- [Live preview overlay](design/live-preview-overlay.md) — System-wide caption window
+- [Docs audit — June 2026](audits/2026-06-docs-audit.md) — What drifted and what was fixed
 
 ### Integration
 - [CLI Reference](developer-guide/cli_reference.md) — Every `phoneme` subcommand

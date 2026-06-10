@@ -67,6 +67,7 @@ update this file in the same PR.
 | WebView | Daemon-side audio deletion rejects `..` and paths outside the audio dir | `phoneme-daemon::ipc_handler` | S-H5 |
 | WebView | Recording IDs from the renderer are validated before reaching ID slicing accessors | `phoneme-tray::commands::parse_id` | — |
 | WebView | Error text rendered into the DOM is HTML-escaped | `frontend RecordingDetail` | S-med |
+| WebView | API keys are **masked** before `read_config` crosses to the renderer and restored from disk on `write_config`, so secrets never reach the WebView | `phoneme-tray::commands` (`mask_config_secrets`/`unmask_config_secrets`) | S-H2 (in part) |
 | Logging | `Debug` for config redacts API keys | `phoneme-core::config` | — |
 
 ## Open items (prioritized)
@@ -74,14 +75,9 @@ update this file in the same PR.
 - **Same-user auth token on the IPC pipe** — defense-in-depth beyond the owner
   ACL: the daemon mints a random token at startup, stores it in the user-only
   data dir, and clients present it on connect. *(S-C1 follow-up.)*
-- **Stop sending API keys to the WebView (masked config DTO)** — `read_config`
-  currently serializes the real keys to the renderer. Plan: return the config
-  with the two `api_key` fields blanked plus "is set" flags; `write_config`
-  merges (a blank incoming key preserves the stored one); move the renderer's
-  key-using calls (provider model-list / connection test) **daemon-side** so the
-  WebView never needs the raw secret. *(S-H2.)*
-- **Encrypt secrets at rest (Windows DPAPI)** — keys live in plaintext
-  `config.toml`. Encrypt per-user via DPAPI; decrypt in the daemon only. *(S-H2.)*
+- **Encrypt secrets at rest (Windows DPAPI)** — API keys still live in plaintext
+  `config.toml` on disk. Encrypt per-user via DPAPI; decrypt in the daemon only.
+  *(S-H2 — the masked-DTO half is now done; see the mitigations table above.)*
 - **Webhook SSRF guard** — the webhook POST target is user-configured; enforce
   HTTPS and consider blocking non-loopback private ranges (loopback is allowed on
   purpose for local automation), plus optional HMAC signing. *(S-H1.)*

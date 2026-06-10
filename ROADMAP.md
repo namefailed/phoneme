@@ -34,6 +34,34 @@ move at least one of these personas closer to "done":
 
 ---
 
+## ✅ Recently shipped (this cycle)
+
+Landed most recently — verified against current code:
+
+- [x] **Chunked hybrid semantic search** — sentence-aware chunking (`chunk.rs`) +
+  per-chunk embeddings (`embedding_chunks`) fused with FTS5 via RRF
+  (`fusion.rs`, `catalog.rs::hybrid_search`) and a calibrated 0–100% relevance.
+  Fixes paraphrase recall on longer notes. *(closes the v1.10 chunking item early)*
+- [x] **Embedding model as a user choice** — `[semantic_search]` now carries
+  `max_tokens`, `pooling` (mean/cls), `token_type_ids`, and `query_prefix` /
+  `passage_prefix`, so E5/BGE-class models work, not just all-MiniLM; a dedicated
+  **Semantic Search** settings section plus a **Re-embed library** action
+  (`ReembedAll`) re-index everything after a model change.
+- [x] **Merged meeting view** — selecting a meeting's group header renders all
+  tracks as one read-only, source-sectioned, speaker-aware document with Copy /
+  Export (`MergedConversationDetail.ts`, `mergeMeeting.ts`). Coarse, not yet
+  chronological — see the v1.9 Meetings item.
+- [x] **System-wide live-preview overlay** — an opt-in, always-on-top, frameless
+  desktop window that floats the live caption over any app (`src-tauri/src/overlay.rs`,
+  `frontend/overlay.*`), gated on `interface.preview_overlay`. See
+  [docs/design/live-preview-overlay.md](docs/design/live-preview-overlay.md).
+- [x] **Masked config at the WebView boundary (S-H2)** — API keys are masked before
+  reaching the renderer and restored on save (`src-tauri/src/commands.rs`).
+- [x] **IPC connection resilience** — an unknown/unparseable request now returns an
+  error `Response` instead of tearing down the pipe (`ServerRequest::Unknown`,
+  `phoneme-ipc`).
+- [x] **Queue failed-count + clear** and **Import audio** in Settings → Storage.
+
 ## ✅ Recently shipped (post-v1.8 baseline)
 
 Landed since the last roadmap reorg — these close several promise-vs-reality gaps:
@@ -110,8 +138,11 @@ same-user malware or a malicious IPC client. Ordered by priority.*
 - [x] **`escapeHtml` the RecordingDetail error path** (`RecordingDetail.ts:59`). *(S-medium)*
 
 **Secrets & transport**
-- [ ] **Stop sending full API keys to the WebView** — `read_config` returns
-  plaintext keys; serve a masked DTO and keep secrets daemon-side. *(S-H2)*
+- [x] **Stop sending full API keys to the WebView** — `read_config` now masks every
+  non-empty key (`__phoneme_secret_kept__`) before it crosses to the renderer, and
+  `write_config` restores any unchanged key from disk, so secrets never reach the
+  WebView (`src-tauri/src/commands.rs` `mask_config_secrets`/`unmask_config_secrets`).
+  Encrypting them at rest (below) is the remaining half. *(S-H2)*
 - [ ] **Encrypt secrets at rest** (Windows DPAPI) instead of plaintext `config.toml`. *(S-H2)*
 - [ ] **Webhook SSRF guard** — HTTPS-only, block private/loopback ranges; HMAC
   signing later. *(S-H1)*
@@ -147,20 +178,39 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
 ### 🏚️ Finish the attic (backend exists, GUI doesn't)
 
 - [ ] **Webhook URL field in Settings** — pipeline already POSTs `hook.webhook_url`; no UI field exists.
-- [ ] **Failed-queue visibility + retry** — inbox has a `failed/` state; the header badge only counts pending+processing. Surface failures with per-file error + one-click retry.
+- [x] **Failed-queue visibility + clear** — the queue panel now surfaces the
+  `failed/` count as a badge and lets the user dismiss it (`QueuePanel.ts`
+  `clearFailed` → `ClearFailed`/`getQueueCounts` IPC; the `queue_depth_changed`
+  event carries the failed count). *Per-file error detail + one-click **retry** is
+  still pending* — today clear only removes the failed marker; the recording and
+  its transcript are untouched.
 - [ ] **Doctor: rebuild catalog** — `phoneme doctor --rebuild-catalog` is CLI-only.
 - [ ] **Delete modes (keep-audio / transcript-only)** — CLI supports it; the GUI always deletes both.
 - [x] **Bulk tag from multi-select** — the floating bulk bar now has Tag plus the full shared Re-run form, Export, and Delete.
-- [ ] **Semantic search settings + re-index** — the wizard sets it up; there's no ongoing management (toggle, model dir, backfill/re-index button).
+- [x] **Semantic search settings + re-index** — a dedicated **Semantic Search**
+  settings section (`SectionSemantic.ts`) exposes the toggle, model directory, and
+  the embedding-model knobs (max tokens, pooling, `token_type_ids`, query/passage
+  prefixes), plus a **Re-embed all recordings** action (`ReembedAll` IPC) that
+  clears every vector and re-indexes the library in the background. *(Known gap:
+  the section is currently only reachable via Settings **search**, not a tab.)*
 - [ ] **IPC reconnect after Doctor "Fix"** — today users must close/reopen the window after a daemon restart.
 - [ ] **In-app hook log tail** — hook debugging means opening `%LOCALAPPDATA%\phoneme\logs\hook.log` by hand.
-- [ ] **Import file picker** — drag-drop works; the picker (`pickAndImportAudio`) needs verifying/wiring. *(Verify current state — may be "moved to Settings," not missing.)*
+- [x] **Import file picker** — wired as an **Import audio** button in Settings →
+  Storage (`SectionStorage.ts` → `pickAndImportAudio`), alongside drag-drop.
 - [ ] **FLAC import** — docs mention FLAC; the decoder only accepts wav/mp3/m4a.
 - [ ] **Recording mode on the main button** — hotkeys support hold/toggle/duration; the header Record button is always one-shot.
 
 ### 🎙️ Meetings
 
-- [ ] **Chronological merged timeline** — interleave the two tracks into one "You / Meeting" story. *(Depends on alignment correctness above. Build it in Lit.)*
+- [x] **Merged meeting view (coarse — chronological interleave still pending)** — a
+  source-sectioned, speaker-aware merge shipped
+  (`MergedConversationDetail.ts` / `mergeMeeting.ts`): selecting a meeting's
+  group header renders every track as one read-only document, labelled 🎤 Microphone
+  / 🔊 System audio with the pipeline's `[Speaker N]` turns surfaced, plus Copy /
+  Export. It does **not** yet interleave the tracks *chronologically* — per-line
+  timestamps aren't persisted, so a true "You / Meeting" timeline still depends on
+  the alignment + word-timestamp prerequisites above. See
+  [docs/design/merged-meeting-view.md](docs/design/merged-meeting-view.md).
 - [ ] **Diarization quality** *(prereq for named speakers — don't build naming UX on wrong labels)*. Each item below was verified against `diarization.rs` / `transcription.rs` and the `speakrs 0.4.2` source; verdicts noted inline.
   - [x] **Fix the `to_segments` frame scaling** ✓ *(shipped — drops the manual `to_segments(1.0,1.0)` and uses speakrs' already-correct `result.segments`)*. `diarization.rs:160` calls `result.discrete_diarization.to_segments(1.0, 1.0)`, but those args are `frame_step`/`frame_duration` in seconds and speakrs' real frame geometry is `FRAME_STEP_SECONDS = 0.016875` / `FRAME_DURATION_SECONDS = 0.0619375` (speakrs `pipeline/config.rs`). Passing `(1.0, 1.0)` inflates every speaker-turn timestamp by ~59×, so turns never line up with the whisper segment midpoints in `assign_speakers` — diarization is effectively scrambled on any real recording. **Simplest fix: drop the manual `to_segments` call and use the already-correct `result.segments`** (speakrs builds it via `to_segments(FRAME_STEP_SECONDS, FRAME_DURATION_SECONDS)` + `merge_segments` in `pipeline/post_inference.rs:65`). *(diarization.rs:154–170)*
   - [ ] **Cache the pipeline in `AppState`** *(confirmed)*. `run_local_diarization` calls `OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)` on *every* transcription (`diarization.rs:157`), reloading the ~500 MB seg+emb ONNX models each time; `AppState` (`app_state.rs`) holds no diarizer. Hold one long-lived pipeline fed via speakrs' background queue — `OwnedDiarizationPipeline::into_queued()` returns a `(QueueSender, QueueReceiver)` (`pipeline.rs:179`) — so model load happens once at startup. *(transcription.rs:352 `diarize_transcript` → diarization.rs:154)*
@@ -176,7 +226,9 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
 
 ### 🔎 Recall
 
-- [ ] **Show semantic relevance scores in the list** — the IPC already returns `score`; the UI discards it. Now that v1.8 added a relevance floor, showing "87% match" also *explains* why a vague query returns few results. (Easy.)
+- [x] **Show semantic relevance scores in the list** — hybrid search now returns a
+  calibrated 0–100% relevance per hit (`fusion.rs::calibrate_cosine`) and the
+  recordings list renders it as a chip during a semantic query.
 - [ ] **"More like this"** — open a recording → find semantically similar ones. Nearly free: search by an existing recording's stored vector instead of a fresh query embedding. (Promoted from "medium" — embeddings already exist.)
 - [ ] **Saved searches / smart filters** — persist "meeting-tagged, last 30 days, contains 'action items'."
 
@@ -191,11 +243,16 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
 
 **Theme: make Recall a moat.** Bigger, model-touching work that builds on v1.9.
 
-- [ ] **Transcript chunking + hybrid search** — embed per-passage (schema migration:
-  the `embeddings` table is one-vector-per-recording today) and fuse FTS5 + vector
-  (RRF). This is the *real* recall win — it's what makes "find the brief moment in a
-  long recording" reliable. Add an in-memory embedding cache (today every query
-  re-reads all BLOBs). *(Ideally add a CI job that can run the ONNX model.)*
+- [x] **Transcript chunking + hybrid search** — *shipped.* Transcripts are split
+  into overlapping, sentence-aware chunks (`chunk.rs`), each embedded into the new
+  `embedding_chunks` table (migration `…_add_embedding_chunks.sql`); a recording is
+  scored by its best-matching chunk (max-sim). The vector and FTS5 rankings are
+  fused with Reciprocal Rank Fusion (`fusion.rs::reciprocal_rank_fusion`) in
+  `catalog.rs::hybrid_search`, and raw cosine is calibrated to a 0–100% relevance
+  for display (`calibrate_cosine`). The legacy one-vector-per-recording `embeddings`
+  table is kept as a fallback until the background re-embed pass backfills chunks.
+  *Still open:* an in-memory embedding cache (every query re-reads the chunk BLOBs)
+  and a CI job that can run the ONNX model.
 - [ ] **"Ask my archive" (local RAG chat)** — "What did we decide about the API
   redesign?" → answer with citations/links to recordings. Builds on chunking +
   retrieval; needs a chat UI + citation UX. The headline differentiated feature.
@@ -344,8 +401,12 @@ alongside the feature releases above.*
 - [x] Consolidate the duplicated **Doctor** and triplicate **record-mode** enums into core. *(A-H3/A-H4)*
 
 **Docs accuracy** *(audit found drift — fix the user-facing claims)*
-- [ ] Say **speakrs**, not "Pyannote", everywhere (docs, `SectionDiarization.ts`). *(A-C5)*
-- [ ] Reconcile claims that don't match code: `hook.log` (no writer), inbox states (`processing/` also used), `HookPayload.original_transcript` (absent), "merged conversation = chronological" (currently stacked panes), empty `docs/screenshots/`, Doctor hook-template path. *(Docs no longer claim a `phoneme config validate` command — validation is automatic on load/reload. Semantic-search settings are now documented as Settings → System → Advanced.)*
+- [x] Say **speakrs**, not "Pyannote", everywhere (docs + `SectionDiarization.ts`). *(A-C5 — verified clean.)*
+- [x] Reconcile claims that don't match code — see [docs/audits/2026-06-docs-audit.md](docs/audits/2026-06-docs-audit.md).
+  `hook.log` / `HookPayload.original_transcript` are no longer claimed; the hook
+  payload doc matches the struct; the merged-meeting and semantic-search docs were
+  rewritten to match the shipped coarse merge + chunked hybrid search; `docs/screenshots/`
+  is populated. Validation is automatic on load/reload (no `phoneme config validate`).
 
 ---
 

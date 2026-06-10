@@ -52,19 +52,22 @@ flowchart LR
     subgraph D [Diarize & Merge]
         R2 --> P{speakrs}
         P -->|Speakers| L[Labels]
-        R1 --> M{Merge}
-        L --> M
+        R1 --> MG{Merge}
+        L --> MG
     end
     
-    M --> V[Meeting View]
+    MG --> V[Meeting View]
 ```
 
-In the recordings list, a meeting's two tracks are grouped under one entry. Open the **merged conversation** view to see both tracks together — each with its own transcript, waveform, and editor — sharing the meeting's wall-clock timeline.
+In the recordings list, a meeting's two tracks are grouped under one entry. Click the meeting's **group header** to open the **merged conversation** view: a single, read-only reading of the whole meeting, with each track rendered as a labelled section — **🎤 Microphone** (you) and **🔊 System audio** (everyone else) — and the diarizer's `[Speaker N]` turns surfaced inside. A toolbar offers **Copy** and **Export** of the merged text. To edit a single track (full editor, waveform, notes, re-transcribe), expand the group and click that track's row instead.
 
 > [!NOTE]
-> Today the merged view shows the two tracks together (mic and system); a single
-> chronologically-interleaved "You / Meeting" transcript is on the
-> [roadmap](../../ROADMAP.md).
+> The merged view orders the tracks by source (mic, then system); it does **not**
+> yet interleave them line-by-line on one chronological timeline, because
+> per-line timestamps aren't persisted. A true "You / Meeting" interleaved
+> transcript is on the [roadmap](../../ROADMAP.md). See
+> [docs/design/merged-meeting-view.md](../design/merged-meeting-view.md) for the
+> rationale and the follow-up that would unlock it.
 
 ### 🗣️ Adding Speaker Diarization
 

@@ -8,9 +8,15 @@ that talks to `phoneme-daemon` over the same named-pipe IPC as the CLI.
 | Module | Responsibility |
 |---|---|
 | `bridge` | `NamedPipeTransport` wrapper with auto-reconnect |
-| `commands` | `#[tauri::command]` handlers (list/get/delete/record_*/retranscribe/refire/update_transcript/daemon_status) |
+| `commands` | `#[tauri::command]` handlers (list/get/delete/record_*/retranscribe/refire/update_transcript/daemon_status, plus `read_config`/`write_config` with API-key masking, `set_overlay`, and `reembed_all`) |
+| `overlay` | Creates/destroys the system-wide live-preview overlay `WebviewWindow` at runtime (gated on `interface.preview_overlay`) |
 | `tray` | System tray icon + menu + state-driven icon/tooltip swaps |
-| `events` | Background task that subscribes to `DaemonEvent` and re-emits to the frontend via Tauri events |
+| `events` | Background task that subscribes to `DaemonEvent` and re-emits to the frontend via Tauri events (broadcast to all webviews, including the overlay) |
+
+> **Secret handling (S-H2):** `read_config` masks every non-empty API key
+> (`__phoneme_secret_kept__`) before it reaches the WebView; `write_config`
+> restores any unchanged key from the on-disk config. Raw secrets never cross to
+> the renderer.
 
 ## Build
 

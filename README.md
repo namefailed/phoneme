@@ -80,7 +80,7 @@ flowchart TD
 - **👥 Meeting Mode (Dual-Track Capture)**: Capture both your microphone and your computer's audio as two linked tracks sharing a wall-clock timeline. Optional **speaker diarization** (offline ONNX, or cloud) labels who spoke on any Zoom, Teams, or Meet call.
 - **⌨️ Transcribe-in-Place (`Ctrl+Alt+I`)**: Speak with a global hotkey and Phoneme types your dictated words into the focused application (Word, Slack, Chrome, VS Code) via OS-level keystroke simulation.
 - **✨ Smart Cleanup & AI Summary**: Pipe raw transcripts through an LLM to fix stutters, reformat, or translate — and optionally generate a per-recording summary, on demand or automatically. Three transcript layers (raw → cleaned → edited) are kept so nothing is lost.
-- **🔍 Keyword + Semantic Search**: Manage thousands of recordings with SQLite FTS5 full-text search, or search by *meaning* using an offline ONNX embedding index.
+- **🔍 Keyword + Semantic Search**: Manage thousands of recordings with SQLite FTS5 full-text search, or search by *meaning* with an offline, **chunked hybrid** index — per-passage ONNX embeddings fused with keyword ranking (RRF) so a query finds the recording whether you remember the gist or the one distinctive word. Bring your own embedding model.
 - **💻 CLI is a Peer**: Every GUI action is a CLI command (`phoneme record --start`). Bind it to AutoHotkey, Stream Deck, or Kanata.
 
 ---

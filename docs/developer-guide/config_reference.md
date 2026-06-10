@@ -91,6 +91,7 @@ An optional, **independent** transcription provider used only for the live previ
 | `theme` | `catppuccin-mocha` | CSS theme id |
 | `visible_columns` | day, time, duration, status, transcript | List columns |
 | `column_widths` | px/fr strings | Resizable column layout |
+| `preview_overlay` | `false` | Float the live preview in a system-wide, always-on-top overlay window (requires `recording.streaming_preview`) |
 
 ---
 
@@ -161,8 +162,15 @@ Stored results: `summary` and `summary_model` columns on the recording.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enabled` | `false` | Index new transcripts |
+| `enabled` | `false` | Index new transcripts (chunked, hybrid with FTS5) |
 | `model_dir` | `""` | ONNX model + tokenizer directory |
+| `max_tokens` | `256` | Truncation length before embedding (all-MiniLM was trained at 256) |
+| `pooling` | `mean` | Token pooling: `mean` (MiniLM/MPNet/E5/BGE) or `cls` |
+| `token_type_ids` | `true` | Feed `token_type_ids` (BERT-family yes; some E5 exports reject it) |
+| `query_prefix` | `""` | Prefix prepended to a search **query** (e.g. `query: ` for E5) |
+| `passage_prefix` | `""` | Prefix prepended to a stored **transcript** (e.g. `passage: ` for E5) |
+
+Changing the model or its dimension makes old vectors unsearchable — re-index with **Re-embed all recordings** (IPC `ReembedAll`). See [Semantic Search](../user-guide/semantic_search.md).
 
 ---
 

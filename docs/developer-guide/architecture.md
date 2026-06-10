@@ -84,7 +84,7 @@ The catalog is a single SQLite database (WAL mode, with an FTS5 full-text index 
 
 - **`recordings`** — the central table: `id`, `started_at`, `duration_ms`, `audio_path`, `model`, `status`, hook result columns, `notes`, plus the three transcript layers (`original_transcript`, `clean_transcript`, `transcript`), the summary (`summary`, `summary_model`), and the meeting-link columns (`meeting_id`, `meeting_name`, `track`). Standalone recordings have a null `meeting_id`; the two tracks of a meeting share one non-null `meeting_id` and differ by `track` (`mic` / `system`).
 - **`tags`** and **`recording_tags`** — colour-coded tags and their many-to-many attachments.
-- **`embeddings`** — per-recording semantic-search vectors.
+- **`embedding_chunks`** — per-chunk semantic-search vectors (many per recording, one per sentence-aware transcript chunk); the legacy per-recording `embeddings` table is kept only as a fallback. Search is hybrid: best-chunk cosine fused with FTS5 via RRF (`phoneme-core::fusion`, `catalog::hybrid_search`).
 - **FTS5 mirror** — kept in sync via triggers so `list_recordings` can do prefix search safely (the query string is sanitised into a robust `term* AND term*` form before it ever reaches SQLite).
 
 Audio is stored on disk under a date-foldered directory, not in the database — the SQLite file stays small and copyable.
