@@ -1,10 +1,10 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listSession, setSpeakerName, type Recording } from "../../services/ipc";
+import { listSession, setSpeakerName, updateTranscript, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { formatDuration } from "../../utils/format";
-import { mergeMeeting, mergedPlainText, type MergedBlock } from "./mergeMeeting";
+import { mergeMeeting, mergedPlainText, applySpeakerNames, type MergedBlock } from "./mergeMeeting";
 
 /** Distinct, theme-agnostic colors so each speaker is easy to follow at a glance.
  *  Indexed by the 1-based speaker label; wraps for meetings with many speakers. */
@@ -124,6 +124,15 @@ export class MergedConversationDetail extends LitElement {
     this.editing = null;
     try {
       await setSpeakerName(recordingId, label, value.trim());
+      // Bake the name into that track's transcript text so it sticks (the
+      // rename replaces [Speaker N] in the stored transcription, not just here).
+      const track = this.recordings.find((r) => r.id === recordingId);
+      if (track?.transcript) {
+        const names = (track.speaker_names ?? []).filter((s) => s.speaker_label !== label);
+        if (value.trim()) names.push({ speaker_label: label, name: value.trim() });
+        const baked = applySpeakerNames(track.transcript, names);
+        if (baked !== track.transcript) await updateTranscript(recordingId, baked);
+      }
       await this.loadSession();
       this.onRefresh?.();
     } catch (e) {

@@ -7,6 +7,7 @@ import {
   rerunSummary,
   setSpeakerName,
   type Recording,
+  type SpeakerName,
 } from "../../services/ipc";
 import {
   formatDuration,
@@ -92,11 +93,11 @@ export class RecordingDetail {
     if (statsEl) statsEl.textContent = wordCountSummary(r.transcript ?? "");
 
     // Only rebuild the transcript editor if the text changed and the user has
-    // no unsaved edits — avoids clobbering in-progress typing. Speaker names are
-    // applied for display (the stored transcript keeps its [Speaker N] markers),
-    // so a rename shows up in the transcript here just like in the merged view.
+    // no unsaved edits — avoids clobbering in-progress typing. (Speaker renames
+    // are baked into the stored transcript on rename, so the text already has
+    // the names — no display overlay needed here.)
     if (!this.dirty) {
-      const newText = applySpeakerNames(r.transcript ?? "", r.speaker_names);
+      const newText = r.transcript ?? "";
       const currentText = this.editor?.getText() ?? "";
       if (newText !== currentText) {
         const editorRoot = this.container.querySelector<HTMLElement>("#editor");
@@ -516,9 +517,10 @@ export class RecordingDetail {
     overlay.querySelector<HTMLInputElement>(".speaker-name-input")?.focus();
   }
 
-  /** Persist a speaker rename for the current recording. No-op when the value is
-   *  unchanged. An empty value clears the custom name (reverts to "Speaker N").
-   *  Refreshes so the panel + any merged view reflect the new name immediately. */
+  /** Persist a speaker rename for the current recording and REWRITE the stored
+   *  transcript so the name actually replaces `[Speaker N]` in the text (it
+   *  sticks — not just a display overlay). An empty value clears the saved name
+   *  but can't un-bake text that was already replaced. */
   private async commitSpeakerName(
     id: string,
     label: number,
@@ -529,12 +531,23 @@ export class RecordingDetail {
     try {
       await setSpeakerName(id, label, value.trim());
       // Keep local state in sync so an in-place refresh shows the new name.
+      let names: SpeakerName[] = [];
       if (this.recording?.id === id) {
-        const names = (this.recording.speaker_names ?? []).filter(
+        names = (this.recording.speaker_names ?? []).filter(
           (s) => s.speaker_label !== label,
         );
         if (value.trim()) names.push({ speaker_label: label, name: value.trim() });
         this.recording.speaker_names = names;
+      }
+      // Bake the names into the transcript text itself: replace every
+      // `[Speaker N]` marker with its chosen name and persist that. This is what
+      // makes the rename "stick" in the actual transcription.
+      if (this.recording?.id === id && this.recording.transcript) {
+        const baked = applySpeakerNames(this.recording.transcript, names);
+        if (baked !== this.recording.transcript) {
+          await updateTranscript(id, baked);
+          this.recording.transcript = baked;
+        }
       }
       showToast(value.trim() ? "Speaker renamed" : "Speaker name cleared", "success");
       this.onRefresh();
