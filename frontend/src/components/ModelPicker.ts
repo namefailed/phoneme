@@ -8,6 +8,7 @@ import { showToast } from '../utils/toast';
 import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from '../services/llmProviders';
 import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModels } from '../services/sttProviders';
 import { fetchLlmModels } from '../services/llmModels';
+import { curatedCleanupModelIds } from '../data/curatedModels';
 
 type ProviderOption = { value: string; label: string };
 
@@ -195,10 +196,12 @@ export class ModelPickerElement extends LitElement {
     }
     this.fetchingSum = true;
     try {
-      this.sumModels = await fetchLlmModels(provider, this.sumUrl, this.sumKey);
+      const fetched = await fetchLlmModels(provider, this.sumUrl, this.sumKey);
+      // Fall back to curated suggestions when the live list is empty (no/masked key).
+      this.sumModels = fetched.length ? fetched : curatedCleanupModelIds(provider);
     } catch (e) {
       console.warn("Failed to fetch summary models:", e);
-      this.sumModels = [];
+      this.sumModels = curatedCleanupModelIds(provider);
     } finally {
       this.fetchingSum = false;
     }
@@ -213,10 +216,12 @@ export class ModelPickerElement extends LitElement {
     }
     this.fetchingLlm = true;
     try {
-      this.llmModels = await fetchLlmModels(provider, this.llmUrl, this.llmKey);
+      const fetched = await fetchLlmModels(provider, this.llmUrl, this.llmKey);
+      // Fall back to curated suggestions when the live list is empty (no/masked key).
+      this.llmModels = fetched.length ? fetched : curatedCleanupModelIds(provider);
     } catch (e) {
       console.warn("Failed to fetch models:", e);
-      this.llmModels = [];
+      this.llmModels = curatedCleanupModelIds(provider);
     } finally {
       this.fetchingLlm = false;
     }

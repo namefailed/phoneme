@@ -3,6 +3,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { fetchLlmModels, isApiLlmProvider } from "../../services/llmModels";
 import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
+import { curatedTranscriptionModels, curatedCleanupModelIds } from "../../data/curatedModels";
 import { invoke } from "@tauri-apps/api/core";
 import type { RerunPayload } from "./rerunActions";
 
@@ -118,15 +119,9 @@ export class RerunFormElement extends LitElement {
             this.availableModels.push({ value: w.model_path, label: name + " (current)" });
           }
         } else {
-          const providerModels: Record<string, string[]> = {
-            "openai": ["whisper-1"],
-            "groq": ["whisper-large-v3", "distil-whisper-large-v3-en"],
-            "deepgram": ["nova-2", "base"],
-            "assemblyai": ["best", "nano"],
-            "elevenlabs": ["scribe"],
-          };
-          const models = providerModels[w.provider] || [];
-          this.availableModels = models.map(m => ({ value: m, label: m }));
+          // Curated per-provider transcription suggestions (the single source
+          // of truth in data/curatedModels.ts), shown with their friendly label.
+          this.availableModels = curatedTranscriptionModels(w.provider).map(m => ({ value: m.id, label: m.label }));
           if (w.model && !this.availableModels.some(m => m.value === w.model)) {
             this.availableModels.push({ value: w.model, label: w.model });
           }
@@ -152,10 +147,15 @@ export class RerunFormElement extends LitElement {
   private async fetchCleanupModels() {
     const provider = this.cleanupProvider;
     if (!provider) return;
+    // Curated suggestions for this provider — used as the fallback when the
+    // live fetch returns nothing (no key yet, masked key, offline Ollama) so
+    // the dropdown still offers good models. Custom entry stays available.
+    const curated = curatedCleanupModelIds(provider);
     this.cleanupModelsLoading = true;
     this.cleanupModelsError = null;
     try {
-      const models = await fetchLlmModels(provider, this.cleanupApiUrl, this.cleanupApiKey);
+      const fetched = await fetchLlmModels(provider, this.cleanupApiUrl, this.cleanupApiKey);
+      const models = fetched.length ? fetched : curated;
       this.cleanupModelOptions = models;
       if (this.cleanupModel && !models.includes(this.cleanupModel)) {
         this.cleanupModelOptions = [...models, this.cleanupModel];
@@ -163,7 +163,11 @@ export class RerunFormElement extends LitElement {
         this.cleanupModel = models[0];
       }
     } catch (e) {
-      this.cleanupModelOptions = [];
+      // Live listing failed — fall back to curated suggestions rather than an
+      // empty list, but surface the error so the user knows it's a fallback.
+      this.cleanupModelOptions = this.cleanupModel && !curated.includes(this.cleanupModel)
+        ? [...curated, this.cleanupModel]
+        : curated;
       this.cleanupModelsError = errText(e);
     } finally {
       this.cleanupModelsLoading = false;

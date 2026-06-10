@@ -6,6 +6,10 @@ import {
   findLlmPreset,
   type LlmPreset,
 } from "../../services/llmProviders";
+import { curatedCleanupModels, modelHint } from "../../data/curatedModels";
+
+/** Sentinel <option> value that flips a provider model select into free-text. */
+const SENTINEL_OTHER = "__other__";
 
 /** Grouped <option> list (Local / Cloud) for a provider-preset dropdown. */
 function presetOptionsHtml(): string {
@@ -103,40 +107,94 @@ export class SectionPostProcessing {
       }
     };
 
+    // Whether a provider's model field is currently a free-text input (user
+    // chose "Other…"). Lets a custom model id always be typeable even when a
+    // curated/fetched list is shown.
+    const freeText: Record<string, boolean> = { ollama: false, openai: false, groq: false, anthropic: false };
+
     const updateProviderSelect = (provider: string) => {
-      const select = container.querySelector<HTMLSelectElement>(`#${provider}-model-select`);
-      if (!select) return;
+      const host = container.querySelector<HTMLElement>(`#${provider}-model-host`);
+      if (!host) return;
 
       const currentModel = config.llm_post_process.model || "";
-      select.innerHTML = "";
-      
-      if (fetchingModels[provider]) {
-        const option = document.createElement("option");
-        option.disabled = true;
-        option.textContent = "Loading models...";
-        select.appendChild(option);
-      } else if (providerModels[provider].length === 0) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "No models found — click Refresh";
-        select.appendChild(option);
-      } else {
-        providerModels[provider].forEach(m => {
-          const option = document.createElement("option");
-          option.value = m;
-          option.textContent = m;
-          if (m === currentModel) option.selected = true;
-          select.appendChild(option);
+
+      // Free-text mode: a plain input + a "List" button to return to the picker.
+      if (freeText[provider]) {
+        host.innerHTML = `
+          <div style="display:flex; gap:8px;">
+            <input type="text" class="pp-model-text" style="flex:1; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" value="${(currentModel).replace(/"/g, "&quot;")}" placeholder="Model id" />
+            <button class="inline-button pp-model-list" type="button" style="padding: 4px 10px;">List</button>
+          </div>`;
+        const input = host.querySelector<HTMLInputElement>(".pp-model-text")!;
+        input.addEventListener("input", () => { config.llm_post_process.model = input.value; });
+        host.querySelector<HTMLButtonElement>(".pp-model-list")?.addEventListener("click", () => {
+          freeText[provider] = false;
+          updateProviderSelect(provider);
         });
+        return;
       }
-      
-      // Ensure current model is shown even if not in list
-      if (currentModel && !providerModels[provider].includes(currentModel)) {
-        const option = document.createElement("option");
-        option.value = currentModel;
-        option.textContent = `${currentModel} (current)`;
-        option.selected = true;
-        select.appendChild(option);
+
+      // Live-fetched list wins; otherwise fall back to the curated suggestions
+      // so the dropdown is never empty before/without a fetch.
+      const curated = curatedCleanupModels(provider);
+      const fetched = providerModels[provider];
+      const ids = fetched.length ? fetched : curated.map((m) => m.id);
+      const metaById = new Map(curated.map((m) => [m.id, m]));
+      const labelFor = (m: string) => {
+        const meta = metaById.get(m);
+        return meta ? `${meta.recommended ? "⭐ " : ""}${meta.label} — ${modelHint(meta)}` : m;
+      };
+
+      const select = document.createElement("select");
+      select.id = `${provider}-model-select`;
+      select.style.cssText = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
+
+      if (fetchingModels[provider] && !ids.length) {
+        const o = document.createElement("option");
+        o.disabled = true;
+        o.textContent = "Loading models...";
+        select.appendChild(o);
+      } else {
+        ids.forEach((m) => {
+          const o = document.createElement("option");
+          o.value = m;
+          o.textContent = labelFor(m);
+          if (m === currentModel) o.selected = true;
+          select.appendChild(o);
+        });
+        // Keep a saved/preset model visible even if it isn't in the list.
+        if (currentModel && !ids.includes(currentModel)) {
+          const o = document.createElement("option");
+          o.value = currentModel;
+          o.textContent = `${currentModel} (current)`;
+          o.selected = true;
+          select.appendChild(o);
+        }
+        const other = document.createElement("option");
+        other.value = SENTINEL_OTHER;
+        other.textContent = "Other… (type a model id)";
+        select.appendChild(other);
+      }
+
+      select.addEventListener("change", () => {
+        if (select.value === SENTINEL_OTHER) {
+          freeText[provider] = true;
+          updateProviderSelect(provider);
+          return;
+        }
+        config.llm_post_process.model = select.value;
+      });
+
+      host.innerHTML = "";
+      host.appendChild(select);
+
+      // A one-line hint for the selected curated model, when we have one.
+      const meta = metaById.get(currentModel);
+      if (meta) {
+        const hint = document.createElement("p");
+        hint.style.cssText = "margin: 4px 0 0; font-size: 11px; color: var(--fg-faded);";
+        hint.textContent = meta.description;
+        host.appendChild(hint);
       }
     };
 
@@ -200,10 +258,8 @@ export class SectionPostProcessing {
           <label>Model Name</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">
-                <select id="ollama-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
-              </div>
-              <button class="inline-button fetch-models-btn" data-provider="ollama" type="button" style="padding: 4px 10px;">Refresh</button>
+              <div id="ollama-model-host" style="flex: 1;"></div>
+              <button class="inline-button fetch-models-btn" data-provider="ollama" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
             </div>
           </div>
         </div>
@@ -220,10 +276,8 @@ export class SectionPostProcessing {
           <label>OpenAI Model</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">
-                <select id="openai-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
-              </div>
-              <button class="inline-button fetch-models-btn" data-provider="openai" type="button" style="padding: 4px 10px;">Refresh</button>
+              <div id="openai-model-host" style="flex: 1;"></div>
+              <button class="inline-button fetch-models-btn" data-provider="openai" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
             </div>
           </div>
         </div>
@@ -248,10 +302,8 @@ export class SectionPostProcessing {
           <label>Groq Model</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">
-                <select id="groq-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
-              </div>
-              <button class="inline-button fetch-models-btn" data-provider="groq" type="button" style="padding: 4px 10px;">Refresh</button>
+              <div id="groq-model-host" style="flex: 1;"></div>
+              <button class="inline-button fetch-models-btn" data-provider="groq" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
             </div>
           </div>
         </div>
@@ -274,10 +326,8 @@ export class SectionPostProcessing {
           <label>Claude Model</label>
           <div>
             <div style="display: flex; gap: 8px;">
-              <div style="flex: 1;">
-                <select id="anthropic-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"></select>
-              </div>
-              <button class="inline-button fetch-models-btn" data-provider="anthropic" type="button" style="padding: 4px 10px;">Refresh</button>
+              <div id="anthropic-model-host" style="flex: 1;"></div>
+              <button class="inline-button fetch-models-btn" data-provider="anthropic" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
             </div>
           </div>
         </div>
@@ -453,12 +503,11 @@ export class SectionPostProcessing {
 
     bindFieldEvents(container, config);
 
-    // Wire up provider model selects
+    // Render each provider's model picker (curated suggestions + live fetch +
+    // "Other…" free-text) and wire its Refresh button. The picker's own change
+    // handler writes config.llm_post_process.model — see updateProviderSelect.
     ["ollama", "openai", "groq", "anthropic"].forEach(provider => {
-      const select = container.querySelector<HTMLSelectElement>(`#${provider}-model-select`);
-      select?.addEventListener("change", (e) => {
-        config.llm_post_process.model = (e.target as HTMLSelectElement).value;
-      });
+      updateProviderSelect(provider);
 
       const refreshBtn = container.querySelector<HTMLButtonElement>(`.fetch-models-btn[data-provider='${provider}']`);
       refreshBtn?.addEventListener("click", () => {

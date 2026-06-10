@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { PREVIEW_STT_PROVIDERS, curatedSttModels } from "../../services/sttProviders";
 import { mountModelField } from "./modelField";
+import { curatedTranscriptionModels } from "../../data/curatedModels";
 import { showToast } from "../../utils/toast";
 import { errText } from "../../utils/error";
 
@@ -291,6 +292,7 @@ export class SectionPreview {
         getModel: () => this.config.preview_whisper?.model ?? "",
         setModel: (m) => { if (this.config.preview_whisper) this.config.preview_whisper.model = m; },
         curated: () => curatedSttModels(this.config.preview_whisper?.provider ?? ""),
+        curatedRich: () => curatedTranscriptionModels(this.config.preview_whisper?.provider ?? ""),
       });
     }
     host.querySelector<HTMLInputElement>("#prev-api-url")?.addEventListener("input", (e) => {

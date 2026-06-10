@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../../utils/toast";
 import { CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
 import { CLOUD_STT_PROVIDERS, PREVIEW_STT_PROVIDERS } from "../../services/sttProviders";
+import { curatedTranscriptionModels, curatedCleanupModels, type CuratedModel } from "../../data/curatedModels";
 import "./styles.css";
 
 /** The dedicated preview source the user picked: reuse the final model, run a
@@ -581,6 +582,15 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
+  /** A <datalist> of curated model suggestions (id + descriptive label). Bind
+   *  it to a text input via `list=${id}` so the user gets recommended options
+   *  while still being free to type any model id. */
+  private modelDatalist(id: string, models: CuratedModel[]) {
+    return html`<datalist id=${id}>
+      ${models.map((m) => html`<option value=${m.id}>${m.recommended ? "★ " : ""}${m.label} — ${m.tier} · ${m.useCase}</option>`)}
+    </datalist>`;
+  }
+
   /**
    * Unified "connect your AI providers" step. Shown only when a chosen feature
    * needs a cloud key: transcription (no local Whisper) and/or AI cleanup &
@@ -633,9 +643,10 @@ export class FirstRunWizardElement extends LitElement {
               </select>
               <input type="password" placeholder="API key" style=${inputStyle}
                 .value=${c.whisper.api_key || ""} @input=${(e: Event) => c.whisper.api_key = (e.target as HTMLInputElement).value} />
-              <input type="text" placeholder="Model (optional — leave blank for default)" style=${inputStyle}
+              <input type="text" list="wiz-stt-models" placeholder="Model (optional — leave blank for default)" style=${inputStyle}
                 .value=${c.whisper.model || ""} @input=${(e: Event) => c.whisper.model = (e.target as HTMLInputElement).value} />
-              <span class="wizard-feature-note">Required — without local Whisper, transcription needs a cloud provider.</span>
+              ${this.modelDatalist("wiz-stt-models", curatedTranscriptionModels(c.whisper.provider || ""))}
+              <span class="wizard-feature-note">Pick a suggested model or type your own. Leave blank to use the provider default.</span>
             </div>
           </div>` : ""}
 
@@ -666,7 +677,10 @@ export class FirstRunWizardElement extends LitElement {
               ${cleanupOn ? html`
                 <input type="password" placeholder="API key" style=${inputStyle}
                   .value=${c.llm_post_process.api_key || ""} @input=${(e: Event) => c.llm_post_process.api_key = (e.target as HTMLInputElement).value} />
-                <span class="wizard-feature-note">Cleans up transcripts and powers auto-summaries. Summaries reuse this provider (change per-feature in Settings).</span>
+                <input type="text" list="wiz-cleanup-models" placeholder="Model (optional — leave blank for default)" style=${inputStyle}
+                  .value=${c.llm_post_process.model || ""} @input=${(e: Event) => c.llm_post_process.model = (e.target as HTMLInputElement).value} />
+                ${this.modelDatalist("wiz-cleanup-models", curatedCleanupModels(c.llm_post_process.provider || ""))}
+                <span class="wizard-feature-note">Cleans up transcripts and powers auto-summaries. Pick a suggested model or type your own. Summaries reuse this provider (change per-feature in Settings).</span>
               ` : html`<span class="wizard-feature-note">Skip to keep transcripts raw. You can connect a provider later in Settings.</span>`}
             </div>
           </div>` : ""}
