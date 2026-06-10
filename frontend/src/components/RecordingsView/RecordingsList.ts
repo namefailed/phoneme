@@ -495,46 +495,24 @@ export class RecordingsListElement extends LitElement {
     }
 
     const checkboxColWidth = "28px";
-    // The grid MUST keep a flexible track so the table always fills the list
-    // pane up to the splitter. The transcript column is that fill column (its
-    // default width is `1fr`); coerce it to `minmax(<floor>, 1fr)` so that even
-    // a fixed px persisted from a column-resize still STRETCHES to the pane edge
-    // (keeping the resized width as a usable floor) instead of freezing the whole
-    // grid to a fixed total width. A frozen all-px grid is the resize bug: when
-    // the pane is wider than the column sum the rows stop short of the splitter
-    // (a gap), and when it's narrower the table forces a horizontal scrollbar.
+    // Transcript column = "read more inline, capped" (Option A). It sizes to its
+    // content (`max-content`, floored at the resized/default width) instead of
+    // `1fr`, so a row can grow past the pane and you scroll horizontally to read
+    // more of the transcript; `.rec-preview { max-width: 1200px }` caps that
+    // growth so a huge transcript can't make the column run away. A trailing
+    // cell-less `minmax(0, 1fr)` filler ALWAYS follows so the row still fills the
+    // pane to the splitter when the columns fit (it absorbs the slack; head and
+    // rows share the template and keep equal cell counts, so the extra track
+    // stays empty in both). The `.rec-table-inner` wrapper is
+    // `width: max-content; min-width: 100%`, so rows grow with the content and
+    // their backgrounds extend the full scrolled width instead of stopping at the
+    // pane edge.
     const widthsForGrid = activeWidths!.map((w, i) => {
       if (visibleCols[i] !== "transcript") return w;
       const floor = w.trim().endsWith("px") ? w.trim() : "160px";
-      return `minmax(${floor}, 1fr)`;
+      return `minmax(${floor}, max-content)`;
     });
-    // Fallback for when the transcript column is hidden: with no flexible track
-    // at all the grid would freeze to fixed px and leave a gap, so append a
-    // cell-less filler track that absorbs the slack as clean blank space (head
-    // and rows share this template and both have the same cell count, so the
-    // extra track stays empty in both — no misalignment).
-    const hasFlexTrack = widthsForGrid.some((w) => w.includes("fr"));
-    const gridTemplate = [
-      checkboxColWidth,
-      ...widthsForGrid,
-      ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
-    ].join(" ");
-    // Minimum total px the columns need. A row is a block-level grid whose box is
-    // otherwise only as wide as the pane, so when the columns overflow, the cells
-    // scroll past while the row's background/selection stops at the pane edge.
-    // Sizing the table's inner wrapper to this width lets rows grow with the
-    // content, so their styles extend the full scrolled width (and the flexible
-    // transcript track still fills the pane when the columns fit).
-    const parsePx = (w: string) => {
-      const m = /([\d.]+)px/.exec(w);
-      return m ? parseFloat(m[1]) : 0;
-    };
-    const gridMinWidth =
-      28 /* checkbox */ +
-      activeWidths!.reduce((sum, w, i) => {
-        if (visibleCols[i] === "transcript") return sum + (parsePx(w) || 160);
-        return sum + (parsePx(w) || 120);
-      }, 0);
+    const gridTemplate = [checkboxColWidth, ...widthsForGrid, "minmax(0, 1fr)"].join(" ");
 
     const allSelected = s.recordings.length > 0 && s.recordings.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
@@ -614,7 +592,7 @@ export class RecordingsListElement extends LitElement {
 
     return html`
       <div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, visibleRows)}>
-        <div class="rec-table-inner" style="min-width: ${gridMinWidth}px;">
+        <div class="rec-table-inner">
           ${head}
           ${body}
         </div>

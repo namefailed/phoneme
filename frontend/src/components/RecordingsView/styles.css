@@ -3,6 +3,13 @@
   overflow-y: auto;
   background: var(--bg-deep);
 }
+.rec-table-inner {
+  /* Grow with the columns (so rows + their backgrounds extend the full
+     horizontally-scrolled width) but never narrower than the pane (so the
+     trailing 1fr filler fills to the splitter when the columns fit). */
+  width: max-content;
+  min-width: 100%;
+}
 .rec-table::-webkit-scrollbar {
   width: 6px;
 }
@@ -135,6 +142,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Option A cap: the transcript column grows to its content so you can scroll
+     to read more inline, but never past this — keeps the horizontal scroll
+     bounded instead of running away on a long transcript. */
+  max-width: 1200px;
   color: var(--fg-muted);
   font-size: 13px;
   transition: color 0.2s ease;
