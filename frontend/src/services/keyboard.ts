@@ -76,8 +76,12 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "g g", label: "Jump to the first recording" },
     { combo: "G", label: "Jump to the last recording" },
     { combo: "Enter", label: "Open recording · apply sidebar filter" },
-    { combo: "i / Enter", label: "Edit transcript (in the detail pane)" },
-    { combo: "Shift + Esc", label: "Leave the transcript editor" },
+    { combo: "l (into detail)", label: "Enter the open recording, on the transcript" },
+    { combo: "j  k (detail)", label: "Down/up: actions · tags · transcript · notes" },
+    { combo: "h  l (detail)", label: "Across a row's buttons (h at the start → list)" },
+    { combo: "Enter (detail)", label: "Edit the box / press the button" },
+    { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
+    { combo: "Shift + Esc", label: "Leave the transcript / notes editor" },
     { combo: "d d", label: "Delete the focused recording (with Undo)" },
     { combo: "Esc", label: "Step back out a level" },
   ],
@@ -543,11 +547,15 @@ function onKeyDown(e: KeyboardEvent) {
     switch (e.key) {
       case "h":
         e.preventDefault();
-        dispatchVim("pane-left");
+        // In the detail pane, h walks LEFT through the focused row's items (and
+        // steps out to the list at the leftmost); elsewhere it switches pane.
+        if (activeWithin(".rv-detail")) dispatchVim("detail-left");
+        else dispatchVim("pane-left");
         return;
       case "l":
         e.preventDefault();
-        dispatchVim("pane-right");
+        if (activeWithin(".rv-detail")) dispatchVim("detail-right");
+        else dispatchVim("pane-right");
         return;
       case "G":
         if (activeWithin(".rv-list")) {
@@ -575,7 +583,7 @@ function onKeyDown(e: KeyboardEvent) {
         // Enter activates the highlighted detail button (or edits the transcript
         // when no detail cursor is set); in the sidebar it applies the filter.
         // (Enter in the list is handled there and arrives as defaultPrevented.)
-        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-enter"); return; }
+        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim(e.shiftKey ? "detail-enter-shift" : "detail-enter"); return; }
         if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-activate"); return; }
         break;
       case "d":

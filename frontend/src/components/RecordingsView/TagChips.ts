@@ -200,7 +200,14 @@ export class TagChipsElement extends LitElement {
       return;
     }
     if (e.key === "Escape") {
-      if (this._showDropdown) { e.preventDefault(); e.stopPropagation(); this._showDropdown = false; this.activeIndex = -1; }
+      // Leave the tag box entirely (back to the detail pane's grid nav), closing
+      // the suggestions dropdown on the way out.
+      e.preventDefault();
+      e.stopPropagation();
+      this._showDropdown = false;
+      this.activeIndex = -1;
+      (e.target as HTMLElement).blur();
+      window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } }));
       return;
     }
     if (e.key === "Enter") {

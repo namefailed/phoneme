@@ -47,6 +47,11 @@ function readStoredSidebar(): boolean {
   return localStorage.getItem(LS_SIDEBAR) !== "false";
 }
 
+/** One keyboard-navigable target in the detail pane's 2D grid. `button` clicks
+ *  on Enter; `tags` focuses the add-tag input (Shift+Enter → Tag Manager);
+ *  `editor` focuses the editable area inside its block (transcript / notes). */
+type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" };
+
 export class RecordingsView {
   private container: HTMLElement;
   private list: RecordingsList;
@@ -73,8 +78,11 @@ export class RecordingsView {
   private focusedPane: "sidebar" | "list" | "detail" | null = null;
   /** Keyboard cursor within the sidebar's filter items (vim j/k), -1 = none. */
   private sidebarCursor = -1;
-  /** Keyboard cursor within the detail pane's option buttons (vim j/k), -1 = none. */
-  private detailCursor = -1;
+  /** Keyboard cursor in the detail pane's 2D grid: row = vertical section
+   *  (top buttons · action row · tags · transcript · notes), col = item within
+   *  that row. row -1 = not in detail nav. */
+  private detailRow = -1;
+  private detailCol = 0;
   private vimHandler: ((e: Event) => void) | null = null;
   /** Any component can request an undoable recording delete by dispatching
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
@@ -293,7 +301,9 @@ export class RecordingsView {
     this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
     this.sidebarCursor = -1;
     this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
-    this.detailCursor = -1;
+    // Leaving the detail pane drops its grid cursor; coming back lands fresh on
+    // the transcript (see enterDetailNav below).
+    if (pane !== "detail") { this.detailRow = -1; this.detailCol = 0; }
     this.focusedPane = pane;
     for (const p of ["sidebar", "list", "detail"] as const) {
       this.paneEl(p)?.classList.toggle("rv-pane-focused", p === pane);
@@ -306,10 +316,15 @@ export class RecordingsView {
       // Land a visible cursor immediately so it's obvious what j/k will move.
       this.list.ensureCursor();
     } else {
-      // Focus the pane container itself (not the editor) so h/l keep working;
-      // `i`/Enter then drops into the transcript editor.
+      // Focus the pane container itself (not the editor) so h/l/j/k keep working.
       el.setAttribute("tabindex", "-1");
       el.focus({ preventScroll: true });
+      // Detail pane: enter the grid nav (on the transcript when arriving fresh,
+      // else re-highlight where the cursor was — e.g. after leaving the editor).
+      if (pane === "detail") {
+        if (this.detailRow < 0) this.enterDetailNav();
+        else this.highlightDetail();
+      }
     }
   }
 
@@ -335,9 +350,12 @@ export class RecordingsView {
       case "sidebar-down": this.moveSidebarCursor(1); break;
       case "sidebar-up": this.moveSidebarCursor(-1); break;
       case "sidebar-activate": this.activateSidebarItem(); break;
-      case "detail-down": this.moveDetailCursor(1); break;
-      case "detail-up": this.moveDetailCursor(-1); break;
-      case "detail-enter": this.activateDetailItem(); break;
+      case "detail-down": this.moveDetailRow(1); break;
+      case "detail-up": this.moveDetailRow(-1); break;
+      case "detail-left": this.moveDetailCol(-1); break;
+      case "detail-right": this.moveDetailCol(1); break;
+      case "detail-enter": this.activateDetail(false); break;
+      case "detail-enter-shift": this.activateDetail(true); break;
       // Shift+Esc out of the transcript editor → back to the detail pane nav.
       case "exit-editor": this.focusPane("detail"); break;
       // ArrowDown from the header search box → drop into the list.
@@ -403,32 +421,103 @@ export class RecordingsView {
     this.sidebarItems()[this.sidebarCursor]?.click();
   }
 
-  /** The detail pane's actionable buttons (play / re-run / copy / export /
-   *  view-toggles / close / fullscreen…), in order — what j/k step through. */
-  private detailItems(): HTMLElement[] {
-    return [...this.container.querySelectorAll<HTMLElement>("#rv-detail button")]
-      .filter((b) => b.offsetParent !== null && !b.hasAttribute("disabled"));
+  /** The detail pane as a vertical stack of rows, each a horizontal list of
+   *  navigable cells. Order matches the layout, top→bottom:
+   *  [fullscreen, close] · [action buttons] · [tags] · [transcript] · [notes]. */
+  private detailGrid(): DetailCell[][] {
+    const qa = (sel: string) =>
+      [...this.container.querySelectorAll<HTMLElement>(sel)].filter(
+        (b) => b.offsetParent !== null && !b.hasAttribute("disabled"),
+      );
+    const q1 = (sel: string) => {
+      const el = this.container.querySelector<HTMLElement>(sel);
+      return el && el.offsetParent !== null ? el : null;
+    };
+    const rows: DetailCell[][] = [];
+    const top = qa("#rv-detail .detail-header button");
+    if (top.length) rows.push(top.map((el) => ({ el, kind: "button" as const })));
+    const action = qa("#rv-detail #actions button");
+    if (action.length) rows.push(action.map((el) => ({ el, kind: "button" as const })));
+    const tags = q1("#rv-detail #tags .tag-add");
+    if (tags) rows.push([{ el: tags, kind: "tags" }]);
+    const transcript = q1("#rv-detail .transcript-block");
+    if (transcript) rows.push([{ el: transcript, kind: "editor" }]);
+    const notes = q1("#rv-detail .notes-block");
+    if (notes) rows.push([{ el: notes, kind: "editor" }]);
+    return rows;
   }
 
-  /** vim j/k inside the focused detail pane: first press lands a visible cursor
-   *  on a button, then steps. (i edits the transcript instead.) */
-  private moveDetailCursor(delta: number) {
-    const items = this.detailItems();
-    if (!items.length) return;
-    items.forEach((i) => i.classList.remove("kbd-cursor"));
-    if (this.detailCursor < 0) this.detailCursor = delta > 0 ? 0 : items.length - 1;
-    else this.detailCursor = Math.max(0, Math.min(items.length - 1, this.detailCursor + delta));
-    const el = items[this.detailCursor];
-    el.classList.add("kbd-cursor");
-    el.scrollIntoView({ block: "nearest" });
+  /** Paint the grid cursor on the current (row, col) cell. */
+  private highlightDetail() {
+    this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+    const cell = this.detailGrid()[this.detailRow]?.[this.detailCol];
+    if (cell) {
+      cell.el.classList.add("kbd-cursor");
+      cell.el.scrollIntoView({ block: "nearest" });
+    }
   }
 
-  /** Enter in the detail pane: click the highlighted button, or — when no cursor
-   *  has been moved yet — drop into the transcript editor (the old behaviour). */
-  private activateDetailItem() {
-    const el = this.detailItems()[this.detailCursor];
-    if (this.detailCursor >= 0 && el) el.click();
-    else this.focusEditor();
+  /** Enter detail-pane nav, landing on the transcript editor — the entry point
+   *  for `l` from the list. */
+  private enterDetailNav() {
+    const rows = this.detailGrid();
+    if (!rows.length) return;
+    const t = rows.findIndex((row) => row[0]?.el.classList.contains("transcript-block"));
+    this.detailRow = t >= 0 ? t : 0;
+    this.detailCol = 0;
+    this.highlightDetail();
+  }
+
+  /** j/k: move down/up a row. Up past the top row drops into the header search
+   *  box (like the list); down past the last row stays put. Always lands on the
+   *  first item of the new row. */
+  private moveDetailRow(delta: number) {
+    const rows = this.detailGrid();
+    if (!rows.length) return;
+    if (this.detailRow < 0) { this.enterDetailNav(); return; }
+    const next = this.detailRow + delta;
+    if (next < 0) {
+      this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+      this.focusSearchBar();
+      return;
+    }
+    if (next >= rows.length) return;
+    this.detailRow = next;
+    this.detailCol = 0;
+    this.highlightDetail();
+  }
+
+  /** h/l: move left/right within the row. Left past the first item drops back to
+   *  the recordings list; right past the last item stays put. */
+  private moveDetailCol(delta: number) {
+    const rows = this.detailGrid();
+    const row = rows[this.detailRow];
+    if (!row) { this.focusPane("list"); return; }
+    const next = this.detailCol + delta;
+    if (next < 0) { this.focusPane("list"); return; }
+    if (next >= row.length) return;
+    this.detailCol = next;
+    this.highlightDetail();
+  }
+
+  /** Enter / Shift+Enter on the current cell: click a button, focus an editor's
+   *  editable area (transcript / notes), or focus the add-tag box (Shift+Enter
+   *  opens the Tag Manager instead). */
+  private activateDetail(shift: boolean) {
+    const cell = this.detailGrid()[this.detailRow]?.[this.detailCol];
+    if (!cell) return;
+    if (cell.kind === "button") {
+      cell.el.click();
+    } else if (cell.kind === "tags") {
+      if (shift) void this.openTagManagerModal();
+      else cell.el.focus();
+    } else {
+      const ed =
+        cell.el.querySelector<HTMLElement>(".cm-content") ??
+        cell.el.querySelector<HTMLElement>("textarea") ??
+        cell.el.querySelector<HTMLElement>('[contenteditable="true"]');
+      ed?.focus();
+    }
   }
 
   /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */
