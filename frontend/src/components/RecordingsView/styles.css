@@ -325,16 +325,22 @@ mark.search-hit {
   color: var(--accent);
 }
 
-/* Transcript history row holding the View summary / unedited / original
-   toggles. Horizontal and right-aligned; wraps only if the pane is too narrow
-   to fit all three on one line. */
+/* Transcript view-toggle row: Speakers + Summary anchor left, Compare /
+   Original / Unedited anchor right. Each group wraps internally if the pane is
+   too narrow. */
 .transcript-history {
   margin-top: 6px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.transcript-history .th-group {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -660,7 +666,9 @@ mark.search-hit {
   color: var(--fg-default);
   border-bottom: 1px solid var(--border-subtle);
   user-select: none;
+  cursor: move; /* drag the panel by its title bar */
 }
+.thinking-close { cursor: pointer; }
 /* Polished header title: brain glyph + name, an animated "live" pill, and a
    muted total-entries badge. */
 .thinking-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }

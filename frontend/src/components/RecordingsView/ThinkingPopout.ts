@@ -268,6 +268,32 @@ export class ThinkingPopoutElement extends LitElement {
     document.addEventListener("mouseup", onUp);
   }
 
+  /** Drag the whole panel by its title bar. Sets a geometry (so it takes over
+   *  from FAB-anchoring) and persists it, mirroring the resize handles. Ignores
+   *  drags that start on the close button. */
+  private startHeadDrag(e: MouseEvent) {
+    if ((e.target as HTMLElement).closest(".thinking-close")) return;
+    e.preventDefault();
+    const panel = this.renderRoot.querySelector<HTMLElement>(".thinking-popout");
+    if (!panel) return;
+    const r = panel.getBoundingClientRect();
+    const startX = e.clientX, startY = e.clientY;
+    const sl = r.left, st = r.top, w = r.width, h = r.height;
+    const onMove = (mv: MouseEvent) => {
+      const left = Math.max(8, Math.min(sl + (mv.clientX - startX), window.innerWidth - w - 8));
+      const top = Math.max(8, Math.min(st + (mv.clientY - startY), window.innerHeight - h - 8));
+      this.geom = { left, top, width: w, height: h };
+      this.applyGeom(panel);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try { localStorage.setItem(ThinkingPopoutElement.GEOM_LS, JSON.stringify(this.geom)); } catch { /* ignore */ }
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
   updated() {
     const panel = this.renderRoot.querySelector<HTMLElement>(".thinking-popout");
     if (!panel) return;
@@ -342,7 +368,7 @@ export class ThinkingPopoutElement extends LitElement {
       ${this.open
         ? html`
             <div class="thinking-popout">
-              <div class="thinking-head">
+              <div class="thinking-head" @mousedown=${(e: MouseEvent) => this.startHeadDrag(e)}>
                 <span class="thinking-title">
                   <span class="thinking-title-icon" aria-hidden="true">🧠</span>
                   <span class="thinking-title-text">AI Activity</span>

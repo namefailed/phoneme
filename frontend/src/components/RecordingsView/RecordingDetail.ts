@@ -169,11 +169,15 @@ export class RecordingDetail {
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div class="transcript-history">
-            <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
-            <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
-            <button class="view-btn" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
-            <button class="view-btn" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
-            <button class="view-btn" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
+            <div class="th-group th-left">
+              <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
+              <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
+            </div>
+            <div class="th-group th-right">
+              <button class="view-btn" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
+              <button class="view-btn" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
+              <button class="view-btn" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
+            </div>
           </div>
         </div>
         <div class="notes-block" style="margin-top: 6px;">
