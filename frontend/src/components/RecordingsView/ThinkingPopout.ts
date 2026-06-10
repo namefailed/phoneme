@@ -145,15 +145,16 @@ export class ThinkingPopoutElement extends LitElement {
     return this.log.filter((e) => !e.done && now - e.at < ThinkingPopoutElement.LIVE_TTL_MS).length;
   }
 
-  /** Default anchored position: bottom-left, straddling the sidebar's right edge
-   *  (or tucked into the corner when the sidebar is hidden). Reads the sidebar
-   *  layout from localStorage so it tracks the drawer. */
+  /** Default anchored position: bottom-left, tucked just inside the sidebar's
+   *  right edge (or into the corner when the sidebar is hidden). Reads the live
+   *  sidebar layout so it tracks the drawer. */
   private defaultFabXY(): { x: number; y: number } {
-    // Anchor to the live right edge of the sidebar (tracks open/collapse/resize);
-    // tuck into the corner when it's hidden.
+    // Sit fully inside the sidebar's bottom-right, 8px clear of its right edge /
+    // the splitter — the 40px button must not straddle the divider; tuck into
+    // the corner when the sidebar is hidden.
     const sb = document.querySelector<HTMLElement>("ph-sidebar");
     const right = sb ? sb.getBoundingClientRect().right : 0;
-    const x = right > 24 ? Math.max(8, right - 20) : 12;
+    const x = right > 24 ? Math.max(8, right - 48) : 12;
     return { x, y: window.innerHeight - 56 };
   }
 
