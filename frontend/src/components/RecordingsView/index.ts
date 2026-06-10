@@ -154,7 +154,15 @@ export class RecordingsView {
       try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
     } else if (selectedId && !this.detail.hasDirtyEdits()) {
       if (selectedId.startsWith("session:")) {
-        this.mergedDetail.meetingId = selectedId.substring(8);
+        const mid = selectedId.substring(8);
+        if (this.mergedDetail.meetingId === mid) {
+          // Same meeting already shown: reassigning meetingId won't re-run the
+          // component's `updated`, so reload its tracks explicitly to pick up a
+          // freshly-finished transcript.
+          void this.mergedDetail.reload();
+        } else {
+          this.mergedDetail.meetingId = mid;
+        }
       } else {
         void this.detail.show(selectedId);
       }

@@ -1476,3 +1476,115 @@ ph-sidebar {
     #ff5d5d, #ffae4a, #ffe24a, #5dd85d, #4ab6ff, #8a7bff, #ff6ad5, #ff5d5d
   );
 }
+
+/* ── Merged meeting view ──────────────────────────────────────────────────── */
+.merged-detail {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  overflow: auto;
+}
+.merged-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  z-index: 2;
+}
+.merged-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.merged-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--fg-default);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.merged-name {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.merged-name:hover {
+  border-color: var(--border-subtle);
+}
+.merged-name:focus {
+  border-color: var(--accent);
+  background: var(--bg-surface);
+}
+.merged-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.merged-meta {
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.merged-body {
+  padding: 12px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Source section divider — repeated whenever the speaking track changes. */
+.merged-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.merged-source:first-child {
+  margin-top: 0;
+}
+.merged-source-icon {
+  font-size: 14px;
+}
+.merged-source-label {
+  color: var(--accent);
+}
+/* One speaker turn (or one prose block for an un-diarized track). */
+.merged-turn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  line-height: 1.6;
+  color: var(--fg-default);
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+.merged-speaker {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: 2px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.merged-text {
+  color: var(--fg-default);
+}
