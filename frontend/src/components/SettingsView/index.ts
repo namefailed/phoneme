@@ -85,6 +85,8 @@ export class SettingsViewElement extends LitElement {
   @state() private config: any = null;
   @state() private searchQuery: string = "";
   private originalConfigStr: string = "";
+  /** Cursor index into the visible result fields for ↑/↓ keyboard nav. */
+  private searchCursor = -1;
 
   @query('#settings-body') bodyEl!: HTMLElement;
 
@@ -266,6 +268,9 @@ export class SettingsViewElement extends LitElement {
    */
   private applySearchFilter() {
     if (!this.bodyEl) return;
+    // Visibility/order is about to change — reset the ↑/↓ result cursor.
+    this.searchCursor = -1;
+    this.bodyEl.querySelectorAll(".sv-result-active").forEach((el) => el.classList.remove("sv-result-active"));
     const raw = this.searchQuery.trim();
     const query = raw.toLowerCase();
     const hosts = [...this.bodyEl.querySelectorAll<HTMLElement>(".sv-result-host")];
@@ -416,18 +421,49 @@ export class SettingsViewElement extends LitElement {
     }, 140);
   }
 
-  /** Esc in the search box clears the query (or blurs once already empty),
-   *  without bubbling up to the app-level Escape (which would close Settings). */
+  /** Keyboard-drive the results without leaving the search box:
+   *  Esc clears (or blurs), ↑/↓ step through the live results, Enter drops
+   *  focus into the highlighted field's control so it can be edited. */
   private handleSearchKeydown(e: KeyboardEvent) {
-    if (e.key !== "Escape") return;
-    e.stopPropagation();
-    const input = e.target as HTMLInputElement;
-    if (input.value || this.searchQuery) {
-      e.preventDefault();
-      this.clearSearch();
-    } else {
-      input.blur();
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      const input = e.target as HTMLInputElement;
+      if (input.value || this.searchQuery) {
+        e.preventDefault();
+        this.clearSearch();
+      } else {
+        input.blur();
+      }
+      return;
     }
+    if (!this.searchQuery.trim()) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      this.moveResultCursor(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      this.moveResultCursor(-1);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const field = this.visibleResultFields()[this.searchCursor];
+      field?.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
+    }
+  }
+
+  /** Result fields currently on screen, in displayed (relevance) order. */
+  private visibleResultFields(): HTMLElement[] {
+    const all = this.bodyEl?.querySelectorAll<HTMLElement>(".sv-result-host .settings-field");
+    return all ? [...all].filter((f) => f.offsetParent !== null) : [];
+  }
+
+  private moveResultCursor(delta: number) {
+    const fields = this.visibleResultFields();
+    if (!fields.length) return;
+    fields.forEach((f) => f.classList.remove("sv-result-active"));
+    this.searchCursor = Math.max(0, Math.min(fields.length - 1, this.searchCursor + delta));
+    const field = fields[this.searchCursor];
+    field.classList.add("sv-result-active");
+    field.scrollIntoView({ block: "nearest" });
   }
 
   private clearSearch() {

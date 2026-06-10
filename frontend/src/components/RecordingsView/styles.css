@@ -1680,6 +1680,12 @@ ph-sidebar {
   color: var(--accent);
   font-weight: 500;
 }
+/* vim j/k cursor within the focused sidebar. */
+.sidebar-item.kbd-cursor {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-default);
+}
 .sidebar-icon {
   font-size: 14px;
 }

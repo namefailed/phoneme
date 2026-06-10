@@ -64,6 +64,8 @@ export class RecordingsView {
    *  Only ever set while `interface.vim_nav` is on, so the focus ring never
    *  appears for non-vim users. */
   private focusedPane: "sidebar" | "list" | "detail" | null = null;
+  /** Keyboard cursor within the sidebar's filter items (vim j/k), -1 = none. */
+  private sidebarCursor = -1;
   private vimHandler: ((e: Event) => void) | null = null;
   /** Any component can request an undoable recording delete by dispatching
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
@@ -256,6 +258,9 @@ export class RecordingsView {
   private focusPane(pane: "sidebar" | "list" | "detail") {
     const panes = this.panesInOrder();
     if (!panes.includes(pane)) pane = panes[0];
+    // Re-home the sidebar keyboard cursor whenever pane focus changes.
+    this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
+    this.sidebarCursor = -1;
     this.focusedPane = pane;
     for (const p of ["sidebar", "list", "detail"] as const) {
       this.paneEl(p)?.classList.toggle("rv-pane-focused", p === pane);
@@ -292,7 +297,36 @@ export class RecordingsView {
       case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
       case "edit": this.focusEditor(); break;
       case "delete": this.vimDelete(); break;
+      case "sidebar-down": this.moveSidebarCursor(1); break;
+      case "sidebar-up": this.moveSidebarCursor(-1); break;
+      case "sidebar-activate": this.activateSidebarItem(); break;
     }
+  }
+
+  /** The sidebar's clickable filter rows (Library kinds + tags), in order. */
+  private sidebarItems(): HTMLElement[] {
+    return [...this.container.querySelectorAll<HTMLElement>("ph-sidebar .sidebar-item")];
+  }
+
+  /** vim j/k inside the focused sidebar: first press lands on the active filter
+   *  (or the top), then steps. The cursor row gets a highlight. */
+  private moveSidebarCursor(delta: number) {
+    const items = this.sidebarItems();
+    if (!items.length) return;
+    items.forEach((i) => i.classList.remove("kbd-cursor"));
+    if (this.sidebarCursor < 0) {
+      const active = items.findIndex((i) => i.classList.contains("active"));
+      this.sidebarCursor = active >= 0 ? active : 0;
+    } else {
+      this.sidebarCursor = Math.max(0, Math.min(items.length - 1, this.sidebarCursor + delta));
+    }
+    const el = items[this.sidebarCursor];
+    el.classList.add("kbd-cursor");
+    el.scrollIntoView({ block: "nearest" });
+  }
+
+  private activateSidebarItem() {
+    this.sidebarItems()[this.sidebarCursor]?.click();
   }
 
   /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */

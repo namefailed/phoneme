@@ -88,6 +88,12 @@ mark.settings-hit {
   border-radius: 3px;
   padding: 0 1px;
 }
+/* The result the ↑/↓ search-box cursor is on. */
+.settings-field.sv-result-active {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  border-radius: 4px;
+}
 #settings-search-header.sv-search-count {
   padding: 2px 2px 14px;
   font-size: 12px;

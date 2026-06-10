@@ -62,12 +62,13 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
 const VIM_HELP_GROUP: HelpGroup = {
   title: "Vim navigation (enabled)",
   items: [
-    { combo: "h   l", label: "Move focus between panes" },
-    { combo: "j   k", label: "Move down / up the list" },
+    { combo: "h   l", label: "Move focus between sidebar / list / detail" },
+    { combo: "j   k", label: "Move down / up (list or sidebar)" },
     { combo: "g g", label: "Jump to the first recording" },
     { combo: "G", label: "Jump to the last recording" },
+    { combo: "Enter", label: "Open recording · apply sidebar filter" },
     { combo: "i / Enter", label: "Edit transcript (in the detail pane)" },
-    { combo: "d d", label: "Delete the focused recording" },
+    { combo: "d d", label: "Delete the focused recording (with Undo)" },
     { combo: "Esc", label: "Step back out a level" },
   ],
 };
@@ -264,14 +265,36 @@ function onKeyDown(e: KeyboardEvent) {
           return;
         }
         break;
+      case "j":
+        // The list owns j/k via its own keydown when focused; this only fires
+        // for the other panes (the sidebar steps through its filter items).
+        if (activeWithin("ph-sidebar")) {
+          e.preventDefault();
+          dispatchVim("sidebar-down");
+          return;
+        }
+        break;
+      case "k":
+        if (activeWithin("ph-sidebar")) {
+          e.preventDefault();
+          dispatchVim("sidebar-up");
+          return;
+        }
+        break;
       case "i":
       case "Enter":
         // Enter inside the list (open recording) is handled by the list itself
-        // and arrives here only as defaultPrevented; this branch fires when the
-        // detail pane container holds focus, to drop into the transcript editor.
+        // and arrives here only as defaultPrevented; these branches fire when
+        // another pane holds focus: drop into the transcript editor from the
+        // detail pane, or activate the highlighted sidebar filter.
         if (activeWithin(".rv-detail")) {
           e.preventDefault();
           dispatchVim("edit");
+          return;
+        }
+        if (e.key === "Enter" && activeWithin("ph-sidebar")) {
+          e.preventDefault();
+          dispatchVim("sidebar-activate");
           return;
         }
         break;
