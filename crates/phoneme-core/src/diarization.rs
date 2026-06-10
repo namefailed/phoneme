@@ -39,23 +39,48 @@ fn interval_distance(span: &SpeakerSpan, t: f64) -> f64 {
     }
 }
 
-/// The label of the speaker active at instant `t`: the span covering `t`, or —
-/// when `t` falls in a gap between turns — the *nearest* span. Returns `None`
-/// only when there are no speaker spans at all. Picking the nearest span (rather
-/// than defaulting to "speaker 0") keeps a line that lands just outside a turn
+/// Length of the overlap between a speaker span and the interval `[start, end]`
+/// (0 when they don't overlap).
+fn overlap(span: &SpeakerSpan, start: f64, end: f64) -> f64 {
+    (span.end.min(end) - span.start.max(start)).max(0.0)
+}
+
+/// The label of the speaker who owns the transcript interval `[start, end]`: the
+/// span with the **largest temporal overlap** with that interval, or — when no
+/// span overlaps it at all (the line sits in a gap between turns) — the span
+/// *nearest* to the interval's midpoint. Returns `None` only when there are no
+/// speaker spans at all.
+///
+/// Using max-overlap rather than the old "first span covering the midpoint"
+/// fixes mislabeling when turns overlap (the powerset model emits simultaneous
+/// speakers): a line straddling a hand-off, or sitting inside two overlapping
+/// turns, is attributed to whoever actually speaks for most of it instead of to
+/// whichever turn merely started earliest. Picking the nearest span for a true
+/// gap (rather than defaulting to "speaker 0") keeps a line just outside a turn
 /// attributed to the most plausible speaker instead of a phantom one.
-fn speaker_at(speakers: &[SpeakerSpan], t: f64) -> Option<&str> {
+fn speaker_for_segment(speakers: &[SpeakerSpan], start: f64, end: f64) -> Option<&str> {
     if speakers.is_empty() {
         return None;
     }
-    if let Some(covering) = speakers.iter().find(|s| t >= s.start && t <= s.end) {
-        return Some(&covering.label);
+    let best = speakers
+        .iter()
+        .max_by(|a, b| {
+            overlap(a, start, end)
+                .partial_cmp(&overlap(b, start, end))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .expect("non-empty checked above");
+    if overlap(best, start, end) > 0.0 {
+        return Some(&best.label);
     }
+    // No overlap: the line falls in a gap — attribute to the nearest turn by
+    // distance from the segment midpoint.
+    let mid = start + (end - start) / 2.0;
     speakers
         .iter()
         .min_by(|a, b| {
-            interval_distance(a, t)
-                .partial_cmp(&interval_distance(b, t))
+            interval_distance(a, mid)
+                .partial_cmp(&interval_distance(b, mid))
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|s| s.label.as_str())
@@ -68,8 +93,9 @@ fn speaker_at(speakers: &[SpeakerSpan], t: f64) -> Option<&str> {
 ///   order**, so any label format works (`"SPEAKER_00"`, `"0"`, `"alice"`, …).
 ///   This fixes the previous `parse::<u8>()` mapping, which silently collapsed
 ///   every non-numeric label to speaker 0 (i.e. one speaker for everyone).
-/// - A segment whose midpoint falls in a gap between turns is attributed to the
-///   nearest turn (see [`speaker_at`]), never a default speaker 0.
+/// - Each segment is attributed to the speaker turn it overlaps most (see
+///   [`speaker_for_segment`]); one falling in a gap between turns goes to the
+///   nearest turn, never a default speaker 0.
 /// - Empty/whitespace segments are skipped.
 ///
 /// When `speakers` is empty (diarization produced nothing) the segments are
@@ -87,8 +113,7 @@ pub fn assign_speakers(segments: &[TextSegment], speakers: &[SpeakerSpan]) -> (S
         if text.is_empty() {
             continue;
         }
-        let midpoint = seg.start + (seg.end - seg.start) / 2.0;
-        let idx = match speaker_at(speakers, midpoint) {
+        let idx = match speaker_for_segment(speakers, seg.start, seg.end) {
             Some(label) => *label_to_idx.entry(label).or_insert_with(|| {
                 let i = next_idx;
                 next_idx += 1;
@@ -148,6 +173,54 @@ pub fn load_audio_mono_16khz(path: &Path) -> Result<Vec<f32>> {
     Ok(samples?)
 }
 
+/// The maximum gap (in seconds) across which two same-speaker turns are treated
+/// as one continuous turn. speakrs frames are ~16.9 ms apart, so a turn that the
+/// model splits across a brief breath/pause shows up as several spans separated
+/// by tens of ms; coalescing anything under a quarter-second stitches those back
+/// together without merging a genuine back-and-forth exchange (turn-taking gaps
+/// are typically a half-second or more).
+const SPEAKER_MERGE_GAP_SECS: f64 = 0.25;
+
+/// Post-process raw speakrs turns into clean, assignment-ready speaker spans:
+/// sort by start, merge adjacent same-speaker turns separated by a gap smaller
+/// than `SPEAKER_MERGE_GAP_SECS`, and drop any zero/negative-length span.
+///
+/// This is the fix for the `to_segments` bug. `speakrs::DiarizationResult.segments`
+/// is built internally as `to_segments(..)` (which emits **per-speaker** spans,
+/// merely sorted by start) followed by `merge_segments(.., merge_gap)` with the
+/// pipeline default `merge_gap == 0.0` — i.e. an effective no-op. So the turns we
+/// got back were never actually merged: a single speaker's continuous speech
+/// arrives as many tiny fragments split on every micro-pause, and consecutive
+/// fragments of *different* speakers interleave. Feeding those raw fragments to
+/// [`assign_speakers`] produced unstable, flickering speaker labels. Coalescing
+/// same-speaker runs here (with a real gap) restores stable turns. Kept as a free
+/// function so it can be unit-tested without the ONNX model.
+fn clean_speaker_spans(mut spans: Vec<SpeakerSpan>, merge_gap: f64) -> Vec<SpeakerSpan> {
+    spans.retain(|s| s.end > s.start);
+    spans.sort_by(|a, b| {
+        a.start
+            .partial_cmp(&b.start)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            // Stable tie-break on end so equal-start spans order deterministically.
+            .then(a.end.partial_cmp(&b.end).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    let mut merged: Vec<SpeakerSpan> = Vec::with_capacity(spans.len());
+    for span in spans {
+        match merged.last_mut() {
+            // Same speaker, and the gap since their last turn is small enough to
+            // treat as one continuous turn — extend rather than start a new span.
+            // `max` guards against a fully-contained later fragment shrinking the
+            // span (spans are start-sorted but ends can still nest).
+            Some(last) if last.label == span.label && span.start - last.end < merge_gap => {
+                last.end = last.end.max(span.end);
+            }
+            _ => merged.push(span),
+        }
+    }
+    merged
+}
+
 /// Run local diarization on a 16 kHz mono WAV, returning speaker turns. The
 /// model is loaded on each call (CPU execution for portability); callers should
 /// run this off the async runtime (e.g. `spawn_blocking`).
@@ -157,23 +230,23 @@ pub fn run_local_diarization(audio_path: &Path) -> Result<Vec<SpeakerSpan>> {
     let mut pipeline = OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?;
     let audio = load_audio_mono_16khz(audio_path)?;
     let result = pipeline.run(&audio)?;
-    // Use the pipeline's merged, time-stamped speaker turns directly. The old
-    // `discrete_diarization.to_segments(1.0, 1.0)` passed a frame STEP/DURATION
-    // of 1.0 s, but the model's real frame geometry is ~16.9 ms / ~61.9 ms — so
-    // it inflated every timestamp by ~59×, pushing the turns far past the end of
-    // the audio so they never overlapped the Whisper segments in
-    // `assign_speakers` (local diarization effectively produced no usable speaker
-    // labels). `result.segments` already carries correctly-scaled, merged turns.
-    let segments = result.segments;
-
-    Ok(segments
+    // `result.segments` carries correctly-scaled (seconds) turns — that part of
+    // the prior fix was right; the old `to_segments(1.0, 1.0)` had passed a frame
+    // STEP/DURATION of 1.0 s against the model's real ~16.9 ms / ~61.9 ms geometry
+    // and inflated every timestamp ~59×. But `result.segments` is NOT actually
+    // merged (speakrs builds it with the default `merge_gap == 0.0`, a no-op), so
+    // we coalesce same-speaker fragments ourselves before handing them off.
+    let spans = result
+        .segments
         .into_iter()
         .map(|s| SpeakerSpan {
             start: s.start,
             end: s.end,
             label: s.speaker,
         })
-        .collect())
+        .collect();
+
+    Ok(clean_speaker_spans(spans, SPEAKER_MERGE_GAP_SECS))
 }
 
 #[cfg(test)]
@@ -255,5 +328,136 @@ mod tests {
         let (text, n) = assign_speakers(&segments, &speakers);
         assert_eq!(n, 1);
         assert_eq!(text, "[Speaker 1]: real");
+    }
+
+    // ── The `to_segments` bug: fragment coalescing ───────────────────────────
+
+    #[test]
+    fn clean_spans_merges_same_speaker_fragments_across_micro_pauses() {
+        // Reproduces the `to_segments` bug. speakrs returns one speaker's
+        // continuous speech as several spans split on every micro-pause (here a
+        // ~50 ms breath at 1.0 and ~80 ms at 2.05), because the pipeline's merge
+        // step runs with `merge_gap == 0.0` and never coalesces them. Those raw
+        // fragments must collapse back into one turn.
+        let raw = vec![
+            span(0.0, 1.0, "SPEAKER_00"),
+            span(1.05, 2.05, "SPEAKER_00"),
+            span(2.13, 3.0, "SPEAKER_00"),
+        ];
+        let cleaned = clean_speaker_spans(raw, SPEAKER_MERGE_GAP_SECS);
+        assert_eq!(cleaned.len(), 1, "one continuous turn, got: {cleaned:?}");
+        assert_eq!(cleaned[0], span(0.0, 3.0, "SPEAKER_00"));
+    }
+
+    #[test]
+    fn clean_spans_keeps_genuine_turn_taking_separate() {
+        // A real back-and-forth must NOT be merged: the half-second-plus gap
+        // between turns is well above the merge threshold, and the speakers
+        // differ regardless.
+        let raw = vec![
+            span(0.0, 2.0, "SPEAKER_00"),
+            span(2.6, 4.0, "SPEAKER_01"),
+            span(4.7, 6.0, "SPEAKER_00"),
+        ];
+        let cleaned = clean_speaker_spans(raw.clone(), SPEAKER_MERGE_GAP_SECS);
+        assert_eq!(cleaned, raw, "distinct turns must be preserved");
+    }
+
+    #[test]
+    fn clean_spans_sorts_and_drops_empty() {
+        // speakrs emits per-speaker spans sorted only by start; a zero/negative
+        // length span (a clustering artifact) carries no speech and is dropped.
+        let raw = vec![
+            span(4.0, 6.0, "SPEAKER_01"),
+            span(3.0, 3.0, "SPEAKER_00"), // zero-length → dropped
+            span(0.0, 2.0, "SPEAKER_00"),
+        ];
+        let cleaned = clean_speaker_spans(raw, SPEAKER_MERGE_GAP_SECS);
+        assert_eq!(
+            cleaned,
+            vec![span(0.0, 2.0, "SPEAKER_00"), span(4.0, 6.0, "SPEAKER_01")]
+        );
+    }
+
+    #[test]
+    fn clean_spans_absorbs_nested_same_speaker_fragment() {
+        // A later same-speaker fragment fully contained in the previous turn must
+        // not shrink it (ends can nest even though spans are start-sorted).
+        let raw = vec![
+            span(0.0, 5.0, "SPEAKER_00"),
+            span(1.0, 2.0, "SPEAKER_00"),
+        ];
+        let cleaned = clean_speaker_spans(raw, SPEAKER_MERGE_GAP_SECS);
+        assert_eq!(cleaned, vec![span(0.0, 5.0, "SPEAKER_00")]);
+    }
+
+    // ── The overlap mis-assignment bug ───────────────────────────────────────
+
+    #[test]
+    fn overlapping_turns_attributed_by_max_overlap_not_earliest_start() {
+        // The powerset model emits simultaneous speakers, so turns overlap. Two
+        // overlapping turns ([0,9] and [5,12]) and two transcript lines:
+        //   - "first speaker" [0,3]: only inside SPEAKER_00 → Speaker 1.
+        //   - "second speaker" [6,11]: midpoint 8.5 is inside BOTH turns, but it
+        //     overlaps SPEAKER_01 more (5.0 s vs 3.0 s).
+        // The old midpoint-first-match logic attributed the second line to the
+        // earliest-starting covering span (SPEAKER_00), collapsing the whole
+        // transcript onto ONE speaker. Max-overlap recovers the second speaker.
+        let speakers = vec![
+            span(0.0, 9.0, "SPEAKER_00"),
+            span(5.0, 12.0, "SPEAKER_01"),
+        ];
+        let segments = vec![
+            seg(0.0, 3.0, "first speaker"),
+            seg(6.0, 11.0, "second speaker"),
+        ];
+        let (text, n) = assign_speakers(&segments, &speakers);
+        assert_eq!(n, 2, "both speakers must be recovered, got: {text}");
+        assert_eq!(text, "[Speaker 1]: first speaker\n\n[Speaker 2]: second speaker");
+    }
+
+    #[test]
+    fn straddling_handoff_goes_to_dominant_speaker() {
+        // Two non-overlapping turns with a clean hand-off at 5.0. A line that
+        // straddles it [4.0, 8.0] overlaps SPEAKER_00 by 1.0s and SPEAKER_01 by
+        // 3.0s → SPEAKER_01 owns it.
+        let speakers = vec![
+            span(0.0, 5.0, "SPEAKER_00"),
+            span(5.0, 10.0, "SPEAKER_01"),
+        ];
+        let segments = vec![
+            seg(0.5, 4.0, "first speaker talks"),
+            seg(4.0, 8.0, "straddles the handoff"),
+        ];
+        let (text, _) = assign_speakers(&segments, &speakers);
+        assert!(text.contains("[Speaker 1]: first speaker talks"), "got: {text}");
+        assert!(text.contains("[Speaker 2]: straddles the handoff"), "got: {text}");
+    }
+
+    #[test]
+    fn end_to_end_fragmented_overlapping_diarization_is_stable() {
+        // Putting both fixes together on realistic raw speakrs output: SPEAKER_00
+        // is fragmented across micro-pauses and its turns overlap SPEAKER_01's.
+        // After cleaning, the transcript reads as two stable turns instead of a
+        // flickering Speaker 1/2/1/2 mess.
+        let raw = vec![
+            span(0.0, 2.0, "SPEAKER_00"),
+            span(2.1, 4.0, "SPEAKER_00"),  // micro-pause → same turn
+            span(3.8, 8.0, "SPEAKER_01"),  // overlaps the tail of SPEAKER_00
+            span(8.1, 9.0, "SPEAKER_01"),  // micro-pause → same turn
+        ];
+        let speakers = clean_speaker_spans(raw, SPEAKER_MERGE_GAP_SECS);
+        // Two clean turns: SPEAKER_00 [0,4], SPEAKER_01 [3.8,9].
+        assert_eq!(speakers.len(), 2, "expected 2 merged turns, got: {speakers:?}");
+
+        let segments = vec![
+            seg(0.0, 2.0, "a one"),
+            seg(2.0, 4.0, "a two"),
+            seg(4.0, 6.0, "b one"),
+            seg(6.0, 9.0, "b two"),
+        ];
+        let (text, n) = assign_speakers(&segments, &speakers);
+        assert_eq!(n, 2, "exactly two speakers, got: {text}");
+        assert_eq!(text, "[Speaker 1]: a one a two\n\n[Speaker 2]: b one b two");
     }
 }
