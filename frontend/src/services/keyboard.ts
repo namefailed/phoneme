@@ -68,6 +68,9 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "h   l", label: "Move focus between sidebar / list / detail" },
     { combo: "j   k", label: "Move down / up (list · sidebar · detail buttons)" },
     { combo: "k / ↑ at top", label: "Up into the search bar (↓ to come back)" },
+    { combo: "h  l (header)", label: "Move across the header controls (wraps around)" },
+    { combo: "Enter (header)", label: "Open the status / Record / Settings dropdown" },
+    { combo: "j  k (in menu)", label: "Choose an option — Enter selects, Esc closes" },
     { combo: "g g", label: "Jump to the first recording" },
     { combo: "G", label: "Jump to the last recording" },
     { combo: "Enter", label: "Open recording · apply sidebar filter" },
@@ -147,6 +150,39 @@ function headerControls(): HTMLElement[] {
 /** Index of the header control the vim cursor is on; -1 when not in header nav. */
 let headerCursor = -1;
 
+/** When Enter "opens" the header control under the cursor, we sub-navigate it:
+ *  a custom dropdown (Record / Settings) whose `[role=menuitem*]` items we step
+ *  with j/k, or the native status `<select>` whose options we cycle (its native
+ *  popup can't be driven from JS, so j/k change the value live). */
+type HeaderSub =
+  | { kind: "menu"; items: HTMLElement[]; index: number; opener: HTMLElement }
+  | { kind: "select"; el: HTMLSelectElement };
+let headerSub: HeaderSub | null = null;
+
+function highlightHeaderSub() {
+  document
+    .querySelectorAll(".headerbar .kbd-cursor, [role='menu'] .kbd-cursor")
+    .forEach((el) => el.classList.remove("kbd-cursor"));
+  if (!headerSub) return;
+  if (headerSub.kind === "menu") {
+    const el = headerSub.items[headerSub.index];
+    if (el) {
+      el.classList.add("kbd-cursor");
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  } else {
+    headerSub.el.classList.add("kbd-cursor");
+  }
+}
+
+/** Tear down the sub-nav. When `closeMenu`, also toggle an open dropdown shut
+ *  via its opener (whose handler flips the menu's reactive state). */
+function closeHeaderSub(closeMenu: boolean) {
+  if (headerSub?.kind === "menu" && closeMenu) headerSub.opener.click();
+  headerSub = null;
+  document.querySelectorAll("[role='menu'] .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+}
+
 function highlightHeaderCursor() {
   const items = headerControls();
   items.forEach((el) => el.classList.remove("kbd-cursor"));
@@ -158,6 +194,7 @@ function highlightHeaderCursor() {
 }
 
 function exitHeaderNav() {
+  closeHeaderSub(true);
   document.querySelectorAll(".headerbar .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
   headerCursor = -1;
 }
@@ -170,6 +207,7 @@ function exitHeaderNav() {
 function enterHeaderNav() {
   const bar = document.querySelector<HTMLElement>(".headerbar");
   if (!bar) return;
+  headerSub = null;
   document.querySelectorAll(".rv-pane-focused").forEach((el) => el.classList.remove("rv-pane-focused"));
   const items = headerControls();
   const searchIdx = items.findIndex((el) => el.classList.contains("search"));
@@ -329,17 +367,117 @@ function onKeyDown(e: KeyboardEvent) {
     // header → h/l through the options → j back into the recordings" loop.
     if (activeWithin(".headerbar")) {
       const items = headerControls();
+
+      // A control under the cursor is "open": route j/k/Enter/Esc to the
+      // dropdown's items (Record / Settings) or the status <select>'s options
+      // before the normal left/right roving.
+      if (headerSub) {
+        if (headerSub.kind === "menu") {
+          const n = headerSub.items.length;
+          switch (e.key) {
+            case "j":
+            case "ArrowDown":
+              e.preventDefault();
+              headerSub.index = (headerSub.index + 1) % n;
+              highlightHeaderSub();
+              return;
+            case "k":
+            case "ArrowUp":
+              e.preventDefault();
+              headerSub.index = (headerSub.index - 1 + n) % n;
+              highlightHeaderSub();
+              return;
+            case "i":
+            case "Enter":
+            case " ": {
+              e.preventDefault();
+              const it = headerSub.items[headerSub.index];
+              closeHeaderSub(false); // the item's own click closes the dropdown
+              it?.click();
+              highlightHeaderCursor();
+              return;
+            }
+            case "Escape":
+              e.preventDefault();
+              closeHeaderSub(true);
+              highlightHeaderCursor();
+              return;
+            case "h":
+            case "ArrowLeft":
+              e.preventDefault();
+              closeHeaderSub(true);
+              headerCursor = (headerCursor - 1 + items.length) % items.length;
+              highlightHeaderCursor();
+              return;
+            case "l":
+            case "ArrowRight":
+              e.preventDefault();
+              closeHeaderSub(true);
+              headerCursor = (headerCursor + 1) % items.length;
+              highlightHeaderCursor();
+              return;
+            default:
+              e.preventDefault(); // trap stray keys while the dropdown is open
+              return;
+          }
+        } else {
+          const sel = headerSub.el;
+          switch (e.key) {
+            case "j":
+            case "ArrowDown":
+              e.preventDefault();
+              if (sel.selectedIndex < sel.options.length - 1) {
+                sel.selectedIndex++;
+                sel.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+              return;
+            case "k":
+            case "ArrowUp":
+              e.preventDefault();
+              if (sel.selectedIndex > 0) {
+                sel.selectedIndex--;
+                sel.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+              return;
+            case "i":
+            case "Enter":
+            case " ":
+            case "Escape":
+              e.preventDefault();
+              headerSub = null;
+              highlightHeaderCursor();
+              return;
+            case "h":
+            case "ArrowLeft":
+              e.preventDefault();
+              headerSub = null;
+              headerCursor = (headerCursor - 1 + items.length) % items.length;
+              highlightHeaderCursor();
+              return;
+            case "l":
+            case "ArrowRight":
+              e.preventDefault();
+              headerSub = null;
+              headerCursor = (headerCursor + 1) % items.length;
+              highlightHeaderCursor();
+              return;
+            default:
+              return;
+          }
+        }
+      }
+
       switch (e.key) {
         case "h":
         case "ArrowLeft":
           e.preventDefault();
-          headerCursor = Math.max(0, headerCursor - 1);
+          headerCursor = (headerCursor - 1 + items.length) % items.length;
           highlightHeaderCursor();
           return;
         case "l":
         case "ArrowRight":
           e.preventDefault();
-          headerCursor = Math.min(items.length - 1, headerCursor + 1);
+          headerCursor = (headerCursor + 1) % items.length;
           highlightHeaderCursor();
           return;
         case "j":
@@ -354,12 +492,43 @@ function onKeyDown(e: KeyboardEvent) {
         case " ": {
           e.preventDefault();
           const el = items[headerCursor];
-          exitHeaderNav();
-          if (el) {
-            el.focus();
-            // The search box just takes focus to type; buttons/toggles activate.
-            if (!el.classList.contains("search")) el.click();
+          if (!el) {
+            exitHeaderNav();
+            return;
           }
+          // Native status <select>: enter option-cycling (its OS popup can't be
+          // opened from JS, so j/k step the value live; Enter/Esc commit).
+          if (el.tagName === "SELECT") {
+            headerSub = { kind: "select", el: el as HTMLSelectElement };
+            highlightHeaderSub();
+            return;
+          }
+          // Split-button caret that opens a dropdown (Record / Settings): open
+          // it, then j/k through its items. The menu paints on the next frame.
+          if (el.getAttribute("aria-haspopup") === "menu") {
+            const group = el.closest(".hb-rec-group, .hb-settings-group");
+            el.click();
+            requestAnimationFrame(() => {
+              if (headerCursor < 0) return; // header nav was left within the frame
+              const menu = group?.querySelector<HTMLElement>('[role="menu"]') ?? null;
+              if (!menu || menu.offsetParent === null) return; // didn't open
+              const mitems = [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')].filter(
+                (x) => x.offsetParent !== null,
+              );
+              if (!mitems.length) return;
+              let idx = mitems.findIndex(
+                (x) => x.getAttribute("aria-checked") === "true" || x.classList.contains("selected"),
+              );
+              if (idx < 0) idx = 0;
+              headerSub = { kind: "menu", items: mitems, index: idx, opener: el };
+              highlightHeaderSub();
+            });
+            return;
+          }
+          // Everything else: the search box focuses to type; other buttons fire.
+          exitHeaderNav();
+          el.focus();
+          if (!el.classList.contains("search")) el.click();
           return;
         }
         // Any other key falls through to the global shortcuts below.
