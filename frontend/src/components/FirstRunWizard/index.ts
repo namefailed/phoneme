@@ -163,6 +163,14 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
+  /** Set an `interface.*` UI preference (vim_nav, format_24h, …) from the wizard. */
+  private setIfacePref(key: string, value: unknown) {
+    if (!this.config) return;
+    if (!this.config.interface) this.config.interface = {};
+    this.config.interface[key] = value;
+    this.requestUpdate();
+  }
+
   private renderWelcome() {
     return html`
       <div class="wizard-body">
@@ -199,7 +207,22 @@ export class FirstRunWizardElement extends LitElement {
             <option value="solarized-light">Solarized Light</option>
           </select>
         </div>
-        
+
+        <div class="wizard-theme-card">
+          <label>Preferences</label>
+          <label class="wizard-pref-row">
+            <span>Keyboard (vim) navigation
+              <span class="wizard-pref-hint">— h/l/j/k to move between panes & lists, ? for the cheat-sheet</span></span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.vim_nav}
+              @change=${(e: Event) => this.setIfacePref("vim_nav", (e.target as HTMLInputElement).checked)}>
+          </label>
+          <label class="wizard-pref-row">
+            <span>24-hour time</span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.format_24h}
+              @change=${(e: Event) => this.setIfacePref("format_24h", (e.target as HTMLInputElement).checked)}>
+          </label>
+        </div>
+
         <p class="wizard-subtitle" style="margin-top: 1.5rem;">Let's get it set up.</p>
       </div>
       <div class="wizard-footer">

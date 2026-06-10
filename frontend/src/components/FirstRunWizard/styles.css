@@ -433,6 +433,20 @@ progress {
   color: var(--fg-default);
   cursor: pointer;
 }
+/* Preference toggle rows (vim nav, 24h time) in the welcome card. */
+.wizard-theme-card .wizard-pref-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+.wizard-pref-hint {
+  color: var(--fg-faded);
+  font-size: 11px;
+}
 
 .test-result {
   padding: 6px 10px;
