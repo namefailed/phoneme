@@ -57,6 +57,8 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "e", label: "Export transcript" },
       { combo: "r", label: "Open the Re-run menu" },
       { combo: "f", label: "Full-screen (focus mode)" },
+      { combo: "t", label: "Add a tag (j/k browse · Enter adds)" },
+      { combo: "Shift + t", label: "Open the Tag Manager" },
     ],
   },
 ];
@@ -604,6 +606,10 @@ function onKeyDown(e: KeyboardEvent) {
     case "r": e.preventDefault(); dispatchAction("rerun"); return;
     // f → toggle full-screen (focus mode) on the open recording.
     case "f": e.preventDefault(); window.dispatchEvent(new CustomEvent("phoneme:toggle-focus-mode")); return;
+    // t → focus the open recording's tag box (then j/k browse, Enter adds);
+    // Shift+T opens the global Tag Manager.
+    case "t": e.preventDefault(); dispatchVim("focus-tags"); return;
+    case "T": e.preventDefault(); dispatchVim("open-tag-manager"); return;
   }
 }
 

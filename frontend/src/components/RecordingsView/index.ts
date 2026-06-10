@@ -331,7 +331,25 @@ export class RecordingsView {
       case "focus-list": this.focusPane("list"); break;
       // k at the top of the list → up into the header search box.
       case "focus-search": this.focusSearchBar(); break;
+      // t → focus the open recording's tag box; Shift+T → Tag Manager.
+      case "focus-tags": this.focusTags(); break;
+      case "open-tag-manager": void this.openTagManagerModal(); break;
     }
+  }
+
+  /** Focus the open recording's tag input (vim `t`). No-op when nothing is open
+   *  or the detail pane has no tag box (e.g. a merged meeting view). */
+  private focusTags() {
+    const chips = this.container.querySelector<HTMLElement & { focusTagInput?: () => void }>(
+      "#rv-detail ph-tag-chips",
+    );
+    chips?.focusTagInput?.();
+  }
+
+  /** Open the global Tag Manager modal (vim `Shift+T`). */
+  private async openTagManagerModal() {
+    const { openTagManager } = await import("../TagManager");
+    await openTagManager();
   }
 
   /** Leave the panes for the header search box (vim k at the top of the list).

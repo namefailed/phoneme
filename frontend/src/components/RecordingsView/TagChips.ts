@@ -156,8 +156,36 @@ export class TagChipsElement extends LitElement {
     });
   }
 
+  /** Open the picker and focus the add-tag box (vim `t`). Highlights the first
+   *  suggestion so Enter adds it immediately and j/k can browse the list from
+   *  the empty box. */
+  focusTagInput() {
+    this._showDropdown = true;
+    this.activeIndex = this.filteredTags().length ? 0 : -1;
+    void this.updateComplete.then(() => {
+      const input = this.renderRoot.querySelector<HTMLInputElement>(".tag-add");
+      input?.focus();
+      this.scrollActiveIntoView();
+    });
+  }
+
   private onInputKeydown(e: KeyboardEvent) {
     const tags = this.filteredTags();
+    // Vim browse: while the box is empty, j / k step the suggestions (pick an
+    // existing tag right after `t`). Once you type a name they insert normally,
+    // so tags whose names contain j or k can still be created.
+    if (this.tagQuery === "" && (e.key === "j" || e.key === "k") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      this._showDropdown = true;
+      if (tags.length) {
+        this.activeIndex =
+          e.key === "j"
+            ? Math.min(this.activeIndex + 1, tags.length - 1)
+            : Math.max(this.activeIndex - 1, 0);
+        this.scrollActiveIntoView();
+      }
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       this._showDropdown = true;
