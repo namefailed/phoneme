@@ -285,10 +285,9 @@ export class SettingsViewElement extends LitElement {
           
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
-        <div class="settings-main" style="display: flex; flex-direction: column; height: 100%;">
-          <div class="settings-body" id="settings-body" style="flex: 1; overflow-y: auto;"></div>
-          <div class="settings-toolbar" style="padding-top: 16px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px;">
-            <span class="spacer"></span>
+        <div class="settings-main">
+          <div class="settings-body" id="settings-body"></div>
+          <div class="settings-float-actions">
             <button id="settings-close" @click=${this.handleClose}>Close</button>
             <button class="primary" id="settings-save" @click=${this.handleSave}>Save</button>
           </div>
