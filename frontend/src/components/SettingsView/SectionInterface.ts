@@ -199,6 +199,23 @@ export class SectionInterface {
           </div>
         </div>
 
+        <div class="settings-field">
+          <label>Keyboard (vim) navigation</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "interface.vim_nav", label: "", kind: "checkbox" },
+              config.interface.vim_nav,
+            )}</div>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              System-wide vim keys: <kbd>h</kbd>/<kbd>l</kbd> move focus between the sidebar, list, and
+              detail panes; <kbd>j</kbd>/<kbd>k</kbd> and <kbd>gg</kbd>/<kbd>G</kbd> move within the list;
+              <kbd>i</kbd>/<kbd>Enter</kbd> edit the transcript; <kbd>dd</kbd> deletes; <kbd>Esc</kbd> steps
+              back out. Press <kbd>?</kbd> anytime for the full cheat-sheet. This is separate from the
+              transcript editor's own vim mode (under Editor).
+            </span>
+          </div>
+        </div>
+
         <div class="settings-field" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Visible Columns</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">

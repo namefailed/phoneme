@@ -59,6 +59,11 @@ export class RecordingsView {
   private keydownHandler: (e: KeyboardEvent) => void;
   private selectHandler: ((e: Event) => void) | null = null;
   private focusHandler: (() => void) | null = null;
+  /** Pane that the vim navigation layer is focused on (null = not driven yet).
+   *  Only ever set while `interface.vim_nav` is on, so the focus ring never
+   *  appears for non-vim users. */
+  private focusedPane: "sidebar" | "list" | "detail" | null = null;
+  private vimHandler: ((e: Event) => void) | null = null;
 
   /** Current multi-selection. Empty when no checkboxes are checked. */
   private multiSelected = new Set<string>();
@@ -129,6 +134,10 @@ export class RecordingsView {
     window.addEventListener("phoneme:select-recording", this.selectHandler);
     this.focusHandler = () => this.toggleFocusMode();
     window.addEventListener("phoneme:toggle-focus-mode", this.focusHandler);
+    // System-wide vim navigation (keyboard.ts owns the gate + key sequencing and
+    // emits these; this view owns the pane DOM, so it performs the movement).
+    this.vimHandler = (e: Event) => this.handleVim((e as CustomEvent).detail?.action);
+    window.addEventListener("phoneme:vim", this.vimHandler);
   }
 
   async refresh() {
@@ -209,7 +218,97 @@ export class RecordingsView {
     const tp = this.container.querySelector<HTMLElement & { recordingId: string }>("#rv-thinking");
     if (tp) tp.recordingId = "";
     this.detailVisible = false;
+    // Drop the vim focus ring with the pane it was on (if any).
+    this.container.querySelector(".rv-detail")?.classList.remove("rv-pane-focused");
+    if (this.focusedPane === "detail") this.focusedPane = "list";
     this.applyLayout();
+  }
+
+  // ── Vim navigation (active only when `interface.vim_nav` is on; keyboard.ts
+  //    gates the keys and emits `phoneme:vim` actions that land in handleVim). ──
+
+  /** Panes that currently exist, left-to-right. Hidden panes are skipped so
+   *  h/l never lands focus on a collapsed sidebar or an absent detail pane. */
+  private panesInOrder(): Array<"sidebar" | "list" | "detail"> {
+    const panes: Array<"sidebar" | "list" | "detail"> = [];
+    if (this.sidebarVisible && !this.focusMode) panes.push("sidebar");
+    panes.push("list");
+    if (this.detailVisible) panes.push("detail");
+    return panes;
+  }
+
+  private paneEl(pane: "sidebar" | "list" | "detail"): HTMLElement | null {
+    const sel = pane === "sidebar" ? "ph-sidebar" : pane === "list" ? "#rv-list" : "#rv-detail";
+    return this.container.querySelector<HTMLElement>(sel);
+  }
+
+  /** Move the focus ring + DOM focus onto a pane (clamped to a visible one). */
+  private focusPane(pane: "sidebar" | "list" | "detail") {
+    const panes = this.panesInOrder();
+    if (!panes.includes(pane)) pane = panes[0];
+    this.focusedPane = pane;
+    for (const p of ["sidebar", "list", "detail"] as const) {
+      this.paneEl(p)?.classList.toggle("rv-pane-focused", p === pane);
+    }
+    const el = this.paneEl(pane);
+    if (!el) return;
+    if (pane === "list") {
+      // The list owns j/k/Enter/Space when its scroll container is focused.
+      (el.querySelector<HTMLElement>(".rec-table") ?? el).focus({ preventScroll: true });
+    } else {
+      // Focus the pane container itself (not the editor) so h/l keep working;
+      // `i`/Enter then drops into the transcript editor.
+      el.setAttribute("tabindex", "-1");
+      el.focus({ preventScroll: true });
+    }
+  }
+
+  private movePaneFocus(dir: "left" | "right") {
+    const panes = this.panesInOrder();
+    if (!panes.length) return;
+    let idx = this.focusedPane ? panes.indexOf(this.focusedPane) : -1;
+    // First-ever move (or the remembered pane is now hidden): enter from the
+    // matching edge so h lands on the rightmost pane, l on the leftmost.
+    if (idx < 0) idx = dir === "right" ? -1 : panes.length;
+    const next = Math.max(0, Math.min(panes.length - 1, idx + (dir === "right" ? 1 : -1)));
+    this.focusPane(panes[next]);
+  }
+
+  private handleVim(action: string | undefined) {
+    switch (action) {
+      case "pane-left": this.movePaneFocus("left"); break;
+      case "pane-right": this.movePaneFocus("right"); break;
+      case "list-top": this.list.focusEdge("top"); this.focusPane("list"); break;
+      case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
+      case "edit": this.focusEditor(); break;
+      case "delete": void this.vimDelete(); break;
+    }
+  }
+
+  /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */
+  private focusEditor() {
+    const ed =
+      this.container.querySelector<HTMLElement>("#rv-detail .cm-content") ??
+      this.container.querySelector<HTMLElement>("#rv-detail textarea") ??
+      this.container.querySelector<HTMLElement>('#rv-detail [contenteditable="true"]');
+    ed?.focus();
+  }
+
+  /** `dd`: delete the recording under the list cursor (falls back to the open
+   *  one), behind the same confirm dialog as the Delete key. Sessions are
+   *  skipped — they're deleted track-by-track or via the bulk bar. */
+  private async vimDelete() {
+    const id = this.list.getFocusedId() ?? this.state.get().selectedId;
+    if (!id || id.startsWith("session:")) return;
+    const { confirmDelete } = await import("../ConfirmDelete");
+    if (!(await confirmDelete())) return;
+    try {
+      const { deleteRecording } = await import("../../services/ipc");
+      await deleteRecording(id, false);
+      void this.refresh();
+    } catch (err) {
+      console.error("Failed to delete recording:", err);
+    }
   }
 
   private disposed = false;
@@ -224,6 +323,7 @@ export class RecordingsView {
     document.removeEventListener("keydown", this.keydownHandler);
     if (this.selectHandler) window.removeEventListener("phoneme:select-recording", this.selectHandler);
     if (this.focusHandler) window.removeEventListener("phoneme:toggle-focus-mode", this.focusHandler);
+    if (this.vimHandler) window.removeEventListener("phoneme:vim", this.vimHandler);
   }
 
   private applyLayout() {
@@ -409,6 +509,13 @@ export class RecordingsView {
       if (this.focusMode) {
         e.preventDefault();
         this.toggleFocusMode();
+        return;
+      }
+      // Vim step-out ladder: from the detail pane, Esc returns to the list
+      // (keeping the recording open) before a second Esc deselects it.
+      if (this.focusedPane === "detail") {
+        e.preventDefault();
+        this.focusPane("list");
         return;
       }
       if (this.state.get().selectedId) {

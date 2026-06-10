@@ -901,6 +901,27 @@ mark.search-hit {
   overflow: hidden;
 }
 
+/* ── Vim navigation: focus ring on the active pane ────────────────────────── */
+/* Toggled by RecordingsView only while `interface.vim_nav` is on, so non-vim
+   users never see it. An INSET shadow (not an outline) so the panes'
+   `overflow:hidden` can't clip it and it never bleeds over the splitter. */
+.rv-pane-focused {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+/* The list scroll-area and the detail/sidebar containers take focus (tabindex)
+   so h/l can move between them; suppress the browser's own focus outline in
+   favour of the accent ring above. */
+.rv-list:focus,
+.rv-list:focus-visible,
+.rv-detail:focus,
+.rv-detail:focus-visible,
+ph-sidebar:focus,
+ph-sidebar:focus-visible,
+.rec-table:focus,
+.rec-table:focus-visible {
+  outline: none;
+}
+
 /* ── Checkbox column ──────────────────────────────────────────────────────── */
 .col-checkbox {
   display: flex !important;

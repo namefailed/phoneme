@@ -7,12 +7,24 @@
  * down while a modal is open. The recordings list keeps its own arrow / Enter /
  * Space navigation when focused — those are documented in the overlay so the
  * whole app is keyboard-navigable and discoverable.
+ *
+ * When `interface.vim_nav` is enabled, a system-wide vim navigation layer turns
+ * on: `h` / `l` move focus between the sidebar, list, and detail panes (the
+ * active pane gets a focus ring); `j` / `k` / `gg` / `G` move within the
+ * recordings list; `i` / `Enter` focus the transcript editor when the detail
+ * pane is active; `dd` deletes the focused recording; `Esc` steps back out.
+ * This is distinct from the transcript editor's OWN vim mode (`editor.vim_mode`).
+ * The pane-level actions are emitted as `phoneme:vim` CustomEvents that
+ * RecordingsView acts on (it owns the pane DOM); this module only owns the gate,
+ * the key sequencing, and the help sheet.
  */
+
+import { invoke } from "@tauri-apps/api/core";
 
 type HelpItem = { combo: string; label: string };
 type HelpGroup = { title: string; items: HelpItem[] };
 
-const HELP_GROUPS: HelpGroup[] = [
+const BASE_HELP_GROUPS: HelpGroup[] = [
   {
     title: "Global",
     items: [
@@ -46,9 +58,36 @@ const HELP_GROUPS: HelpGroup[] = [
   },
 ];
 
+/** Shown in the help sheet only while `interface.vim_nav` is enabled. */
+const VIM_HELP_GROUP: HelpGroup = {
+  title: "Vim navigation (enabled)",
+  items: [
+    { combo: "h   l", label: "Move focus between panes" },
+    { combo: "j   k", label: "Move down / up the list" },
+    { combo: "g g", label: "Jump to the first recording" },
+    { combo: "G", label: "Jump to the last recording" },
+    { combo: "i / Enter", label: "Edit transcript (in the detail pane)" },
+    { combo: "d d", label: "Delete the focused recording" },
+    { combo: "Esc", label: "Step back out a level" },
+  ],
+};
+
+function helpGroups(): HelpGroup[] {
+  // Surface the vim group right after "Global" so it's the first thing a vim
+  // user sees; otherwise hide it entirely (the keys are inert when off).
+  return vimNav
+    ? [BASE_HELP_GROUPS[0], VIM_HELP_GROUP, ...BASE_HELP_GROUPS.slice(1)]
+    : BASE_HELP_GROUPS;
+}
+
 let helpOpen = false;
 let pendingG = false;
 let pendingGTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingD = false;
+let pendingDTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Whether the system-wide vim navigation layer is active (`interface.vim_nav`). */
+let vimNav = false;
 
 function isTypingTarget(el: Element | null): boolean {
   if (!el) return false;
@@ -78,11 +117,30 @@ function dispatchAction(action: string) {
   window.dispatchEvent(new CustomEvent("phoneme:action", { detail: { action } }));
 }
 
+/** Tell RecordingsView to perform a pane-level vim action (it owns the panes). */
+function dispatchVim(action: string) {
+  window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action } }));
+}
+
+/** Is keyboard focus currently inside the element matching `selector`? */
+function activeWithin(selector: string): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  return !!el && typeof el.closest === "function" && !!el.closest(selector);
+}
+
 function clearPendingG() {
   pendingG = false;
   if (pendingGTimer) {
     clearTimeout(pendingGTimer);
     pendingGTimer = null;
+  }
+}
+
+function clearPendingD() {
+  pendingD = false;
+  if (pendingDTimer) {
+    clearTimeout(pendingDTimer);
+    pendingDTimer = null;
   }
 }
 
@@ -95,8 +153,9 @@ function openHelp() {
     <div class="modal-dialog kbd-help-dialog" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
       <div class="modal-header"><h3 class="modal-title">⌨ Keyboard shortcuts</h3></div>
       <div class="kbd-help-body">
-        ${HELP_GROUPS.map(
-          (g) => `
+        ${helpGroups()
+          .map(
+            (g) => `
           <div class="kbd-help-group">
             <div class="kbd-help-group-title">${g.title}</div>
             ${g.items
@@ -106,7 +165,8 @@ function openHelp() {
               )
               .join("")}
           </div>`,
-        ).join("")}
+          )
+          .join("")}
       </div>
       <div class="modal-actions"><button class="modal-btn modal-btn-primary kbd-help-close">Done</button></div>
     </div>`;
@@ -133,7 +193,9 @@ function onKeyDown(e: KeyboardEvent) {
   }
 
   // While typing, never hijack keys — except Esc from the search box, which
-  // blurs it and hands focus to the list so arrow-nav can take over.
+  // blurs it and hands focus to the list so arrow-nav can take over. The
+  // transcript editor's own vim mode (when focused) keeps Esc too, by virtue of
+  // this early return — the system-wide layer never steals it.
   if (isTypingTarget(document.activeElement)) {
     if (e.key === "Escape") {
       const active = document.activeElement as HTMLElement;
@@ -157,13 +219,71 @@ function onKeyDown(e: KeyboardEvent) {
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-  // "g" prefix sequence (vim-style): g l / g s / g d.
+  // "g" prefix sequence (vim-style): g l / g s / g d, plus g g → top of list.
   if (pendingG) {
     clearPendingG();
     if (e.key === "l") { e.preventDefault(); navigate("recordings"); return; }
     if (e.key === "s") { e.preventDefault(); navigate("settings"); return; }
     if (e.key === "d") { e.preventDefault(); navigate("doctor"); return; }
+    if (vimNav && e.key === "g" && activeWithin(".rv-list")) {
+      e.preventDefault();
+      dispatchVim("list-top");
+      return;
+    }
     return;
+  }
+
+  // "d" prefix (vim): dd deletes the focused recording. A non-"d" follow-up
+  // falls through so the key is still handled normally below.
+  if (pendingD) {
+    clearPendingD();
+    if (vimNav && e.key === "d") {
+      e.preventDefault();
+      dispatchVim("delete");
+      return;
+    }
+  }
+
+  // System-wide vim navigation layer. These keys are inert unless vim_nav is on,
+  // so non-vim users are completely unaffected. Pane movement (h/l) works from
+  // anywhere; the list/edit/delete keys require the relevant pane to hold focus.
+  if (vimNav) {
+    switch (e.key) {
+      case "h":
+        e.preventDefault();
+        dispatchVim("pane-left");
+        return;
+      case "l":
+        e.preventDefault();
+        dispatchVim("pane-right");
+        return;
+      case "G":
+        if (activeWithin(".rv-list")) {
+          e.preventDefault();
+          dispatchVim("list-bottom");
+          return;
+        }
+        break;
+      case "i":
+      case "Enter":
+        // Enter inside the list (open recording) is handled by the list itself
+        // and arrives here only as defaultPrevented; this branch fires when the
+        // detail pane container holds focus, to drop into the transcript editor.
+        if (activeWithin(".rv-detail")) {
+          e.preventDefault();
+          dispatchVim("edit");
+          return;
+        }
+        break;
+      case "d":
+        if (activeWithin(".rv-list")) {
+          e.preventDefault();
+          pendingD = true;
+          pendingDTimer = setTimeout(clearPendingD, 1000);
+          return;
+        }
+        break;
+    }
   }
 
   switch (e.key) {
@@ -195,4 +315,10 @@ export function initKeyboard() {
   if (installed) return;
   installed = true;
   document.addEventListener("keydown", onKeyDown);
+  // Load the vim-nav preference and keep it in sync with Settings saves so the
+  // layer turns on/off the moment the toggle is saved (no reload needed).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const apply = (cfg: any) => { vimNav = !!cfg?.interface?.vim_nav; };
+  invoke("read_config").then(apply).catch(() => {});
+  window.addEventListener("config:saved", (e: Event) => apply((e as CustomEvent).detail));
 }

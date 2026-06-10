@@ -116,6 +116,11 @@ export class RecordingsListElement extends LitElement {
    */
   private relevanceById = new Map<string, number>();
 
+  /** The flattened rows as last rendered (singles + expanded meeting tracks),
+   *  in display order. Mirrors what arrow/j-k navigation steps through, and lets
+   *  the vim layer jump to an edge (gg/G) or read the focused row's id (dd). */
+  private lastVisibleRows: Recording[] = [];
+
   private unsubStore: (() => void) | null = null;
   private unsubFilter: (() => void) | null = null;
   private onConfigSaved = (e: Event) => {
@@ -335,7 +340,14 @@ export class RecordingsListElement extends LitElement {
       return;
     }
 
-    if (e.key === "ArrowDown") {
+    // With vim navigation on, j / k are plain down / up within the list (no
+    // shift-extend — that stays on the arrow keys). They're inert otherwise so
+    // a stray keystroke on the focused list never moves the cursor for users
+    // who haven't opted in.
+    const vim = !!this.config?.interface?.vim_nav;
+    const key = vim && e.key === "j" ? "ArrowDown" : vim && e.key === "k" ? "ArrowUp" : e.key;
+
+    if (key === "ArrowDown") {
       e.preventDefault();
       const next = Math.min(this.focusedIndex + 1, recs.length - 1);
       if (e.shiftKey) {
@@ -344,7 +356,7 @@ export class RecordingsListElement extends LitElement {
       }
       this.focusedIndex = next;
       this.scrollFocusedIntoView();
-    } else if (e.key === "ArrowUp") {
+    } else if (key === "ArrowUp") {
       e.preventDefault();
       const prev = Math.max(this.focusedIndex - 1, 0);
       if (e.shiftKey) {
@@ -369,6 +381,22 @@ export class RecordingsListElement extends LitElement {
       const rows = this.querySelectorAll<HTMLElement>(".rec-row");
       rows[this.focusedIndex]?.scrollIntoView({ block: "nearest" });
     });
+  }
+
+  /** Vim `gg` / `G`: jump the keyboard cursor to the first / last visible row. */
+  focusEdge(edge: "top" | "bottom") {
+    const rows = this.lastVisibleRows;
+    if (!rows.length) return;
+    this.focusedIndex = edge === "top" ? 0 : rows.length - 1;
+    this.scrollFocusedIntoView();
+    this.requestUpdate();
+  }
+
+  /** The id of the row under the keyboard cursor, or null when none is focused.
+   *  Used by `dd` to delete the row the cursor is on (not just the open one). */
+  getFocusedId(): string | null {
+    if (this.focusedIndex < 0) return null;
+    return this.lastVisibleRows[this.focusedIndex]?.id ?? null;
   }
 
   private handleRowClick(e: MouseEvent, id: string, index: number, visibleRows: Recording[]) {
@@ -593,7 +621,8 @@ export class RecordingsListElement extends LitElement {
 
     const grouped = groupRecordings(s.recordings);
     const visibleRows = visibleRecordings(grouped, (sid) => this.expandedSessions.has(sid));
-    
+    this.lastVisibleRows = visibleRows;
+
     if (this.focusedIndex >= visibleRows.length) {
       this.focusedIndex = visibleRows.length - 1;
     }
@@ -877,5 +906,13 @@ export class RecordingsList {
 
   getMultiSelected(): Set<string> {
     return this.element.getMultiSelected();
+  }
+
+  focusEdge(edge: "top" | "bottom") {
+    this.element.focusEdge(edge);
+  }
+
+  getFocusedId(): string | null {
+    return this.element.getFocusedId();
   }
 }

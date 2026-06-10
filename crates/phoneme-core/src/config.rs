@@ -715,6 +715,14 @@ pub struct InterfaceConfig {
     /// the app, exactly as before.
     #[serde(default)]
     pub preview_overlay: bool,
+    /// Enable system-wide vim-style keyboard navigation across the whole app
+    /// (h/l to move focus between panes, j/k to move within the recordings list,
+    /// gg/G to jump, i/Enter to edit, Esc to step out). This is distinct from
+    /// [`EditorConfig::vim_mode`], which only affects the transcript text editor.
+    /// **Default false = disabled** — when off, only the existing global shortcuts
+    /// (search `/`, help `?`, `g`-prefix jumps) are active.
+    #[serde(default)]
+    pub vim_nav: bool,
 }
 
 fn default_column_widths() -> Vec<String> {
@@ -924,6 +932,7 @@ impl Default for Config {
                 ],
                 column_widths: default_column_widths(),
                 preview_overlay: false,
+                vim_nav: false,
             },
             editor: EditorConfig {
                 vim_mode: false,
