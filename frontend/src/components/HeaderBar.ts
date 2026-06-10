@@ -7,6 +7,7 @@ import { listTags, type Tag } from '../services/ipc';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
+import { setSettingsAnchor } from './shared/settingsAnchor';
 import './SavedSearches';
 
 export type HeaderBarCallbacks = {
@@ -393,6 +394,13 @@ export class HeaderBarElement extends LitElement {
 
   private openAllSettings() {
     this.settingsMenuOpen = false;
+    // Record exactly where this button is, so the Settings view's floating
+    // ⚙ Settings button can sit in the identical spot (no jump on open).
+    const btn = document.querySelector<HTMLElement>(".hb-settings-main");
+    if (btn) {
+      const r = btn.getBoundingClientRect();
+      setSettingsAnchor({ top: r.top, left: r.left, width: r.width, height: r.height });
+    }
     this.callbacks?.onOpenSettings();
   }
 

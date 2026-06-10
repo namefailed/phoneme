@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";
 import { fuzzyScore } from "../../utils/fuzzy";
 import { keywordsForKey } from "./searchKeywords";
+import { getSettingsAnchor } from "../shared/settingsAnchor";
 
 import { SectionWhisper } from "./SectionWhisper";
 import { SectionPreview } from "./SectionPreview";
@@ -172,6 +173,15 @@ export class SettingsViewElement extends LitElement {
 
   private async handleClose() {
     if (await this.confirmClose()) this.onClose();
+  }
+
+  /** Inline position for the floating ⚙ Settings button: snap it to exactly
+   *  where the header button was (captured on open) so opening Settings doesn't
+   *  move it. Empty string → fall back to the CSS default (Settings opened via
+   *  a keyboard shortcut or deep link, with no captured anchor). */
+  private floatAnchorStyle(): string {
+    const a = getSettingsAnchor();
+    return a ? `position: fixed; top: ${a.top}px; left: ${a.left}px; right: auto;` : "";
   }
 
   private async handleSave() {
@@ -535,7 +545,7 @@ export class SettingsViewElement extends LitElement {
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
         <div class="settings-main">
-          <button class="settings-float-toggle" title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
+          <button class="settings-float-toggle" style=${this.floatAnchorStyle()} title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
           <div class="settings-body" id="settings-body"></div>
           <div class="settings-float-actions">
             <button id="settings-close" @click=${this.handleClose}>Close</button>
