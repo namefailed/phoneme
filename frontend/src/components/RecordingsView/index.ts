@@ -238,6 +238,17 @@ export class RecordingsView {
   private deselect() {
     const s = this.state.get();
     if (!s.selectedId) return;
+    // Closing the pane with unsaved transcript/notes edits would lose them.
+    if (this.detail.hasDirtyEdits()) {
+      void this.confirmLeaveUnsaved().then((discard) => { if (discard) this.applyDeselect(); });
+      return;
+    }
+    this.applyDeselect();
+  }
+
+  private applyDeselect() {
+    const s = this.state.get();
+    if (!s.selectedId) return;
     this.state.set({ ...s, selectedId: null });
     try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
     this.detail.clear();
@@ -586,6 +597,30 @@ export class RecordingsView {
   }
 
   private onSelect(id: string) {
+    const currentId = this.state.get().selectedId;
+    // Switching away from a recording with unsaved transcript/notes edits would
+    // lose them (the editors no longer auto-save) — confirm first.
+    if (currentId && currentId !== id && this.detail.hasDirtyEdits()) {
+      void this.confirmLeaveUnsaved().then((discard) => { if (discard) this.applySelect(id); });
+      return;
+    }
+    this.applySelect(id);
+  }
+
+  /** Prompt before discarding unsaved transcript/notes edits when leaving the
+   *  open recording. Resolves true to discard + proceed, false to keep editing. */
+  private async confirmLeaveUnsaved(): Promise<boolean> {
+    const { confirmDialog } = await import("../confirmDialog");
+    return confirmDialog({
+      title: "Unsaved changes",
+      body: "This recording has unsaved edits in its transcript or notes. Discard them?",
+      confirmLabel: "Discard changes",
+      cancelLabel: "Keep editing",
+      danger: true,
+    });
+  }
+
+  private applySelect(id: string) {
     this.state.set({ ...this.state.get(), selectedId: id });
     try { localStorage.setItem(LS_SELECTED, id); } catch { /* private mode */ }
     // Point the AI-activity popout at the selected single recording (sessions

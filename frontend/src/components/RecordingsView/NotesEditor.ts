@@ -13,8 +13,10 @@ import { invoke } from "@tauri-apps/api/core";
  *
  * Mirrors TranscriptEditor but:
  *  - saves via `updateNotes` (not `updateTranscript`)
- *  - auto-saves on change (debounced 800 ms) and on blur — no explicit
- *    "Save Changes" button, matching the previous textarea UX
+ *  - saves ONLY on an explicit action — the "Save Changes" button, Ctrl+S, or a
+ *    vim `:w` / `:wq`. No auto-save on change or blur (it felt like the box was
+ *    silently committing); unsaved edits are surfaced via the Save button and an
+ *    `onDirtyChange` callback so the pane can prompt before they're abandoned.
  *  - respects the same `editor.vim_mode` / `editor.vimrc` config as the
  *    transcript editor so the user gets consistent keybindings everywhere
  */
@@ -24,21 +26,27 @@ export class NotesEditor {
   private current: string;
   private lastSaved: string;
   private view: EditorView | null = null;
-  private debounce: ReturnType<typeof setTimeout> | undefined;
   private vimMode = false;
   private vimCurrentMode = "NORMAL";
   private vimBadgeElement: HTMLElement | null = null;
   private saveBtn: HTMLButtonElement | null = null;
+  private onDirtyChange?: (dirty: boolean) => void;
   private vimSaveHandler = () => {
     if (this.view?.hasFocus) void this.save();
   };
 
-  constructor(container: HTMLElement, id: string, initial: string) {
+  constructor(container: HTMLElement, id: string, initial: string, onDirtyChange?: (dirty: boolean) => void) {
     this.container = container;
     this.id = id;
     this.current = initial;
     this.lastSaved = initial;
+    this.onDirtyChange = onDirtyChange;
     void this.init();
+  }
+
+  /** Whether there are unsaved edits (used by the pane's leave-guard). */
+  isDirty(): boolean {
+    return this.current !== this.lastSaved;
   }
 
   private async init() {
@@ -137,33 +145,26 @@ export class NotesEditor {
       },
     });
 
-    const saveHandler = () => {
-      if (this.debounce) clearTimeout(this.debounce);
-      this.debounce = setTimeout(() => void this.save(), 800);
-    };
-
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         this.current = update.state.doc.toString();
         this.updateSaveBtn();
-        saveHandler();
+        this.onDirtyChange?.(this.isDirty());
       }
     });
 
-    // Blur-on-focusout: flush the debounce immediately.
-    const blurListener = EditorView.domEventHandlers({
-      blur: () => {
-        if (this.debounce) clearTimeout(this.debounce);
-        void this.save();
-        return false;
-      },
-    });
+    // Ctrl/Cmd+S saves (mirrors the transcript editor). Deliberately no auto-save
+    // on change or blur — the user commits explicitly via this, the Save button,
+    // or a vim `:w`.
+    const saveKeymap = keymap.of([
+      { key: "Mod-s", run: () => { void this.save(); return true; } },
+    ]);
 
     const extensions = [
       theme,
       EditorView.lineWrapping,
       updateListener,
-      blurListener,
+      saveKeymap,
       drawSelection({ cursorBlinkRate: 1200 }),
       keymap.of(standardKeymap),
     ];
@@ -201,20 +202,21 @@ export class NotesEditor {
     if (this.saveBtn) this.saveBtn.style.display = this.current !== this.lastSaved ? "" : "none";
   }
 
-  private async save() {
+  async save() {
     const value = this.current;
     if (value === this.lastSaved) return;
     try {
       await updateNotes(this.id, value);
       this.lastSaved = value;
       this.updateSaveBtn();
+      this.onDirtyChange?.(false);
+      showToast("Notes saved", "success");
     } catch (e) {
       showToast(`Failed to save notes: ${errText(e)}`, "error");
     }
   }
 
   dispose() {
-    if (this.debounce) clearTimeout(this.debounce);
     document.removeEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
     if (this.view) {
       this.view.destroy();

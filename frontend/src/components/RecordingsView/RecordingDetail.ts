@@ -17,7 +17,7 @@ import {
   escapeAttr,
 } from "../../utils/format";
 import { showToast } from "../../utils/toast";
-import { speakerLabelsIn, speakerDisplayName } from "./mergeMeeting";
+import { speakerLabelsIn, speakerDisplayName, applySpeakerNames } from "./mergeMeeting";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptDiff } from "./TranscriptDiff";
@@ -33,6 +33,7 @@ export class RecordingDetail {
   private notesEditor: NotesEditor | null = null;
   private onRefresh: () => void;
   private dirty = false;
+  private notesDirty = false;
   /** Identity of what is currently rendered, so refreshes that don't change the
    *  recording or its audio file can update text in place instead of tearing
    *  down and remounting the waveform (which caused it to flicker/clear). */
@@ -91,9 +92,11 @@ export class RecordingDetail {
     if (statsEl) statsEl.textContent = wordCountSummary(r.transcript ?? "");
 
     // Only rebuild the transcript editor if the text changed and the user has
-    // no unsaved edits — avoids clobbering in-progress typing.
+    // no unsaved edits — avoids clobbering in-progress typing. Speaker names are
+    // applied for display (the stored transcript keeps its [Speaker N] markers),
+    // so a rename shows up in the transcript here just like in the merged view.
     if (!this.dirty) {
-      const newText = r.transcript ?? "";
+      const newText = applySpeakerNames(r.transcript ?? "", r.speaker_names);
       const currentText = this.editor?.getText() ?? "";
       if (newText !== currentText) {
         const editorRoot = this.container.querySelector<HTMLElement>("#editor");
@@ -122,8 +125,16 @@ export class RecordingDetail {
     this.editor = null;
     this.notesEditor?.dispose();
     this.notesEditor = null;
+    this.dirty = false;
+    this.notesDirty = false;
     this.player.destroy();
     this.renderEmpty();
+  }
+
+  /** Commit any pending transcript + notes edits (the "Save" choice on the
+   *  unsaved-changes prompt). */
+  async saveAll(): Promise<void> {
+    await Promise.all([this.editor?.save(), this.notesEditor?.save()]);
   }
 
   private renderEmpty() {
@@ -332,7 +343,7 @@ export class RecordingDetail {
     const notesRoot = this.container.querySelector<HTMLElement>("#notes-editor");
     if (notesRoot) {
       this.notesEditor?.dispose();
-      this.notesEditor = new NotesEditor(notesRoot, r.id, r.notes ?? "");
+      this.notesEditor = new NotesEditor(notesRoot, r.id, r.notes ?? "", (d) => { this.notesDirty = d; });
     }
 
     // Focus-mode toggle in the header: hide the recordings list so the detail
@@ -600,8 +611,10 @@ export class RecordingDetail {
     window.setTimeout(() => void tick(), 1500);
   }
 
+  /** Unsaved edits in the transcript OR the notes box — gates the in-place
+   *  refresh (don't clobber a half-typed edit) and the leave/switch warning. */
   hasDirtyEdits(): boolean {
-    return this.dirty;
+    return this.dirty || this.notesDirty;
   }
 
   saveDirtyEdits(): Promise<void> {
