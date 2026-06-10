@@ -173,7 +173,13 @@ mark.search-hit {
   display: flex;
   flex-direction: column;
   background: var(--bg-elevated);
-  overflow: auto;
+  /* Only ever scroll vertically. A stray sub-pixel-wide child (e.g. a metadata
+     row) used to trip `overflow: auto` into showing a horizontal scrollbar
+     across the bottom; the pane's content wraps, so horizontal scroll is never
+     wanted. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
 }
 .detail-header {
   padding: 14px 18px;
