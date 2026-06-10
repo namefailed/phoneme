@@ -495,7 +495,30 @@ export class RecordingsListElement extends LitElement {
     }
 
     const checkboxColWidth = "28px";
-    const gridTemplate = [checkboxColWidth, ...activeWidths!].join(" ");
+    // The grid MUST keep a flexible track so the table always fills the list
+    // pane up to the splitter. The transcript column is that fill column (its
+    // default width is `1fr`); coerce it to `minmax(<floor>, 1fr)` so that even
+    // a fixed px persisted from a column-resize still STRETCHES to the pane edge
+    // (keeping the resized width as a usable floor) instead of freezing the whole
+    // grid to a fixed total width. A frozen all-px grid is the resize bug: when
+    // the pane is wider than the column sum the rows stop short of the splitter
+    // (a gap), and when it's narrower the table forces a horizontal scrollbar.
+    const widthsForGrid = activeWidths!.map((w, i) => {
+      if (visibleCols[i] !== "transcript") return w;
+      const floor = w.trim().endsWith("px") ? w.trim() : "160px";
+      return `minmax(${floor}, 1fr)`;
+    });
+    // Fallback for when the transcript column is hidden: with no flexible track
+    // at all the grid would freeze to fixed px and leave a gap, so append a
+    // cell-less filler track that absorbs the slack as clean blank space (head
+    // and rows share this template and both have the same cell count, so the
+    // extra track stays empty in both — no misalignment).
+    const hasFlexTrack = widthsForGrid.some((w) => w.includes("fr"));
+    const gridTemplate = [
+      checkboxColWidth,
+      ...widthsForGrid,
+      ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
+    ].join(" ");
 
     const allSelected = s.recordings.length > 0 && s.recordings.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
