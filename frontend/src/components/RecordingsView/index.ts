@@ -46,7 +46,9 @@ export class RecordingsView {
   private mergedDetail: MergedConversationDetail;
   private state: Store<RecordingsListState>;
   private splitPercent = readStoredSplit();
-  private detailVisible = true;
+  // Starts hidden: the detail pane is shown only when a recording is selected,
+  // so the recordings list gets the full width when nothing is selected.
+  private detailVisible = false;
   private focusMode = false;
   private sidebarVisible = readStoredSidebar();
   private sidebarWidth = readStoredSidebarWidth();
@@ -156,6 +158,9 @@ export class RecordingsView {
       this.detail.clear();
       this.mergedDetail.meetingId = "";
       try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
+      // No selection → collapse the detail pane so the list uses the full width.
+      this.detailVisible = false;
+      this.applyLayout();
     } else if (selectedId && !this.detail.hasDirtyEdits()) {
       if (selectedId.startsWith("session:")) {
         const mid = selectedId.substring(8);
@@ -188,6 +193,25 @@ export class RecordingsView {
     this.applyLayout();
   }
 
+  /** Clear the current selection: empty the detail pane and collapse it so the
+   *  recordings list gets the full width (used by Escape, and when the selected
+   *  recording is removed). */
+  private deselect() {
+    const s = this.state.get();
+    if (!s.selectedId) return;
+    this.state.set({ ...s, selectedId: null });
+    try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
+    this.detail.clear();
+    this.mergedDetail.meetingId = "";
+    this.mergedDetail.style.display = "none";
+    const single = this.container.querySelector<HTMLElement>("#rv-single-detail");
+    if (single) single.style.display = "block";
+    const tp = this.container.querySelector<HTMLElement & { recordingId: string }>("#rv-thinking");
+    if (tp) tp.recordingId = "";
+    this.detailVisible = false;
+    this.applyLayout();
+  }
+
   private disposed = false;
 
   dispose() {
@@ -216,7 +240,7 @@ export class RecordingsView {
     }
 
     const sidebarWidth = this.sidebarVisible ? `${this.sidebarWidth}px` : "0px";
-    const resizerWidth = this.sidebarVisible ? "4px" : "0px";
+    const resizerWidth = this.sidebarVisible ? "6px" : "0px";
     const resizer = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
     // IMPORTANT: never `display:none` the resizer. The grid has five explicit
     // column tracks (sidebar, resizer, list, splitter, detail); removing the
@@ -235,7 +259,7 @@ export class RecordingsView {
       // flexible 1fr track, so collapsing the sidebar grows the LIST and leaves
       // the detail pane's width unchanged (detail% is of the constant shell
       // width). The splitter drag is delta-based, so this stays consistent.
-      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} minmax(0, 1fr) 3px ${100 - this.splitPercent}%`;
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} minmax(0, 1fr) 6px ${100 - this.splitPercent}%`;
     } else {
       shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} 1fr 0 0`;
     }
@@ -300,6 +324,12 @@ export class RecordingsView {
       singleContainer.style.display = "block";
       this.mergedDetail.meetingId = "";
       void this.detail.show(id);
+    }
+    // A recording is selected → ensure the detail pane is shown (it auto-hides
+    // when nothing is selected, giving the list the full width).
+    if (!this.detailVisible) {
+      this.detailVisible = true;
+      this.applyLayout();
     }
   }
 
@@ -372,12 +402,20 @@ export class RecordingsView {
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
-    // Escape exits focus mode — but not while typing in the transcript/notes
-    // editor (CodeMirror's contenteditable, where Esc is vim's normal-mode).
-    if (e.key === "Escape" && this.focusMode && !target.isContentEditable) {
-      e.preventDefault();
-      this.toggleFocusMode();
-      return;
+    // Escape: exit focus mode if active, otherwise clear the selection (which
+    // collapses the detail pane). Not while typing in the transcript/notes editor
+    // (CodeMirror's contenteditable, where Esc is vim's normal-mode).
+    if (e.key === "Escape" && !target.isContentEditable) {
+      if (this.focusMode) {
+        e.preventDefault();
+        this.toggleFocusMode();
+        return;
+      }
+      if (this.state.get().selectedId) {
+        e.preventDefault();
+        this.deselect();
+        return;
+      }
     }
 
     if (e.ctrlKey && e.key === "\\") {

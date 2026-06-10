@@ -463,18 +463,26 @@ mark.search-hit {
    editing. */
 .detail-focus-btn {
   flex: 0 0 auto;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--fg-muted);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+/* Block display + explicit size so the icon is crisply centered in the button
+   (an inline SVG otherwise sits a hair off-center on its text baseline). */
+.detail-focus-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 .detail-focus-btn:hover {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -873,7 +881,7 @@ mark.search-hit {
   background: var(--border-subtle);
   position: relative;
   cursor: col-resize;
-  width: 3px;
+  width: 6px;
   height: 100%;
   z-index: 100;
   transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
@@ -884,7 +892,9 @@ mark.search-hit {
 }
 .splitter-handle {
   position: absolute;
-  inset: 0;
+  /* Extend the grabbable area a few px each side of the thin visible bar so the
+     splitter is easy to grab without making the divider itself look chunky. */
+  inset: 0 -5px;
 }
 .rv-detail {
   height: 100%;
@@ -1579,12 +1589,19 @@ ph-sidebar {
 
 /* Sidebar resize handle (between the sidebar and the recordings list). */
 .rv-sidebar-resizer {
-  width: 4px;
+  width: 6px;
   height: 100%;
   cursor: col-resize;
   background: transparent;
   z-index: 100;
+  position: relative;
   transition: background 0.15s ease-out;
+}
+/* Invisible wider hit area so the thin handle is easy to grab. */
+.rv-sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
 }
 .rv-sidebar-resizer:hover { background: var(--accent); }
 .sidebar-header {

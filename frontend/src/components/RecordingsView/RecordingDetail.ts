@@ -165,9 +165,9 @@ export class RecordingDetail {
           <div class="transcript-history">
             <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
             <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
-            <button class="view-btn" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
-            <button class="view-btn" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
             <button class="view-btn" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
+            <button class="view-btn" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
+            <button class="view-btn" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
           </div>
         </div>
         <div class="notes-block" style="margin-top: 6px;">
