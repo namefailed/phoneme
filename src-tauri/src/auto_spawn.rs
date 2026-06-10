@@ -176,11 +176,15 @@ mod tests {
             if let Ok(mut conn) = listener.accept().await {
                 while let Ok(Some(req)) = conn.recv().await {
                     let res = match req {
-                        Request::DaemonStatus => Response::Ok(serde_json::json!({
-                            "running": true,
-                            "pid": 0,
-                            "version": env!("CARGO_PKG_VERSION"),
-                        })),
+                        phoneme_ipc::ServerRequest::Known(req)
+                            if matches!(*req, Request::DaemonStatus) =>
+                        {
+                            Response::Ok(serde_json::json!({
+                                "running": true,
+                                "pid": 0,
+                                "version": env!("CARGO_PKG_VERSION"),
+                            }))
+                        }
                         _ => Response::Ok(serde_json::Value::Null),
                     };
                     if conn.send_response(res).await.is_err() {

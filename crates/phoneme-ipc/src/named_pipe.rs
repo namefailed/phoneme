@@ -7,7 +7,7 @@
 
 use crate::codec::JsonLineCodec;
 use crate::error::{IpcTransportError, TransportResult};
-use crate::schema::{DaemonEvent, Request, Response};
+use crate::schema::{DaemonEvent, Request, Response, ServerRequest};
 use crate::transport::Transport;
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
@@ -100,12 +100,20 @@ fn create_secured_server(opts: &ServerOptions, path: &str) -> std::io::Result<Na
 /// Server-side: a single accepted connection. Use [`NamedPipeListener`] to
 /// produce these.
 pub struct NamedPipeConnection {
-    framed_in: Framed<NamedPipeServer, JsonLineCodec<Request>>,
+    // Decodes requests leniently as `ServerRequest`: a well-formed JSON line that
+    // isn't a recognized `Request` (e.g. a newer client during a rolling upgrade)
+    // becomes `ServerRequest::Unknown` instead of a stream-fatal codec error that
+    // would tear down the whole connection. Only a non-JSON / truncated frame is
+    // still a hard transport error.
+    framed_in: Framed<NamedPipeServer, JsonLineCodec<ServerRequest>>,
 }
 
 impl NamedPipeConnection {
     /// Receive the next request from the client, or `None` if they disconnected.
-    pub async fn recv(&mut self) -> TransportResult<Option<Request>> {
+    /// An unrecognized-but-well-formed request is returned as
+    /// [`ServerRequest::Unknown`] so the caller can reply with an error and keep
+    /// the connection alive.
+    pub async fn recv(&mut self) -> TransportResult<Option<ServerRequest>> {
         match self.framed_in.next().await {
             Some(Ok(req)) => Ok(Some(req)),
             Some(Err(e)) => Err(IpcTransportError::Io(e)),
@@ -182,7 +190,7 @@ impl NamedPipeListener {
             .map_err(IpcTransportError::Connect)?;
         self.current = Some(next);
 
-        let framed = Framed::new(server, JsonLineCodec::<Request>::new());
+        let framed = Framed::new(server, JsonLineCodec::<ServerRequest>::new());
         Ok(NamedPipeConnection { framed_in: framed })
     }
 }

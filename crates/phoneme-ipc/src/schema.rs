@@ -290,6 +290,41 @@ pub enum Response {
     Err(IpcError),
 }
 
+/// A request as decoded on the **server** (daemon) side.
+///
+/// Decoding a bare [`Request`] fails the whole codec stream when a line is valid
+/// JSON but not a recognized variant — e.g. a newer client (the tray) sends a
+/// request this daemon predates during a rolling rebuild. That codec error tears
+/// down the entire pipe connection, collaterally killing every other in-flight
+/// and subsequent command on it (this is what made an unrelated `run_doctor`
+/// "stop working" the moment the tray got ahead of the daemon). `ServerRequest`
+/// instead decodes such a line to [`ServerRequest::Unknown`] so the daemon can
+/// answer with an error `Response` and keep serving the connection.
+#[derive(Debug, Clone)]
+pub enum ServerRequest {
+    /// A recognized request.
+    Known(Box<Request>),
+    /// A line that parsed as JSON but not into any known request; carries the
+    /// deserialize error detail so the daemon can return a useful `Response`.
+    Unknown { detail: String },
+}
+
+impl<'de> Deserialize<'de> for ServerRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Decode to a generic Value first — any well-formed JSON line succeeds
+        // here — then try to interpret it as a Request. An unknown variant
+        // becomes data (`Unknown`) rather than a stream-fatal codec error.
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match serde_json::from_value::<Request>(value) {
+            Ok(req) => ServerRequest::Known(Box::new(req)),
+            Err(e) => ServerRequest::Unknown { detail: e.to_string() },
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IpcError {
     pub kind: IpcErrorKind,

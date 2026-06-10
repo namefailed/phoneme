@@ -13,12 +13,40 @@ use crate::app_state::AppState;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus};
 use phoneme_ipc::{
     DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, PipelineStage, Request, Response,
+    ServerRequest,
 };
 
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
-        match conn.recv().await {
-            Ok(Some(Request::SubscribeEvents)) => {
+        // Read one request. An unrecognized-but-well-formed request (a client
+        // ahead of this daemon during a rolling rebuild) is answered with an
+        // error and the connection is KEPT — a single unknown request must never
+        // tear down the pipe and break this client's other commands.
+        let req = match conn.recv().await {
+            Ok(Some(ServerRequest::Known(req))) => *req,
+            Ok(Some(ServerRequest::Unknown { detail })) => {
+                tracing::warn!(
+                    %detail,
+                    "unrecognized IPC request; replying with an error and keeping the connection alive"
+                );
+                let resp = Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!("unsupported or unrecognized request: {detail}"),
+                });
+                if let Err(e) = conn.send_response(resp).await {
+                    tracing::warn!(error = %e, "send_response failed");
+                    return;
+                }
+                continue;
+            }
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(error = %e, "recv failed");
+                return;
+            }
+        };
+        match req {
+            Request::SubscribeEvents => {
                 // No ACK Response is sent. The client reframes its connection
                 // as a DaemonEvent stream the instant it writes
                 // SubscribeEvents — an ACK `Response` would be decoded by that
@@ -57,17 +85,12 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
                     }
                 }
             }
-            Ok(Some(req)) => {
-                let response = handle_request(req, &state).await;
+            other => {
+                let response = handle_request(other, &state).await;
                 if let Err(e) = conn.send_response(response).await {
                     tracing::warn!(error = %e, "send_response failed");
                     return;
                 }
-            }
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(error = %e, "recv failed");
-                return;
             }
         }
     }
