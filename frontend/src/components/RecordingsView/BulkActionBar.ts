@@ -58,7 +58,18 @@ export class BulkActionBarElement extends LitElement {
       const raw = localStorage.getItem(POS_LS);
       if (raw) {
         const p = JSON.parse(raw);
-        if (typeof p?.x === "number" && typeof p?.y === "number") this.pos = p;
+        // Only honour a saved drag position that's still on-screen — a stale
+        // off-screen position (window was resized smaller, or it was dragged
+        // out) would mount the whole bar where it can't be seen ("bar gone").
+        if (
+          typeof p?.x === "number" && typeof p?.y === "number" &&
+          p.x >= 0 && p.x <= window.innerWidth - 80 &&
+          p.y >= 0 && p.y <= window.innerHeight - 40
+        ) {
+          this.pos = p;
+        } else {
+          localStorage.removeItem(POS_LS);
+        }
       }
     } catch { /* ignore */ }
     void this.loadTags();
@@ -229,7 +240,7 @@ export class BulkActionBarElement extends LitElement {
     if (n === 0) return html``;
 
     const style = this.pos
-      ? `position:fixed; left:${this.pos.x}px; top:${this.pos.y}px;`
+      ? `position:fixed; left:${Math.max(8, Math.min(window.innerWidth - 80, this.pos.x))}px; top:${Math.max(8, Math.min(window.innerHeight - 40, this.pos.y))}px;`
       : `position:fixed; left:50%; bottom:24px; transform:translateX(-50%);`;
 
     return html`
