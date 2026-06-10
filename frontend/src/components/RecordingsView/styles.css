@@ -1588,3 +1588,135 @@ ph-sidebar {
 .merged-text {
   color: var(--fg-default);
 }
+
+/* ── Transcript version diff (Compare versions) ───────────────────── */
+/* A read-only diff between two transcript layers, mounted inside the existing
+   transcript "peek" slot. Insertions/deletions reuse the theme ok/err colors so
+   it reads correctly across every theme. */
+.tdiff {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+}
+.tdiff-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.tdiff-pickers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tdiff-arrow {
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+.tdiff-select {
+  background: var(--bg-elevated);
+  color: var(--fg-default);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tdiff-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+/* Word/line granularity toggle — a small segmented control. */
+.tdiff-modes {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.tdiff-mode {
+  background: var(--bg-elevated);
+  border: none;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.tdiff-mode + .tdiff-mode {
+  border-left: 1px solid var(--border-subtle);
+}
+.tdiff-mode:hover {
+  color: var(--fg-default);
+}
+.tdiff-mode.active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+.tdiff-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex: 0 0 auto;
+}
+.tdiff-key {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.tdiff-hint {
+  color: var(--fg-faded);
+  margin-left: auto;
+}
+/* The diff text itself: wraps, preserves whitespace, scrolls if long. */
+.tdiff-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.tdiff-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.7;
+  font-size: 14px;
+  color: var(--fg-default);
+}
+.tdiff-eq {
+  color: var(--fg-default);
+}
+/* Insertions (present only on the right side) — green-tinted. */
+.tdiff-ins {
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: var(--fg-default);
+  border-radius: 3px;
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--ok) 60%, transparent);
+}
+/* Deletions (present only on the left side) — red-tinted, struck through. */
+.tdiff-del {
+  background: color-mix(in srgb, var(--err) 20%, transparent);
+  color: var(--fg-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--err) 70%, transparent);
+  border-radius: 3px;
+}
+.tdiff-empty,
+.tdiff-same {
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+.tdiff-same {
+  margin-bottom: 8px;
+  font-style: italic;
+  color: var(--fg-faded);
+}

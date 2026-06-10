@@ -17,6 +17,7 @@ import {
 import { showToast } from "../../utils/toast";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
+import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
@@ -146,7 +147,9 @@ export class RecordingDetail {
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
+          <div id="compare-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end; flex-wrap: wrap;">
+            <button class="inline-button" id="view-compare" title="Side-by-side diff of the raw, cleaned, and current transcript versions">Compare versions</button>
             <button class="inline-button" id="view-summary">View summary</button>
             <button class="inline-button" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">View unedited transcript</button>
             <button class="inline-button" id="view-original" title="The raw machine transcript, before AI cleanup">View original transcript</button>
@@ -196,7 +199,7 @@ export class RecordingDetail {
     //   • summary    — AI summary (generated on demand if absent)
     // Exactly one of {editor, original, unedited, summary} is visible at a time.
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
-    type PeekKind = "original" | "unedited" | "summary";
+    type PeekKind = "original" | "unedited" | "summary" | "compare";
     const peeks: Record<PeekKind, { btn: HTMLButtonElement | null; el: HTMLElement | null; idle: string }> = {
       original: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
@@ -212,6 +215,11 @@ export class RecordingDetail {
         btn: this.container.querySelector<HTMLButtonElement>("#view-summary"),
         el: this.container.querySelector<HTMLElement>("#summary-peek"),
         idle: "View summary",
+      },
+      compare: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-compare"),
+        el: this.container.querySelector<HTMLElement>("#compare-peek"),
+        idle: "Compare versions",
       },
     };
 
@@ -290,6 +298,28 @@ export class RecordingDetail {
         void this.requestSummary(r.id);
       }
       openPeek("summary");
+    });
+
+    // Compare peek (v1.10): a read-only diff between any two of the three
+    // transcript layers — original (raw machine), clean (LLM-cleaned, pre-edit),
+    // and current. The raw/clean layers are fetched on demand (the same IPC the
+    // other peeks use); current comes straight from the loaded recording. Missing
+    // layers are handled inside TranscriptDiff (shows a clear "n/a" state).
+    peeks.compare.btn?.addEventListener("click", async () => {
+      if (activePeek === "compare") return resetPeek();
+      const el = peeks.compare.el;
+      if (!el) return;
+      el.innerHTML = `<div style="color: var(--fg-muted); line-height: 1.6;">Loading versions…</div>`;
+      openPeek("compare");
+      const [original, clean] = await Promise.all([
+        getOriginalTranscript(r.id).catch(() => null),
+        getCleanTranscript(r.id).catch(() => null),
+      ]);
+      // Bail if the user navigated away or closed the peek while we were loading
+      // (the peek box is hidden again once another peek/editor takes over).
+      if (this.recording?.id !== r.id || el.style.display === "none") return;
+      el.innerHTML = "";
+      new TranscriptDiff(el, { original, clean, current: r.transcript ?? "" });
     });
 
     // Notes: CodeMirror editor (respects editor.vim_mode like the transcript
