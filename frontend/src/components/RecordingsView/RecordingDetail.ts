@@ -148,6 +148,7 @@ export class RecordingDetail {
               <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
             </div>
           </div>
+          <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">⛶</button>
         </div>
         <div class="waveform" id="wf-${r.id}"></div>
         <div id="actions"></div>
@@ -158,14 +159,14 @@ export class RecordingDetail {
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="compare-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
-          <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end; flex-wrap: wrap;">
-            <button class="inline-button" id="view-compare" title="Side-by-side diff of the raw, cleaned, and current transcript versions">Compare versions</button>
-            <button class="inline-button" id="view-summary">View summary</button>
-            <button class="inline-button" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">View unedited transcript</button>
-            <button class="inline-button" id="view-original" title="The raw machine transcript, before AI cleanup">View original transcript</button>
+          <div class="transcript-history">
+            <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
+            <button class="view-btn" id="view-compare" title="Side-by-side diff of the raw, cleaned, and current transcript versions">🆚 Compare</button>
+            <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
+            <button class="view-btn" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
+            <button class="view-btn" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
           </div>
         </div>
-        <div id="speakers-block" class="speakers-block" style="margin-top: 6px;"></div>
         <div class="notes-block" style="margin-top: 6px;">
           <div id="notes-editor"></div>
         </div>
@@ -216,22 +217,22 @@ export class RecordingDetail {
       original: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
         el: this.container.querySelector<HTMLElement>("#original-peek"),
-        idle: "View original transcript",
+        idle: "📃 Original",
       },
       unedited: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-unedited"),
         el: this.container.querySelector<HTMLElement>("#unedited-peek"),
-        idle: "View unedited transcript",
+        idle: "📄 Unedited",
       },
       summary: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-summary"),
         el: this.container.querySelector<HTMLElement>("#summary-peek"),
-        idle: "View summary",
+        idle: "✨ Summary",
       },
       compare: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-compare"),
         el: this.container.querySelector<HTMLElement>("#compare-peek"),
-        idle: "Compare versions",
+        idle: "🆚 Compare",
       },
     };
 
@@ -342,25 +343,49 @@ export class RecordingDetail {
       this.notesEditor = new NotesEditor(notesRoot, r.id, r.notes ?? "");
     }
 
+    // Focus-mode toggle in the header: hide the recordings list so the detail
+    // (and the editor) take the full width. RecordingsView owns the layout; we
+    // just toggle it and mirror the active state on the button.
+    const focusBtn = this.container.querySelector<HTMLButtonElement>("#detail-focus");
+    if (focusBtn) {
+      const sync = () => {
+        const inFocus = !!document.getElementById("rv-shell")?.classList.contains("rv-focus");
+        focusBtn.classList.toggle("active", inFocus);
+        focusBtn.title = inFocus
+          ? "Exit focus mode (show the recordings list)"
+          : "Focus mode — hide the recordings list and edit full-width";
+      };
+      sync();
+      focusBtn.onclick = () => {
+        window.dispatchEvent(new CustomEvent("phoneme:toggle-focus-mode"));
+        sync();
+      };
+    }
+
     this.renderSpeakers(r);
   }
 
-  /** Render the "Speakers" panel: one renamable row per `[Speaker N]` label that
-   *  appears in this recording's transcript. Shown only for diarized recordings
-   *  (those carrying at least one marker). Renaming maps the label → name via
-   *  the catalog; the stored transcript keeps its `[Speaker N]` markers, so the
-   *  change is reversible and the transcript text is never rewritten. */
+  /** Show the "Rename speakers" button when this recording is diarized (carries
+   *  at least one `[Speaker N]` marker) and wire it to open the rename modal —
+   *  a modal rather than an inline panel so it never stretches the detail pane. */
   private renderSpeakers(r: Recording) {
-    const root = this.container.querySelector<HTMLElement>("#speakers-block");
-    if (!root) return;
+    const btn = this.container.querySelector<HTMLButtonElement>("#rename-speakers");
+    if (!btn) return;
     const labels = speakerLabelsIn(r.transcript);
     if (labels.length === 0) {
-      // No diarization markers → no panel (and clear any stale content).
-      root.innerHTML = "";
-      root.style.display = "none";
+      btn.style.display = "none";
+      btn.onclick = null;
       return;
     }
-    root.style.display = "block";
+    btn.style.display = "";
+    btn.onclick = () => this.openSpeakersModal(r, labels);
+  }
+
+  /** Modal to rename the diarized speakers. Each row maps `Speaker N` → a name
+   *  (blank clears it, reverting to "Speaker N"); the stored transcript keeps
+   *  its `[Speaker N]` markers, so renames are reversible and never rewrite the
+   *  text. Commits on Enter/blur. */
+  private openSpeakersModal(r: Recording, labels: number[]) {
     const rows = labels
       .map((label) => {
         const name = speakerDisplayName(r.speaker_names, label);
@@ -379,13 +404,39 @@ export class RecordingDetail {
           </div>`;
       })
       .join("");
-    root.innerHTML = `
-      <div class="speakers-header">Speakers</div>
-      <div class="speakers-hint">Rename a speaker to show that name everywhere — the transcript keeps its <code>[Speaker N]</code> labels.</div>
-      <div class="speakers-list">${rows}</div>`;
+    const overlay = document.createElement("div");
+    overlay.className = "speakers-modal-overlay";
+    overlay.innerHTML = `
+      <div class="speakers-modal" role="dialog" aria-modal="true" aria-label="Rename speakers">
+        <div class="speakers-modal-header">
+          <span>Rename speakers</span>
+          <button class="speakers-modal-close" aria-label="Close">✕</button>
+        </div>
+        <div class="speakers-block" style="margin: 0; padding: 0; border: none; background: none;">
+          <div class="speakers-hint">Renaming shows the name everywhere — the transcript keeps its <code>[Speaker N]</code> labels, so it's reversible.</div>
+          <div class="speakers-list">${rows}</div>
+        </div>
+        <div class="speakers-modal-footer">
+          <button class="inline-button speakers-modal-done">Done</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
 
-    // Wire each input: commit on Enter or blur; Escape reverts to the stored value.
-    root.querySelectorAll<HTMLInputElement>(".speaker-name-input").forEach((input) => {
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", onKey);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close();
+    });
+    overlay.querySelector(".speakers-modal-close")?.addEventListener("click", close);
+    overlay.querySelector(".speakers-modal-done")?.addEventListener("click", close);
+
+    overlay.querySelectorAll<HTMLInputElement>(".speaker-name-input").forEach((input) => {
       const rowEl = input.closest<HTMLElement>(".speaker-row");
       const label = Number(rowEl?.dataset.label);
       input.addEventListener("keydown", (e) => {
@@ -393,15 +444,21 @@ export class RecordingDetail {
           e.preventDefault();
           input.blur();
         } else if (e.key === "Escape") {
+          // Revert this field; the bubbling Escape then closes the modal (the
+          // reverted value re-commits as a no-op via the blur guard).
           e.preventDefault();
           input.value = input.defaultValue;
           input.blur();
         }
       });
-      input.addEventListener("blur", () => {
-        void this.commitSpeakerName(r.id, label, input.value, input.defaultValue);
+      input.addEventListener("blur", async () => {
+        const v = input.value;
+        await this.commitSpeakerName(r.id, label, v, input.defaultValue);
+        input.defaultValue = v.trim();
       });
     });
+
+    overlay.querySelector<HTMLInputElement>(".speaker-name-input")?.focus();
   }
 
   /** Persist a speaker rename for the current recording. No-op when the value is

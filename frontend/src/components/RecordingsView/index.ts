@@ -47,6 +47,7 @@ export class RecordingsView {
   private state: Store<RecordingsListState>;
   private splitPercent = readStoredSplit();
   private detailVisible = true;
+  private focusMode = false;
   private sidebarVisible = readStoredSidebar();
   private sidebarWidth = readStoredSidebarWidth();
   private unsub: (() => void) | null = null;
@@ -55,6 +56,7 @@ export class RecordingsView {
   private splitter: Splitter;
   private keydownHandler: (e: KeyboardEvent) => void;
   private selectHandler: ((e: Event) => void) | null = null;
+  private focusHandler: (() => void) | null = null;
 
   /** Current multi-selection. Empty when no checkboxes are checked. */
   private multiSelected = new Set<string>();
@@ -123,6 +125,8 @@ export class RecordingsView {
       if (typeof id === "string") this.onSelect(id);
     };
     window.addEventListener("phoneme:select-recording", this.selectHandler);
+    this.focusHandler = () => this.toggleFocusMode();
+    window.addEventListener("phoneme:toggle-focus-mode", this.focusHandler);
   }
 
   async refresh() {
@@ -174,6 +178,16 @@ export class RecordingsView {
     this.applyLayout();
   }
 
+  /** Focus mode: hide the recordings list (+ sidebar/splitter) so the detail
+   *  pane fills the view for full-width editing. Toggled from the detail
+   *  header's ⛶ button and exited with Escape. */
+  toggleFocusMode() {
+    this.focusMode = !this.focusMode;
+    const shell = this.container.querySelector<HTMLElement>("#rv-shell");
+    shell?.classList.toggle("rv-focus", this.focusMode);
+    this.applyLayout();
+  }
+
   private disposed = false;
 
   dispose() {
@@ -185,6 +199,7 @@ export class RecordingsView {
     this.splitter.dispose();
     document.removeEventListener("keydown", this.keydownHandler);
     if (this.selectHandler) window.removeEventListener("phoneme:select-recording", this.selectHandler);
+    if (this.focusHandler) window.removeEventListener("phoneme:toggle-focus-mode", this.focusHandler);
   }
 
   private applyLayout() {
@@ -211,7 +226,11 @@ export class RecordingsView {
     // hidden. Keep it in the grid and just give it a 0px-wide track instead.
     if (resizer) resizer.style.display = "";
 
-    if (this.detailVisible) {
+    if (this.detailVisible && this.focusMode) {
+      // Focus mode: collapse the sidebar, resizer, list, and splitter so the
+      // detail pane fills the whole view for distraction-free, full-width editing.
+      shell.style.gridTemplateColumns = `0px 0px 0 0 1fr`;
+    } else if (this.detailVisible) {
       // The detail (right) pane is the percentage track and the list is the
       // flexible 1fr track, so collapsing the sidebar grows the LIST and leaves
       // the detail pane's width unchanged (detail% is of the constant shell
@@ -352,6 +371,14 @@ export class RecordingsView {
     // Ignore keydown if we are inside an input/textarea
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+
+    // Escape exits focus mode — but not while typing in the transcript/notes
+    // editor (CodeMirror's contenteditable, where Esc is vim's normal-mode).
+    if (e.key === "Escape" && this.focusMode && !target.isContentEditable) {
+      e.preventDefault();
+      this.toggleFocusMode();
+      return;
+    }
 
     if (e.ctrlKey && e.key === "\\") {
       e.preventDefault();
