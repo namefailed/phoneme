@@ -5,8 +5,28 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { showToast } from "../../utils/toast";
 import { CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
-import { CLOUD_STT_PROVIDERS } from "../../services/sttProviders";
+import { CLOUD_STT_PROVIDERS, PREVIEW_STT_PROVIDERS } from "../../services/sttProviders";
 import "./styles.css";
+
+/** The dedicated preview source the user picked: reuse the final model, run a
+ *  small local model on its own server, or hit a fast cloud API. Mirrors
+ *  Settings → Live Preview (SectionPreview) so the two stay in lock-step. */
+type PreviewSource = "same" | "local" | "api";
+
+/** Friendly label for a downloaded whisper model filename (matches SectionPreview). */
+function prettyPreviewModel(path: string): string {
+  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  const map: Record<string, string> = {
+    "ggml-tiny.en.bin": "Tiny (English)",
+    "ggml-base.en.bin": "Base (English)",
+    "ggml-small.en.bin": "Small (English)",
+    "ggml-medium.en.bin": "Medium (English)",
+    "ggml-large-v3.bin": "Large v3",
+    "ggml-large-v3-turbo.bin": "Large v3 Turbo",
+    "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
+  };
+  return map[name] ?? name;
+}
 
 
 export type WizardStep = "welcome" | "mode" | "configure" | "connect" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
@@ -53,6 +73,8 @@ export class FirstRunWizardElement extends LitElement {
 
   // Live-preview step state
   @state() private previewDownloading = false;
+  /** Whisper model files already on disk (for the dedicated-local picker). */
+  @state() private downloadedModels: string[] = [];
 
   // Hotkey mode state
   @state() private capturingHotkeyFor: "general" | "meeting" | "in_place" | null = null;
@@ -71,6 +93,7 @@ export class FirstRunWizardElement extends LitElement {
       this.systemVramMb = sysInfo.vram_mb;
       
       this.devices = await invoke<string[]>("list_input_devices").catch(() => []);
+      this.downloadedModels = await invoke<string[]>("wizard_list_downloaded_models").catch(() => []);
     } catch (e) {
       console.error("Wizard init error:", e);
     }
@@ -94,7 +117,8 @@ export class FirstRunWizardElement extends LitElement {
       delete cleanConfig._whisper_model_choice;
       delete cleanConfig._ollama_model_choice;
       delete cleanConfig._setup_native_streaming;
-      
+      delete cleanConfig._setup_preview;
+
       await invoke("write_config", { config: cleanConfig });
       this.onComplete();
     } catch (e) {
@@ -111,7 +135,8 @@ export class FirstRunWizardElement extends LitElement {
       delete cleanConfig._whisper_model_choice;
       delete cleanConfig._ollama_model_choice;
       delete cleanConfig._setup_native_streaming;
-      
+      delete cleanConfig._setup_preview;
+
       await invoke("write_config", { config: cleanConfig });
       this.onComplete();
     } catch (e) {
@@ -143,9 +168,10 @@ export class FirstRunWizardElement extends LitElement {
         <h2 class="wizard-title">Welcome to Phoneme</h2>
         <p class="wizard-subtitle">Local-first voice notes. Press a hotkey, speak, get a transcript — all on your machine.</p>
         <ul class="wizard-bullets">
-          <li>Records audio via your microphone</li>
-          <li>Transcribes locally with whisper-server (no cloud)</li>
-          <li>Emits the transcript as JSON to your hook script</li>
+          <li>Records from your microphone with a single global hotkey</li>
+          <li>Transcribes privately on your own machine — no cloud required</li>
+          <li>Optionally watch the words appear live as you speak</li>
+          <li>Cleans up, summarizes, and sends the text wherever you want</li>
         </ul>
         
         <div class="wizard-theme-card">
@@ -677,25 +703,95 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
-  /** Enable live preview on a dedicated local Tiny model (its own server), downloading it if needed. */
-  private async setPreviewLocal() {
+  /** Which preview source is active, from the current config (mirrors SectionPreview). */
+  private previewSource(): PreviewSource {
+    const pv = this.config.preview_whisper;
+    if (!pv) return "same";
+    return pv.provider === "local" ? "local" : "api";
+  }
+
+  /** Main (final) bundled-server port; the preview server uses the next port up. */
+  private mainPreviewPort(): number {
+    return (this.config.whisper?.bundled_server_port ?? 5809) as number;
+  }
+
+  /** Full path of an already-downloaded model file ending in `filename`, or null. */
+  private downloadedPath(filename: string): string | null {
+    return this.downloadedModels.find((p) => p.replace(/\\/g, "/").endsWith(filename)) ?? null;
+  }
+
+  /** Turn live preview on/off. Disabling also clears the overlay flag (it has
+   *  nothing to show without preview text) but preserves the chosen source. */
+  private setPreviewEnabled(on: boolean) {
     if (!this.config.recording) this.config.recording = {};
+    this.config.recording.streaming_preview = on;
+    if (!on) {
+      if (!this.config.interface) this.config.interface = {};
+      this.config.interface.preview_overlay = false;
+    }
+    this.requestUpdate();
+  }
+
+  /** Reuse the main (final) model on its own server — no extra download. */
+  private setPreviewSame() {
+    delete this.config.preview_whisper;
+    this.requestUpdate();
+  }
+
+  /** Drive the preview from a dedicated local bundled model on its OWN server.
+   *  Build from the main whisper config so every required field is present. */
+  private setPreviewLocal(modelPath: string) {
+    this.config.preview_whisper = {
+      ...this.config.whisper,
+      provider: "local",
+      mode: "bundled_model",
+      model_path: modelPath,
+      // Distinct port from the final server so both run concurrently.
+      bundled_server_port: this.mainPreviewPort() + 1,
+      api_key: "",
+    };
+    this.requestUpdate();
+  }
+
+  /** Drive the preview from a fast cloud API (e.g. Groq) — no second server. */
+  private setPreviewApi(provider: string) {
+    const existing = this.config.preview_whisper ?? {};
+    this.config.preview_whisper = {
+      ...this.config.whisper,
+      provider,
+      mode: "external",
+      model_path: "",
+      api_key: existing.api_key ?? "",
+      model: existing.model ?? "",
+      api_url: existing.api_url ?? "",
+    };
+    this.requestUpdate();
+  }
+
+  /** Pick the dedicated-local source: prefer an already-downloaded small model;
+   *  otherwise download Tiny on the fly. Keeps the overlay/preview snappy. */
+  private async choosePreviewLocal() {
+    // Prefer a small model that's already on disk (Tiny → Base → Small), then
+    // any downloaded model, before downloading Tiny.
+    const ready =
+      this.downloadedPath("ggml-tiny.en.bin") ??
+      this.downloadedPath("ggml-base.en.bin") ??
+      this.downloadedPath("ggml-small.en.bin") ??
+      this.downloadedModels[0] ??
+      null;
+    if (ready) {
+      this.setPreviewLocal(ready);
+      return;
+    }
     this.previewDownloading = true;
+    this.requestUpdate();
     try {
       const path = await invoke<string>("wizard_download_model", {
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
         filename: "ggml-tiny.en.bin",
       });
-      this.config.recording.streaming_preview = true;
-      const mainPort = this.config.whisper?.bundled_server_port ?? 5809;
-      this.config.preview_whisper = {
-        ...this.config.whisper,
-        provider: "local",
-        mode: "bundled_model",
-        model_path: path,
-        bundled_server_port: mainPort + 1,
-        api_key: "",
-      };
+      if (!this.downloadedModels.includes(path)) this.downloadedModels = [...this.downloadedModels, path];
+      this.setPreviewLocal(path);
     } catch (e) {
       showToast(`Preview model download failed: ${errText(e)}`, "error");
     } finally {
@@ -704,52 +800,113 @@ export class FirstRunWizardElement extends LitElement {
     }
   }
 
-  /** Enable live preview but reuse the main (final) model — no extra server. */
-  private setPreviewSame() {
-    if (!this.config.recording) this.config.recording = {};
-    this.config.recording.streaming_preview = true;
-    delete this.config.preview_whisper;
-    this.requestUpdate();
-  }
-
-  /** Disable live preview entirely. */
-  private setPreviewOff() {
-    if (!this.config.recording) this.config.recording = {};
-    this.config.recording.streaming_preview = false;
-    delete this.config.preview_whisper;
-    this.requestUpdate();
+  /** Briefly show the system-wide overlay so the user can see/position it
+   *  without starting a real recording (matches the Settings "Preview" button). */
+  private async showOverlayPreview() {
+    try {
+      await invoke("set_overlay", { action: "show" });
+      showToast("Overlay shown — drag it where you like; it hides shortly.", "info");
+      setTimeout(() => void invoke("set_overlay", { action: "hide" }).catch(() => {}), 4000);
+    } catch (e) {
+      showToast(`Could not show overlay: ${errText(e)}`, "error");
+    }
   }
 
   private renderPreview() {
-    const sp = this.config.recording?.streaming_preview;
-    const pv = this.config.preview_whisper;
-    const choice = !sp ? "off" : pv ? (pv.provider === "local" ? "local" : "api") : "same";
+    if (!this.config.recording) this.config.recording = {};
+    if (!this.config.interface) this.config.interface = {};
+    // First time on this step, pick a sensible default: enable the preview and,
+    // if a small model is already on disk, drive it from a dedicated local
+    // server (the recommended, snappiest option). We never auto-download here —
+    // the user opts into that by choosing "Dedicated local" explicitly.
+    if (this.config._setup_preview === undefined) {
+      this.config._setup_preview = true;
+      this.config.recording.streaming_preview = true;
+      const ready =
+        this.downloadedPath("ggml-tiny.en.bin") ??
+        this.downloadedPath("ggml-base.en.bin") ??
+        this.downloadedPath("ggml-small.en.bin");
+      // Set the default source inline (no requestUpdate during render).
+      if (ready) {
+        this.config.preview_whisper = {
+          ...this.config.whisper,
+          provider: "local",
+          mode: "bundled_model",
+          model_path: ready,
+          bundled_server_port: this.mainPreviewPort() + 1,
+          api_key: "",
+        };
+      }
+    }
+
+    const enabled = !!this.config.recording?.streaming_preview;
+    const overlay = !!this.config.interface?.preview_overlay;
+    const source = this.previewSource();
+    const inputStyle =
+      "width:100%; padding:9px 12px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default); font-size:13px;";
+    const sw = (id: string, checked: boolean, disabled: boolean, handler: (e: Event) => void) => html`
+      <label class="wizard-switch ${disabled ? "is-disabled" : ""}" title="Toggle">
+        <input type="checkbox" id=${id} .checked=${checked} ?disabled=${disabled} @change=${handler}>
+        <span class="track"></span><span class="thumb"></span>
+      </label>`;
+
     return html`
       <div class="wizard-body">
         <h2 class="wizard-title">Live Preview</h2>
         <p class="wizard-subtitle">
-          Optionally watch words appear as you speak. Give it its own fast model so it
-          never slows down your final transcription. You can change this anytime in
-          Settings → Live Preview (including a cloud API like Groq).
+          Watch words appear as you speak. Give the preview its own fast model or
+          API so it never slows down your final transcription. You can change all
+          of this anytime in Settings → Live Preview.
         </p>
-        <div class="wizard-choice">
-          <button class="wizard-btn ${choice === "local" ? "primary" : ""}" ?disabled=${this.previewDownloading}
-            @click=${() => this.setPreviewLocal()}>
-            <span class="opt-title">${this.previewDownloading ? "Downloading Tiny…" : "Fast local model · Recommended"}</span>
-            <span class="opt-sub">A dedicated Tiny model (~75 MB) on its own server — never slows your final transcript.</span>
-          </button>
-          <button class="wizard-btn ${choice === "same" ? "primary" : ""}" @click=${() => this.setPreviewSame()}>
-            <span class="opt-title">Use my main model</span>
-            <span class="opt-sub">Simplest — no extra download, but can lag on heavier models.</span>
-          </button>
-          <button class="wizard-btn ${choice === "off" ? "primary" : ""}" @click=${() => this.setPreviewOff()}>
-            <span class="opt-title">Off</span>
-            <span class="opt-sub">No live words while recording.</span>
-          </button>
+
+        <div class="wizard-feature ${enabled ? "on" : ""}">
+          <div class="wizard-feature-head">
+            <span class="wizard-feature-title">👀 Show live text while recording</span>
+            ${sw("prev-enabled", enabled, false, (e) => this.setPreviewEnabled((e.target as HTMLInputElement).checked))}
+          </div>
+          ${enabled ? "" : html`<div class="wizard-feature-note">Off — your transcript appears once the recording finishes.</div>`}
         </div>
-        ${choice === "local" && pv?.model_path
-          ? html`<p class="wizard-subtitle">✓ Tiny model ready — preview runs on its own thread-limited server.</p>`
-          : ""}
+
+        ${enabled ? html`
+          <p class="wizard-subtitle" style="margin: 22px 0 10px;">Where should the live text come from?</p>
+          <div class="wizard-choice">
+            <button class="wizard-btn ${source === "local" ? "primary" : ""}" ?disabled=${this.previewDownloading}
+              @click=${() => this.choosePreviewLocal()}>
+              <span class="opt-title">${this.previewDownloading ? "Downloading Tiny…" : "Dedicated local model · Recommended"}</span>
+              <span class="opt-sub">A small model on its OWN thread-limited server — snappy text that never slows your final transcript.</span>
+            </button>
+            <button class="wizard-btn ${source === "same" ? "primary" : ""}" @click=${() => this.setPreviewSame()}>
+              <span class="opt-title">Same as my final model</span>
+              <span class="opt-sub">Simplest — no extra download, but can lag on heavier models.</span>
+            </button>
+            <button class="wizard-btn ${source === "api" ? "primary" : ""}" @click=${() => this.setPreviewApi(this.config.preview_whisper?.provider && this.config.preview_whisper?.provider !== "local" ? this.config.preview_whisper.provider : "groq")}>
+              <span class="opt-title">Cloud API (e.g. Groq)</span>
+              <span class="opt-sub">A fast hosted model. Sends preview audio to the provider; needs an API key.</span>
+            </button>
+          </div>
+
+          ${this.renderPreviewDetail(source, inputStyle)}
+
+          <div class="wizard-feature ${overlay ? "on" : ""}" style="margin-top: 22px;">
+            <div class="wizard-feature-head">
+              <span class="wizard-feature-title">🪟 System-wide overlay</span>
+              ${sw("prev-overlay", overlay, false, (e) => {
+                if (!this.config.interface) this.config.interface = {};
+                this.config.interface.preview_overlay = (e.target as HTMLInputElement).checked;
+                this.requestUpdate();
+              })}
+            </div>
+            <div class="wizard-feature-body">
+              <div class="wizard-feature-note" style="margin-top:0;">
+                Float the live text in an always-on-top window over your whole desktop
+                (draggable; remembers where you put it). It auto-shows when recording starts.
+              </div>
+              ${overlay ? html`
+                <button class="wizard-btn small" style="margin-top:10px;" @click=${() => this.showOverlayPreview()}>Preview overlay</button>
+              ` : ""}
+            </div>
+          </div>
+        ` : ""}
       </div>
       <div class="wizard-footer">
         <button class="wizard-btn" @click=${() => this.go("back")}>← Back</button>
@@ -758,6 +915,60 @@ export class FirstRunWizardElement extends LitElement {
         <button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>
       </div>
     `;
+  }
+
+  /** Per-source detail card for the Live Preview step. Mirrors SectionPreview:
+   *  • same → just an explanatory note;
+   *  • local → a dropdown of downloaded models (or a hint to download one);
+   *  • api → provider + key + optional model/URL. */
+  private renderPreviewDetail(source: PreviewSource, inputStyle: string) {
+    if (source === "same") {
+      return html`
+        <div class="wizard-feature-note" style="margin-top:14px;">
+          Preview reuses your final model on the same server. Simplest, but on a heavy model the
+          live text can lag — pick a dedicated local model or a cloud API above for a snappy overlay.
+        </div>`;
+    }
+
+    if (source === "local") {
+      const current = (this.config.preview_whisper?.model_path ?? "").replace(/\\/g, "/");
+      if (!this.downloadedModels.length) {
+        return html`
+          <div class="wizard-feature-note" style="margin-top:14px;">
+            ${this.previewDownloading
+              ? "Downloading a Tiny model (~75 MB) for the preview…"
+              : "We'll download a Tiny model (~75 MB) for the preview. Click the option above again if it didn't start."}
+          </div>`;
+      }
+      return html`
+        <div class="wizard-field" style="margin-top:14px;">
+          <label>Preview model</label>
+          <select style=${inputStyle} @change=${(e: Event) => this.setPreviewLocal((e.target as HTMLSelectElement).value)}>
+            ${this.downloadedModels.map((p) => {
+              const norm = p.replace(/\\/g, "/");
+              const sel = !!current && current.endsWith(norm.split("/").pop() ?? "");
+              return html`<option value=${p} ?selected=${sel}>${prettyPreviewModel(p)}</option>`;
+            })}
+          </select>
+          <span class="wizard-feature-note" style="margin-top:6px;">
+            Runs on a second, thread-limited whisper-server. Smaller models (Tiny / Base) give the snappiest overlay.
+          </span>
+        </div>`;
+    }
+
+    // Cloud API
+    const pv = this.config.preview_whisper ?? {};
+    return html`
+      <div class="wizard-feature-body" style="display:flex; flex-direction:column; gap:10px; margin-top:14px; padding-left:0;">
+        <select style=${inputStyle} @change=${(e: Event) => this.setPreviewApi((e.target as HTMLSelectElement).value)}>
+          ${PREVIEW_STT_PROVIDERS.map((p) => html`<option value=${p.value} ?selected=${pv.provider === p.value}>${p.label}</option>`)}
+        </select>
+        <input type="password" placeholder="API key" style=${inputStyle}
+          .value=${pv.api_key || ""} @input=${(e: Event) => { if (this.config.preview_whisper) this.config.preview_whisper.api_key = (e.target as HTMLInputElement).value; }} />
+        <input type="text" placeholder="Model (optional — leave blank for default)" style=${inputStyle}
+          .value=${pv.model || ""} @input=${(e: Event) => { if (this.config.preview_whisper) this.config.preview_whisper.model = (e.target as HTMLInputElement).value; }} />
+        <span class="wizard-feature-note" style="margin-top:0;">⚠️ Preview audio is sent to this provider while you record. Keys are stored locally.</span>
+      </div>`;
   }
 
   private renderSummary() {
@@ -977,9 +1188,18 @@ export class FirstRunWizardElement extends LitElement {
       : (c.llm_post_process?.enabled ? `Cloud · ${c.llm_post_process.provider}` : "Off");
     const mic = c.recording?.input_device && c.recording.input_device !== "default"
       ? c.recording.input_device : "System default";
-    const preview = !c.recording?.streaming_preview
-      ? "Off"
-      : (c.preview_whisper ? (c.preview_whisper.provider === "local" ? "Local Tiny model" : "Cloud API") : "Main model");
+    let preview: string;
+    if (!c.recording?.streaming_preview) {
+      preview = "Off";
+    } else {
+      const pv = c.preview_whisper;
+      const src = !pv
+        ? "Same as final model"
+        : pv.provider === "local"
+          ? `Dedicated local · ${prettyPreviewModel(pv.model_path || "")}`
+          : `Cloud · ${pv.provider}`;
+      preview = c.interface?.preview_overlay ? `${src} · overlay on` : src;
+    }
     const dest = (c.hook?.commands && c.hook.commands[0]?.trim()) ? c.hook.commands[0].trim() : "Show in Phoneme";
     const hotkeys = [
       c.hotkey?.combo ? `Record: ${c.hotkey.combo}` : null,
