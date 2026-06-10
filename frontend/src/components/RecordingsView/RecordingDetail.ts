@@ -138,6 +138,10 @@ export class RecordingDetail {
     if (!this.recording) return;
     const r = this.recording;
     const stats = wordCountSummary(r.transcript ?? "");
+    // Crisp corner-bracket icons (maximize / minimize) for the focus toggle —
+    // sharper than a font glyph and they swap to signal the current state.
+    const EXPAND_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>`;
+    const CONTRACT_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>`;
     this.container.innerHTML = `
       <div class="detail">
         <div class="detail-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -148,7 +152,7 @@ export class RecordingDetail {
               <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
             </div>
           </div>
-          <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">⛶</button>
+          <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>
         </div>
         <div class="waveform" id="wf-${r.id}"></div>
         <div id="actions"></div>
@@ -161,10 +165,10 @@ export class RecordingDetail {
           <div id="compare-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div class="transcript-history">
             <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
-            <button class="view-btn" id="view-compare" title="Side-by-side diff of the raw, cleaned, and current transcript versions">🆚 Compare</button>
             <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
             <button class="view-btn" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
             <button class="view-btn" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
+            <button class="view-btn" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
           </div>
         </div>
         <div class="notes-block" style="margin-top: 6px;">
@@ -351,6 +355,7 @@ export class RecordingDetail {
       const sync = () => {
         const inFocus = !!document.getElementById("rv-shell")?.classList.contains("rv-focus");
         focusBtn.classList.toggle("active", inFocus);
+        focusBtn.innerHTML = inFocus ? CONTRACT_SVG : EXPAND_SVG;
         focusBtn.title = inFocus
           ? "Exit focus mode (show the recordings list)"
           : "Focus mode — hide the recordings list and edit full-width";
