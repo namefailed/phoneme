@@ -18,6 +18,9 @@ Commands:
   notes         Get or set a recording's free-form notes
   edit          Replace a recording's transcript text (hand edit)
   search        Semantic (embedding) search over transcripts
+  reembed       Clear all embeddings and re-embed the whole library with the current model
+  queue         Inspect and manage the transcription queue
+  refire-hook   Re-fire the post-processing hook on a recording's stored transcript
   delete        Delete a recording
   doctor        Health check
   config        Configuration management

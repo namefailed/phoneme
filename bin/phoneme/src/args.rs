@@ -46,6 +46,12 @@ pub enum Command {
     Edit(EditArgs),
     /// Semantic (embedding) search over transcripts.
     Search(SearchArgs),
+    /// Clear all embeddings and re-embed the whole library with the current model.
+    Reembed,
+    /// Inspect and manage the transcription queue.
+    Queue(QueueArgs),
+    /// Re-fire the post-processing hook on a recording's stored transcript.
+    RefireHook(RefireHookArgs),
     /// Delete a recording.
     Delete(DeleteArgs),
     /// Health check.
@@ -82,6 +88,10 @@ pub struct RecordArgs {
     /// Non-blocking: stop the active recording, exit 0.
     #[arg(long, conflicts_with_all = ["start", "cancel", "oneshot", "duration"])]
     pub stop: bool,
+    /// Non-blocking: start recording if idle, otherwise stop the active one
+    /// (atomic — for hotkey-style bindings). Exit 0.
+    #[arg(long, conflicts_with_all = ["start", "stop", "cancel", "oneshot", "duration"])]
+    pub toggle: bool,
     /// Discard the active recording without saving.
     #[arg(long, conflicts_with_all = ["start", "stop", "oneshot", "duration"])]
     pub cancel: bool,
@@ -102,6 +112,11 @@ pub enum MeetingAction {
     Start,
     /// Stop the active meeting; both tracks are finalized and transcribed.
     Stop,
+    /// Start a meeting if none is active, otherwise stop the active one
+    /// (atomic — for hotkey-style bindings).
+    Toggle,
+    /// List every recording (track) belonging to a meeting session.
+    Tracks { meeting_id: String },
     /// Rename a meeting session.
     Rename { meeting_id: String, name: String },
 }
@@ -296,6 +311,53 @@ pub enum HookAction {
 }
 
 #[derive(Debug, clap::Args)]
+pub struct RefireHookArgs {
+    pub id: String,
+    /// Run a specific hook command instead of the configured default. The
+    /// command must already be in the configured hook allowlist.
+    #[arg(long)]
+    pub command: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct QueueArgs {
+    #[command(subcommand)]
+    pub action: Option<QueueAction>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum QueueAction {
+    /// List the queue: the in-flight item plus everything still pending.
+    List,
+    /// Print the inbox depth counts (pending/processing/done/failed).
+    Counts,
+    /// Pause the queue (the worker stops claiming new pending items).
+    Pause,
+    /// Resume a paused queue.
+    Resume,
+    /// Print whether the queue is currently paused.
+    Status,
+    /// Set the pending claim order to this exact list of ids (worker claims in
+    /// order; absent ids fall back to chronological).
+    Reorder {
+        #[arg(required = true, value_name = "ID")]
+        ids: Vec<String>,
+    },
+    /// Remove one still-pending recording from the queue.
+    Cancel {
+        id: String,
+    },
+    /// Cancel the item currently being processed (abort the in-flight work).
+    CancelProcessing {
+        id: String,
+    },
+    /// Remove ALL still-pending items from the queue at once.
+    CancelAll,
+    /// Empty the inbox `failed/` quarantine ("dismiss failed").
+    ClearFailed,
+}
+
+#[derive(Debug, clap::Args)]
 pub struct TagArgs {
     #[command(subcommand)]
     pub action: TagAction,
@@ -303,7 +365,14 @@ pub struct TagArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum TagAction {
-    List,
+    /// List tags. By default only tags attached to a recording are shown;
+    /// pass --all to include orphaned (unused) tags too.
+    List {
+        /// Include orphaned tags with no recordings attached (mirrors the GUI
+        /// Tag Manager's full list).
+        #[arg(long)]
+        all: bool,
+    },
     Add {
         name: String,
         #[arg(long)]
@@ -328,6 +397,20 @@ pub enum TagAction {
     Detach {
         recording_id: String,
         tag: String,
+    },
+    /// List the tags attached to one recording.
+    For {
+        recording_id: String,
+    },
+    /// Show how many recordings each tag is attached to.
+    Usage,
+    /// Merge one tag into another: re-point all recordings, then delete the
+    /// source. Both args accept a tag id or name.
+    Merge {
+        /// Source tag (id or name) — removed after the merge.
+        from: String,
+        /// Destination tag (id or name) — keeps its recordings plus the merged ones.
+        into: String,
     },
 }
 
