@@ -95,13 +95,24 @@ mark.settings-hit {
   border-radius: 4px;
 }
 #settings-search-header.sv-search-count {
-  padding: 2px 2px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 7px 14px 7px 11px;
   font-size: 12px;
   color: var(--fg-muted);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 999px;
 }
 #settings-search-header.sv-search-count strong {
-  color: var(--fg-default);
-  font-weight: 600;
+  color: var(--accent);
+  font-weight: 700;
+}
+#settings-search-header .sv-count-ico {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 .sv-search-empty {
   display: flex;

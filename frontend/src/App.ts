@@ -44,9 +44,7 @@ export class App {
     new HeaderBar(this.headerEl, {
       onOpenSettings: () => {
         if (this.current instanceof SettingsView) {
-          if (this.current.canClose()) {
-            this.router.go("recordings");
-          }
+          void this.tryNavigate("recordings");
         } else {
           this.router.go("settings");
         }
@@ -61,22 +59,18 @@ export class App {
     this.router.state.subscribe((s) => this.mount(s.current));
 
     // Tray menu navigation.
-    void onNav("settings", () => this.router.go("settings"));
-    void onNav("doctor", () => this.router.go("doctor"));
+    void onNav("settings", () => void this.tryNavigate("settings"));
+    void onNav("doctor", () => void this.tryNavigate("doctor"));
 
     // In-app navigation shortcuts (decoupled window event so deep components
     // don't need a routing callback threaded through). e.g. the Re-run menu's
     // "Enable cleanup in Settings" jumps straight to the Post-Processing tab.
     window.addEventListener("phoneme:navigate", (e) => {
       const detail = (e as CustomEvent).detail ?? {};
-      if (detail.view === "settings") {
-        this.pendingSettingsTab = typeof detail.section === "string" ? detail.section : null;
-        this.router.go("settings");
-      } else if (detail.view === "recordings") {
-        this.router.go("recordings");
-      } else if (detail.view === "doctor") {
-        this.router.go("doctor");
-      }
+      const tab = typeof detail.section === "string" ? detail.section : null;
+      if (detail.view === "settings") void this.tryNavigate("settings", tab);
+      else if (detail.view === "recordings") void this.tryNavigate("recordings");
+      else if (detail.view === "doctor") void this.tryNavigate("doctor");
     });
 
     // Global keyboard shortcuts (focus search, navigate, "?" cheat-sheet).
@@ -154,6 +148,22 @@ export class App {
       console.error("Failed to check if config exists. Backend may be unreachable:", e);
       // If the backend isn't reachable, stay on the default view.
     }
+  }
+
+  /**
+   * Navigate to `view`, but if we're currently in Settings with unsaved edits,
+   * ask first (themed prompt). EVERY leave-path — the Settings button, the
+   * quick-menu, `g`-nav, and the tray menu — funnels through here, so unsaved
+   * changes can't be lost silently (the bare `router.go` only guarded the
+   * Settings button before). `settingsTab` is the tab to open when entering
+   * Settings; it's applied only once the navigation is allowed to proceed.
+   */
+  private async tryNavigate(view: ViewName, settingsTab: string | null = null) {
+    if (this.current instanceof SettingsView && !(await this.current.confirmClose())) {
+      return; // user chose to keep editing
+    }
+    if (view === "settings") this.pendingSettingsTab = settingsTab;
+    this.router.go(view);
   }
 
   private mount(view: ViewName) {

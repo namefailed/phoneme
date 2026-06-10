@@ -137,15 +137,41 @@ export class SettingsViewElement extends LitElement {
     }
   }
 
+  /** Whether the in-memory config differs from what was last loaded or saved. */
+  private hasUnsavedChanges(): boolean {
+    return !!this.config && JSON.stringify(this.config) !== this.originalConfigStr;
+  }
+
+  /**
+   * Legacy sync gate (native confirm). Retained for the unit tests and any
+   * caller needing a synchronous answer; the app now prefers {@link confirmClose}.
+   */
   public canClose(): boolean {
-    if (this.config && JSON.stringify(this.config) !== this.originalConfigStr) {
+    if (this.hasUnsavedChanges()) {
       return confirm("You have unsaved changes. Discard them?");
     }
     return true;
   }
 
-  private handleClose() {
-    if (this.canClose()) this.onClose();
+  /**
+   * Themed async gate for leaving Settings with unsaved edits: resolves `true`
+   * to proceed (discard), `false` to stay. A no-op (`true`) when nothing is
+   * unsaved, so callers can always await it before navigating away.
+   */
+  public async confirmClose(): Promise<boolean> {
+    if (!this.hasUnsavedChanges()) return true;
+    const { confirmDialog } = await import("../confirmDialog");
+    return confirmDialog({
+      title: "Discard unsaved changes?",
+      body: "You've changed settings that haven't been saved yet. Leave without saving?",
+      confirmLabel: "Discard",
+      cancelLabel: "Keep editing",
+      danger: true,
+    });
+  }
+
+  private async handleClose() {
+    if (await this.confirmClose()) this.onClose();
   }
 
   private async handleSave() {
@@ -397,8 +423,9 @@ export class SettingsViewElement extends LitElement {
     } else {
       header.className = "sv-search-count";
       header.innerHTML =
-        `<strong>${fields}</strong> setting${fields === 1 ? "" : "s"} in ` +
-        `<strong>${sections}</strong> section${sections === 1 ? "" : "s"} match “${q}”`;
+        `<svg class="sv-count-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>` +
+        `<span><strong>${fields}</strong> setting${fields === 1 ? "" : "s"} in ` +
+        `<strong>${sections}</strong> section${sections === 1 ? "" : "s"} match “${q}”</span>`;
     }
   }
 
@@ -532,6 +559,10 @@ export class SettingsView {
 
   public canClose(): boolean {
     return this.element.canClose();
+  }
+
+  public confirmClose(): Promise<boolean> {
+    return this.element.confirmClose();
   }
 
   dispose() {

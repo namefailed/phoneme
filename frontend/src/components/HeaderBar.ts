@@ -544,6 +544,9 @@ export class HeaderBarElement extends LitElement {
               border-radius: 7px; cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
             }
             .hb-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+            /* Fixed-width icon column so every label starts at the same x — emoji
+               glyph widths vary, which otherwise leaves the first row out of line. */
+            .hb-menu-ico { flex-shrink: 0; width: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; }
             .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
             .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
@@ -555,16 +558,16 @@ export class HeaderBarElement extends LitElement {
             @click=${this.toggleSettingsMenu}><svg class="ph-caret-ico ${this.settingsMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
           <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
             style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
-            <button class="hb-menu-item" role="menuitem" @click=${this.openModels}>🎛 Quick model switch…</button>
-            <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}>🩺 Doctor — health check</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}><span class="hb-menu-ico">🩺</span>Doctor — health check</button>
             <div class="hb-menu-sep"></div>
             <div class="hb-menu-label">Jump to settings</div>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}>🗣️ Transcription</button>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("postprocessing")}>✨ Post-Processing</button>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}>🎙️ Capture &amp; hotkeys</button>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}>🎨 Appearance</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}><span class="hb-menu-ico">🗣️</span>Transcription</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("postprocessing")}><span class="hb-menu-ico">✨</span>Post-Processing</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}><span class="hb-menu-ico">🎙️</span>Capture &amp; hotkeys</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}><span class="hb-menu-ico">🎨</span>Appearance</button>
             <div class="hb-menu-sep"></div>
-            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}>⚙ All settings…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙</span>All settings…</button>
           </div>
         </div>
       </div>
