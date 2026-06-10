@@ -15,6 +15,7 @@ pub mod llm;
 pub mod native_whisper;
 pub mod profiles;
 pub mod queue;
+pub(crate) mod secret_crypto;
 pub mod tags;
 pub mod transcription;
 pub mod types;

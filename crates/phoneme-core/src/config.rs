@@ -26,7 +26,22 @@ fn serialize_secret_string<S>(
 where
     S: serde::Serializer,
 {
-    serializer.serialize_str(secret.expose_secret())
+    // Encrypt at rest (DPAPI on Windows) so the key is never written to
+    // config.toml in plaintext. Empty stays empty; see secret_crypto.
+    serializer.serialize_str(&crate::secret_crypto::protect(secret.expose_secret()))
+}
+
+/// Read an API key from config, decrypting an at-rest DPAPI value
+/// (`dpapi:v1:…`) and passing a legacy plaintext value through unchanged (so old
+/// configs migrate transparently and get re-encrypted on the next save).
+fn deserialize_secret_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<SecretString, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let stored = String::deserialize(deserializer)?;
+    Ok(SecretString::from(crate::secret_crypto::unprotect(&stored)))
 }
 
 /// The root configuration object for Phoneme.
@@ -192,7 +207,8 @@ pub struct LlmPostProcessConfig {
     /// API key for authentication, if required by the chosen provider.
     #[serde(
         default = "default_secret_string",
-        serialize_with = "serialize_secret_string"
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
     )]
     pub api_key: SecretString,
     /// Base URL for the API. If empty, the provider's default is used.
@@ -282,7 +298,8 @@ pub struct SummaryConfig {
     /// API key for the summary provider. Empty → inherit the cleanup key.
     #[serde(
         default = "default_secret_string",
-        serialize_with = "serialize_secret_string"
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
     )]
     pub api_key: SecretString,
     /// Base URL for the summary provider. Empty → inherit / provider default.
@@ -426,7 +443,8 @@ pub struct WhisperConfig {
     /// API key for a cloud transcription provider (OpenAI/Groq). Ignored for `local`.
     #[serde(
         default = "default_secret_string",
-        serialize_with = "serialize_secret_string"
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
     )]
     pub api_key: SecretString,
     /// Cloud model identifier (e.g. `whisper-1` for OpenAI, `whisper-large-v3`
