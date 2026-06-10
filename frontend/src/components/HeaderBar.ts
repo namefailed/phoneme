@@ -7,6 +7,7 @@ import { listTags, type Tag } from '../services/ipc';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
+import './SavedSearches';
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
@@ -472,6 +473,7 @@ export class HeaderBarElement extends LitElement {
           <button class="icon-btn ${f.semantic ? 'active' : ''}" 
             title="Toggle Semantic Search (finds meaning, not exact words)"
             @click=${this.toggleSemantic}>✨</button>
+          <ph-saved-searches></ph-saved-searches>
         </div>
         <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">
           <input type="date" class="filter-pill hb-date-since" title="Start date (from)" 
