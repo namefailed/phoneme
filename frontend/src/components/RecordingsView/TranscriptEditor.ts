@@ -28,9 +28,19 @@ export class TranscriptEditorElement extends LitElement {
 
   private view: EditorView | null = null;
 
-  private vimSaveHandler = () => {
-    // Only the focused editor responds to a global `:w`.
-    if (this.view?.hasFocus) void this.save();
+  private vimSaveHandler = (e: Event) => {
+    // Only the focused editor responds to a global `:w` / `:wq` / `:q`.
+    if (!this.view?.hasFocus) return;
+    const detail = (e as CustomEvent)?.detail ?? {};
+    const save = detail.save !== false; // default true for a plain `:w`
+    const quit = !!detail.quit;
+    // Saving (when dirty) clears the "Save Changes" button via the re-render;
+    // a quit (`:wq` / `:q`) then leaves the editor back to the pane nav.
+    const leave = () => {
+      if (quit) window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } }));
+    };
+    if (save) void this.save().then(leave);
+    else leave();
   };
 
   connectedCallback() {

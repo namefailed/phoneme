@@ -206,6 +206,30 @@ mark.settings-hit {
      body uses the full height and the buttons float over its bottom-right. */
   position: relative;
 }
+/* Floating ⚙ Settings button (top-right) — the only header control kept in the
+   Settings view, since the header bar itself is hidden. Closes Settings. */
+.settings-float-toggle {
+  position: absolute;
+  top: 18px;
+  right: 22px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  color: var(--fg-default);
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.settings-float-toggle:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+}
 .settings-float-actions {
   position: absolute;
   bottom: 18px;

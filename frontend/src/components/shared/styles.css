@@ -1,3 +1,9 @@
+/* Settings, the setup wizard, and full-screen focus mode hide the top header
+   bar (it's useless there) — toggled via this body class by App / RecordingsView. */
+body.phoneme-hide-header #hdr {
+  display: none;
+}
+
 /* vim header-nav: the roving cursor HIGHLIGHTS a control (the bar holds focus,
    not the control) so h/l can step across without the search box capturing
    keystrokes. Enter/i commits (focus the box to type / activate a button). */

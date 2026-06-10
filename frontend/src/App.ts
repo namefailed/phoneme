@@ -169,6 +169,10 @@ export class App {
   private mount(view: ViewName) {
     this.current?.dispose?.();
     this.mainEl.innerHTML = "";
+    // The top header bar is useless in Settings / the setup wizard — hide it so
+    // only the view's own (floating) controls show. Focus mode toggles the same
+    // class from RecordingsView.
+    document.body.classList.toggle("phoneme-hide-header", view === "settings" || view === "wizard");
     switch (view) {
       case "recordings":
         this.current = new RecordingsView(this.mainEl);

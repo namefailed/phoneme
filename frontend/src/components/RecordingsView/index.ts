@@ -73,6 +73,8 @@ export class RecordingsView {
   private focusedPane: "sidebar" | "list" | "detail" | null = null;
   /** Keyboard cursor within the sidebar's filter items (vim j/k), -1 = none. */
   private sidebarCursor = -1;
+  /** Keyboard cursor within the detail pane's option buttons (vim j/k), -1 = none. */
+  private detailCursor = -1;
   private vimHandler: ((e: Event) => void) | null = null;
   /** Any component can request an undoable recording delete by dispatching
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
@@ -225,6 +227,8 @@ export class RecordingsView {
     this.focusMode = !this.focusMode;
     const shell = this.container.querySelector<HTMLElement>("#rv-shell");
     shell?.classList.toggle("rv-focus", this.focusMode);
+    // Full-screen focus mode also hides the top header bar (same as Settings).
+    document.body.classList.toggle("phoneme-hide-header", this.focusMode);
     this.applyLayout();
   }
 
@@ -272,9 +276,11 @@ export class RecordingsView {
   private focusPane(pane: "sidebar" | "list" | "detail") {
     const panes = this.panesInOrder();
     if (!panes.includes(pane)) pane = panes[0];
-    // Re-home the sidebar keyboard cursor whenever pane focus changes.
+    // Re-home the sidebar + detail keyboard cursors whenever pane focus changes.
     this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
     this.sidebarCursor = -1;
+    this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
+    this.detailCursor = -1;
     this.focusedPane = pane;
     for (const p of ["sidebar", "list", "detail"] as const) {
       this.paneEl(p)?.classList.toggle("rv-pane-focused", p === pane);
@@ -316,6 +322,9 @@ export class RecordingsView {
       case "sidebar-down": this.moveSidebarCursor(1); break;
       case "sidebar-up": this.moveSidebarCursor(-1); break;
       case "sidebar-activate": this.activateSidebarItem(); break;
+      case "detail-down": this.moveDetailCursor(1); break;
+      case "detail-up": this.moveDetailCursor(-1); break;
+      case "detail-enter": this.activateDetailItem(); break;
       // Shift+Esc out of the transcript editor → back to the detail pane nav.
       case "exit-editor": this.focusPane("detail"); break;
       // ArrowDown from the header search box → drop into the list.
@@ -361,6 +370,34 @@ export class RecordingsView {
 
   private activateSidebarItem() {
     this.sidebarItems()[this.sidebarCursor]?.click();
+  }
+
+  /** The detail pane's actionable buttons (play / re-run / copy / export /
+   *  view-toggles / close / fullscreen…), in order — what j/k step through. */
+  private detailItems(): HTMLElement[] {
+    return [...this.container.querySelectorAll<HTMLElement>("#rv-detail button")]
+      .filter((b) => b.offsetParent !== null && !b.hasAttribute("disabled"));
+  }
+
+  /** vim j/k inside the focused detail pane: first press lands a visible cursor
+   *  on a button, then steps. (i edits the transcript instead.) */
+  private moveDetailCursor(delta: number) {
+    const items = this.detailItems();
+    if (!items.length) return;
+    items.forEach((i) => i.classList.remove("kbd-cursor"));
+    if (this.detailCursor < 0) this.detailCursor = delta > 0 ? 0 : items.length - 1;
+    else this.detailCursor = Math.max(0, Math.min(items.length - 1, this.detailCursor + delta));
+    const el = items[this.detailCursor];
+    el.classList.add("kbd-cursor");
+    el.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Enter in the detail pane: click the highlighted button, or — when no cursor
+   *  has been moved yet — drop into the transcript editor (the old behaviour). */
+  private activateDetailItem() {
+    const el = this.detailItems()[this.detailCursor];
+    if (this.detailCursor >= 0 && el) el.click();
+    else this.focusEditor();
   }
 
   /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */
@@ -429,6 +466,9 @@ export class RecordingsView {
 
   dispose() {
     this.disposed = true;
+    // Don't leave the header hidden if we're torn down while in focus mode
+    // (mount() re-applies the right value for the next view).
+    document.body.classList.remove("phoneme-hide-header");
     if (this.unsub) {
       this.unsub();
       this.unsub = null;

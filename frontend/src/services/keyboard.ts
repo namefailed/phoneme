@@ -56,6 +56,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "c", label: "Copy transcript" },
       { combo: "e", label: "Export transcript" },
       { combo: "r", label: "Open the Re-run menu" },
+      { combo: "f", label: "Full-screen (focus mode)" },
     ],
   },
 ];
@@ -65,7 +66,7 @@ const VIM_HELP_GROUP: HelpGroup = {
   title: "Vim navigation (enabled)",
   items: [
     { combo: "h   l", label: "Move focus between sidebar / list / detail" },
-    { combo: "j   k", label: "Move down / up (list or sidebar)" },
+    { combo: "j   k", label: "Move down / up (list · sidebar · detail buttons)" },
     { combo: "k / ↑ at top", label: "Up into the search bar (↓ to come back)" },
     { combo: "g g", label: "Jump to the first recording" },
     { combo: "G", label: "Jump to the last recording" },
@@ -382,36 +383,25 @@ function onKeyDown(e: KeyboardEvent) {
         break;
       case "j":
         // The list owns j/k via its own keydown when focused; this only fires
-        // for the other panes (the sidebar steps through its filter items).
-        if (activeWithin("ph-sidebar")) {
-          e.preventDefault();
-          dispatchVim("sidebar-down");
-          return;
-        }
+        // for the other panes — the sidebar steps its filters, the detail pane
+        // steps its option buttons (Play/Copy/Summary/…).
+        if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-down"); return; }
+        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-down"); return; }
         break;
       case "k":
-        if (activeWithin("ph-sidebar")) {
-          e.preventDefault();
-          dispatchVim("sidebar-up");
-          return;
-        }
+        if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-up"); return; }
+        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-up"); return; }
         break;
       case "i":
+        // i drops straight into the transcript editor from the detail pane.
+        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("edit"); return; }
+        break;
       case "Enter":
-        // Enter inside the list (open recording) is handled by the list itself
-        // and arrives here only as defaultPrevented; these branches fire when
-        // another pane holds focus: drop into the transcript editor from the
-        // detail pane, or activate the highlighted sidebar filter.
-        if (activeWithin(".rv-detail")) {
-          e.preventDefault();
-          dispatchVim("edit");
-          return;
-        }
-        if (e.key === "Enter" && activeWithin("ph-sidebar")) {
-          e.preventDefault();
-          dispatchVim("sidebar-activate");
-          return;
-        }
+        // Enter activates the highlighted detail button (or edits the transcript
+        // when no detail cursor is set); in the sidebar it applies the filter.
+        // (Enter in the list is handled there and arrives as defaultPrevented.)
+        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-enter"); return; }
+        if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-activate"); return; }
         break;
       case "d":
         if (activeWithin(".rv-list")) {
@@ -443,6 +433,8 @@ function onKeyDown(e: KeyboardEvent) {
     case "c": e.preventDefault(); dispatchAction("copy"); return;
     case "e": e.preventDefault(); dispatchAction("export"); return;
     case "r": e.preventDefault(); dispatchAction("rerun"); return;
+    // f → toggle full-screen (focus mode) on the open recording.
+    case "f": e.preventDefault(); window.dispatchEvent(new CustomEvent("phoneme:toggle-focus-mode")); return;
   }
 }
 

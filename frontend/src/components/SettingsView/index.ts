@@ -535,6 +535,7 @@ export class SettingsViewElement extends LitElement {
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
         <div class="settings-main">
+          <button class="settings-float-toggle" title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
           <div class="settings-body" id="settings-body"></div>
           <div class="settings-float-actions">
             <button id="settings-close" @click=${this.handleClose}>Close</button>

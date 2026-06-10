@@ -15,11 +15,16 @@ let vimWriteDefined = false;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function defineVimWrite(Vim: any) {
   if (vimWriteDefined) return;
-  const fire = () => document.dispatchEvent(new CustomEvent(VIM_SAVE_EVENT));
+  // The event carries intent so the editor can save (`:w`), save-and-leave
+  // (`:wq` / `:x`), or just leave (`:q`) — quitting hands focus back to the
+  // pane nav, same as Shift+Esc.
+  const fire = (save: boolean, quit: boolean) =>
+    document.dispatchEvent(new CustomEvent(VIM_SAVE_EVENT, { detail: { save, quit } }));
   try {
-    Vim.defineEx("write", "w", fire);
-    Vim.defineEx("wq", "wq", fire);
-    Vim.defineEx("xit", "x", fire);
+    Vim.defineEx("write", "w", () => fire(true, false));
+    Vim.defineEx("wq", "wq", () => fire(true, true));
+    Vim.defineEx("xit", "x", () => fire(true, true));
+    Vim.defineEx("quit", "q", () => fire(false, true));
     vimWriteDefined = true;
   } catch {
     /* older vim build without defineEx — silently skip */
