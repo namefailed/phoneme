@@ -385,6 +385,20 @@ impl Catalog {
         Ok(())
     }
 
+    /// Delete ALL stored embeddings — per-chunk and legacy whole-recording — so
+    /// the whole library can be re-embedded with a newly-configured model. After
+    /// this every recording counts as "without chunk embeddings", so the daemon's
+    /// backfill re-embeds them. Vectors from a different model/dimension would
+    /// otherwise be silently skipped (dimension guard) and the recording would be
+    /// unsearchable until re-embedded.
+    pub async fn clear_all_embeddings(&self) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM embedding_chunks").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM embeddings").execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Recordings that have a transcript but no chunk embeddings yet. Drives the
     /// daemon's one-time backfill that migrates the library from the legacy
     /// whole-recording `embeddings` table to per-chunk vectors.

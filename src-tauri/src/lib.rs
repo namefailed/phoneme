@@ -238,6 +238,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_recordings,
             commands::semantic_search,
+            commands::reembed_all,
             commands::get_recording,
             commands::list_meeting,
             commands::delete_recording,

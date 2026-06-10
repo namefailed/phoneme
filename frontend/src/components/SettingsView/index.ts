@@ -12,6 +12,7 @@ import { SectionRecording } from "./SectionRecording";
 import { SectionHotkey } from "./SectionHotkey";
 import { SectionHook } from "./SectionHook";
 import { SectionStorage } from "./SectionStorage";
+import { SectionSemantic } from "./SectionSemantic";
 import { SectionTray } from "./SectionTray";
 import { SectionInterface } from "./SectionInterface";
 import { SectionPostProcessing } from "./SectionPostProcessing";
@@ -149,6 +150,7 @@ export class SettingsViewElement extends LitElement {
       new SectionPostProcessing(createSubHost(), this.config);
       new SectionHook(createSubHost(), this.config);
       new SectionStorage(createSubHost(), this.config);
+      new SectionSemantic(createSubHost(), this.config);
       new SectionProfiles(createSubHost(), this.config);
       new SectionAdvanced(createSubHost(), this.config, this.onNavigateToWizard);
     };

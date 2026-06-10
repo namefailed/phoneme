@@ -237,7 +237,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             const SEMANTIC_MIN_RELEVANCE: f32 = 0.12;
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {
-                match embedder.embed(&query) {
+                match embedder.embed_query(&query) {
                     Ok(query_vec) => match state
                         .catalog
                         .hybrid_search(&query, &query_vec, limit, SEMANTIC_MIN_RELEVANCE)
@@ -270,6 +270,50 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     kind: IpcErrorKind::Internal,
                     message: "Semantic search is not enabled or model is missing.".to_string(),
                 })
+            }
+        }
+        Request::ReembedAll => {
+            let cfg = state.config.load();
+            if !cfg.semantic_search.enabled {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: "semantic search is disabled — enable it before re-embedding".into(),
+                })
+            } else if state.embedder.read().await.is_none() {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: "embedding model is not loaded (check the model path)".into(),
+                })
+            } else {
+                // Clear every old vector, then re-embed the whole library in the
+                // background with the current model. Returns immediately.
+                match state.catalog.clear_all_embeddings().await {
+                    Ok(()) => {
+                        let bg = state.clone();
+                        tokio::spawn(async move {
+                            let guard = bg.embedder.read().await;
+                            let Some(embedder) = guard.as_ref() else { return };
+                            match bg.catalog.list_recordings_without_chunk_embeddings().await {
+                                Ok(records) => {
+                                    let n = records.len();
+                                    tracing::info!("re-embedding {n} recordings with the current model");
+                                    for r in records {
+                                        if let Some(t) = r.transcript.as_ref() {
+                                            crate::pipeline::embed_and_store(embedder, &bg.catalog, &r.id, t).await;
+                                        }
+                                    }
+                                    tracing::info!("re-embed complete ({n} recordings)");
+                                }
+                                Err(e) => tracing::error!(error = %e, "re-embed: failed to list recordings"),
+                            }
+                        });
+                        Response::Ok(serde_json::Value::Null)
+                    }
+                    Err(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: format!("failed to clear embeddings: {e}"),
+                    }),
+                }
             }
         }
         Request::DeleteRecording { id, keep_audio } => match state.catalog.get(&id).await {
@@ -964,14 +1008,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
 
                     let cfg_arc = state.config.load();
                     let mut embedder_guard = state.embedder.write().await;
-                    if cfg_arc.semantic_search.enabled && embedder_guard.is_none() {
-                        match phoneme_core::Embedder::new(&cfg_arc.semantic_search.model_dir) {
+                    if cfg_arc.semantic_search.enabled {
+                        // (Re)build on every reload so a changed model_dir /
+                        // pooling / max_tokens / prefix actually takes effect on
+                        // save — not only when no model was loaded before. On
+                        // failure keep the previous model so search doesn't break.
+                        match phoneme_core::Embedder::new(&cfg_arc.semantic_search) {
                             Ok(e) => *embedder_guard = Some(std::sync::Arc::new(e)),
                             Err(e) => {
-                                tracing::warn!(error = %e, "Failed to load semantic search model on reload")
+                                tracing::warn!(error = %e, "failed to (re)load semantic search model on reload; keeping the previous one")
                             }
                         }
-                    } else if !cfg_arc.semantic_search.enabled {
+                    } else {
                         *embedder_guard = None;
                     }
                     drop(cfg_arc);

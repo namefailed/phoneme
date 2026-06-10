@@ -109,7 +109,7 @@ impl AppState {
         let webhook = WebhookClient::new()?;
 
         let embedder = if config.semantic_search.enabled {
-            match phoneme_core::Embedder::new(&config.semantic_search.model_dir) {
+            match phoneme_core::Embedder::new(&config.semantic_search) {
                 Ok(e) => Some(Arc::new(e)),
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to load semantic search model");

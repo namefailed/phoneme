@@ -116,6 +116,14 @@ pub async fn semantic_search(
     forward(&bridge, Request::SemanticSearch { query, limit }).await
 }
 
+/// Clear all embeddings and re-embed the whole library with the current model
+/// (run after changing the embedding model). Returns immediately; runs in the
+/// background on the daemon.
+#[tauri::command]
+pub async fn reembed_all(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ReembedAll).await
+}
+
 /// Fetch the details, tags, and transcript for a specific recording by its ID.
 #[tauri::command]
 pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {

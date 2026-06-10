@@ -272,6 +272,11 @@ pub enum Request {
         query: String,
         limit: usize,
     },
+    /// Clear every stored embedding and re-embed the whole library with the
+    /// currently-configured model. Use after changing the embedding model (a
+    /// different model/dimension makes old vectors unsearchable). Returns
+    /// immediately; the re-embed runs in the background.
+    ReembedAll,
 }
 
 /// Daemon response. For most requests, a single Response is returned.

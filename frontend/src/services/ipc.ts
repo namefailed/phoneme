@@ -76,6 +76,13 @@ export async function semanticSearch(query: string, limit: number = 20): Promise
   return await tauriInvoke<SemanticSearchResult[]>("semantic_search", { query, limit });
 }
 
+/** Clear all embeddings and re-embed the whole library with the current model.
+ *  Run after changing the embedding model. Returns at once; the daemon
+ *  re-embeds in the background. */
+export async function reembedAll(): Promise<void> {
+  await tauriInvoke("reembed_all");
+}
+
 /**
  * Fetch all recordings belonging to a single meeting session (the two tracks
  * sharing a `meeting_id`), ordered by track then start time.

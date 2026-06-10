@@ -117,7 +117,24 @@ pub struct DiarizationConfig {
     pub local_model_path: String,
 }
 
+/// How an embedding model reduces per-token hidden states to one sentence
+/// vector. `Mean` (attention-mask-weighted average) fits MiniLM/MPNet/E5/BGE;
+/// `Cls` takes the `[CLS]` token, which some models are trained to use instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingPooling {
+    #[default]
+    Mean,
+    Cls,
+}
+
 /// Settings for local semantic search via ONNX embeddings.
+///
+/// The fields below the model path adapt Phoneme to embedding models other than
+/// the bundled all-MiniLM-L6-v2 — different pooling, max length, whether the
+/// model takes `token_type_ids`, and the query/passage prefixes that
+/// instruction-tuned models (E5, BGE) expect. Every one defaults to the
+/// all-MiniLM behaviour, so an existing config keeps working unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SemanticSearchConfig {
     /// Whether semantic search indexing is enabled. If true, the daemon will load
@@ -126,6 +143,29 @@ pub struct SemanticSearchConfig {
     /// Absolute path to the directory containing the ONNX model and tokenizer.
     /// Example: `C:\Users\Namef\AppData\Local\phoneme\models\all-MiniLM-L6-v2`
     pub model_dir: PathBuf,
+    /// Max input length (tokens) before truncation. all-MiniLM was trained at 256.
+    #[serde(default = "default_embed_max_tokens")]
+    pub max_tokens: usize,
+    /// Token-pooling strategy for this model.
+    #[serde(default)]
+    pub pooling: EmbeddingPooling,
+    /// Whether the model takes a `token_type_ids` input. BERT-family models
+    /// (MiniLM, MPNet) do; some exports (e.g. several E5 variants) don't and
+    /// error if fed one. Leave on for the bundled model.
+    #[serde(default = "default_true")]
+    pub token_type_ids: bool,
+    /// Prefix prepended to a SEARCH QUERY before embedding (e.g. `"query: "` for
+    /// E5). Empty for symmetric models like all-MiniLM.
+    #[serde(default)]
+    pub query_prefix: String,
+    /// Prefix prepended to a STORED PASSAGE/transcript before embedding (e.g.
+    /// `"passage: "` for E5). Empty for all-MiniLM.
+    #[serde(default)]
+    pub passage_prefix: String,
+}
+
+fn default_embed_max_tokens() -> usize {
+    256
 }
 
 impl Default for SemanticSearchConfig {
@@ -133,6 +173,11 @@ impl Default for SemanticSearchConfig {
         Self {
             enabled: false,
             model_dir: PathBuf::new(),
+            max_tokens: default_embed_max_tokens(),
+            pooling: EmbeddingPooling::Mean,
+            token_type_ids: true,
+            query_prefix: String::new(),
+            passage_prefix: String::new(),
         }
     }
 }
