@@ -4,7 +4,14 @@ import { subscribe, type DaemonEvent } from "../../services/events";
 import { Store } from "../../state/store";
 import { RecordingsList, type RecordingsListState } from "./RecordingsList";
 import { RecordingDetail } from "./RecordingDetail";
-import { MergedConversationDetail } from "./MergedConversationDetail";
+// Side-effect import is REQUIRED. `MergedConversationDetail` below is referenced
+// ONLY as a type (annotation + `as` cast), so a plain named import gets elided
+// by esbuild/Vite — which means the `@customElement("ph-merged-conversation-detail")`
+// registration never runs and the meeting (merged) detail renders as an empty,
+// un-upgraded element. The bare import forces the module to run; the `import type`
+// keeps the type available and makes the intent explicit so this can't regress.
+import "./MergedConversationDetail";
+import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
 import { showActionToast } from "../../utils/toast";
