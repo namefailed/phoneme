@@ -210,24 +210,30 @@ mark.settings-hit {
    Settings view, since the header bar itself is hidden. Closes Settings. */
 .settings-float-toggle {
   position: absolute;
+  /* Sit exactly where the header's ⚙ Settings split-button was AND look
+     identical to it (.headerbar .icon-btn / .hb-settings-main) so opening
+     Settings doesn't make the button appear to jump or restyle. right:42px
+     lands on the header main-button's right edge — the header group hugs the
+     corner at 14px and the dropdown caret to its right is ~28px wide. */
   top: 18px;
-  right: 22px;
+  right: 42px;
   z-index: 5;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-elevated);
+  background: var(--bg-deep);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-radius: 6px;
-  padding: 7px 14px;
-  font-size: 13px;
-  color: var(--fg-default);
+  padding: 4px 11px;
+  font-size: 16px;
+  color: var(--fg-muted);
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: all 0.15s ease-out;
 }
 .settings-float-toggle:hover {
-  background: var(--bg-surface);
+  background: var(--border-subtle);
+  color: var(--fg-default);
   border-color: var(--accent);
 }
 .settings-float-actions {
@@ -547,6 +553,11 @@ select[data-key="daemon.log_level"] {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+  /* Left-align/fill children. Without this the wrapper inherits `align-items:
+     center` from `.settings-field > div`, which — with `flex-direction: column`
+     — centres the preset row and textarea horizontally (the "not lined up with
+     our UI" bug). Same fix as `.settings-field.stacked > div` above. */
+  align-items: stretch;
 }
 .ai-preset-row {
   display: flex;
@@ -574,6 +585,40 @@ select[data-key="daemon.log_level"] {
   font-size: 13px;
   padding: 8px 10px;
   line-height: 1.5;
+}
+
+/* Advanced disclosure (<details>) — replace the browser's default triangle
+   marker with a chevron that rotates down when the section is open. */
+.settings-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.settings-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-advanced > summary::marker {
+  content: "";
+}
+.settings-advanced-chev {
+  flex-shrink: 0;
+  color: var(--fg-faded);
+  transition: transform 0.18s ease;
+}
+.settings-advanced[open] > summary .settings-advanced-chev {
+  transform: rotate(90deg);
+}
+.settings-advanced > summary:hover {
+  color: var(--fg-default);
+}
+.settings-advanced > summary:hover .settings-advanced-chev {
+  color: var(--accent);
 }
 
 /* Generic helper text below a control (reusable across any section). */
