@@ -50,6 +50,13 @@ export class SectionInterface {
       ...saved,
       ...COLUMN_CATALOG.map((c) => c.value).filter((c) => !saved.includes(c)),
     ];
+    // Transcript snippet is pinned as the last column — its read-more horizontal
+    // scroll requires it, and any other position misbehaves. Keep it at the end.
+    const pin = this.order.indexOf("transcript");
+    if (pin >= 0) {
+      this.order.splice(pin, 1);
+      this.order.push("transcript");
+    }
     this.visible = new Set(saved);
 
     this.renderShell();
@@ -62,7 +69,15 @@ export class SectionInterface {
 
   /** Persist the current order + visibility into config and notify SettingsView. */
   private syncConfig() {
-    this.config.interface.visible_columns = this.order.filter((c) => this.visible.has(c));
+    const cols = this.order.filter((c) => this.visible.has(c));
+    // Transcript snippet is always the last column (its read-more scroll
+    // behavior requires it; any other position is buggy).
+    const pin = cols.indexOf("transcript");
+    if (pin >= 0 && pin !== cols.length - 1) {
+      cols.splice(pin, 1);
+      cols.push("transcript");
+    }
+    this.config.interface.visible_columns = cols;
     // Saved widths are positional, so dropping/reordering columns would
     // misalign them. Clear them so the list recomputes per-column widths in the
     // new order (the user can re-drag widths afterward).
@@ -74,6 +89,8 @@ export class SectionInterface {
   private move(index: number, dir: -1 | 1) {
     const j = index + dir;
     if (j < 0 || j >= this.order.length) return;
+    // Transcript is pinned last — never move it, and never move a column past it.
+    if (this.order[index] === "transcript" || this.order[j] === "transcript") return;
     [this.order[index], this.order[j]] = [this.order[j], this.order[index]];
     this.renderColumns();
     this.syncConfig();
@@ -90,8 +107,8 @@ export class SectionInterface {
               <span>${this.label(value)}</span>
             </label>
             <span class="col-move">
-              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg></button>
-              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 || value === "transcript" ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg></button>
+              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 || value === "transcript" || this.order[i + 1] === "transcript" ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             </span>
           </div>`)
       .join("");
@@ -187,7 +204,7 @@ export class SectionInterface {
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
             <div id="col-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
             <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-              Check a column to show it; use the up/down chevrons to reorder. Columns appear left-to-right in this order.
+              Check a column to show it; use the up/down chevrons to reorder. Columns appear left-to-right in this order. The transcript snippet is always shown last (it scrolls to read more inline).
             </span>
           </div>
         </div>

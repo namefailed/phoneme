@@ -464,16 +464,27 @@ export class RecordingsListElement extends LitElement {
       </div>`;
     }
 
-    const visibleCols: string[] = this.config?.interface?.visible_columns || [
+    let visibleCols: string[] = this.config?.interface?.visible_columns || [
       "time",
       "duration",
       "status",
       "source",
       "transcript",
     ];
+    // The transcript snippet is ALWAYS the last column — its read-more horizontal
+    // scroll requires it and any other position misbehaves (Settings pins it last
+    // too; this is the defensive guarantee). If a stale config had it elsewhere,
+    // moving it would misalign the positional column widths, so drop those and
+    // let the widths recompute in the corrected order.
+    const tIdx = visibleCols.indexOf("transcript");
+    const transcriptMoved = tIdx >= 0 && tIdx !== visibleCols.length - 1;
+    if (transcriptMoved) {
+      visibleCols = [...visibleCols.filter((_, i) => i !== tIdx), "transcript"];
+      this.currentWidths = null;
+    }
     let activeWidths = this.currentWidths;
     if (!activeWidths || activeWidths.length !== visibleCols.length) {
-      activeWidths = this.config?.interface?.column_widths || null;
+      activeWidths = transcriptMoved ? null : this.config?.interface?.column_widths || null;
       const colWidths: Record<string, string> = {
         day: "85px",
         time: "94px",
