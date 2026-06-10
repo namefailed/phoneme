@@ -495,24 +495,41 @@ export class RecordingsListElement extends LitElement {
     }
 
     const checkboxColWidth = "28px";
-    // Transcript column = "read more inline, capped" (Option A). It sizes to its
-    // content (`max-content`, floored at the resized/default width) instead of
-    // `1fr`, so a row can grow past the pane and you scroll horizontally to read
-    // more of the transcript; `.rec-preview { max-width: 1200px }` caps that
-    // growth so a huge transcript can't make the column run away. A trailing
-    // cell-less `minmax(0, 1fr)` filler ALWAYS follows so the row still fills the
-    // pane to the splitter when the columns fit (it absorbs the slack; head and
-    // rows share the template and keep equal cell counts, so the extra track
-    // stays empty in both). The `.rec-table-inner` wrapper is
-    // `width: max-content; min-width: 100%`, so rows grow with the content and
-    // their backgrounds extend the full scrolled width instead of stopping at the
-    // pane edge.
+    // The transcript "read more by scrolling" behavior (Option A) applies ONLY
+    // when transcript is the LAST column: there it sizes to its content
+    // (`max-content`, capped at 1200px via `.transcript-tail .rec-preview`) so the
+    // row grows past the pane and you scroll to read more. Anywhere else (when
+    // rearranged in Appearance settings) it's a normal, resizable, fixed-width
+    // column like the rest — never ballooning mid-row. A cell-less `minmax(0,1fr)`
+    // filler is appended only when no column is already flexible, so the row
+    // always fills the pane to the splitter.
+    const transcriptIsLast = visibleCols[visibleCols.length - 1] === "transcript";
+    const parsePx = (w: string) => {
+      const m = /([\d.]+)px/.exec(w);
+      return m ? parseFloat(m[1]) : 0;
+    };
     const widthsForGrid = activeWidths!.map((w, i) => {
       if (visibleCols[i] !== "transcript") return w;
-      const floor = w.trim().endsWith("px") ? w.trim() : "160px";
-      return `minmax(${floor}, max-content)`;
+      const px = w.trim().endsWith("px") ? w.trim() : null;
+      if (transcriptIsLast) return `minmax(${px ?? "160px"}, max-content)`;
+      return px ?? "300px"; // not last → a normal, resizable fixed-width column
     });
-    const gridTemplate = [checkboxColWidth, ...widthsForGrid, "minmax(0, 1fr)"].join(" ");
+    const hasFlexTrack = widthsForGrid.some((t) => t.includes("fr"));
+    const gridTemplate = [
+      checkboxColWidth,
+      ...widthsForGrid,
+      ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
+    ].join(" ");
+    // Row min-width (used only when transcript is NOT the tail) so a row's
+    // background/selection extends the full scrolled width when the fixed columns
+    // overflow the pane, instead of stopping at the pane edge.
+    const gridMinWidth =
+      28 +
+      activeWidths!.reduce((sum, w, i) => {
+        const px = parsePx(w);
+        if (visibleCols[i] === "transcript") return sum + (px || (transcriptIsLast ? 160 : 300));
+        return sum + (px || 120);
+      }, 0);
 
     const allSelected = s.recordings.length > 0 && s.recordings.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
@@ -592,7 +609,7 @@ export class RecordingsListElement extends LitElement {
 
     return html`
       <div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, visibleRows)}>
-        <div class="rec-table-inner">
+        <div class="rec-table-inner${transcriptIsLast ? " transcript-tail" : ""}" style="${transcriptIsLast ? "" : `min-width: ${gridMinWidth}px;`}">
           ${head}
           ${body}
         </div>
