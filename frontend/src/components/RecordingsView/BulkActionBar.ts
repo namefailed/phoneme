@@ -1,7 +1,6 @@
 import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import {
-  deleteRecording,
   listTags,
   attachTag,
   type Recording,
@@ -198,21 +197,14 @@ export class BulkActionBarElement extends LitElement {
     showToast(`Exported ${this.selectedRecordings().filter((r) => r.transcript).length} transcript(s) as ${format.toUpperCase()}.`, "success");
   }
 
-  private async handleDelete() {
+  private handleDelete() {
     if (this.busy) return;
     this.openMenu = null;
-    const n = this.selected.size;
-    const { confirmDelete } = await import("../ConfirmDelete");
-    const confirmed = await confirmDelete({
-      title: n === 1 ? "Delete Recording?" : `Delete ${n} Recordings?`,
-      body: n === 1
-        ? "This will permanently delete the recording and its audio file. This action cannot be undone."
-        : `This will permanently delete ${n} recordings and their audio files. This action cannot be undone.`,
-      confirmLabel: n === 1 ? "Delete" : `Delete ${n} Recordings`,
-      skipKey: "phoneme_skip_bulk_delete_confirm",
-    });
-    if (!confirmed) return;
-    await this.runOverSelection((r) => deleteRecording(r.id, false), "Deleted");
+    const ids = [...this.selected];
+    if (!ids.length) return;
+    // RecordingsView runs the grace-period Undo flow (hides the rows now, only
+    // deletes for real when the Undo toast lapses) and clears this selection.
+    window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids } }));
   }
 
   private toggleMenu(menu: "rerun" | "tag" | "export", e: Event) {

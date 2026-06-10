@@ -7,6 +7,7 @@ import { RecordingDetail } from "./RecordingDetail";
 import { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
+import { showActionToast } from "../../utils/toast";
 import "./Sidebar";
 import "./ThinkingPopout";
 import "./styles.css";
@@ -64,6 +65,10 @@ export class RecordingsView {
    *  appears for non-vim users. */
   private focusedPane: "sidebar" | "list" | "detail" | null = null;
   private vimHandler: ((e: Event) => void) | null = null;
+  /** Any component can request an undoable recording delete by dispatching
+   *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
+   *  flow (the bulk bar and the detail action row both use it). */
+  private deleteReqHandler: ((e: Event) => void) | null = null;
 
   /** Current multi-selection. Empty when no checkboxes are checked. */
   private multiSelected = new Set<string>();
@@ -138,6 +143,11 @@ export class RecordingsView {
     // emits these; this view owns the pane DOM, so it performs the movement).
     this.vimHandler = (e: Event) => this.handleVim((e as CustomEvent).detail?.action);
     window.addEventListener("phoneme:vim", this.vimHandler);
+    this.deleteReqHandler = (e: Event) => {
+      const ids = (e as CustomEvent<{ ids?: string[] }>).detail?.ids;
+      if (Array.isArray(ids)) this.requestUndoableDelete(ids);
+    };
+    window.addEventListener("phoneme:request-delete", this.deleteReqHandler);
   }
 
   async refresh() {
@@ -281,7 +291,7 @@ export class RecordingsView {
       case "list-top": this.list.focusEdge("top"); this.focusPane("list"); break;
       case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
       case "edit": this.focusEditor(); break;
-      case "delete": void this.vimDelete(); break;
+      case "delete": this.vimDelete(); break;
     }
   }
 
@@ -295,20 +305,56 @@ export class RecordingsView {
   }
 
   /** `dd`: delete the recording under the list cursor (falls back to the open
-   *  one), behind the same confirm dialog as the Delete key. Sessions are
-   *  skipped — they're deleted track-by-track or via the bulk bar. */
-  private async vimDelete() {
+   *  one) via the undoable flow. Sessions are skipped — they're deleted
+   *  track-by-track or via the bulk bar. */
+  private vimDelete() {
     const id = this.list.getFocusedId() ?? this.state.get().selectedId;
-    if (!id || id.startsWith("session:")) return;
-    const { confirmDelete } = await import("../ConfirmDelete");
-    if (!(await confirmDelete())) return;
-    try {
-      const { deleteRecording } = await import("../../services/ipc");
-      await deleteRecording(id, false);
-      void this.refresh();
-    } catch (err) {
-      console.error("Failed to delete recording:", err);
-    }
+    if (!id) return;
+    this.requestUndoableDelete([id]);
+  }
+
+  /**
+   * Delete one or more recordings with a grace-period Undo: the rows vanish
+   * immediately, but the real (permanent) delete only fires when the Undo toast
+   * expires — clicking Undo cancels it entirely, so nothing is ever lost to a
+   * stray keystroke. Sessions are skipped (they're deleted via their own flow).
+   */
+  private requestUndoableDelete(rawIds: string[]) {
+    const ids = [...new Set(rawIds)].filter((id) => id && !id.startsWith("session:"));
+    if (!ids.length) return;
+
+    // Optimistically hide the rows, drop them from the selection (so the bulk
+    // bar count stays honest), and close the detail if the open one is going.
+    this.list.setPendingDelete(ids, true);
+    this.list.clearSelection();
+    const sel = this.state.get().selectedId;
+    if (sel && ids.includes(sel)) this.deselect();
+
+    const label = ids.length === 1 ? "Recording deleted" : `${ids.length} recordings deleted`;
+    showActionToast({
+      message: label,
+      actionLabel: "Undo",
+      icon: "🗑",
+      durationMs: 6000,
+      onAction: () => {
+        // Cancelled — just un-hide; nothing was ever sent to the backend.
+        this.list.setPendingDelete(ids, false);
+      },
+      onExpire: async () => {
+        const { deleteRecording } = await import("../../services/ipc");
+        for (const id of ids) {
+          try {
+            await deleteRecording(id, false);
+          } catch (err) {
+            console.error("Failed to delete recording:", err);
+          }
+        }
+        // The daemon's RecordingDeleted events refresh the store; clear the hide
+        // set so it never grows, and refresh to reconcile.
+        this.list.setPendingDelete(ids, false);
+        void this.refresh();
+      },
+    });
   }
 
   private disposed = false;
@@ -324,6 +370,7 @@ export class RecordingsView {
     if (this.selectHandler) window.removeEventListener("phoneme:select-recording", this.selectHandler);
     if (this.focusHandler) window.removeEventListener("phoneme:toggle-focus-mode", this.focusHandler);
     if (this.vimHandler) window.removeEventListener("phoneme:vim", this.vimHandler);
+    if (this.deleteReqHandler) window.removeEventListener("phoneme:request-delete", this.deleteReqHandler);
   }
 
   private applyLayout() {
@@ -529,25 +576,15 @@ export class RecordingsView {
       e.preventDefault();
       this.toggleDetail();
     } else if (e.key === "Delete") {
-      // If we have a multi-selection, bulk-delete via the bar; otherwise single-delete.
-      if (this.multiSelected.size > 1) {
-        // Delegate to BulkActionBar by programmatically clicking its delete button.
-        const btn = this.bulkBarRoot?.querySelector<HTMLButtonElement>("#bulk-delete");
-        btn?.click();
-        return;
-      }
-      const id = this.state.get().selectedId;
-      if (id) {
+      // Undoable: a multi-selection deletes all selected, otherwise the open one.
+      if (this.multiSelected.size > 0) {
         e.preventDefault();
-        const { confirmDelete } = await import("../ConfirmDelete");
-        if (await confirmDelete()) {
-          try {
-            const { deleteRecording } = await import("../../services/ipc");
-            await deleteRecording(id, false);
-            this.refresh();
-          } catch (err) {
-            console.error("Failed to delete recording:", err);
-          }
+        this.requestUndoableDelete([...this.multiSelected]);
+      } else {
+        const id = this.state.get().selectedId;
+        if (id) {
+          e.preventDefault();
+          this.requestUndoableDelete([id]);
         }
       }
     }

@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { deleteRecording, type SpeakerName } from "../../services/ipc";
+import { type SpeakerName } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import "./RerunForm";
@@ -136,17 +136,11 @@ export class ActionRowElement extends LitElement {
     }
   }
 
-  private async handleDelete() {
-    const { confirmDelete } = await import("../ConfirmDelete");
-    if (await confirmDelete()) {
-      try {
-        await deleteRecording(this.recordingId, false);
-        showToast("Recording deleted", "success");
-        this.cbs.onRefresh();
-      } catch (e) {
-        showToast(`Delete failed: ${errText(e)}`, "error");
-      }
-    }
+  private handleDelete() {
+    // RecordingsView runs the grace-period Undo flow: it hides the row, closes
+    // this detail pane (the open recording is the one being deleted), and only
+    // deletes for real when the Undo toast lapses.
+    window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids: [this.recordingId] } }));
   }
 
   render() {

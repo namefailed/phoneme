@@ -121,6 +121,21 @@ export class RecordingsListElement extends LitElement {
    *  the vim layer jump to an edge (gg/G) or read the focused row's id (dd). */
   private lastVisibleRows: Recording[] = [];
 
+  /** Ids hidden by an in-flight undoable delete. They stay in the store (so the
+   *  delete can be cancelled) but are filtered out of the rendered list until
+   *  the undo window passes (committed → daemon refresh drops them) or is undone
+   *  (cleared → they reappear). Survives daemon-event refreshes by design. */
+  private pendingDelete = new Set<string>();
+
+  /** Show/hide rows for the undoable-delete flow (see RecordingsView). */
+  setPendingDelete(ids: string[], pending: boolean) {
+    for (const id of ids) {
+      if (pending) this.pendingDelete.add(id);
+      else this.pendingDelete.delete(id);
+    }
+    this.requestUpdate();
+  }
+
   private unsubStore: (() => void) | null = null;
   private unsubFilter: (() => void) | null = null;
   private onConfigSaved = (e: Event) => {
@@ -484,7 +499,12 @@ export class RecordingsListElement extends LitElement {
     if (s.error) {
       return html`<div class="empty error">${s.error}</div>`;
     }
-    if (s.recordings.length === 0) {
+    // Rows hidden by an in-flight undoable delete are filtered out here; they
+    // remain in the store so an Undo can bring them straight back.
+    const recs = this.pendingDelete.size
+      ? s.recordings.filter((r) => !this.pendingDelete.has(r.id))
+      : s.recordings;
+    if (recs.length === 0) {
       return html`<div class="empty">
         <h3 style="margin-bottom: 8px; color: var(--fg-default);">No recordings found</h3>
         <p style="color: var(--fg-muted); margin-bottom: 12px;">Press your global hotkey to start speaking, or click the Record button in the top right.</p>
@@ -570,7 +590,7 @@ export class RecordingsListElement extends LitElement {
         return sum + (px || 120);
       }, 0);
 
-    const allSelected = s.recordings.length > 0 && s.recordings.every((r) => this.multiSelected.has(r.id));
+    const allSelected = recs.length > 0 && recs.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
 
     const colLabels: Record<string, string> = {
@@ -619,7 +639,7 @@ export class RecordingsListElement extends LitElement {
       </div>
     `;
 
-    const grouped = groupRecordings(s.recordings);
+    const grouped = groupRecordings(recs);
     const visibleRows = visibleRecordings(grouped, (sid) => this.expandedSessions.has(sid));
     this.lastVisibleRows = visibleRows;
 
@@ -914,5 +934,9 @@ export class RecordingsList {
 
   getFocusedId(): string | null {
     return this.element.getFocusedId();
+  }
+
+  setPendingDelete(ids: string[], pending: boolean) {
+    this.element.setPendingDelete(ids, pending);
   }
 }
