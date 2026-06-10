@@ -1353,29 +1353,66 @@ export class FirstRunWizardElement extends LitElement {
       c.in_place_hotkey?.combo ? `In-place: ${c.in_place_hotkey.combo}` : null,
     ].filter(Boolean).join("  ·  ") || "None set";
 
-    // [key, value, isOff]
-    const rows: [string, string, boolean][] = [
-      ["Speech-to-text", stt, !c._setup_whisper],
-      ["Real-time streaming", c._setup_whisper && c._setup_native_streaming ? "On" : "Off", !(c._setup_whisper && c._setup_native_streaming)],
-      ["AI cleanup", cleanup, cleanup === "Off"],
-      ["Auto summary", c.summary?.auto ? "On — every recording" : "On demand only", !c.summary?.auto],
-      ["Speaker diarization", c._setup_diarization ? "On (local)" : "Off", !c._setup_diarization],
-      ["Semantic search", c.semantic_search?.enabled ? "On" : "Off", !c.semantic_search?.enabled],
-      ["Microphone", mic, false],
-      ["Live preview", preview, preview === "Off"],
-      ["Destination", dest, dest === "Show in Phoneme"],
-      ["Hotkeys", hotkeys, hotkeys === "None set"],
+    // A small inline toggle, matching the switches used on the Configure step.
+    const sw = (checked: boolean, handler: (on: boolean) => void) => html`
+      <label class="wizard-switch review-switch" title="Toggle" @click=${(e: Event) => e.stopPropagation()}>
+        <input type="checkbox" .checked=${checked}
+          @change=${(e: Event) => { handler((e.target as HTMLInputElement).checked); this.requestUpdate(); }}>
+        <span class="track"></span><span class="thumb"></span>
+      </label>`;
+
+    // key · value · optional inline toggle (the boolean features can be flipped
+    // here without going back; provider-bound rows stay read-only).
+    type ReviewRow = { key: string; value: string; off: boolean; toggle?: ReturnType<typeof html> };
+    const rows: ReviewRow[] = [
+      { key: "Speech-to-text", value: stt, off: !c._setup_whisper },
+      {
+        key: "Real-time streaming",
+        value: c._setup_whisper && c._setup_native_streaming ? "On" : "Off",
+        off: !(c._setup_whisper && c._setup_native_streaming),
+        // Native streaming rides on local Whisper; only offer it when that's on.
+        toggle: c._setup_whisper ? sw(!!c._setup_native_streaming, (on) => { c._setup_native_streaming = on; }) : undefined,
+      },
+      { key: "AI cleanup", value: cleanup, off: cleanup === "Off" },
+      {
+        key: "Auto summary",
+        value: c.summary?.auto ? "On — every recording" : "On demand only",
+        off: !c.summary?.auto,
+        toggle: sw(!!c.summary?.auto, (on) => { if (!c.summary) c.summary = {}; c.summary.auto = on; }),
+      },
+      {
+        key: "Speaker diarization",
+        value: c._setup_diarization ? "On (local)" : "Off",
+        off: !c._setup_diarization,
+        toggle: sw(!!c._setup_diarization, (on) => { c._setup_diarization = on; }),
+      },
+      {
+        key: "Semantic search",
+        value: c.semantic_search?.enabled ? "On" : "Off",
+        off: !c.semantic_search?.enabled,
+        toggle: sw(!!c.semantic_search?.enabled, (on) => { if (!c.semantic_search) c.semantic_search = {}; c.semantic_search.enabled = on; }),
+      },
+      { key: "Microphone", value: mic, off: false },
+      {
+        key: "Live preview",
+        value: preview,
+        off: preview === "Off",
+        toggle: sw(!!c.recording?.streaming_preview, (on) => { if (!c.recording) c.recording = {}; c.recording.streaming_preview = on; }),
+      },
+      { key: "Destination", value: dest, off: dest === "Show in Phoneme" },
+      { key: "Hotkeys", value: hotkeys, off: hotkeys === "None set" },
     ];
 
     return html`
       <div class="wizard-body">
         <h2 class="wizard-title">Review your setup</h2>
-        <p class="wizard-subtitle">Here's what Phoneme will use. You can change any of this anytime in Settings.</p>
+        <p class="wizard-subtitle">Here's what Phoneme will use — flip a switch to change it now, or adjust anything later in Settings.</p>
         <div class="review-list">
-          ${rows.map(([k, v, off]) => html`
+          ${rows.map((r) => html`
             <div class="review-row">
-              <span class="review-key">${k}</span>
-              <span class="review-val ${off ? "off" : ""}">${v}</span>
+              <span class="review-key">${r.key}</span>
+              <span class="review-val ${r.off ? "off" : ""}">${r.value}</span>
+              ${r.toggle ?? ""}
             </div>`)}
         </div>
       </div>

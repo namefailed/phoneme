@@ -80,9 +80,13 @@
   flex: 1;
   padding: 40px 32px;
   overflow-y: auto;
-  /* Center the column for readability on wide windows. */
+  /* Center the column horizontally for readability on wide windows, and
+     vertically so a short step (Welcome/Review) fills the height instead of
+     hugging the top with a big empty gap below. `safe` falls back to top-aligned
+     when a tall step would otherwise clip above the scroll area. */
   display: flex;
   flex-direction: column;
+  justify-content: safe center;
 }
 .wizard-body > * {
   width: 100%;
@@ -337,10 +341,15 @@
 }
 .review-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   padding: 11px 18px;
   border-bottom: 1px solid var(--border-subtle);
+}
+/* The inline toggle sits at the far right; the value column (flex:1) pushes it
+   over. Keep it from shrinking so the switch never squishes. */
+.review-switch {
+  flex: 0 0 auto;
 }
 .review-row:last-child { border-bottom: none; }
 .review-key {
