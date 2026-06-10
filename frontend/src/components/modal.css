@@ -171,38 +171,72 @@
 .doctor-fix { flex: 0 0 auto; }
 
 /* ── Keyboard shortcuts cheat-sheet ("?") ─────────────────────────────────── */
-.kbd-help-dialog { max-width: 460px; width: 460px; }
+.kbd-help-dialog {
+  width: 640px;
+  max-width: 92vw;
+}
+/* Masonry-style 2-column layout: each group is a self-contained card that never
+   splits across the column break. */
 .kbd-help-body {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  margin: 6px 0 4px;
+  column-count: 2;
+  column-gap: 14px;
+  margin: 10px 0 4px;
+  max-height: 64vh;
+  overflow-y: auto;
+}
+.kbd-help-group {
+  break-inside: avoid;
+  margin-bottom: 12px;
+  padding: 11px 13px 7px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
 }
 .kbd-help-group-title {
-  font-size: 11px;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--accent);
   margin-bottom: 8px;
+}
+/* Accent tab before each group title. */
+.kbd-help-group-title::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 .kbd-help-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 0;
+  padding: 5px 0;
 }
-.kbd-help-label { font-size: 13px; color: var(--fg-default); }
+.kbd-help-row + .kbd-help-row {
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 55%, transparent);
+}
+.kbd-help-label {
+  font-size: 12.5px;
+  color: var(--fg-default);
+}
 .kbd-key {
   flex: 0 0 auto;
   font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   font-size: 11px;
+  font-weight: 600;
   color: var(--fg-default);
-  background: var(--bg-surface);
+  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-surface));
   border: 1px solid var(--border-subtle);
   border-bottom-width: 2px;
   border-radius: 6px;
   padding: 2px 8px;
   white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
 }

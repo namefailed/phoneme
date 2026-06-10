@@ -16,6 +16,9 @@ export class TranscriptEditorElement extends LitElement {
 
   @property({ type: String }) recordingId = "";
   @property({ type: String }) initialText = "";
+  /** Whether this transcript was manually edited before (the catalog's
+   *  `user_edited` flag) — surfaced as an "Edited" badge next to Save. */
+  @property({ type: Boolean }) userEdited = false;
 
   @state() private currentText = "";
   @state() private vimMode = false;
@@ -266,6 +269,11 @@ export class TranscriptEditorElement extends LitElement {
           padding: 1px 4px;
           border-radius: 4px;
         }
+        ph-transcript-editor .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
         ph-transcript-editor .btn-save {
           background: var(--accent);
           color: var(--accent-fg);
@@ -276,12 +284,26 @@ export class TranscriptEditorElement extends LitElement {
           cursor: pointer;
           font-weight: bold;
         }
+        /* "Edited" status badge — same footprint as Save, but a non-interactive
+           accent-tinted pill so it reads as a marker, not an action. */
+        ph-transcript-editor .edited-badge {
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-weight: bold;
+          background: color-mix(in srgb, var(--accent) 16%, transparent);
+          color: var(--accent);
+          border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+        }
       </style>
       <div class="header">
         <span class="title">
           Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
-        <button class="btn-save" style="display: ${this.isDirty() ? 'block' : 'none'};" @click=${this.save}>Save Changes</button>
+        <div class="header-actions">
+          ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
+          <button class="btn-save" style="display: ${this.isDirty() ? 'inline-flex' : 'none'};" @click=${this.save}>Save Changes</button>
+        </div>
       </div>
       <div id="cm-editor-root" @keydown=${this.handleKeydown}></div>
     `;
@@ -296,10 +318,12 @@ export class TranscriptEditor {
     id: string,
     initial: string,
     onDirtyChange: (dirty: boolean) => void,
+    userEdited = false,
   ) {
     this.element = document.createElement('ph-transcript-editor') as TranscriptEditorElement;
     this.element.recordingId = id;
     this.element.initialText = initial;
+    this.element.userEdited = userEdited;
     this.element.addEventListener('dirty-change', (e: Event) => {
       onDirtyChange((e as CustomEvent<boolean>).detail);
     });

@@ -516,11 +516,11 @@ export class HeaderBarElement extends LitElement {
               .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
               .hb-mode-item.selected { color: var(--accent); }
               .hb-mode-item .hb-mode-ico { font-size: 15px; width: 20px; text-align: center; flex: 0 0 auto; }
-              .hb-mode-item .hb-mode-label { flex: 1; }
-              .hb-mode-item .hb-mode-check { color: var(--accent); font-weight: 700; }
+              .hb-mode-item .hb-mode-label { flex: 0 1 auto; }
+              .hb-mode-item .hb-mode-check { margin-left: 4px; color: var(--accent); font-weight: 700; }
             </style>
             <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
-              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:200px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:168px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
               <div class="hb-mode-cap">Record as</div>
               <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
                 <span class="hb-mode-ico">🎙️</span>

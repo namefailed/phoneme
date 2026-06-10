@@ -101,7 +101,7 @@ export class RecordingDetail {
           this.editor?.dispose();
           this.editor = new TranscriptEditor(editorRoot, r.id, newText, (d) => {
             this.dirty = d;
-          });
+          }, !!r.user_edited);
         }
       }
     }
@@ -142,6 +142,9 @@ export class RecordingDetail {
     // sharper than a font glyph and they swap to signal the current state.
     const EXPAND_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>`;
     const CONTRACT_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>`;
+    // Right-arrow: dismiss the detail pane back to the recordings list (the mouse
+    // equivalent of Esc / clicking away).
+    const CLOSE_SVG = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`;
     this.container.innerHTML = `
       <div class="detail">
         <div class="detail-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -152,7 +155,10 @@ export class RecordingDetail {
               <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
             </div>
           </div>
-          <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>
+          <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+            <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>
+            <button class="detail-focus-btn" id="detail-close" aria-label="Close recording" title="Close — back to the recordings list">${CLOSE_SVG}</button>
+          </div>
         </div>
         <div class="waveform" id="wf-${r.id}"></div>
         <div id="actions"></div>
@@ -204,7 +210,7 @@ export class RecordingDetail {
       this.editor?.dispose();
       this.editor = new TranscriptEditor(editorRoot, r.id, r.transcript ?? "", (d) => {
         this.dirty = d;
-      });
+      }, !!r.user_edited);
     }
 
     // Transcript history: "peek" an earlier version by temporarily hijacking the
@@ -343,6 +349,13 @@ export class RecordingDetail {
         window.dispatchEvent(new CustomEvent("phoneme:toggle-focus-mode"));
         sync();
       };
+    }
+
+    // Close (→): dismiss the detail pane back to the list (RecordingsView owns
+    // selection/layout, so it does the actual deselect).
+    const closeBtn = this.container.querySelector<HTMLButtonElement>("#detail-close");
+    if (closeBtn) {
+      closeBtn.onclick = () => window.dispatchEvent(new CustomEvent("phoneme:close-detail"));
     }
 
     this.renderSpeakers(r);

@@ -357,11 +357,6 @@ mark.search-hit {
   border-color: var(--accent);
   color: var(--accent);
 }
-/* The "Speakers" rename button reads as a distinct accent affordance. */
-#rename-speakers {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-}
 .transcript-block {
   /* Tighter bottom margin: it sits directly above the notes block, so this is
      half of the previous gap (paired with notes-block's reduced top margin). */

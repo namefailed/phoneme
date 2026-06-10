@@ -139,7 +139,14 @@ export class ThinkingPopoutElement extends LitElement {
   }
 
   private fabXY(): { x: number; y: number } {
-    return this.fabPos ?? { x: window.innerWidth - 60, y: window.innerHeight - 60 };
+    if (!this.fabPos) return { x: window.innerWidth - 60, y: window.innerHeight - 60 };
+    // Re-clamp to the CURRENT viewport on every read — a saved position from a
+    // larger window would otherwise leave the button stranded off-screen (the
+    // "where did my brain button go?" bug).
+    return {
+      x: Math.max(8, Math.min(window.innerWidth - 48, this.fabPos.x)),
+      y: Math.max(8, Math.min(window.innerHeight - 48, this.fabPos.y)),
+    };
   }
 
   /** Press-drag-or-click on the FAB: a drag moves (and persists) the button; a

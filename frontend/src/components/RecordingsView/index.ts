@@ -78,6 +78,8 @@ export class RecordingsView {
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
    *  flow (the bulk bar and the detail action row both use it). */
   private deleteReqHandler: ((e: Event) => void) | null = null;
+  /** The detail header's → close button dismisses the pane back to the list. */
+  private closeDetailHandler: (() => void) | null = null;
 
   /** Current multi-selection. Empty when no checkboxes are checked. */
   private multiSelected = new Set<string>();
@@ -157,6 +159,11 @@ export class RecordingsView {
       if (Array.isArray(ids)) this.requestUndoableDelete(ids);
     };
     window.addEventListener("phoneme:request-delete", this.deleteReqHandler);
+    this.closeDetailHandler = () => {
+      if (this.focusMode) this.toggleFocusMode();
+      this.deselect();
+    };
+    window.addEventListener("phoneme:close-detail", this.closeDetailHandler);
   }
 
   async refresh() {
@@ -432,6 +439,7 @@ export class RecordingsView {
     if (this.focusHandler) window.removeEventListener("phoneme:toggle-focus-mode", this.focusHandler);
     if (this.vimHandler) window.removeEventListener("phoneme:vim", this.vimHandler);
     if (this.deleteReqHandler) window.removeEventListener("phoneme:request-delete", this.deleteReqHandler);
+    if (this.closeDetailHandler) window.removeEventListener("phoneme:close-detail", this.closeDetailHandler);
   }
 
   private applyLayout() {
