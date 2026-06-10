@@ -101,6 +101,41 @@ struct TaskOutput {
     first_non_silent_at: Option<Instant>,
 }
 
+/// A cheap, cloneable, read-only handle for snapshotting a live recorder's
+/// captured audio without owning the [`Recorder`] itself.
+///
+/// It holds a clone of the recorder's command channel, so it can ask the capture
+/// task for a trailing window exactly like [`Recorder::snapshot_tail`] does —
+/// but it can be handed to a *separate* task (e.g. the daemon's streaming
+/// preview loop) and outlive the borrow of the `Recorder`. This is what lets the
+/// live preview read a single recording's audio AND a meeting mic-track's audio
+/// through one uniform path: the daemon keeps the `Recorder` wherever it likes
+/// (an `Arc<Mutex<…>>` for the single path, inside the `ActiveMeeting` for the
+/// meeting path) and just clones out a `SnapshotHandle` for the preview.
+///
+/// `snapshot_tail` returns `Err` once the recorder task has ended (stop/cancel),
+/// which the preview loop treats as "recording gone — exit".
+#[derive(Clone)]
+pub struct SnapshotHandle {
+    cmd_tx: mpsc::Sender<RecorderCommand>,
+}
+
+impl SnapshotHandle {
+    /// See [`Recorder::snapshot_tail`]. Returns `(total_len, tail_samples)`.
+    pub async fn snapshot_tail(&self, max_tail: usize) -> Result<(usize, Vec<i16>)> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.cmd_tx
+            .send(RecorderCommand::Snapshot {
+                max_tail,
+                reply: tx,
+            })
+            .await
+            .map_err(|_| Error::Internal("recorder task is gone".into()))?;
+        rx.await
+            .map_err(|_| Error::Internal("recorder dropped snapshot reply".into()))
+    }
+}
+
 impl Recorder {
     /// Begin recording with the given source. The task starts pulling
     /// immediately.
@@ -335,16 +370,19 @@ impl Recorder {
     /// (constant per-tick cost) while still knowing how much total audio exists
     /// so it can throttle on newly-accumulated samples.
     pub async fn snapshot_tail(&self, max_tail: usize) -> Result<(usize, Vec<i16>)> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.cmd_tx
-            .send(RecorderCommand::Snapshot {
-                max_tail,
-                reply: tx,
-            })
-            .await
-            .map_err(|_| Error::Internal("recorder task is gone".into()))?;
-        rx.await
-            .map_err(|_| Error::Internal("recorder dropped snapshot reply".into()))
+        self.snapshot_handle().snapshot_tail(max_tail).await
+    }
+
+    /// A cheap, cloneable, read-only handle that can snapshot this recorder's
+    /// captured audio from another task without owning the `Recorder`. Used by
+    /// the daemon's live-preview loop so it can read either a single recording's
+    /// or a meeting mic track's audio through one uniform path. The handle stays
+    /// valid until the recorder is stopped/cancelled (after which `snapshot_tail`
+    /// returns `Err`).
+    pub fn snapshot_handle(&self) -> SnapshotHandle {
+        SnapshotHandle {
+            cmd_tx: self.cmd_tx.clone(),
+        }
     }
 
     /// Wait for the recorder to auto-finalize (Oneshot / Duration modes,

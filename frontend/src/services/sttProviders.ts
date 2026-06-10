@@ -12,6 +12,8 @@
  * endpoint). "Custom" presets below map a friendly name onto `custom` + a URL.
  */
 
+import { CURATED_TRANSCRIPTION, curatedTranscriptionModelIds } from "../data/curatedModels";
+
 export interface SttProvider {
   /** Value stored in `config.whisper.provider`. */
   value: string;
@@ -128,18 +130,21 @@ export function findSttCustomPreset(id: string): SttCustomPreset | undefined {
 }
 
 /**
- * Curated model lists per cloud STT provider. Unlike LLM providers, most STT
- * APIs (Deepgram, AssemblyAI, ElevenLabs) don't expose a "list models"
- * endpoint, so we ship a known-good list for a dropdown + free-text fallback.
+ * Curated model ids per cloud STT provider, for a dropdown + free-text
+ * fallback. Unlike LLM providers, most STT APIs (Deepgram, AssemblyAI,
+ * ElevenLabs) don't expose a "list models" endpoint, so a shipped list is the
+ * only way to suggest good options.
+ *
+ * The rich source of truth — labels, descriptions, resource-tier and use-case
+ * hints, and the recommended default per provider — lives in
+ * `data/curatedModels.ts`. This derives the bare id lists from it so the
+ * existing `string[]`-based callers (the shared model picker's curated
+ * dropdown, the header Models picker) keep working unchanged.
  */
-export const STT_CURATED_MODELS: Record<string, string[]> = {
-  openai: ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"],
-  groq: ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"],
-  deepgram: ["nova-3", "nova-2", "enhanced", "base"],
-  assemblyai: ["best", "nano"],
-  elevenlabs: ["scribe_v1"],
-};
+export const STT_CURATED_MODELS: Record<string, string[]> = Object.fromEntries(
+  Object.keys(CURATED_TRANSCRIPTION).map((p) => [p, curatedTranscriptionModelIds(p)]),
+);
 
 export function curatedSttModels(provider: string): string[] {
-  return STT_CURATED_MODELS[provider] ?? [];
+  return curatedTranscriptionModelIds(provider);
 }

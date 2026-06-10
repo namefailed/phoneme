@@ -81,6 +81,62 @@ pub struct AppState {
     /// that caused "Whisper timed out after 60s" on long recordings while the
     /// preview hammered the server with a big model.
     pub whisper_sem: Arc<tokio::sync::Semaphore>,
+    /// The currently-processing recording and its cancellation token, set by the
+    /// queue worker around each `pipeline::run` call and cleared after. The
+    /// `CancelProcessing` IPC cancels this token to abort the in-flight item.
+    pub processing: Arc<std::sync::Mutex<Option<(phoneme_core::RecordingId, tokio_util::sync::CancellationToken)>>>,
+    /// A ONE-JOB-SCOPED override of the bundled whisper-server's model file,
+    /// used by a model-override re-transcription. `None` (the default) means the
+    /// supervisor runs the configured `whisper.model_path`.
+    ///
+    /// Why this exists instead of mutating the global config: a re-transcribe
+    /// with a different model must load that model for *only that one job*. The
+    /// previous approach wrote the model into the process-global config, which
+    /// the whisper supervisor independently polls and restarts on — and which
+    /// the queue worker then reverted with a blanket post-run reload, causing a
+    /// SECOND restart. Queued/preview transcriptions reading the same global
+    /// config raced the flapping server and mass-failed (#49). The override is
+    /// applied here, read by the supervisor as the authoritative model, and the
+    /// pipeline drives a single serialized restart-to-override / restore cycle
+    /// under `whisper_sem` so nothing else touches the server mid-swap.
+    pub whisper_model_override: Arc<WhisperModelOverride>,
+    /// Per-recording REQUESTED whisper model overrides, keyed by recording id.
+    /// The `RetranscribeRecording` handler records the request here at enqueue
+    /// time; the pipeline removes and applies it when that job actually runs
+    /// (serialized behind the queue + `whisper_sem`), so an override never takes
+    /// effect while a *different* recording is mid-transcription. In-memory and
+    /// ephemeral — a daemon restart drops pending overrides (the job then re-runs
+    /// with the configured model), mirroring the prior behavior where the
+    /// global-config override didn't survive a restart either.
+    pub pending_overrides:
+        Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
+}
+
+/// Coordination cell between a model-override re-transcription (in the pipeline)
+/// and the whisper supervisor. The supervisor treats `get()` (when `Some`) as
+/// the model file to run, falling back to the configured `model_path`; the
+/// `changed` notify lets the supervisor react to a set/clear without waiting out
+/// its poll interval.
+#[derive(Default)]
+pub struct WhisperModelOverride {
+    /// The override model path, or `None` to use the configured model.
+    model: std::sync::Mutex<Option<String>>,
+    /// Pinged whenever `model` is set or cleared so the supervisor can restart
+    /// the server promptly instead of waiting for its next 1s poll tick.
+    pub changed: tokio::sync::Notify,
+}
+
+impl WhisperModelOverride {
+    /// Current override model path, if any.
+    pub fn get(&self) -> Option<String> {
+        self.model.lock().unwrap().clone()
+    }
+
+    /// Set (`Some`) or clear (`None`) the override and wake the supervisor.
+    pub fn set(&self, value: Option<String>) {
+        *self.model.lock().unwrap() = value;
+        self.changed.notify_waiters();
+    }
 }
 
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -105,7 +161,7 @@ impl AppState {
         let webhook = WebhookClient::new()?;
 
         let embedder = if config.semantic_search.enabled {
-            match phoneme_core::Embedder::new(&config.semantic_search.model_dir) {
+            match phoneme_core::Embedder::new(&config.semantic_search) {
                 Ok(e) => Some(Arc::new(e)),
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to load semantic search model");
@@ -129,6 +185,9 @@ impl AppState {
             webhook,
             embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
             whisper_sem: Arc::new(tokio::sync::Semaphore::new(1)),
+            processing: Arc::new(std::sync::Mutex::new(None)),
+            whisper_model_override: Arc::new(WhisperModelOverride::default()),
+            pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         })
     }
 }

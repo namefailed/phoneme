@@ -98,4 +98,27 @@ mod tests {
         let decoded = codec.decode(&mut buf).unwrap();
         assert_eq!(decoded.as_deref(), Some("hello"));
     }
+
+    #[test]
+    fn unknown_request_decodes_leniently_and_does_not_break_the_stream() {
+        // The resilience guarantee behind the run_doctor regression: a client
+        // ahead of this build sends a request variant we don't know. As a
+        // `ServerRequest` it must decode to `Unknown` (not a codec error that
+        // fuses the Framed stream), and a *subsequent* valid request on the same
+        // connection must still decode — i.e. one unknown request can't break
+        // the client's other commands.
+        use crate::schema::{Request, ServerRequest};
+        let mut codec = JsonLineCodec::<ServerRequest>::new();
+        let mut buf = BytesMut::from(
+            "{\"type\":\"some_future_request\"}\n{\"type\":\"daemon_status\"}\n".as_bytes(),
+        );
+        match codec.decode(&mut buf).expect("unknown frame must not error") {
+            Some(ServerRequest::Unknown { .. }) => {}
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+        match codec.decode(&mut buf).expect("following frame must still decode") {
+            Some(ServerRequest::Known(req)) => assert!(matches!(*req, Request::DaemonStatus)),
+            other => panic!("expected Known(DaemonStatus), got {other:?}"),
+        }
+    }
 }

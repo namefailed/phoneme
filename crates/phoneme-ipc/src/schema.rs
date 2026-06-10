@@ -8,6 +8,28 @@ use chrono::{DateTime, Local};
 use phoneme_core::{ListFilter, RecordMode, RecordingId};
 use serde::{Deserialize, Serialize};
 
+/// One-time overrides for a Re-run → "All" (whole-pipeline) run, carried on
+/// [`Request::RetranscribeRecording`]. When present, the daemon forces the
+/// cleanup and auto-summary steps ON for this run and layers these values into
+/// the temporary in-memory config (never persisted). `None` fields fall back to
+/// the configured `[llm_post_process]` / `[summary]` values. The API key is
+/// intentionally NOT included — cleanup/summary reuse the configured key.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RerunAllOverrides {
+    #[serde(default)]
+    pub cleanup_provider: Option<String>,
+    #[serde(default)]
+    pub cleanup_model: Option<String>,
+    #[serde(default)]
+    pub cleanup_prompt: Option<String>,
+    #[serde(default)]
+    pub cleanup_api_url: Option<String>,
+    #[serde(default)]
+    pub summary_model: Option<String>,
+    #[serde(default)]
+    pub summary_prompt: Option<String>,
+}
+
 /// All operations a client can ask the daemon to perform.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -82,6 +104,11 @@ pub enum Request {
         /// machine transcript. Never persisted to config.
         #[serde(default)]
         post_process: Option<bool>,
+        /// When set, this is a Re-run → "All": force cleanup + auto-summary on
+        /// for this run and layer these one-time overrides into the temporary
+        /// config. `None` = a plain re-transcription (existing behavior).
+        #[serde(default)]
+        all_overrides: Option<RerunAllOverrides>,
     },
     RefireHook {
         id: RecordingId,
@@ -148,6 +175,65 @@ pub enum Request {
         id: RecordingId,
         notes: String,
     },
+    /// Set (or clear) the custom display name for one diarized speaker label of
+    /// a recording. `speaker_label` is the 1-based index from the transcript's
+    /// `[Speaker N]` marker. A blank `name` clears the mapping (the label
+    /// reverts to the default "Speaker N"). The stored transcript is never
+    /// rewritten — names are applied at display/export time — so a rename is
+    /// reversible. The updated name map is delivered back to clients via the
+    /// recording DTO (`Recording::speaker_names` on `GetRecording`/`ListRecordings`/
+    /// `ListMeeting`); a `SpeakerNameUpdated` event signals the change.
+    SetSpeakerName {
+        id: RecordingId,
+        speaker_label: i64,
+        name: String,
+    },
+
+    /// List the transcription pipeline queue: items waiting in `pending/` (in
+    /// claim order) plus the one currently `processing/`. Returns queue entries
+    /// with id, timestamp, audio path, duration, and state.
+    ListQueue,
+    /// Remove a still-pending recording from the queue before it's transcribed.
+    /// No-op (reported) if it was already claimed/processing.
+    CancelQueued {
+        id: RecordingId,
+    },
+    /// Set the desired claim order of pending queue items (full ordered id
+    /// list). The worker claims in this order; unknown/absent ids fall back to
+    /// chronological order.
+    ReorderQueue {
+        ids: Vec<RecordingId>,
+    },
+    /// Pause or resume the transcription queue. While paused the worker stops
+    /// claiming new pending items (the in-flight item still finishes).
+    SetQueuePaused {
+        paused: bool,
+    },
+    /// Query whether the queue is currently paused.
+    QueuePaused,
+    /// Return the inbox depth counts (`pending`, `processing`, `done`,
+    /// `failed`). The same numbers `QueueDepthChanged` carries, fetchable on
+    /// demand so a freshly-loaded UI shows accurate counts (e.g. the failed
+    /// count) without waiting for the next queue-change event.
+    QueueCounts,
+    /// Remove every payload quarantined in the inbox `failed/` folder
+    /// ("dismiss failed"). Returns how many were cleared. Catalog rows are
+    /// untouched — only the inbox quarantine is emptied.
+    ClearFailed,
+    /// Remove ALL still-pending items from the queue at once ("clear queue").
+    /// The currently-processing item is left untouched.
+    CancelAllQueued,
+    /// Cancel the item currently being processed (transcribe/cleanup/summary).
+    /// Aborts the in-flight work, moves it out of `processing/`, and marks it
+    /// terminal. No-op if `id` isn't the in-flight item.
+    CancelProcessing {
+        id: RecordingId,
+    },
+
+    /// Run all health checks (local filesystem + backend reachability) and
+    /// return the results for the GUI Doctor view. Each result carries a name,
+    /// ok flag, detail string, and optional `fix_action`.
+    RunDoctor,
 
     // Daemon control
     DaemonStatus,
@@ -186,12 +272,24 @@ pub enum Request {
     TagsFor {
         recording_id: RecordingId,
     },
+    /// Number of recordings attached to each tag, keyed by tag id.
+    TagUsageCounts,
+    /// Merge one tag into another: re-point all recordings, then delete `from_id`.
+    MergeTags {
+        from_id: i64,
+        into_id: i64,
+    },
 
     // Semantic Search
     SemanticSearch {
         query: String,
         limit: usize,
     },
+    /// Clear every stored embedding and re-embed the whole library with the
+    /// currently-configured model. Use after changing the embedding model (a
+    /// different model/dimension makes old vectors unsearchable). Returns
+    /// immediately; the re-embed runs in the background.
+    ReembedAll,
 }
 
 /// Daemon response. For most requests, a single Response is returned.
@@ -208,6 +306,41 @@ pub enum Request {
 pub enum Response {
     Ok(serde_json::Value),
     Err(IpcError),
+}
+
+/// A request as decoded on the **server** (daemon) side.
+///
+/// Decoding a bare [`Request`] fails the whole codec stream when a line is valid
+/// JSON but not a recognized variant — e.g. a newer client (the tray) sends a
+/// request this daemon predates during a rolling rebuild. That codec error tears
+/// down the entire pipe connection, collaterally killing every other in-flight
+/// and subsequent command on it (this is what made an unrelated `run_doctor`
+/// "stop working" the moment the tray got ahead of the daemon). `ServerRequest`
+/// instead decodes such a line to [`ServerRequest::Unknown`] so the daemon can
+/// answer with an error `Response` and keep serving the connection.
+#[derive(Debug, Clone)]
+pub enum ServerRequest {
+    /// A recognized request.
+    Known(Box<Request>),
+    /// A line that parsed as JSON but not into any known request; carries the
+    /// deserialize error detail so the daemon can return a useful `Response`.
+    Unknown { detail: String },
+}
+
+impl<'de> Deserialize<'de> for ServerRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Decode to a generic Value first — any well-formed JSON line succeeds
+        // here — then try to interpret it as a Request. An unknown variant
+        // becomes data (`Unknown`) rather than a stream-fatal codec error.
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match serde_json::from_value::<Request>(value) {
+            Ok(req) => ServerRequest::Known(Box::new(req)),
+            Err(e) => ServerRequest::Unknown { detail: e.to_string() },
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -231,6 +364,27 @@ pub enum IpcErrorKind {
     ShuttingDown,
     Io,
     Internal,
+}
+
+/// A pipeline processing stage, reported via [`DaemonEvent::PipelineStageChanged`]
+/// so the UI can show which step of the transcribe → cleanup → summary → hook
+/// flow a recording is currently in (and surface re-runs in the queue, not just
+/// fresh transcriptions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineStage {
+    /// Running speech-to-text (whisper / cloud STT).
+    Transcribing,
+    /// Running the LLM post-processing ("cleanup") step.
+    CleaningUp,
+    /// Running the LLM summary step.
+    Summarizing,
+    /// Running an action hook.
+    RunningHook,
+    /// All work finished successfully.
+    Done,
+    /// The work failed at some stage.
+    Failed,
 }
 
 /// Events broadcast by the daemon on `SubscribeEvents`.
@@ -284,6 +438,31 @@ pub enum DaemonEvent {
         id: RecordingId,
         error: String,
     },
+    /// Pipeline stage transition for a recording being processed. The UI shows
+    /// the current step (Transcribing / CleaningUp / Summarizing / RunningHook)
+    /// on the queue item and clears it on a terminal stage (Done / Failed).
+    /// Emitted by `pipeline::run` and by every re-run handler, so re-runs surface
+    /// in the queue just like fresh transcriptions.
+    PipelineStageChanged {
+        id: RecordingId,
+        stage: PipelineStage,
+    },
+    /// Live AI activity for one LLM stage (cleanup or summary), so the GUI can
+    /// show the exact prompt and the response as it streams. Lifecycle per
+    /// stage: (1) one event with the full `prompt` (`done=false`), (2) zero or
+    /// more `delta` chunks as the response streams (Ollama) or one full delta
+    /// (non-streaming providers), (3) a final `done=true` event. Deltas are
+    /// coalesced and capped so a long generation can't flood the bus.
+    LlmActivity {
+        id: RecordingId,
+        stage: PipelineStage,
+        #[serde(default)]
+        prompt: String,
+        #[serde(default)]
+        delta: String,
+        #[serde(default)]
+        done: bool,
+    },
     HookStarted {
         id: RecordingId,
     },
@@ -317,7 +496,18 @@ pub enum DaemonEvent {
     SummaryUpdated {
         id: RecordingId,
     },
+    /// Summary generation failed. Distinct from `TranscriptionFailed` — the
+    /// transcript itself is fine; only the (optional) summary step failed.
+    SummaryFailed {
+        id: RecordingId,
+        error: String,
+    },
     NotesUpdated {
+        id: RecordingId,
+    },
+    /// A recording's custom speaker-name map changed (a label was renamed or
+    /// cleared). Clients re-fetch the recording to pick up the new names.
+    SpeakerNameUpdated {
         id: RecordingId,
     },
     MeetingNameUpdated {

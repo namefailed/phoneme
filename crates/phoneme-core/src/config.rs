@@ -26,7 +26,22 @@ fn serialize_secret_string<S>(
 where
     S: serde::Serializer,
 {
-    serializer.serialize_str(secret.expose_secret())
+    // Encrypt at rest (DPAPI on Windows) so the key is never written to
+    // config.toml in plaintext. Empty stays empty; see secret_crypto.
+    serializer.serialize_str(&crate::secret_crypto::protect(secret.expose_secret()))
+}
+
+/// Read an API key from config, decrypting an at-rest DPAPI value
+/// (`dpapi:v1:…`) and passing a legacy plaintext value through unchanged (so old
+/// configs migrate transparently and get re-encrypted on the next save).
+fn deserialize_secret_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<SecretString, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let stored = String::deserialize(deserializer)?;
+    Ok(SecretString::from(crate::secret_crypto::unprotect(&stored)))
 }
 
 /// The root configuration object for Phoneme.
@@ -117,7 +132,24 @@ pub struct DiarizationConfig {
     pub local_model_path: String,
 }
 
+/// How an embedding model reduces per-token hidden states to one sentence
+/// vector. `Mean` (attention-mask-weighted average) fits MiniLM/MPNet/E5/BGE;
+/// `Cls` takes the `[CLS]` token, which some models are trained to use instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingPooling {
+    #[default]
+    Mean,
+    Cls,
+}
+
 /// Settings for local semantic search via ONNX embeddings.
+///
+/// The fields below the model path adapt Phoneme to embedding models other than
+/// the bundled all-MiniLM-L6-v2 — different pooling, max length, whether the
+/// model takes `token_type_ids`, and the query/passage prefixes that
+/// instruction-tuned models (E5, BGE) expect. Every one defaults to the
+/// all-MiniLM behaviour, so an existing config keeps working unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SemanticSearchConfig {
     /// Whether semantic search indexing is enabled. If true, the daemon will load
@@ -126,6 +158,29 @@ pub struct SemanticSearchConfig {
     /// Absolute path to the directory containing the ONNX model and tokenizer.
     /// Example: `C:\Users\Namef\AppData\Local\phoneme\models\all-MiniLM-L6-v2`
     pub model_dir: PathBuf,
+    /// Max input length (tokens) before truncation. all-MiniLM was trained at 256.
+    #[serde(default = "default_embed_max_tokens")]
+    pub max_tokens: usize,
+    /// Token-pooling strategy for this model.
+    #[serde(default)]
+    pub pooling: EmbeddingPooling,
+    /// Whether the model takes a `token_type_ids` input. BERT-family models
+    /// (MiniLM, MPNet) do; some exports (e.g. several E5 variants) don't and
+    /// error if fed one. Leave on for the bundled model.
+    #[serde(default = "default_true")]
+    pub token_type_ids: bool,
+    /// Prefix prepended to a SEARCH QUERY before embedding (e.g. `"query: "` for
+    /// E5). Empty for symmetric models like all-MiniLM.
+    #[serde(default)]
+    pub query_prefix: String,
+    /// Prefix prepended to a STORED PASSAGE/transcript before embedding (e.g.
+    /// `"passage: "` for E5). Empty for all-MiniLM.
+    #[serde(default)]
+    pub passage_prefix: String,
+}
+
+fn default_embed_max_tokens() -> usize {
+    256
 }
 
 impl Default for SemanticSearchConfig {
@@ -133,6 +188,11 @@ impl Default for SemanticSearchConfig {
         Self {
             enabled: false,
             model_dir: PathBuf::new(),
+            max_tokens: default_embed_max_tokens(),
+            pooling: EmbeddingPooling::Mean,
+            token_type_ids: true,
+            query_prefix: String::new(),
+            passage_prefix: String::new(),
         }
     }
 }
@@ -147,7 +207,8 @@ pub struct LlmPostProcessConfig {
     /// API key for authentication, if required by the chosen provider.
     #[serde(
         default = "default_secret_string",
-        serialize_with = "serialize_secret_string"
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
     )]
     pub api_key: SecretString,
     /// Base URL for the API. If empty, the provider's default is used.
@@ -197,6 +258,12 @@ impl LlmPostProcessConfig {
     pub fn set_api_key(&mut self, key: impl Into<String>) {
         self.api_key = SecretString::from(key.into());
     }
+
+    /// The API key as a plain `&str`, so callers outside this crate can read it
+    /// without depending on `secrecy` (e.g. masking config for the WebView).
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
 }
 
 fn default_llm_post_process() -> LlmPostProcessConfig {
@@ -231,7 +298,8 @@ pub struct SummaryConfig {
     /// API key for the summary provider. Empty → inherit the cleanup key.
     #[serde(
         default = "default_secret_string",
-        serialize_with = "serialize_secret_string"
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
     )]
     pub api_key: SecretString,
     /// Base URL for the summary provider. Empty → inherit / provider default.
@@ -375,7 +443,8 @@ pub struct WhisperConfig {
     /// API key for a cloud transcription provider (OpenAI/Groq). Ignored for `local`.
     #[serde(
         default = "default_secret_string",
-        serialize_with = "serialize_secret_string"
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
     )]
     pub api_key: SecretString,
     /// Cloud model identifier (e.g. `whisper-1` for OpenAI, `whisper-large-v3`
@@ -423,6 +492,16 @@ impl PartialEq for WhisperConfig {
 }
 
 impl WhisperConfig {
+    /// Replace the API key from a plain string (encapsulates `SecretString`).
+    pub fn set_api_key(&mut self, key: impl Into<String>) {
+        self.api_key = SecretString::from(key.into());
+    }
+
+    /// The API key as a plain `&str` (for masking config for the WebView).
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
+
     /// OpenAI-compatible Whisper server base URL (no trailing path).
     pub fn server_base_url(&self) -> String {
         match self.mode {
@@ -627,6 +706,15 @@ pub struct InterfaceConfig {
     /// Column widths for the main list view.
     #[serde(default = "default_column_widths")]
     pub column_widths: Vec<String>,
+    /// Show the live transcription preview in a system-wide, always-on-top,
+    /// frameless overlay window that floats over the whole desktop (instead of
+    /// only inside the app's own window). Auto-shows when a recording or meeting
+    /// starts and dims/hides shortly after it stops. Requires `streaming_preview`
+    /// to be enabled to have anything to show. **Default false = disabled** —
+    /// when off, the overlay window is never created and the preview stays inside
+    /// the app, exactly as before.
+    #[serde(default)]
+    pub preview_overlay: bool,
 }
 
 fn default_column_widths() -> Vec<String> {
@@ -800,7 +888,11 @@ impl Default for Config {
             },
             hook: HookConfig {
                 commands: vec![
-                    "powershell -File ~/AppData/Roaming/phoneme/hooks/to-stdout.ps1".into(),
+                    // Safe, inert default: echo the transcript to stdout (captured
+                    // to hook.log). `-NoProfile` avoids loading the user's profile
+                    // and `-ExecutionPolicy Bypass` lets the bundled, unsigned
+                    // script run regardless of the machine's execution policy.
+                    "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1".into(),
                 ],
                 timeout_secs: 30,
                 webhook_url: None,
@@ -831,6 +923,7 @@ impl Default for Config {
                     "transcript".into(),
                 ],
                 column_widths: default_column_widths(),
+                preview_overlay: false,
             },
             editor: EditorConfig {
                 vim_mode: false,

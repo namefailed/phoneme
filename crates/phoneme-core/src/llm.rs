@@ -19,11 +19,38 @@ use secrecy::ExposeSecret;
 use serde::Deserialize;
 use std::time::Duration;
 
+/// A sink for streamed response tokens, passed to
+/// [`LlmProvider::process_streaming`] to forward partial output to the UI as it
+/// is produced. `Send` so it can cross `.await` points inside the async provider.
+pub type DeltaSink<'a> = &'a mut (dyn FnMut(&str) + Send);
+
 /// Post-processes a transcript with an LLM.
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Apply the instruction `prompt` to `text`, returning the new text.
     async fn process(&self, prompt: &str, text: &str) -> Result<String>;
+
+    /// The verbatim prompt this provider sends to the model for `(prompt,
+    /// text)`, so the GUI can show exactly what was sent. The default matches
+    /// every current provider (a single user message of `combine(...)`).
+    fn exact_prompt(&self, prompt: &str, text: &str) -> String {
+        combine(prompt, text)
+    }
+
+    /// Like [`process`](Self::process) but forwards partial response text to
+    /// `on_delta` as it is produced. The default calls `process` and emits the
+    /// whole result as one delta — correct for non-streaming providers
+    /// (OpenAI-compatible, Groq, Anthropic). Ollama overrides this to stream.
+    async fn process_streaming(
+        &self,
+        prompt: &str,
+        text: &str,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<String> {
+        let out = self.process(prompt, text).await?;
+        on_delta(&out);
+        Ok(out)
+    }
 }
 
 /// Owns the process-wide HTTP client and builds an [`LlmProvider`] per request
@@ -160,6 +187,16 @@ struct OllamaResponse {
     response: String,
 }
 
+/// One NDJSON object from a streaming `/api/generate` response. `response` is a
+/// token/chunk; `done` marks the final object.
+#[derive(Debug, Deserialize)]
+struct OllamaStreamChunk {
+    #[serde(default)]
+    response: String,
+    #[serde(default)]
+    done: bool,
+}
+
 #[async_trait]
 impl LlmProvider for OllamaProvider {
     async fn process(&self, prompt: &str, text: &str) -> Result<String> {
@@ -174,6 +211,78 @@ impl LlmProvider for OllamaProvider {
         )
         .await?;
         Ok(normalize_response(&parsed.response))
+    }
+
+    /// Stream tokens from Ollama's NDJSON response, forwarding each chunk to
+    /// `on_delta` as it arrives. The accumulated raw text is normalized once at
+    /// the end so the stored result matches the non-streaming path.
+    async fn process_streaming(
+        &self,
+        prompt: &str,
+        text: &str,
+        on_delta: DeltaSink<'_>,
+    ) -> Result<String> {
+        let body = serde_json::json!({
+            "model": self.model,
+            "prompt": combine(prompt, text),
+            "stream": true,
+        });
+        let resp = self
+            .http
+            .post(&self.url)
+            .timeout(self.timeout)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| Error::Internal(format!("Ollama request failed: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(Error::Internal(format!(
+                "Ollama returned status {status}: {body}"
+            )));
+        }
+
+        // NDJSON: one JSON object per line. reqwest hands us arbitrary byte
+        // chunks, so buffer and split on '\n' rather than assuming a chunk is a
+        // whole line.
+        let mut acc = String::new();
+        let mut buf = String::new();
+        let mut resp = resp;
+        while let Some(chunk) = resp
+            .chunk()
+            .await
+            .map_err(|e| Error::Internal(format!("Ollama stream error: {e}")))?
+        {
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(nl) = buf.find('\n') {
+                let line: String = buf.drain(..=nl).collect();
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Ok(obj) = serde_json::from_str::<OllamaStreamChunk>(line) {
+                    if !obj.response.is_empty() {
+                        acc.push_str(&obj.response);
+                        on_delta(&obj.response);
+                    }
+                    if obj.done {
+                        return Ok(normalize_response(&acc));
+                    }
+                }
+            }
+        }
+        // Stream ended without an explicit done — flush any trailing line.
+        let tail = buf.trim();
+        if !tail.is_empty() {
+            if let Ok(obj) = serde_json::from_str::<OllamaStreamChunk>(tail) {
+                if !obj.response.is_empty() {
+                    acc.push_str(&obj.response);
+                    on_delta(&obj.response);
+                }
+            }
+        }
+        Ok(normalize_response(&acc))
     }
 }
 

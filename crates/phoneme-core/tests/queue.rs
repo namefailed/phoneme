@@ -159,6 +159,35 @@ async fn finish_failed_moves_processing_to_failed() {
 }
 
 #[tokio::test]
+async fn clear_failed_empties_the_failed_folder() {
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    // Two items that end up quarantined in failed/.
+    for _ in 0..2 {
+        let id = RecordingId::new();
+        q.enqueue(&make_payload(id)).await.unwrap();
+        let claimed = q.claim_next().await.unwrap().unwrap();
+        q.finish_failed(&claimed.id, "whisper_error", "boom")
+            .await
+            .unwrap();
+    }
+    // A pending item must NOT be touched by clear_failed.
+    let pending_id = RecordingId::new();
+    q.enqueue(&make_payload(pending_id)).await.unwrap();
+
+    assert_eq!(q.counts().await.unwrap().failed, 2);
+    let removed = q.clear_failed().await.unwrap();
+    assert_eq!(removed, 2);
+
+    let counts = q.counts().await.unwrap();
+    assert_eq!(counts.failed, 0, "failed/ should be empty after clear");
+    assert_eq!(counts.pending, 1, "clear_failed must leave pending/ alone");
+
+    // Idempotent: clearing an already-empty failed/ removes nothing.
+    assert_eq!(q.clear_failed().await.unwrap(), 0);
+}
+
+#[tokio::test]
 async fn states_counts_reflect_inbox() {
     let dir = TempDir::new().unwrap();
     let q = InboxQueue::new(dir.path()).await.unwrap();

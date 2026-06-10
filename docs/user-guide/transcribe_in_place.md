@@ -6,7 +6,7 @@ Transcribe-in-Place allows you to use Phoneme as a system-wide dictation engine.
 
 ## 🚀 How to use it
 
-1. Ensure the feature is enabled in **Settings -> Hotkeys**.
+1. Ensure the feature is enabled in **Settings → Capture → Hotkeys**.
 2. By default, the global hotkey is `Ctrl+Alt+I` (though you can change this to anything, like a spare mouse button or F-key).
 3. Focus any text field in any application (your browser, Discord, a Word document, your code editor).
 4. Press and hold the Transcribe-in-Place hotkey.

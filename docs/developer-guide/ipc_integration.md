@@ -23,34 +23,57 @@ Requests must be a single line of JSON ending with a newline `\n`. They must inc
 
 **Example Request:**
 ```json
-{"type": "record_start"}
+{"type": "record_start", "mode": "toggle"}
 ```
 
-**Example Response:**
+**Example Response (success):**
 ```json
-{"status": {"Ok": null}}
+{"status": "ok", "value": null}
 ```
+
+**Example Response (error):**
+```json
+{"status": "err", "value": {"kind": "already_recording", "message": "a recording is already in progress"}}
+```
+
+The `Response` is adjacently tagged: a `status` of `"ok"` or `"err"`, with the
+payload under `value`. On error, `value` is an `IpcError` with a machine-readable
+`kind` (`already_recording`, `not_recording`, `not_found`, `invalid_config`,
+`whisper_unreachable`, `whisper_timeout`, `hook_failed`, `daemon_not_running`,
+`pipe_in_use`, `shutting_down`, `io`, `internal`) plus a human `message`.
 
 ### 📋 Full Request Schema
 
-Phoneme supports the following commands (snake_case):
-- `record_start`: Start capturing the microphone.
-- `record_stop`: Finalize the current recording and queue it for transcription.
-- `record_cancel`: Stop recording and instantly discard the audio.
-- `record_pause`: Pause the active capture.
-- `record_resume`: Resume a paused capture.
-- `record_toggle`: Toggle the recording state (start/stop).
-- `start_meeting`: Start a dual-track Meeting Mode capture.
-- `list_recordings`: Fetch the catalog.
-- `get_recording`: Fetch details for a specific recording ID.
-- `list_meeting`: Fetch all recordings sharing a `meeting_id`.
-- `update_meeting_name`: Rename a meeting.
-- `retranscribe_recording`: Re-queue a recording through the transcription pipeline.
-- `rerun_cleanup`: Re-run ONLY the LLM post-processing step on a recording's stored transcript (no re-transcription); the preserved original transcript is the input, so the original is never lost.
-- `import_recording`: Feed a `.wav`/`.mp3`/`.m4a` file into the transcription pipeline.
-- `update_notes`: Update the free-form notes field for a recording.
-- `reload_config`: Tell the daemon to hot-reload `config.toml`.
-- `subscribe_events`: (See Event Streaming below).
+Phoneme supports the following commands (snake_case). The canonical, always-current
+list is the `Request` enum in `crates/phoneme-ipc/src/schema.rs`.
+
+**Recording control** (`record_start` requires a `mode`: `"hold"`, `"toggle"`,
+`"oneshot"`, or `{ "duration": secs }`, and an optional `in_place` bool):
+- `record_start`, `record_stop`, `record_cancel`, `record_pause`, `record_resume`
+- `record_toggle` (`in_place` optional), `record_status`
+
+**Meeting control:**
+- `start_meeting`, `stop_meeting`, `meeting_toggle`
+
+**Catalog & editing:**
+- `list_recordings` (with a `filter`), `get_recording`, `list_meeting`
+- `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`)
+- `update_transcript`, `update_notes`, `update_meeting_name`
+- `get_original_transcript` (raw machine transcript), `get_clean_transcript` (cleaned, pre-edit)
+
+**Re-processing** (one-time overrides, never persisted to config):
+- `retranscribe_recording` (optional `model`, `run_hooks`, `post_process`)
+- `rerun_cleanup` (re-runs only LLM cleanup against the preserved original; optional `model`/`provider`/`prompt`/`api_url`/`api_key`)
+- `rerun_summary` (generate/regenerate an LLM summary; optional `model`/`prompt`)
+- `refire_hook` (optional `command`, restricted to the configured allowlist)
+
+**Tags:** `list_tags`, `list_all_tags`, `add_tag`, `update_tag`, `delete_tag`,
+`attach_tag`, `detach_tag`, `tags_for`.
+
+**Search:** `semantic_search` (`query`, `limit`).
+
+**Daemon control:** `daemon_status`, `reload_config`, `shutdown`, `hook_test`,
+`subscribe_events` (see Event Streaming below).
 
 ## 🌊 Real-Time Event Streaming
 
@@ -61,17 +84,21 @@ The most powerful feature of the IPC layer is real-time event streaming. By send
 {"type": "subscribe_events"}
 ```
 
+Events are **internally tagged**: each event is a flat object with an `event`
+field naming the variant, plus that variant's fields alongside it.
+
 **Stream Received:**
 ```json
-{"event": "recording_started"}
-{"event": {"transcription_partial": {"text": "Hello, this is a real time stream..."}}}
-{"event": "recording_stopped"}
-{"event": {"queue_depth_changed": 1}}
-{"event": {"queue_depth_changed": 0}}
-{"event": "catalog_updated"}
+{"event": "recording_started", "id": "20260519T143500823", "started_at": "2026-05-19T14:35:00.823-07:00", "meeting_id": null}
+{"event": "transcription_partial", "id": "20260519T143500823", "text": "Hello, this is a live preview..."}
+{"event": "recording_stopped", "id": "20260519T143500823", "duration_ms": 4200, "audio_path": "...", "meeting_id": null}
+{"event": "queue_depth_changed", "pending": 1, "processing": 0, "failed": 0}
+{"event": "transcription_done", "id": "20260519T143500823", "transcript": "Hello, this is a live preview."}
+{"event": "summary_updated", "id": "20260519T143500823"}
 ```
 
-This is the exact same API that the official Phoneme GUI uses to render its live waveform and real-time streaming transcripts. You can use it to build your own custom overlays, status LEDs on hardware, or custom notification systems!
+This is the same API the official Phoneme GUI uses to stay in sync. You can use it
+to build custom overlays, status LEDs on hardware, or notification systems.
 
 ## ⌨️ Example: AutoHotkey Integration
 
@@ -100,10 +127,11 @@ client.on('data', (data) => {
     for (const line of lines) {
         try {
             const msg = JSON.parse(line);
-            
-            // Check for partial transcript updates
-            if (msg.event && msg.event.transcription_partial) {
-                console.log('Live Transcript:', msg.event.transcription_partial.text);
+
+            // Events are flat objects tagged by `event`; the variant's fields
+            // sit alongside it (e.g. `text` for transcription_partial).
+            if (msg.event === "transcription_partial") {
+                console.log('Live Transcript:', msg.text);
             }
         } catch (e) {
             console.error('Failed to parse:', line);

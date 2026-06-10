@@ -1,4 +1,8 @@
 import { renderField, bindFieldEvents } from "./form";
+import { invoke } from "@tauri-apps/api/core";
+
+/** Default visible columns, used by the reset action. */
+const DEFAULT_VISIBLE_COLUMNS = ["day", "time", "duration", "status", "source", "transcript"];
 
 /** All reorderable/toggleable list columns. */
 const COLUMN_CATALOG: { value: string; label: string }[] = [
@@ -9,7 +13,10 @@ const COLUMN_CATALOG: { value: string; label: string }[] = [
   { value: "tags", label: "Tags" },
   { value: "model", label: "Transcription Model" },
   { value: "cleanup_model", label: "Post-Processing Model" },
+  { value: "summary_model", label: "Summary Model" },
   { value: "diarized", label: "Diarized" },
+  { value: "user_edited", label: "Edited" },
+  { value: "source", label: "Source" },
   { value: "transcript", label: "Transcript Snippet" },
 ];
 
@@ -32,7 +39,7 @@ export class SectionInterface {
         theme: "catppuccin-mocha",
         format_24h: false,
         strip_titlebar: false,
-        visible_columns: ["day", "time", "duration", "status", "transcript"],
+        visible_columns: ["day", "time", "duration", "status", "source", "transcript"],
       };
     }
 
@@ -79,12 +86,12 @@ export class SectionInterface {
       .map((value, i) => `
           <div class="col-row" data-col="${value}">
             <label class="col-label">
-              <input type="checkbox" class="col-toggle" value="${value}" ${this.visible.has(value) ? "checked" : ""} />
+              <input type="checkbox" class="col-toggle toggle-switch" value="${value}" ${this.visible.has(value) ? "checked" : ""} />
               <span>${this.label(value)}</span>
             </label>
             <span class="col-move">
-              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}>▲</button>
-              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}>▼</button>
+              <button class="col-up" title="Move up" data-i="${i}" ${i === 0 ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg></button>
+              <button class="col-down" title="Move down" data-i="${i}" ${i === this.order.length - 1 ? "disabled" : ""}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             </span>
           </div>`)
       .join("");
@@ -180,13 +187,52 @@ export class SectionInterface {
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
             <div id="col-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
             <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
-              Check a column to show it; use ▲▼ to reorder. Columns appear left-to-right in this order.
+              Check a column to show it; use the up/down chevrons to reorder. Columns appear left-to-right in this order.
             </span>
           </div>
+        </div>
+
+        <div class="settings-field">
+          <label>Reset remembered layout</label>
+          <div><button class="inline-button" id="reset-ui-prefs" type="button">Reset interface preferences</button></div>
+          <span style="grid-column: 2; font-size: 11px; color: var(--fg-faded);">
+            Clears all per-device UI state remembered across reloads — column layout &amp; widths,
+            panel split, sidebar, expanded meetings, the semantic-search toggle, record mode, and
+            "don't ask again" prompts — back to defaults, then reloads.
+          </span>
         </div>
 
       </div>
     `;
     bindFieldEvents(this.container, config);
+
+    this.container
+      .querySelector<HTMLButtonElement>("#reset-ui-prefs")
+      ?.addEventListener("click", () => void this.resetUiPrefs());
+  }
+
+  /** Clear every remembered per-device UI preference and reload. */
+  private async resetUiPrefs() {
+    const ok = confirm(
+      "Reset all remembered interface preferences (column layout, panel sizes, expanded meetings, toggles, prompts)?\n\nThis reloads the app.",
+    );
+    if (!ok) return;
+    // Per-device prefs live in localStorage under the "phoneme" prefix.
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith("phoneme"))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch {
+      /* private mode — ignore */
+    }
+    // Column layout lives in config.toml — reset to defaults and persist.
+    this.config.interface.visible_columns = [...DEFAULT_VISIBLE_COLUMNS];
+    delete this.config.interface.column_widths;
+    try {
+      await invoke("write_config", { config: this.config });
+    } catch {
+      /* non-fatal — localStorage prefs are already cleared */
+    }
+    location.reload();
   }
 }

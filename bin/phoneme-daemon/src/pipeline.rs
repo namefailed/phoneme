@@ -2,12 +2,262 @@
 //!
 //! Called by the queue worker per claimed payload.
 
-use crate::app_state::AppState;
-use phoneme_core::config::{Config, LlmPostProcessConfig};
+use crate::app_state::{AppState, WhisperModelOverride};
+use phoneme_core::config::{
+    Config, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
+};
 use phoneme_core::error::Result;
-use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
-use phoneme_ipc::DaemonEvent;
+use phoneme_core::{Catalog, Embedder, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
+use phoneme_ipc::{DaemonEvent, PipelineStage};
+use std::sync::Arc;
+
+/// Coalesce streamed deltas until this many chars accumulate, then flush one
+/// LlmActivity event — keeps the event bus from being flooded token-by-token.
+const DELTA_FLUSH_CHARS: usize = 48;
+/// Cap on total response chars forwarded to the UI per stage (the full result
+/// is still returned and stored; only the live "thinking" view is bounded).
+const MAX_STREAMED_CHARS: usize = 16 * 1024;
+
+/// Longest we wait for the bundled whisper-server to come back up after a
+/// one-job model-override swap before transcribing anyway. A model load can take
+/// several seconds (large models, cold disk); if it overruns this the transcribe
+/// attempt fails with `WhisperUnreachable`, which the queue worker already
+/// retries with backoff — so this bound only avoids a needless first failure, it
+/// is never a correctness requirement.
+const WHISPER_READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Restores the configured whisper model when a one-job model override goes out
+/// of scope. Dropping it pings the supervisor to swap the bundled server back,
+/// so the override is undone on EVERY pipeline exit path (success, transcribe
+/// error, cancel) without each path having to remember to clear it. A no-op
+/// (`inner = None`) when the job had no override or used a cloud backend (no
+/// server to restore).
+struct WhisperOverrideGuard {
+    inner: Option<Arc<WhisperModelOverride>>,
+}
+
+impl Drop for WhisperOverrideGuard {
+    fn drop(&mut self) {
+        if let Some(o) = self.inner.take() {
+            // Clear the override → supervisor restarts the bundled server back
+            // onto the configured model for subsequent jobs.
+            o.set(None);
+        }
+    }
+}
+
+/// Apply a recording's one-time whisper model override for THIS job only,
+/// returning the per-job [`WhisperConfig`] to build the provider from plus a
+/// guard that restores the configured model on drop.
+///
+/// - No override (or a blank one): returns the configured config unchanged with
+///   a no-op guard — the steady-state path, byte-for-byte the prior behavior.
+/// - Local bundled backend: the override is a model FILE the single shared
+///   server must load, so we publish it to the supervisor (which performs one
+///   controlled restart), wait for the server to report ready, and pin the
+///   per-job `model_path` to the override for labels/stored model. The override
+///   never touches the process-global config, so previews and other jobs keep
+///   running the configured model. The returned guard clears the override.
+/// - Cloud / custom backend: the override is just a model id sent in the HTTP
+///   request, so we swap it into a per-job config clone — no server, no
+///   supervisor, no guard work needed.
+///
+/// Runs while the caller holds the `whisper_sem` permit, so for the local case
+/// the restart + readiness wait is serialized against the preview and any other
+/// final transcription.
+async fn apply_model_override(
+    state: &AppState,
+    configured: &WhisperConfig,
+    requested: Option<String>,
+) -> (WhisperConfig, WhisperOverrideGuard) {
+    let model = match requested {
+        Some(m) if !m.trim().is_empty() => m.trim().to_string(),
+        _ => {
+            return (
+                configured.clone(),
+                WhisperOverrideGuard { inner: None },
+            )
+        }
+    };
+
+    let mut whisper_cfg = configured.clone();
+    match configured.provider {
+        TranscriptionBackend::Local => {
+            tracing::info!(model = %model, "re-transcribe: applying one-job whisper model override");
+            // Publish the override; the supervisor swaps the server's model.
+            state.whisper_model_override.set(Some(model.clone()));
+            // Pin the per-job model_path so the activity label and the stored
+            // `model` reflect the override (the local provider talks to the
+            // server over HTTP and ignores model_path itself).
+            whisper_cfg.model_path = model;
+            // Only the bundled server is ours to wait on; External is a
+            // user-managed endpoint we never restart.
+            if matches!(configured.mode, WhisperMode::BundledModel | WhisperMode::BundledDownload) {
+                wait_for_whisper_ready(&whisper_cfg.server_base_url(), WHISPER_READY_TIMEOUT).await;
+            }
+            (
+                whisper_cfg,
+                WhisperOverrideGuard {
+                    inner: Some(state.whisper_model_override.clone()),
+                },
+            )
+        }
+        // Cloud / custom: the model is a request parameter, not a server model.
+        _ => {
+            tracing::info!(model = %model, "re-transcribe: applying one-job cloud model override");
+            whisper_cfg.model = model;
+            (whisper_cfg, WhisperOverrideGuard { inner: None })
+        }
+    }
+}
+
+/// Best-effort wait until the bundled whisper-server answers `GET {base}/health`
+/// with success, or `timeout` elapses. Used right after a one-job model-override
+/// restart so the transcription doesn't fire at a server that's still loading
+/// the model. Never errors: on timeout it logs and returns, letting the normal
+/// transcribe attempt (and the queue worker's `WhisperUnreachable` retry) take
+/// over.
+async fn wait_for_whisper_ready(base_url: &str, timeout: Duration) {
+    let health = format!("{}/health", base_url.trim_end_matches('/'));
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not build health-probe client; skipping readiness wait");
+            return;
+        }
+    };
+    let deadline = std::time::Instant::now() + timeout;
+    let mut poll = tokio::time::interval(Duration::from_millis(200));
+    loop {
+        if let Ok(resp) = client.get(&health).send().await {
+            if resp.status().is_success() {
+                return;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!(
+                url = %health,
+                "whisper-server not ready within timeout after model-override swap; transcribing anyway"
+            );
+            return;
+        }
+        poll.tick().await;
+    }
+}
+
+/// Run one LLM stage (cleanup or summary) through the streaming path, emitting
+/// `DaemonEvent::LlmActivity` so the GUI can show the exact prompt and the
+/// response as it streams. Returns the final (normalized) text.
+pub(crate) async fn run_llm_stage(
+    state: &AppState,
+    id: &RecordingId,
+    stage: PipelineStage,
+    provider: &dyn phoneme_core::LlmProvider,
+    prompt: &str,
+    text: &str,
+) -> Result<String> {
+    // (1) Start event carrying the verbatim prompt.
+    state.events.emit(DaemonEvent::LlmActivity {
+        id: id.clone(),
+        stage,
+        prompt: provider.exact_prompt(prompt, text),
+        delta: String::new(),
+        done: false,
+    });
+
+    // (2) Stream deltas, coalesced and capped.
+    let mut pending = String::new();
+    let mut streamed = 0usize;
+    let result = {
+        let mut on_delta = |d: &str| {
+            if streamed >= MAX_STREAMED_CHARS {
+                return;
+            }
+            let remaining = MAX_STREAMED_CHARS - streamed;
+            let slice = if d.len() > remaining {
+                let mut end = remaining;
+                while end > 0 && !d.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &d[..end]
+            } else {
+                d
+            };
+            pending.push_str(slice);
+            streamed += slice.len();
+            if pending.len() >= DELTA_FLUSH_CHARS {
+                state.events.emit(DaemonEvent::LlmActivity {
+                    id: id.clone(),
+                    stage,
+                    prompt: String::new(),
+                    delta: std::mem::take(&mut pending),
+                    done: false,
+                });
+            }
+        };
+        provider.process_streaming(prompt, text, &mut on_delta).await
+    };
+
+    // (3) Flush any tail and the terminal `done` marker (regardless of outcome).
+    if !pending.is_empty() {
+        state.events.emit(DaemonEvent::LlmActivity {
+            id: id.clone(),
+            stage,
+            prompt: String::new(),
+            delta: std::mem::take(&mut pending),
+            done: false,
+        });
+    }
+    state.events.emit(DaemonEvent::LlmActivity {
+        id: id.clone(),
+        stage,
+        prompt: String::new(),
+        delta: String::new(),
+        done: true,
+    });
+
+    result
+}
 use std::time::Duration;
+
+/// Embed `transcript` for semantic search and persist both representations:
+/// per-chunk vectors (the high-recall path that powers paraphrase matching) and
+/// the legacy whole-recording vector (kept so anything that still reads the old
+/// `embeddings` table — and the search fallback — stays consistent).
+///
+/// Shared by every place a transcript becomes final or changes (pipeline, manual
+/// edit, cleanup re-run, retroactive backfill) so all paths embed identically.
+/// Best-effort: a failure is logged, never fatal — search degrades gracefully
+/// rather than failing the recording.
+pub(crate) async fn embed_and_store(
+    embedder: &Embedder,
+    catalog: &Catalog,
+    id: &RecordingId,
+    transcript: &str,
+) {
+    match embedder.embed_chunks(transcript) {
+        Ok(chunks) => {
+            if let Err(e) = catalog.upsert_chunk_embeddings(id, &chunks).await {
+                tracing::warn!(error = %e, "Failed to save chunk embeddings");
+            } else {
+                tracing::info!(chunks = chunks.len(), "Saved chunk embeddings for {}", id.as_str());
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "Failed to embed transcript chunks"),
+    }
+    // Keep the whole-recording vector in sync too (cheap; one extra embed).
+    match embedder.embed(transcript) {
+        Ok(vec) => {
+            if let Err(e) = catalog.upsert_embedding(id, &vec).await {
+                tracing::warn!(error = %e, "Failed to save embedding to catalog");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "Failed to embed transcript"),
+    }
+}
 
 /// Build the effective LLM config for summaries: start from `[llm_post_process]`
 /// and overlay any summary-specific provider / URL / key / model the user set.
@@ -47,6 +297,7 @@ pub fn summary_llm_config(cfg: &Config) -> LlmPostProcessConfig {
 pub async fn generate_summary(
     state: &AppState,
     cfg: &Config,
+    id: &RecordingId,
     transcript: &str,
 ) -> Option<(String, String)> {
     if transcript.trim().is_empty() {
@@ -64,7 +315,7 @@ pub async fn generate_summary(
             return None;
         }
     };
-    match llm.process(&cfg.summary.prompt, transcript).await {
+    match run_llm_stage(state, id, PipelineStage::Summarizing, &*llm, &cfg.summary.prompt, transcript).await {
         Ok(summary) if !summary.trim().is_empty() => Some((summary, model)),
         Ok(_) => {
             tracing::warn!("summary LLM returned empty output");
@@ -89,23 +340,80 @@ async fn maybe_auto_summarize(
     if !cfg.summary.auto {
         return;
     }
-    if let Some((summary, model)) = generate_summary(state, cfg, transcript).await {
-        if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
-            tracing::warn!(error = %e, "failed to persist auto summary");
-        } else {
-            tracing::info!(id = %id.as_str(), "auto summary saved");
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Summarizing,
+    });
+    match generate_summary(state, cfg, id, transcript).await {
+        Some((summary, model)) => {
+            if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
+                tracing::warn!(error = %e, "failed to persist auto summary");
+                state.events.emit(DaemonEvent::SummaryFailed {
+                    id: id.clone(),
+                    error: e.to_string(),
+                });
+            } else {
+                tracing::info!(id = %id.as_str(), "auto summary saved");
+                state.events.emit(DaemonEvent::SummaryUpdated { id: id.clone() });
+            }
+        }
+        None => {
+            // Auto-summary failed — surface it distinctly (the transcript itself
+            // is fine; only the optional summary step failed).
+            state.events.emit(DaemonEvent::SummaryFailed {
+                id: id.clone(),
+                error: "summary generation failed (check the AI provider)".into(),
+            });
         }
     }
+}
+
+/// Finalize an in-flight item canceled by the user: move the inbox file out of
+/// `processing/`, mark the recording terminal, and emit the cancel events.
+/// Best-effort — logs (but doesn't propagate) errors so a cancel always settles.
+/// (Uses TranscribeFailed for parity with the pending-queue cancel until a
+/// dedicated Canceled status lands.)
+async fn finalize_canceled(state: &AppState, id: &RecordingId) {
+    if let Err(e) = state
+        .catalog
+        .update_status(id, RecordingStatus::TranscribeFailed)
+        .await
+    {
+        tracing::warn!(error = %e, "cancel: failed to set status");
+    }
+    if let Err(e) = state
+        .inbox
+        .finish_failed(id, "canceled", "canceled by user")
+        .await
+    {
+        tracing::warn!(error = %e, "cancel: failed to move inbox item out of processing");
+    }
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Failed,
+    });
+    state
+        .events
+        .emit(DaemonEvent::RecordingCancelled { id: id.clone() });
+    tracing::info!(id = %id, "in-flight recording canceled by user");
 }
 
 /// Process a single claimed payload through the full pipeline.
 ///
 /// Updates catalog, fires events, moves inbox files to done/ or failed/.
-pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
+pub async fn run(
+    state: &AppState,
+    mut payload: HookPayload,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<()> {
     let id = payload.id.clone();
     state
         .events
         .emit(DaemonEvent::TranscriptionStarted { id: id.clone() });
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Transcribing,
+    });
 
     // Transcribe — reuse the process-wide client (AppState) so the HTTP
     // connection pool to the local whisper-server stays warm across items.
@@ -113,29 +421,129 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
     // Filter empty string to None — frontend sends "" for "auto-detect"
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
-    let provider = state.transcription.provider(&cfg.whisper, &cfg.diarization);
+
     // Hold the whisper-server permit for the whole final transcription so the
     // streaming preview backs off and can't starve it (the "Whisper timed out
     // after 60s" bug). Acquiring waits for any in-flight preview tick to finish.
+    // Crucially, a model-override swap (below) happens UNDER this permit, so the
+    // preview and any other final transcription never run while the bundled
+    // server is mid-restart for a one-job model override (#49).
     let _whisper_permit = state.whisper_sem.acquire().await;
-    let transcript = match provider.transcribe(&audio_path, language.as_deref()).await {
-        Ok(t) => t,
-        Err(e) => {
-            state
-                .catalog
-                .update_status(&id, RecordingStatus::TranscribeFailed)
-                .await?;
-            state
-                .inbox
-                .finish_failed(&id, "whisper_error", &e.to_string())
-                .await?;
-            state.events.emit(DaemonEvent::TranscriptionFailed {
-                id: id.clone(),
-                error: e.to_string(),
-            });
-            return Err(e);
+
+    // Apply this recording's one-time model override (if any), scoped to JUST
+    // this job. `override_guard` restores the configured model on every exit
+    // path (success, error, cancel) via Drop, so the override can never leak
+    // onto a later job or persist in config. `whisper_cfg` is the per-job
+    // transcription config the provider is built from.
+    let requested_override = state.pending_overrides.lock().unwrap().remove(&id);
+    let (whisper_cfg, override_guard) =
+        apply_model_override(state, &cfg.whisper, requested_override).await;
+    let provider = state.transcription.provider(&whisper_cfg, &cfg.diarization);
+
+    // Report transcription to the unified AI-activity ("brain") popout via the
+    // Transcribing stage of LlmActivity: a start event naming the model/file,
+    // then a done event with timing + size once it finishes. This lets the same
+    // popout that shows cleanup/summary also surface what the STT engine is up to.
+    let model_label = {
+        use phoneme_core::config::TranscriptionBackend as TB;
+        match whisper_cfg.provider {
+            TB::Local => std::path::Path::new(&whisper_cfg.model_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("local model")
+                .to_string(),
+            _ => whisper_cfg.model.clone(),
         }
     };
+    let provider_label = format!("{:?}", whisper_cfg.provider).to_lowercase();
+    let file_label = audio_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    state.events.emit(DaemonEvent::LlmActivity {
+        id: id.clone(),
+        stage: PipelineStage::Transcribing,
+        prompt: format!(
+            "Transcribing with {provider_label} · {model_label}\nfile: {file_label}\nlanguage: {}",
+            language.as_deref().unwrap_or("auto-detect")
+        ),
+        delta: String::new(),
+        done: false,
+    });
+    let transcribe_started = std::time::Instant::now();
+
+    // Race transcription against cancellation. Dropping the transcribe future on
+    // cancel tears down the in-flight HTTP request (reqwest futures are
+    // cancel-safe); the native path stops at the next stage boundary.
+    let transcript = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            state.events.emit(DaemonEvent::LlmActivity {
+                id: id.clone(),
+                stage: PipelineStage::Transcribing,
+                prompt: String::new(),
+                delta: "✕ canceled".into(),
+                done: true,
+            });
+            finalize_canceled(state, &id).await;
+            return Ok(());
+        }
+        res = provider.transcribe(&audio_path, language.as_deref()) => match res {
+            Ok(t) => t,
+            Err(e) => {
+                state.events.emit(DaemonEvent::LlmActivity {
+                    id: id.clone(),
+                    stage: PipelineStage::Transcribing,
+                    prompt: String::new(),
+                    delta: format!("✕ failed: {e}"),
+                    done: true,
+                });
+                state
+                    .catalog
+                    .update_status(&id, RecordingStatus::TranscribeFailed)
+                    .await?;
+                state
+                    .inbox
+                    .finish_failed(&id, "whisper_error", &e.to_string())
+                    .await?;
+                state.events.emit(DaemonEvent::TranscriptionFailed {
+                    id: id.clone(),
+                    error: e.to_string(),
+                });
+                return Err(e);
+            }
+        }
+    };
+
+    // Checkpoint between transcription and post-processing.
+    if cancel.is_cancelled() {
+        finalize_canceled(state, &id).await;
+        return Ok(());
+    }
+
+    // Finish the Transcribing activity entry with timing + size for the popout.
+    {
+        let secs = transcribe_started.elapsed().as_secs_f32();
+        let chars = transcript.chars().count();
+        let words = transcript.split_whitespace().count();
+        state.events.emit(DaemonEvent::LlmActivity {
+            id: id.clone(),
+            stage: PipelineStage::Transcribing,
+            prompt: String::new(),
+            delta: format!("✓ {words} words · {chars} chars in {secs:.1}s"),
+            done: true,
+        });
+    }
+
+    // Restore the configured whisper model (if this job overrode it) BEFORE
+    // releasing the permit, so the bundled server is swapped back while the
+    // preview is still gated — the resumed preview then runs the configured
+    // model, not this job's one-time override. Dropping the guard pings the
+    // supervisor; for non-override jobs it's a no-op. (Both early-return paths
+    // above — cancel and transcribe error — drop this guard implicitly, so the
+    // model is always restored.)
+    drop(override_guard);
 
     // Release the whisper-server permit now that transcription is done — LLM
     // post-processing and hooks below don't touch the server, so the preview
@@ -152,7 +560,26 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
     if let Some(llm) = state.llm.provider(&cfg.llm_post_process) {
-        match llm.process(&cfg.llm_post_process.prompt, &transcript).await {
+        state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: id.clone(),
+            stage: PipelineStage::CleaningUp,
+        });
+        let cleanup_result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                finalize_canceled(state, &id).await;
+                return Ok(());
+            }
+            r = run_llm_stage(
+                state,
+                &id,
+                PipelineStage::CleaningUp,
+                &*llm,
+                &cfg.llm_post_process.prompt,
+                &transcript,
+            ) => r,
+        };
+        match cleanup_result {
             Ok(processed) => {
                 tracing::info!("LLM post-processing succeeded");
                 transcript = processed;
@@ -165,10 +592,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     }
 
     payload.transcript = transcript.clone();
-    // The whisper-server supervisor (Task 12) will publish the actually-loaded
-    // model name; until then, fall back to the configured model_path's file
-    // stem or "unknown".
-    payload.model = std::path::Path::new(&cfg.whisper.model_path)
+    // Record the model that actually ran. Use the per-job whisper config so a
+    // one-time model-override re-transcription stores the override's model file
+    // stem (for the local backend) rather than the configured default.
+    payload.model = std::path::Path::new(&whisper_cfg.model_path)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown")
@@ -181,8 +608,15 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
 
-    // Record which post-processing model was used and whether diarization was applied
-    let diarized = cfg.diarization.provider != phoneme_core::config::DiarizationBackend::None;
+    // Record which post-processing model was used and whether diarization was
+    // actually applied. Diarization is only meaningfully "applied" when it
+    // produced multi-speaker labels — both the local diarizer (`assign_speakers`)
+    // and the cloud providers emit a "[Speaker N]: " prefix and fall back to
+    // plain, unlabeled text when diarization is off, fails, or finds ≤1 speaker.
+    // So a recording is diarized iff its raw (pre-cleanup) transcript carries
+    // those labels — not merely because the setting is enabled. (Check the raw
+    // transcript: LLM cleanup may strip the labels from the live version.)
+    let diarized = raw_transcript.contains("[Speaker ");
     state
         .catalog
         .update_processing_meta(&id, cleanup_model.as_deref(), diarized)
@@ -215,18 +649,7 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
 
     let embedder_guard = state.embedder.read().await;
     if let Some(embedder) = embedder_guard.as_ref() {
-        match embedder.embed(&transcript) {
-            Ok(vec) => {
-                if let Err(e) = state.catalog.upsert_embedding(&id, &vec).await {
-                    tracing::warn!(error = %e, "Failed to save embedding to catalog");
-                } else {
-                    tracing::info!("Saved semantic embedding for {}", id.as_str());
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to embed transcript");
-            }
-        }
+        embed_and_store(embedder, &state.catalog, &id, &transcript).await;
     }
     drop(embedder_guard);
 
@@ -264,6 +687,10 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
     state
         .events
         .emit(DaemonEvent::HookStarted { id: id.clone() });
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::RunningHook,
+    });
     payload.metadata = HookMetadata::current();
 
     let mut final_exit_code = 0;
@@ -355,7 +782,9 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
         exit_code: final_exit_code,
     });
 
-    if let Some(url) = &cfg.hook.webhook_url {
+    // Only POST when a non-blank URL is configured — an empty string (e.g. the
+    // Settings field was filled then cleared) must not fire a request per run.
+    if let Some(url) = cfg.hook.webhook_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
         if let Err(e) = state
             .webhook
             .post(url, Duration::from_secs(cfg.hook.timeout_secs), &payload)
@@ -367,3 +796,7 @@ pub async fn run(state: &AppState, mut payload: HookPayload) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "pipeline_test.rs"]
+mod pipeline_test;

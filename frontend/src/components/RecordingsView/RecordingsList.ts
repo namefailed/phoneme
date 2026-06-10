@@ -16,8 +16,59 @@ import {
   escapeHtml,
 } from "../../utils/format";
 import { groupRecordings, visibleRecordings, trackLabel } from "./grouping";
+import { getContrastColor } from "./TagChips";
 import "../shared/styles.css";
 import "./styles.css";
+
+/** Which meeting groups are expanded — remembered across reloads (per device). */
+const LS_EXPANDED_MEETINGS = "phoneme.expandedMeetings";
+function loadExpandedMeetings(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_EXPANDED_MEETINGS);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function saveExpandedMeetings(set: Set<string>): void {
+  try {
+    localStorage.setItem(LS_EXPANDED_MEETINGS, JSON.stringify([...set]));
+  } catch {
+    /* private mode / quota — non-fatal */
+  }
+}
+
+/** Per-meeting display icon (a cosmetic per-device pref, like the meeting name
+ *  is in the catalog). Keyed by meeting id. */
+const LS_MEETING_ICONS = "phoneme.meetingIcons";
+const DEFAULT_MEETING_ICON = "👥";
+/** Emoji choices offered in the meeting icon picker. */
+const MEETING_ICON_CHOICES = [
+  "👥", "🎙️", "📞", "💼", "🧑‍🏫", "🎧", "🗣️", "📅", "🤝", "🎬", "📋", "💡",
+  "📝", "🧠", "⭐", "🔥", "🎯", "🚀", "🐞", "🔧", "💬", "📣", "🎓", "🩺",
+];
+function loadMeetingIcons(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LS_MEETING_ICONS);
+    const obj = raw ? JSON.parse(raw) : {};
+    return obj && typeof obj === "object" ? obj : {};
+  } catch {
+    return {};
+  }
+}
+function meetingIcon(meetingId: string): string {
+  return loadMeetingIcons()[meetingId] || DEFAULT_MEETING_ICON;
+}
+function saveMeetingIcon(meetingId: string, icon: string): void {
+  try {
+    const all = loadMeetingIcons();
+    all[meetingId] = icon;
+    localStorage.setItem(LS_MEETING_ICONS, JSON.stringify(all));
+  } catch {
+    /* private mode — non-fatal */
+  }
+}
 
 export type RecordingsListState = {
   recordings: Recording[];
@@ -37,12 +88,19 @@ export class RecordingsListElement extends LitElement {
   @property({ type: Object }) onSelectionChangeCb!: (ids: Set<string>) => void;
 
   @state() private listState: RecordingsListState = { recordings: [], selectedId: null, loading: false, error: null };
+
   @state() private config: any = null;
   @state() private currentWidths: string[] | null = null;
   @state() private focusedIndex = -1;
   @state() private loadingMore = false;
   @state() private editingMeetingId: string | null = null;
   @state() private editingName = "";
+  @state() private editingIcon = DEFAULT_MEETING_ICON;
+  @state() private iconPickerOpen = false;
+  /** Viewport coords for the icon picker popover. It renders position:fixed so
+   *  it escapes the recordings list's overflow clipping (the old absolute
+   *  popover was clipped to the row and appeared to "not open" at all). */
+  @state() private iconPickerPos: { x: number; y: number } | null = null;
   
   private offset = 0;
   private readonly pageSize = 100;
@@ -50,7 +108,13 @@ export class RecordingsListElement extends LitElement {
 
   private multiSelected = new Set<string>();
   private anchorIndex = -1;
-  private expandedSessions = new Set<string>();
+  private expandedSessions = new Set<string>(loadExpandedMeetings());
+
+  /**
+   * Calibrated relevance (0..1) per recording id from the last semantic search,
+   * used to render a "% relevant" chip. Empty for ordinary (non-semantic) lists.
+   */
+  private relevanceById = new Map<string, number>();
 
   private unsubStore: (() => void) | null = null;
   private unsubFilter: (() => void) | null = null;
@@ -106,9 +170,13 @@ export class RecordingsListElement extends LitElement {
         this.config = await invoke("read_config");
       }
       let rows: Recording[] = [];
+      this.relevanceById.clear();
       if (f.search && f.semantic) {
         const results = await semanticSearch(f.search, this.pageSize);
         rows = results.map((r) => r.recording);
+        // Stash the calibrated relevance per recording so the row can show a
+        // "% relevant" chip. The backend returns results already ranked.
+        for (const r of results) this.relevanceById.set(r.recording.id, r.score);
         this.reachedEnd = true;
       } else {
         rows = await listRecordings({ ...f, limit: this.pageSize, offset: 0 });
@@ -198,6 +266,8 @@ export class RecordingsListElement extends LitElement {
     e.stopPropagation();
     this.editingMeetingId = meetingId;
     this.editingName = currentName;
+    this.editingIcon = meetingIcon(meetingId);
+    this.iconPickerOpen = false;
     this.updateComplete.then(() => {
       const input = this.querySelector(`.rec-group-input[data-session="${meetingId}"]`) as HTMLInputElement | null;
       if (input) {
@@ -219,6 +289,7 @@ export class RecordingsListElement extends LitElement {
       e.preventDefault();
       this.editingMeetingId = null;
       this.editingName = "";
+      this.iconPickerOpen = false;
       this.requestUpdate();
     }
   }
@@ -228,9 +299,12 @@ export class RecordingsListElement extends LitElement {
     this.editingMeetingId = null;
     const trimmed = value.trim();
     const finalValue = trimmed === "" ? null : trimmed;
+    // The icon is a per-device display pref (localStorage); the name is stored
+    // in the catalog via the daemon.
+    saveMeetingIcon(meetingId, this.editingIcon);
     try {
       await updateMeetingName(meetingId, finalValue);
-      showToast("Meeting renamed", "success");
+      showToast("Meeting updated", "success");
       await this.refresh();
     } catch (err) {
       console.error("Failed to rename meeting:", err);
@@ -327,6 +401,7 @@ export class RecordingsListElement extends LitElement {
     } else {
       this.expandedSessions.add(sid);
     }
+    saveExpandedMeetings(this.expandedSessions);
     this.onSelectCb("session:" + sid);
     this.requestUpdate();
   }
@@ -393,6 +468,7 @@ export class RecordingsListElement extends LitElement {
       "time",
       "duration",
       "status",
+      "source",
       "transcript",
     ];
     let activeWidths = this.currentWidths;
@@ -406,7 +482,10 @@ export class RecordingsListElement extends LitElement {
         tags: "100px",
         model: "120px",
         cleanup_model: "120px",
+        summary_model: "120px",
         diarized: "60px",
+        user_edited: "60px",
+        source: "124px",
         transcript: "1fr",
       };
       if (!activeWidths || activeWidths.length !== visibleCols.length) {
@@ -416,7 +495,30 @@ export class RecordingsListElement extends LitElement {
     }
 
     const checkboxColWidth = "28px";
-    const gridTemplate = [checkboxColWidth, ...activeWidths!].join(" ");
+    // The grid MUST keep a flexible track so the table always fills the list
+    // pane up to the splitter. The transcript column is that fill column (its
+    // default width is `1fr`); coerce it to `minmax(<floor>, 1fr)` so that even
+    // a fixed px persisted from a column-resize still STRETCHES to the pane edge
+    // (keeping the resized width as a usable floor) instead of freezing the whole
+    // grid to a fixed total width. A frozen all-px grid is the resize bug: when
+    // the pane is wider than the column sum the rows stop short of the splitter
+    // (a gap), and when it's narrower the table forces a horizontal scrollbar.
+    const widthsForGrid = activeWidths!.map((w, i) => {
+      if (visibleCols[i] !== "transcript") return w;
+      const floor = w.trim().endsWith("px") ? w.trim() : "160px";
+      return `minmax(${floor}, 1fr)`;
+    });
+    // Fallback for when the transcript column is hidden: with no flexible track
+    // at all the grid would freeze to fixed px and leave a gap, so append a
+    // cell-less filler track that absorbs the slack as clean blank space (head
+    // and rows share this template and both have the same cell count, so the
+    // extra track stays empty in both — no misalignment).
+    const hasFlexTrack = widthsForGrid.some((w) => w.includes("fr"));
+    const gridTemplate = [
+      checkboxColWidth,
+      ...widthsForGrid,
+      ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
+    ].join(" ");
 
     const allSelected = s.recordings.length > 0 && s.recordings.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
@@ -429,7 +531,10 @@ export class RecordingsListElement extends LitElement {
       tags: "Tags",
       model: "Transcript Model",
       cleanup_model: "Post-Process Model",
+      summary_model: "Summary Model",
       diarized: "Diarized",
+      user_edited: "Edited",
+      source: "Source",
       transcript: "Transcript",
     };
 
@@ -527,20 +632,50 @@ export class RecordingsListElement extends LitElement {
     const preview = r.transcript ?? truncatedError(r);
     const searchTerm = filterStore.get().search ?? "";
 
-    const trackBadge = track
+    // Source: meeting tracks report "mic"/"system"; a single recording has no
+    // track and is, by definition, the microphone.
+    const sourceIsSystem = track === "system";
+    const sourceLabel = sourceIsSystem ? "System audio" : "Microphone";
+    const sourceIcon = sourceIsSystem ? "🔊" : "🎤";
+
+    // When the dedicated Source column is visible, the badge lives there; only
+    // fall back to prefixing the transcript (legacy behaviour) when it isn't,
+    // so meeting tracks never lose their source label.
+    const sourceColVisible = visibleCols.includes("source");
+    const trackBadge = track && !sourceColVisible
       ? html`<span class="rec-track-badge">${trackLabel(track)}</span> `
       : nothing;
+
+    // Semantic-search relevance chip: only present when this row came from a
+    // semantic search (relevanceById is populated). Shows the calibrated 0..1
+    // score as a percentage so the user sees how strong each match is.
+    const relevance = this.relevanceById.get(r.id);
+    const relevanceChip =
+      relevance !== undefined
+        ? html`<span
+            class="rec-relevance"
+            title="Semantic relevance to your search"
+            >${Math.round(relevance * 100)}%</span
+          > `
+        : nothing;
 
     const cellMap: Record<string, unknown> = {
       day: html`<span class="rec-time">${day}</span>`,
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
-      tags: html`<span class="rec-tags" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.tags?.map((t: any) => t.name).join(", ") || ""}</span>`,
+      tags: html`<span class="rec-tags">${
+        (r.tags ?? []).length
+          ? r.tags!.map((t: any) => html`<span class="rec-tag-chip" style=${t.color ? `background:${t.color}; color:${getContrastColor(t.color)};` : ""}>${t.name}</span>`)
+          : nothing
+      }</span>`,
       model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,
       cleanup_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.cleanup_model || ""}</span>`,
-      diarized: html`<span class="rec-diarized" style="color: var(--fg-muted); text-align: center; display: block;">${r.diarized ? "✓" : ""}</span>`,
-      transcript: html`<span class="rec-preview">${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
+      summary_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.summary_model || ""}</span>`,
+      user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
+      diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
+      source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span><span class="rec-source-label">${sourceLabel}</span></span>`,
+      transcript: html`<span class="rec-preview">${relevanceChip}${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
     const cells = visibleCols.map((c) => cellMap[c] || nothing);
@@ -611,19 +746,63 @@ export class RecordingsListElement extends LitElement {
           </span>
           <span class="rec-group-meta" style="margin-right: 8px;">${day} · ${time}</span>
           ${isEditing ? html`
-            <input
-              type="text"
-              class="rec-group-input"
-              data-session="${meetingId}"
-              style="background: var(--bg-deep, #11111b); color: var(--fg-default); border: 1px solid var(--accent, #89b4fa); border-radius: 4px; padding: 2px 6px; font-size: 13px; font-family: inherit; font-weight: 600; outline: none; margin-left: -4px; flex: 1; min-width: 120px;"
-              .value=${this.editingName}
-              @click=${(e: Event) => e.stopPropagation()}
-              @dblclick=${(e: Event) => e.stopPropagation()}
-              @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, meetingId)}
-              @blur=${(e: FocusEvent) => this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value)}
-            />
+            <span class="rec-rename" @click=${(e: Event) => e.stopPropagation()}>
+              <button
+                class="rec-icon-btn"
+                title="Change icon"
+                @mousedown=${(e: Event) => e.preventDefault()}
+                @click=${(e: Event) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  // Anchor below the button; clamp so a near-bottom row's popover
+                  // doesn't run off-screen (the grid is ~6 rows tall).
+                  this.iconPickerPos = { x: r.left, y: Math.min(r.bottom + 6, window.innerHeight - 180) };
+                  this.iconPickerOpen = !this.iconPickerOpen;
+                }}
+              >${this.editingIcon}</button>
+              <input
+                type="text"
+                class="rec-group-input"
+                data-session="${meetingId}"
+                placeholder="Meeting name"
+                style="background: var(--bg-deep, #11111b); color: var(--fg-default); border: 1px solid var(--accent, #89b4fa); border-radius: 4px; padding: 2px 6px; font-size: 13px; font-family: inherit; font-weight: 600; outline: none; flex: 1; min-width: 120px;"
+                .value=${this.editingName}
+                @click=${(e: Event) => e.stopPropagation()}
+                @dblclick=${(e: Event) => e.stopPropagation()}
+                @keydown=${(e: KeyboardEvent) => this.handleRenameKeyDown(e, meetingId)}
+                @blur=${(e: FocusEvent) => {
+                  // Keep editing if focus moved within the rename widget (e.g.
+                  // clicking the icon button or a picker choice); only save when
+                  // focus leaves it entirely.
+                  const rel = e.relatedTarget as HTMLElement | null;
+                  if (rel && rel.closest && rel.closest(".rec-rename")) return;
+                  this.saveInlineRename(meetingId, (e.target as HTMLInputElement).value);
+                }}
+              />
+              ${this.iconPickerOpen ? html`
+                <div class="rec-icon-popover" style="position:fixed; left:${this.iconPickerPos?.x ?? 0}px; top:${this.iconPickerPos?.y ?? 0}px; z-index:9999;" @click=${(e: Event) => e.stopPropagation()}>
+                  ${MEETING_ICON_CHOICES.map((ic) => html`
+                    <button
+                      class="rec-icon-choice ${ic === this.editingIcon ? "sel" : ""}"
+                      title="Use ${ic}"
+                      @mousedown=${(e: Event) => e.preventDefault()}
+                      @click=${(e: Event) => {
+                        e.stopPropagation();
+                        this.editingIcon = ic;
+                        this.iconPickerOpen = false;
+                        this.requestUpdate();
+                        // Return focus to the name field so Enter/blur still saves.
+                        this.updateComplete.then(() => {
+                          const input = this.querySelector(`.rec-group-input[data-session="${meetingId}"]`) as HTMLInputElement | null;
+                          input?.focus();
+                        });
+                      }}
+                    >${ic}</button>`)}
+                </div>
+              ` : ""}
+            </span>
           ` : html`
-            <span class="rec-group-title"><span style="margin-right: 5px;">👥</span>${meetingName}</span>
+            <span class="rec-group-title"><span style="margin-right: 5px;">${meetingIcon(meetingId)}</span>${meetingName}</span>
             <button
               class="rec-group-rename"
               title="Rename meeting"

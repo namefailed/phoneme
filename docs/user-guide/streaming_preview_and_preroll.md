@@ -21,7 +21,7 @@ On **Record Start**, those buffered samples are **prepended** to the new WAV bef
 pre_roll_ms = 1500   # 0 = disabled (mic only open while recording)
 ```
 
-Or **Settings → Recording → Pre-roll**.
+Or **Settings → Capture → Pre-roll**.
 
 ### Notes
 
@@ -37,22 +37,33 @@ After you stop a long recording, Whisper can take seconds to minutes. The UI sho
 
 ### Solution
 
-Enable `recording.streaming_preview = true`. While recording, the daemon periodically re-transcribes **new** audio (not the entire buffer every tick) and pushes a **partial transcript** to the UI.
+Enable `recording.streaming_preview = true`. While recording, the daemon periodically re-transcribes only the **last ~15 seconds** of audio (a bounded rolling window, not the whole growing buffer) and stitches the genuinely-new tail onto a forward-growing **partial transcript** pushed to the UI. Keeping the window bounded makes each tick a constant cost instead of growing with the take.
 
 ### Important limitations
 
 - This is a **preview**, not the final transcript. After stop, the normal pipeline runs again for the authoritative result.
-- whisper.cpp's `/v1/audio/transcriptions` returns a **full** transcript per request — not token streaming. Phoneme simulates "live" feel via incremental re-transcription every ~2 seconds.
+- whisper.cpp's `/v1/audio/transcriptions` returns a **full** transcript per request — not token streaming. Phoneme simulates "live" feel via incremental re-transcription, roughly every **2 s** (a fast local/native provider tightens this to ~1 s).
+- The preview yields to the final transcription (it only runs a tick when the single whisper permit is free), so it can never starve the authoritative pass.
 - Preview costs extra CPU/GPU while recording. Disable on low-end hardware.
+- Optionally use a separate, faster provider just for the preview — see the `[preview_whisper]` section in the [Configuration Reference](../developer-guide/config_reference.md).
 
 ### Configuration
 
 ```toml
 [recording]
 streaming_preview = true
+
+[interface]
+# Optional: float the preview caption over the whole desktop in an
+# always-on-top window (requires streaming_preview).
+preview_overlay = false
 ```
 
-Or **Settings → Recording → Streaming preview**.
+Or **Settings → Capture → Streaming preview** (and the **System-wide overlay** checkbox under **Settings → Transcription → Live Preview**).
+
+### System-wide overlay
+
+With `interface.preview_overlay = true`, the live caption also appears in a frameless, always-on-top window that floats over any app — useful during a meeting or screen share when the main window is hidden. It auto-shows when a recording or meeting starts, can be dragged anywhere (its position is remembered), and dims/hides shortly after capture stops. Off by default.
 
 ## Using both together
 
@@ -62,4 +73,4 @@ Or **Settings → Recording → Streaming preview**.
 | Streaming preview | Long rants, meetings where you want to see text forming |
 | Both | Long-form voice notes where you care about start *and* mid-flight feedback |
 
-Neither affects **Meeting Mode** timeline alignment — see [Meeting Mode](meeting_mode.md).
+In **Meeting Mode**, the preview follows your **microphone** track (your dense local voice), so you still see live feedback during a call. Neither feature affects Meeting Mode timeline alignment — see [Meeting Mode](meeting_mode.md).

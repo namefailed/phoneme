@@ -27,6 +27,19 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
     if args.stop {
         return single_request(&mut client, Request::RecordStop, json).await;
     }
+    if args.toggle {
+        // Atomic start-if-idle / stop-if-active, mirroring the GUI record
+        // hotkey. Honors --in-place so a toggle binding can start an in-place
+        // recording the same way `record --start --in-place` does.
+        return single_request(
+            &mut client,
+            Request::RecordToggle {
+                in_place: args.in_place,
+            },
+            json,
+        )
+        .await;
+    }
     if args.cancel {
         return single_request(&mut client, Request::RecordCancel, json).await;
     }

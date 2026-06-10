@@ -11,6 +11,8 @@
  * Pure vanilla DOM so it drops into the innerHTML-based settings sections.
  */
 import { fetchLlmModels } from "../../services/llmModels";
+import type { CuratedModel } from "../../data/curatedModels";
+import { modelHint } from "../../data/curatedModels";
 
 export interface ModelFieldOpts {
   /** Effective provider id (e.g. "ollama", "openai", "groq"). */
@@ -19,10 +21,19 @@ export interface ModelFieldOpts {
   getApiKey: () => string;
   getModel: () => string;
   setModel: (m: string) => void;
-  /** "llm" → live fetch; "curated" → use `curated()`. */
+  /** "llm" → live fetch; "curated" → use `curated()`/`curatedRich()`. */
   mode: "llm" | "curated";
   /** Curated model ids (curated mode, or LLM fallback before a fetch). */
   curated?: () => string[];
+  /**
+   * Rich curated models (label + description + tier/use-case hint + recommended
+   * default). When supplied it supersedes `curated()`: the dropdown shows the
+   * human labels, the recommended entry is marked, and a one-line hint for the
+   * selected model renders below. In LLM mode it's the fallback list shown
+   * before (or when) a live `/models` fetch returns nothing, so the picker is
+   * never empty.
+   */
+  curatedRich?: () => CuratedModel[];
   /** Optional leading blank option (e.g. summary "Same as cleanup model"). */
   blankLabel?: string;
 }
@@ -40,15 +51,28 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
 
   const render = () => {
     const current = opts.getModel();
-    const list = models.length ? models : (opts.curated?.() ?? []);
+    // Rich curated metadata (if the caller supplied any) drives the option
+    // labels + the per-model hint; its ids also seed the list.
+    const rich = opts.curatedRich?.() ?? [];
+    const richById = new Map(rich.map((m) => [m.id, m]));
+    const curatedIds = rich.length ? rich.map((m) => m.id) : (opts.curated?.() ?? []);
+    const list = models.length ? models : curatedIds;
     const known = new Set(list);
     if (current) known.add(current);
+
+    // Human label for an id: rich label + "⭐"/tier·use-case when known, else
+    // the raw id. "(current)" suffix when the saved model isn't in the list.
+    const labelFor = (m: string): string => {
+      const meta = richById.get(m);
+      const base = meta ? `${meta.recommended ? "⭐ " : ""}${meta.label} — ${modelHint(meta)}` : m;
+      return m === current && !list.includes(m) ? `${base} (current)` : base;
+    };
 
     if (freeText) {
       host.innerHTML = `
         <div style="display:flex; gap:8px; align-items:center;">
           <input type="text" class="mf-text" style="${inputStyle}" value="${(current || "").replace(/"/g, "&quot;")}" placeholder="Model id" />
-          <button type="button" class="inline-button mf-list" style="padding:6px 10px;" title="Back to the model list">▾ List</button>
+          <button type="button" class="inline-button mf-list" style="padding:6px 10px;" title="Back to the model list"><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg> List</button>
         </div>`;
       const input = host.querySelector<HTMLInputElement>(".mf-text")!;
       input.addEventListener("input", () => opts.setModel(input.value));
@@ -60,21 +84,27 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
       return;
     }
 
+    const escAttr = (s: string) => s.replace(/"/g, "&quot;");
+    const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const opt = (v: string, label: string, sel: boolean) =>
-      `<option value="${v.replace(/"/g, "&quot;")}" ${sel ? "selected" : ""}>${label}</option>`;
+      `<option value="${escAttr(v)}" ${sel ? "selected" : ""}>${escHtml(label)}</option>`;
     const options = [
       opts.blankLabel ? opt("", opts.blankLabel, !current) : "",
-      ...Array.from(known).map((m) => opt(m, m === current && !list.includes(m) ? `${m} (current)` : m, m === current)),
+      ...Array.from(known).map((m) => opt(m, labelFor(m), m === current)),
       opt(SENTINEL_OTHER, "Other… (type a model id)", false),
     ].join("");
 
+    // Description of the currently-selected curated model, when we have one.
+    const selectedMeta = current ? richById.get(current) : undefined;
     const status = loading
       ? `<span style="font-size:11px; color:var(--fg-faded);">Loading models…</span>`
       : error
         ? `<span style="font-size:11px; color:var(--fg-faded);">Couldn't list models (${error}) — Refresh or choose Other.</span>`
-        : (opts.mode === "llm" && !models.length && !current
-            ? `<span style="font-size:11px; color:var(--fg-faded);">Click Refresh to list models.</span>`
-            : "");
+        : selectedMeta
+          ? `<span style="font-size:11px; color:var(--fg-faded);">${escHtml(selectedMeta.description)}</span>`
+          : (opts.mode === "llm" && !models.length && !current
+              ? `<span style="font-size:11px; color:var(--fg-faded);">Click Refresh to list models.</span>`
+              : "");
 
     host.innerHTML = `
       <div style="display:flex; gap:8px; align-items:center;">

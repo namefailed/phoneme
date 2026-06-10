@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Phoneme Live Preview</title>
+  </head>
+  <body>
+    <!-- Standalone page for the system-wide live-preview overlay window. It
+         renders ONLY the overlay component (no app shell) so the window stays
+         tiny and cheap. The window itself is created at runtime by the tray
+         (see src-tauri/src/overlay.rs); this page is its content. -->
+    <div id="overlay-root"></div>
+    <script type="module" src="/src/overlay.ts"></script>
+  </body>
+</html>

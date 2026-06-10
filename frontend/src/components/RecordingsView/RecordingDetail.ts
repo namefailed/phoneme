@@ -5,6 +5,7 @@ import {
   getOriginalTranscript,
   getCleanTranscript,
   rerunSummary,
+  setSpeakerName,
   type Recording,
 } from "../../services/ipc";
 import {
@@ -13,10 +14,13 @@ import {
   statusLabel,
   wordCountSummary,
   escapeHtml,
+  escapeAttr,
 } from "../../utils/format";
 import { showToast } from "../../utils/toast";
+import { speakerLabelsIn, speakerDisplayName } from "./mergeMeeting";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
+import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
@@ -101,6 +105,13 @@ export class RecordingDetail {
         }
       }
     }
+
+    // Refresh the Speakers panel (labels and custom names may have changed), but
+    // not while the user is mid-rename — re-rendering would steal focus.
+    const editingSpeaker = !!this.container
+      .querySelector<HTMLElement>("#speakers-block")
+      ?.contains(document.activeElement);
+    if (!editingSpeaker) this.renderSpeakers(r);
   }
 
   clear() {
@@ -146,12 +157,15 @@ export class RecordingDetail {
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
+          <div id="compare-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div class="transcript-history" style="margin-top: 6px; flex: 0 0 auto; display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end; flex-wrap: wrap;">
+            <button class="inline-button" id="view-compare" title="Side-by-side diff of the raw, cleaned, and current transcript versions">Compare versions</button>
             <button class="inline-button" id="view-summary">View summary</button>
             <button class="inline-button" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">View unedited transcript</button>
             <button class="inline-button" id="view-original" title="The raw machine transcript, before AI cleanup">View original transcript</button>
           </div>
         </div>
+        <div id="speakers-block" class="speakers-block" style="margin-top: 6px;"></div>
         <div class="notes-block" style="margin-top: 6px;">
           <div id="notes-editor"></div>
         </div>
@@ -159,7 +173,7 @@ export class RecordingDetail {
           <span id="detail-stats">${stats}</span>
           <span id="detail-models">${modelsLine(r)}</span>
           <span id="detail-hook-exit">Hook exit: ${r.hook_exit_code ?? "—"}</span>
-          <span>${escapeHtml(r.audio_path)}</span>
+          <span class="detail-path" title="${escapeHtml(r.audio_path)}">${escapeHtml(r.audio_path)}</span>
         </div>
       </div>
     `;
@@ -173,6 +187,7 @@ export class RecordingDetail {
         onRefresh: () => this.onRefresh(),
         getTranscript: () => this.recording?.transcript ?? "",
         getAudioPath: () => this.recording?.audio_path ?? "",
+        getSpeakerNames: () => this.recording?.speaker_names ?? [],
       });
       this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
     }
@@ -196,7 +211,7 @@ export class RecordingDetail {
     //   • summary    — AI summary (generated on demand if absent)
     // Exactly one of {editor, original, unedited, summary} is visible at a time.
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
-    type PeekKind = "original" | "unedited" | "summary";
+    type PeekKind = "original" | "unedited" | "summary" | "compare";
     const peeks: Record<PeekKind, { btn: HTMLButtonElement | null; el: HTMLElement | null; idle: string }> = {
       original: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
@@ -212,6 +227,11 @@ export class RecordingDetail {
         btn: this.container.querySelector<HTMLButtonElement>("#view-summary"),
         el: this.container.querySelector<HTMLElement>("#summary-peek"),
         idle: "View summary",
+      },
+      compare: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-compare"),
+        el: this.container.querySelector<HTMLElement>("#compare-peek"),
+        idle: "Compare versions",
       },
     };
 
@@ -231,7 +251,7 @@ export class RecordingDetail {
       resetPeek();
       editorEl.style.display = "none";
       el.style.display = "block";
-      if (btn) btn.textContent = "Back to current transcript";
+      if (btn) btn.textContent = "← Back";
       activePeek = kind;
       if (kind === "summary") this.summaryPeeking = true;
     };
@@ -292,12 +312,122 @@ export class RecordingDetail {
       openPeek("summary");
     });
 
+    // Compare peek (v1.10): a read-only diff between any two of the three
+    // transcript layers — original (raw machine), clean (LLM-cleaned, pre-edit),
+    // and current. The raw/clean layers are fetched on demand (the same IPC the
+    // other peeks use); current comes straight from the loaded recording. Missing
+    // layers are handled inside TranscriptDiff (shows a clear "n/a" state).
+    peeks.compare.btn?.addEventListener("click", async () => {
+      if (activePeek === "compare") return resetPeek();
+      const el = peeks.compare.el;
+      if (!el) return;
+      el.innerHTML = `<div style="color: var(--fg-muted); line-height: 1.6;">Loading versions…</div>`;
+      openPeek("compare");
+      const [original, clean] = await Promise.all([
+        getOriginalTranscript(r.id).catch(() => null),
+        getCleanTranscript(r.id).catch(() => null),
+      ]);
+      // Bail if the user navigated away or closed the peek while we were loading
+      // (the peek box is hidden again once another peek/editor takes over).
+      if (this.recording?.id !== r.id || el.style.display === "none") return;
+      el.innerHTML = "";
+      new TranscriptDiff(el, { original, clean, current: r.transcript ?? "" });
+    });
+
     // Notes: CodeMirror editor (respects editor.vim_mode like the transcript
     // editor). Auto-saves on change (debounced) and on blur.
     const notesRoot = this.container.querySelector<HTMLElement>("#notes-editor");
     if (notesRoot) {
       this.notesEditor?.dispose();
       this.notesEditor = new NotesEditor(notesRoot, r.id, r.notes ?? "");
+    }
+
+    this.renderSpeakers(r);
+  }
+
+  /** Render the "Speakers" panel: one renamable row per `[Speaker N]` label that
+   *  appears in this recording's transcript. Shown only for diarized recordings
+   *  (those carrying at least one marker). Renaming maps the label → name via
+   *  the catalog; the stored transcript keeps its `[Speaker N]` markers, so the
+   *  change is reversible and the transcript text is never rewritten. */
+  private renderSpeakers(r: Recording) {
+    const root = this.container.querySelector<HTMLElement>("#speakers-block");
+    if (!root) return;
+    const labels = speakerLabelsIn(r.transcript);
+    if (labels.length === 0) {
+      // No diarization markers → no panel (and clear any stale content).
+      root.innerHTML = "";
+      root.style.display = "none";
+      return;
+    }
+    root.style.display = "block";
+    const rows = labels
+      .map((label) => {
+        const name = speakerDisplayName(r.speaker_names, label);
+        const isCustom = name !== `Speaker ${label}`;
+        return `
+          <div class="speaker-row" data-label="${label}">
+            <span class="speaker-tag">Speaker ${label}</span>
+            <span class="speaker-arrow" aria-hidden="true">→</span>
+            <input
+              class="speaker-name-input"
+              type="text"
+              value="${isCustom ? escapeAttr(name) : ""}"
+              placeholder="Speaker ${label}"
+              aria-label="Name for Speaker ${label}"
+            />
+          </div>`;
+      })
+      .join("");
+    root.innerHTML = `
+      <div class="speakers-header">Speakers</div>
+      <div class="speakers-hint">Rename a speaker to show that name everywhere — the transcript keeps its <code>[Speaker N]</code> labels.</div>
+      <div class="speakers-list">${rows}</div>`;
+
+    // Wire each input: commit on Enter or blur; Escape reverts to the stored value.
+    root.querySelectorAll<HTMLInputElement>(".speaker-name-input").forEach((input) => {
+      const rowEl = input.closest<HTMLElement>(".speaker-row");
+      const label = Number(rowEl?.dataset.label);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          input.blur();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          input.value = input.defaultValue;
+          input.blur();
+        }
+      });
+      input.addEventListener("blur", () => {
+        void this.commitSpeakerName(r.id, label, input.value, input.defaultValue);
+      });
+    });
+  }
+
+  /** Persist a speaker rename for the current recording. No-op when the value is
+   *  unchanged. An empty value clears the custom name (reverts to "Speaker N").
+   *  Refreshes so the panel + any merged view reflect the new name immediately. */
+  private async commitSpeakerName(
+    id: string,
+    label: number,
+    value: string,
+    previous: string,
+  ) {
+    if (value.trim() === previous.trim()) return; // nothing changed
+    try {
+      await setSpeakerName(id, label, value.trim());
+      // Keep local state in sync so an in-place refresh shows the new name.
+      if (this.recording?.id === id) {
+        const names = (this.recording.speaker_names ?? []).filter(
+          (s) => s.speaker_label !== label,
+        );
+        if (value.trim()) names.push({ speaker_label: label, name: value.trim() });
+        this.recording.speaker_names = names;
+      }
+      showToast(value.trim() ? "Speaker renamed" : "Speaker name cleared", "success");
+      this.onRefresh();
+    } catch (e) {
+      showToast(`Couldn't rename speaker: ${errText(e)}`, "error");
     }
   }
 
@@ -385,10 +515,11 @@ function formatDate(iso: string): string {
   return `${dateObj} at ${timeObj}`;
 }
 
-/** Compact "transcription · cleanup" model line for the detail footer. */
+/** Compact "transcription · cleanup · summary" model line for the detail footer. */
 function modelsLine(r: Recording): string {
   const parts: string[] = [];
   if (r.model) parts.push(`🗣 ${escapeHtml(r.model)}`);
   if (r.cleanup_model) parts.push(`✨ ${escapeHtml(r.cleanup_model)}`);
+  if (r.summary_model) parts.push(`📝 ${escapeHtml(r.summary_model)}`);
   return parts.join("  ·  ");
 }

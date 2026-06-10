@@ -46,6 +46,72 @@ const PREVIEW_MIN_NEW_SAMPLES: usize = 16_000;
 /// preview, not the final result. 15 s at 16 kHz.
 const PREVIEW_WINDOW_SAMPLES: usize = 16_000 * 15;
 
+/// Stitch a freshly-transcribed trailing window onto the preview text already
+/// shown, producing a stable, forward-growing caption instead of a text that
+/// "rewinds" every time the rolling audio window slides.
+///
+/// Why this exists: the preview transcribes only the last ~15 s of audio each
+/// tick (`PREVIEW_WINDOW_SAMPLES`) to keep per-tick cost constant. While the
+/// recording is shorter than that window, each transcription covers the whole
+/// take and grows monotonically — fine to show directly. But once the window
+/// starts sliding, each transcription begins partway through the speech, so
+/// naively replacing the displayed text makes its *start* jump around (the most
+/// visible jank). We instead treat the previously-shown text as a committed
+/// prefix and append only the genuinely-new tail of the latest window, found by
+/// the longest overlap between the committed text's suffix and the window's
+/// prefix. Word-boundary matching (not raw chars) keeps whisper's minor
+/// re-tokenization from defeating the overlap.
+///
+/// `committed` is the full text shown so far; `window` is the latest window
+/// transcription. Returns the new full text to display. This is a pure function
+/// so it can be unit-tested without any audio/whisper round trip.
+fn stitch_preview(committed: &str, window: &str) -> String {
+    let window = window.trim();
+    if window.is_empty() {
+        return committed.to_string();
+    }
+    if committed.is_empty() {
+        return window.to_string();
+    }
+
+    // Tokenize both sides on whitespace. We look for the longest run of trailing
+    // committed words that equals a leading run of window words; everything in
+    // the window past that overlap is the new text to append.
+    let committed_words: Vec<&str> = committed.split_whitespace().collect();
+    let window_words: Vec<&str> = window.split_whitespace().collect();
+
+    // Case-insensitive word compare so capitalization drift across re-transcriptions
+    // (e.g. sentence-start casing changing as more context arrives) still overlaps.
+    let eq = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+
+    // Try the largest possible overlap first and shrink. Cap the search at a
+    // sensible window so this stays cheap even on long captions.
+    let max_overlap = committed_words.len().min(window_words.len()).min(64);
+    for overlap in (1..=max_overlap).rev() {
+        let tail = &committed_words[committed_words.len() - overlap..];
+        let head = &window_words[..overlap];
+        if tail.iter().zip(head).all(|(a, b)| eq(a, b)) {
+            // Append only the window words past the overlap.
+            if overlap == window_words.len() {
+                // The whole window is already contained in the committed text —
+                // nothing new this tick.
+                return committed.to_string();
+            }
+            let mut out = committed.to_string();
+            for w in &window_words[overlap..] {
+                out.push(' ');
+                out.push_str(w);
+            }
+            return out;
+        }
+    }
+
+    // No overlap found (e.g. a long silence split the speech, or whisper produced
+    // a wholly different window). Append the window as a new segment so we never
+    // lose newly-spoken words; a leading separator keeps it readable.
+    format!("{committed} {window}")
+}
+
 /// Open a [`Source`] for the current recording: returns a real CPAL source in
 /// production and a [`GeneratorSource`] when `PHONEME_AUDIO_BACKEND=synthetic`
 /// is set (CI / headless tests).
@@ -293,17 +359,30 @@ impl DaemonRecorder {
     /// Spawn the streaming-preview loop for `id`, if `recording.streaming_preview`
     /// is enabled. No-op (and no task) when the flag is off — that default path
     /// is byte-for-byte the historical behavior. The loop snapshots the live
-    /// recorder every `PREVIEW_INTERVAL`, transcribes the audio so far via the
-    /// configured provider, and emits `TranscriptionPartial`. It transcribes one
-    /// tick at a time (a slow transcription simply means the next tick is
-    /// skipped — never two in flight), and stops when told to via `stop_tx`.
-    async fn start_preview(&self, state: &AppState, id: RecordingId) {
+    /// recorder (through `snapshot`) every `PREVIEW_INTERVAL`, transcribes the
+    /// audio so far via the configured provider, and emits `TranscriptionPartial`.
+    /// It transcribes one tick at a time (a slow transcription simply means the
+    /// next tick is skipped — never two in flight), and stops when told to via
+    /// `stop_tx`.
+    ///
+    /// `snapshot` is a [`SnapshotHandle`] cloned from the recorder whose audio
+    /// the preview should reflect: the single recording's recorder, or a
+    /// meeting's mic track. Passing the handle (rather than reaching into
+    /// `self.handle`) is what lets one preview implementation serve BOTH the
+    /// single-recording and the meeting path — meetings previously emitted no
+    /// partials at all because their recorder lives inside `ActiveMeeting`, not
+    /// `self.handle`.
+    async fn start_preview(
+        &self,
+        state: &AppState,
+        id: RecordingId,
+        snapshot: phoneme_audio::recorder::SnapshotHandle,
+    ) {
         if !state.config.load().recording.streaming_preview {
             return;
         }
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
         let state = state.clone();
-        let handle = self.handle.clone();
         let log_id = id.clone();
         let task = tokio::spawn(async move {
             let cfg = state.config.load();
@@ -336,6 +415,11 @@ impl DaemonRecorder {
             // Burn the immediate first tick so we don't transcribe near-empty audio.
             interval.tick().await;
             let mut last_len = 0usize;
+            // The stable, forward-growing caption shown so far. While the
+            // recording is shorter than the audio window each transcription is of
+            // the whole take (authoritative), so we replace this wholesale; once
+            // the window slides we stitch the new tail onto it (see stitch_preview).
+            let mut committed = String::new();
             let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
 
             loop {
@@ -347,16 +431,11 @@ impl DaemonRecorder {
                 // Snapshot only the trailing window of audio captured so far (the
                 // recorder also tells us the full captured length so we can still
                 // throttle on newly-accumulated audio). If the recorder is gone
-                // (race with stop), end the loop.
-                let (total_len, samples) = {
-                    let guard = handle.lock().await;
-                    match guard.as_ref() {
-                        Some(rec) => match rec.snapshot_tail(PREVIEW_WINDOW_SAMPLES).await {
-                            Ok(s) => s,
-                            Err(_) => break,
-                        },
-                        None => break,
-                    }
+                // (race with stop), `snapshot_tail` errors and we end the loop.
+                let (total_len, samples) = match snapshot.snapshot_tail(PREVIEW_WINDOW_SAMPLES).await
+                {
+                    Ok(s) => s,
+                    Err(_) => break,
                 };
                 // Skip until enough *new* audio has accumulated to be worth a tick.
                 if total_len < last_len + PREVIEW_MIN_NEW_SAMPLES {
@@ -386,11 +465,24 @@ impl DaemonRecorder {
                 // Config changes during recording will take effect on the next recording.
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
-                        let text = text.trim().to_string();
+                        let text = text.trim();
                         if !text.is_empty() {
+                            // While the take still fits inside the audio window the
+                            // transcription covers everything from the start, so it
+                            // is the authoritative full caption — show it directly.
+                            // Once the window has begun sliding (longer take), the
+                            // transcription only covers the tail, so stitch it onto
+                            // the committed caption to keep the preview growing
+                            // forward instead of rewinding its start each tick.
+                            let window_slid = total_len > PREVIEW_WINDOW_SAMPLES;
+                            committed = if window_slid {
+                                stitch_preview(&committed, text)
+                            } else {
+                                text.to_string()
+                            };
                             state.events.emit(DaemonEvent::TranscriptionPartial {
                                 id: id.clone(),
-                                text,
+                                text: committed.clone(),
                             });
                         }
                     }
@@ -488,9 +580,11 @@ impl DaemonRecorder {
             in_place,
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         if let Err(e) = state.catalog.insert(&row).await {
             *self.active.lock().await = None;
@@ -543,6 +637,9 @@ impl DaemonRecorder {
                     return Err(e);
                 }
             };
+        // Clone a snapshot handle before moving the recorder into the slot, so
+        // the preview loop can read this recording's audio.
+        let preview_snapshot = recorder.snapshot_handle();
         *self.handle.lock().await = Some(recorder);
 
         // If it's a self-terminating mode, spawn a task to auto-stop when the recorder task finishes natively.
@@ -560,7 +657,7 @@ impl DaemonRecorder {
 
         // Spawn the live streaming-preview loop. No-op unless
         // `recording.streaming_preview` is enabled (default: off).
-        self.start_preview(state, id.clone()).await;
+        self.start_preview(state, id.clone(), preview_snapshot).await;
 
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
@@ -626,6 +723,9 @@ impl DaemonRecorder {
         if active_lock.is_none() {
             let mut meeting_lock = self.meeting.lock().await;
             if let Some(meeting) = meeting_lock.take() {
+                // Tear down the live-preview loop before cancelling the track
+                // recorders. No-op when no preview is running.
+                self.stop_preview().await;
                 let id = meeting.tracks[0].id.clone();
                 for track_handle in meeting.tracks {
                     if let Err(e) = track_handle.recorder.cancel().await {
@@ -941,9 +1041,11 @@ impl DaemonRecorder {
                 track: Some(track.as_str().to_string()),
                 cleanup_model: None,
                 diarized: false,
+                user_edited: false,
                 summary: None,
                 summary_model: None,
                 tags: vec![],
+                speaker_names: vec![],
             };
             // Insert the catalog row. If it fails, roll back every track already
             // started so we never leave orphaned `recording`-status rows or live
@@ -992,12 +1094,35 @@ impl DaemonRecorder {
             });
         }
 
+        // Grab a snapshot handle for the mic track (if present) so the live
+        // preview can caption the local speaker during a meeting, exactly like a
+        // single recording. We prefer the mic over the system track — the system
+        // track is the remote audio and is often sparse, whereas the mic is the
+        // dense local voice the user is watching the caption for. Captured before
+        // `tracks` is moved into `ActiveMeeting`.
+        let preview_target = tracks
+            .iter()
+            .find(|t| matches!(t.track, MeetingTrack::Mic))
+            .or_else(|| tracks.first())
+            .map(|t| (t.id.clone(), t.recorder.snapshot_handle()));
+
         *meeting_lock = Some(ActiveMeeting {
             meeting_id: meeting_id.clone(),
             tracks,
             paused: false,
             wall_started,
         });
+        // Release the meeting lock before spawning the preview loop (it doesn't
+        // touch `meeting`, but keep lock scopes tight).
+        drop(meeting_lock);
+
+        // Spawn the live streaming-preview loop for the meeting. No-op unless
+        // `recording.streaming_preview` is enabled (default: off), so meetings
+        // get the same opt-in live caption single recordings do.
+        if let Some((preview_id, snapshot)) = preview_target {
+            self.start_preview(state, preview_id, snapshot).await;
+        }
+
         tracing::info!(session = %meeting_id, "meeting started");
         Ok(meeting_id)
     }
@@ -1012,6 +1137,11 @@ impl DaemonRecorder {
             .await
             .take()
             .ok_or(Error::NotRecording)?;
+        // Stop the live-preview loop (if any) before finalizing the tracks, so it
+        // isn't mid-snapshot when the mic recorder is consumed. No-op when no
+        // preview is running (preview disabled, or this build started before the
+        // meeting-preview wiring). Mirrors the single-recording `stop`.
+        self.stop_preview().await;
         let meeting_id = meeting.meeting_id.clone();
         let wall_started = meeting.wall_started;
         // Snapshot meeting wall-clock length before stopping recorders (stop/drain can take time).
@@ -1208,6 +1338,72 @@ mod tests {
     use phoneme_audio::format::AudioConfig;
     use phoneme_audio::source::{GeneratorSource, SyntheticSource};
     use phoneme_core::{Config, ListFilter};
+
+    // ── stitch_preview (pure caption stitching) ───────────────────────────
+
+    #[test]
+    fn stitch_preview_appends_only_new_tail_on_overlap() {
+        // The new window re-states the tail of what's shown, then adds new words.
+        let committed = "the quick brown fox";
+        let window = "brown fox jumps over";
+        assert_eq!(
+            stitch_preview(committed, window),
+            "the quick brown fox jumps over"
+        );
+    }
+
+    #[test]
+    fn stitch_preview_no_change_when_window_fully_contained() {
+        // The window is entirely a suffix of the committed text — nothing new.
+        let committed = "hello world how are you";
+        let window = "how are you";
+        assert_eq!(stitch_preview(committed, window), committed);
+    }
+
+    #[test]
+    fn stitch_preview_handles_empty_inputs() {
+        assert_eq!(stitch_preview("", "hello world"), "hello world");
+        assert_eq!(stitch_preview("already here", ""), "already here");
+        assert_eq!(stitch_preview("", ""), "");
+        // Whitespace-only window is treated as empty.
+        assert_eq!(stitch_preview("keep me", "   "), "keep me");
+    }
+
+    #[test]
+    fn stitch_preview_appends_disjoint_window_as_new_segment() {
+        // No overlap at all (e.g. a pause split the speech): never drop the new
+        // words — append them so the caption still advances.
+        let committed = "first sentence done";
+        let window = "completely different words";
+        assert_eq!(
+            stitch_preview(committed, window),
+            "first sentence done completely different words"
+        );
+    }
+
+    #[test]
+    fn stitch_preview_overlap_is_case_insensitive() {
+        // Whisper may change sentence-start casing as more context arrives; the
+        // overlap must still match so we don't double-print the boundary word.
+        let committed = "we met at the";
+        let window = "The cafe yesterday";
+        assert_eq!(
+            stitch_preview(committed, window),
+            "we met at the cafe yesterday"
+        );
+    }
+
+    #[test]
+    fn stitch_preview_prefers_longest_overlap() {
+        // "to be" appears twice; the longest trailing/leading overlap must win so
+        // we don't re-append an already-shown run.
+        let committed = "to be or not to be";
+        let window = "to be that is the question";
+        assert_eq!(
+            stitch_preview(committed, window),
+            "to be or not to be that is the question"
+        );
+    }
 
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
     /// so meeting orchestration can be tested without touching the real install.
@@ -1455,9 +1651,11 @@ mod tests {
             track: Some(MeetingTrack::Mic.as_str().to_string()),
             cleanup_model: None,
             diarized: false,
+            user_edited: false,
             summary: None,
             summary_model: None,
             tags: vec![],
+            speaker_names: vec![],
         };
         state.catalog.insert(&row).await.unwrap();
 

@@ -110,6 +110,10 @@ pub struct Recording {
     /// Whether speaker diarization was applied to this recording.
     #[serde(default)]
     pub diarized: bool,
+    /// Whether the user hand-edited the transcript. Independent of `model`,
+    /// which always reflects the transcription model that produced the text.
+    #[serde(default)]
+    pub user_edited: bool,
     /// LLM-generated summary of the transcript, if one has been produced
     /// (on demand or as the final pipeline step). `None` until generated.
     #[serde(default)]
@@ -121,6 +125,25 @@ pub struct Recording {
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]
     pub tags: Vec<crate::tags::Tag>,
+    /// Custom display names for this recording's diarized speaker labels, e.g.
+    /// `[Speaker 1]` → "Sarah". Populated by `Catalog::list`/`get`/`list_by_meeting`
+    /// from the `speaker_names` table (not a column on `recordings`). The stored
+    /// transcript keeps its canonical `[Speaker N]` markers; these names are
+    /// applied at display/export time, so a rename is reversible and never
+    /// rewrites the transcript. Empty when no speakers have been renamed.
+    #[serde(default)]
+    pub speaker_names: Vec<SpeakerName>,
+}
+
+/// A custom display name for one diarized speaker label within a recording.
+///
+/// `speaker_label` is the 1-based index from the transcript's `[Speaker N]`
+/// marker; `name` is the user-chosen replacement shown wherever that speaker
+/// renders. Stored in the `speaker_names` table, keyed per recording.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeakerName {
+    pub speaker_label: i64,
+    pub name: String,
 }
 
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.

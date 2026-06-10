@@ -67,7 +67,7 @@ export class ConfirmDeleteElement extends LitElement {
           </div>
           <p class="modal-body">${this.bodyText}</p>
           <label class="modal-checkbox-row">
-            <input type="checkbox" id="dont-ask-again" class="modal-checkbox" />
+            <input type="checkbox" id="dont-ask-again" class="toggle-switch" />
             <span class="modal-checkbox-label">Don't ask again</span>
           </label>
           <div class="modal-actions">

@@ -20,8 +20,10 @@ sliver of users?* A cheap prototype or a concrete user request is the usual trig
 ### Duplicate / near-duplicate detection
 "You already recorded this call" when importing or starting a meeting.
 - **Why parked:** needs embedding-similarity + time-overlap heuristics and a good
-  false-positive story. Depends on the v1.10 embedding/chunking work existing first.
-- **Promote when:** chunked embeddings land and a user actually complains about dupes.
+  false-positive story. The chunked-embedding substrate it depended on now exists
+  (`embedding_chunks` + `catalog::hybrid_search`).
+- **Promote when:** a user actually complains about dupes (the embedding prerequisite
+  is met).
 
 ### Chapter markers
 Auto-split a 90-minute meeting on long silences into navigable chapters.
@@ -31,10 +33,12 @@ Auto-split a 90-minute meeting on long silences into navigable chapters.
 
 ### Live meeting subtitles overlay
 Floating captions during Meeting Mode without alt-tabbing.
-- **Why parked:** an OS-level always-on-top overlay synced to the (sparse) system
-  track is real work, and the bounded live preview already covers "am I being
-  captured?" Performance + multi-monitor edge cases are a tax.
-- **Promote when:** there's demand for true real-time captioning, not just a preview.
+- **Status: partially shipped.** A system-wide, always-on-top, frameless live-preview
+  overlay now floats the caption over any app (opt-in via `interface.preview_overlay`;
+  `src-tauri/src/overlay.rs`, `frontend/overlay.*`). It shows the **live preview**
+  stream (a rolling re-transcription), not yet true word-by-word real-time captions.
+- **Remaining:** lower-latency real-time captioning and the multi-monitor / click-through
+  UX decisions noted in [docs/design/live-preview-overlay.md](design/live-preview-overlay.md).
 
 ### Team glossary sync
 Shared names/terms (custom vocabulary) across machines/teammates.

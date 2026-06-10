@@ -9,7 +9,22 @@ use std::process::ExitCode;
 pub async fn run(args: ProfileArgs, cfg: &Config, is_json: bool) -> ExitCode {
     match args.action {
         ProfileAction::List => list(is_json),
+        ProfileAction::Save { name } => save(cfg, &name),
         ProfileAction::Use { name } => switch(cfg, &name).await,
+    }
+}
+
+/// Snapshot the current live config under a named profile.
+fn save(cfg: &Config, name: &str) -> ExitCode {
+    match profiles::save_profile(name, cfg) {
+        Ok(()) => {
+            println!("saved profile \"{name}\"");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(exit::GENERIC_FAIL)
+        }
     }
 }
 

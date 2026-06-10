@@ -3,6 +3,7 @@ import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
 import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, sttMeta, curatedSttModels } from "../../services/sttProviders";
 import { mountModelField } from "./modelField";
+import { curatedTranscriptionModels } from "../../data/curatedModels";
 
 const HELP =
   "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
@@ -323,6 +324,7 @@ export class SectionWhisper {
         getModel: () => this.config.whisper.model ?? "",
         setModel: (m) => { this.config.whisper.model = m; },
         curated: () => curatedSttModels(this.config.whisper.provider ?? ""),
+        curatedRich: () => curatedTranscriptionModels(this.config.whisper.provider ?? ""),
       });
     };
 

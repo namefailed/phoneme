@@ -7,8 +7,7 @@ Phoneme isn't just for live dictation and meetings. You can also use Phoneme's p
 Phoneme can import and transcribe the following audio formats:
 - `.wav`
 - `.mp3`
-- `.m4a` / `.mp4` (audio track)
-- `.flac`
+- `.m4a` (AAC / ALAC)
 
 ## 🚀 How to Import
 

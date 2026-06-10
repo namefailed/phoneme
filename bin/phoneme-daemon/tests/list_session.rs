@@ -34,9 +34,11 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         meeting_name: None,
         cleanup_model: None,
         diarized: false,
+        user_edited: false,
         summary: None,
         summary_model: None,
         tags: vec![],
+        speaker_names: vec![],
     }
 }
 

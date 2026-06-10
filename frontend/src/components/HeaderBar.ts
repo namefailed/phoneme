@@ -7,6 +7,7 @@ import { listTags, type Tag } from '../services/ipc';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
+import './SavedSearches';
 
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
@@ -27,12 +28,25 @@ export class HeaderBarElement extends LitElement {
   @state() private recordMode: "recording" | "meeting" =
     (localStorage.getItem("phoneme.recordMode") as "recording" | "meeting") || "recording";
   @state() private modeMenuOpen = false;
+  @state() private settingsMenuOpen = false;
   @state() private previewText: string | null = null;
-  @state() private whisperReachable: boolean | null = null;
-  @state() private queuePending = 0;
-  @state() private queueProcessing = 0;
   @state() private filterState: UiFilter = filterStore.get();
-  private previewDebounceTimer: number | null = null;
+  // Coalescing throttle for partials. The daemon emits a fresh re-transcription
+  // of the trailing audio window every ~1-2s, and a stalled tick can let two
+  // arrive nearly back-to-back. The old code used a 100ms debounce that *reset*
+  // on every event — since events are ~1s apart it never actually coalesced and
+  // only added a fixed 100ms of lag. Instead we throttle: render at most once
+  // per PREVIEW_RENDER_MS, always with the LATEST text, so the ticker advances
+  // at a steady cadence (no jump per event, no wasted lag on a lone partial).
+  private static readonly PREVIEW_RENDER_MS = 150;
+  // Cap the displayed preview so an unexpectedly long trailing-window transcript
+  // can't blow up layout; we keep the tail (newest words) since that's what the
+  // overlay/ticker shows. The daemon already bounds the audio window, so this is
+  // just a defensive ceiling on text length.
+  private static readonly PREVIEW_MAX_CHARS = 600;
+  private pendingPreviewText: string | null = null;
+  private previewThrottleTimer: number | null = null;
+  private previewLastRenderAt = 0;
 
   private unsubEvent: UnlistenFn | null = null;
   private unsubFilter: (() => void) | null = null;
@@ -41,12 +55,10 @@ export class HeaderBarElement extends LitElement {
   constructor() {
     super();
     this.docClickHandler = (e: MouseEvent) => {
-      if (!this.modeMenuOpen) return;
       const path = e.composedPath();
-      const isInsideMenu = path.some(node => (node as Element)?.classList?.contains('hb-rec-group'));
-      if (!isInsideMenu) {
-        this.modeMenuOpen = false;
-      }
+      const inside = (cls: string) => path.some(node => (node as Element)?.classList?.contains(cls));
+      if (this.modeMenuOpen && !inside('hb-rec-group')) this.modeMenuOpen = false;
+      if (this.settingsMenuOpen && !inside('hb-settings-group')) this.settingsMenuOpen = false;
     };
   }
 
@@ -60,6 +72,7 @@ export class HeaderBarElement extends LitElement {
 
     void this.loadTags();
     void this.syncStatusFromDaemon();
+    void this.initSemanticDefault();
 
     this.unsubEvent = await listen<any>("daemon-event", async (e) => {
       const p = e.payload;
@@ -70,12 +83,12 @@ export class HeaderBarElement extends LitElement {
           this.isRecording = true;
           this.isMeeting = false;
           this.isPaused = false;
-          this.previewText = null;
+          this.clearPreview();
         } else {
           this.isRecording = false;
           this.isMeeting = true;
           this.isPaused = false;
-          this.previewText = null;
+          this.clearPreview();
         }
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
         if (p.meeting_id) {
@@ -83,28 +96,22 @@ export class HeaderBarElement extends LitElement {
         } else if (!this.isMeeting) {
           this.isRecording = false;
           this.isPaused = false;
-          this.previewText = null;
+          this.clearPreview();
         }
       } else if (eventName === "transcription_partial") {
         if (this.isRecording || this.isMeeting) {
-          // Debounce preview updates to avoid excessive re-renders
-          if (this.previewDebounceTimer !== null) {
-            clearTimeout(this.previewDebounceTimer);
-          }
-          this.previewDebounceTimer = window.setTimeout(() => {
-            this.previewText = typeof p.text === "string" && p.text.trim() ? p.text.trim() : null;
-            this.previewDebounceTimer = null;
-          }, 100);
+          const t = typeof p.text === "string" ? p.text.trim() : "";
+          // Coalesce partials to a steady cadence (queuePreview), keeping only
+          // the tail so a long window can't blow up layout — the single-line
+          // ticker is anchored to the newest words anyway.
+          this.queuePreview(t ? t.slice(-HeaderBarElement.PREVIEW_MAX_CHARS) : null);
         }
       } else if (eventName === "recording_paused") {
         this.isPaused = true;
       } else if (eventName === "recording_resumed") {
         this.isPaused = false;
-      } else if (eventName === "whisper_status_changed") {
-        this.whisperReachable = p.reachable as boolean;
-      } else if (eventName === "queue_depth_changed") {
-        this.queuePending = (p.pending as number) ?? 0;
-        this.queueProcessing = (p.processing as number) ?? 0;
+      } else if (eventName === "summary_failed") {
+        showToast(`Summary failed: ${p.error ?? "check the AI provider in Settings"}`, "error");
       } else if (eventName === "retention_warning") {
         try {
           const { isPermissionGranted, requestPermission, sendNotification } = await import("@tauri-apps/plugin-notification");
@@ -149,9 +156,18 @@ export class HeaderBarElement extends LitElement {
       this.unsubFilter();
       this.unsubFilter = null;
     }
-    if (this.previewDebounceTimer !== null) {
-      clearTimeout(this.previewDebounceTimer);
-      this.previewDebounceTimer = null;
+    if (this.previewThrottleTimer !== null) {
+      clearTimeout(this.previewThrottleTimer);
+      this.previewThrottleTimer = null;
+    }
+  }
+
+  protected updated() {
+    // Keep the single-line live preview scrolled to its end so the newest words
+    // are always visible while older text scrolls off the left.
+    if (this.previewText) {
+      const el = this.renderRoot.querySelector<HTMLElement>(".hb-preview-text");
+      if (el) el.scrollLeft = el.scrollWidth;
     }
   }
 
@@ -171,7 +187,55 @@ export class HeaderBarElement extends LitElement {
       this.isRecording = !s.meeting && !!s.recording;
       this.isPaused = !!s.paused;
       if (this.isMeeting) this.recordMode = "meeting";
+      // Once nothing is capturing (e.g. the LAST meeting track just stopped),
+      // drop any lingering live-preview caption. Meeting stops route through
+      // here (a per-track `recording_stopped` re-syncs status), so without this
+      // the ticker would keep the final partial on screen after the meeting ends.
+      if (!this.isMeeting && !this.isRecording) this.clearPreview();
     } catch {}
+  }
+
+  /**
+   * Coalesce an incoming partial into a steady render cadence. We always show
+   * the latest text but commit it at most once per PREVIEW_RENDER_MS, so bursts
+   * of partials don't each trigger their own re-render/layout pass (the jank the
+   * old per-event swap caused). A trailing timer flushes the final partial so we
+   * never drop the newest text.
+   */
+  private queuePreview(text: string | null) {
+    this.pendingPreviewText = text;
+    const now = Date.now();
+    const sinceLast = now - this.previewLastRenderAt;
+    if (sinceLast >= HeaderBarElement.PREVIEW_RENDER_MS) {
+      this.flushPreview();
+      return;
+    }
+    if (this.previewThrottleTimer === null) {
+      this.previewThrottleTimer = window.setTimeout(
+        () => this.flushPreview(),
+        HeaderBarElement.PREVIEW_RENDER_MS - sinceLast,
+      );
+    }
+  }
+
+  /** Commit the pending preview text and reset the throttle window. */
+  private flushPreview() {
+    if (this.previewThrottleTimer !== null) {
+      clearTimeout(this.previewThrottleTimer);
+      this.previewThrottleTimer = null;
+    }
+    this.previewLastRenderAt = Date.now();
+    this.previewText = this.pendingPreviewText;
+  }
+
+  /** Drop any queued partial and hide the preview immediately (on stop/cancel). */
+  private clearPreview() {
+    if (this.previewThrottleTimer !== null) {
+      clearTimeout(this.previewThrottleTimer);
+      this.previewThrottleTimer = null;
+    }
+    this.pendingPreviewText = null;
+    this.previewText = null;
   }
 
   async toggleMeeting() {
@@ -181,7 +245,7 @@ export class HeaderBarElement extends LitElement {
         this.isMeeting = false;
         this.isRecording = false;
         this.isPaused = false;
-        this.previewText = null;
+        this.clearPreview();
         showToast("Meeting stopped — both tracks are transcribing", "info");
       } catch (e) {
         showToast(`Meeting toggle failed: ${errText(e)}`, "error");
@@ -228,8 +292,31 @@ export class HeaderBarElement extends LitElement {
     filterStore.set({ ...this.filterState, search: q || null });
   }
 
+  /**
+   * Initialize the semantic-search toggle. If the user previously set it, honor
+   * that (persisted in localStorage). Otherwise default it ON when semantic
+   * search is configured/installed in Settings — so it "just works" out of the
+   * box for users who set it up.
+   */
+  private async initSemanticDefault() {
+    const stored = localStorage.getItem("phoneme.semanticSearch");
+    if (stored === "true" || stored === "false") {
+      filterStore.set({ ...filterStore.get(), semantic: stored === "true" });
+      return;
+    }
+    try {
+      const cfg = await invoke<any>("read_config");
+      if (cfg?.semantic_search?.enabled) {
+        filterStore.set({ ...filterStore.get(), semantic: true });
+      }
+    } catch { /* leave default off */ }
+  }
+
   private toggleSemantic() {
-    filterStore.set({ ...this.filterState, semantic: !this.filterState.semantic });
+    const next = !this.filterState.semantic;
+    // Remember the user's explicit choice across sessions.
+    localStorage.setItem("phoneme.semanticSearch", String(next));
+    filterStore.set({ ...this.filterState, semantic: next });
   }
 
   private formatLocalIso(dateStr: string, endOfDay: boolean) {
@@ -268,10 +355,32 @@ export class HeaderBarElement extends LitElement {
     filterStore.set({ ...this.filterState, sort_desc: newDesc });
   }
 
-  private async openModels(e: Event) {
-    const target = e.currentTarget as HTMLElement;
+  private toggleSettingsMenu(e: Event) {
+    e.stopPropagation();
+    this.settingsMenuOpen = !this.settingsMenuOpen;
+  }
+
+  private async openModels() {
+    this.settingsMenuOpen = false;
     const { openModelPicker } = await import("./ModelPicker");
-    await openModelPicker("transcription", target);
+    await openModelPicker("transcription");
+  }
+
+  private async openDoctor() {
+    this.settingsMenuOpen = false;
+    const { openDoctor } = await import("./DoctorModal");
+    await openDoctor();
+  }
+
+  /** Jump straight to a Settings tab via the app's navigation event. */
+  private jumpSettings(section: string) {
+    this.settingsMenuOpen = false;
+    window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view: "settings", section } }));
+  }
+
+  private openAllSettings() {
+    this.settingsMenuOpen = false;
+    this.callbacks?.onOpenSettings();
   }
 
   private handleActionClick() {
@@ -332,8 +441,6 @@ export class HeaderBarElement extends LitElement {
     const actionTitle = this.recordMode === "meeting"
       ? "Meeting Mode: record your mic and the system audio as two linked tracks"
       : "Start/Stop a single recording (or use your global hotkey)";
-    const totalQueue = this.queuePending + this.queueProcessing;
-
     return html`
       <div class="headerbar" data-tauri-drag-region>
         <style>
@@ -366,6 +473,7 @@ export class HeaderBarElement extends LitElement {
           <button class="icon-btn ${f.semantic ? 'active' : ''}" 
             title="Toggle Semantic Search (finds meaning, not exact words)"
             @click=${this.toggleSemantic}>✨</button>
+          <ph-saved-searches></ph-saved-searches>
         </div>
         <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">
           <input type="date" class="filter-pill hb-date-since" title="Start date (from)" 
@@ -384,11 +492,7 @@ export class HeaderBarElement extends LitElement {
           <option value="hook_failed" ?selected=${f.status === "hook_failed"}>Hook Failed</option>
         </select>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
-          <span class="hb-whisper-dot ${this.whisperReachable === true ? 'reachable' : this.whisperReachable === false ? 'unreachable' : ''}"
-            title=${this.whisperReachable === true ? 'Whisper: connected' : this.whisperReachable === false ? 'Whisper: unreachable' : 'Whisper status unknown'}></span>
-          <span class="hb-queue-badge" style="display:${totalQueue > 0 ? "inline-flex" : "none"}"
-            title="${this.queueProcessing} processing, ${this.queuePending} queued">${totalQueue || ""}</span>
-          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;" 
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;"
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
           <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" 
             title="Cancel recording and discard audio" @click=${this.cancelRecording}>✕ Cancel</button>
@@ -398,41 +502,78 @@ export class HeaderBarElement extends LitElement {
             <button class="record-btn hb-mode-caret ${isCapturing ? 'recording-active' : ''}" aria-haspopup="menu" aria-expanded=${this.modeMenuOpen} 
               title="Switch capture mode (single recording or meeting)" ?disabled=${isCapturing} 
               style="padding:6px 8px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid rgba(0,0,0,0.25);"
-              @click=${this.toggleModeMenu}>▾</button>
+              @click=${this.toggleModeMenu}><svg class="ph-caret-ico ${this.modeMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             <style>
               .hb-mode-menu { animation: hbMenuIn 0.12s ease-out; }
               @keyframes hbMenuIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
+              .hb-mode-menu .hb-mode-cap { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 3px; }
               .hb-mode-item {
-                display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                display: flex; align-items: center; gap: 10px;
                 width: 100%; text-align: left; background: none; border: none;
-                color: var(--fg-default); padding: 8px 10px; border-radius: 7px;
+                color: var(--fg-default); padding: 9px 12px; border-radius: 8px;
                 cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
               }
               .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-              .hb-mode-item.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-              .hb-mode-item .hb-mode-label { display: flex; align-items: center; gap: 9px; }
+              .hb-mode-item.selected { color: var(--accent); }
+              .hb-mode-item .hb-mode-ico { font-size: 15px; width: 20px; text-align: center; flex: 0 0 auto; }
+              .hb-mode-item .hb-mode-label { flex: 1; }
               .hb-mode-item .hb-mode-check { color: var(--accent); font-weight: 700; }
             </style>
             <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
-              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:200px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
+              <div class="hb-mode-cap">Record as</div>
               <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
-                <span class="hb-mode-label">🎙️ Voice note</span>
-                <span class="hb-mode-check" style="opacity:${this.recordMode === 'recording' ? 1 : 0}">✓</span>
+                <span class="hb-mode-ico">🎙️</span>
+                <span class="hb-mode-label">Voice note</span>
+                ${this.recordMode === 'recording' ? html`<span class="hb-mode-check">✓</span>` : ""}
               </button>
               <button class="hb-mode-item ${this.recordMode === 'meeting' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'meeting'} @click=${(e: Event) => this.selectMode('meeting', e)}>
-                <span class="hb-mode-label">👥 Meeting</span>
-                <span class="hb-mode-check" style="opacity:${this.recordMode === 'meeting' ? 1 : 0}">✓</span>
+                <span class="hb-mode-ico">👥</span>
+                <span class="hb-mode-label">Meeting</span>
+                ${this.recordMode === 'meeting' ? html`<span class="hb-mode-check">✓</span>` : ""}
               </button>
             </div>
           </div>
         </div>
-        <button class="icon-btn" aria-label="Quick model picker" title="Quickly switch the transcription and post-processing models" @click=${this.openModels}>🎛 Models</button>
-        <button class="icon-btn" aria-label="Settings" title="Open application settings" @click=${() => this.callbacks?.onOpenSettings()}>⚙</button>
+        <div class="hb-settings-group" style="position: relative; display: inline-flex;">
+          <style>
+            .hb-settings-menu { animation: hbMenuIn 0.12s ease-out; }
+            .hb-menu-item {
+              display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+              background: none; border: none; color: var(--fg-default); padding: 8px 12px;
+              border-radius: 7px; cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
+            }
+            .hb-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+            .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
+            .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
+          </style>
+          <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
+            style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
+          <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings & actions" aria-haspopup="menu"
+            aria-expanded=${this.settingsMenuOpen} title="Quick settings & actions"
+            style="padding:6px 7px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
+            @click=${this.toggleSettingsMenu}><svg class="ph-caret-ico ${this.settingsMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+          <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
+            style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+            <button class="hb-menu-item" role="menuitem" @click=${this.openModels}>🎛 Quick model switch…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}>🩺 Doctor — health check</button>
+            <div class="hb-menu-sep"></div>
+            <div class="hb-menu-label">Jump to settings</div>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}>🗣️ Transcription</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("postprocessing")}>✨ Post-Processing</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}>🎙️ Capture &amp; hotkeys</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}>🎨 Appearance</button>
+            <div class="hb-menu-sep"></div>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}>⚙ All settings…</button>
+          </div>
+        </div>
       </div>
       <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"
         title="Live transcription preview — updates as you speak while recording">
-        <span class="hb-preview-pulse" aria-hidden="true"></span>
-        <span class="hb-preview-label">Live</span>
+        <span class="hb-preview-live">
+          <span class="hb-preview-pulse" aria-hidden="true"></span>
+          <span class="hb-preview-label">Live</span>
+        </span>
         <span class="hb-preview-text">${this.previewText ?? ''}</span>
       </div>
     `;

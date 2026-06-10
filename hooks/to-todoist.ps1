@@ -1,25 +1,32 @@
-# to-todoist.ps1 — SHOWCASE: turn a spoken note into a Todoist task.
+# to-todoist.ps1 — turn a spoken note into a Todoist task.
 #
 # This hook shines when paired with a KEYWORD-TRIGGERED RULE so only your
-# action items become tasks. In Settings → Action Hook, add a rule:
+# action items become tasks. In Settings -> Action Hook, add a rule:
 #
 #     pattern  = "action item:"
-#     command  = powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1
+#     command  = powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1
 #
 # Now say "...action item: email Sarah the contract" and it lands in Todoist,
 # while your other notes are untouched. (Equivalent config.toml form:)
 #
 #     [[hook.keyword_rules]]
 #     pattern = "action item:"
-#     command = "powershell -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
+#     command = "powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-todoist.ps1"
 #
-# Requires a Todoist API token in the PHONEME_TODOIST_TOKEN environment variable
-# (Todoist → Settings → Integrations → Developer → API token).
+# Reads the recording as a JSON object on STDIN (see to-stdout.ps1 or
+# docs/developer-guide/plugins_and_hooks.md for the full payload shape).
+#
+# ── Configure ───────────────────────────────────────────────────────────────
+#   PHONEME_TODOIST_TOKEN   (required) Todoist API token, from
+#                           Todoist -> Settings -> Integrations -> Developer.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$payload = $input | Out-String | ConvertFrom-Json
+$raw = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace($raw)) { Write-Error 'No payload received on stdin.' }
+
+$payload = $raw | ConvertFrom-Json
 $text = [string]$payload.transcript
 if ([string]::IsNullOrWhiteSpace($text)) { exit 0 }
 

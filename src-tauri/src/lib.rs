@@ -6,6 +6,7 @@ mod commands;
 mod config_io;
 mod doctor;
 mod events;
+mod overlay;
 mod tray;
 mod wizard;
 
@@ -224,12 +225,20 @@ pub fn run() {
                 // Register all enabled global hotkeys via the shared helper, so
                 // startup and config-save/profile-switch stay in lockstep.
                 commands::register_hotkeys(app.handle(), &bridge.config);
+
+                // Pre-create the system-wide live-preview overlay (hidden) when
+                // the setting is on, so the first recording can reveal it with no
+                // cold-start lag. No-op when the setting is off — the window is
+                // only built when the user opts in. `overlay.ts` then drives its
+                // visibility from the daemon event stream.
+                overlay::sync(app.handle(), bridge.config.interface.preview_overlay);
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_recordings,
             commands::semantic_search,
+            commands::reembed_all,
             commands::get_recording,
             commands::list_meeting,
             commands::delete_recording,
@@ -246,13 +255,25 @@ pub fn run() {
             commands::refire_hook,
             commands::rerun_cleanup,
             commands::rerun_summary,
+            commands::list_queue,
+            commands::cancel_queued,
+            commands::reorder_queue,
+            commands::set_queue_paused,
+            commands::queue_paused,
+            commands::queue_counts,
+            commands::clear_failed,
+            commands::cancel_all_queued,
+            commands::cancel_processing,
+            commands::run_doctor,
             commands::update_transcript,
             commands::update_meeting_name,
             commands::get_original_transcript,
             commands::get_clean_transcript,
             commands::update_notes,
+            commands::set_speaker_name,
             commands::daemon_status,
             commands::read_config,
+            commands::set_overlay,
             commands::write_config,
             commands::config_exists,
             commands::config_path,
@@ -260,6 +281,8 @@ pub fn run() {
             commands::save_profile,
             commands::switch_profile,
             commands::delete_profile,
+            commands::list_profiles_detailed,
+            commands::rename_profile,
             commands::doctor_local_checks,
             commands::doctor_backend_checks,
             commands::start_daemon,
@@ -274,6 +297,8 @@ pub fn run() {
             commands::attach_tag,
             commands::detach_tag,
             commands::tags_for,
+            commands::tag_usage_counts,
+            commands::merge_tags,
             commands::wizard_download_model,
             commands::wizard_download_semantic_model,
             commands::wizard_download_diarization_model,

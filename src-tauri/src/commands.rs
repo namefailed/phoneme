@@ -116,6 +116,14 @@ pub async fn semantic_search(
     forward(&bridge, Request::SemanticSearch { query, limit }).await
 }
 
+/// Clear all embeddings and re-embed the whole library with the current model
+/// (run after changing the embedding model). Returns immediately; runs in the
+/// background on the daemon.
+#[tauri::command]
+pub async fn reembed_all(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ReembedAll).await
+}
+
 /// Fetch the details, tags, and transcript for a specific recording by its ID.
 #[tauri::command]
 pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
@@ -216,6 +224,7 @@ pub async fn retranscribe_recording(
     model: Option<String>,
     run_hooks: Option<bool>,
     post_process: Option<bool>,
+    all_overrides: Option<phoneme_ipc::RerunAllOverrides>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(
@@ -225,6 +234,7 @@ pub async fn retranscribe_recording(
             model,
             run_hooks,
             post_process,
+            all_overrides,
         },
     )
     .await
@@ -263,6 +273,15 @@ pub async fn rerun_cleanup(
     api_key: Option<String>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
+    // A masked key means "use the configured cleanup key" — resolve it here so
+    // the real secret is never round-tripped through the WebView.
+    let api_key = if api_key.as_deref() == Some(MASKED_SECRET) {
+        config_io::read()
+            .ok()
+            .map(|c| c.llm_post_process.api_key_str().to_owned())
+    } else {
+        api_key
+    };
     forward(
         &bridge,
         Request::RerunCleanup {
@@ -289,6 +308,70 @@ pub async fn rerun_summary(
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::RerunSummary { id, model, prompt }).await
+}
+
+/// List the transcription pipeline queue (pending + processing items).
+#[tauri::command]
+pub async fn list_queue(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListQueue).await
+}
+
+/// Run all health checks for the GUI Doctor view.
+#[tauri::command]
+pub async fn run_doctor(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RunDoctor).await
+}
+
+/// Remove a still-pending recording from the queue.
+#[tauri::command]
+pub async fn cancel_queued(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::CancelQueued { id }).await
+}
+
+/// Set the pending queue's claim order (full ordered id list).
+#[tauri::command]
+pub async fn reorder_queue(bridge: Br<'_>, ids: Vec<String>) -> Result<Value, CommandError> {
+    let parsed: Result<Vec<_>, _> = ids.iter().map(|s| parse_id(s)).collect();
+    forward(&bridge, Request::ReorderQueue { ids: parsed? }).await
+}
+
+/// Pause or resume the transcription queue.
+#[tauri::command]
+pub async fn set_queue_paused(bridge: Br<'_>, paused: bool) -> Result<Value, CommandError> {
+    forward(&bridge, Request::SetQueuePaused { paused }).await
+}
+
+/// Query whether the transcription queue is currently paused.
+#[tauri::command]
+pub async fn queue_paused(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::QueuePaused).await
+}
+
+/// Return inbox depth counts (pending/processing/done/failed) on demand, so a
+/// freshly-loaded UI shows accurate counts without waiting for an event.
+#[tauri::command]
+pub async fn queue_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::QueueCounts).await
+}
+
+/// Clear the inbox `failed/` quarantine ("dismiss failed"). Returns the count.
+#[tauri::command]
+pub async fn clear_failed(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ClearFailed).await
+}
+
+/// Remove ALL still-pending items from the queue ("clear queue").
+#[tauri::command]
+pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::CancelAllQueued).await
+}
+
+/// Cancel the item currently being processed (abort the in-flight transcription/LLM).
+#[tauri::command]
+pub async fn cancel_processing(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::CancelProcessing { id }).await
 }
 
 /// Manually update the transcript text for a specific recording.
@@ -337,6 +420,30 @@ pub async fn update_notes(
     forward(&bridge, Request::UpdateNotes { id, notes }).await
 }
 
+/// Set (or clear) the custom display name for one diarized speaker label of a
+/// recording. `speaker_label` is the 1-based `[Speaker N]` index; a blank `name`
+/// clears the mapping. The stored transcript is never rewritten — names are
+/// applied at display/export time. The updated map is reflected on the next
+/// `get_recording`/`list_recordings`; a `SpeakerNameUpdated` event also fires.
+#[tauri::command]
+pub async fn set_speaker_name(
+    bridge: Br<'_>,
+    id: String,
+    speaker_label: i64,
+    name: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::SetSpeakerName {
+            id,
+            speaker_label,
+            name,
+        },
+    )
+    .await
+}
+
 /// Check the background daemon's current runtime status.
 /// Returns whether the daemon is actively running and its process ID.
 #[tauri::command]
@@ -352,10 +459,108 @@ pub async fn record_status(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RecordStatus).await
 }
 
-/// Read the application configuration directly from the local `config.toml` file.
+/// Placeholder the WebView sees in place of any saved API key, so secrets never
+/// leave the daemon/tray process (S-H2). When the WebView writes config back, an
+/// unchanged key arrives as this sentinel and we restore the real on-disk value
+/// instead of clobbering it. The frontend mirrors this constant.
+const MASKED_SECRET: &str = "__phoneme_secret_kept__";
+
+/// Replace every non-empty API key in a serialized config with the mask.
+fn mask_config_secrets(v: &mut Value) {
+    for section in ["whisper", "llm_post_process", "summary", "preview_whisper"] {
+        if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
+            if key.as_str().is_some_and(|k| !k.is_empty()) {
+                *key = Value::String(MASKED_SECRET.to_string());
+            }
+        }
+    }
+}
+
+/// Restore any masked key in an incoming config from the current on-disk config,
+/// so saving without changing a key keeps it rather than writing the placeholder.
+fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
+    if incoming.whisper.api_key_str() == MASKED_SECRET {
+        incoming.whisper.set_api_key(current.whisper.api_key_str().to_owned());
+    }
+    if incoming.llm_post_process.api_key_str() == MASKED_SECRET {
+        incoming
+            .llm_post_process
+            .set_api_key(current.llm_post_process.api_key_str().to_owned());
+    }
+    if incoming.summary.api_key_str() == MASKED_SECRET {
+        incoming
+            .summary
+            .set_api_key(current.summary.api_key_str().to_owned());
+    }
+    if let Some(pw) = incoming.preview_whisper.as_mut() {
+        if pw.api_key_str() == MASKED_SECRET {
+            let cur = current
+                .preview_whisper
+                .as_ref()
+                .map(|c| c.api_key_str().to_owned())
+                .unwrap_or_default();
+            pw.set_api_key(cur);
+        }
+    }
+}
+
+/// Read the config for the WebView with all API keys masked, so secrets never
+/// cross the IPC boundary into the renderer (S-H2). Tray/daemon code that needs
+/// the real keys reads `config_io::read()` directly instead.
 #[tauri::command]
-pub fn read_config() -> Result<Config, CommandError> {
-    config_io::read().map_err(|e| CommandError::from(e.to_string()))
+pub fn read_config() -> Result<Value, CommandError> {
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
+    let mut json = serde_json::to_value(&cfg).map_err(|e| CommandError::from(e.to_string()))?;
+    mask_config_secrets(&mut json);
+    Ok(json)
+}
+
+/// Show, hide, or move the system-wide live-preview overlay window.
+///
+/// The overlay normally drives its own visibility from the daemon event stream
+/// (see `frontend/src/overlay.ts`), so the frontend rarely needs this — but it
+/// exposes explicit control for: a Settings "preview the overlay" button, future
+/// keyboard toggles, and re-positioning the card programmatically. The window is
+/// created lazily if the setting is on but it hasn't been built yet.
+///
+/// `action` is one of `"show"`, `"hide"`, or `"move"`. For `"move"`, pass
+/// logical `x`/`y` (top-left corner); they are ignored for show/hide.
+#[tauri::command]
+pub fn set_overlay(
+    app: tauri::AppHandle,
+    action: String,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<(), CommandError> {
+    use tauri::Manager;
+    // Create the window on demand so "show" works even before the first record.
+    crate::overlay::ensure(&app);
+    let Some(win) = app.get_webview_window(crate::overlay::OVERLAY_LABEL) else {
+        return Err(CommandError::new(
+            "internal",
+            "overlay window could not be created",
+        ));
+    };
+    let map = |e: tauri::Error| CommandError::new("internal", e.to_string());
+    match action.as_str() {
+        "show" => {
+            win.show().map_err(map)?;
+            win.set_always_on_top(true).map_err(map)?;
+        }
+        "hide" => win.hide().map_err(map)?,
+        "move" => {
+            let (x, y) = (x.unwrap_or(0.0), y.unwrap_or(0.0));
+            win.set_position(tauri::LogicalPosition::new(x, y))
+                .map_err(map)?;
+        }
+        other => {
+            return Err(CommandError::new(
+                "invalid_config",
+                format!("unknown overlay action: {other:?}"),
+            ))
+        }
+    }
+    Ok(())
 }
 
 /// Write a new configuration state to `config.toml`.
@@ -368,8 +573,12 @@ pub fn read_config() -> Result<Config, CommandError> {
 pub async fn write_config(
     app: tauri::AppHandle,
     bridge: Br<'_>,
-    config: Config,
+    mut config: Config,
 ) -> Result<(), CommandError> {
+    // The WebView only ever held masked keys; restore any unchanged secret from
+    // the current on-disk config so saving doesn't overwrite it with the mask.
+    let current = config_io::read().unwrap_or_default();
+    unmask_config_secrets(&mut config, &current);
     let cfg = config.clone();
     tokio::task::spawn_blocking(move || config_io::write(&cfg))
         .await
@@ -472,6 +681,12 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
         tracing::warn!("failed to reload daemon config: {e:?}");
     }
 
+    // Create or tear down the system-wide live-preview overlay window to match
+    // the (just-saved) `interface.preview_overlay` setting. Creating it here
+    // (hidden) means the next recording can show it instantly; turning the
+    // setting off closes the window so no invisible webview lingers.
+    crate::overlay::sync(app, config.interface.preview_overlay);
+
     // Dynamically reload hotkeys in the frontend: drop the old set, then
     // register the new config's hotkeys via the shared helper so all three
     // (record, meeting, in-place) are always re-applied together.
@@ -521,6 +736,18 @@ pub async fn switch_profile(
 #[tauri::command]
 pub fn delete_profile(name: String) -> Result<(), CommandError> {
     phoneme_core::profiles::delete_profile(&name).map_err(|e| CommandError::from(e.to_string()))
+}
+
+/// List saved profiles with metadata (last-modified time) for the Profile Manager.
+#[tauri::command]
+pub fn list_profiles_detailed() -> Result<Vec<phoneme_core::profiles::ProfileInfo>, CommandError> {
+    phoneme_core::profiles::list_profiles_detailed().map_err(|e| CommandError::from(e.to_string()))
+}
+
+/// Rename a saved profile. Fails if the source is missing or the target exists.
+#[tauri::command]
+pub fn rename_profile(from: String, to: String) -> Result<(), CommandError> {
+    phoneme_core::profiles::rename_profile(&from, &to).map_err(|e| CommandError::from(e.to_string()))
 }
 
 /// Check if a `config.toml` file already exists on disk.
@@ -670,6 +897,20 @@ pub async fn update_tag(
 #[tauri::command]
 pub async fn delete_tag(bridge: Br<'_>, id: i64) -> Result<Value, CommandError> {
     forward(&bridge, Request::DeleteTag { id }).await
+}
+
+/// Map of tag id → number of recordings it's attached to. Powers the Tag
+/// Manager usage counts.
+#[tauri::command]
+pub async fn tag_usage_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::TagUsageCounts).await
+}
+
+/// Merge one tag into another: re-point all of `from_id`'s recordings onto
+/// `into_id`, then delete `from_id`.
+#[tauri::command]
+pub async fn merge_tags(bridge: Br<'_>, from_id: i64, into_id: i64) -> Result<Value, CommandError> {
+    forward(&bridge, Request::MergeTags { from_id, into_id }).await
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -1106,6 +1347,36 @@ mod tests {
             err.message.contains("daemon not reachable"),
             "expected daemon-not-reachable message, got: {err:?}"
         );
+    }
+
+    // ── config secret masking (S-H2) ──────────────────────────────────────
+
+    #[test]
+    fn mask_replaces_only_nonempty_keys() {
+        let mut cfg = Config::default();
+        cfg.llm_post_process.set_api_key("sk-secret-123");
+        let mut json = serde_json::to_value(&cfg).unwrap();
+        mask_config_secrets(&mut json);
+        assert_eq!(json["llm_post_process"]["api_key"], MASKED_SECRET);
+        // Whisper has no key by default — an empty key stays empty (not masked).
+        assert_eq!(json["whisper"]["api_key"], "");
+    }
+
+    #[test]
+    fn unmask_restores_unchanged_key_and_keeps_a_changed_one() {
+        let mut current = Config::default();
+        current.llm_post_process.set_api_key("real-cleanup-key");
+        current.summary.set_api_key("real-summary-key");
+
+        let mut incoming = current.clone();
+        // Unchanged field arrives masked → restore from disk.
+        incoming.llm_post_process.set_api_key(MASKED_SECRET);
+        // Changed field carries the new key → keep it.
+        incoming.summary.set_api_key("new-summary-key");
+
+        unmask_config_secrets(&mut incoming, &current);
+        assert_eq!(incoming.llm_post_process.api_key_str(), "real-cleanup-key");
+        assert_eq!(incoming.summary.api_key_str(), "new-summary-key");
     }
 
     // ── parse_id ──────────────────────────────────────────────────────────

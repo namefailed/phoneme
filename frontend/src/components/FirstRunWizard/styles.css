@@ -299,6 +299,13 @@
 .wizard-switch input:focus-visible + .track {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
+.wizard-switch.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wizard-switch.is-disabled input {
+  cursor: not-allowed;
+}
 
 /* ── Choice buttons (Live Preview / Summary) ───────────────────────────────── */
 .wizard-choice {

@@ -67,10 +67,13 @@ Channel cheat-sheet (in `phoneme-audio`/daemon `recorder`):
 5. **Transcribe** — the configured `TranscriptionProvider` runs; the raw output
    is preserved as `original_transcript`.
 6. **Post-process** — optional LLM cleanup; the cleaned text becomes the live
-   `transcript` while the raw stays in `original_transcript`.
+   `transcript`, is also preserved as `clean_transcript`, while the raw stays in
+   `original_transcript`.
 7. **Hooks** — unless `hook.run_on_transcribe` is off, the always-on `commands`
    run, then any matching `keyword_rules`, then the webhook fires.
-8. **Done** — status → `done`, the payload moves to `inbox/done/`.
+8. **Summary** — if `summary.auto` is on, an LLM summary is generated as the final
+   step and stored in `summary` / `summary_model`.
+9. **Done** — status → `done`, the payload moves to `inbox/done/`.
 
 Imported files (`ImportRecording`) skip 1–3: the file is decoded to canonical
 form, copied into the audio dir, and enters at step 4.
@@ -106,34 +109,90 @@ A single SQLite database, accessed with `sqlx` and versioned migrations
 `wal_autocheckpoint`, and a `journal_size_limit` cap; the daemon also checkpoints
 on idle to bound WAL growth.
 
-- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`,
-  `audio_path`, `transcript`, `original_transcript`, `model`, `status`, hook
-  result columns, `notes`, and the meeting-link columns `meeting_id` + `track`.
-- **FTS5** — a full-text index mirrors the transcript so `list` search is fast.
+- **`recordings`** — the central table. Beyond `id`, `started_at`,
+  `duration_ms`, `audio_path`, `model`, `status`, and the hook-result columns, it
+  carries:
+  - **Three transcript layers:** `original_transcript` (raw machine output,
+    pre-cleanup), `clean_transcript` (pipeline output — transcribed + cleaned —
+    pre-hand-edit), and `transcript` (the current, possibly user-edited text).
+  - **Summary:** `summary` and `summary_model` (the AI summary and the model that
+    produced it; null until generated).
+  - **Meeting link:** `meeting_id`, `meeting_name`, `track` (`mic` / `system`).
+    Standalone recordings have a null `meeting_id`.
+  - Plus `notes`, `cleanup_model`, `in_place`, and `diarized`.
+- **FTS5** — `recordings_fts` mirrors the transcript so `list` search is fast.
   It's kept in sync with the `recordings` table via triggers, so an insert /
   update / delete automatically updates the index. User search text is sanitised
   into a robust `term* AND term*` prefix query before it ever reaches SQLite
   (`sanitize_fts5_query`), so odd input can't crash the matcher.
 - **`tags`** / **`recording_tags`** — colour-coded tags, many-to-many.
+- **`embedding_chunks`** — the primary semantic-search store: **many** ONNX vectors
+  (BLOB) per recording, one per sentence-aware transcript chunk
+  (`phoneme-core::chunk`), keyed `(recording_id, chunk_index)`; cascades on delete.
+  A recording is scored by its best-matching chunk (max-sim). See *Semantic search*
+  below.
+- **`embeddings`** — the legacy one-vector-per-recording table, kept only as a
+  fallback for rows not yet re-embedded into chunks; the search path prefers
+  `embedding_chunks`.
+
+Schema is defined in `crates/phoneme-core/migrations`: the initial schema plus
+additive `add_summary`, `add_clean_transcript`, `add_user_edited`, and
+`add_embedding_chunks` migrations.
 
 Audio lives on disk under a date-foldered directory, **not** in the DB — the
 SQLite file stays small and copyable.
+
+## 🧠 Semantic search (`phoneme-core::chunk` / `embed` / `fusion`)
+
+Semantic search is **chunked and hybrid**, not one-vector-per-recording:
+
+- **`chunk`** — `chunk_transcript` splits a transcript into overlapping,
+  sentence-aware windows (~80 words, 1-sentence overlap, capped per recording).
+  Short transcripts stay a single chunk. Pure + unit-tested (no model/DB).
+- **`embed`** — loads the ONNX model once (`ort`) and embeds each chunk, adapting
+  to the configured model via `SemanticSearchConfig` (`max_tokens`, `pooling`
+  mean/cls, `token_type_ids`, query/passage prefixes). `pool` and the truncation
+  policy are pulled out as pure functions so the math is testable without the
+  (unbundled) model.
+- **`fusion`** — `reciprocal_rank_fusion` (RRF, `k = 60`) fuses the vector ranking
+  with the FTS5 ranking without needing the two score scales to be comparable;
+  `calibrate_cosine` maps raw cosine into a 0–100% relevance for the UI.
+- **`catalog::hybrid_search`** ties it together: best-chunk cosine ranking ⊕ FTS5
+  ranking → RRF → calibrated score. `upsert_chunk_embeddings` replaces a
+  recording's chunks transactionally; `list_recordings_without_chunk_embeddings`
+  drives the background backfill, and `clear_all_embeddings` + the `ReembedAll`
+  IPC re-index the whole library after a model change.
 
 ## 📡 IPC (`phoneme-ipc`)
 
 - **Transport** — a Windows named pipe (`\\.\pipe\phoneme-daemon`), framed as
   **newline-delimited JSON** (`JsonLineCodec`): one JSON value per line.
-- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case):
-  `record_start`, `start_meeting`, `list_recordings`, `get_recording`,
-  `list_meeting`, `retranscribe_recording`, `import_recording`, `update_notes`,
-  `reload_config`, `shutdown`, … plus tag ops.
+- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case).
+  Recording/meeting control (`record_start`, `record_toggle`, `record_pause`,
+  `start_meeting`, `meeting_toggle`, …), catalog queries (`list_recordings`,
+  `get_recording`, `list_meeting`), import (`import_recording`), re-processing
+  (`retranscribe_recording`, `rerun_cleanup`, `rerun_summary`, `refire_hook`),
+  editing (`update_transcript`, `update_notes`, `update_meeting_name`),
+  the preserved-transcript fetches (`get_original_transcript`,
+  `get_clean_transcript`), tags, semantic search (`semantic_search`,
+  `reembed_all`), and lifecycle (`reload_config`, `shutdown`, `subscribe_events`).
+  The re-processing requests carry one-time overrides (model/provider/prompt/url/key)
+  that are never persisted to config.
+- **`ServerRequest` (connection resilience)** — on the **server** side, a line is
+  decoded as `ServerRequest`, not a bare `Request`. A well-formed JSON line that
+  isn't a recognized variant (e.g. a newer tray sending a request this daemon
+  predates during a rolling rebuild) becomes `ServerRequest::Unknown { detail }`
+  instead of a codec error. The handler replies with an error `Response` and
+  **keeps the connection alive**, so one unknown request can't tear down the pipe
+  and break the client's other in-flight commands.
 - **`Response`** — daemon → client, tagged on `"status"`: `Ok(value)` or
   `Err(IpcError)`. `IpcError` carries a machine-readable `kind`
   (`already_recording`, `not_found`, `whisper_unreachable`, …) + a human message.
 - **`DaemonEvent`** — daemon → all subscribers, tagged on `"event"`
-  (`recording_started`, `transcription_partial`, `queue_depth_changed`,
-  `notes_updated`, …). Clients send `subscribe_events` and then receive the
-  one-way stream.
+  (`recording_started`, `transcription_partial`, `transcription_done`,
+  `summary_updated`, `transcript_updated`, `queue_depth_changed`,
+  `notes_updated`, tag events, …). Clients send `subscribe_events` and then
+  receive the one-way stream.
 - **`Transport` trait** — abstracts the wire so a future `HttpTransport` (v2.0
   mobile/REST) can be added without touching `schema.rs`.
 
@@ -164,6 +223,13 @@ The frontend is intentionally built for performance and maintainability, leverag
 - **`router.ts`** — simple hash-based router handling navigation between main views.
 - **`services/ipc.ts`** — the typed boundary to the Tauri commands.
 - **`services/events.ts`** — subscribes to `daemon-event` streams and dispatches to handlers.
+- **`overlay.html` + `src/overlay.ts`** — a second, standalone entry (registered as
+  an extra Rollup input in `vite.config.ts`) for the system-wide live-preview
+  overlay window. It mounts only the caption card — no app shell/router — and is
+  driven by the same `daemon-event` stream. The window itself is created at runtime
+  by `src-tauri/src/overlay.rs` (frameless, transparent, always-on-top), gated on
+  `interface.preview_overlay`. See
+  [docs/design/live-preview-overlay.md](../design/live-preview-overlay.md).
 
 > [!IMPORTANT]
 > **Security invariant:** Lit's `html` tagged template literals provide automatic contextual escaping, protecting against XSS for most interpolations. However, when using `unsafeHTML` or manually manipulating the DOM, data must still go through `escapeHtml` / `escapeAttr` (`utils/format.ts`). Transcripts, notes, file paths, tag names, search terms, and meeting ids are all attacker-influenced. `highlightMatch` escapes in every branch.

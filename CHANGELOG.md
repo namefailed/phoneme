@@ -4,6 +4,58 @@ Shipped releases — what landed in each. **Forward-looking plans live in [`ROAD
 
 ---
 
+## 🚧 v1.8.x — Recall, Meetings & Hardening (in development)
+
+*Workspace version `1.8.1`. Closing promise-vs-reality gaps and hardening the
+trust boundary. Verified against current code.*
+
+### Recall
+
+- [x] **Chunked hybrid semantic search** — transcripts are split into overlapping,
+  sentence-aware chunks (`phoneme-core::chunk`), each embedded into a new
+  `embedding_chunks` table; a recording is scored by its best-matching chunk. The
+  vector ranking is fused with FTS5 via Reciprocal Rank Fusion (`fusion.rs`,
+  `catalog::hybrid_search`), and cosine is calibrated to a 0–100% relevance chip.
+  Big paraphrase-recall win on longer notes.
+- [x] **Embedding model as a user choice** — `[semantic_search]` gained `max_tokens`,
+  `pooling`, `token_type_ids`, and `query_prefix` / `passage_prefix`, so E5/BGE-class
+  models work alongside the bundled all-MiniLM-L6-v2. A dedicated **Semantic Search**
+  settings section exposes them, plus a **Re-embed all recordings** action
+  (`ReembedAll` IPC) that re-indexes the library after a model change.
+- [x] **Semantic relevance chip** in the recordings list during a semantic query.
+
+### Meetings
+
+- [x] **Merged meeting view** — selecting a meeting's group header opens a single,
+  read-only reading of every track, labelled 🎤 Microphone / 🔊 System audio with the
+  diarizer's `[Speaker N]` turns surfaced, plus Copy / Export
+  (`MergedConversationDetail.ts`, `mergeMeeting.ts`). Coarse/source-sectioned — not
+  yet chronologically interleaved.
+
+### Recording
+
+- [x] **System-wide live-preview overlay** — an opt-in, always-on-top, frameless
+  desktop window that floats the live caption over any app, even when the main
+  window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
+  `interface.preview_overlay`. Off by default.
+
+### Security & reliability
+
+- [x] **Masked config at the WebView boundary (S-H2)** — API keys are masked before
+  `read_config` reaches the renderer and restored from disk on save, so secrets
+  never leave the daemon side (`src-tauri/src/commands.rs`).
+- [x] **IPC connection resilience** — an unknown or unparseable request returns an
+  error `Response` and keeps the pipe open instead of tearing down the connection
+  (`ServerRequest::Unknown`, `phoneme-ipc`).
+
+### UX wiring
+
+- [x] **Queue failed-items count + clear** — the queue panel surfaces the `failed/`
+  count and lets you dismiss it (`QueuePanel.ts`).
+- [x] **Import audio** button in Settings → Storage (`SectionStorage.ts`).
+
+---
+
 ## ✅ v1.3.x — Maintenance (shipped)
 
 - [x] Stale tag in filter dropdown after detach
@@ -104,7 +156,7 @@ clean base.*
 ### Local AI (on-device, offline)
 
 - [x] **Local semantic search** — bundle a local embedding model (e.g. all-MiniLM-L6-v2 via ONNX) + a vector index so you can search by *meaning* ("that idea about rust error handling last week"), not just exact text. Complements the existing FTS5 keyword search.
-- [x] **Merged conversation view** — interleave a dual-track meeting's two transcripts by timestamp into one chronological "You:" / "Meeting:" conversation; exportable, and feedable to the LLM post-processor as a single context for summaries/action items. **Build this on Lit (below), not raw `innerHTML`** — interleaving two dynamic arrays while preserving interactive elements (play/edit state) is exactly the case manual DOM templating handles badly.
+- [x] **Merged conversation view** — render a dual-track meeting as one exportable "You:" / "Meeting:" document, feedable to the LLM post-processor as a single context for summaries/action items. **Built on Lit (below), not raw `innerHTML`.** *(Note: as shipped this is a **coarse, source-sectioned, speaker-aware** merge — true line-by-line **chronological** interleaving by timestamp is still pending, because per-line timestamps aren't persisted. See the v1.9 Meetings roadmap item and [docs/design/merged-meeting-view.md](docs/design/merged-meeting-view.md).)*
 
 ### Internal quality
 

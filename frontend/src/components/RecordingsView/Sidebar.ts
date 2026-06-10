@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { listTags, type Tag } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, type UiFilter, type RecordingKind } from "../../state/filter";
+import "./QueuePanel";
 
 @customElement('ph-sidebar')
 export class SidebarElement extends LitElement {
@@ -12,8 +13,20 @@ export class SidebarElement extends LitElement {
 
   @state() private tags: Tag[] = [];
   @state() private filterState: UiFilter = filterStore.get();
+  @state() private libraryOpen = localStorage.getItem("phoneme.sidebar.libraryOpen") !== "false";
+  @state() private tagsOpen = localStorage.getItem("phoneme.sidebar.tagsOpen") !== "false";
   private unsubFilter: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
+
+  private toggleSection(which: "library" | "tags") {
+    if (which === "library") {
+      this.libraryOpen = !this.libraryOpen;
+      localStorage.setItem("phoneme.sidebar.libraryOpen", String(this.libraryOpen));
+    } else {
+      this.tagsOpen = !this.tagsOpen;
+      localStorage.setItem("phoneme.sidebar.tagsOpen", String(this.tagsOpen));
+    }
+  }
 
   async connectedCallback() {
     super.connectedCallback();
@@ -81,29 +94,43 @@ export class SidebarElement extends LitElement {
 
     return html`
       <div class="rv-sidebar">
-        <div class="sidebar-header">Library</div>
-        <div class="sidebar-list">
-          ${this.renderKindItem("all", "📚", "All Recordings")}
-          ${this.renderKindItem("single", "🎙️", "Voice Notes")}
-          ${this.renderKindItem("meeting", "👥", "Meetings")}
+        <div class="rv-sidebar-scroll">
+          <div class="sidebar-header" @click=${() => this.toggleSection("library")} title="Collapse / expand">
+            <span class="sidebar-chevron ${this.libraryOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Library
+          </div>
+          ${this.libraryOpen ? html`
+            <div class="sidebar-list">
+              ${this.renderKindItem("all", "📚", "All Recordings")}
+              ${this.renderKindItem("single", "🎙️", "Voice Notes")}
+              ${this.renderKindItem("meeting", "👥", "Meetings")}
+            </div>
+          ` : ""}
+
+          <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);"
+            @click=${() => this.toggleSection("tags")} title="Collapse / expand">
+            <span class="sidebar-chevron ${this.tagsOpen ? "open" : ""}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>Tags
+          </div>
+          ${this.tagsOpen ? html`
+            <div class="sidebar-list">
+              <div class="sidebar-item ${!f.tag_id ? 'active' : ''}" @click=${() => this.setTagFilter(null)}>
+                <span class="sidebar-icon" style="color: var(--accent);">#</span>
+                <span>All Tags</span>
+                <span class="sidebar-dot sidebar-dot-rainbow" title="All tags"></span>
+              </div>
+              ${this.tags.length === 0 ? html`
+                <div style="padding: 12px; font-size: 11px; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a note's detail view.</div>
+              ` : this.tags.map(t => html`
+                <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
+                  <span class="sidebar-icon" style="color: var(--accent);">#</span>
+                  <span>${t.name}</span>
+                  <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
+                </div>
+              `)}
+            </div>
+          ` : ""}
         </div>
 
-        <div class="sidebar-header" style="margin-top: 12px; border-top: 1px solid var(--border-subtle);">Tags</div>
-        <div class="sidebar-list">
-          <div class="sidebar-item ${!f.tag_id ? 'active' : ''}" @click=${() => this.setTagFilter(null)}>
-            <span class="sidebar-icon" style="color: var(--accent);">#</span>
-            <span>All Tags</span>
-          </div>
-          ${this.tags.length === 0 ? html`
-            <div style="padding: 12px; font-size: 11px; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a note's detail view.</div>
-          ` : this.tags.map(t => html`
-            <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
-              <span class="sidebar-icon" style="color: var(--accent);">#</span>
-              <span>${t.name}</span>
-              <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
-            </div>
-          `)}
-        </div>
+        <ph-queue-panel></ph-queue-panel>
       </div>
     `;
   }

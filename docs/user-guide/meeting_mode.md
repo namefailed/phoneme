@@ -32,7 +32,7 @@ When system audio starts late (you speak first, then share a video at 5 s), Phon
 
 ## ✨ Why Dual-Track is Magic
 
-When the meeting ends, Phoneme transcribes both tracks independently. Because they share a wall-clock timeline, the **Merged Conversation View** can interleave them chronologically.
+When the meeting ends, Phoneme transcribes both tracks independently. Because they share a wall-clock timeline, you can review them together in one place.
 
 ```mermaid
 %%{init: {'flowchart': {'curve': 'basis', 'useMaxWidth': false}, 'theme': 'dark', 'themeVariables': { 'fontSize': '12px' }}}%%
@@ -52,20 +52,26 @@ flowchart LR
     subgraph D [Diarize & Merge]
         R2 --> P{speakrs}
         P -->|Speakers| L[Labels]
-        R1 --> M{Merge}
-        L --> M
+        R1 --> MG{Merge}
+        L --> MG
     end
     
-    M --> V[Timeline View]
+    MG --> V[Meeting View]
 ```
 
-Instead of a giant block of text, you get a beautiful, chronological timeline of the conversation, exactly as it happened:
+In the recordings list, a meeting's two tracks are grouped under one entry. Click the meeting's **group header** to open the **merged conversation** view: a single, read-only reading of the whole meeting, with each track rendered as a labelled section — **🎤 Microphone** (you) and **🔊 System audio** (everyone else) — and the diarizer's `[Speaker N]` turns surfaced inside. A toolbar offers **Copy** and **Export** of the merged text. To edit a single track (full editor, waveform, notes, re-transcribe), expand the group and click that track's row instead.
 
-Expand a meeting group in the recordings list, then open the **merged conversation** view to see mic and system lines interleaved by timestamp.
+> [!NOTE]
+> The merged view orders the tracks by source (mic, then system); it does **not**
+> yet interleave them line-by-line on one chronological timeline, because
+> per-line timestamps aren't persisted. A true "You / Meeting" interleaved
+> transcript is on the [roadmap](../../ROADMAP.md). See
+> [docs/design/merged-meeting-view.md](../design/merged-meeting-view.md) for the
+> rationale and the follow-up that would unlock it.
 
 ### 🗣️ Adding Speaker Diarization
 
-If you want to take this to the next level, you can enable **Offline Speaker Diarization** in **Settings → Whisper**.
+If you want to take this to the next level, you can enable **Offline Speaker Diarization** in **Settings → Transcription → Diarization**.
 
 By default, the System Track is just one long transcript of everyone on the call. But with Diarization enabled, Phoneme uses a powerful AI model (speakrs) to analyze the System Track and separate the different voices.
 

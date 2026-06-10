@@ -1,8 +1,8 @@
 # Configuration Reference (`config.toml`)
 
-Location: `%APPDATA%\phoneme\config.toml` (expanded from `~/` paths on load).
+Location: `%APPDATA%\phoneme\config.toml` (expanded from `~/`, `%APPDATA%`, and `%USERPROFILE%` tokens on load).
 
-Validate: `phoneme config validate` · Reload: `phoneme config reload` or IPC `reload_config`.
+The config is **validated on load/reload** — an invalid file is rejected with an error. Reload after editing: `phoneme config reload` or IPC `reload_config`. Override the active path with the `PHONEME_CONFIG` environment variable.
 
 Schema source: `crates/phoneme-core/src/config.rs`.
 
@@ -15,7 +15,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | `mode` | `external` \| `bundled_model` \| `bundled_download` | `bundled_download` | How local whisper-server is provisioned |
 | `provider` | `local` \| `openai` \| `groq` \| `deepgram` \| `assemblyai` \| `elevenlabs` \| `custom` | `local` | Transcription backend |
 | `external_url` | string | `http://127.0.0.1:5809` | OpenAI-compatible server base URL |
-| `model_path` | path | `""` | GGUF path when `mode = bundled_model` |
+| `model_path` | path | `""` | GGML model path (`.bin`) when `mode = bundled_model` |
 | `bundled_server_port` | u16 | `5809` | Local server port |
 | `bundled_server_args` | string[] | `[]` | Extra whisper-server CLI args |
 | `timeout_secs` | u64 | `60` | Transcription HTTP timeout |
@@ -23,6 +23,12 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | `api_key` | string | `""` | Cloud provider key (redacted in logs) |
 | `model` | string | `""` | Cloud model id |
 | `api_url` | string | `""` | Custom provider base URL |
+
+---
+
+## `[preview_whisper]` (optional)
+
+An optional, **independent** transcription provider used only for the live preview, so it never contends with the final transcription. It has the **same keys as `[whisper]`**. Omit the section entirely (the default) to make the preview reuse the main `[whisper]` provider. The final transcript always uses `[whisper]` regardless. Set a distinct `bundled_server_port` if you point it at a second local bundled model. See [Live Preview & Pre-Roll](../user-guide/streaming_preview_and_preroll.md).
 
 ---
 
@@ -40,6 +46,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | `source` | `microphone` \| `system_audio` | `microphone` | Single-track capture source |
 | `pre_roll_ms` | u32 | `1500` | Idle mic ring buffer; `0` = off |
 | `streaming_preview` | bool | `false` | Live partial transcript while recording |
+| `auto_stop_on_silence` | bool | `false` | GUI Record button auto-stops on silence; `false` = manual start/stop toggle. Push-to-talk hotkey is always hold-to-record regardless. |
 
 ---
 
@@ -84,6 +91,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | `theme` | `catppuccin-mocha` | CSS theme id |
 | `visible_columns` | day, time, duration, status, transcript | List columns |
 | `column_widths` | px/fr strings | Resizable column layout |
+| `preview_overlay` | `false` | Float the live preview in a system-wide, always-on-top overlay window (requires `recording.streaming_preview`) |
 
 ---
 
@@ -129,14 +137,40 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | `prompt` | clean-up instruction | System prompt |
 | `timeout_secs` | `30` | LLM HTTP timeout |
 
+The cleanup provider speaks one of four wire protocols: `ollama`, `openai` (OpenAI-compatible chat completions — used by most cloud providers), `groq`, or `anthropic`. See [Providers & Models](../user-guide/providers_and_models.md).
+
+---
+
+## `[summary]`
+
+Auto AI summary. Generated on demand (**View summary**) or — when `auto = true` — automatically as the **final** pipeline step. Each provider field falls back to the corresponding `[llm_post_process]` value when left empty, so summaries can use a fully independent provider+model or just reuse the cleanup connection.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `auto` | `false` | Summarize every recording automatically |
+| `provider` | `""` (inherit) | `ollama`, `openai`, `groq`, `anthropic`; empty inherits cleanup |
+| `api_key` | `""` (inherit) | Empty inherits the cleanup key |
+| `api_url` | `""` (inherit) | Empty inherits / provider default |
+| `model` | `""` (inherit) | Empty inherits the cleanup model |
+| `prompt` | summarize instruction | Summary system prompt |
+
+Stored results: `summary` and `summary_model` columns on the recording.
+
 ---
 
 ## `[semantic_search]`
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enabled` | `false` | Index new transcripts |
+| `enabled` | `false` | Index new transcripts (chunked, hybrid with FTS5) |
 | `model_dir` | `""` | ONNX model + tokenizer directory |
+| `max_tokens` | `256` | Truncation length before embedding (all-MiniLM was trained at 256) |
+| `pooling` | `mean` | Token pooling: `mean` (MiniLM/MPNet/E5/BGE) or `cls` |
+| `token_type_ids` | `true` | Feed `token_type_ids` (BERT-family yes; some E5 exports reject it) |
+| `query_prefix` | `""` | Prefix prepended to a search **query** (e.g. `query: ` for E5) |
+| `passage_prefix` | `""` | Prefix prepended to a stored **transcript** (e.g. `passage: ` for E5) |
+
+Changing the model or its dimension makes old vectors unsearchable — re-index with **Re-embed all recordings** (IPC `ReembedAll`). See [Semantic Search](../user-guide/semantic_search.md).
 
 ---
 
@@ -161,6 +195,7 @@ Named copies under `%APPDATA%\phoneme\profiles\`. Switch via tray menu. See [Con
 | Variable | Effect |
 |----------|--------|
 | `PHONEME_AUDIO_BACKEND=synthetic` | Use generator source instead of CPAL (tests/CI) |
-| `PHONEME_CONFIG` | Override config file path (if supported by binary) |
+| `PHONEME_CONFIG` | Override the active config file path (honored by the daemon, CLI, and tray) |
+| `RUST_LOG` | Tracing filter for the daemon (e.g. `debug`) |
 
 See [Testing & CI](testing_and_ci.md) for synthetic audio in integration tests.

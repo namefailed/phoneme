@@ -1,5 +1,26 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+/** A pipeline processing stage (mirrors the daemon's `PipelineStage`). */
+export type PipelineStage =
+  | "transcribing"
+  | "cleaning_up"
+  | "summarizing"
+  | "running_hook"
+  | "done"
+  | "failed";
+
+/** Human-readable label for a live pipeline stage. */
+export function stageLabel(stage: PipelineStage): string {
+  switch (stage) {
+    case "transcribing": return "Transcribing…";
+    case "cleaning_up": return "Cleaning up…";
+    case "summarizing": return "Summarizing…";
+    case "running_hook": return "Running hook…";
+    case "done": return "Done";
+    case "failed": return "Failed";
+  }
+}
+
 export type DaemonEvent =
   | { event: "recording_started"; id: string; started_at: string }
   | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string }
@@ -7,6 +28,8 @@ export type DaemonEvent =
   | { event: "transcription_partial"; id: string; text: string }
   | { event: "transcription_done"; id: string; transcript: string }
   | { event: "transcription_failed"; id: string; error: string }
+  | { event: "pipeline_stage_changed"; id: string; stage: PipelineStage }
+  | { event: "llm_activity"; id: string; stage: PipelineStage; prompt: string; delta: string; done: boolean }
   | { event: "hook_started"; id: string }
   | { event: "hook_done"; id: string; exit_code: number }
   | { event: "hook_failed"; id: string; error: string }
@@ -19,7 +42,9 @@ export type DaemonEvent =
   | { event: "retention_warning"; count: number; hours: number }
   | { event: "transcript_updated"; id: string }
   | { event: "summary_updated"; id: string }
+  | { event: "summary_failed"; id: string; error: string }
   | { event: "notes_updated"; id: string }
+  | { event: "speaker_name_updated"; id: string }
   | { event: "tag_created"; id: number }
   | { event: "tag_updated"; id: number }
   | { event: "tag_deleted"; id: number }

@@ -48,13 +48,42 @@
   transform: translateX(2px);
   color: var(--accent);
 }
-.rec-row.active {
-  background: rgba(203, 166, 247, 0.08);
-  background-image: linear-gradient(to right, rgba(203, 166, 247, 0.04), transparent);
-  border-left-color: var(--accent);
-  padding-left: 13px;
+/* Make the selected row unmistakable: a strong fill, a bold accent left bar,
+   and a BRIGHT ring (accent lifted toward white) that pops even on top of the
+   accent-tinted meeting rows. The `:hover` variants are listed explicitly so a
+   selected meeting track keeps the full selected look when hovered — otherwise
+   `.rec-row--track:hover` (equal specificity, declared later) would override
+   the selection's background. Everything here is background / box-shadow /
+   color only — never border-width, padding, or margin — so selection never
+   shifts content and alignment is preserved. */
+.rec-row.active,
+.rec-row.active:hover,
+.rec-row--track.active,
+.rec-row--track.active:hover,
+.rec-row.multi-selected.active,
+.rec-row.multi-selected.active:hover {
+  /* Selection = strong fill + bright full-row ring + lift glow. NO left bar —
+     the accent left rail is reserved for meetings, so a selected meeting track
+     still shows its rail (inherited from .rec-row--track) plus this ring, while
+     a selected single recording gets the ring only. */
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, white),
+    0 2px 16px color-mix(in srgb, var(--accent) 30%, transparent);
 }
-.rec-row.kbd-focused {
+/* Keep the selected row's text bright (don't let the muted time/duration
+   columns wash it out) so the active row reads as clearly "current". */
+.rec-row.active,
+.rec-row.active .rec-time,
+.rec-row.active .rec-dur,
+.rec-row.active .rec-preview {
+  color: var(--fg-default);
+}
+/* Keyboard-focus ring only matters on rows that AREN'T the selected one —
+   otherwise this (equal specificity, declared after .rec-row.active) would
+   override the much stronger selected look, which is the "selection reverts to
+   a faint border" bug. The active row keeps its full highlight. */
+.rec-row.kbd-focused:not(.active) {
   outline: none;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
   background: rgba(203, 166, 247, 0.05);
@@ -144,7 +173,13 @@ mark.search-hit {
   display: flex;
   flex-direction: column;
   background: var(--bg-elevated);
-  overflow: auto;
+  /* Only ever scroll vertically. A stray sub-pixel-wide child (e.g. a metadata
+     row) used to trip `overflow: auto` into showing a horizontal scrollbar
+     across the bottom; the pane's content wraps, so horizontal scroll is never
+     wanted. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
 }
 .detail-header {
   padding: 14px 18px;
@@ -279,10 +314,14 @@ mark.search-hit {
 .transcript-history {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+.transcript-history .inline-button {
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .transcript-block {
   /* Tighter bottom margin: it sits directly above the notes block, so this is
@@ -315,6 +354,74 @@ mark.search-hit {
 .notes-block:focus-within {
   border-color: var(--accent);
 }
+/* Speakers panel — one renamable row per diarized [Speaker N] label. Matches
+   the transcript/notes boxes so it reads as part of the same stack. */
+.speakers-block {
+  margin: 0 18px 9px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 14px;
+}
+.speakers-block .speakers-header {
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+.speakers-block .speakers-hint {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-bottom: 10px;
+}
+.speakers-block .speakers-hint code {
+  font-size: 10px;
+  background: var(--bg-elevated);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.speakers-block .speakers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.speakers-block .speaker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.speakers-block .speaker-tag {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.speakers-block .speaker-arrow {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+.speakers-block .speaker-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg-elevated);
+  color: var(--fg-default);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.speakers-block .speaker-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-surface);
+}
 .cm-editor-root, .cm-editor {
   flex: 1;
   height: 100%;
@@ -330,14 +437,212 @@ mark.search-hit {
   background: transparent;
 }
 .detail-footer {
-  padding: 0 18px 16px;
+  padding: 6px 18px 16px;
   color: var(--fg-muted);
   font-size: 11px;
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  row-gap: 3px;
+  column-gap: 14px;
   border-top: 1px solid var(--border-subtle);
-  padding-top: 6px;
+  line-height: 1.5;
+  text-align: right;
 }
+/* The metadata chunks stay on one line each but wrap as a group when the pane
+   is narrow, instead of squishing/overflowing. */
+.detail-footer > span { white-space: nowrap; }
+/* The file path is long — give it its own full-width line and let it break
+   anywhere so it never forces horizontal overflow. */
+.detail-footer .detail-path {
+  flex-basis: 100%;
+  white-space: normal;
+  word-break: break-all;
+  opacity: 0.7;
+  font-size: 10px;
+}
+
+/* ── AI activity / "thinking" popout ──────────────────────────────────────── */
+.thinking-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 200;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  color: var(--fg-default);
+  cursor: pointer;
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.thinking-fab:hover { transform: translateY(-1px); border-color: var(--accent); }
+.thinking-fab.live { border-color: var(--accent); }
+.thinking-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: thinkingPulse 1s ease-in-out infinite;
+}
+@keyframes thinkingPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.thinking-popout {
+  z-index: 201;
+  /* Default size — comfortable enough to read a few activity entries at a
+     glance. Movable/resizable; a saved geometry overrides this. */
+  width: 560px;
+  height: 600px;
+  min-width: 300px;
+  min-height: 220px;
+  max-width: 92vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  /* Resized via custom handles on all four edges + corners (see .thinking-rz). */
+}
+/* Resize handles — thin strips on each edge and small squares at the corners.
+   Placed last in the DOM so they sit above the content and are grabbable
+   anywhere along the edge. */
+.thinking-rz { position: absolute; z-index: 6; }
+.thinking-rz-n { top: 0; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.thinking-rz-s { bottom: 0; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.thinking-rz-e { right: 0; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.thinking-rz-w { left: 0; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.thinking-rz-ne { top: 0; right: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+.thinking-rz-nw { top: 0; left: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.thinking-rz-se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.thinking-rz-sw { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+/* Keep the close button clickable above the (DOM-later) handles. */
+.thinking-close { position: relative; z-index: 7; }
+.thinking-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-default);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+}
+/* Polished header title: brain glyph + name, an animated "live" pill, and a
+   muted total-entries badge. */
+.thinking-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.thinking-title-icon { font-size: 14px; line-height: 1; }
+.thinking-title-text { font-size: 13px; font-weight: 700; letter-spacing: 0.01em; color: var(--fg-default); }
+.thinking-title-live {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 2px 8px; border-radius: 999px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.thinking-title-live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: thinkingPulse 1s ease-in-out infinite;
+}
+.thinking-title-count {
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 999px;
+  color: var(--fg-faded);
+  background: color-mix(in srgb, var(--fg-faded) 12%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.thinking-close { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 13px; }
+.thinking-close:hover { color: var(--accent); }
+.thinking-body { flex: 1; overflow-y: auto; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px; }
+.thinking-empty { font-size: 11px; color: var(--fg-faded); line-height: 1.5; }
+/* One AI-activity log entry — a compact card. */
+.thinking-entry {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px 11px;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.thinking-entry.live {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+              0 2px 10px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.thinking-entry-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 8px;
+}
+.thinking-entry-stage {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.01em; color: var(--accent);
+}
+.thinking-entry-meta {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; color: var(--fg-faded);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.thinking-id { color: var(--fg-muted); }
+.thinking-mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+/* Spinner shown beside a live (not-yet-done) stage label. */
+.thinking-spin {
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  display: inline-block;
+  animation: thinkingSpin 0.7s linear infinite;
+}
+@keyframes thinkingSpin { to { transform: rotate(360deg); } }
+
+/* Collapsible Prompt / Response sections — chevron replaces the native triangle. */
+.thinking-fold { margin-top: 6px; }
+.thinking-fold:first-of-type { margin-top: 0; }
+.thinking-fold-sum {
+  display: flex; align-items: center; gap: 6px;
+  list-style: none; cursor: pointer; user-select: none;
+  padding: 3px 5px; border-radius: 6px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.thinking-fold-sum::-webkit-details-marker { display: none; }
+.thinking-fold-sum:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--fg-default); }
+.thinking-chevron { display: inline-flex; color: var(--fg-faded); transition: transform 0.15s ease; }
+.thinking-fold[open] > .thinking-fold-sum .thinking-chevron { transform: rotate(90deg); }
+.thinking-fold-label { flex: 1; }
+.thinking-copy {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer; padding: 2px;
+  color: var(--fg-faded); border-radius: 5px;
+  opacity: 0; transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.thinking-fold-sum:hover .thinking-copy,
+.thinking-copy:focus-visible { opacity: 1; }
+.thinking-copy:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.thinking-pre {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 11px; line-height: 1.5;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  padding: 7px 9px;
+  margin: 5px 0 0;
+  color: var(--fg-default);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+}
+.thinking-pre--prompt { max-height: 200px; overflow-y: auto; color: var(--fg-muted); }
+.thinking-pre--response { max-height: 240px; overflow-y: auto; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 12px; }
 .tag-chip {
   transition: all 0.15s ease-out;
@@ -378,7 +683,7 @@ mark.search-hit {
   left: 0;
   z-index: 100;
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  border: var(--popup-border);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   width: 120px;
@@ -398,6 +703,11 @@ mark.search-hit {
 }
 .tag-dropdown-item:hover {
   background: var(--bg-surface);
+}
+/* Keyboard-highlighted item (arrow-key navigation). */
+.tag-dropdown-item.active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
 }
 .tag-dropdown-dot {
   width: 8px;
@@ -430,6 +740,15 @@ mark.search-hit {
 .rv-shell {
   height: 100%;
   display: grid;
+  /* A single full-height row so every column (incl. the sidebar) stretches to
+     the bottom — without this the implicit `auto` row can collapse to content,
+     leaving the sidebar (and its pinned queue panel) short of the bottom. */
+  grid-template-rows: minmax(0, 1fr);
+}
+/* Smooth sidebar open/close. The class is added only during a toggle (not while
+   dragging the splitter or sidebar-resizer), so drags stay instant/non-laggy. */
+.rv-shell.rv-animate-sidebar {
+  transition: grid-template-columns 0.2s ease;
 }
 .rv-list {
   height: 100%;
@@ -511,13 +830,16 @@ mark.search-hit {
   border-color: var(--accent);
 }
 
-/* ── Multi-selected row highlight ─────────────────────────────────────────── */
+/* Checkbox multi-select: a faint fill only — the checkbox is the real
+   indicator. NO left bar here: the left edge is reserved for the meeting rail,
+   otherwise select-all paints every row with a meeting-looking edge. The
+   active row's rule has higher specificity (.multi-selected.active) so a
+   selected row keeps its strong highlight even while checkbox-selected. */
 .rec-row.multi-selected {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border-left-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 .rec-row.multi-selected:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 17%, transparent);
 }
 
 /* ── Bulk action bar ─────────────────────────────────────────────────────── */
@@ -529,30 +851,77 @@ mark.search-hit {
   z-index: 50;
   pointer-events: none;
 }
+/* Floating, draggable bulk-action popup (position set inline by the component). */
 .bulk-bar {
   pointer-events: all;
+  z-index: 150;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-top: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
-  animation: bulk-bar-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  gap: 8px;
+  padding: 8px 10px 8px 6px;
+  max-width: calc(100vw - 32px);
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: var(--popup-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+  animation: bulk-bar-in 0.16s ease-out;
 }
 @keyframes bulk-bar-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
+.bulk-grip {
+  cursor: move;
+  color: var(--fg-faded);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 3px;
+  user-select: none;
+  letter-spacing: -2px;
+  flex: 0 0 auto;
+}
+.bulk-grip:hover { color: var(--accent); }
+.bulk-menu-wrap { position: relative; display: inline-flex; }
+/* The shared Re-run form floats above the bar; the form carries its own card. */
+.bulk-rerun-pop { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 6; }
+.bulk-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  min-width: 168px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  border-radius: 10px;
+  padding: 5px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bulk-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg-default);
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.bulk-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.bulk-menu-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.bulk-menu-empty { font-size: 11px; color: var(--fg-faded); padding: 8px 10px; }
 .bulk-count {
   font-size: 12px;
   font-weight: 600;
@@ -613,14 +982,15 @@ mark.search-hit {
   gap: 0;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  /* 3px to match the track rows' reserved left border exactly, so the meeting
+     rail and the checkbox column line up between the header and its tracks. */
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-default);
   transition: background 0.15s ease-out;
-  margin-top: 4px;
 }
 .rec-group-head:hover {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
@@ -699,9 +1069,22 @@ mark.search-hit {
 }
 
 /* Expanded meeting track rows: same column grid as standalone rows; track badge in transcript col. */
+/* Meeting track rows read as a connected cluster under their group header:
+   a clearer tint plus a continuous left rail (inset box-shadow — no layout
+   shift) that visually links them to the accent-barred header above. Single
+   recordings stay on the flat deep background, so the two are easy to tell
+   apart at a glance. The active-row rule (higher specificity) still wins when
+   a track is selected. */
 .rec-row--track {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border-left-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  /* Meeting rail: color the 3px reserved left border. No layout shift, and it
+     lines up exactly with the group header's matching 3px accent border.
+     Multi-select and hover don't touch border-left-color, so the rail always
+     shows; the active ring composes on top of it. */
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-left-color: var(--accent);
+}
+.rec-row--track:hover {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 .rec-track-badge {
   display: inline-block;
@@ -717,19 +1100,378 @@ mark.search-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+/* Semantic-search relevance chip shown at the start of the transcript cell. */
+.rec-relevance {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  vertical-align: middle;
+}
+
+/* Source column: a plain icon + label per track ("Microphone" / "System
+   audio"). The earlier pill was too wide for the column — its edge touched the
+   divider and clipped the text. Bare icon + text reads cleaner and fits; both
+   sources share identical styling (only the icon glyph and label differ). */
+.rec-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  transition: color 0.2s ease;
+}
+.rec-source-ico {
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.rec-source-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* System audio and microphone are styled identically — only the icon glyph and
+   label text differ. Both brighten together on hover / selection. */
+.rec-row:hover .rec-source,
+.rec-row.active .rec-source { color: var(--fg-default); }
+
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 ph-sidebar {
   display: block;
   height: 100%;
 }
+ph-sidebar {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
 .rv-sidebar {
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   height: 100%;
 }
+/* Library + Tags scroll; the queue panel below stays pinned to the bottom.
+   flex-basis:0 lets this area absorb all leftover height so the (content-sized)
+   queue panel sits flush at the bottom. */
+.rv-sidebar-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ── Pipeline queue panel (bottom of sidebar) ──────────────────────────────── */
+.queue-panel {
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  display: flex;
+  /* column-reverse keeps the "QUEUE" header pinned at the very bottom of the
+     sidebar; the list (DOM order: header then list) renders ABOVE it, so the
+     panel grows upward instead of off the bottom edge. */
+  flex-direction: column-reverse;
+}
+/* Content-sized and pinned at the very bottom (the sidebar scroll area above
+   takes all remaining space). The header therefore always sits flush at the
+   sidebar bottom; the list grows upward from it, capped + scrollable. */
+.queue-panel { flex: 0 0 auto; }
+/* Separator between the list (above) and the pinned header (below). */
+.queue-panel.expanded .queue-header { border-top: 1px solid var(--border-subtle); }
+.queue-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.queue-header:hover { color: var(--fg-default); }
+.queue-chevron {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease;
+}
+.queue-chevron svg { display: block; }
+/* Points up when open — the panel expands upward. */
+.queue-chevron.open { transform: rotate(-90deg); }
+.queue-title { flex: 1; }
+.queue-count {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.queue-count.idle { background: transparent; color: var(--fg-faded); font-weight: 500; }
+.queue-count.paused { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+/* Failed-items badge: a clickable chip that dismisses the inbox failed/ quarantine. */
+.queue-failed {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  padding: 1px 7px;
+  margin-left: 4px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  color: var(--err);
+  transition: background 0.12s ease;
+}
+.queue-failed:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 30%, transparent); }
+.queue-failed:disabled { opacity: 0.6; cursor: default; }
+/* Pause / clear controls on the right of the queue header. */
+.queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+.queue-action {
+  /* Fixed-size centered box so the pause symbol and the trash emoji (which have
+     different intrinsic glyph metrics) sit on the same baseline and don't look
+     misaligned next to each other. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 6px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.queue-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.queue-action.active { color: var(--warn); }
+.queue-action:disabled { opacity: 0.35; cursor: default; }
+/* Crisp SVG glyphs (replacing emoji) so pause/play and trash share exact metrics. */
+.qa-ico { width: 13px; height: 13px; display: block; }
+.queue-list {
+  /* Sized to its content, capped so it shows a healthy number of items and
+     scrolls beyond. The header below stays pinned to the sidebar bottom. The
+     cap is overridable per-device by dragging the top splitter (inline
+     max-height set by QueuePanel). */
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* Drag handle pinned to the visual TOP of the queue panel (it's the last DOM
+   child of the column-reverse panel). Dragging it up grows the queue list,
+   down shrinks it; the chosen height persists per device. */
+.queue-resizer {
+  flex: 0 0 auto;
+  height: 7px;
+  cursor: row-resize;
+  position: relative;
+}
+.queue-resizer::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  transform: translateX(-50%);
+  width: 34px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--border-subtle);
+  transition: background 0.15s ease, width 0.15s ease;
+}
+.queue-resizer:hover::before {
+  background: var(--accent);
+  width: 48px;
+}
+.queue-empty {
+  font-size: 11px;
+  color: var(--fg-faded);
+  padding: 4px 6px 8px;
+  line-height: 1.4;
+}
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+.queue-item.processing {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface));
+}
+.queue-item-icon { flex: 0 0 auto; color: var(--fg-faded); font-size: 11px; }
+.queue-item.processing .queue-item-icon { color: var(--accent); }
+.queue-item-main { flex: 1; min-width: 0; cursor: pointer; }
+.queue-item-main:hover .queue-item-title { color: var(--accent); }
+.queue-reorder { flex: 0 0 auto; display: inline-flex; flex-direction: column; gap: 1px; }
+.queue-move {
+  background: transparent; border: none; color: var(--fg-faded);
+  width: 20px; height: 13px; line-height: 1; font-size: 9px; padding: 0;
+  border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+}
+.queue-move:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.queue-move:disabled { opacity: 0.25; cursor: default; }
+.queue-item-title { font-size: 12px; color: var(--fg-default); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-item-sub { font-size: 10px; color: var(--fg-faded); }
+.queue-cancel {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--fg-faded);
+  cursor: pointer;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.queue-cancel:hover { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
+.queue-spin {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: queueSpin 0.8s linear infinite;
+}
+@keyframes queueSpin { to { transform: rotate(360deg); } }
+
+/* Meeting rename: an icon button + name input; clicking the icon opens a popover
+   grid to pick a new icon. */
+.rec-rename {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.rec-icon-btn {
+  flex: 0 0 auto;
+  background: var(--bg-deep, #11111b);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 3px 5px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.rec-icon-btn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.rec-icon-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 8px;
+  background: var(--bg-elevated, #1e1e2e);
+  border: var(--popup-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.rec-icon-choice {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.rec-icon-choice:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.rec-icon-choice.sel {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Tag chips inside the list's Tags column. */
+.rec-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow: hidden;
+  align-content: center;
+}
+.rec-tag-chip {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cute, centered ✓ for boolean columns (Diarized / Edited). */
+.rec-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rec-check-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+/* Sidebar resize handle (between the sidebar and the recordings list). */
+.rv-sidebar-resizer {
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 100;
+  transition: background 0.15s ease-out;
+}
+.rv-sidebar-resizer:hover { background: var(--accent); }
 .sidebar-header {
   padding: 16px;
   font-weight: 600;
@@ -738,7 +1480,27 @@ ph-sidebar {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 1px;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 0.12s ease;
 }
+.sidebar-header:hover { color: var(--accent); }
+.sidebar-chevron {
+  color: var(--fg-faded);
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+.sidebar-chevron svg { display: block; }
+.sidebar-chevron.open { transform: rotate(90deg); color: var(--accent); }
+.sidebar-header:hover .sidebar-chevron { color: var(--accent); }
 .sidebar-list {
   display: flex;
   flex-direction: column;
@@ -774,4 +1536,280 @@ ph-sidebar {
   height: 8px;
   border-radius: 50%;
   margin-right: 6px;
+}
+/* "All Tags" gets a rainbow dot since it represents every tag at once. */
+.sidebar-dot-rainbow {
+  background: conic-gradient(
+    from 0deg,
+    #ff5d5d, #ffae4a, #ffe24a, #5dd85d, #4ab6ff, #8a7bff, #ff6ad5, #ff5d5d
+  );
+}
+
+/* ── Merged meeting view ──────────────────────────────────────────────────── */
+.merged-detail {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  overflow: auto;
+}
+.merged-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  z-index: 2;
+}
+.merged-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.merged-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--fg-default);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.merged-name {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.merged-name:hover {
+  border-color: var(--border-subtle);
+}
+.merged-name:focus {
+  border-color: var(--accent);
+  background: var(--bg-surface);
+}
+.merged-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.merged-meta {
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.merged-body {
+  padding: 12px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Source section divider — repeated whenever the speaking track changes. */
+.merged-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.merged-source:first-child {
+  margin-top: 0;
+}
+.merged-source-icon {
+  font-size: 14px;
+}
+.merged-source-label {
+  color: var(--accent);
+}
+/* One speaker turn (or one prose block for an un-diarized track). */
+.merged-turn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  line-height: 1.6;
+  color: var(--fg-default);
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+.merged-speaker {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: 2px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* The speaker chip is a click-to-rename button. Inherit the chip look and add a
+   pointer + hover so it reads as interactive without changing the layout. */
+.merged-speaker-button {
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.merged-speaker-button:hover {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border-color: var(--accent);
+}
+.merged-speaker-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Inline rename field — same pill footprint as the chip, sized to fit a name. */
+.merged-speaker-input {
+  width: 12ch;
+  font-family: inherit;
+  outline: none;
+}
+.merged-speaker-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-surface);
+}
+.merged-text {
+  color: var(--fg-default);
+}
+
+/* ── Transcript version diff (Compare versions) ───────────────────── */
+/* A read-only diff between two transcript layers, mounted inside the existing
+   transcript "peek" slot. Insertions/deletions reuse the theme ok/err colors so
+   it reads correctly across every theme. */
+.tdiff {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+}
+.tdiff-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.tdiff-pickers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tdiff-arrow {
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+.tdiff-select {
+  background: var(--bg-elevated);
+  color: var(--fg-default);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tdiff-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+/* Word/line granularity toggle — a small segmented control. */
+.tdiff-modes {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.tdiff-mode {
+  background: var(--bg-elevated);
+  border: none;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.tdiff-mode + .tdiff-mode {
+  border-left: 1px solid var(--border-subtle);
+}
+.tdiff-mode:hover {
+  color: var(--fg-default);
+}
+.tdiff-mode.active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+.tdiff-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex: 0 0 auto;
+}
+.tdiff-key {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.tdiff-hint {
+  color: var(--fg-faded);
+  margin-left: auto;
+}
+/* The diff text itself: wraps, preserves whitespace, scrolls if long. */
+.tdiff-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.tdiff-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.7;
+  font-size: 14px;
+  color: var(--fg-default);
+}
+.tdiff-eq {
+  color: var(--fg-default);
+}
+/* Insertions (present only on the right side) — green-tinted. */
+.tdiff-ins {
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: var(--fg-default);
+  border-radius: 3px;
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--ok) 60%, transparent);
+}
+/* Deletions (present only on the left side) — red-tinted, struck through. */
+.tdiff-del {
+  background: color-mix(in srgb, var(--err) 20%, transparent);
+  color: var(--fg-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--err) 70%, transparent);
+  border-radius: 3px;
+}
+.tdiff-empty,
+.tdiff-same {
+  font-size: 12px;
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+.tdiff-same {
+  margin-bottom: 8px;
+  font-style: italic;
+  color: var(--fg-faded);
 }

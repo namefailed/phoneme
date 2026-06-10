@@ -7,7 +7,8 @@
 
 use crate::args::{MeetingAction, MeetingArgs};
 use crate::client::Client;
-use phoneme_core::Config;
+use crate::output;
+use phoneme_core::{Config, Recording};
 use phoneme_ipc::Request;
 use std::process::ExitCode;
 
@@ -17,9 +18,38 @@ pub async fn run(args: MeetingArgs, cfg: &Config, json: bool) -> ExitCode {
         Err(code) => return code,
     };
 
+    // `tracks` returns a list of recordings, so it gets its own rendering path
+    // (table / JSON-lines) rather than the meeting_id-printing path below.
+    if let MeetingAction::Tracks { meeting_id } = &args.action {
+        let value = match client
+            .send(Request::ListMeeting {
+                meeting_id: meeting_id.clone(),
+            })
+            .await
+        {
+            Ok(v) => v,
+            Err(code) => return code,
+        };
+        let rows: Vec<Recording> = match serde_json::from_value(value) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("error: parsing meeting tracks response: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        if json {
+            output::print_json_lines(&rows);
+        } else {
+            output::print_list_pretty(&rows);
+        }
+        return ExitCode::SUCCESS;
+    }
+
     let req = match args.action {
         MeetingAction::Start => Request::StartMeeting,
         MeetingAction::Stop => Request::StopMeeting,
+        MeetingAction::Toggle => Request::MeetingToggle,
+        MeetingAction::Tracks { .. } => unreachable!("handled above"),
         MeetingAction::Rename { meeting_id, name } => Request::UpdateMeetingName {
             meeting_id,
             name: Some(name),

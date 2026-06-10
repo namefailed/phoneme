@@ -17,15 +17,14 @@ Where Phoneme reads and writes state on disk. Paths assume Windows defaults; `co
 
 ```
 %LOCALAPPDATA%\phoneme\
-├── catalog.db           # SQLite: recordings, tags, FTS5, embeddings
+├── catalog.db           # SQLite: recordings, tags, FTS5, embedding_chunks
 ├── inbox\
 │   ├── pending\         # JSON payloads awaiting pipeline
 │   ├── done\            # Successfully processed
 │   └── failed\          # Permanent failures
 ├── logs\
-│   ├── daemon.log       # Rotating tracing output
-│   └── hook.log         # Hook stderr aggregation
-├── models\              # GGUF, ONNX, diarization weights
+│   └── daemon.log       # Rotating tracing output (hook results logged here too)
+├── models\              # GGML, ONNX, diarization weights
 └── bin\                 # Downloaded whisper-server.exe, etc.
 ```
 
@@ -57,12 +56,13 @@ When a recording stops, the daemon writes a JSON file to `inbox/pending/`:
 
 | Table / index | Purpose |
 |---------------|---------|
-| `recordings` | Core rows: status, transcript, original_transcript, notes, meeting_id, track |
-| FTS5 virtual table | Keyword search |
-| Vector / embedding store | Semantic search (when enabled) |
+| `recordings` | Core rows: status; the three transcript layers (`transcript`, `clean_transcript`, `original_transcript`); `summary` / `summary_model`; `notes`; `meeting_id` / `meeting_name` / `track`; `cleanup_model`; `in_place`; `diarized` |
+| `recordings_fts` (FTS5) | Keyword search over transcripts |
+| `embedding_chunks` | Per-chunk semantic-search vectors (when enabled); primary store, one row per sentence-aware transcript chunk |
+| `embeddings` | Legacy one-vector-per-recording table, kept as a fallback for rows not yet re-embedded into chunks |
 | `tags` / `recording_tags` | Many-to-many tagging |
 
-Migrations live in `phoneme-core` catalog module.
+Migrations live in `crates/phoneme-core/migrations`.
 
 ## Logs
 

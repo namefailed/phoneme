@@ -19,6 +19,14 @@ pub fn print_recording_pretty(r: &Recording) {
     if let Some(t) = &r.transcript {
         table.add_row(vec!["transcript", t]);
     }
+    if let Some(s) = &r.summary {
+        table.add_row(vec!["summary", s]);
+    }
+    if let Some(n) = &r.notes {
+        if !n.is_empty() {
+            table.add_row(vec!["notes", n]);
+        }
+    }
     if let Some(ek) = &r.error_kind {
         table.add_row(vec!["error_kind", ek]);
     }

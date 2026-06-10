@@ -36,7 +36,7 @@ export function renderField(field: Field, value: any): string {
     case "number":
       return `<input type="number" data-key="${field.key}" value="${value ?? 0}" />`;
     case "checkbox":
-      return `<input type="checkbox" data-key="${field.key}" ${value ? "checked" : ""} />`;
+      return `<input type="checkbox" class="toggle-switch" data-key="${field.key}" ${value ? "checked" : ""} />`;
     case "select":
       return `<select data-key="${field.key}">${
         field.options

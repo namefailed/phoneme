@@ -4608,6 +4608,7 @@ dependencies = [
  "tracing",
  "which 6.0.3",
  "whisper-rs",
+ "windows-sys 0.59.0",
  "wiremock",
 ]
 

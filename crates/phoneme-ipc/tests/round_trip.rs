@@ -1,5 +1,6 @@
 use phoneme_ipc::{
-    IpcError, IpcErrorKind, NamedPipeListener, NamedPipeTransport, Request, Response, Transport,
+    IpcError, IpcErrorKind, NamedPipeListener, NamedPipeTransport, Request, Response, ServerRequest,
+    Transport,
 };
 
 /// Generate a unique pipe name for parallel test runs.
@@ -20,7 +21,7 @@ async fn client_sends_request_server_responds_ok() {
     let server_handle = tokio::spawn(async move {
         let mut conn = listener.accept().await.expect("accept");
         let req = conn.recv().await.expect("recv").expect("some");
-        assert!(matches!(req, Request::DaemonStatus));
+        assert!(matches!(req, ServerRequest::Known(r) if matches!(*r, Request::DaemonStatus)));
         conn.send_response(Response::Ok(serde_json::json!({
             "running": true,
             "pid": 1234,

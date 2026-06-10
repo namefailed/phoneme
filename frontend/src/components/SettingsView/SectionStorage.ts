@@ -1,7 +1,8 @@
 import { errText } from "../../utils/error";
 import { renderField, bindFieldEvents } from "./form";
-import { listRecordings } from "../../services/ipc";
+import { listRecordings, IMPORT_AUDIO_EXTENSIONS } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
+import { pickAndImportAudio } from "../../utils/import";
 
 export class SectionStorage {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,10 +50,19 @@ export class SectionStorage {
         <div class="settings-field">
           <label>Delete audio only</label>
           <div>
-            <input type="checkbox" id="ret-delete-audio" ${this.config.retention?.delete_audio ? "checked" : ""} />
+            <input type="checkbox" class="toggle-switch" id="ret-delete-audio" ${this.config.retention?.delete_audio ? "checked" : ""} />
           </div>
           <span>When pruning, remove the audio file but keep the transcript. Auto-delete runs on
             startup and hourly; only completed recordings are affected — in-progress ones are always preserved.</span>
+        </div>
+
+        <div class="settings-field">
+          <label>Import audio</label>
+          <div>
+            <button class="inline-button" id="btn-import-audio">⬆ Import audio…</button>
+          </div>
+          <span>Bring existing audio files into Phoneme to transcribe and process them.
+            Supported formats: ${(IMPORT_AUDIO_EXTENSIONS as readonly string[]).join(", ")}.</span>
         </div>
 
         <div class="settings-field">
@@ -119,6 +129,12 @@ export class SectionStorage {
       ?.addEventListener("click", async () => {
         const { open } = await import("@tauri-apps/plugin-shell");
         await open(this.config.recording.audio_dir).catch(() => {});
+      });
+
+    container
+      .querySelector("#btn-import-audio")
+      ?.addEventListener("click", async () => {
+        await pickAndImportAudio();
       });
 
     container

@@ -1,6 +1,18 @@
 # 💻 Phoneme CLI Reference
 
-Every core action in Phoneme is fully accessible from the command line interface via `phoneme.exe` or `phoneme-daemon.exe`.
+Every core action in Phoneme is fully accessible from the command line interface via `phoneme.exe` (the client) and `phoneme-daemon.exe` (the engine).
+
+## 🌐 Global flags
+
+These apply to any subcommand:
+
+| Flag | Effect |
+|------|--------|
+| `--json` | JSON-lines output where supported |
+| `--no-color` | Disable colored output (or set `NO_COLOR=1`) |
+| `-v`, `--verbose` | Verbose tracing to stderr |
+
+The CLI auto-spawns the daemon if it isn't already running.
 
 ## ⚙️ Core Commands
 
@@ -14,6 +26,10 @@ phoneme record --start
 
 # Non-blocking: stops the current recording and begins transcription/hooks.
 phoneme record --stop
+
+# Non-blocking: start if idle, otherwise stop the active recording (atomic —
+# ideal for a single hotkey binding). Honors --in-place.
+phoneme record --toggle
 
 # Blocking: starts recording, waits for you to press Enter (or timeout), 
 # then stops, transcribes, and prints the result.
@@ -41,6 +57,12 @@ phoneme meeting start
 # Stop the meeting and transcribe both tracks
 phoneme meeting stop
 
+# Start if no meeting is active, otherwise stop it (atomic, for hotkey bindings)
+phoneme meeting toggle
+
+# List every recording (track) belonging to a meeting session
+phoneme meeting tracks 20260519T143500823
+
 # Rename a meeting
 phoneme meeting rename 20260519T143500823 "Q3 Planning Sync"
 ```
@@ -67,12 +89,15 @@ phoneme list --since 2026-05-19
 # Filter by status (e.g., Recording, Transcribing, Done, Failed)
 phoneme list --status Done
 
-# Limit the number of results returned (with optional offset)
+# Limit the number of results returned (with optional offset for pagination)
 phoneme list --limit 10
 phoneme list --limit 10 --offset 20
 
 # Full-Text Search via FTS5
 phoneme list --search "rust migration"
+
+# Filter by recording type: all (default), single (voice notes), or meeting
+phoneme list --kind meeting
 ```
 
 ### 👁️ `phoneme show <ID>`
@@ -92,6 +117,133 @@ Re-transcribe a saved recording using your current model settings.
 
 ```bash
 phoneme retranscribe 20260519T143500823
+
+# Use a different transcription model for this run only
+phoneme retranscribe 20260519T143500823 --model ggml-large-v3.bin
+
+# Force hooks on / off for this run (overrides the configured behavior)
+phoneme retranscribe 20260519T143500823 --run-hooks
+phoneme retranscribe 20260519T143500823 --no-run-hooks
+
+# Skip the LLM cleanup step for this run only (produces the raw transcript)
+phoneme retranscribe 20260519T143500823 --no-post-process
+```
+
+### ✨ `phoneme cleanup <ID>`
+
+Re-run only the LLM cleanup ("post-processing") step on a recording's stored
+transcript, without re-transcribing the audio. The preserved original transcript
+is always the input, so cleanup is idempotent. Overrides apply to this run only
+and are never written to config; passing `--provider` also forces cleanup on.
+
+```bash
+phoneme cleanup 20260519T143500823
+phoneme cleanup 20260519T143500823 --provider ollama --model llama3.1
+phoneme cleanup 20260519T143500823 --prompt "Fix grammar only"
+```
+
+### 📝 `phoneme summarize <ID>`
+
+Generate (or regenerate) an LLM summary of a recording's current transcript and
+store it. `--model` / `--prompt` override the configured summary settings for
+this run only.
+
+```bash
+phoneme summarize 20260519T143500823
+phoneme summarize 20260519T143500823 --model llama3.1
+```
+
+### ✏️ `phoneme edit <ID>`
+
+Replace a recording's transcript with a hand edit. The new text comes from
+`--text`, or from stdin if `--text` is omitted.
+
+```bash
+phoneme edit 20260519T143500823 --text "Corrected transcript."
+echo "Corrected transcript." | phoneme edit 20260519T143500823
+```
+
+### 🗒️ `phoneme notes <ID>`
+
+Get or set a recording's free-form notes (independent of the transcript).
+
+```bash
+# Print the current notes
+phoneme notes 20260519T143500823
+
+# Set the notes
+phoneme notes 20260519T143500823 --set "Follow up with Alex."
+```
+
+### 🔎 `phoneme search <QUERY>`
+
+Semantic (embedding) search over transcripts. Requires semantic search to be
+enabled and the embedding model present. Prints `score  id  preview` per hit.
+
+```bash
+phoneme search "database migration plan"
+phoneme search "database migration plan" --limit 5
+```
+
+> `phoneme list --semantic "<query>"` runs the same search, reusing `--limit`.
+
+### 🧬 `phoneme reembed`
+
+Clear every stored embedding and re-embed the whole library with the
+currently-configured embedding model. Run this after changing the embedding
+model — a different model/dimension makes old vectors unsearchable. Returns
+immediately; the re-embed runs in the background on the daemon (watch progress
+in the daemon log).
+
+```bash
+phoneme reembed
+```
+
+### 🪝 `phoneme refire-hook <ID>`
+
+Re-run the post-processing hook against a recording's already-stored transcript,
+without re-transcribing. The hook runs in the background; observe the result via
+`phoneme watch` (`hook_done` / `hook_failed` events). `--command` re-fires a
+specific hook instead of the configured default — for safety the daemon only
+accepts a command already present in the configured hook allowlist.
+
+```bash
+phoneme refire-hook 20260519T143500823
+phoneme refire-hook 20260519T143500823 --command "python notify.py"
+```
+
+### 📜 `phoneme queue`
+
+Inspect and manage the transcription pipeline queue. With no subcommand,
+defaults to `list`.
+
+```bash
+# List the in-flight item plus everything still pending (table)
+phoneme queue
+phoneme queue list
+
+# Inbox depth counts (pending / processing / done / failed)
+phoneme queue counts
+
+# Pause / resume the queue, or check whether it's paused
+phoneme queue pause
+phoneme queue resume
+phoneme queue status
+
+# Set the exact pending claim order (worker claims in this order)
+phoneme queue reorder 20260519T143500823 20260519T143501999
+
+# Remove one still-pending recording from the queue
+phoneme queue cancel 20260519T143500823
+
+# Cancel the item currently being processed (abort the in-flight work)
+phoneme queue cancel-processing 20260519T143500823
+
+# Remove ALL still-pending items at once
+phoneme queue cancel-all
+
+# Empty the inbox failed/ quarantine ("dismiss failed")
+phoneme queue clear-failed
 ```
 
 ### 🗑️ `phoneme delete <ID>`
@@ -124,23 +276,35 @@ phoneme export backup.zip
 
 ### 🏷️ `phoneme tag`
 
-Manage recording tags.
+Manage recording tags. Wherever a `<TAG>` is taken (attach / detach / merge), it
+accepts either a numeric tag id or a tag name.
 
 ```bash
-# List all tags
+# List tags attached to a recording; --all also includes orphaned (unused) tags
 phoneme tag list
+phoneme tag list --all
 
 # Add a new tag with an optional color
 phoneme tag add work --color "#ff0000"
 
+# Rename and/or recolor an existing tag (by id)
+phoneme tag update 1 work --color "#4caf50"
+
 # Delete a tag by ID
 phoneme tag delete 1
 
-# Attach a tag to a recording
+# Attach / detach a tag (by name or id) to a recording
 phoneme tag attach 20260519T143500823 work
-
-# Detach a tag from a recording
 phoneme tag detach 20260519T143500823 work
+
+# List the tags attached to one recording
+phoneme tag for 20260519T143500823
+
+# Show how many recordings each tag is attached to
+phoneme tag usage
+
+# Merge one tag into another: re-point all recordings, then delete the source
+phoneme tag merge old-name work
 ```
 
 ### 🎭 `phoneme profile`
@@ -171,15 +335,21 @@ phoneme doctor --rebuild-catalog
 Manage configuration.
 
 ```bash
+# With no subcommand: print the active config as TOML
+phoneme config
+
 # Print the path to the active config file
 phoneme config path
 
-# Set a config value
+# Set a config value (parses bool/int/float, else string)
 phoneme config set whisper.mode external
 
-# Hot-reload the configuration file from disk. The daemon will immediately apply changes (like hotkeys or models) without needing to be restarted.
+# Hot-reload the configuration file from disk. The daemon immediately applies
+# changes (hotkeys, models, …) without restarting.
 phoneme config reload
 ```
+
+> The config is **validated automatically** when the daemon loads or reloads it; an invalid file is rejected with an error. There is no separate `config validate` subcommand.
 
 ### 📡 `phoneme watch`
 
@@ -204,14 +374,22 @@ phoneme daemon status
 phoneme daemon stop
 ```
 
-## 🧠 Daemon Management
+### 🏷️ `phoneme version`
 
-While the daemon is usually auto-spawned by the System Tray application or `phoneme daemon start`, you can run it directly:
+Print version and commit info.
 
 ```bash
+phoneme version
+```
+
+## 🧠 Daemon Management
+
+While the daemon is usually auto-spawned by the CLI, the System Tray application, or `phoneme daemon start`, you can run it directly:
+
+```powershell
 # Run the daemon in the foreground
 phoneme-daemon
 
-# Run the daemon with explicit trace logging for debugging
-RUST_LOG=debug phoneme-daemon
+# Run with explicit debug logging (PowerShell)
+$env:RUST_LOG = "debug"; phoneme-daemon
 ```

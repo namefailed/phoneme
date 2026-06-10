@@ -11,12 +11,42 @@
 
 use crate::app_state::AppState;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus};
-use phoneme_ipc::{DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, Request, Response};
+use phoneme_ipc::{
+    DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, PipelineStage, Request, Response,
+    ServerRequest,
+};
 
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
-        match conn.recv().await {
-            Ok(Some(Request::SubscribeEvents)) => {
+        // Read one request. An unrecognized-but-well-formed request (a client
+        // ahead of this daemon during a rolling rebuild) is answered with an
+        // error and the connection is KEPT — a single unknown request must never
+        // tear down the pipe and break this client's other commands.
+        let req = match conn.recv().await {
+            Ok(Some(ServerRequest::Known(req))) => *req,
+            Ok(Some(ServerRequest::Unknown { detail })) => {
+                tracing::warn!(
+                    %detail,
+                    "unrecognized IPC request; replying with an error and keeping the connection alive"
+                );
+                let resp = Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!("unsupported or unrecognized request: {detail}"),
+                });
+                if let Err(e) = conn.send_response(resp).await {
+                    tracing::warn!(error = %e, "send_response failed");
+                    return;
+                }
+                continue;
+            }
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(error = %e, "recv failed");
+                return;
+            }
+        };
+        match req {
+            Request::SubscribeEvents => {
                 // No ACK Response is sent. The client reframes its connection
                 // as a DaemonEvent stream the instant it writes
                 // SubscribeEvents — an ACK `Response` would be decoded by that
@@ -55,17 +85,12 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
                     }
                 }
             }
-            Ok(Some(req)) => {
-                let response = handle_request(req, &state).await;
+            other => {
+                let response = handle_request(other, &state).await;
                 if let Err(e) = conn.send_response(response).await {
                     tracing::warn!(error = %e, "send_response failed");
                     return;
                 }
-            }
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(error = %e, "recv failed");
-                return;
             }
         }
     }
@@ -203,20 +228,19 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::SemanticSearch { query, limit } => {
-            // Cosine floor below which a match is treated as noise. Short
-            // queries (a single word like "memory") legitimately score lower
-            // against a recording's averaged embedding, so 0.2 was dropping
-            // genuinely-related hits. 0.1 keeps those loosely-related matches
-            // while still excluding the near-orthogonal (~0) noise. The deeper
-            // recall win — per-chunk embeddings so a phrase inside a long
-            // recording ranks on its own — is tracked as a follow-up.
-            const SEMANTIC_MIN_SCORE: f32 = 0.1;
+            // Minimum *calibrated* relevance (0..1) a semantic-only hit must clear
+            // to surface. Hybrid search ranks by per-chunk best-match cosine fused
+            // (RRF) with the FTS5 lexical ranking, so this is no longer a fragile
+            // raw-cosine floor that silently dropped good paraphrase matches: a
+            // lexical (exact-term) hit is never filtered by this, and the score is
+            // calibrated so 0.12 ≈ "barely related". See catalog::hybrid_search.
+            const SEMANTIC_MIN_RELEVANCE: f32 = 0.12;
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {
-                match embedder.embed(&query) {
+                match embedder.embed_query(&query) {
                     Ok(query_vec) => match state
                         .catalog
-                        .semantic_search(&query_vec, limit, SEMANTIC_MIN_SCORE)
+                        .hybrid_search(&query, &query_vec, limit, SEMANTIC_MIN_RELEVANCE)
                         .await
                     {
                         Ok(results) => {
@@ -246,6 +270,50 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     kind: IpcErrorKind::Internal,
                     message: "Semantic search is not enabled or model is missing.".to_string(),
                 })
+            }
+        }
+        Request::ReembedAll => {
+            let cfg = state.config.load();
+            if !cfg.semantic_search.enabled {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: "semantic search is disabled — enable it before re-embedding".into(),
+                })
+            } else if state.embedder.read().await.is_none() {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: "embedding model is not loaded (check the model path)".into(),
+                })
+            } else {
+                // Clear every old vector, then re-embed the whole library in the
+                // background with the current model. Returns immediately.
+                match state.catalog.clear_all_embeddings().await {
+                    Ok(()) => {
+                        let bg = state.clone();
+                        tokio::spawn(async move {
+                            let guard = bg.embedder.read().await;
+                            let Some(embedder) = guard.as_ref() else { return };
+                            match bg.catalog.list_recordings_without_chunk_embeddings().await {
+                                Ok(records) => {
+                                    let n = records.len();
+                                    tracing::info!("re-embedding {n} recordings with the current model");
+                                    for r in records {
+                                        if let Some(t) = r.transcript.as_ref() {
+                                            crate::pipeline::embed_and_store(embedder, &bg.catalog, &r.id, t).await;
+                                        }
+                                    }
+                                    tracing::info!("re-embed complete ({n} recordings)");
+                                }
+                                Err(e) => tracing::error!(error = %e, "re-embed: failed to list recordings"),
+                            }
+                        });
+                        Response::Ok(serde_json::Value::Null)
+                    }
+                    Err(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: format!("failed to clear embeddings: {e}"),
+                    }),
+                }
             }
         }
         Request::DeleteRecording { id, keep_audio } => match state.catalog.get(&id).await {
@@ -297,9 +365,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Ok(()) => {
                     let embedder_guard = state.embedder.read().await;
                     if let Some(embedder) = embedder_guard.as_ref() {
-                        if let Ok(vec) = embedder.embed(&text) {
-                            let _ = state.catalog.upsert_embedding(&id, &vec).await;
-                        }
+                        crate::pipeline::embed_and_store(embedder, &state.catalog, &id, &text).await;
                     }
                     drop(embedder_guard);
 
@@ -358,23 +424,68 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::SetSpeakerName {
+            id,
+            speaker_label,
+            name,
+        } => {
+            // Speaker indices are 1-based (`[Speaker 1]`, …); reject a non-positive
+            // label rather than writing a row that can never match a marker.
+            if speaker_label < 1 {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::Internal,
+                    message: format!("invalid speaker label {speaker_label} (must be >= 1)"),
+                });
+            }
+            match state
+                .catalog
+                .set_speaker_name(&id, speaker_label, &name)
+                .await
+            {
+                Ok(()) => {
+                    state.events.emit(DaemonEvent::SpeakerNameUpdated { id });
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::ImportRecording { path } => import_recording(state, path).await,
         Request::RetranscribeRecording {
             id,
             model,
             run_hooks,
             post_process,
+            all_overrides,
         } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 let mut cfg = state.config.load().as_ref().clone();
                 let mut changed = false;
+                // A per-recording model override is NO LONGER written into the
+                // process-global config. Doing so made the whisper supervisor
+                // (which polls the global config) restart the server, and the
+                // queue worker's blanket post-run reload restart it again — a
+                // thrash that mass-failed other queued/preview jobs reading the
+                // same global config (#49). Instead we record the requested model
+                // against this recording id; the pipeline applies it to that one
+                // job only (a single serialized server model-swap for the local
+                // bundled backend, or a per-job config clone for cloud backends),
+                // then restores. See `pipeline::run`.
                 if let Some(m) = model {
-                    if cfg.whisper.provider == phoneme_core::config::TranscriptionBackend::Local {
-                        cfg.whisper.model_path = m;
+                    let m = m.trim();
+                    if m.is_empty() {
+                        // Empty = "use the configured model"; clear any stale
+                        // request so a prior override can't leak onto this run.
+                        state.pending_overrides.lock().unwrap().remove(&id);
                     } else {
-                        cfg.whisper.model = m;
+                        state
+                            .pending_overrides
+                            .lock()
+                            .unwrap()
+                            .insert(id.clone(), m.to_string());
                     }
-                    changed = true;
                 }
                 if let Some(rh) = run_hooks {
                     cfg.hook.run_on_transcribe = rh;
@@ -390,10 +501,37 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     cfg.llm_post_process.enabled = false;
                     changed = true;
                 }
+                // Re-run → "All": force the whole pipeline on and layer the
+                // one-time cleanup + summary overrides into the temp config.
+                // (Applied after the post_process opt-out so cleanup stays on.)
+                if let Some(ov) = all_overrides {
+                    cfg.llm_post_process.enabled = true;
+                    if let Some(p) = ov.cleanup_provider {
+                        cfg.llm_post_process.provider = p;
+                    }
+                    if let Some(m) = ov.cleanup_model {
+                        cfg.llm_post_process.model = m;
+                    }
+                    if let Some(p) = ov.cleanup_prompt {
+                        cfg.llm_post_process.prompt = p;
+                    }
+                    if let Some(u) = ov.cleanup_api_url {
+                        cfg.llm_post_process.api_url = u;
+                    }
+                    cfg.summary.auto = true;
+                    if let Some(m) = ov.summary_model {
+                        cfg.summary.model = m;
+                    }
+                    if let Some(p) = ov.summary_prompt {
+                        cfg.summary.prompt = p;
+                    }
+                    changed = true;
+                }
                 if changed {
+                    // NOTE: this temp-global config carries only server-independent
+                    // overrides (hooks / cleanup / summary). The whisper model is
+                    // deliberately NOT here — see the per-recording override above.
                     state.config.store(std::sync::Arc::new(cfg));
-                    // Wait a moment for the supervisor to restart the server
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 let payload = HookPayload {
                     id: r.id,
@@ -479,6 +617,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     let hook_id = payload.id.clone();
                     task_state.events.emit(DaemonEvent::HookStarted {
                         id: hook_id.clone(),
+                    });
+                    // Surface this re-run in the queue as an active "Running hook…" item.
+                    task_state.events.emit(DaemonEvent::PipelineStageChanged {
+                        id: hook_id.clone(),
+                        stage: PipelineStage::RunningHook,
                     });
 
                     // Mirror pipeline::run: execute every configured hook in
@@ -586,6 +729,155 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RerunSummary { id, model, prompt } => {
             rerun_summary(state, id, model, prompt).await
         }
+        Request::RunDoctor => {
+            let cfg = state.config.load();
+            let mut checks = phoneme_core::doctor::run_local_checks(&cfg);
+            checks.extend(phoneme_core::doctor::run_backend_checks(&cfg).await);
+            serialize_response(checks)
+        }
+        Request::ListQueue => {
+            let pending = state.inbox.list_pending().await;
+            let processing = state.inbox.list_processing().await;
+            match (pending, processing) {
+                (Ok(pending), Ok(processing)) => {
+                    let entry = |p: &phoneme_core::HookPayload, queue_state: &str| {
+                        serde_json::json!({
+                            "id": p.id,
+                            "timestamp": p.timestamp,
+                            "audio_path": p.audio_path,
+                            "duration_ms": p.duration_ms,
+                            "model": p.model,
+                            "state": queue_state,
+                        })
+                    };
+                    let mut items: Vec<serde_json::Value> = Vec::new();
+                    // The actively-processing item(s) first, then the pending queue.
+                    items.extend(processing.iter().map(|p| entry(p, "processing")));
+                    items.extend(pending.iter().map(|p| entry(p, "pending")));
+                    Response::Ok(serde_json::Value::Array(items))
+                }
+                (Err(e), _) | (_, Err(e)) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::ReorderQueue { ids } => match state.inbox.set_order(&ids).await {
+            Ok(()) => {
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::Value::Null)
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::CancelQueued { id } => match state.inbox.cancel_pending(&id).await {
+            Ok(true) => {
+                // Leave the recording in a terminal state so it isn't stuck
+                // showing "transcribing"; the user can re-run it later.
+                let _ = state
+                    .catalog
+                    .update_status(&id, RecordingStatus::TranscribeFailed)
+                    .await;
+                state
+                    .events
+                    .emit(DaemonEvent::RecordingCancelled { id: id.clone() });
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::Value::Null)
+            }
+            Ok(false) => Response::Err(IpcError {
+                kind: IpcErrorKind::NotFound,
+                message: "recording is not in the pending queue (already processing or finished)"
+                    .into(),
+            }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::SetQueuePaused { paused } => match state.inbox.set_paused(paused).await {
+            Ok(()) => {
+                // Nudge the panel so the pause state reflects immediately.
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::json!({ "paused": paused }))
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::QueuePaused => {
+            Response::Ok(serde_json::json!({ "paused": state.inbox.is_paused().await }))
+        }
+        Request::QueueCounts => match state.inbox.counts().await {
+            Ok(c) => Response::Ok(serde_json::json!({
+                "pending": c.pending,
+                "processing": c.processing,
+                "done": c.done,
+                "failed": c.failed,
+            })),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::ClearFailed => match state.inbox.clear_failed().await {
+            Ok(removed) => {
+                // Refresh the depth so the panel's failed badge clears at once.
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::json!({ "removed": removed }))
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::CancelProcessing { id } => {
+            // Signal the in-flight cancellation token only if `id` is the item
+            // currently processing; the worker + pipeline finalize the rest.
+            let canceled = {
+                match state.processing.lock() {
+                    Ok(slot) => match slot.as_ref() {
+                        Some((pid, token)) if *pid == id => {
+                            token.cancel();
+                            true
+                        }
+                        _ => false,
+                    },
+                    Err(_) => false,
+                }
+            };
+            if canceled {
+                Response::Ok(serde_json::Value::Null)
+            } else {
+                Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: "recording is not the item currently being processed".into(),
+                })
+            }
+        }
+        Request::CancelAllQueued => match state.inbox.cancel_all_pending().await {
+            Ok(ids) => {
+                // Mark each cancelled recording terminal so it isn't stuck
+                // showing "transcribing", mirroring single-item CancelQueued.
+                for id in &ids {
+                    let _ = state
+                        .catalog
+                        .update_status(id, RecordingStatus::TranscribeFailed)
+                        .await;
+                    state
+                        .events
+                        .emit(DaemonEvent::RecordingCancelled { id: id.clone() });
+                }
+                crate::queue_worker::emit_queue_depth(state).await;
+                Response::Ok(serde_json::json!({ "removed": ids.len() }))
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         // Unlike RefireHook, HookTest intentionally runs a caller-supplied
         // command: it is the Hook Manager's "test this command" affordance, used
         // to validate a hook the user is editing but has not saved yet. That is a
@@ -725,6 +1017,26 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 message: e.to_string(),
             }),
         },
+        Request::TagUsageCounts => match state.catalog.tag_usage_counts().await {
+            Ok(counts) => Response::Ok(serde_json::to_value(counts).unwrap_or_default()),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
+        Request::MergeTags { from_id, into_id } => {
+            match state.catalog.merge_tags(from_id, into_id).await {
+                Ok(()) => {
+                    // The source tag is gone; consumers refresh on TagDeleted.
+                    state.events.emit(DaemonEvent::TagDeleted { id: from_id });
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::ReloadConfig => {
             tracing::info!("reloading config via IPC");
             match crate::load_config() {
@@ -733,14 +1045,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
 
                     let cfg_arc = state.config.load();
                     let mut embedder_guard = state.embedder.write().await;
-                    if cfg_arc.semantic_search.enabled && embedder_guard.is_none() {
-                        match phoneme_core::Embedder::new(&cfg_arc.semantic_search.model_dir) {
+                    if cfg_arc.semantic_search.enabled {
+                        // (Re)build on every reload so a changed model_dir /
+                        // pooling / max_tokens / prefix actually takes effect on
+                        // save — not only when no model was loaded before. On
+                        // failure keep the previous model so search doesn't break.
+                        match phoneme_core::Embedder::new(&cfg_arc.semantic_search) {
                             Ok(e) => *embedder_guard = Some(std::sync::Arc::new(e)),
                             Err(e) => {
-                                tracing::warn!(error = %e, "Failed to load semantic search model on reload")
+                                tracing::warn!(error = %e, "failed to (re)load semantic search model on reload; keeping the previous one")
                             }
                         }
-                    } else if !cfg_arc.semantic_search.enabled {
+                    } else {
                         *embedder_guard = None;
                     }
                     drop(cfg_arc);
@@ -947,7 +1263,22 @@ async fn rerun_cleanup(
             return;
         };
 
-        match provider.process(&llm_cfg.prompt, &source).await {
+        // Surface this re-run in the queue as an active "Cleaning up…" item.
+        task_state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: id.clone(),
+            stage: PipelineStage::CleaningUp,
+        });
+
+        match crate::pipeline::run_llm_stage(
+            &task_state,
+            &id,
+            PipelineStage::CleaningUp,
+            &*provider,
+            &llm_cfg.prompt,
+            &source,
+        )
+        .await
+        {
             Ok(cleaned) => {
                 // Re-assert the original alongside the freshly cleaned live text.
                 // Reusing `update_transcript` (the same call the pipeline makes)
@@ -978,9 +1309,8 @@ async fn rerun_cleanup(
                 // mirroring the pipeline and UpdateTranscript paths.
                 let embedder_guard = task_state.embedder.read().await;
                 if let Some(embedder) = embedder_guard.as_ref() {
-                    if let Ok(vec) = embedder.embed(&cleaned) {
-                        let _ = task_state.catalog.upsert_embedding(&id, &vec).await;
-                    }
+                    crate::pipeline::embed_and_store(embedder, &task_state.catalog, &id, &cleaned)
+                        .await;
                 }
                 drop(embedder_guard);
 
@@ -1068,7 +1398,12 @@ async fn rerun_summary(
 
     let task_state = state.clone();
     tokio::spawn(async move {
-        match crate::pipeline::generate_summary(&task_state, &cfg, &transcript).await {
+        // Surface this re-run in the queue as an active "Summarizing…" item.
+        task_state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: id.clone(),
+            stage: PipelineStage::Summarizing,
+        });
+        match crate::pipeline::generate_summary(&task_state, &cfg, &id, &transcript).await {
             Some((summary, model)) => {
                 if let Err(e) = task_state
                     .catalog
@@ -1076,7 +1411,7 @@ async fn rerun_summary(
                     .await
                 {
                     tracing::error!(error = %e, "rerun_summary: failed to persist summary");
-                    task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                    task_state.events.emit(DaemonEvent::SummaryFailed {
                         id,
                         error: e.to_string(),
                     });
@@ -1085,9 +1420,9 @@ async fn rerun_summary(
                 task_state.events.emit(DaemonEvent::SummaryUpdated { id });
             }
             None => {
-                task_state.events.emit(DaemonEvent::TranscriptionFailed {
+                task_state.events.emit(DaemonEvent::SummaryFailed {
                     id,
-                    error: "summary generation failed".into(),
+                    error: "summary generation failed (check the AI provider)".into(),
                 });
             }
         }
@@ -1212,9 +1547,11 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         track: None,
         cleanup_model: None,
         diarized: false,
+        user_edited: false,
         summary: None,
         summary_model: None,
         tags: vec![],
+        speaker_names: vec![],
     };
     if let Err(e) = state.catalog.insert(&row).await {
         // Clean up the WAV we just wrote — no row means it's orphaned.
@@ -1343,5 +1680,145 @@ mod tests {
             "/data/phoneme/audio/../../etc/passwd",
             dir
         ));
+    }
+
+    // ── RetranscribeRecording model override (#49 regression) ──────────────
+
+    use crate::app_state::AppState;
+    use phoneme_core::config::{Config, TranscriptionBackend, WhisperMode};
+    use phoneme_core::types::{Recording, RecordingStatus};
+    use phoneme_core::RecordingId;
+
+    async fn override_test_state(tmp: &std::path::Path, cfg: Config) -> AppState {
+        std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
+        AppState::new(cfg).await.expect("build test AppState")
+    }
+
+    /// Insert a minimal Done recording row so a retranscribe has something to act
+    /// on, and return its id.
+    async fn insert_done_recording(state: &AppState) -> RecordingId {
+        let id = RecordingId::new();
+        let row = Recording {
+            id: id.clone(),
+            started_at: chrono::Local::now(),
+            duration_ms: 1000,
+            audio_path: "C:/phoneme/audio/x.wav".into(),
+            transcript: Some("hello".into()),
+            model: Some("ggml-base.en".into()),
+            status: RecordingStatus::Done,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+            meeting_id: None,
+            meeting_name: None,
+            track: None,
+            in_place: false,
+            cleanup_model: None,
+            diarized: false,
+            user_edited: false,
+            summary: None,
+            summary_model: None,
+            tags: vec![],
+            speaker_names: vec![],
+        };
+        state.catalog.insert(&row).await.unwrap();
+        id
+    }
+
+    /// THE #49 REGRESSION: a model-override re-transcription for a Local
+    /// (bundled) recording must NOT mutate the process-global whisper config.
+    /// The old code wrote the override model into the shared config, which the
+    /// whisper supervisor polls and restarts on — and which the queue worker's
+    /// post-run reload reverted, restarting it again. That double restart raced
+    /// every other queued/preview transcription (which read the same global
+    /// config) and mass-failed them. The override must instead be recorded for
+    /// just this one job in `pending_overrides`.
+    #[tokio::test]
+    async fn model_override_retranscribe_does_not_mutate_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "C:/models/ggml-base.en.bin".into();
+        cfg.whisper.bundled_server_port = 5809;
+        let state = override_test_state(tmp.path(), cfg).await;
+
+        let id = insert_done_recording(&state).await;
+        // Snapshot the configured model BEFORE the request.
+        let model_path_before = state.config.load().whisper.model_path.clone();
+        let port_before = state.config.load().whisper.bundled_server_port;
+
+        let resp = handle_request(
+            Request::RetranscribeRecording {
+                id: id.clone(),
+                model: Some("C:/models/ggml-large-v3.bin".into()),
+                run_hooks: None,
+                post_process: None,
+                all_overrides: None,
+            },
+            &state,
+        )
+        .await;
+        assert!(matches!(resp, Response::Ok(_)), "retranscribe should be accepted");
+
+        // The GLOBAL config is untouched — this is the crux of the fix. The
+        // supervisor never sees a model change here, so it never thrashes.
+        let after = state.config.load();
+        assert_eq!(
+            after.whisper.model_path, model_path_before,
+            "global whisper.model_path must NOT change on a model-override retranscribe"
+        );
+        assert_eq!(
+            after.whisper.bundled_server_port, port_before,
+            "global whisper port must be unchanged"
+        );
+
+        // The override is instead recorded against just this recording id, to be
+        // applied by the pipeline when this single job runs.
+        let pending = state.pending_overrides.lock().unwrap();
+        assert_eq!(
+            pending.get(&id).map(String::as_str),
+            Some("C:/models/ggml-large-v3.bin"),
+            "the per-job override should be queued for this recording only"
+        );
+
+        // And the recording was put back into the transcribing state + enqueued.
+        let rec = state.catalog.get(&id).await.unwrap().unwrap();
+        assert_eq!(rec.status, RecordingStatus::Transcribing);
+    }
+
+    /// A retranscribe WITHOUT a model override must not create a phantom override
+    /// entry (so a plain re-run always uses the configured model).
+    #[tokio::test]
+    async fn retranscribe_without_model_records_no_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "C:/models/ggml-base.en.bin".into();
+        let state = override_test_state(tmp.path(), cfg).await;
+
+        let id = insert_done_recording(&state).await;
+        let resp = handle_request(
+            Request::RetranscribeRecording {
+                id: id.clone(),
+                model: None,
+                run_hooks: Some(false),
+                post_process: Some(false),
+                all_overrides: None,
+            },
+            &state,
+        )
+        .await;
+        assert!(matches!(resp, Response::Ok(_)));
+        assert!(
+            state.pending_overrides.lock().unwrap().get(&id).is_none(),
+            "no model override should be recorded when none was requested"
+        );
     }
 }

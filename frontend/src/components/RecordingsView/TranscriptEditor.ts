@@ -3,7 +3,7 @@ import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { updateTranscript } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { applyVimrc } from "../../utils/vimrc";
+import { applyVimrc, defineVimWrite, VIM_SAVE_EVENT } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
@@ -25,15 +25,22 @@ export class TranscriptEditorElement extends LitElement {
 
   private view: EditorView | null = null;
 
+  private vimSaveHandler = () => {
+    // Only the focused editor responds to a global `:w`.
+    if (this.view?.hasFocus) void this.save();
+  };
+
   connectedCallback() {
     super.connectedCallback();
     this.currentText = this.initialText;
     void this.initEditor();
+    document.addEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this.disposeEditor();
+    document.removeEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
   }
 
   updated(changedProperties: PropertyValues) {
@@ -148,6 +155,7 @@ export class TranscriptEditorElement extends LitElement {
     if (this.vimMode) {
       extensions.unshift(vim());
       applyVimrc(vimrc, Vim);
+      defineVimWrite(Vim);
     }
 
     this.view = new EditorView({
