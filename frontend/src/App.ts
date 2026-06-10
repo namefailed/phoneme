@@ -6,6 +6,7 @@ import { FirstRunWizard } from "./components/FirstRunWizard";
 import { Router, type ViewName } from "./router";
 import { onNav } from "./services/events";
 import { initKeyboard } from "./services/keyboard";
+import { setSettingsAnchor } from "./components/shared/settingsAnchor";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -169,6 +170,17 @@ export class App {
   private mount(view: ViewName) {
     this.current?.dispose?.();
     this.mainEl.innerHTML = "";
+    // Capture the header ⚙ Settings button's exact position BEFORE hiding the
+    // header, so the Settings view can place its floating ⚙ button on the same
+    // spot. Done here (not only in the header click handler) so it works no
+    // matter how Settings was opened — header button, Ctrl+,, tray, deep link.
+    if (view === "settings") {
+      const btn = document.querySelector<HTMLElement>(".hb-settings-main");
+      if (btn) {
+        const r = btn.getBoundingClientRect();
+        setSettingsAnchor({ top: r.top, left: r.left, width: r.width, height: r.height });
+      }
+    }
     // The top header bar is useless in Settings / the setup wizard — hide it so
     // only the view's own (floating) controls show. Focus mode toggles the same
     // class from RecordingsView.
