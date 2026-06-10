@@ -15,7 +15,8 @@ update this file in the same PR.
 - **Transcripts and audio.** The point of the app; often sensitive (meetings,
   personal notes). Stored under `%LOCALAPPDATA%\phoneme\data\`.
 - **API keys.** `whisper.api_key` and `llm_post_process.api_key` for cloud
-  transcription / LLM post-processing, kept in `config.toml`.
+  transcription / LLM post-processing, kept in `config.toml` (DPAPI-encrypted at
+  rest — see the mitigations table).
 - **The daemon's command surface.** Record/stop/delete, hook execution,
   shutdown, and the event stream (live transcripts) — all reachable over IPC.
 
@@ -31,8 +32,8 @@ update this file in the same PR.
    a content-injection bug there must not become arbitrary file/process access.
 4. **Outbound network** — cloud transcription/LLM providers and the optional
    webhook. URLs and request bodies leave the machine.
-5. **Files on disk** — `config.toml` (plaintext secrets today), the audio dir,
-   downloaded models/binaries.
+5. **Files on disk** — `config.toml` (API-key secrets DPAPI-encrypted at rest), the
+   audio dir, downloaded models/binaries.
 
 ## Adversaries we defend against
 
@@ -51,8 +52,8 @@ update this file in the same PR.
   pipe ACL (below) raises the bar to "same user," and an optional per-session
   **auth token** (tracked, not yet implemented) would further bind clients — but
   full same-user isolation is not a goal of a single-user local app.
-- **Physical access / disk forensics** beyond at-rest secret encryption (see
-  DPAPI, open).
+- **Physical access / disk forensics** beyond at-rest secret encryption (API keys
+  are DPAPI-encrypted; broader full-disk forensics is out of scope).
 - **Supply-chain integrity of crates/npm packages** (covered separately by
   dependency auditing in CI, not this document).
 
@@ -69,15 +70,18 @@ update this file in the same PR.
 | WebView | Error text rendered into the DOM is HTML-escaped | `frontend RecordingDetail` | S-med |
 | WebView | API keys are **masked** before `read_config` crosses to the renderer and restored from disk on `write_config`, so secrets never reach the WebView | `phoneme-tray::commands` (`mask_config_secrets`/`unmask_config_secrets`) | S-H2 (in part) |
 | Logging | `Debug` for config redacts API keys | `phoneme-core::config` | — |
+| Files on disk | API keys are encrypted at rest with Windows DPAPI (`CryptProtectData`, per-user, `dpapi:v1:` prefix); decrypted only in-process on config load, and legacy plaintext migrates on the next save | `phoneme-core::secret_crypto` + `config.rs` | S-H2 |
 
 ## Open items (prioritized)
 
 - **Same-user auth token on the IPC pipe** — defense-in-depth beyond the owner
   ACL: the daemon mints a random token at startup, stores it in the user-only
   data dir, and clients present it on connect. *(S-C1 follow-up.)*
-- **Encrypt secrets at rest (Windows DPAPI)** — API keys still live in plaintext
-  `config.toml` on disk. Encrypt per-user via DPAPI; decrypt in the daemon only.
-  *(S-H2 — the masked-DTO half is now done; see the mitigations table above.)*
+- ~~**Encrypt secrets at rest (Windows DPAPI)**~~ *Done — API keys are encrypted
+  per-user with `CryptProtectData` (a `dpapi:v1:` prefix) on write and decrypted on
+  load; legacy plaintext migrates on the next save, and an undecryptable blob reads
+  as unset. Both S-H2 halves (masked DTO + at-rest) are now in place. See the
+  mitigations table above.*
 - **Webhook SSRF guard** — the webhook POST target is user-configured; enforce
   HTTPS and consider blocking non-loopback private ranges (loopback is allowed on
   purpose for local automation), plus optional HMAC signing. *(S-H1.)*

@@ -143,7 +143,12 @@ same-user malware or a malicious IPC client. Ordered by priority.*
   `write_config` restores any unchanged key from disk, so secrets never reach the
   WebView (`src-tauri/src/commands.rs` `mask_config_secrets`/`unmask_config_secrets`).
   Encrypting them at rest (below) is the remaining half. *(S-H2)*
-- [ ] **Encrypt secrets at rest** (Windows DPAPI) instead of plaintext `config.toml`. *(S-H2)*
+- [x] **Encrypt secrets at rest** (Windows DPAPI) — API keys are encrypted per-user
+  with `CryptProtectData` (a `dpapi:v1:` prefix) on write and transparently decrypted
+  on load; legacy plaintext keys migrate on the next save, and an undecryptable blob
+  reads as unset rather than leaking. Composes with the S-H2 masking (the mask sees
+  the encrypted value, still replaces it with the sentinel). *(S-H2 — both halves now
+  done. `phoneme-core::secret_crypto`, `config.rs` serde.)*
 - [ ] **Webhook SSRF guard** — HTTPS-only, block private/loopback ranges; HMAC
   signing later. *(S-H1)*
 - [ ] **Baseline CSP + narrowed asset/fs scopes** (`tauri.conf.json` is `csp:null`,
@@ -177,7 +182,8 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
 
 ### 🏚️ Finish the attic (backend exists, GUI doesn't)
 
-- [ ] **Webhook URL field in Settings** — pipeline already POSTs `hook.webhook_url`; no UI field exists.
+- [x] **Webhook URL field in Settings** — the Hooks section now exposes the
+  `hook.webhook_url` field (with empty-value guarding); the pipeline POSTs to it. (`SectionHook.ts`)
 - [x] **Failed-queue visibility + clear** — the queue panel now surfaces the
   `failed/` count as a badge and lets the user dismiss it (`QueuePanel.ts`
   `clearFailed` → `ClearFailed`/`getQueueCounts` IPC; the `queue_depth_changed`
@@ -191,8 +197,8 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
   settings section (`SectionSemantic.ts`) exposes the toggle, model directory, and
   the embedding-model knobs (max tokens, pooling, `token_type_ids`, query/passage
   prefixes), plus a **Re-embed all recordings** action (`ReembedAll` IPC) that
-  clears every vector and re-indexes the library in the background. *(Known gap:
-  the section is currently only reachable via Settings **search**, not a tab.)*
+  clears every vector and re-indexes the library in the background. It lives under
+  the **System** tab (and is also surfaced via Settings **search**).
 - [ ] **IPC reconnect after Doctor "Fix"** — today users must close/reopen the window after a daemon restart.
 - [ ] **In-app hook log tail** — hook debugging means opening `%LOCALAPPDATA%\phoneme\logs\hook.log` by hand.
 - [x] **Import file picker** — wired as an **Import audio** button in Settings →
