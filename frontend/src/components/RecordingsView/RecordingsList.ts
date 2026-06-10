@@ -519,6 +519,22 @@ export class RecordingsListElement extends LitElement {
       ...widthsForGrid,
       ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
     ].join(" ");
+    // Minimum total px the columns need. A row is a block-level grid whose box is
+    // otherwise only as wide as the pane, so when the columns overflow, the cells
+    // scroll past while the row's background/selection stops at the pane edge.
+    // Sizing the table's inner wrapper to this width lets rows grow with the
+    // content, so their styles extend the full scrolled width (and the flexible
+    // transcript track still fills the pane when the columns fit).
+    const parsePx = (w: string) => {
+      const m = /([\d.]+)px/.exec(w);
+      return m ? parseFloat(m[1]) : 0;
+    };
+    const gridMinWidth =
+      28 /* checkbox */ +
+      activeWidths!.reduce((sum, w, i) => {
+        if (visibleCols[i] === "transcript") return sum + (parsePx(w) || 160);
+        return sum + (parsePx(w) || 120);
+      }, 0);
 
     const allSelected = s.recordings.length > 0 && s.recordings.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
@@ -598,8 +614,10 @@ export class RecordingsListElement extends LitElement {
 
     return html`
       <div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, visibleRows)}>
-        ${head}
-        ${body}
+        <div class="rec-table-inner" style="min-width: ${gridMinWidth}px;">
+          ${head}
+          ${body}
+        </div>
       </div>
       ${!this.reachedEnd ? html`
         <div class="rec-loadmore">
