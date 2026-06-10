@@ -535,6 +535,7 @@ export class RecordingsView {
         const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + (m.clientX - startX)));
         this.sidebarWidth = w;
         this.applyLayout();
+        window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed"));
       };
       const onUp = () => {
         document.removeEventListener("mousemove", onMove);
@@ -560,6 +561,10 @@ export class RecordingsView {
       window.setTimeout(() => shell.classList.remove("rv-animate-sidebar"), 260);
     }
     this.applyLayout();
+    // Let the AI-activity button re-anchor to the new sidebar edge (now + after
+    // the slide animation settles).
+    window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed"));
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed")), 300);
   }
 
   private onSelect(id: string) {

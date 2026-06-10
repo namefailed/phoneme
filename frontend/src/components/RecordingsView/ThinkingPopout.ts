@@ -52,6 +52,9 @@ export class ThinkingPopoutElement extends LitElement {
   private current = new Map<string, ActivityEntry>();
   private seq = 0;
   private unsub: (() => void) | null = null;
+  /** Recompute the anchored default when the sidebar toggles/resizes or the
+   *  window resizes (only matters while no custom position is set). */
+  private onLayoutChange = () => { if (!this.fabPos) this.requestUpdate(); };
 
   /** User-set panel geometry from edge/corner resizing; null = auto-anchored to
    *  the FAB at the default size. Once the user resizes, this takes over. */
@@ -75,6 +78,8 @@ export class ThinkingPopoutElement extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    window.addEventListener("phoneme:sidebar-changed", this.onLayoutChange);
+    window.addEventListener("resize", this.onLayoutChange);
     try {
       const raw = localStorage.getItem(ThinkingPopoutElement.FAB_LS);
       if (raw) {
@@ -130,6 +135,8 @@ export class ThinkingPopoutElement extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    window.removeEventListener("phoneme:sidebar-changed", this.onLayoutChange);
+    window.removeEventListener("resize", this.onLayoutChange);
     if (this.unsub) this.unsub();
   }
 
@@ -138,11 +145,23 @@ export class ThinkingPopoutElement extends LitElement {
     return this.log.filter((e) => !e.done && now - e.at < ThinkingPopoutElement.LIVE_TTL_MS).length;
   }
 
+  /** Default anchored position: bottom-left, straddling the sidebar's right edge
+   *  (or tucked into the corner when the sidebar is hidden). Reads the sidebar
+   *  layout from localStorage so it tracks the drawer. */
+  private defaultFabXY(): { x: number; y: number } {
+    // Anchor to the live right edge of the sidebar (tracks open/collapse/resize);
+    // tuck into the corner when it's hidden.
+    const sb = document.querySelector<HTMLElement>("ph-sidebar");
+    const right = sb ? sb.getBoundingClientRect().right : 0;
+    const x = right > 24 ? Math.max(8, right - 20) : 12;
+    return { x, y: window.innerHeight - 56 };
+  }
+
   private fabXY(): { x: number; y: number } {
-    if (!this.fabPos) return { x: window.innerWidth - 60, y: window.innerHeight - 60 };
-    // Re-clamp to the CURRENT viewport on every read — a saved position from a
-    // larger window would otherwise leave the button stranded off-screen (the
-    // "where did my brain button go?" bug).
+    // No custom position → the sidebar-anchored default (recomputed each render
+    // so it follows the drawer). Otherwise re-clamp the saved position to the
+    // CURRENT viewport so a smaller window can't strand it off-screen.
+    if (!this.fabPos) return this.defaultFabXY();
     return {
       x: Math.max(8, Math.min(window.innerWidth - 48, this.fabPos.x)),
       y: Math.max(8, Math.min(window.innerHeight - 48, this.fabPos.y)),
@@ -152,6 +171,15 @@ export class ThinkingPopoutElement extends LitElement {
   /** Press-drag-or-click on the FAB: a drag moves (and persists) the button; a
    *  plain click toggles the panel. Threshold distinguishes the two. */
   private startFabPress(e: MouseEvent) {
+    // Ctrl+Shift+click resets to the default sidebar-anchored position/behaviour.
+    if (e.ctrlKey && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.fabPos = null;
+      try { localStorage.removeItem(ThinkingPopoutElement.FAB_LS); } catch { /* ignore */ }
+      this.requestUpdate();
+      return;
+    }
     e.preventDefault();
     const startX = e.clientX;
     const startY = e.clientY;
