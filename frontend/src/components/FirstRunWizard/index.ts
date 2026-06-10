@@ -58,6 +58,10 @@ export class FirstRunWizardElement extends LitElement {
   @property({ type: Object }) onComplete!: () => void;
   @property({ type: Object }) config: any = null;
   @state() private step: WizardStep = "welcome";
+  /** Express mode (default): a one-click "recommended local setup" path that
+   *  installs everything, then just mic → hotkey → review → done. "Customize
+   *  setup" flips this off to reveal the full per-feature flow. */
+  @state() private express = true;
 
   // Shared state across steps
   @state() private systemRamMb: number = 0;
@@ -95,16 +99,31 @@ export class FirstRunWizardElement extends LitElement {
       
       this.devices = await invoke<string[]>("list_input_devices").catch(() => []);
       this.downloadedModels = await invoke<string[]>("wizard_list_downloaded_models").catch(() => []);
+      // Pre-fill the recommended local setup so the express welcome can show the
+      // plan immediately (idempotent; the customize picker reuses these choices).
+      this.applyRecommendedSetup();
+      this.requestUpdate();
     } catch (e) {
       console.error("Wizard init error:", e);
     }
   }
 
+  /** The active step sequence — trimmed in express mode (the per-feature config
+   *  screens are auto-applied, so skip them), full in customize mode. */
+  private steps(): WizardStep[] {
+    return this.express
+      ? ["welcome", "configure", "mic", "hotkey", "review", "done"]
+      : ALL_STEPS;
+  }
+
   private go(direction: "next" | "back") {
-    const idx = ALL_STEPS.indexOf(this.step);
-    const next = direction === "next" ? Math.min(idx + 1, ALL_STEPS.length - 1) : Math.max(idx - 1, 0);
-    this.step = ALL_STEPS[next];
-    if (this.step === "configure") {
+    const seq = this.steps();
+    const idx = seq.indexOf(this.step);
+    const ni = direction === "next" ? Math.min(idx + 1, seq.length - 1) : Math.max(idx - 1, 0);
+    this.step = seq[ni];
+    // Run the installs when entering the configure step going FORWARD only — a
+    // back-nav onto it must not kick off the downloads again.
+    if (direction === "next" && this.step === "configure") {
       this.runConfigureStep();
     }
   }
@@ -146,16 +165,17 @@ export class FirstRunWizardElement extends LitElement {
   }
 
   private renderProgress() {
-    const idx = ALL_STEPS.indexOf(this.step);
-    const pct = ALL_STEPS.length > 1 ? (idx / (ALL_STEPS.length - 1)) * 100 : 0;
+    const seq = this.steps();
+    const idx = seq.indexOf(this.step);
+    const pct = seq.length > 1 ? (idx / (seq.length - 1)) * 100 : 0;
     return html`
       <div class="wizard-header-top">
         <span class="wizard-brand">🎙 Phoneme — Setup</span>
-        <span class="wizard-steplabel">Step <b>${idx + 1}</b> of ${ALL_STEPS.length} · <b>${STEP_LABELS[this.step]}</b></span>
+        <span class="wizard-steplabel">Step <b>${idx + 1}</b> of ${seq.length} · <b>${STEP_LABELS[this.step]}</b></span>
       </div>
       <div class="wizard-progress"><div class="wizard-progress-fill" style="width: ${pct}%"></div></div>
       <div class="wizard-dots">
-        ${ALL_STEPS.map((s, i) => {
+        ${seq.map((s, i) => {
           const klass = i < idx ? "done" : i === idx ? "active" : "";
           return html`<span class="wizard-dot ${klass}" title="${STEP_LABELS[s]}"></span>`;
         })}
@@ -169,6 +189,62 @@ export class FirstRunWizardElement extends LitElement {
     if (!this.config.interface) this.config.interface = {};
     this.config.interface[key] = value;
     this.requestUpdate();
+  }
+
+  /** Express welcome: the recommended one-click local setup + a "Customize"
+   *  escape hatch to the full per-feature flow. */
+  private renderExpressWelcome() {
+    const gb = Math.round(this.systemRamMb / 1024);
+    const plan = this.recommendedPlan();
+    return html`
+      <div class="wizard-body">
+        <h2 class="wizard-title">Welcome to Phoneme</h2>
+        <p class="wizard-subtitle">Local-first voice notes — press a hotkey, speak, get a transcript, all on your machine. Let's get you fully set up.</p>
+
+        <div class="wizard-express-card">
+          <div class="wizard-express-head">
+            <span class="wizard-express-title">✨ Recommended local setup</span>
+            <span class="wizard-express-specs">Detected ${gb} GB RAM${this.systemVramMb > 0 ? html` · ${Math.round(this.systemVramMb / 1024)} GB VRAM` : ""}</span>
+          </div>
+          <p class="wizard-express-sub">One click installs and configures everything below — it all runs privately on your machine. You can change any of it later in Settings.</p>
+          <ul class="wizard-express-plan">
+            ${plan.map((p) => html`<li>
+              <span class="wizard-express-ico">${p.icon}</span>
+              <span class="wizard-express-text"><b>${p.title}</b><span class="wizard-express-detail">${p.detail}</span></span>
+            </li>`)}
+          </ul>
+        </div>
+
+        <div class="wizard-theme-card">
+          <label>Preferences</label>
+          <select .value=${this.config?.interface?.theme || "catppuccin-mocha"}
+                  @change=${(e: Event) => { this.setIfacePref("theme", (e.target as HTMLSelectElement).value); document.documentElement.setAttribute('data-theme', (e.target as HTMLSelectElement).value); }}>
+            <option value="catppuccin-mocha">Catppuccin Mocha (Default)</option>
+            <option value="catppuccin-macchiato">Catppuccin Macchiato</option>
+            <option value="dracula">Dracula</option>
+            <option value="everforest">Everforest</option>
+            <option value="gruvbox">Gruvbox</option>
+            <option value="nord">Nord</option>
+            <option value="one-dark">One Dark</option>
+            <option value="rose-pine">Rosé Pine</option>
+            <option value="tokyo-night">Tokyo Night</option>
+            <option value="catppuccin-latte">Catppuccin Latte (Light)</option>
+            <option value="solarized-light">Solarized Light</option>
+          </select>
+          <label class="wizard-pref-row">
+            <span>Keyboard (vim) navigation
+              <span class="wizard-pref-hint">— h/l/j/k to move, ? for the cheat-sheet</span></span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.vim_nav}
+              @change=${(e: Event) => this.setIfacePref("vim_nav", (e.target as HTMLInputElement).checked)}>
+          </label>
+        </div>
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn ghost" @click=${() => { this.express = false; this.requestUpdate(); }}>Customize setup</button>
+        <span class="spacer"></span>
+        <button class="wizard-btn primary" @click=${() => { this.applyRecommendedSetup(); this.go("next"); }}>Set it all up automatically →</button>
+      </div>
+    `;
   }
 
   private renderWelcome() {
@@ -232,8 +308,10 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
-  private renderModePicker() {
-    // First run initializations
+  /** Pre-select the locally-recommended features + models for the detected
+   *  hardware (idempotent — only fills choices that aren't already set). Shared
+   *  by the express path and the customize feature picker. */
+  private applyRecommendedSetup() {
     if (this.config._setup_whisper === undefined) {
       if (this.systemRamMb >= 16000 || this.systemVramMb >= 6000) {
         this.config._setup_whisper = true;
@@ -255,7 +333,6 @@ export class FirstRunWizardElement extends LitElement {
         this.config._setup_native_streaming = false;
       }
     }
-    
     if (!this.config._whisper_model_choice) {
       if (this.systemRamMb >= 32000 || this.systemVramMb >= 8000) this.config._whisper_model_choice = "ggml-large-v3-turbo-q5_0.bin";
       else if (this.systemRamMb >= 16000 || this.systemVramMb >= 4000) this.config._whisper_model_choice = "ggml-medium.en.bin";
@@ -268,6 +345,36 @@ export class FirstRunWizardElement extends LitElement {
       else if (this.systemRamMb >= 16000 || this.systemVramMb >= 6000) this.config._ollama_model_choice = "llama3.1:8b";
       else this.config._ollama_model_choice = "llama3.2:3b";
     }
+  }
+
+  /** Human "what will be installed" plan for the detected hardware, used by the
+   *  express welcome's summary (and as the model labels). */
+  private recommendedPlan(): { icon: string; title: string; detail: string }[] {
+    const WHISPER_LABELS: Record<string, string> = {
+      "ggml-large-v3-turbo-q5_0.bin": "Whisper Large v3 Turbo (~1.1 GB)",
+      "ggml-large-v3.bin": "Whisper Large v3 (~3.1 GB)",
+      "ggml-medium.en.bin": "Whisper Medium (~1.5 GB)",
+      "ggml-small.en.bin": "Whisper Small (~480 MB)",
+      "ggml-base.en.bin": "Whisper Base (~140 MB)",
+    };
+    const plan: { icon: string; title: string; detail: string }[] = [
+      { icon: "🎙️", title: "Speech-to-text engine", detail: `whisper.cpp + ${WHISPER_LABELS[this.config._whisper_model_choice] ?? "a Whisper model"}` },
+    ];
+    if (this.config._setup_ollama) {
+      plan.push({ icon: "✨", title: "Local AI (cleanup + summaries)", detail: `Ollama + ${this.config._ollama_model_choice}` });
+    }
+    if (this.config.semantic_search?.enabled) {
+      plan.push({ icon: "🔍", title: "Semantic search", detail: "all-MiniLM embedding model (~90 MB)" });
+    }
+    if (this.config._setup_diarization) {
+      plan.push({ icon: "🗣️", title: "Speaker labels", detail: "speakrs diarization models (~500 MB)" });
+    }
+    return plan;
+  }
+
+  private renderModePicker() {
+    // Pre-select recommended features/models for the detected hardware.
+    this.applyRecommendedSetup();
 
     const gb = Math.round(this.systemRamMb / 1024);
     const sw = (id: string, checked: boolean, handler: (e: Event) => void) => html`
@@ -600,7 +707,9 @@ export class FirstRunWizardElement extends LitElement {
       </div>
       <div class="wizard-footer">
         <span class="spacer"></span>
-        <button class="wizard-btn primary" disabled>Please wait...</button>
+        ${this.isDownloading
+          ? html`<button class="wizard-btn primary" disabled>Please wait…</button>`
+          : html`<button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>`}
       </div>
     `;
   }
@@ -1307,7 +1416,7 @@ export class FirstRunWizardElement extends LitElement {
         <div class="wizard-header">
           ${this.renderProgress()}
         </div>
-        ${this.step === 'welcome' ? this.renderWelcome() : ''}
+        ${this.step === 'welcome' ? (this.express ? this.renderExpressWelcome() : this.renderWelcome()) : ''}
         ${this.step === 'mode' ? this.renderModePicker() : ''}
         ${this.step === 'configure' ? this.renderConfigure() : ''}
         ${this.step === 'connect' ? this.renderConnect() : ''}
