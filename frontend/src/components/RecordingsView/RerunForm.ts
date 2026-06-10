@@ -52,6 +52,15 @@ export class RerunFormElement extends LitElement {
 
   @state() private summaryModel = "";
   @state() private summaryPrompt = "";
+  // Summary uses an LLM too — give it the same auto-detected model list as the
+  // cleanup picker (fetched for the summary provider, which inherits the
+  // post-process provider/key/URL when its own fields are blank).
+  @state() private summaryProvider = "";
+  @state() private summaryApiUrl = "";
+  @state() private summaryApiKey = "";
+  @state() private summaryModelOptions: string[] = [];
+  @state() private summaryModelsLoading = false;
+  @state() private summaryModelsError: string | null = null;
 
   @state() private configuredHookCommands: string[] = [];
   @state() private selectedHookCommand = "";
@@ -91,8 +100,20 @@ export class RerunFormElement extends LitElement {
       }
 
       if (this.config && this.config.summary) {
-        this.summaryModel = this.config.summary.model ?? "";
-        this.summaryPrompt = this.config.summary.prompt ?? "";
+        const sum = this.config.summary;
+        const pp = this.config.llm_post_process ?? {};
+        this.summaryModel = sum.model ?? "";
+        this.summaryPrompt = sum.prompt ?? "";
+        // Provider/key/URL inherit the post-process config when the summary's own
+        // are blank (mirrors the daemon's pipeline behaviour).
+        const sumProv = typeof sum.provider === "string" ? sum.provider.trim() : "";
+        const ppProv = typeof pp.provider === "string" ? pp.provider.trim() : "";
+        const provRaw = sumProv && sumProv.toLowerCase() !== "none" ? sumProv : ppProv;
+        const lc = provRaw.toLowerCase();
+        this.summaryProvider = (CLEANUP_PROVIDERS as readonly string[]).includes(lc) ? lc : "ollama";
+        this.summaryApiUrl = sum.api_url || pp.api_url || "";
+        this.summaryApiKey = sum.api_key || pp.api_key || "";
+        void this.fetchSummaryModels();
       }
 
       if (this.config && this.config.whisper) {
@@ -172,6 +193,33 @@ export class RerunFormElement extends LitElement {
     } finally {
       this.cleanupModelsLoading = false;
     }
+  }
+
+  /** Auto-detect available summary models for the (inherited) summary provider,
+   *  exactly like the cleanup picker — live list, curated fallback, custom entry
+   *  preserved. Blank model stays valid ("use the configured summary model"). */
+  private async fetchSummaryModels() {
+    const provider = this.summaryProvider;
+    if (!provider) return;
+    const curated = curatedCleanupModelIds(provider);
+    this.summaryModelsLoading = true;
+    this.summaryModelsError = null;
+    try {
+      const fetched = await fetchLlmModels(provider, this.summaryApiUrl, this.summaryApiKey);
+      const models = fetched.length ? fetched : curated;
+      this.summaryModelOptions =
+        this.summaryModel && !models.includes(this.summaryModel) ? [...models, this.summaryModel] : models;
+    } catch (e) {
+      this.summaryModelOptions =
+        this.summaryModel && !curated.includes(this.summaryModel) ? [...curated, this.summaryModel] : curated;
+      this.summaryModelsError = errText(e);
+    } finally {
+      this.summaryModelsLoading = false;
+    }
+  }
+
+  private handleSummaryModelSelect(e: Event) {
+    this.summaryModel = (e.target as HTMLSelectElement).value;
   }
 
   private handleCleanupProviderChange(e: Event) {
@@ -311,10 +359,25 @@ export class RerunFormElement extends LitElement {
     const sLabel = "font-size: 11px; color: var(--fg-muted);";
     return html`
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <label style=${sLabel}>Summary model</label>
-        <input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
-          placeholder="Leave blank to use the configured summary model"
-          @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />
+        <label style="display: flex; justify-content: space-between; align-items: center; ${sLabel}">
+          <span>Summary model</span>
+          <button type="button" title="Refresh model list"
+            style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0;"
+            ?disabled=${this.summaryModelsLoading} @click=${() => this.fetchSummaryModels()}>↻ Refresh</button>
+        </label>
+        ${this.summaryModelOptions.length > 0
+          ? html`<select class="rerun-summary-model-select" style=${sInput} @change=${this.handleSummaryModelSelect}>
+              <option value="" ?selected=${!this.summaryModel}>— Use configured summary model —</option>
+              ${this.summaryModelOptions.map(m => html`<option value=${m} ?selected=${m === this.summaryModel}>${m}</option>`)}
+            </select>`
+          : html`<input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
+              placeholder="Leave blank to use the configured summary model"
+              @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />`}
+        ${this.summaryModelsLoading
+          ? html`<p style="margin: 0; ${sLabel}">Loading models…</p>`
+          : this.summaryModelsError
+            ? html`<p style="margin: 0; ${sLabel}">Couldn't list models (${this.summaryModelsError}). Pick a suggestion or type one.</p>`
+            : nothing}
       </div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <label style=${sLabel}>Summary instructions</label>
