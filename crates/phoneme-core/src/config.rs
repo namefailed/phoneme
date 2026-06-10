@@ -643,6 +643,15 @@ pub struct InterfaceConfig {
     /// Column widths for the main list view.
     #[serde(default = "default_column_widths")]
     pub column_widths: Vec<String>,
+    /// Show the live transcription preview in a system-wide, always-on-top,
+    /// frameless overlay window that floats over the whole desktop (instead of
+    /// only inside the app's own window). Auto-shows when a recording or meeting
+    /// starts and dims/hides shortly after it stops. Requires `streaming_preview`
+    /// to be enabled to have anything to show. **Default false = disabled** —
+    /// when off, the overlay window is never created and the preview stays inside
+    /// the app, exactly as before.
+    #[serde(default)]
+    pub preview_overlay: bool,
 }
 
 fn default_column_widths() -> Vec<String> {
@@ -851,6 +860,7 @@ impl Default for Config {
                     "transcript".into(),
                 ],
                 column_widths: default_column_widths(),
+                preview_overlay: false,
             },
             editor: EditorConfig {
                 vim_mode: false,

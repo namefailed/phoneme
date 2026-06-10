@@ -30,7 +30,22 @@ export class HeaderBarElement extends LitElement {
   @state() private settingsMenuOpen = false;
   @state() private previewText: string | null = null;
   @state() private filterState: UiFilter = filterStore.get();
-  private previewDebounceTimer: number | null = null;
+  // Coalescing throttle for partials. The daemon emits a fresh re-transcription
+  // of the trailing audio window every ~1-2s, and a stalled tick can let two
+  // arrive nearly back-to-back. The old code used a 100ms debounce that *reset*
+  // on every event — since events are ~1s apart it never actually coalesced and
+  // only added a fixed 100ms of lag. Instead we throttle: render at most once
+  // per PREVIEW_RENDER_MS, always with the LATEST text, so the ticker advances
+  // at a steady cadence (no jump per event, no wasted lag on a lone partial).
+  private static readonly PREVIEW_RENDER_MS = 150;
+  // Cap the displayed preview so an unexpectedly long trailing-window transcript
+  // can't blow up layout; we keep the tail (newest words) since that's what the
+  // overlay/ticker shows. The daemon already bounds the audio window, so this is
+  // just a defensive ceiling on text length.
+  private static readonly PREVIEW_MAX_CHARS = 600;
+  private pendingPreviewText: string | null = null;
+  private previewThrottleTimer: number | null = null;
+  private previewLastRenderAt = 0;
 
   private unsubEvent: UnlistenFn | null = null;
   private unsubFilter: (() => void) | null = null;
@@ -67,12 +82,12 @@ export class HeaderBarElement extends LitElement {
           this.isRecording = true;
           this.isMeeting = false;
           this.isPaused = false;
-          this.previewText = null;
+          this.clearPreview();
         } else {
           this.isRecording = false;
           this.isMeeting = true;
           this.isPaused = false;
-          this.previewText = null;
+          this.clearPreview();
         }
       } else if (eventName === "recording_stopped" || eventName === "recording_deleted" || eventName === "recording_cancelled") {
         if (p.meeting_id) {
@@ -80,21 +95,15 @@ export class HeaderBarElement extends LitElement {
         } else if (!this.isMeeting) {
           this.isRecording = false;
           this.isPaused = false;
-          this.previewText = null;
+          this.clearPreview();
         }
       } else if (eventName === "transcription_partial") {
         if (this.isRecording || this.isMeeting) {
-          // Debounce preview updates to avoid excessive re-renders
-          if (this.previewDebounceTimer !== null) {
-            clearTimeout(this.previewDebounceTimer);
-          }
-          this.previewDebounceTimer = window.setTimeout(() => {
-            const t = typeof p.text === "string" ? p.text.trim() : "";
-            // Keep only a trailing window — the preview is a one-line ticker that
-            // scrolls to show the newest words, so older text is cycled out.
-            this.previewText = t ? t.slice(-600) : null;
-            this.previewDebounceTimer = null;
-          }, 100);
+          const t = typeof p.text === "string" ? p.text.trim() : "";
+          // Coalesce partials to a steady cadence (queuePreview), keeping only
+          // the tail so a long window can't blow up layout — the single-line
+          // ticker is anchored to the newest words anyway.
+          this.queuePreview(t ? t.slice(-HeaderBarElement.PREVIEW_MAX_CHARS) : null);
         }
       } else if (eventName === "recording_paused") {
         this.isPaused = true;
@@ -146,9 +155,9 @@ export class HeaderBarElement extends LitElement {
       this.unsubFilter();
       this.unsubFilter = null;
     }
-    if (this.previewDebounceTimer !== null) {
-      clearTimeout(this.previewDebounceTimer);
-      this.previewDebounceTimer = null;
+    if (this.previewThrottleTimer !== null) {
+      clearTimeout(this.previewThrottleTimer);
+      this.previewThrottleTimer = null;
     }
   }
 
@@ -177,7 +186,55 @@ export class HeaderBarElement extends LitElement {
       this.isRecording = !s.meeting && !!s.recording;
       this.isPaused = !!s.paused;
       if (this.isMeeting) this.recordMode = "meeting";
+      // Once nothing is capturing (e.g. the LAST meeting track just stopped),
+      // drop any lingering live-preview caption. Meeting stops route through
+      // here (a per-track `recording_stopped` re-syncs status), so without this
+      // the ticker would keep the final partial on screen after the meeting ends.
+      if (!this.isMeeting && !this.isRecording) this.clearPreview();
     } catch {}
+  }
+
+  /**
+   * Coalesce an incoming partial into a steady render cadence. We always show
+   * the latest text but commit it at most once per PREVIEW_RENDER_MS, so bursts
+   * of partials don't each trigger their own re-render/layout pass (the jank the
+   * old per-event swap caused). A trailing timer flushes the final partial so we
+   * never drop the newest text.
+   */
+  private queuePreview(text: string | null) {
+    this.pendingPreviewText = text;
+    const now = Date.now();
+    const sinceLast = now - this.previewLastRenderAt;
+    if (sinceLast >= HeaderBarElement.PREVIEW_RENDER_MS) {
+      this.flushPreview();
+      return;
+    }
+    if (this.previewThrottleTimer === null) {
+      this.previewThrottleTimer = window.setTimeout(
+        () => this.flushPreview(),
+        HeaderBarElement.PREVIEW_RENDER_MS - sinceLast,
+      );
+    }
+  }
+
+  /** Commit the pending preview text and reset the throttle window. */
+  private flushPreview() {
+    if (this.previewThrottleTimer !== null) {
+      clearTimeout(this.previewThrottleTimer);
+      this.previewThrottleTimer = null;
+    }
+    this.previewLastRenderAt = Date.now();
+    this.previewText = this.pendingPreviewText;
+  }
+
+  /** Drop any queued partial and hide the preview immediately (on stop/cancel). */
+  private clearPreview() {
+    if (this.previewThrottleTimer !== null) {
+      clearTimeout(this.previewThrottleTimer);
+      this.previewThrottleTimer = null;
+    }
+    this.pendingPreviewText = null;
+    this.previewText = null;
   }
 
   async toggleMeeting() {
@@ -187,7 +244,7 @@ export class HeaderBarElement extends LitElement {
         this.isMeeting = false;
         this.isRecording = false;
         this.isPaused = false;
-        this.previewText = null;
+        this.clearPreview();
         showToast("Meeting stopped — both tracks are transcribing", "info");
       } catch (e) {
         showToast(`Meeting toggle failed: ${errText(e)}`, "error");

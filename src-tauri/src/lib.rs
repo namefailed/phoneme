@@ -6,6 +6,7 @@ mod commands;
 mod config_io;
 mod doctor;
 mod events;
+mod overlay;
 mod tray;
 mod wizard;
 
@@ -224,6 +225,13 @@ pub fn run() {
                 // Register all enabled global hotkeys via the shared helper, so
                 // startup and config-save/profile-switch stay in lockstep.
                 commands::register_hotkeys(app.handle(), &bridge.config);
+
+                // Pre-create the system-wide live-preview overlay (hidden) when
+                // the setting is on, so the first recording can reveal it with no
+                // cold-start lag. No-op when the setting is off — the window is
+                // only built when the user opts in. `overlay.ts` then drives its
+                // visibility from the daemon event stream.
+                overlay::sync(app.handle(), bridge.config.interface.preview_overlay);
             }
             Ok(())
         })
@@ -263,6 +271,7 @@ pub fn run() {
             commands::update_notes,
             commands::daemon_status,
             commands::read_config,
+            commands::set_overlay,
             commands::write_config,
             commands::config_exists,
             commands::config_path,

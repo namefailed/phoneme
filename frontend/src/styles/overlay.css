@@ -1,0 +1,108 @@
+/* Styles for the system-wide live-preview overlay window (overlay.html /
+   overlay.ts). The window itself is transparent and frameless, so the page
+   background must be transparent and only the floating card paints. */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  /* The whole window is the card; the card handles its own pointer events. */
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* The floating caption card fills the (small) overlay window with a little inset
+   so the drop shadow isn't clipped by the window edge. */
+.ov-card {
+  box-sizing: border-box;
+  width: calc(100% - 12px);
+  height: calc(100% - 12px);
+  margin: 6px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg-default, #cdd6f4);
+  background: color-mix(in srgb, var(--bg-elevated, #1e1e2e) 88%, transparent);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 13px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  cursor: grab; /* the whole card is the drag region */
+  transition: opacity 0.4s ease;
+}
+.ov-card:active {
+  cursor: grabbing;
+}
+
+/* Dimmed state shortly after a recording stops, before the window auto-hides. */
+body.ov-dim .ov-card {
+  opacity: 0.35;
+}
+
+/* Pulsing record indicator. */
+.ov-pulse {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--err, #f38ba8);
+  animation: ovPulse 1.5s ease-out infinite;
+}
+@keyframes ovPulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--err, #f38ba8) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.ov-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--accent, #89b4fa);
+}
+
+/* Tail-anchored two-line window: a fixed-height scroll box pinned to its bottom
+   (in overlay.ts) so the NEWEST words stay visible while older text scrolls up
+   out of view. */
+.ov-text {
+  flex: 1;
+  min-width: 0;
+  max-height: calc(1.45em * 2);
+  overflow: hidden;
+  font-style: italic;
+  color: var(--fg-muted, #a6adc8);
+  scroll-behavior: smooth;
+}
+
+/* Small close button. Excluded from the drag region (see overlay.ts markup —
+   it's outside data-tauri-drag-region's effect via pointer handling) so a click
+   hides the window instead of dragging it. */
+.ov-close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faded, #6c7086);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.ov-close:hover {
+  background: color-mix(in srgb, var(--err, #f38ba8) 18%, transparent);
+  color: var(--err, #f38ba8);
+}

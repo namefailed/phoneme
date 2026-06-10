@@ -311,4 +311,7 @@ option {
   overflow: hidden;
   font-style: italic;
   color: var(--fg-muted);
+  /* Smooth, GPU-friendly scroll when HeaderBar nudges the box to its end. */
+  scroll-behavior: smooth;
+  transition: opacity 0.18s ease;
 }

@@ -483,6 +483,54 @@ pub fn read_config() -> Result<Value, CommandError> {
     Ok(json)
 }
 
+/// Show, hide, or move the system-wide live-preview overlay window.
+///
+/// The overlay normally drives its own visibility from the daemon event stream
+/// (see `frontend/src/overlay.ts`), so the frontend rarely needs this — but it
+/// exposes explicit control for: a Settings "preview the overlay" button, future
+/// keyboard toggles, and re-positioning the card programmatically. The window is
+/// created lazily if the setting is on but it hasn't been built yet.
+///
+/// `action` is one of `"show"`, `"hide"`, or `"move"`. For `"move"`, pass
+/// logical `x`/`y` (top-left corner); they are ignored for show/hide.
+#[tauri::command]
+pub fn set_overlay(
+    app: tauri::AppHandle,
+    action: String,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<(), CommandError> {
+    use tauri::Manager;
+    // Create the window on demand so "show" works even before the first record.
+    crate::overlay::ensure(&app);
+    let Some(win) = app.get_webview_window(crate::overlay::OVERLAY_LABEL) else {
+        return Err(CommandError::new(
+            "internal",
+            "overlay window could not be created",
+        ));
+    };
+    let map = |e: tauri::Error| CommandError::new("internal", e.to_string());
+    match action.as_str() {
+        "show" => {
+            win.show().map_err(map)?;
+            win.set_always_on_top(true).map_err(map)?;
+        }
+        "hide" => win.hide().map_err(map)?,
+        "move" => {
+            let (x, y) = (x.unwrap_or(0.0), y.unwrap_or(0.0));
+            win.set_position(tauri::LogicalPosition::new(x, y))
+                .map_err(map)?;
+        }
+        other => {
+            return Err(CommandError::new(
+                "invalid_config",
+                format!("unknown overlay action: {other:?}"),
+            ))
+        }
+    }
+    Ok(())
+}
+
 /// Write a new configuration state to `config.toml`.
 ///
 /// This command also applies several side effects:
@@ -600,6 +648,12 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
     if let Err(e) = forward(bridge, Request::ReloadConfig).await {
         tracing::warn!("failed to reload daemon config: {e:?}");
     }
+
+    // Create or tear down the system-wide live-preview overlay window to match
+    // the (just-saved) `interface.preview_overlay` setting. Creating it here
+    // (hidden) means the next recording can show it instantly; turning the
+    // setting off closes the window so no invisible webview lingers.
+    crate::overlay::sync(app, config.interface.preview_overlay);
 
     // Dynamically reload hotkeys in the frontend: drop the old set, then
     // register the new config's hotkeys via the shared helper so all three

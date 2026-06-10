@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { PREVIEW_STT_PROVIDERS, curatedSttModels } from "../../services/sttProviders";
 import { mountModelField } from "./modelField";
+import { showToast } from "../../utils/toast";
+import { errText } from "../../utils/error";
 
 /** Small, fast models suitable for the live preview (the final transcript keeps
  *  whatever the Transcription section is set to). */
@@ -108,6 +110,7 @@ export class SectionPreview {
   private render() {
     const src = this.source();
     const enabled = !!this.config.recording?.streaming_preview;
+    const overlay = !!this.config.interface?.preview_overlay;
 
     this.container.innerHTML = `
       <div class="settings-section">
@@ -120,6 +123,19 @@ export class SectionPreview {
         <div class="settings-field">
           <label>Enable live preview</label>
           <div><input type="checkbox" id="prev-enabled" ${enabled ? "checked" : ""} /></div>
+        </div>
+
+        <div class="settings-field">
+          <label>System-wide overlay
+            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+              Float the live text in an always-on-top window over the whole desktop
+              (draggable; remembers where you put it). Auto-shows when recording starts.
+            </span>
+          </label>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" id="prev-overlay" ${overlay ? "checked" : ""} ${enabled ? "" : "disabled"} />
+            <button class="inline-button" id="prev-overlay-test" ${overlay ? "" : "disabled"}>Preview</button>
+          </div>
         </div>
 
         <div class="settings-field">
@@ -138,7 +154,32 @@ export class SectionPreview {
     `;
 
     this.container.querySelector<HTMLInputElement>("#prev-enabled")?.addEventListener("change", (e) => {
-      this.config.recording.streaming_preview = (e.target as HTMLInputElement).checked;
+      const on = (e.target as HTMLInputElement).checked;
+      this.config.recording.streaming_preview = on;
+      // The overlay needs preview text to show anything, so it only makes sense
+      // alongside the preview. Turning the preview off also clears the overlay
+      // flag and re-renders to disable its controls.
+      if (!on && this.config.interface) this.config.interface.preview_overlay = false;
+      this.render();
+    });
+
+    this.container.querySelector<HTMLInputElement>("#prev-overlay")?.addEventListener("change", (e) => {
+      if (this.config.interface) {
+        this.config.interface.preview_overlay = (e.target as HTMLInputElement).checked;
+      }
+      this.render();
+    });
+
+    // "Preview" briefly shows the overlay so the user can see and position it
+    // without starting a real recording. Hides again after a few seconds.
+    this.container.querySelector<HTMLButtonElement>("#prev-overlay-test")?.addEventListener("click", async () => {
+      try {
+        await invoke("set_overlay", { action: "show" });
+        showToast("Overlay shown — drag it where you like; it hides shortly.", "info");
+        setTimeout(() => void invoke("set_overlay", { action: "hide" }).catch(() => {}), 4000);
+      } catch (e) {
+        showToast(`Could not show overlay: ${errText(e)}`, "error");
+      }
     });
     this.container.querySelector<HTMLSelectElement>("#prev-source")?.addEventListener("change", (e) => {
       const v = (e.target as HTMLSelectElement).value as PreviewSource;
