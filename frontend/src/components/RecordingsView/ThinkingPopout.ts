@@ -336,7 +336,16 @@ export class ThinkingPopoutElement extends LitElement {
         ? html`
             <div class="thinking-popout">
               <div class="thinking-head">
-                <span>AI activity${live ? ` · ${live} live` : ""}${this.log.length ? ` · ${this.log.length}` : ""}</span>
+                <span class="thinking-title">
+                  <span class="thinking-title-icon" aria-hidden="true">🧠</span>
+                  <span class="thinking-title-text">AI Activity</span>
+                  ${live
+                    ? html`<span class="thinking-title-live" title="${live} stage${live === 1 ? "" : "s"} running now"><span class="thinking-title-live-dot"></span>${live} live</span>`
+                    : ""}
+                  ${this.log.length
+                    ? html`<span class="thinking-title-count" title="Total sessions logged since the app opened">${this.log.length} ${this.log.length === 1 ? "entry" : "entries"}</span>`
+                    : ""}
+                </span>
                 <button class="thinking-close" @click=${() => this.setOpen(false)} title="Close">✕</button>
               </div>
               <div class="thinking-body">

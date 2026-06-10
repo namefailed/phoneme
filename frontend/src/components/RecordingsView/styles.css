@@ -466,6 +466,29 @@ mark.search-hit {
   border-bottom: 1px solid var(--border-subtle);
   user-select: none;
 }
+/* Polished header title: brain glyph + name, an animated "live" pill, and a
+   muted total-entries badge. */
+.thinking-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.thinking-title-icon { font-size: 14px; line-height: 1; }
+.thinking-title-text { font-size: 13px; font-weight: 700; letter-spacing: 0.01em; color: var(--fg-default); }
+.thinking-title-live {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 2px 8px; border-radius: 999px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.thinking-title-live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: thinkingPulse 1s ease-in-out infinite;
+}
+.thinking-title-count {
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 999px;
+  color: var(--fg-faded);
+  background: color-mix(in srgb, var(--fg-faded) 12%, transparent);
+  font-variant-numeric: tabular-nums;
+}
 .thinking-close { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 13px; }
 .thinking-close:hover { color: var(--accent); }
 .thinking-body { flex: 1; overflow-y: auto; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px; }
