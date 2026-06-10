@@ -376,7 +376,8 @@ export class RecordingsListElement extends LitElement {
       // With vim nav on, pressing up (k) at the very top steps OUT of the list
       // into the header search box — ArrowDown / Esc there come back down.
       if (vim && this.focusedIndex <= 0) {
-        window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-search" } }));
+        // Highlight (not focus) the search box so h/l can roam the header.
+        window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
         return;
       }
       const prev = Math.max(this.focusedIndex - 1, 0);

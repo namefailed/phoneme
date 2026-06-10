@@ -1,3 +1,15 @@
+/* vim header-nav: the roving cursor HIGHLIGHTS a control (the bar holds focus,
+   not the control) so h/l can step across without the search box capturing
+   keystrokes. Enter/i commits (focus the box to type / activate a button). */
+.headerbar:focus,
+.headerbar:focus-visible {
+  outline: none;
+}
+.headerbar .kbd-cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
 .headerbar {
   background: var(--bg-surface);
   padding: 10px 14px;

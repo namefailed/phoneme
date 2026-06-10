@@ -34,6 +34,8 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "g then s", label: "Go to Settings" },
       { combo: "g then d", label: "Go to Doctor" },
       { combo: "Ctrl + ,", label: "Open Settings" },
+      { combo: "Ctrl + B", label: "Toggle the sidebar" },
+      { combo: "Ctrl + \\", label: "Toggle the detail pane" },
       { combo: "Esc", label: "Close popups / leave search" },
     ],
   },
@@ -131,22 +133,49 @@ function activeWithin(selector: string): boolean {
   return !!el && typeof el.closest === "function" && !!el.closest(selector);
 }
 
-/** Move focus to the next (`dir:1`) / previous (`dir:-1`) focusable control in
- *  the header bar — vim h/l (and ←/→) stepping through the "search bar options"
- *  (search box + the toggle/sort/status/record/settings controls). */
-function focusAdjacentHeaderControl(dir: 1 | -1) {
+/** All focusable header controls (search box + sort/toggles/status/record/
+ *  settings), left to right. */
+function headerControls(): HTMLElement[] {
   const bar = document.querySelector(".headerbar");
-  if (!bar) return;
+  if (!bar) return [];
   const sel =
     'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-  const items = [...bar.querySelectorAll<HTMLElement>(sel)].filter((el) => el.offsetParent !== null);
-  if (!items.length) return;
-  const idx = items.indexOf(document.activeElement as HTMLElement);
-  const next =
-    idx < 0
-      ? items[dir === 1 ? 0 : items.length - 1]
-      : items[Math.max(0, Math.min(items.length - 1, idx + dir))];
-  next?.focus();
+  return [...bar.querySelectorAll<HTMLElement>(sel)].filter((el) => el.offsetParent !== null);
+}
+
+/** Index of the header control the vim cursor is on; -1 when not in header nav. */
+let headerCursor = -1;
+
+function highlightHeaderCursor() {
+  const items = headerControls();
+  items.forEach((el) => el.classList.remove("kbd-cursor"));
+  const el = items[headerCursor];
+  if (el) {
+    el.classList.add("kbd-cursor");
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+}
+
+function exitHeaderNav() {
+  document.querySelectorAll(".headerbar .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+  headerCursor = -1;
+}
+
+/** Enter "header nav": HIGHLIGHT (not focus) the search box so h/l can roam the
+ *  header controls without the text box swallowing keystrokes. The user commits
+ *  with Enter/i (focus the box to type, or activate a button) or j/Esc (back to
+ *  the list). Focus goes to the bar container, which isn't a typing target, so
+ *  the global key handler keeps routing the keys. */
+function enterHeaderNav() {
+  const bar = document.querySelector<HTMLElement>(".headerbar");
+  if (!bar) return;
+  document.querySelectorAll(".rv-pane-focused").forEach((el) => el.classList.remove("rv-pane-focused"));
+  const items = headerControls();
+  const searchIdx = items.findIndex((el) => el.classList.contains("search"));
+  headerCursor = searchIdx >= 0 ? searchIdx : 0;
+  bar.setAttribute("tabindex", "-1");
+  bar.focus({ preventScroll: true });
+  highlightHeaderCursor();
 }
 
 function clearPendingG() {
@@ -213,6 +242,9 @@ function onKeyDown(e: KeyboardEvent) {
     return;
   }
 
+  // Drop a stale header-nav cursor if focus has drifted out of the header.
+  if (headerCursor >= 0 && !activeWithin(".headerbar")) exitHeaderNav();
+
   // While typing, never hijack keys — except Esc from the search box, which
   // blurs it and hands focus to the list so arrow-nav can take over. The
   // transcript editor's own vim mode (when focused) keeps Esc too, by virtue of
@@ -232,12 +264,19 @@ function onKeyDown(e: KeyboardEvent) {
     // (so you can search for "h" / "j"), so the keyboard nav never traps you.
     if (vimNav && isSearch) {
       const input = active as HTMLInputElement;
+      if (e.key === "ArrowDown") { e.preventDefault(); input.blur(); dispatchVim("focus-list"); return; }
+      // ←/→ at the caret edges hop OUT of the text box back to header-cursor nav.
+      const len = input.value?.length ?? 0;
       const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
-      const atEnd =
-        input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
-      if (e.key === "ArrowDown") { e.preventDefault(); dispatchVim("focus-list"); return; }
-      if (e.key === "ArrowRight" && atEnd) { e.preventDefault(); focusAdjacentHeaderControl(1); return; }
-      if (e.key === "ArrowLeft" && atStart) { e.preventDefault(); focusAdjacentHeaderControl(-1); return; }
+      const atEnd = input.selectionStart === len && input.selectionEnd === len;
+      if (e.key === "ArrowRight" && atEnd) {
+        e.preventDefault(); input.blur(); enterHeaderNav();
+        headerCursor = Math.min(headerControls().length - 1, headerCursor + 1); highlightHeaderCursor(); return;
+      }
+      if (e.key === "ArrowLeft" && atStart) {
+        e.preventDefault(); input.blur(); enterHeaderNav();
+        headerCursor = Math.max(0, headerCursor - 1); highlightHeaderCursor(); return;
+      }
     }
     return;
   }
@@ -288,23 +327,41 @@ function onKeyDown(e: KeyboardEvent) {
     // and j/↓ drop into the list. Completes the "k at the top of the list →
     // header → h/l through the options → j back into the recordings" loop.
     if (activeWithin(".headerbar")) {
+      const items = headerControls();
       switch (e.key) {
         case "h":
         case "ArrowLeft":
           e.preventDefault();
-          focusAdjacentHeaderControl(-1);
+          headerCursor = Math.max(0, headerCursor - 1);
+          highlightHeaderCursor();
           return;
         case "l":
         case "ArrowRight":
           e.preventDefault();
-          focusAdjacentHeaderControl(1);
+          headerCursor = Math.min(items.length - 1, headerCursor + 1);
+          highlightHeaderCursor();
           return;
         case "j":
         case "ArrowDown":
+        case "Escape":
           e.preventDefault();
+          exitHeaderNav();
           dispatchVim("focus-list");
           return;
-        // Enter / Space activate the focused control natively.
+        case "i":
+        case "Enter":
+        case " ": {
+          e.preventDefault();
+          const el = items[headerCursor];
+          exitHeaderNav();
+          if (el) {
+            el.focus();
+            // The search box just takes focus to type; buttons/toggles activate.
+            if (!el.classList.contains("search")) el.click();
+          }
+          return;
+        }
+        // Any other key falls through to the global shortcuts below.
       }
     }
     switch (e.key) {
@@ -402,4 +459,7 @@ export function initKeyboard() {
   const apply = (cfg: any) => { vimNav = !!cfg?.interface?.vim_nav; };
   invoke("read_config").then(apply).catch(() => {});
   window.addEventListener("config:saved", (e: Event) => apply((e as CustomEvent).detail));
+  // The list dispatches this when k is pressed at the top — highlight the search
+  // box (don't focus it) so h/l can roam the header without typing.
+  window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav());
 }

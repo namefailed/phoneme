@@ -641,7 +641,12 @@ export class RecordingsView {
       }
     }
 
-    if (e.ctrlKey && e.key === "\\") {
+    if (e.ctrlKey && (e.key === "b" || e.key === "B") && !target.isContentEditable) {
+      // Hide / show the left sidebar (VS Code-style).
+      e.preventDefault();
+      this.toggleSidebar();
+    } else if (e.ctrlKey && e.key === "\\") {
+      // Hide / show the right detail pane.
       e.preventDefault();
       this.toggleDetail();
     } else if (e.key === "Delete") {
