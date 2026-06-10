@@ -173,6 +173,27 @@ impl Embedder {
         Ok(pooled)
     }
 
+    /// Embed a transcript as a set of sentence-aware, overlapping chunks.
+    ///
+    /// Returns one L2-normalized vector per chunk produced by
+    /// [`crate::chunk::chunk_transcript`]. This is the ingest path for semantic
+    /// search: storing per-chunk vectors (instead of one mean-pooled vector for
+    /// the whole transcript) is what lets a query paraphrasing a single spoken
+    /// idea match on that idea's *own* vector rather than an averaged-out blur of
+    /// the entire note — the central paraphrase-recall fix.
+    ///
+    /// Each chunk is embedded with the same model + normalization as a query, so
+    /// query and document vectors are directly comparable by cosine. An empty or
+    /// whitespace-only transcript yields no chunks (and so no embeddings).
+    pub fn embed_chunks(&self, text: &str) -> Result<Vec<Vec<f32>>> {
+        let chunks = crate::chunk::chunk_transcript(text);
+        let mut out = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            out.push(self.embed(&chunk)?);
+        }
+        Ok(out)
+    }
+
     /// Computes cosine similarity between two L2-normalized vectors.
     pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()

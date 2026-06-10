@@ -350,6 +350,55 @@ impl Catalog {
         rows.into_iter().map(row_to_recording).collect()
     }
 
+    /// Replace all chunk embeddings for a recording in one transaction.
+    ///
+    /// Per-chunk embeddings (one vector per sentence-aware chunk) are what make
+    /// paraphrase recall work on longer notes — see [`crate::chunk`]. Re-embedding
+    /// deletes the recording's existing chunks first so a re-transcription or an
+    /// edit can't leave stale vectors from the previous text behind. An empty
+    /// `vectors` (e.g. a blank transcript) just clears the chunks.
+    pub async fn upsert_chunk_embeddings(
+        &self,
+        id: &RecordingId,
+        vectors: &[Vec<f32>],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM embedding_chunks WHERE recording_id = ?")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        for (idx, vector) in vectors.iter().enumerate() {
+            let mut bytes = Vec::with_capacity(vector.len() * 4);
+            for &v in vector {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+            sqlx::query(
+                "INSERT INTO embedding_chunks (recording_id, chunk_index, vector) VALUES (?, ?, ?)",
+            )
+            .bind(id.as_str())
+            .bind(idx as i64)
+            .bind(bytes)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Recordings that have a transcript but no chunk embeddings yet. Drives the
+    /// daemon's one-time backfill that migrates the library from the legacy
+    /// whole-recording `embeddings` table to per-chunk vectors.
+    pub async fn list_recordings_without_chunk_embeddings(&self) -> Result<Vec<Recording>> {
+        let rows = sqlx::query(
+            "SELECT * FROM recordings \
+             WHERE id NOT IN (SELECT DISTINCT recording_id FROM embedding_chunks) \
+             AND transcript IS NOT NULL AND transcript != ''",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(row_to_recording).collect()
+    }
+
     /// Loads all embeddings into memory for brute-force cosine similarity.
     pub async fn load_all_embeddings(&self) -> Result<Vec<(RecordingId, Vec<f32>)>> {
         let rows = sqlx::query("SELECT id, vector FROM embeddings")
@@ -454,6 +503,226 @@ impl Catalog {
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(limit);
         Ok(scores)
+    }
+
+    /// Compute the per-recording **best-chunk** (max-sim) cosine ranking for a
+    /// query vector, meeting-deduped.
+    ///
+    /// Returns `(dedupe_key, RecordingId, raw_cosine)` sorted high→low. The raw
+    /// cosine is of the single best-matching chunk, which is what makes a
+    /// paraphrase of one spoken idea rank on that idea instead of an averaged
+    /// whole-note vector. The `dedupe_key` is the recording's `meeting_id` when
+    /// it belongs to a meeting, else its own id — exposed so the fusion in
+    /// [`Self::hybrid_search`] can collapse a meeting on the SAME key the lexical
+    /// retriever uses, even if the two retrievers each pick a different track of
+    /// that meeting as its representative (otherwise the meeting would surface
+    /// twice). Recordings that only have a legacy whole-recording vector (no
+    /// chunks yet, pending backfill) are folded in from the `embeddings` table so
+    /// nothing becomes unsearchable during migration. Dimension-mismatched
+    /// vectors are skipped (same guard as [`Self::semantic_search`]).
+    async fn vector_ranking(&self, query_vec: &[f32]) -> Result<Vec<(String, RecordingId, f32)>> {
+        let dim = query_vec.len();
+        // best raw cosine per dedupe key (meeting_id or recording id).
+        let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
+            std::collections::HashMap::new();
+
+        let mut consider = |id: String, meeting_id: Option<String>, bytes: Vec<u8>| {
+            if !bytes.len().is_multiple_of(4) {
+                tracing::warn!(id = %id, len = bytes.len(), "skipping embedding: not 4-byte aligned");
+                return;
+            }
+            let vec: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                .collect();
+            if vec.len() != dim {
+                tracing::warn!(id = %id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
+                return;
+            }
+            let score = crate::embed::Embedder::cosine_similarity(query_vec, &vec);
+            let Some(rec_id) = RecordingId::parse(id.clone()) else {
+                return;
+            };
+            let key = meeting_id.unwrap_or(id);
+            best.entry(key)
+                .and_modify(|e| {
+                    if score > e.1 {
+                        *e = (rec_id.clone(), score);
+                    }
+                })
+                .or_insert((rec_id, score));
+        };
+
+        // Per-chunk vectors (the primary, high-recall path).
+        let chunk_rows = sqlx::query(
+            "SELECT ec.recording_id AS id, ec.vector AS vector, r.meeting_id AS meeting_id \
+             FROM embedding_chunks ec JOIN recordings r ON r.id = ec.recording_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut have_chunks: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for row in chunk_rows {
+            let id: String = row.try_get("id")?;
+            let bytes: Vec<u8> = row.try_get("vector")?;
+            let meeting_id: Option<String> = row.try_get("meeting_id")?;
+            have_chunks.insert(id.clone());
+            consider(id, meeting_id, bytes);
+        }
+
+        // Legacy whole-recording vectors, only for recordings not yet chunked, so
+        // the library stays searchable while the backfill runs.
+        let legacy_rows = sqlx::query(
+            "SELECT e.id AS id, e.vector AS vector, r.meeting_id AS meeting_id \
+             FROM embeddings e JOIN recordings r ON r.id = e.id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        for row in legacy_rows {
+            let id: String = row.try_get("id")?;
+            if have_chunks.contains(&id) {
+                continue; // chunks supersede the legacy whole-recording vector
+            }
+            let bytes: Vec<u8> = row.try_get("vector")?;
+            let meeting_id: Option<String> = row.try_get("meeting_id")?;
+            consider(id, meeting_id, bytes);
+        }
+
+        let mut ranking: Vec<(String, RecordingId, f32)> = best
+            .into_iter()
+            .map(|(key, (rec_id, score))| (key, rec_id, score))
+            .collect();
+        ranking.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(ranking)
+    }
+
+    /// The lexical (FTS5) ranking for a query, meeting-deduped, best-first.
+    ///
+    /// FTS5 `rank` is BM25-like (more negative = more relevant), so ordering by
+    /// `rank` ascending gives best-first. We keep the first (best) occurrence per
+    /// dedupe key and return `(dedupe_key, RecordingId)` so the fusion in
+    /// [`Self::hybrid_search`] collapses a meeting on the same key the vector
+    /// retriever uses. This list feeds the RRF fusion as the "exact term"
+    /// retriever that complements the paraphrase-oriented vector retriever.
+    async fn lexical_ranking(&self, query: &str) -> Result<Vec<(String, RecordingId)>> {
+        let sanitized = sanitize_fts5_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(
+            "SELECT r.id AS id, r.meeting_id AS meeting_id \
+             FROM recordings_fts f \
+             JOIN recordings r ON r.rowid = f.rowid \
+             WHERE recordings_fts MATCH ? \
+             ORDER BY f.rank",
+        )
+        .bind(&sanitized)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let meeting_id: Option<String> = row.try_get("meeting_id")?;
+            let key = meeting_id.unwrap_or_else(|| id.clone());
+            if !seen.insert(key.clone()) {
+                continue; // already have the best-ranked track of this meeting
+            }
+            if let Some(rec_id) = RecordingId::parse(id) {
+                out.push((key, rec_id));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Hybrid semantic + lexical search with Reciprocal Rank Fusion.
+    ///
+    /// This is the search the daemon now uses. It:
+    /// 1. Ranks recordings by best-matching chunk cosine (paraphrase recall).
+    /// 2. Ranks recordings by FTS5 BM25 (exact-term recall).
+    /// 3. Fuses the two rankings with RRF (no fragile cross-scale threshold).
+    /// 4. Returns `(RecordingId, relevance)` where `relevance` is the *calibrated*
+    ///    best-chunk cosine (0..1) for display — a meaningful percentage, not raw
+    ///    cosine. Lexical-only hits (no vector signal) get a small floor relevance
+    ///    so they still surface with an honest "weak semantic match" reading.
+    ///
+    /// `min_relevance` drops fused results whose calibrated relevance is below the
+    /// floor *only when they are not also a lexical hit* — a recording the user
+    /// clearly named by an exact term is never filtered out for weak cosine. This
+    /// replaces the old hard cosine floor that silently dropped good paraphrase
+    /// matches.
+    pub async fn hybrid_search(
+        &self,
+        query: &str,
+        query_vec: &[f32],
+        limit: usize,
+        min_relevance: f32,
+    ) -> Result<Vec<(RecordingId, f32)>> {
+        let vec_rank = self.vector_ranking(query_vec).await?;
+        let lex_rank = self.lexical_ranking(query).await?;
+
+        // Everything below is keyed by the meeting-stable DEDUPE KEY (meeting_id
+        // or recording id), not the raw recording id, so a meeting collapses to a
+        // single result even when the vector and lexical retrievers each pick a
+        // different track of it as their representative.
+
+        // dedupe_key -> best raw cosine (for calibration into a relevance %).
+        let cosine_by_key: std::collections::HashMap<String, f32> = vec_rank
+            .iter()
+            .map(|(key, _id, c)| (key.clone(), *c))
+            .collect();
+        // dedupe_key -> a representative RecordingId to return for that key.
+        // Prefer the vector retriever's pick (best-chunk track); fall back to the
+        // lexical retriever's for lexical-only hits.
+        let mut rec_id_by_key: std::collections::HashMap<String, RecordingId> =
+            std::collections::HashMap::new();
+        for (key, id, _c) in &vec_rank {
+            rec_id_by_key.entry(key.clone()).or_insert_with(|| id.clone());
+        }
+        for (key, id) in &lex_rank {
+            rec_id_by_key.entry(key.clone()).or_insert_with(|| id.clone());
+        }
+        let lexical_keys: std::collections::HashSet<String> =
+            lex_rank.iter().map(|(key, _id)| key.clone()).collect();
+
+        // Fuse the two orderings on the dedupe key.
+        let vec_keys: Vec<String> = vec_rank.iter().map(|(key, _, _)| key.clone()).collect();
+        let lex_keys: Vec<String> = lex_rank.iter().map(|(key, _)| key.clone()).collect();
+        // Weight the semantic list slightly higher: the whole point is paraphrase
+        // recall, and the lexical list is the complementary safety net.
+        let fused = crate::fusion::reciprocal_rank_fusion(
+            &[&vec_keys[..], &lex_keys[..]],
+            Some(&[1.0, 0.85]),
+        );
+
+        // Small relevance floor for a lexical-only hit so it surfaces honestly
+        // rather than reading "0% relevant" despite being an exact-term match.
+        const LEXICAL_ONLY_RELEVANCE: f32 = 0.30;
+
+        let mut results: Vec<(RecordingId, f32)> = Vec::new();
+        for (key, _fused_score) in fused {
+            let Some(rec_id) = rec_id_by_key.get(&key).cloned() else {
+                continue;
+            };
+            let is_lexical = lexical_keys.contains(&key);
+            let relevance = match cosine_by_key.get(&key) {
+                Some(c) => crate::fusion::calibrate_cosine(*c),
+                None => 0.0,
+            };
+            // A lexical hit is kept regardless of its (possibly weak) cosine; a
+            // semantic-only hit must clear the relevance floor.
+            let display = if is_lexical {
+                relevance.max(LEXICAL_ONLY_RELEVANCE)
+            } else {
+                relevance
+            };
+            if !is_lexical && display < min_relevance {
+                continue;
+            }
+            results.push((rec_id, display));
+        }
+        results.truncate(limit);
+        Ok(results)
     }
 
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
@@ -1088,6 +1357,284 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upsert_chunk_embeddings_replaces_prior_chunks() {
+        // Re-embedding (a re-transcription or a manual edit) must REPLACE a
+        // recording's chunk vectors, never leave stale ones from the old text
+        // behind — otherwise an edited note keeps matching phrases it no longer
+        // contains. We store three chunks, then re-embed with two and assert the
+        // third is gone.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+
+        db.upsert_chunk_embeddings(
+            &a.id,
+            &[
+                vec![1.0, 0.0, 0.0],
+                vec![0.0, 1.0, 0.0],
+                vec![0.0, 0.0, 1.0],
+            ],
+        )
+        .await
+        .unwrap();
+
+        // A query identical to the second chunk finds the recording.
+        let r = db.vector_ranking(&[0.0, 1.0, 0.0]).await.unwrap();
+        assert_eq!(r.len(), 1);
+        assert!((r[0].2 - 1.0).abs() < 1e-6, "best chunk is the exact match");
+
+        // Re-embed with only two chunks; the third (z-axis) must be dropped.
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+        // The old z-axis chunk is gone: a z-axis query now only matches by the
+        // shared positive baseline (here, exactly 0 against the two remaining
+        // orthogonal chunks), not 1.0.
+        let r2 = db.vector_ranking(&[0.0, 0.0, 1.0]).await.unwrap();
+        assert!(
+            r2.is_empty() || r2[0].2 < 0.5,
+            "stale chunk must not survive a re-embed (got {r2:?})"
+        );
+
+        // Empty re-embed clears all chunks.
+        db.upsert_chunk_embeddings(&a.id, &[]).await.unwrap();
+        let none = db
+            .list_recordings_without_chunk_embeddings()
+            .await
+            .unwrap();
+        assert!(
+            none.iter().any(|rec| rec.id.as_str() == a.id.as_str()),
+            "after clearing, the recording reappears as needing chunks"
+        );
+    }
+
+    #[tokio::test]
+    async fn vector_ranking_scores_by_best_chunk_not_average() {
+        // The core paraphrase fix: a recording is ranked by its BEST-matching
+        // chunk (max-sim), not by an averaged whole-note vector. Recording `a`
+        // has many unrelated chunks plus ONE chunk that nails the query; it must
+        // still rank top, because that one chunk competes on its own tight vector
+        // instead of being diluted by the rest of the note.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.insert(&b).await.unwrap();
+
+        // `a`: one chunk exactly on the query axis, several pulling other ways.
+        db.upsert_chunk_embeddings(
+            &a.id,
+            &[
+                vec![0.0, 1.0, 0.0],
+                vec![0.0, 0.0, 1.0],
+                vec![1.0, 0.0, 0.0], // the matching chunk
+                vec![0.0, 1.0, 0.0],
+            ],
+        )
+        .await
+        .unwrap();
+        // `b`: a single chunk only loosely aligned with the query.
+        db.upsert_chunk_embeddings(&b.id, &[vec![0.6, 0.8, 0.0]])
+            .await
+            .unwrap();
+
+        let ranking = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(ranking.len(), 2);
+        assert_eq!(
+            ranking[0].1.as_str(),
+            a.id.as_str(),
+            "the recording with the best single chunk wins (max-sim, not mean)"
+        );
+        assert!(
+            (ranking[0].2 - 1.0).abs() < 1e-6,
+            "best-chunk cosine is the exact-match chunk's score, not an average"
+        );
+    }
+
+    #[tokio::test]
+    async fn vector_ranking_falls_back_to_legacy_whole_recording_vector() {
+        // During the backfill window a recording may still have only a legacy
+        // whole-recording vector and no chunks. It must remain searchable via the
+        // `embeddings` table fallback, and once chunks exist they SUPERSEDE the
+        // legacy vector (no double-counting / no stale legacy score winning).
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let legacy_only = embedded_recording(None);
+        let chunked = embedded_recording(None);
+        db.insert(&legacy_only).await.unwrap();
+        db.insert(&chunked).await.unwrap();
+
+        // legacy_only: only the old whole-recording vector, loosely on-axis.
+        db.upsert_embedding(&legacy_only.id, &[0.8, 0.6, 0.0])
+            .await
+            .unwrap();
+        // chunked: a stale legacy vector AND a fresh, better chunk vector. The
+        // chunk must win; the legacy row must be ignored for this recording.
+        db.upsert_embedding(&chunked.id, &[0.0, 0.0, 1.0])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&chunked.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+
+        let ranking = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(ranking.len(), 2, "both recordings are searchable");
+        // chunked's fresh chunk (cosine 1.0) beats legacy_only's 0.8.
+        assert_eq!(ranking[0].1.as_str(), chunked.id.as_str());
+        assert!((ranking[0].2 - 1.0).abs() < 1e-6);
+        // And the chunked recording is scored from its chunk, not its stale
+        // legacy vector (which was orthogonal → would have scored 0.0).
+        let legacy_score = ranking
+            .iter()
+            .find(|(_key, id, _score)| id.as_str() == legacy_only.id.as_str())
+            .unwrap()
+            .2;
+        assert!(
+            (legacy_score - 0.8).abs() < 1e-6,
+            "legacy-only recording scored from its whole-recording vector"
+        );
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_recalls_a_paraphrase_where_keyword_match_misses() {
+        // THE headline requirement: "utter the likeness of something I spoke
+        // about and get the proper search results."
+        //
+        // We simulate the embedding space directly (the ONNX model isn't bundled
+        // in tests). The query and the target recording's transcript share NO
+        // word, so FTS5 (lexical) returns nothing for them — a naive keyword
+        // search misses entirely. But their *vectors* are nearly identical
+        // (high cosine), modelling a paraphrase. Hybrid search must still surface
+        // the right recording, ranked first, with an honest relevance score.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+        // The recording the user is trying to recall. Its transcript talks about
+        // moving the schema over — the QUERY below ("database migration") shares
+        // none of these words, so lexical search cannot find it.
+        let mut target = embedded_recording(None);
+        target.transcript = Some("we should shift the records across to the new store".into());
+        // A distractor whose words overlap the query's domain words a bit but
+        // whose meaning (and vector) is unrelated.
+        let mut distractor = embedded_recording(None);
+        distractor.transcript = Some("lunch plans for friday afternoon".into());
+        db.insert(&target).await.unwrap();
+        db.insert(&distractor).await.unwrap();
+
+        // Query vector ("the bit about the database migration"). The target's
+        // matching chunk vector is nearly identical (paraphrase); the distractor
+        // points elsewhere.
+        let query_vec = [1.0_f32, 0.0, 0.0];
+        db.upsert_chunk_embeddings(&target.id, &[vec![0.98, 0.20, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&distractor.id, &[vec![0.0, 0.0, 1.0]])
+            .await
+            .unwrap();
+
+        // Sanity: a pure keyword search for the query terms finds NOTHING — the
+        // words don't appear in either transcript. This is the gap vectors close.
+        let lexical = db
+            .lexical_ranking("database migration")
+            .await
+            .unwrap();
+        assert!(
+            lexical.is_empty(),
+            "precondition: naive keyword search must miss the paraphrase"
+        );
+
+        // Hybrid search, same min_relevance the daemon uses (0.12). Despite the
+        // lexical miss, the semantic signal surfaces the target, ranked first.
+        let results = db
+            .hybrid_search("database migration", &query_vec, 10, 0.12)
+            .await
+            .unwrap();
+        assert!(!results.is_empty(), "paraphrase must be recalled by meaning");
+        assert_eq!(
+            results[0].0.as_str(),
+            target.id.as_str(),
+            "the paraphrased recording must rank first"
+        );
+        // The displayed relevance is the calibrated best-chunk cosine — a strong
+        // paraphrase (cosine ~0.98) should read as a strong match, not single
+        // digits.
+        assert!(
+            results[0].1 > 0.5,
+            "a strong paraphrase should read as a strong relevance, got {}",
+            results[0].1
+        );
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_keeps_exact_term_hit_despite_weak_cosine() {
+        // The complement to paraphrase recall: when the user remembers one
+        // distinctive word, an exact lexical hit must surface even if its vector
+        // barely aligns with the query — never filtered out by the relevance
+        // floor. This is the "union of strengths" guarantee.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let mut named = embedded_recording(None);
+        named.transcript = Some("the Kubernetes rollout notes are attached".into());
+        db.insert(&named).await.unwrap();
+        // Its vector is essentially orthogonal to the query (weak cosine), so a
+        // semantic-only path with a 0.12 floor would drop it.
+        db.upsert_chunk_embeddings(&named.id, &[vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+
+        // The user types the exact distinctive term; the query vector is the
+        // unrelated x-axis.
+        let results = db
+            .hybrid_search("Kubernetes", &[1.0, 0.0, 0.0], 10, 0.12)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1, "the exact-term hit must survive");
+        assert_eq!(results[0].0.as_str(), named.id.as_str());
+        assert!(
+            results[0].1 > 0.0,
+            "a lexical-only hit gets an honest non-zero relevance floor, not 0%"
+        );
+    }
+
+    #[tokio::test]
+    async fn hybrid_search_collapses_a_meeting_across_both_retrievers() {
+        // Regression for the cross-retriever dedupe: a meeting's two tracks share
+        // a meeting_id. If the vector retriever's best track differs from the
+        // lexical retriever's best track, fusing on raw recording id would surface
+        // the SAME meeting twice. Fusing on the meeting-stable dedupe key must
+        // collapse it to one row.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let mic = embedded_recording(Some("meeting-x"));
+        let mut sys = embedded_recording(Some("meeting-x"));
+        // Put the distinctive lexical term on the SYSTEM track only, and the
+        // strong semantic vector on the MIC track only — so each retriever prefers
+        // a different track of the same meeting.
+        sys.transcript = Some("the quarterly Kubernetes review".into());
+        db.insert(&mic).await.unwrap();
+        db.insert(&sys).await.unwrap();
+
+        // Mic track: chunk vector strongly on the query axis (semantic winner).
+        db.upsert_chunk_embeddings(&mic.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        // System track: vector points elsewhere, but it carries the exact term.
+        db.upsert_chunk_embeddings(&sys.id, &[vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+
+        let results = db
+            .hybrid_search("Kubernetes", &[1.0, 0.0, 0.0], 10, 0.12)
+            .await
+            .unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "the meeting's two tracks must collapse to a single result, got {results:?}"
+        );
+        // The surviving row is one of the meeting's tracks.
+        assert!(
+            results[0].0.as_str() == mic.id.as_str() || results[0].0.as_str() == sys.id.as_str()
+        );
+    }
+
+    #[tokio::test]
     async fn test_insert_and_get() {
         let db = Catalog::open(Path::new("sqlite::memory:"))
             .await
@@ -1196,7 +1743,10 @@ mod tests {
             .expect("user edit");
         let got = db.get(&r.id).await.unwrap().unwrap();
         assert_eq!(got.transcript.as_deref(), Some("edited by the user"));
-        assert_eq!(got.model.as_deref(), Some("user-edit"));
+        // The transcription model is preserved — a hand edit is surfaced by the
+        // user_edited flag / "Edited" column, not by overwriting the model field.
+        assert_eq!(got.model.as_deref(), Some("ggml-base"));
+        assert!(got.user_edited, "a manual edit must set the user_edited flag");
         assert_eq!(
             db.get_original_transcript(&r.id).await.unwrap().as_deref(),
             Some("machine output")

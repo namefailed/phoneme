@@ -52,32 +52,38 @@ async fn main() -> Result<()> {
 
     reconcile::run(&state).await?;
 
-    // Background task to retroactively embed recordings that lack embeddings
+    // Background task to (re-)embed recordings that lack per-chunk embeddings.
+    // This doubles as the migration from the legacy whole-recording `embeddings`
+    // table to sentence-aware chunk vectors: any recording with a transcript but
+    // no chunk rows — including ones that only have an old whole-recording vector
+    // — is backfilled so paraphrase recall improves across the existing library
+    // without the user re-recording or re-transcribing anything.
     let retroactive_state = state.clone();
     tokio::spawn(async move {
         let embedder_guard = retroactive_state.embedder.read().await;
         if let Some(embedder) = embedder_guard.as_ref() {
             if let Ok(records) = retroactive_state
                 .catalog
-                .list_recordings_without_embeddings()
+                .list_recordings_without_chunk_embeddings()
                 .await
             {
                 if !records.is_empty() {
                     tracing::info!(
-                        "Found {} recordings without semantic embeddings, generating...",
+                        "Found {} recordings without chunk embeddings, (re-)embedding...",
                         records.len()
                     );
                     for r in records {
                         if let Some(transcript) = r.transcript.as_ref() {
-                            if let Ok(vec) = embedder.embed(transcript) {
-                                let _ = retroactive_state
-                                    .catalog
-                                    .upsert_embedding(&r.id, &vec)
-                                    .await;
-                            }
+                            pipeline::embed_and_store(
+                                embedder,
+                                &retroactive_state.catalog,
+                                &r.id,
+                                transcript,
+                            )
+                            .await;
                         }
                     }
-                    tracing::info!("Finished generating retroactive semantic embeddings.");
+                    tracing::info!("Finished backfilling chunk embeddings.");
                 }
             }
         }

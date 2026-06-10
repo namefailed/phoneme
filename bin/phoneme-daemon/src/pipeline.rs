@@ -5,7 +5,7 @@
 use crate::app_state::AppState;
 use phoneme_core::config::{Config, LlmPostProcessConfig};
 use phoneme_core::error::Result;
-use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
+use phoneme_core::{Catalog, Embedder, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
 use phoneme_ipc::{DaemonEvent, PipelineStage};
 
 /// Coalesce streamed deltas until this many chars accumulate, then flush one
@@ -89,6 +89,42 @@ pub(crate) async fn run_llm_stage(
     result
 }
 use std::time::Duration;
+
+/// Embed `transcript` for semantic search and persist both representations:
+/// per-chunk vectors (the high-recall path that powers paraphrase matching) and
+/// the legacy whole-recording vector (kept so anything that still reads the old
+/// `embeddings` table — and the search fallback — stays consistent).
+///
+/// Shared by every place a transcript becomes final or changes (pipeline, manual
+/// edit, cleanup re-run, retroactive backfill) so all paths embed identically.
+/// Best-effort: a failure is logged, never fatal — search degrades gracefully
+/// rather than failing the recording.
+pub(crate) async fn embed_and_store(
+    embedder: &Embedder,
+    catalog: &Catalog,
+    id: &RecordingId,
+    transcript: &str,
+) {
+    match embedder.embed_chunks(transcript) {
+        Ok(chunks) => {
+            if let Err(e) = catalog.upsert_chunk_embeddings(id, &chunks).await {
+                tracing::warn!(error = %e, "Failed to save chunk embeddings");
+            } else {
+                tracing::info!(chunks = chunks.len(), "Saved chunk embeddings for {}", id.as_str());
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "Failed to embed transcript chunks"),
+    }
+    // Keep the whole-recording vector in sync too (cheap; one extra embed).
+    match embedder.embed(transcript) {
+        Ok(vec) => {
+            if let Err(e) = catalog.upsert_embedding(id, &vec).await {
+                tracing::warn!(error = %e, "Failed to save embedding to catalog");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "Failed to embed transcript"),
+    }
+}
 
 /// Build the effective LLM config for summaries: start from `[llm_post_process]`
 /// and overlay any summary-specific provider / URL / key / model the user set.
@@ -458,18 +494,7 @@ pub async fn run(
 
     let embedder_guard = state.embedder.read().await;
     if let Some(embedder) = embedder_guard.as_ref() {
-        match embedder.embed(&transcript) {
-            Ok(vec) => {
-                if let Err(e) = state.catalog.upsert_embedding(&id, &vec).await {
-                    tracing::warn!(error = %e, "Failed to save embedding to catalog");
-                } else {
-                    tracing::info!("Saved semantic embedding for {}", id.as_str());
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to embed transcript");
-            }
-        }
+        embed_and_store(embedder, &state.catalog, &id, &transcript).await;
     }
     drop(embedder_guard);
 

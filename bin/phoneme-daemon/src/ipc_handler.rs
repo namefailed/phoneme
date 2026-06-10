@@ -228,20 +228,19 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::SemanticSearch { query, limit } => {
-            // Cosine floor below which a match is treated as noise. Short
-            // queries (a single word like "memory") legitimately score lower
-            // against a recording's averaged embedding, so 0.2 was dropping
-            // genuinely-related hits. 0.1 keeps those loosely-related matches
-            // while still excluding the near-orthogonal (~0) noise. The deeper
-            // recall win — per-chunk embeddings so a phrase inside a long
-            // recording ranks on its own — is tracked as a follow-up.
-            const SEMANTIC_MIN_SCORE: f32 = 0.1;
+            // Minimum *calibrated* relevance (0..1) a semantic-only hit must clear
+            // to surface. Hybrid search ranks by per-chunk best-match cosine fused
+            // (RRF) with the FTS5 lexical ranking, so this is no longer a fragile
+            // raw-cosine floor that silently dropped good paraphrase matches: a
+            // lexical (exact-term) hit is never filtered by this, and the score is
+            // calibrated so 0.12 ≈ "barely related". See catalog::hybrid_search.
+            const SEMANTIC_MIN_RELEVANCE: f32 = 0.12;
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {
                 match embedder.embed(&query) {
                     Ok(query_vec) => match state
                         .catalog
-                        .semantic_search(&query_vec, limit, SEMANTIC_MIN_SCORE)
+                        .hybrid_search(&query, &query_vec, limit, SEMANTIC_MIN_RELEVANCE)
                         .await
                     {
                         Ok(results) => {
@@ -322,9 +321,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Ok(()) => {
                     let embedder_guard = state.embedder.read().await;
                     if let Some(embedder) = embedder_guard.as_ref() {
-                        if let Ok(vec) = embedder.embed(&text) {
-                            let _ = state.catalog.upsert_embedding(&id, &vec).await;
-                        }
+                        crate::pipeline::embed_and_store(embedder, &state.catalog, &id, &text).await;
                     }
                     drop(embedder_guard);
 
@@ -1227,9 +1224,8 @@ async fn rerun_cleanup(
                 // mirroring the pipeline and UpdateTranscript paths.
                 let embedder_guard = task_state.embedder.read().await;
                 if let Some(embedder) = embedder_guard.as_ref() {
-                    if let Ok(vec) = embedder.embed(&cleaned) {
-                        let _ = task_state.catalog.upsert_embedding(&id, &vec).await;
-                    }
+                    crate::pipeline::embed_and_store(embedder, &task_state.catalog, &id, &cleaned)
+                        .await;
                 }
                 drop(embedder_guard);
 
