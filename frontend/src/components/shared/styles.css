@@ -3,6 +3,9 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   display: flex;
+  /* Wrap to a second row on a narrow window instead of squishing/clipping the
+     right-side Record + Settings split buttons. No effect when there's room. */
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   flex-shrink: 0;
