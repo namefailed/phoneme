@@ -31,6 +31,10 @@ export class RerunFormElement extends LitElement {
   @property({ type: Boolean }) busy = false;
   /** Label for the confirm button (e.g. "Re-run" or "Re-run · 8"). */
   @property({ type: String }) submitLabel = "Re-run";
+  /** Render as a centered modal panel (wider, scrolls) instead of the compact
+   *  280px dropdown card. The parent wraps it in a `.modal-overlay`. The "All"
+   *  step is too tall for a dropdown, so the detail + bulk surfaces use this. */
+  @property({ type: Boolean }) modal = false;
 
   @state() private config: any = null;
   @state() private availableModels: { value: string; label: string }[] = [];
@@ -572,10 +576,15 @@ export class RerunFormElement extends LitElement {
   }
 
   render() {
+    // Modal: a centered, wider, scrollable panel (the "All" step is too tall for
+    // a dropdown). Dropdown: the original compact 280px anchored card.
+    const rootStyle = this.modal
+      ? "width: min(460px, calc(100vw - 48px)); max-height: 85vh; overflow-y: auto; background: var(--bg-elevated); border: var(--popup-border); border-radius: 10px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04); display: flex; flex-direction: column; gap: 12px; text-align: left; align-items: stretch;"
+      : "width: 280px; background: var(--bg-elevated); border: var(--popup-border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;";
     return html`
-      <div class="rerun-form" @click=${(e: Event) => e.stopPropagation()}
-        style="width: 280px; background: var(--bg-elevated); border: var(--popup-border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
-        <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-run</h4>
+      <div class="rerun-form ${this.modal ? "rerun-form--modal" : ""}" @click=${(e: Event) => e.stopPropagation()}
+        style=${rootStyle}>
+        <h4 style="margin: 0; font-size: ${this.modal ? "15px" : "13px"}; font-weight: 600; color: var(--fg-default); display: flex; align-items: center; gap: 7px;">↻ Re-run</h4>
 
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label style="font-size: 11px; color: var(--fg-muted);">Step</label>

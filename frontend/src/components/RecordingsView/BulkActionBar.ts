@@ -227,10 +227,6 @@ export class BulkActionBarElement extends LitElement {
         <div class="bulk-actions">
           <span class="bulk-menu-wrap">
             <button class="bulk-btn" title="Re-run a step on the selected recordings" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("rerun", e)}>↻ Re-run <svg class="ph-caret-ico ${this.openMenu === "rerun" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
-            ${this.openMenu === "rerun" ? html`
-              <div class="bulk-rerun-pop" @click=${(e: Event) => e.stopPropagation()}>
-                <ph-rerun-form .busy=${this.busy} .submitLabel=${`Re-run · ${n}`} @rerun=${this.onRerun} @cancel=${() => { this.openMenu = null; }}></ph-rerun-form>
-              </div>` : null}
           </span>
 
           <span class="bulk-menu-wrap">
@@ -260,6 +256,11 @@ export class BulkActionBarElement extends LitElement {
           <button class="bulk-btn bulk-btn--muted" title="Deselect all" .disabled=${this.busy} @click=${() => this.callbacks.onClear()}>✕ Deselect</button>
         </div>
       </div>
+
+      ${this.openMenu === "rerun" ? html`
+        <div class="modal-overlay" @click=${(e: MouseEvent) => { if (e.target === e.currentTarget) this.openMenu = null; }}>
+          <ph-rerun-form modal .busy=${this.busy} .submitLabel=${`Re-run · ${n}`} @rerun=${this.onRerun} @cancel=${() => { this.openMenu = null; }}></ph-rerun-form>
+        </div>` : null}
     `;
   }
 }

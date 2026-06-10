@@ -45,6 +45,15 @@ export class ActionRowElement extends LitElement {
       case "rerun": this.rerunMenuOpen = true; break;
     }
   };
+  /** Close the Re-run modal on Escape (capture-phase so it beats the global vim
+   *  layer). Only acts while the modal is open. */
+  private escHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && this.rerunMenuOpen) {
+      e.stopPropagation();
+      e.preventDefault();
+      this.rerunMenuOpen = false;
+    }
+  };
 
   connectedCallback() {
     super.connectedCallback();
@@ -56,6 +65,7 @@ export class ActionRowElement extends LitElement {
       }
     };
     document.addEventListener("click", this.docClickHandler);
+    document.addEventListener("keydown", this.escHandler, true);
     window.addEventListener("phoneme:action", this.actionHandler);
   }
 
@@ -64,6 +74,7 @@ export class ActionRowElement extends LitElement {
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }
+    document.removeEventListener("keydown", this.escHandler, true);
     window.removeEventListener("phoneme:action", this.actionHandler);
   }
 
@@ -91,6 +102,11 @@ export class ActionRowElement extends LitElement {
 
   private onCancelRerun() {
     this.rerunMenuOpen = false;
+  }
+
+  /** Close only when the backdrop itself is clicked (not the form inside it). */
+  private onOverlayClick(e: MouseEvent) {
+    if (e.target === e.currentTarget) this.rerunMenuOpen = false;
   }
 
   /** The transcript with any custom speaker names applied, for copy/export. */
@@ -149,11 +165,11 @@ export class ActionRowElement extends LitElement {
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
 
         <div class="split-btn" style="position: relative;">
-          <button class="rerun-trigger" title="Re-run a step on this recording" aria-haspopup="menu" aria-expanded=${this.rerunMenuOpen ? "true" : "false"} @click=${this.toggleRerunMenu}>↻ Re-run… <svg class="ph-caret-ico ${this.rerunMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+          <button class="rerun-trigger" title="Re-run a step on this recording" aria-haspopup="dialog" aria-expanded=${this.rerunMenuOpen ? "true" : "false"} @click=${this.toggleRerunMenu}>↻ Re-run… <svg class="ph-caret-ico ${this.rerunMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 
           ${this.rerunMenuOpen ? html`
-            <div role="menu" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100;">
-              <ph-rerun-form @rerun=${this.onRerun} @cancel=${this.onCancelRerun}></ph-rerun-form>
+            <div class="modal-overlay" @click=${this.onOverlayClick}>
+              <ph-rerun-form modal @rerun=${this.onRerun} @cancel=${this.onCancelRerun}></ph-rerun-form>
             </div>
           ` : nothing}
         </div>
