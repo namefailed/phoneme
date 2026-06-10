@@ -99,7 +99,8 @@
    ambiguous which pane is active. A left accent bar + ring + tint make the
    cursor unmistakable while you're in the list. Rows that are the SELECTED one
    keep their full selected look (`:not(.active)` never overrides it). */
-.rec-table:focus-within .rec-row.kbd-focused:not(.active) {
+.rec-table:focus-within .rec-row.kbd-focused:not(.active),
+.rec-table:focus-within .rec-group-head.kbd-focused:not(.active) {
   outline: none;
   box-shadow: inset 3px 0 0 var(--accent),
     inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
