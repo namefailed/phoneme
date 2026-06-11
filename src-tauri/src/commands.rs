@@ -1175,7 +1175,15 @@ pub fn reveal_file(path: String) -> Result<(), CommandError> {
     // (the only thing the UI ever reveals — a recording's WAV or the folder
     // itself) so a compromised WebView can't pop Explorer onto arbitrary paths.
     let cfg = config_io::read().map_err(|e| format!("config error: {e}"))?;
-    let audio_dir = std::path::PathBuf::from(&cfg.recording.audio_dir);
+    // Expand %VAR%/~ in the configured audio dir before comparing. The path the
+    // UI reveals is an absolute, already-expanded path, so a raw config string
+    // like "%USERPROFILE%\\Documents\\phoneme\\audio" would never match and the
+    // reveal would fail "path not permitted".
+    let audio_dir_raw = cfg
+        .expanded()
+        .map(|c| c.recording.audio_dir)
+        .unwrap_or_else(|_| cfg.recording.audio_dir.clone());
+    let audio_dir = std::path::PathBuf::from(&audio_dir_raw);
     let requested = std::path::PathBuf::from(&path);
     if requested != audio_dir && !path_within(&requested, &audio_dir) {
         return Err("path not permitted".into());
