@@ -55,7 +55,10 @@ pub async fn run(args: QueueArgs, cfg: &Config, json: bool) -> ExitCode {
                 if json {
                     output::print_json(&value);
                 } else {
-                    let paused = value.get("paused").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let paused = value
+                        .get("paused")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     println!("{}", if paused { "paused" } else { "running" });
                 }
                 ExitCode::SUCCESS

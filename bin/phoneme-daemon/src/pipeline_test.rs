@@ -15,7 +15,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Build a minimal Transcribing recording row + matching audio file for a
 /// pipeline run, returning the id. Keeps the override test below focused.
-async fn seed_recording(state: &AppState, tmp: &std::path::Path) -> (RecordingId, std::path::PathBuf) {
+async fn seed_recording(
+    state: &AppState,
+    tmp: &std::path::Path,
+) -> (RecordingId, std::path::PathBuf) {
     let audio_path = tmp.join(format!("{}.wav", RecordingId::new()));
     std::fs::write(&audio_path, b"RIFF....not-real-audio").unwrap();
     let id = RecordingId::new();
@@ -167,7 +170,11 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         .unwrap()
         .expect("recording should still exist");
 
-    assert_eq!(rec.status, RecordingStatus::Done, "pipeline should finish Done");
+    assert_eq!(
+        rec.status,
+        RecordingStatus::Done,
+        "pipeline should finish Done"
+    );
     assert_eq!(
         rec.transcript.as_deref(),
         Some("PROCESSED OUTPUT"),

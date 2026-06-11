@@ -64,10 +64,7 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
 }
 
 /// Resolve a `--tag` argument (numeric id or tag name) to a tag id.
-async fn resolve_tag(
-    client: &mut Client,
-    tag: Option<&str>,
-) -> Result<Option<i64>, ExitCode> {
+async fn resolve_tag(client: &mut Client, tag: Option<&str>) -> Result<Option<i64>, ExitCode> {
     let Some(tag) = tag else { return Ok(None) };
     if let Ok(id) = tag.parse::<i64>() {
         return Ok(Some(id));

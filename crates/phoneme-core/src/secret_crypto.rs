@@ -122,9 +122,8 @@ fn dpapi_protect(plaintext: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     // SAFETY: on success DPAPI guarantees `pbData`/`cbData` describe a valid buffer.
-    let bytes = unsafe {
-        std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec()
-    };
+    let bytes =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
     // SAFETY: `pbData` was allocated by DPAPI via LocalAlloc; free it once.
     unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
     Some(bytes)
@@ -164,9 +163,8 @@ fn dpapi_unprotect(ciphertext: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     // SAFETY: on success DPAPI guarantees `pbData`/`cbData` describe a valid buffer.
-    let bytes = unsafe {
-        std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec()
-    };
+    let bytes =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
     // SAFETY: DPAPI-allocated; free once.
     unsafe { LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
     Some(bytes)
@@ -186,7 +184,10 @@ mod tests {
     fn legacy_plaintext_reads_back_verbatim() {
         // Migration: a key written before DPAPI (no prefix) must round-trip on
         // read so existing configs keep working until the next save re-encrypts.
-        assert_eq!(unprotect("sk-legacy-plaintext-key"), "sk-legacy-plaintext-key");
+        assert_eq!(
+            unprotect("sk-legacy-plaintext-key"),
+            "sk-legacy-plaintext-key"
+        );
     }
 
     #[test]
@@ -202,8 +203,14 @@ mod tests {
     fn dpapi_protect_unprotect_roundtrips() {
         let key = "sk-proj-abc123-secret";
         let stored = protect(key);
-        assert!(stored.starts_with(PREFIX), "encrypted form is tagged: {stored}");
-        assert!(!stored.contains(key), "plaintext must not appear in the stored form");
+        assert!(
+            stored.starts_with(PREFIX),
+            "encrypted form is tagged: {stored}"
+        );
+        assert!(
+            !stored.contains(key),
+            "plaintext must not appear in the stored form"
+        );
         assert_eq!(unprotect(&stored), key, "decrypt restores the original");
     }
 

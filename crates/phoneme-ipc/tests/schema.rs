@@ -62,6 +62,11 @@ fn all_daemon_events_roundtrip() {
             id: id.clone(),
             started_at: chrono::Local::now(),
             meeting_id: None,
+            track: None,
+        },
+        DaemonEvent::TagSuggestionsUpdated { id: id.clone() },
+        DaemonEvent::PreviewSourceChanged {
+            track: "mic".into(),
         },
         DaemonEvent::RecordingStopped {
             id: id.clone(),

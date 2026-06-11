@@ -106,9 +106,10 @@ impl InboxQueue {
         let mut placed: std::collections::HashSet<String> = std::collections::HashSet::new();
         // 1. Files explicitly ordered by the user, in that order.
         for id in &order {
-            if let Some(p) = files.iter().find(|f| {
-                f.file_stem().and_then(|s| s.to_str()) == Some(id.as_str())
-            }) {
+            if let Some(p) = files
+                .iter()
+                .find(|f| f.file_stem().and_then(|s| s.to_str()) == Some(id.as_str()))
+            {
                 ordered.push(p.clone());
                 placed.insert(id.clone());
             }

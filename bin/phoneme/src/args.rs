@@ -348,13 +348,9 @@ pub enum QueueAction {
         ids: Vec<String>,
     },
     /// Remove one still-pending recording from the queue.
-    Cancel {
-        id: String,
-    },
+    Cancel { id: String },
     /// Cancel the item currently being processed (abort the in-flight work).
-    CancelProcessing {
-        id: String,
-    },
+    CancelProcessing { id: String },
     /// Remove ALL still-pending items from the queue at once.
     CancelAll,
     /// Empty the inbox `failed/` quarantine ("dismiss failed").

@@ -202,7 +202,11 @@ fn clean_speaker_spans(mut spans: Vec<SpeakerSpan>, merge_gap: f64) -> Vec<Speak
             .partial_cmp(&b.start)
             .unwrap_or(std::cmp::Ordering::Equal)
             // Stable tie-break on end so equal-start spans order deterministically.
-            .then(a.end.partial_cmp(&b.end).unwrap_or(std::cmp::Ordering::Equal))
+            .then(
+                a.end
+                    .partial_cmp(&b.end)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
     });
 
     let mut merged: Vec<SpeakerSpan> = Vec::with_capacity(spans.len());
@@ -383,10 +387,7 @@ mod tests {
     fn clean_spans_absorbs_nested_same_speaker_fragment() {
         // A later same-speaker fragment fully contained in the previous turn must
         // not shrink it (ends can nest even though spans are start-sorted).
-        let raw = vec![
-            span(0.0, 5.0, "SPEAKER_00"),
-            span(1.0, 2.0, "SPEAKER_00"),
-        ];
+        let raw = vec![span(0.0, 5.0, "SPEAKER_00"), span(1.0, 2.0, "SPEAKER_00")];
         let cleaned = clean_speaker_spans(raw, SPEAKER_MERGE_GAP_SECS);
         assert_eq!(cleaned, vec![span(0.0, 5.0, "SPEAKER_00")]);
     }
@@ -403,17 +404,17 @@ mod tests {
         // The old midpoint-first-match logic attributed the second line to the
         // earliest-starting covering span (SPEAKER_00), collapsing the whole
         // transcript onto ONE speaker. Max-overlap recovers the second speaker.
-        let speakers = vec![
-            span(0.0, 9.0, "SPEAKER_00"),
-            span(5.0, 12.0, "SPEAKER_01"),
-        ];
+        let speakers = vec![span(0.0, 9.0, "SPEAKER_00"), span(5.0, 12.0, "SPEAKER_01")];
         let segments = vec![
             seg(0.0, 3.0, "first speaker"),
             seg(6.0, 11.0, "second speaker"),
         ];
         let (text, n) = assign_speakers(&segments, &speakers);
         assert_eq!(n, 2, "both speakers must be recovered, got: {text}");
-        assert_eq!(text, "[Speaker 1]: first speaker\n\n[Speaker 2]: second speaker");
+        assert_eq!(
+            text,
+            "[Speaker 1]: first speaker\n\n[Speaker 2]: second speaker"
+        );
     }
 
     #[test]
@@ -421,17 +422,20 @@ mod tests {
         // Two non-overlapping turns with a clean hand-off at 5.0. A line that
         // straddles it [4.0, 8.0] overlaps SPEAKER_00 by 1.0s and SPEAKER_01 by
         // 3.0s → SPEAKER_01 owns it.
-        let speakers = vec![
-            span(0.0, 5.0, "SPEAKER_00"),
-            span(5.0, 10.0, "SPEAKER_01"),
-        ];
+        let speakers = vec![span(0.0, 5.0, "SPEAKER_00"), span(5.0, 10.0, "SPEAKER_01")];
         let segments = vec![
             seg(0.5, 4.0, "first speaker talks"),
             seg(4.0, 8.0, "straddles the handoff"),
         ];
         let (text, _) = assign_speakers(&segments, &speakers);
-        assert!(text.contains("[Speaker 1]: first speaker talks"), "got: {text}");
-        assert!(text.contains("[Speaker 2]: straddles the handoff"), "got: {text}");
+        assert!(
+            text.contains("[Speaker 1]: first speaker talks"),
+            "got: {text}"
+        );
+        assert!(
+            text.contains("[Speaker 2]: straddles the handoff"),
+            "got: {text}"
+        );
     }
 
     #[test]
@@ -442,13 +446,17 @@ mod tests {
         // flickering Speaker 1/2/1/2 mess.
         let raw = vec![
             span(0.0, 2.0, "SPEAKER_00"),
-            span(2.1, 4.0, "SPEAKER_00"),  // micro-pause → same turn
-            span(3.8, 8.0, "SPEAKER_01"),  // overlaps the tail of SPEAKER_00
-            span(8.1, 9.0, "SPEAKER_01"),  // micro-pause → same turn
+            span(2.1, 4.0, "SPEAKER_00"), // micro-pause → same turn
+            span(3.8, 8.0, "SPEAKER_01"), // overlaps the tail of SPEAKER_00
+            span(8.1, 9.0, "SPEAKER_01"), // micro-pause → same turn
         ];
         let speakers = clean_speaker_spans(raw, SPEAKER_MERGE_GAP_SECS);
         // Two clean turns: SPEAKER_00 [0,4], SPEAKER_01 [3.8,9].
-        assert_eq!(speakers.len(), 2, "expected 2 merged turns, got: {speakers:?}");
+        assert_eq!(
+            speakers.len(),
+            2,
+            "expected 2 merged turns, got: {speakers:?}"
+        );
 
         let segments = vec![
             seg(0.0, 2.0, "a one"),

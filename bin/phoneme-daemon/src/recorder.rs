@@ -440,11 +440,11 @@ impl DaemonRecorder {
                 // recorder also tells us the full captured length so we can still
                 // throttle on newly-accumulated audio). If the recorder is gone
                 // (race with stop), `snapshot_tail` errors and we end the loop.
-                let (total_len, samples) = match snapshot.snapshot_tail(PREVIEW_WINDOW_SAMPLES).await
-                {
-                    Ok(s) => s,
-                    Err(_) => break,
-                };
+                let (total_len, samples) =
+                    match snapshot.snapshot_tail(PREVIEW_WINDOW_SAMPLES).await {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
                 // Skip until enough *new* audio has accumulated to be worth a tick.
                 if total_len < last_len + PREVIEW_MIN_NEW_SAMPLES {
                     continue;
@@ -507,7 +507,10 @@ impl DaemonRecorder {
             let _ = tokio::fs::remove_file(&tmp_wav).await;
         });
 
-        self.preview.lock().await.push(PreviewTask { stop_tx, task });
+        self.preview
+            .lock()
+            .await
+            .push(PreviewTask { stop_tx, task });
         tracing::info!(id = %log_id, "streaming transcription preview started");
     }
 
@@ -692,7 +695,8 @@ impl DaemonRecorder {
 
         // Spawn the live streaming-preview loop. No-op unless
         // `recording.streaming_preview` is enabled (default: off).
-        self.start_preview(state, id.clone(), preview_snapshot).await;
+        self.start_preview(state, id.clone(), preview_snapshot)
+            .await;
 
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
@@ -1080,7 +1084,7 @@ impl DaemonRecorder {
                 diarized: false,
                 user_edited: false,
                 favorite: false,
-            tag_suggestions: vec![],
+                tag_suggestions: vec![],
                 summary: None,
                 summary_model: None,
                 tags: vec![],

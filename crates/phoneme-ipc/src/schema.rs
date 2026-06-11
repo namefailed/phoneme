@@ -375,7 +375,9 @@ impl<'de> Deserialize<'de> for ServerRequest {
         let value = serde_json::Value::deserialize(deserializer)?;
         Ok(match serde_json::from_value::<Request>(value) {
             Ok(req) => ServerRequest::Known(Box::new(req)),
-            Err(e) => ServerRequest::Unknown { detail: e.to_string() },
+            Err(e) => ServerRequest::Unknown {
+                detail: e.to_string(),
+            },
         })
     }
 }

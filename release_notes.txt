@@ -1,4 +1,0 @@
-﻿## What's Changed
-* audio: synthetic backend for CI + notes vim editor by @namefailed in https://github.com/namefailed/phoneme/pull/38
-
-**Full Changelog**: https://github.com/namefailed/phoneme/compare/v1.7.1...v1.7.5

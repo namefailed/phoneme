@@ -419,7 +419,7 @@ alongside the feature releases above.*
 
 **Docs / DX**
 - [ ] `config.example.toml` + `.env.example`; document JSON output + env vars; semantic-search + advanced-search-syntax docs; troubleshooting (audio devices, network/cloud, performance).
-- [ ] Shell completions (bash/zsh/PowerShell); `cargo-audit`/`cargo-deny`; code coverage; consolidate `release_notes.md`/`.txt`.
+- [ ] Shell completions (bash/zsh/PowerShell); `cargo-audit`/`cargo-deny`; code coverage. (Stale `release_notes.md`/`.txt` scratch files removed — GitHub releases auto-generate notes.)
 
 **Testing & CI** *(from June 2026 audit — ~6/10 maturity; strong Rust foundation, integration gaps)*
 - [x] **Gate `release.yml` on `cargo test` + vitest** — a `test` job (fmt + clippy + cargo test + vitest + type-check) now blocks the release job.
