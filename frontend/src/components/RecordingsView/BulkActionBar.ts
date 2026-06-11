@@ -52,6 +52,69 @@ export class BulkActionBarElement extends LitElement {
     }
   };
 
+  /** Roving keyboard cursor over the bar's buttons (Shift+Enter from the list
+   *  enters this); -1 = not active. */
+  @state() private navIndex = -1;
+
+  private bulkButtons(): HTMLElement[] {
+    return [...this.querySelectorAll<HTMLElement>(".bulk-bar .bulk-btn")].filter((b) => b.offsetParent !== null);
+  }
+
+  private highlightBulkNav() {
+    this.querySelectorAll(".bulk-btn.kbd-cursor").forEach((b) => b.classList.remove("kbd-cursor"));
+    this.bulkButtons()[this.navIndex]?.classList.add("kbd-cursor");
+  }
+
+  /** Shift+Enter from the list hands keyboard control to the bar. */
+  private onEnterBulkBar = () => {
+    if (this.selected.size === 0) return;
+    this.navIndex = 0;
+    void this.updateComplete.then(() => this.highlightBulkNav());
+  };
+
+  private exitBulkNav() {
+    this.navIndex = -1;
+    this.querySelectorAll(".bulk-btn.kbd-cursor").forEach((b) => b.classList.remove("kbd-cursor"));
+    // Back to the recordings list, on the last-selected file.
+    window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-list" } }));
+  }
+
+  /** Keyboard nav inside the bar: h/l move, Enter activates, j/k/Esc exit.
+   *  Capture-phase + stopPropagation so it beats the list/global handlers; only
+   *  active once Shift+Enter entered the nav and no dropdown/modal owns keys. */
+  private onBulkNavKey = (e: KeyboardEvent) => {
+    // Shift+Enter (while a selection exists, and not typing in a field) hands
+    // control to the bar. The bar is only mounted when something is selected, so
+    // this listener is dormant otherwise.
+    if (e.key === "Enter" && e.shiftKey && this.navIndex < 0 && !this.openMenu) {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (!typing && this.selected.size > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.onEnterBulkBar();
+      }
+      return;
+    }
+    if (this.navIndex < 0 || this.openMenu) return;
+    const btns = this.bulkButtons();
+    if (!btns.length) return;
+    switch (e.key) {
+      case "h": case "ArrowLeft":
+        e.preventDefault(); e.stopPropagation();
+        this.navIndex = Math.max(0, this.navIndex - 1); this.highlightBulkNav(); return;
+      case "l": case "ArrowRight":
+        e.preventDefault(); e.stopPropagation();
+        this.navIndex = Math.min(btns.length - 1, this.navIndex + 1); this.highlightBulkNav(); return;
+      case "Enter": case " ":
+        e.preventDefault(); e.stopPropagation();
+        btns[this.navIndex]?.click(); return;
+      case "j": case "k": case "ArrowDown": case "ArrowUp": case "Escape":
+        e.preventDefault(); e.stopPropagation();
+        this.exitBulkNav(); return;
+    }
+  };
+
   connectedCallback() {
     super.connectedCallback();
     try {
@@ -75,12 +138,16 @@ export class BulkActionBarElement extends LitElement {
     void this.loadTags();
     document.addEventListener("click", this.docClick);
     document.addEventListener("keydown", this.onEsc, true);
+    document.addEventListener("keydown", this.onBulkNavKey, true);
+    window.addEventListener("phoneme:enter-bulk-bar", this.onEnterBulkBar);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("click", this.docClick);
     document.removeEventListener("keydown", this.onEsc, true);
+    document.removeEventListener("keydown", this.onBulkNavKey, true);
+    window.removeEventListener("phoneme:enter-bulk-bar", this.onEnterBulkBar);
   }
 
   private async loadTags() {
