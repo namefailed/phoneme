@@ -53,8 +53,7 @@ Landed most recently — verified against current code:
   chronological — see the v1.9 Meetings item.
 - [x] **System-wide live-preview overlay** — an opt-in, always-on-top, frameless
   desktop window that floats the live caption over any app (`src-tauri/src/overlay.rs`,
-  `frontend/overlay.*`), gated on `interface.preview_overlay`. See
-  [docs/design/live-preview-overlay.md](docs/design/live-preview-overlay.md).
+  `frontend/overlay.*`), gated on `interface.preview_overlay`.
 - [x] **Masked config at the WebView boundary (S-H2)** — API keys are masked before
   reaching the renderer and restored on save (`src-tauri/src/commands.rs`).
 - [x] **IPC connection resilience** — an unknown/unparseable request now returns an
@@ -215,8 +214,7 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
   / 🔊 System audio with the pipeline's `[Speaker N]` turns surfaced, plus Copy /
   Export. It does **not** yet interleave the tracks *chronologically* — per-line
   timestamps aren't persisted, so a true "You / Meeting" timeline still depends on
-  the alignment + word-timestamp prerequisites above. See
-  [docs/design/merged-meeting-view.md](docs/design/merged-meeting-view.md).
+  the alignment + word-timestamp prerequisites above.
 - [ ] **Diarization quality** *(prereq for named speakers — don't build naming UX on wrong labels)*. Each item below was verified against `diarization.rs` / `transcription.rs` and the `speakrs 0.4.2` source; verdicts noted inline.
   - [x] **Fix the `to_segments` frame scaling, then coalesce the turns** ✓ *(shipped)*. #23 first dropped the old manual `result.discrete_diarization.to_segments(1.0, 1.0)`, whose `(1.0, 1.0)` `frame_step`/`frame_duration` (vs speakrs' real `FRAME_STEP_SECONDS = 0.016875` / `FRAME_DURATION_SECONDS = 0.0619375`) inflated every turn ~59× and scrambled `assign_speakers`. But `result.segments` is **not** usable raw: speakrs builds it via `to_segments(…) + merge_segments(merge_gap)` with `PipelineConfig::default().merge_gap == 0.0` — a no-op merge — and emits **per-speaker** spans sorted only by start, so one speaker's speech fragments on every micro-pause and different speakers' spans interleave → flickering `[Speaker N]` labels. Now `clean_speaker_spans` sorts, drops zero-length spans, and merges adjacent same-speaker turns under 0.25 s, and `speaker_for_segment` attributes each transcript line by **max temporal overlap** (the old midpoint-first-covering-match could collapse an overlapped line onto whichever turn merely started first). *(diarization.rs; 7 new unit tests, one verified to fail under the old logic.)*
   - [ ] **Cache the pipeline in `AppState`** *(confirmed)*. `run_local_diarization` calls `OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)` on *every* transcription (`diarization.rs:157`), reloading the ~500 MB seg+emb ONNX models each time; `AppState` (`app_state.rs`) holds no diarizer. Hold one long-lived pipeline fed via speakrs' background queue — `OwnedDiarizationPipeline::into_queued()` returns a `(QueueSender, QueueReceiver)` (`pipeline.rs:179`) — so model load happens once at startup. *(transcription.rs:352 `diarize_transcript` → diarization.rs:154)*
@@ -368,9 +366,7 @@ graduate someday live in the [Idea Parking Lot](docs/IDEAS.md) instead.)
 ## 🔬 Audit follow-ups (June 2026 code audits)
 
 Two line-by-line audits (a combined module pass + a net-new pass on the newest
-code). Full findings, locations, and fixes:
-[docs/audits/2026-06-code-audit.md](docs/audits/2026-06-code-audit.md). **Not
-started** — these land in waves once kicked off. *Already resolved:* DPAPI
+code). **Not started** — these land in waves once kicked off. *Already resolved:* DPAPI
 at-rest, the masked-config WebView boundary, diarization coalescing, list-pane
 fill + scroll-extend, the detail-pane overhaul. The transcript-diff,
 saved-searches, and curated-models features audited **clean**.
@@ -439,7 +435,7 @@ alongside the feature releases above.*
 
 **Docs accuracy** *(audit found drift — fix the user-facing claims)*
 - [x] Say **speakrs**, not "Pyannote", everywhere (docs + `SectionDiarization.ts`). *(A-C5 — verified clean.)*
-- [x] Reconcile claims that don't match code — see [docs/audits/2026-06-docs-audit.md](docs/audits/2026-06-docs-audit.md).
+- [x] Reconcile claims that don't match code:
   `hook.log` / `HookPayload.original_transcript` are no longer claimed; the hook
   payload doc matches the struct; the merged-meeting and semantic-search docs were
   rewritten to match the shipped coarse merge + chunked hybrid search; `docs/screenshots/`

@@ -55,11 +55,6 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Data Directories](developer-guide/data_directories.md) — Config, catalog, inbox, logs, models
 - [Threat Model](developer-guide/threat_model.md) — Trust boundaries, mitigations, open hardening items
 
-### Design notes & audits
-- [Merged meeting view](design/merged-meeting-view.md) — Why the merge is coarse (for now)
-- [Live preview overlay](design/live-preview-overlay.md) — System-wide caption window
-- [Docs audit — June 2026](audits/2026-06-docs-audit.md) — What drifted and what was fixed
-
 ### Integration
 - [CLI Reference](developer-guide/cli_reference.md) — Every `phoneme` subcommand
 - [IPC Integration](developer-guide/ipc_integration.md) — NDJSON over `\\.\pipe\phoneme-daemon`
