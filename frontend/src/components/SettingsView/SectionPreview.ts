@@ -171,13 +171,12 @@ export class SectionPreview {
       this.render();
     });
 
-    // "Preview" briefly shows the overlay so the user can see and position it
-    // without starting a real recording. Hides again after a few seconds.
+    // "Preview" shows the overlay with sample text and keeps it up until the
+    // user closes it with ✕ — all the time they need to drag and resize it.
     this.container.querySelector<HTMLButtonElement>("#prev-overlay-test")?.addEventListener("click", async () => {
       try {
-        await invoke("set_overlay", { action: "show" });
-        showToast("Overlay shown — drag it where you like; it hides shortly.", "info");
-        setTimeout(() => void invoke("set_overlay", { action: "hide" }).catch(() => {}), 4000);
+        await invoke("set_overlay", { action: "preview" });
+        showToast("Overlay shown with sample text — drag/resize it, then close it with ✕.", "info");
       } catch (e) {
         showToast(`Could not show overlay: ${errText(e)}`, "error");
       }

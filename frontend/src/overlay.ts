@@ -25,6 +25,11 @@ root.innerHTML = `
 const textEl = document.getElementById("ov-text") as HTMLElement;
 const win = getCurrentWindow();
 
+/** Placeholder shown by the Settings "Preview" button so the overlay can be
+ *  positioned/resized without a live recording. */
+const DUMMY_PREVIEW =
+  "This is your live transcription overlay. Drag it anywhere and resize it from the window edges — your words appear here as you speak. Close it with the ✕ when it's where you want it.";
+
 // Apply the saved theme so the overlay matches the app's look. Falls back to the
 // CSS default if the config read fails — the overlay must never block on it.
 void (async () => {
@@ -84,6 +89,7 @@ function queue(text: string | null) {
 let dimTimer: number | null = null;
 let hideTimer: number | null = null;
 let userHidden = false; // set when the user clicks ✕; cleared on the next start
+let previewPinned = false; // Settings "Preview": stay up (no auto-hide) until ✕
 
 function clearTimers() {
   if (dimTimer !== null) { clearTimeout(dimTimer); dimTimer = null; }
@@ -105,6 +111,7 @@ async function showOverlay() {
 }
 
 function scheduleHide() {
+  if (previewPinned) return; // a manual preview stays up until the user closes it
   clearTimers();
   // Keep the final caption up briefly, then dim, then hide.
   dimTimer = window.setTimeout(() => document.body.classList.add("ov-dim"), 2500);
@@ -118,6 +125,7 @@ function scheduleHide() {
 
 document.getElementById("ov-close")?.addEventListener("click", () => {
   userHidden = true;
+  previewPinned = false;
   clearTimers();
   void win.hide().catch(() => {});
 });
@@ -128,6 +136,8 @@ void listen<any>("daemon-event", async (e) => {
   switch (p?.event) {
     case "recording_started":
       // Both single recordings and meeting tracks carry this; show for either.
+      // A real recording ends any manual preview pinning.
+      previewPinned = false;
       pendingText = null;
       renderText(null);
       await showOverlay();
@@ -148,4 +158,15 @@ void listen<any>("daemon-event", async (e) => {
       scheduleHide();
       break;
   }
+});
+
+// The Settings "Preview" button (set_overlay "preview") asks us to show sample
+// text and stay pinned open until the user closes it with ✕ — so they can drag
+// and resize the overlay without starting a recording.
+void listen("overlay-preview", async () => {
+  previewPinned = true;
+  userHidden = false;
+  clearTimers();
+  await showOverlay();
+  renderText(DUMMY_PREVIEW);
 });

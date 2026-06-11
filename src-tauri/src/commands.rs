@@ -532,7 +532,7 @@ pub fn set_overlay(
     x: Option<f64>,
     y: Option<f64>,
 ) -> Result<(), CommandError> {
-    use tauri::Manager;
+    use tauri::{Emitter, Manager};
     // Create the window on demand so "show" works even before the first record.
     crate::overlay::ensure(&app);
     let Some(win) = app.get_webview_window(crate::overlay::OVERLAY_LABEL) else {
@@ -548,6 +548,14 @@ pub fn set_overlay(
             win.set_always_on_top(true).map_err(map)?;
         }
         "hide" => win.hide().map_err(map)?,
+        "preview" => {
+            // Show it and ask the overlay webview to render placeholder text and
+            // stay pinned open (no auto-hide) so the user can position/resize it
+            // without recording. The overlay's ✕ closes it.
+            win.show().map_err(map)?;
+            win.set_always_on_top(true).map_err(map)?;
+            let _ = app.emit(crate::overlay::OVERLAY_PREVIEW_EVENT, ());
+        }
         "move" => {
             let (x, y) = (x.unwrap_or(0.0), y.unwrap_or(0.0));
             win.set_position(tauri::LogicalPosition::new(x, y))
