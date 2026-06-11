@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listRecordings, semanticSearch, updateMeetingName, type Recording } from "../../services/ipc";
+import { listRecordings, semanticSearch, updateMeetingName, setFavorite, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
 import { filterStore, type RecordingKind } from "../../state/filter";
@@ -185,7 +185,22 @@ export class RecordingsListElement extends LitElement {
   private filterByKind(rows: Recording[], kind?: RecordingKind): Recording[] {
     if (!kind || kind === "all") return rows;
     if (kind === "single") return rows.filter((r) => !r.meeting_id);
+    if (kind === "favorite") return rows.filter((r) => !!r.favorite);
     return rows.filter((r) => !!r.meeting_id);
+  }
+
+  /** Toggle the star/favorite flag on a recording (optimistic; persisted via IPC). */
+  private async toggleFavorite(r: Recording) {
+    const next = !r.favorite;
+    r.favorite = next; // optimistic — reflect immediately
+    this.requestUpdate();
+    try {
+      await setFavorite(r.id, next);
+    } catch (e) {
+      r.favorite = !next; // revert on failure
+      this.requestUpdate();
+      showToast(`Couldn't ${next ? "star" : "unstar"}: ${errText(e)}`, "error");
+    }
   }
 
   async refresh() {
@@ -591,6 +606,10 @@ export class RecordingsListElement extends LitElement {
       "source",
       "transcript",
     ];
+    // The star/favorite column is always present (a quick affordance, not a data
+    // column you reorder) — inject it at the front when the saved column config
+    // doesn't already include it.
+    if (!visibleCols.includes("favorite")) visibleCols = ["favorite", ...visibleCols];
     // The transcript snippet is ALWAYS the last column — its read-more horizontal
     // scroll requires it and any other position misbehaves (Settings pins it last
     // too; this is the defensive guarantee). If a stale config had it elsewhere,
@@ -606,6 +625,7 @@ export class RecordingsListElement extends LitElement {
     if (!activeWidths || activeWidths.length !== visibleCols.length) {
       activeWidths = transcriptMoved ? null : this.config?.interface?.column_widths || null;
       const colWidths: Record<string, string> = {
+        favorite: "40px",
         day: "85px",
         time: "94px",
         duration: "84px",
@@ -666,6 +686,7 @@ export class RecordingsListElement extends LitElement {
     const someSelected = this.multiSelected.size > 0 && !allSelected;
 
     const colLabels: Record<string, string> = {
+      favorite: "★",
       day: "Day",
       time: "Time",
       duration: "Duration",
@@ -804,6 +825,7 @@ export class RecordingsListElement extends LitElement {
 
     const cellMap: Record<string, unknown> = {
       day: html`<span class="rec-time">${day}</span>`,
+      favorite: html`<span class="rec-fav"><button class="rec-fav-btn ${r.favorite ? "on" : ""}" title=${r.favorite ? "Unstar" : "Star"} aria-label=${r.favorite ? "Unstar" : "Star"} @click=${(e: Event) => { e.stopPropagation(); void this.toggleFavorite(r); }}>${r.favorite ? "★" : "☆"}</button></span>`,
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,

@@ -420,6 +420,17 @@ pub async fn update_notes(
     forward(&bridge, Request::UpdateNotes { id, notes }).await
 }
 
+/// Set or clear the "favorite"/star flag for a recording (Favorites view).
+#[tauri::command]
+pub async fn set_favorite(
+    bridge: Br<'_>,
+    id: String,
+    favorite: bool,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SetFavorite { id, favorite }).await
+}
+
 /// Set (or clear) the custom display name for one diarized speaker label of a
 /// recording. `speaker_label` is the 1-based `[Speaker N]` index; a blank `name`
 /// clears the mapping. The stored transcript is never rewritten — names are

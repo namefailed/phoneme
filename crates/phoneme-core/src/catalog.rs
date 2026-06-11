@@ -242,6 +242,20 @@ impl Catalog {
         Ok(())
     }
 
+    /// Set or clear the "favorite"/star flag for a recording (Favorites view).
+    pub async fn set_favorite(&self, id: &RecordingId, favorite: bool) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET favorite = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(favorite as i64)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// The preserved original (machine) transcript, if any. `None` for
     /// recordings transcribed before this column existed, or never transcribed.
     pub async fn get_original_transcript(&self, id: &RecordingId) -> Result<Option<String>> {
@@ -1236,6 +1250,7 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         cleanup_model: row.try_get("cleanup_model").unwrap_or(None),
         diarized: row.try_get("diarized").unwrap_or(false),
         user_edited: row.try_get("user_edited").unwrap_or(false),
+        favorite: row.try_get("favorite").unwrap_or(false),
         summary: row.try_get("summary").unwrap_or(None),
         summary_model: row.try_get("summary_model").unwrap_or(None),
         tags: Vec::new(),
@@ -1339,6 +1354,7 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1761,6 +1777,7 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1822,6 +1839,7 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1882,6 +1900,7 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1961,6 +1980,7 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -2006,6 +2026,7 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
             summary: None,
             summary_model: None,
             tags: vec![],

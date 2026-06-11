@@ -175,6 +175,11 @@ pub enum Request {
         id: RecordingId,
         notes: String,
     },
+    /// Set or clear the "favorite"/star flag for a recording (Favorites view).
+    SetFavorite {
+        id: RecordingId,
+        favorite: bool,
+    },
     /// Set (or clear) the custom display name for one diarized speaker label of
     /// a recording. `speaker_label` is the 1-based index from the transcript's
     /// `[Speaker N]` marker. A blank `name` clears the mapping (the label

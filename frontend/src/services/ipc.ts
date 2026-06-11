@@ -32,6 +32,8 @@ export type Recording = {
   diarized?: boolean;
   /** Whether the user hand-edited the transcript (independent of `model`). */
   user_edited?: boolean;
+  /** Whether the user has starred this recording (the Favorites view). */
+  favorite?: boolean;
   /** LLM-generated summary of the transcript, if one has been produced. */
   summary?: string | null;
   /** The LLM model used to produce `summary`, if any. */
@@ -330,6 +332,11 @@ export async function getCleanTranscript(id: string): Promise<string | null> {
  */
 export async function updateNotes(id: string, notes: string): Promise<void> {
   await tauriInvoke("update_notes", { id, notes });
+}
+
+/** Star or unstar a recording (the Favorites view). Cosmetic organisation only. */
+export async function setFavorite(id: string, favorite: boolean): Promise<void> {
+  await tauriInvoke("set_favorite", { id, favorite });
 }
 
 /**

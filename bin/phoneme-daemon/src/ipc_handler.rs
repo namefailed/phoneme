@@ -414,6 +414,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::SetFavorite { id, favorite } => {
+            match state.catalog.set_favorite(&id, favorite).await {
+                Ok(()) => Response::Ok(serde_json::Value::Null),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::NotesUpdated { id });
@@ -1548,6 +1557,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         cleanup_model: None,
         diarized: false,
         user_edited: false,
+        favorite: false,
         summary: None,
         summary_model: None,
         tags: vec![],
@@ -1721,6 +1731,7 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
             summary: None,
             summary_model: None,
             tags: vec![],

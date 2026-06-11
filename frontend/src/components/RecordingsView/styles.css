@@ -1005,6 +1005,23 @@ ph-sidebar:focus-visible,
   background: color-mix(in srgb, var(--accent) 17%, transparent);
 }
 
+/* Favorites star — the compact toggle in the leading list column (and its
+   header). Gold when starred; subtle until hovered otherwise. */
+.rec-fav { display: flex; align-items: center; justify-content: center; }
+.rec-fav-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  color: var(--fg-faded);
+  border-radius: 4px;
+  transition: color 0.12s ease, transform 0.1s ease;
+}
+.rec-fav-btn:hover { color: var(--accent); transform: scale(1.15); }
+.rec-fav-btn.on { color: #f5c518; }
+
 /* ── Bulk action bar ─────────────────────────────────────────────────────── */
 #rv-bulk-bar {
   position: absolute;

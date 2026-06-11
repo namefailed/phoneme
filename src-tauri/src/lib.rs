@@ -270,6 +270,7 @@ pub fn run() {
             commands::get_original_transcript,
             commands::get_clean_transcript,
             commands::update_notes,
+            commands::set_favorite,
             commands::set_speaker_name,
             commands::daemon_status,
             commands::read_config,

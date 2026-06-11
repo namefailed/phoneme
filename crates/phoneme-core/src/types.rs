@@ -114,6 +114,10 @@ pub struct Recording {
     /// which always reflects the transcription model that produced the text.
     #[serde(default)]
     pub user_edited: bool,
+    /// Whether the user has starred this recording (the Favorites view). Cosmetic
+    /// organisation only; never affects transcription or the pipeline.
+    #[serde(default)]
+    pub favorite: bool,
     /// LLM-generated summary of the transcript, if one has been produced
     /// (on demand or as the final pipeline step). `None` until generated.
     #[serde(default)]

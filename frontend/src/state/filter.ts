@@ -6,8 +6,9 @@ import type { ListFilter } from "../services/ipc";
  * `_timePreset` tracks which named preset is active in the time dropdown so
  * the select can restore its selected value after a re-render.
  */
-/** Library type-filter: all recordings, single-track only, or meetings only. */
-export type RecordingKind = "all" | "single" | "meeting";
+/** Library type-filter: all recordings, single-track only, meetings only, or
+ *  starred (favorites). */
+export type RecordingKind = "all" | "single" | "meeting" | "favorite";
 
 export type UiFilter = ListFilter & {
   semantic?: boolean;
