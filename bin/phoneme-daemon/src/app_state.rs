@@ -110,6 +110,16 @@ pub struct AppState {
     /// global-config override didn't survive a restart either.
     pub pending_overrides:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
+    /// Explicit whisper-server restart requests (the Doctor's "Fix"). Both
+    /// supervisors select on this and bounce their child with the backoff
+    /// reset — the path that heals a HUNG server, which the exit-based
+    /// auto-restart can't see.
+    pub whisper_restart: Arc<tokio::sync::Notify>,
+    /// "Skip the current step" requests from the queue UI. The in-flight LLM
+    /// stage (cleanup / summary / tagging) races this and aborts when it fires;
+    /// the pipeline then continues with the next step, exactly as if that one
+    /// stage had failed non-fatally.
+    pub skip_stage: Arc<tokio::sync::Notify>,
 }
 
 /// Coordination cell between a model-override re-transcription (in the pipeline)
@@ -188,6 +198,8 @@ impl AppState {
             processing: Arc::new(std::sync::Mutex::new(None)),
             whisper_model_override: Arc::new(WhisperModelOverride::default()),
             pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            whisper_restart: Arc::new(tokio::sync::Notify::new()),
+            skip_stage: Arc::new(tokio::sync::Notify::new()),
         })
     }
 }

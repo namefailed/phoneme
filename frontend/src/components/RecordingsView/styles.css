@@ -1005,6 +1005,50 @@ ph-sidebar:focus-visible,
   background: color-mix(in srgb, var(--accent) 17%, transparent);
 }
 
+/* Ctrl+/ hides the top (search/header) bar app-wide — body-scoped so it works
+   regardless of which view is mounted. Ctrl+/ again brings it back. */
+body.phoneme-hide-header ph-header-bar {
+  display: none;
+}
+
+/* AI tag suggestions — dashed "ghost" chips awaiting approval. ✓ applies (the
+   tag becomes a real chip), ✕ dismisses. Visually distinct from real chips so
+   nothing looks applied before the user confirms. */
+.tag-suggestions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tag-chip--suggested {
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent) !important;
+  background: color-mix(in srgb, var(--accent) 8%, transparent) !important;
+  color: var(--fg-muted) !important;
+  font-style: italic;
+}
+.tag-chip--suggested .tag-ok {
+  color: var(--ok, #a6e3a1);
+  font-weight: 700;
+}
+.tag-suggest:disabled { opacity: 0.6; cursor: wait; }
+
+/* Favorites star — the compact toggle in the leading list column (and its
+   header). Gold when starred; subtle until hovered otherwise. */
+.rec-fav { display: flex; align-items: center; justify-content: center; }
+.rec-fav-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  color: var(--fg-faded);
+  border-radius: 4px;
+  transition: color 0.12s ease, transform 0.1s ease;
+}
+.rec-fav-btn:hover { color: var(--accent); transform: scale(1.15); }
+.rec-fav-btn.on { color: #f5c518; }
+
 /* ── Bulk action bar ─────────────────────────────────────────────────────── */
 #rv-bulk-bar {
   position: absolute;
@@ -1373,6 +1417,12 @@ ph-sidebar {
   letter-spacing: 0.6px;
   color: var(--fg-muted);
   user-select: none;
+  /* Stay on ONE line in a narrow sidebar — never wrap to a second row or bleed
+     past the sidebar into the list. The title ellipsizes first; if it's still
+     too tight, the right-hand badges get clipped (info cut off, not wrapped). */
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
 }
 .queue-header:hover { color: var(--fg-default); }
 .queue-chevron {
@@ -1386,7 +1436,9 @@ ph-sidebar {
 .queue-chevron svg { display: block; }
 /* Points up when open — the panel expands upward. */
 .queue-chevron.open { transform: rotate(-90deg); }
-.queue-title { flex: 1; }
+.queue-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Badges keep their size and never wrap; the header's overflow clips them last. */
+.queue-count, .queue-failed { flex: 0 0 auto; white-space: nowrap; }
 .queue-count {
   font-size: 10px;
   font-weight: 700;
@@ -1458,6 +1510,17 @@ ph-sidebar {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* The active (processing) item(s), pinned just above the header so the one being
+   processed stays visible while the pending list scrolls above it. Not part of
+   the scroll area — it's a separate, content-sized block. */
+.queue-active {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border-subtle);
 }
 /* Drag handle pinned to the visual TOP of the queue panel (it's the last DOM
    child of the column-reverse panel). Dragging it up grows the queue list,
@@ -1705,11 +1768,28 @@ ph-sidebar {
   color: var(--accent);
   font-weight: 500;
 }
-/* vim j/k cursor within the focused sidebar. */
+/* vim j/k cursor within the focused sidebar — matches the recordings-list row
+   cursor (.rec-row.kbd-focused) exactly so keyboard nav looks identical in both
+   vertical lists: 3px accent rail + faint accent ring + accent-tinted fill
+   (was a thin 2px rail + a plain white wash, the odd one out app-wide). */
 .sidebar-item.kbd-cursor {
-  box-shadow: inset 2px 0 0 var(--accent);
-  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 3px 0 0 var(--accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--fg-default);
+}
+/* Sidebar grid cursor on everything that ISN'T a filter row — section headers,
+   the queue header, queue item cells and their buttons. Same accent outline the
+   detail pane's grid cursor uses, for one keyboard look app-wide. */
+ph-sidebar .kbd-cursor:not(.sidebar-item) {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: 6px;
+}
+/* The queue item's clickable main area is a plain div — give the cursor a hint
+   of fill so it reads as the focused row, not just an outline. */
+ph-sidebar .queue-item-main.kbd-cursor {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .sidebar-icon {
   font-size: 14px;

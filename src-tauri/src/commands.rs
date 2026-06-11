@@ -420,6 +420,82 @@ pub async fn update_notes(
     forward(&bridge, Request::UpdateNotes { id, notes }).await
 }
 
+/// Set or clear the "favorite"/star flag for a recording (Favorites view).
+#[tauri::command]
+pub async fn set_favorite(
+    bridge: Br<'_>,
+    id: String,
+    favorite: bool,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SetFavorite { id, favorite }).await
+}
+
+/// Persist every window's position/size NOW. tauri-plugin-window-state only
+/// saves on a graceful exit — a crash, force-kill, or dev-watcher rebuild
+/// loses any move/resize since launch. The live-preview overlay calls this
+/// (debounced) after the user drags or resizes it, so its placement survives
+/// anything.
+#[tauri::command]
+pub fn save_window_state(app: tauri::AppHandle) -> Result<(), CommandError> {
+    use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+    // Everything EXCEPT visibility — saving "visible" while the overlay was up
+    // (preview/drag) made it restore visible and pop open on every app start.
+    app.save_window_state(StateFlags::all() & !StateFlags::VISIBLE)
+        .map_err(|e| CommandError::new("internal", e.to_string()))
+}
+
+/// Force-restart the bundled whisper-server(s) — the Doctor's "Fix" for an
+/// unreachable local Whisper (sweeps hung/orphaned processes; supervisors
+/// respawn from the current config).
+#[tauri::command]
+pub async fn restart_whisper(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RestartWhisper).await
+}
+
+/// Switch which meeting track ("mic" / "system") feeds the live preview —
+/// the overlay's source toggle (meeting_preview = "toggle").
+#[tauri::command]
+pub async fn set_preview_source(bridge: Br<'_>, track: String) -> Result<Value, CommandError> {
+    forward(&bridge, Request::SetPreviewSource { track }).await
+}
+
+/// Skip the pipeline step currently running for the active queue item (the
+/// LLM stages — cleanup / summary / tagging). The pipeline continues.
+#[tauri::command]
+pub async fn skip_current_stage(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::SkipCurrentStage).await
+}
+
+/// Run the LLM tag-suggestion step for one recording on demand.
+#[tauri::command]
+pub async fn suggest_tags(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SuggestTags { id }).await
+}
+
+/// Approve one suggested tag (create if needed + attach + drop the suggestion).
+#[tauri::command]
+pub async fn approve_tag_suggestion(
+    bridge: Br<'_>,
+    id: String,
+    name: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::ApproveTagSuggestion { id, name }).await
+}
+
+/// Dismiss one suggested tag (drop it from the recording's suggestion list).
+#[tauri::command]
+pub async fn dismiss_tag_suggestion(
+    bridge: Br<'_>,
+    id: String,
+    name: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::DismissTagSuggestion { id, name }).await
+}
+
 /// Set (or clear) the custom display name for one diarized speaker label of a
 /// recording. `speaker_label` is the 1-based `[Speaker N]` index; a blank `name`
 /// clears the mapping. The stored transcript is never rewritten — names are
@@ -467,7 +543,7 @@ const MASKED_SECRET: &str = "__phoneme_secret_kept__";
 
 /// Replace every non-empty API key in a serialized config with the mask.
 fn mask_config_secrets(v: &mut Value) {
-    for section in ["whisper", "llm_post_process", "summary", "preview_whisper"] {
+    for section in ["whisper", "llm_post_process", "summary", "auto_tag", "preview_whisper"] {
         if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
             if key.as_str().is_some_and(|k| !k.is_empty()) {
                 *key = Value::String(MASKED_SECRET.to_string());
@@ -491,6 +567,11 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
         incoming
             .summary
             .set_api_key(current.summary.api_key_str().to_owned());
+    }
+    if incoming.auto_tag.api_key_str() == MASKED_SECRET {
+        incoming
+            .auto_tag
+            .set_api_key(current.auto_tag.api_key_str().to_owned());
     }
     if let Some(pw) = incoming.preview_whisper.as_mut() {
         if pw.api_key_str() == MASKED_SECRET {
@@ -532,7 +613,7 @@ pub fn set_overlay(
     x: Option<f64>,
     y: Option<f64>,
 ) -> Result<(), CommandError> {
-    use tauri::Manager;
+    use tauri::{Emitter, Manager};
     // Create the window on demand so "show" works even before the first record.
     crate::overlay::ensure(&app);
     let Some(win) = app.get_webview_window(crate::overlay::OVERLAY_LABEL) else {
@@ -548,6 +629,14 @@ pub fn set_overlay(
             win.set_always_on_top(true).map_err(map)?;
         }
         "hide" => win.hide().map_err(map)?,
+        "preview" => {
+            // Show it and ask the overlay webview to render placeholder text and
+            // stay pinned open (no auto-hide) so the user can position/resize it
+            // without recording. The overlay's ✕ closes it.
+            win.show().map_err(map)?;
+            win.set_always_on_top(true).map_err(map)?;
+            let _ = app.emit(crate::overlay::OVERLAY_PREVIEW_EVENT, ());
+        }
         "move" => {
             let (x, y) = (x.unwrap_or(0.0), y.unwrap_or(0.0));
             win.set_position(tauri::LogicalPosition::new(x, y))

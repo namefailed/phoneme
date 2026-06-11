@@ -22,6 +22,8 @@ import { SectionEditor } from "./SectionEditor";
 import { SectionAdvanced } from "./SectionAdvanced";
 import { SectionTags } from "./SectionTags";
 import { SectionProfiles } from "./SectionProfiles";
+import { SectionSavedSearches } from "./SectionSavedSearches";
+import { SectionAutoTag } from "./SectionAutoTag";
 import "./styles.css";
 
 // ── Settings-search helpers ────────────────────────────────────────────────
@@ -83,6 +85,9 @@ export class SettingsViewElement extends LitElement {
   // Public so an opener (e.g. the Re-run "Enable cleanup in Settings" shortcut)
   // can deep-link to a tab; also mutated internally by switchTab.
   @property({ type: String }) activeTab: string = "transcription";
+  /** Sub-tab within the Managers tab (Tags · Profiles · Saved searches). Set
+   *  by the sub-tab bar and by composite deep-links ("managers/profiles"). */
+  private managersSub: "tags" | "profiles" | "saved" = "tags";
   @state() private config: any = null;
   @state() private searchQuery: string = "";
   private originalConfigStr: string = "";
@@ -235,12 +240,14 @@ export class SettingsViewElement extends LitElement {
       { tab: "capture", label: "Capture", mount: (h) => { new SectionHotkey(h, this.config); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, this.config); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, this.config); } },
-      { tab: "tags", label: "Tags", mount: (h) => { new SectionTags(h, this.config); } },
+      { tab: "managers", label: "Managers", mount: (h) => { new SectionTags(h, this.config); } },
+      { tab: "managers", label: "Managers", mount: (h) => { new SectionProfiles(h, this.config); } },
+      { tab: "managers", label: "Managers", mount: (h) => { new SectionSavedSearches(h, this.config); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, this.config); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, this.config); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionSemantic(h, this.config); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionProfiles(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, this.config, this.onNavigateToWizard); } },
     ];
@@ -259,7 +266,11 @@ export class SettingsViewElement extends LitElement {
       }
       this.applySearchFilter();
     } else {
-      switch (this.activeTab) {
+      // The tab may arrive as a composite deep-link ("managers/profiles") from
+      // the g-chords or another component — split off the sub-tab.
+      const [tab, sub] = this.activeTab.split("/");
+      if (sub === "tags" || sub === "profiles" || sub === "saved") this.managersSub = sub;
+      switch (tab) {
         case "transcription":
           new SectionWhisper(createSubHost(), this.config);
           // Live Preview sits directly under Whisper — it's a transcription
@@ -275,22 +286,78 @@ export class SettingsViewElement extends LitElement {
           new SectionInterface(createSubHost(), this.config);
           new SectionEditor(createSubHost(), this.config);
           break;
+        // Legacy deep-links to the old standalone Tags tab land on its new home.
         case "tags":
-          new SectionTags(createSubHost(), this.config);
+          this.managersSub = "tags";
+          this.mountManagers(createSubHost());
+          break;
+        case "managers":
+          this.mountManagers(createSubHost());
           break;
         case "postprocessing":
           new SectionPostProcessing(createSubHost(), this.config);
+          new SectionAutoTag(createSubHost(), this.config);
           new SectionHook(createSubHost(), this.config);
           break;
         case "system":
           new SectionStorage(createSubHost(), this.config);
           new SectionSemantic(createSubHost(), this.config);
-          new SectionProfiles(createSubHost(), this.config);
           new SectionTray(createSubHost(), this.config);
           new SectionAdvanced(createSubHost(), this.config, this.onNavigateToWizard);
           break;
       }
     }
+  }
+
+  /** The Managers tab: a top sub-tab strip (Tags · Profiles · Saved searches)
+   *  over the chosen manager section. Sub-tab clicks re-mount in place. */
+  private mountManagers(host: HTMLElement) {
+    const subs = [
+      { id: "tags" as const, label: "🏷️ Tags" },
+      { id: "profiles" as const, label: "👤 Profiles" },
+      { id: "saved" as const, label: "🔖 Saved searches" },
+    ];
+    host.innerHTML = `
+      <div class="managers-subtabs">
+        ${subs
+          .map(
+            (s) =>
+              `<button class="managers-subtab ${this.managersSub === s.id ? "active" : ""}" data-sub="${s.id}">${s.label}</button>`,
+          )
+          .join("")}
+      </div>
+      <div id="managers-body"></div>
+      <style>
+        .managers-subtabs {
+          display: flex; gap: 6px; margin-bottom: 14px;
+          border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;
+        }
+        .managers-subtab {
+          background: var(--bg-surface); border: 1px solid var(--border-subtle);
+          color: var(--fg-muted); font-size: 13px; padding: 6px 14px;
+          border-radius: 8px; cursor: pointer;
+          transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+        }
+        .managers-subtab:hover { color: var(--fg-default); }
+        .managers-subtab.active {
+          background: color-mix(in srgb, var(--accent) 16%, transparent);
+          border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+          color: var(--accent); font-weight: 600;
+        }
+      </style>
+    `;
+    const body = host.querySelector<HTMLElement>("#managers-body")!;
+    if (this.managersSub === "profiles") new SectionProfiles(body, this.config);
+    else if (this.managersSub === "saved") new SectionSavedSearches(body, this.config);
+    else new SectionTags(body, this.config);
+    host.querySelectorAll<HTMLButtonElement>(".managers-subtab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this.managersSub = btn.dataset.sub as "tags" | "profiles" | "saved";
+        // Normalize a composite deep-link tab so re-mounts don't re-apply it.
+        if (this.activeTab.includes("/")) this.activeTab = "managers";
+        this.mountManagers(host);
+      });
+    });
   }
 
   /**
@@ -524,6 +591,9 @@ export class SettingsViewElement extends LitElement {
     }
 
     const isSearching = this.searchQuery.trim().length > 0;
+    // The active tab may be a composite deep-link ("managers/profiles") —
+    // compare the base for highlighting.
+    const tab = this.activeTab.split("/")[0];
 
     return html`
       <div class="settings-layout">
@@ -535,12 +605,12 @@ export class SettingsViewElement extends LitElement {
             <button type="button" class="sv-search-clear ${isSearching ? "" : "is-hidden"}" title="Clear search (Esc)" aria-label="Clear search" @click=${this.clearSearch}>✕</button>
           </div>
 
-          <div class="sv-tab ${this.activeTab === "transcription" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('transcription')}>🗣️ Transcription</div>
-          <div class="sv-tab ${this.activeTab === "capture" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('capture')}>🎙️ Capture</div>
-          <div class="sv-tab ${this.activeTab === "appearance" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('appearance')}>🎨 Appearance</div>
-          <div class="sv-tab ${this.activeTab === "tags" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('tags')}>🏷️ Tags</div>
-          <div class="sv-tab ${this.activeTab === "postprocessing" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('postprocessing')}>✨ Post-Processing</div>
-          <div class="sv-tab ${this.activeTab === "system" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('system')}>⚙️ System</div>
+          <div class="sv-tab ${tab === "transcription" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('transcription')}>🗣️ Transcription</div>
+          <div class="sv-tab ${tab === "capture" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('capture')}>🎙️ Capture</div>
+          <div class="sv-tab ${tab === "appearance" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('appearance')}>🎨 Appearance</div>
+          <div class="sv-tab ${(tab === "managers" || tab === "tags") && !isSearching ? "active" : ""}" @click=${() => this.switchTab('managers')}>🗂️ Managers</div>
+          <div class="sv-tab ${tab === "postprocessing" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('postprocessing')}>✨ Post-Processing</div>
+          <div class="sv-tab ${tab === "system" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('system')}>⚙️ System</div>
           
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>

@@ -191,9 +191,17 @@ pub struct DaemonRecorder {
     /// Idle pre-roll pre-capture, present only while enabled and not actively
     /// recording. `None` means no continuous capture is running (the default).
     preroll: Arc<Mutex<Option<PreRoll>>>,
-    /// Streaming transcription preview loop, present only while recording with
-    /// the feature enabled. `None` (the default) means no preview is running.
-    preview: Arc<Mutex<Option<PreviewTask>>>,
+    /// Streaming transcription preview loops, present only while recording with
+    /// the feature enabled. Empty (the default) means no preview is running.
+    /// Single recordings and meetings in "toggle" mode run one loop; meetings
+    /// in "both" mode run one per track.
+    preview: Arc<Mutex<Vec<PreviewTask>>>,
+    /// The active meeting's preview sources — (recording id, track label,
+    /// snapshot handle) per track — kept so `SetPreviewSource` can switch which
+    /// track feeds the preview mid-meeting ("toggle" mode). Cleared when the
+    /// meeting stops/cancels.
+    meeting_preview_sources:
+        Arc<Mutex<Vec<(RecordingId, String, phoneme_audio::recorder::SnapshotHandle)>>>,
     /// In-flight meeting (Meeting Mode, v1.6). `None` (the default) means no
     /// meeting is recording. Held separately from `active` so the existing
     /// single-recording path is completely untouched.
@@ -499,18 +507,43 @@ impl DaemonRecorder {
             let _ = tokio::fs::remove_file(&tmp_wav).await;
         });
 
-        *self.preview.lock().await = Some(PreviewTask { stop_tx, task });
+        self.preview.lock().await.push(PreviewTask { stop_tx, task });
         tracing::info!(id = %log_id, "streaming transcription preview started");
     }
 
     /// Stop the streaming-preview loop (if running) and wait for it to exit so
     /// its temp WAV is cleaned up. No-op when no preview is running.
     async fn stop_preview(&self) {
-        let Some(PreviewTask { stop_tx, task }) = self.preview.lock().await.take() else {
-            return;
+        let tasks: Vec<PreviewTask> = std::mem::take(&mut *self.preview.lock().await);
+        for PreviewTask { stop_tx, task } in tasks {
+            let _ = stop_tx.send(());
+            let _ = task.await;
+        }
+    }
+
+    /// Switch which meeting track feeds the live preview ("toggle" mode): stop
+    /// the running loop(s) and start one on the requested track's snapshot.
+    /// Errors when no meeting is active or the track label doesn't exist.
+    /// Emits `PreviewSourceChanged` so the overlay's toggle reflects it.
+    pub async fn set_preview_source(&self, state: &AppState, track: &str) -> Result<()> {
+        let entry = self
+            .meeting_preview_sources
+            .lock()
+            .await
+            .iter()
+            .find(|(_, t, _)| t == track)
+            .map(|(id, t, h)| (id.clone(), t.clone(), h.clone()));
+        let Some((id, track, snapshot)) = entry else {
+            return Err(Error::Internal(format!(
+                "no active meeting track {track:?} to preview"
+            )));
         };
-        let _ = stop_tx.send(());
-        let _ = task.await;
+        self.stop_preview().await;
+        self.start_preview(state, id, snapshot).await;
+        state
+            .events
+            .emit(DaemonEvent::PreviewSourceChanged { track });
+        Ok(())
     }
 
     /// Start a recording. Returns `AlreadyRecording` if one is in flight.
@@ -581,6 +614,8 @@ impl DaemonRecorder {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
+            tag_suggestions: vec![],
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -663,6 +698,7 @@ impl DaemonRecorder {
             id: id.clone(),
             started_at,
             meeting_id: None,
+            track: None,
         });
         tracing::info!(id = %id, mode = ?mode, "recording started");
         Ok(id)
@@ -726,6 +762,7 @@ impl DaemonRecorder {
                 // Tear down the live-preview loop before cancelling the track
                 // recorders. No-op when no preview is running.
                 self.stop_preview().await;
+                self.meeting_preview_sources.lock().await.clear();
                 let id = meeting.tracks[0].id.clone();
                 for track_handle in meeting.tracks {
                     if let Err(e) = track_handle.recorder.cancel().await {
@@ -1042,6 +1079,8 @@ impl DaemonRecorder {
                 cleanup_model: None,
                 diarized: false,
                 user_edited: false,
+                favorite: false,
+            tag_suggestions: vec![],
                 summary: None,
                 summary_model: None,
                 tags: vec![],
@@ -1081,6 +1120,7 @@ impl DaemonRecorder {
                 id: id.clone(),
                 started_at,
                 meeting_id: Some(meeting_id.clone()),
+                track: Some(track.as_str().to_string()),
             });
             tracing::info!(id = %id, track = track.as_str(), session = %meeting_id, "meeting track started");
 
@@ -1094,17 +1134,23 @@ impl DaemonRecorder {
             });
         }
 
-        // Grab a snapshot handle for the mic track (if present) so the live
-        // preview can caption the local speaker during a meeting, exactly like a
-        // single recording. We prefer the mic over the system track — the system
-        // track is the remote audio and is often sparse, whereas the mic is the
-        // dense local voice the user is watching the caption for. Captured before
-        // `tracks` is moved into `ActiveMeeting`.
-        let preview_target = tracks
+        // Per-track preview sources, captured before `tracks` is moved into
+        // `ActiveMeeting`. These power both meeting-preview modes
+        // (`recording.meeting_preview`):
+        //  * "toggle" (default) — one loop follows a single track; the overlay's
+        //    🎤/🔊 button switches it via SetPreviewSource (which is why every
+        //    track's snapshot handle is kept, not just the starting one).
+        //  * "both" — one loop per track, captions shown stacked.
+        let sources: Vec<(RecordingId, String, phoneme_audio::recorder::SnapshotHandle)> = tracks
             .iter()
-            .find(|t| matches!(t.track, MeetingTrack::Mic))
-            .or_else(|| tracks.first())
-            .map(|t| (t.id.clone(), t.recorder.snapshot_handle()));
+            .map(|t| {
+                (
+                    t.id.clone(),
+                    t.track.as_str().to_string(),
+                    t.recorder.snapshot_handle(),
+                )
+            })
+            .collect();
 
         *meeting_lock = Some(ActiveMeeting {
             meeting_id: meeting_id.clone(),
@@ -1112,15 +1158,34 @@ impl DaemonRecorder {
             paused: false,
             wall_started,
         });
-        // Release the meeting lock before spawning the preview loop (it doesn't
+        // Release the meeting lock before spawning the preview loops (they don't
         // touch `meeting`, but keep lock scopes tight).
         drop(meeting_lock);
 
-        // Spawn the live streaming-preview loop for the meeting. No-op unless
+        // Spawn the live streaming-preview loop(s) for the meeting. No-op unless
         // `recording.streaming_preview` is enabled (default: off), so meetings
         // get the same opt-in live caption single recordings do.
-        if let Some((preview_id, snapshot)) = preview_target {
-            self.start_preview(state, preview_id, snapshot).await;
+        let mode = state.config.load().recording.meeting_preview.clone();
+        *self.meeting_preview_sources.lock().await = sources.clone();
+        if mode == "both" {
+            for (id, _, snapshot) in sources {
+                self.start_preview(state, id, snapshot).await;
+            }
+        } else {
+            // "toggle": start on the mic (the dense local voice the user is
+            // watching the caption for); the system track is reachable via the
+            // overlay's source toggle. Falls back to the first track.
+            let start = sources
+                .iter()
+                .find(|(_, t, _)| t == "mic")
+                .or_else(|| sources.first())
+                .cloned();
+            if let Some((id, track, snapshot)) = start {
+                self.start_preview(state, id, snapshot).await;
+                state
+                    .events
+                    .emit(DaemonEvent::PreviewSourceChanged { track });
+            }
         }
 
         tracing::info!(session = %meeting_id, "meeting started");
@@ -1142,6 +1207,7 @@ impl DaemonRecorder {
         // preview is running (preview disabled, or this build started before the
         // meeting-preview wiring). Mirrors the single-recording `stop`.
         self.stop_preview().await;
+        self.meeting_preview_sources.lock().await.clear();
         let meeting_id = meeting.meeting_id.clone();
         let wall_started = meeting.wall_started;
         // Snapshot meeting wall-clock length before stopping recorders (stop/drain can take time).
@@ -1652,6 +1718,8 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
+            tag_suggestions: vec![],
             summary: None,
             summary_model: None,
             tags: vec![],

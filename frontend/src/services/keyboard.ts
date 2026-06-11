@@ -33,9 +33,15 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "g then l", label: "Go to Library" },
       { combo: "g then s", label: "Go to Settings" },
       { combo: "g then d", label: "Go to Doctor" },
+      { combo: "g then T", label: "Open the Tag Manager" },
+      { combo: "g then P", label: "Managers → Profiles" },
+      { combo: "g then S", label: "Managers → Saved searches" },
       { combo: "Ctrl + ,", label: "Open Settings" },
       { combo: "Ctrl + B", label: "Toggle the sidebar" },
       { combo: "Ctrl + \\", label: "Toggle the detail pane" },
+      { combo: "Ctrl + /", label: "Hide / show the top bar" },
+      { combo: "Ctrl + = / − / 0", label: "Zoom the list bigger / smaller / reset" },
+      { combo: "Ctrl + scroll", label: "Zoom the list (over the list pane)" },
       { combo: "Esc", label: "Close popups / leave search" },
     ],
   },
@@ -43,10 +49,22 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
     title: "Recordings list (when focused)",
     items: [
       { combo: "↑  ↓", label: "Move between recordings" },
-      { combo: "Enter", label: "Open the focused recording" },
-      { combo: "Space", label: "Toggle multi-select" },
+      { combo: "Enter", label: "Open recording · fold/unfold a meeting" },
+      { combo: "Shift + Enter", label: "Meeting title → open the merged view" },
+      { combo: "Space", label: "Multi-select (on a meeting title: all tracks)" },
       { combo: "Shift + ↑ / ↓", label: "Extend the selection" },
+      { combo: "\\", label: "Two selected → open them side by side" },
       { combo: "Esc", label: "Clear the multi-selection" },
+    ],
+  },
+  {
+    title: "Bulk actions bar (recordings selected)",
+    items: [
+      { combo: "Shift + Enter", label: "Hand the keyboard to the bar" },
+      { combo: "h   l", label: "Move across the bar's buttons" },
+      { combo: "Enter / Space", label: "Press the highlighted button" },
+      { combo: "j · k · Esc", label: "Leave the bar" },
+      { combo: "Ctrl+Shift+click ⠿", label: "Reset the bar's position" },
     ],
   },
   {
@@ -55,10 +73,13 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "p", label: "Play / pause" },
       { combo: "c", label: "Copy transcript" },
       { combo: "e", label: "Export transcript" },
-      { combo: "r", label: "Open the Re-run menu" },
+      { combo: "r", label: "Re-run with chosen models (Models modal)" },
       { combo: "f", label: "Full-screen (focus mode)" },
       { combo: "t", label: "Add a tag (j/k browse · Enter adds)" },
       { combo: "Shift + t", label: "Open the Tag Manager" },
+      { combo: "Ctrl + S", label: "Save the focused editor" },
+      { combo: ":w  :wq  :q", label: "Save / save-and-leave / leave (vim editors)" },
+      { combo: "Shift + Esc", label: "Leave the transcript / notes editor" },
     ],
   },
 ];
@@ -68,7 +89,7 @@ const VIM_HELP_GROUP: HelpGroup = {
   title: "Vim navigation (enabled)",
   items: [
     { combo: "h   l", label: "Move focus between sidebar / list / detail" },
-    { combo: "j   k", label: "Move down / up (list · sidebar · detail buttons)" },
+    { combo: "j   k", label: "Move down / up (list · sidebar · detail rows)" },
     { combo: "k / ↑ at top", label: "Up into the search bar (↓ to come back)" },
     { combo: "h  l (header)", label: "Move across the header controls (wraps around)" },
     { combo: "Enter (header)", label: "Open the status / Record / Settings dropdown" },
@@ -76,12 +97,15 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "g g", label: "Jump to the first recording" },
     { combo: "G", label: "Jump to the last recording" },
     { combo: "Enter", label: "Open recording · apply sidebar filter" },
+    { combo: "j  k (sidebar)", label: "Filters · section headers · the queue's items" },
+    { combo: "h  l (sidebar)", label: "Across a queue row's buttons (l past the end → list)" },
+    { combo: "Enter (sidebar)", label: "Apply filter · fold a section · press a queue button" },
     { combo: "l (into detail)", label: "Enter the open recording, on the transcript" },
-    { combo: "j  k (detail)", label: "Down/up: actions · tags · transcript · notes" },
+    { combo: "j  k (detail)", label: "Top row · actions · tags · transcript · views · notes" },
     { combo: "h  l (detail)", label: "Across a row's buttons (h at the start → list)" },
     { combo: "Enter (detail)", label: "Edit the box / press the button" },
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
-    { combo: "Shift + Esc", label: "Leave the transcript / notes editor" },
+    { combo: "i", label: "Edit the transcript directly" },
     { combo: "d d", label: "Delete the focused recording (with Undo)" },
     { combo: "Esc", label: "Step back out a level" },
   ],
@@ -123,8 +147,20 @@ function focusList() {
   document.querySelector<HTMLElement>(".rec-table")?.focus();
 }
 
-function navigate(view: string) {
-  window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view } }));
+function navigate(view: string, section?: string) {
+  window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view, section } }));
+}
+
+/** Per-device "top bar hidden" preference (Ctrl+/). */
+const LS_HEADER_HIDDEN = "phoneme.layout.headerHidden";
+
+/** Hide/show the header (search/top) bar. The class lives on <body> so the
+ *  rule applies regardless of which view is mounted; the preference persists
+ *  per device and is re-applied at startup by initKeyboard. */
+function toggleHeaderBar(force?: boolean) {
+  const hide = force ?? !document.body.classList.contains("phoneme-hide-header");
+  document.body.classList.toggle("phoneme-hide-header", hide);
+  try { localStorage.setItem(LS_HEADER_HIDDEN, String(hide)); } catch { /* private mode */ }
 }
 
 /** Ask the open recording's action row to run an action (no-op if none open). */
@@ -340,6 +376,12 @@ function onKeyDown(e: KeyboardEvent) {
     navigate("settings");
     return;
   }
+  // Ctrl+/ → hide/show the top (search/header) bar. Persisted per device.
+  if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+    e.preventDefault();
+    toggleHeaderBar();
+    return;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
 
   // "g" prefix sequence (vim-style): g l / g s / g d, plus g g → top of list.
@@ -348,6 +390,11 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === "l") { e.preventDefault(); navigate("recordings"); return; }
     if (e.key === "s") { e.preventDefault(); navigate("settings"); return; }
     if (e.key === "d") { e.preventDefault(); navigate("doctor"); return; }
+    // Capital chords jump to the managers: g T = quick Tag Manager popup,
+    // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches.
+    if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
+    if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
+    if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
     if (vimNav && e.key === "g" && activeWithin(".rv-list")) {
       e.preventDefault();
       dispatchVim("list-top");
@@ -547,14 +594,17 @@ function onKeyDown(e: KeyboardEvent) {
     switch (e.key) {
       case "h":
         e.preventDefault();
-        // In the detail pane, h walks LEFT through the focused row's items (and
-        // steps out to the list at the leftmost); elsewhere it switches pane.
+        // In the detail pane (and the sidebar), h walks LEFT through the focused
+        // row's items; elsewhere it switches pane. The sidebar steps out to the
+        // list on l past its rightmost cell (it's the leftmost pane).
         if (activeWithin(".rv-detail")) dispatchVim("detail-left");
+        else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-left");
         else dispatchVim("pane-left");
         return;
       case "l":
         e.preventDefault();
         if (activeWithin(".rv-detail")) dispatchVim("detail-right");
+        else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-right");
         else dispatchVim("pane-right");
         return;
       case "G":
@@ -632,6 +682,10 @@ export function initKeyboard() {
   if (installed) return;
   installed = true;
   document.addEventListener("keydown", onKeyDown);
+  // Restore the Ctrl+/ "top bar hidden" preference.
+  try {
+    if (localStorage.getItem(LS_HEADER_HIDDEN) === "true") toggleHeaderBar(true);
+  } catch { /* private mode */ }
   // Load the vim-nav preference and keep it in sync with Settings saves so the
   // layer turns on/off the moment the toggle is saved (no reload needed).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

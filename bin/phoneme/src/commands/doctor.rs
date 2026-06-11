@@ -77,6 +77,44 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     checks.extend(doctor::run_local_checks(cfg));
     checks.extend(doctor::run_backend_checks(cfg).await);
 
+    // --fix: when a check the daemon can repair failed (the whisper / preview
+    // server probes carry fix_action "restart_whisper"), ask the daemon to
+    // sweep + respawn the server(s), wait for them to come up, and re-probe.
+    if args.fix {
+        let fixable_failed = checks
+            .iter()
+            .any(|c| !c.ok && c.fix_action.as_deref() == Some("restart_whisper"));
+        if !fixable_failed {
+            if !json {
+                println!("--fix: nothing fixable failed (whisper checks are ok).");
+            }
+        } else if let Ok(ref mut c) = client_result {
+            if !json {
+                println!("--fix: restarting the bundled whisper-server(s)…");
+            }
+            match c.send(Request::RestartWhisper).await {
+                Ok(_) => {
+                    // Give the supervisors a moment to respawn, then re-probe.
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let recheck = doctor::run_backend_checks(cfg).await;
+                    // Replace the stale backend results with the fresh probes.
+                    checks.retain(|c| !recheck.iter().any(|r| r.name == c.name));
+                    checks.extend(recheck);
+                    if !json {
+                        println!("--fix: re-probed after restart.");
+                    }
+                }
+                Err(_) => {
+                    if !json {
+                        eprintln!("--fix: daemon rejected the restart request.");
+                    }
+                }
+            }
+        } else if !json {
+            eprintln!("--fix: daemon not reachable — start it first: phoneme daemon start");
+        }
+    }
+
     // A check whose name is marked "(optional)" never fails the run.
     let is_optional = |name: &str| name.to_lowercase().contains("(optional)");
     let any_failed = checks.iter().any(|c| !c.ok && !is_optional(&c.name));

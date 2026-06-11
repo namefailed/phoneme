@@ -158,6 +158,33 @@ Stored results: `summary` and `summary_model` columns on the recording.
 
 ---
 
+## `[recording]` — meeting preview
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `meeting_preview` | `"toggle"` | How the live preview handles a meeting's two tracks (needs `streaming_preview`). `"toggle"` — one preview loop follows a single track; the overlay's 🎤/🔊 button switches it (same cost as a single recording). `"both"` — one loop per track, captions stacked in the overlay (~double the preview work; the loops interleave on the shared transcription semaphore). |
+
+## `[auto_tag]`
+
+LLM tag suggestions, approved by the user before they apply. Blank
+provider/key/URL/model fields inherit the `[llm_post_process]` connection,
+like `[summary]`.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `auto` | `false` | Suggest tags automatically as a pipeline step on every recording |
+| `provider` | `""` | `ollama` / `openai` / `groq` / `anthropic`; empty → inherit |
+| `api_key` | `""` | Empty → inherit the cleanup key (DPAPI-encrypted at rest) |
+| `api_url` | `""` | Empty → inherit / provider default |
+| `model` | `""` | Empty → the cleanup model |
+| `prompt` | (built-in) | Tagger instructions; the existing-tag list and transcript are appended at run time |
+| `auto_accept_existing` | `false` | Auto-apply a suggestion whose tag already exists (any tag in your library, matched case-insensitively); only suggestions that would create a brand-new tag wait as approve/dismiss chips. |
+| `max_tags` | `5` | Maximum suggestions per recording (clamped 1–12) |
+
+Suggestions land on the recording (`tag_suggestions`) and are surfaced in the
+GUI as approve/dismiss chips; approving creates-or-fetches the tag and attaches
+it.
+
 ## `[semantic_search]`
 
 | Key | Default | Description |

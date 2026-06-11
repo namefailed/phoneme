@@ -175,6 +175,43 @@ pub enum Request {
         id: RecordingId,
         notes: String,
     },
+    /// Set or clear the "favorite"/star flag for a recording (Favorites view).
+    SetFavorite {
+        id: RecordingId,
+        favorite: bool,
+    },
+    /// Run the LLM tag-suggestion step for one recording on demand (regardless
+    /// of the `auto_tag.auto` gate). Suggestions land on the recording and a
+    /// `TagSuggestionsUpdated` event fires when they're ready.
+    SuggestTags {
+        id: RecordingId,
+    },
+    /// Approve one suggested tag: create the tag if needed, attach it, and
+    /// remove the name from the recording's suggestion list.
+    ApproveTagSuggestion {
+        id: RecordingId,
+        name: String,
+    },
+    /// Dismiss one suggested tag (drop it from the suggestion list).
+    DismissTagSuggestion {
+        id: RecordingId,
+        name: String,
+    },
+    /// Force-restart the bundled whisper-server(s): best-effort kill of every
+    /// whisper-server process (covers hung servers and orphans holding the
+    /// port), then the supervisors respawn the main + preview servers from the
+    /// current config. The Doctor's "Fix" for an unreachable local Whisper.
+    RestartWhisper,
+    /// Skip the pipeline step currently running for the active item (cleanup /
+    /// summary / tagging — the LLM stages). The stage aborts and the pipeline
+    /// continues with the next step, as if the stage failed non-fatally.
+    SkipCurrentStage,
+    /// Switch which meeting track feeds the live preview (`"mic"` /
+    /// `"system"`). Only meaningful while a meeting is recording with
+    /// `recording.meeting_preview = "toggle"`; emits `PreviewSourceChanged`.
+    SetPreviewSource {
+        track: String,
+    },
     /// Set (or clear) the custom display name for one diarized speaker label of
     /// a recording. `speaker_label` is the 1-based index from the transcript's
     /// `[Speaker N]` marker. A blank `name` clears the mapping (the label
@@ -379,6 +416,8 @@ pub enum PipelineStage {
     CleaningUp,
     /// Running the LLM summary step.
     Summarizing,
+    /// Running the LLM tag-suggestion (auto-tag) step.
+    Tagging,
     /// Running an action hook.
     RunningHook,
     /// All work finished successfully.
@@ -399,6 +438,11 @@ pub enum DaemonEvent {
         /// events apart from single-recording events without guessing.
         #[serde(default)]
         meeting_id: Option<String>,
+        /// Which meeting track this is (`"mic"` / `"system"`); `None` for a
+        /// single recording. Lets the live-preview overlay label and route
+        /// each track's partials without a catalog round-trip.
+        #[serde(default)]
+        track: Option<String>,
     },
     RecordingStopped {
         id: RecordingId,
@@ -504,6 +548,16 @@ pub enum DaemonEvent {
     },
     NotesUpdated {
         id: RecordingId,
+    },
+    /// A recording's LLM tag suggestions changed (generated, approved away, or
+    /// dismissed). The UI re-reads the recording to show the current list.
+    TagSuggestionsUpdated {
+        id: RecordingId,
+    },
+    /// The live preview switched to following this meeting track (`"mic"` /
+    /// `"system"`). The overlay's source toggle reflects it.
+    PreviewSourceChanged {
+        track: String,
     },
     /// A recording's custom speaker-name map changed (a label was renamed or
     /// cleared). Clients re-fetch the recording to pick up the new names.

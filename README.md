@@ -81,6 +81,9 @@ flowchart TD
 - **⌨️ Transcribe-in-Place (`Ctrl+Alt+I`)**: Speak with a global hotkey and Phoneme types your dictated words into the focused application (Word, Slack, Chrome, VS Code) via OS-level keystroke simulation.
 - **✨ Smart Cleanup & AI Summary**: Pipe raw transcripts through an LLM to fix stutters, reformat, or translate — and optionally generate a per-recording summary, on demand or automatically. Three transcript layers (raw → cleaned → edited) are kept so nothing is lost.
 - **🔍 Keyword + Semantic Search**: Manage thousands of recordings with SQLite FTS5 full-text search, or search by *meaning* with an offline, **chunked hybrid** index — per-passage ONNX embeddings fused with keyword ranking (RRF) so a query finds the recording whether you remember the gist or the one distinctive word. Bring your own embedding model.
+- **🏷️ Organize at scale**: Tags with a full manager, ⭐ favorites, saved searches that snapshot every filter, AI **auto-tag suggestions** you approve before they apply, and a side-by-side view for any two transcripts.
+- **⌨️ Keyboard everything**: Opt-in vim-style navigation drives all three panes (and the queue), `g`-chords jump anywhere, the list zooms with `Ctrl+=`/`-`, and `?` shows the full cheat sheet.
+- **🩺 Self-healing**: A header health pill + Doctor watch the local servers; one click (or `phoneme doctor --fix`) sweeps a hung/orphaned whisper-server and respawns it from config.
 - **💻 CLI is a Peer**: Every GUI action is a CLI command (`phoneme record --start`). Bind it to AutoHotkey, Stream Deck, or Kanata.
 
 ---

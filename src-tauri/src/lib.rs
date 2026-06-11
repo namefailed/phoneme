@@ -52,7 +52,19 @@ pub fn run() {
                 }
             }
         })
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Remember window positions/sizes but NEVER visibility: the overlay is
+        // created hidden and shown only by recording events / the Preview
+        // button, and the main window's visibility belongs to the tray logic.
+        // (With VISIBLE tracked, a state save taken while the overlay was up
+        // made it pop open on every app start.)
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -270,6 +282,14 @@ pub fn run() {
             commands::get_original_transcript,
             commands::get_clean_transcript,
             commands::update_notes,
+            commands::set_favorite,
+            commands::restart_whisper,
+            commands::save_window_state,
+            commands::set_preview_source,
+            commands::skip_current_stage,
+            commands::suggest_tags,
+            commands::approve_tag_suggestion,
+            commands::dismiss_tag_suggestion,
             commands::set_speaker_name,
             commands::daemon_status,
             commands::read_config,

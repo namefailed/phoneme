@@ -11,9 +11,9 @@ The settings are grouped into six tabs in the left sidebar, with a **search box*
 | 🗣️ **Transcription** | Whisper / transcription provider, Live Preview, Diarization |
 | 🎙️ **Capture** | Recording, Hotkeys |
 | 🎨 **Appearance** | Interface, Editor |
-| 🏷️ **Tags** | Tag manager |
+| 🗂️ **Managers** | Tags · Profiles · Saved searches (sub-tabs) |
 | ✨ **Post-Processing** | AI cleanup + Auto Summary, Hooks |
-| ⚙️ **System** | Storage & retention, Profiles, Tray, Advanced |
+| ⚙️ **System** | Storage & retention, Tray, Semantic search, Advanced |
 
 ---
 
@@ -69,9 +69,30 @@ Theme (Catppuccin Mocha default), 24-hour time, visible list columns (reorderabl
 
 Optional Vim keybindings (with inline or external `vimrc`) for the transcript editor.
 
-## 🏷️ Tags
+## 🗂️ Managers
+
+One home for the three managers, with sub-tabs on top:
+
+- **Tags** — create, rename, recolor, delete, and merge tags (the quick
+  Tag Manager popup is still on `Shift+T` / `g T`).
+- **Profiles** — named full-config snapshots; save the current config and
+  switch between setups (`g P` jumps here).
+- **Saved searches** — the full saved-search manager: apply, rename, update to
+  the current filters, delete (`g S` jumps here). See
+  [Search & Organization](search_and_organization.md).
+
+## 🏷️ Tags (legacy section)
 
 Rename, recolor, and delete tags. See [Search & Organization](search_and_organization.md).
+
+### Auto-Tagging
+
+Under Post-Processing: let the AI **suggest tags** for each new transcript. It
+prefers your existing tags and proposes new ones only when nothing fits; every
+suggestion waits as a dashed ✨ chip on the recording until you approve or
+dismiss it. Pick a provider/model (blank inherits the cleanup connection), cap
+the number of suggestions, and tune the instructions. See
+[Auto-Tagging](auto_tagging.md).
 
 ## ✨ Post-Processing
 
@@ -124,3 +145,21 @@ phoneme config reload
 ```
 
 Full schema: [Configuration Reference](../developer-guide/config_reference.md).
+
+## 🩺 Health indicators
+
+Phoneme watches its own health (the same checks as the Doctor) and surfaces
+problems three ways:
+
+- a **health pill** in the header — green dot when everything passes, blinking
+  red with an issue count when something fails; click it to open the Doctor;
+- the **⚙ Settings button pulses red** while anything is unhealthy;
+- a **banner** appears under the header naming the failing checks, with
+  **🔧 Fix now** (restarts the whisper-server(s) / starts the daemon) and
+  **🩺 Open Doctor**. Dismissing it re-arms automatically once health returns
+  to ok.
+
+The Doctor itself can **restart the bundled whisper-server(s)** with one click
+when the Whisper or live-preview probe fails — it sweeps hung or orphaned
+server processes and respawns them from your config (CLI:
+`phoneme doctor --fix`).

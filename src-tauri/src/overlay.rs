@@ -38,6 +38,12 @@ use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 /// the `windows` allowlist in `src-tauri/capabilities/default.json`.
 pub const OVERLAY_LABEL: &str = "preview-overlay";
 
+/// Event the main window emits (via the `set_overlay` "preview" action) to ask
+/// the overlay webview to render placeholder text and stay pinned open until the
+/// user closes it with ✕ — so the overlay can be positioned/resized without a
+/// live recording. See `frontend/src/overlay.ts`.
+pub const OVERLAY_PREVIEW_EVENT: &str = "overlay-preview";
+
 /// Default overlay size (logical px). Small: a one/two-line caption card.
 const OVERLAY_W: f64 = 540.0;
 const OVERLAY_H: f64 = 92.0;
@@ -69,7 +75,10 @@ pub fn ensure(app: &AppHandle) {
     let builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
         .title("Phoneme Live Preview")
         .inner_size(OVERLAY_W, OVERLAY_H)
-        .resizable(false)
+        // Resizable so the caption can be sized to taste; position AND size are
+        // remembered by tauri-plugin-window-state. Frameless, so the resize grips
+        // are the window edges.
+        .resizable(true)
         .decorations(false)
         .transparent(true)
         .always_on_top(true)

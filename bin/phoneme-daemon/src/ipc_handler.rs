@@ -414,6 +414,105 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::SetFavorite { id, favorite } => {
+            match state.catalog.set_favorite(&id, favorite).await {
+                Ok(()) => Response::Ok(serde_json::Value::Null),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::SuggestTags { id } => {
+            // On-demand tag suggestions (the UI's ✨ Suggest button). Runs the
+            // same step as the auto pipeline, regardless of `auto_tag.auto`.
+            let cfg = state.config.load();
+            match state.catalog.get(&id).await {
+                Ok(Some(rec)) => {
+                    let transcript = rec.transcript.unwrap_or_default();
+                    if transcript.trim().is_empty() {
+                        Response::Err(IpcError {
+                            kind: IpcErrorKind::InvalidConfig,
+                            message: "recording has no transcript to tag yet".into(),
+                        })
+                    } else {
+                        crate::pipeline::suggest_tags(state, &cfg, &id, &transcript).await;
+                        Response::Ok(serde_json::Value::Null)
+                    }
+                }
+                Ok(None) => Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: format!("no recording {}", id.as_str()),
+                }),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::ApproveTagSuggestion { id, name } => {
+            // Create-or-fetch the tag, attach it, then drop the suggestion.
+            match state.catalog.add_tag(&name, None).await {
+                Ok(tag) => match state.catalog.attach_tag(&id, tag.id).await {
+                    Ok(()) => {
+                        state.events.emit(DaemonEvent::TagAttached { tag_id: tag.id });
+                        if let Ok(Some(rec)) = state.catalog.get(&id).await {
+                            let rest: Vec<String> = rec
+                                .tag_suggestions
+                                .into_iter()
+                                .filter(|n| !n.eq_ignore_ascii_case(&name))
+                                .collect();
+                            if let Err(e) = state.catalog.set_tag_suggestions(&id, &rest).await {
+                                tracing::warn!(error = %e, "failed to drop approved tag suggestion");
+                            }
+                        }
+                        state
+                            .events
+                            .emit(DaemonEvent::TagSuggestionsUpdated { id });
+                        Response::Ok(serde_json::to_value(tag).unwrap_or_default())
+                    }
+                    Err(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: e.to_string(),
+                    }),
+                },
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::DismissTagSuggestion { id, name } => {
+            match state.catalog.get(&id).await {
+                Ok(Some(rec)) => {
+                    let rest: Vec<String> = rec
+                        .tag_suggestions
+                        .into_iter()
+                        .filter(|n| !n.eq_ignore_ascii_case(&name))
+                        .collect();
+                    match state.catalog.set_tag_suggestions(&id, &rest).await {
+                        Ok(()) => {
+                            state
+                                .events
+                                .emit(DaemonEvent::TagSuggestionsUpdated { id });
+                            Response::Ok(serde_json::Value::Null)
+                        }
+                        Err(e) => Response::Err(IpcError {
+                            kind: error_to_kind(&e),
+                            message: e.to_string(),
+                        }),
+                    }
+                }
+                Ok(None) => Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: format!("no recording {}", id.as_str()),
+                }),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::NotesUpdated { id });
@@ -734,6 +833,33 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             let mut checks = phoneme_core::doctor::run_local_checks(&cfg);
             checks.extend(phoneme_core::doctor::run_backend_checks(&cfg).await);
             serialize_response(checks)
+        }
+        Request::RestartWhisper => {
+            // Sweep every whisper-server process (hung children AND orphans
+            // from a dead daemon still holding the port), then wake both
+            // supervisors so the main + preview servers respawn from config.
+            crate::whisper_supervisor::sweep_stray_servers();
+            state.whisper_restart.notify_waiters();
+            tracing::info!("whisper-server restart requested via IPC (Doctor fix)");
+            Response::Ok(serde_json::json!({
+                "message": "whisper-server processes swept; supervisors respawning"
+            }))
+        }
+        Request::SetPreviewSource { track } => {
+            match state.recorder.set_preview_source(state, &track).await {
+                Ok(()) => Response::Ok(serde_json::Value::Null),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::SkipCurrentStage => {
+            // Wakes whichever LLM stage is currently streaming (no-op when none
+            // is — the notify has no waiter then and stores nothing).
+            state.skip_stage.notify_waiters();
+            tracing::info!("skip-current-stage requested via IPC");
+            Response::Ok(serde_json::Value::Null)
         }
         Request::ListQueue => {
             let pending = state.inbox.list_pending().await;
@@ -1548,6 +1674,8 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         cleanup_model: None,
         diarized: false,
         user_edited: false,
+        favorite: false,
+        tag_suggestions: vec![],
         summary: None,
         summary_model: None,
         tags: vec![],
@@ -1721,6 +1849,8 @@ mod tests {
             cleanup_model: None,
             diarized: false,
             user_edited: false,
+            favorite: false,
+        tag_suggestions: vec![],
             summary: None,
             summary_model: None,
             tags: vec![],

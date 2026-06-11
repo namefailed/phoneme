@@ -9,11 +9,13 @@ import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from '../services
 import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModels } from '../services/sttProviders';
 import { fetchLlmModels } from '../services/llmModels';
 import { curatedCleanupModelIds } from '../data/curatedModels';
+import { applyRerun, rerunToastMessage, type RerunPayload } from './RecordingsView/rerunActions';
+import { getOpenRecordingId } from '../state/openRecording';
 
 type ProviderOption = { value: string; label: string };
 
 /** Every surface where a model can be switched from the quick picker. */
-type MpTab = "transcription" | "postprocessing" | "summary" | "preview";
+type MpTab = "transcription" | "postprocessing" | "summary" | "autotag" | "preview" | "semantic";
 
 const LLM_PROVIDERS: ProviderOption[] = [
   { value: "none", label: "None" },
@@ -57,6 +59,22 @@ export class ModelPickerElement extends LitElement {
   @property({ type: String }) initialTab: MpTab = "transcription";
   @property({ type: Object }) anchor?: HTMLElement;
   @property({ type: Object }) config: any = null;
+  /** "default" → Save as default (persist to config). "oneshot" → Run once on
+   *  `recordingId` (re-run that recording with these models, not saved). */
+  @property() activeMode: "default" | "oneshot" = "default";
+  /** Set when opened from a recording's Re-run; enables the "Run once" mode. */
+  @property({ type: String }) recordingId = "";
+  /** Multiple targets (the bulk bar's selection). Takes precedence over the
+   *  single `recordingId` when non-empty so "Run once" re-runs each one. */
+  @property({ type: Array }) recordingIds: string[] = [];
+
+  /** The recordings "Run once" will act on. Bulk selection wins; otherwise the
+   *  single recording id (which openModelPicker seeds from the open recording
+   *  when nothing explicit was passed). Empty → "Run once" is disabled. */
+  private get targets(): string[] {
+    if (this.recordingIds.length) return this.recordingIds;
+    return this.recordingId ? [this.recordingId] : [];
+  }
 
   @state() private activeTab: MpTab = "transcription";
   @state() private downloadedModels: string[] = [];
@@ -85,6 +103,20 @@ export class ModelPickerElement extends LitElement {
   @state() private sumModels: string[] = [];
   @state() private fetchingSum = false;
   @state() private sumModelOther = false;
+
+  // Auto-tag model (config.auto_tag). Empty provider = inherit the cleanup
+  // connection, like the summary.
+  @state() private atProvider = "";
+  @state() private atUrl = "";
+  @state() private atModel = "";
+  @state() private atKey = "";
+  @state() private atModels: string[] = [];
+  @state() private fetchingAt = false;
+  @state() private atModelOther = false;
+
+  // Semantic-search embedding model (config.semantic_search.model_dir) — a
+  // local ONNX model directory, not a provider/model pair.
+  @state() private semModelDir = "";
 
   // Live-preview transcription model (config.preview_whisper). When "dedicated"
   // is off, the preview reuses the main transcription provider.
@@ -164,6 +196,14 @@ export class ModelPickerElement extends LitElement {
     this.sumModel = String(s.model ?? "");
     this.sumKey = String(s.api_key ?? "");
 
+    const at = this.config.auto_tag || {};
+    this.atProvider = String(at.provider ?? "");
+    this.atUrl = String(at.api_url ?? "");
+    this.atModel = String(at.model ?? "");
+    this.atKey = String(at.api_key ?? "");
+
+    this.semModelDir = String(this.config.semantic_search?.model_dir ?? "");
+
     const pv = this.config.preview_whisper;
     this.prevDedicated = !!pv;
     if (pv) {
@@ -184,6 +224,28 @@ export class ModelPickerElement extends LitElement {
     }
     if (this.sumProvider && this.sumProvider !== "none") {
       void this.fetchSumModelList();
+    }
+    if (this.atProvider && this.atProvider !== "none") {
+      void this.fetchAtModelList();
+    }
+  }
+
+  /** Fetch the model list for the current auto-tag provider. */
+  private async fetchAtModelList() {
+    const provider = this.atProvider;
+    if (!provider || provider === "none") {
+      this.atModels = [];
+      return;
+    }
+    this.fetchingAt = true;
+    try {
+      const fetched = await fetchLlmModels(provider, this.atUrl, this.atKey);
+      this.atModels = fetched.length ? fetched : curatedCleanupModelIds(provider);
+    } catch (e) {
+      console.warn("Failed to fetch auto-tag models:", e);
+      this.atModels = curatedCleanupModelIds(provider);
+    } finally {
+      this.fetchingAt = false;
     }
   }
 
@@ -279,6 +341,18 @@ export class ModelPickerElement extends LitElement {
     this.config.summary.api_key = this.sumKey;
     this.config.summary.api_url = this.sumUrl.trim();
 
+    // Auto-tag model — blank fields inherit the post-processing connection
+    // (mirrors summary). The enable toggle itself lives in Settings.
+    if (!this.config.auto_tag) this.config.auto_tag = {};
+    this.config.auto_tag.provider = this.atProvider.trim();
+    this.config.auto_tag.model = this.atModel.trim();
+    this.config.auto_tag.api_key = this.atKey;
+    this.config.auto_tag.api_url = this.atUrl.trim();
+
+    // Semantic embedding model directory (local ONNX). Blank keeps the default.
+    if (!this.config.semantic_search) this.config.semantic_search = {};
+    this.config.semantic_search.model_dir = this.semModelDir.trim();
+
     // Live-preview model. Off → reuse the main provider (null). On → clone the
     // main whisper config (so every required field is present) and override the
     // provider + model fields for this dedicated preview provider.
@@ -305,6 +379,44 @@ export class ModelPickerElement extends LitElement {
     } catch (e) {
       showToast(`Save failed: ${errText(e)}`, "error");
     }
+  }
+
+  /** "Run once": re-run the open recording's whole pipeline (transcribe →
+   *  cleanup → summary → hooks) with the models chosen here, applied this one
+   *  time only — nothing is written to config. (Live preview is a capture-time
+   *  setting, so it doesn't apply to a one-shot re-run.) */
+  private async runOnce() {
+    const targets = this.targets;
+    if (!targets.length) return;
+    const transcriptionModel =
+      this.sttRealProvider === "local" ? this.sttLocalModel : this.sttModel.trim();
+    const llmOn = this.llmRealProvider !== "none";
+    const isApi = ["openai", "groq", "anthropic"].includes(this.llmRealProvider);
+    const orNull = (s: string) => (s.trim() === "" ? null : s.trim());
+    const payload: RerunPayload = {
+      step: "all",
+      model: transcriptionModel || null,
+      overrides: llmOn
+        ? {
+            cleanupProvider: this.llmRealProvider || null,
+            cleanupModel: orNull(this.llmModel),
+            cleanupPrompt: null,
+            cleanupApiUrl: isApi ? orNull(this.llmUrl) : null,
+            summaryModel: orNull(this.sumModel),
+            summaryPrompt: null,
+          }
+        : null,
+    };
+    // Apply to every target (one or the whole bulk selection). Identical path to
+    // the old per-surface Re-run, so single and bulk behave the same.
+    let ok = 0;
+    let failed = 0;
+    for (const id of targets) {
+      try { await applyRerun(id, payload); ok++; } catch { failed++; }
+    }
+    if (failed === 0) showToast(rerunToastMessage(payload, ok), "info");
+    else showToast(`${ok} ok, ${failed} failed`, "error");
+    this.close(false);
   }
 
   private onSttProviderChange() {
@@ -380,6 +492,42 @@ export class ModelPickerElement extends LitElement {
     this.prevModelOther = false;
   }
 
+  private onAtProviderChange(e: Event) {
+    this.atProvider = (e.target as HTMLSelectElement).value;
+    this.atModelOther = false;
+    if (this.atProvider && this.atProvider !== "none") void this.fetchAtModelList();
+    else this.atModels = [];
+  }
+
+  /** Auto-tag model control: live-fetched dropdown + Refresh + "Other…". */
+  private renderAtModel() {
+    const cur = this.atModel;
+    const known = new Set(this.atModels);
+    if (cur) known.add(cur);
+    if (this.atModelOther) {
+      return html`
+        <div style="display:flex; gap:8px;">
+          <input class="mp-input" type="text" .value=${cur} placeholder="Model id"
+            @input=${(e: Event) => this.atModel = (e.target as HTMLInputElement).value} />
+          <button class="modal-btn" @click=${() => { this.atModelOther = false; }}>List</button>
+        </div>`;
+    }
+    return html`
+      <div style="display:flex; gap:8px;">
+        <select class="mp-input" @change=${(e: Event) => {
+          const v = (e.target as HTMLSelectElement).value;
+          if (v === "__other__") this.atModelOther = true; else this.atModel = v;
+        }}>
+          <option value="" ?selected=${!cur}>(cleanup model)</option>
+          ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
+          <option value="__other__">Other… (type a model id)</option>
+        </select>
+        <button class="modal-btn" ?disabled=${this.fetchingAt} title="Fetch available models"
+          @click=${() => void this.fetchAtModelList()}>↻</button>
+      </div>
+      ${this.fetchingAt ? html`<p class="mp-hint">Loading models…</p>` : ""}`;
+  }
+
   /** LLM model control: live-fetched dropdown + Refresh + "Other…" free-text. */
   private renderLlmModel() {
     const cur = this.llmModel;
@@ -438,6 +586,24 @@ export class ModelPickerElement extends LitElement {
       </select>`;
   }
 
+  /** "Run once" — applies the chosen models to the target recording(s) as a
+   *  one-time re-run. Disabled (but always shown) when there's no target. */
+  private renderRunOnceBtn() {
+    const n = this.targets.length;
+    const has = n > 0;
+    return html`<button class="modal-btn ${this.activeMode === "oneshot" ? "modal-btn-primary" : ""}"
+      ?disabled=${!has}
+      title=${has ? "Re-run with these models once — not saved to your config" : "Open a recording (or select some) to run these once"}
+      @click=${this.runOnce}>↻ Run once${n > 1 ? ` · ${n}` : ""}</button>`;
+  }
+
+  /** "Save as default" — persists the chosen models to config. */
+  private renderSaveBtn() {
+    return html`<button id="mp-save" class="modal-btn ${this.activeMode === "default" ? "modal-btn-primary" : ""}"
+      title="Save these models as your defaults"
+      @click=${this.save}>💾 Save as default</button>`;
+  }
+
   render() {
     const isSttLocal = this.sttRealProvider === "local";
     const isLlmCloud = this.llmRealProvider === "openai" || this.llmRealProvider === "groq" || this.llmRealProvider === "anthropic";
@@ -463,14 +629,20 @@ export class ModelPickerElement extends LitElement {
       <div class=${"modal-overlay " + (this.anchor ? "mp-anchored" : "")} @click=${this.handleOverlayClick}>
         <div class="modal-dialog mp-dialog" role="dialog" aria-modal="true" aria-labelledby="mp-title">
           <div class="modal-header">
-            <h3 class="modal-title" id="mp-title">Choose Models</h3>
+            <h3 class="modal-title" id="mp-title">${
+              this.activeMode === "oneshot"
+                ? (this.targets.length > 1 ? `Re-run · ${this.targets.length} recordings` : "Re-run with these models")
+                : "Quick model switch"
+            }</h3>
           </div>
 
           <div class="mp-tabs" role="tablist">
             <button class="mp-tab ${this.activeTab === 'transcription' ? 'active' : ''}" @click=${() => this.activeTab = 'transcription'} role="tab">Transcription</button>
             <button class="mp-tab ${this.activeTab === 'postprocessing' ? 'active' : ''}" @click=${() => this.activeTab = 'postprocessing'} role="tab">Post-processing</button>
             <button class="mp-tab ${this.activeTab === 'summary' ? 'active' : ''}" @click=${() => this.activeTab = 'summary'} role="tab">Summary</button>
+            <button class="mp-tab ${this.activeTab === 'autotag' ? 'active' : ''}" @click=${() => this.activeTab = 'autotag'} role="tab">Auto-tag</button>
             <button class="mp-tab ${this.activeTab === 'preview' ? 'active' : ''}" @click=${() => this.activeTab = 'preview'} role="tab">Live preview</button>
+            <button class="mp-tab ${this.activeTab === 'semantic' ? 'active' : ''}" @click=${() => this.activeTab = 'semantic'} role="tab">Semantic</button>
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'transcription'}>
@@ -560,6 +732,30 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
 
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'autotag'}>
+            <label class="mp-label" for="mp-at-provider">Provider</label>
+            <select id="mp-at-provider" class="mp-input" @change=${this.onAtProviderChange}>
+              <option value="" ?selected=${!this.atProvider}>Same as post-processing</option>
+              <option value="ollama" ?selected=${this.atProvider === 'ollama'}>Local Ollama</option>
+              <option value="openai" ?selected=${this.atProvider === 'openai'}>OpenAI-Compatible Endpoint</option>
+              <option value="groq" ?selected=${this.atProvider === 'groq'}>Groq (cloud)</option>
+              <option value="anthropic" ?selected=${this.atProvider === 'anthropic'}>Anthropic Claude (cloud)</option>
+            </select>
+
+            <div class="mp-row" style="display:${["openai", "groq", "anthropic"].includes(this.atProvider) ? '' : 'none'}">
+              <label class="mp-label" for="mp-at-key">API key</label>
+              <input id="mp-at-key" class="mp-input" type="password" .value=${this.atKey} @input=${(e: Event) => this.atKey = (e.target as HTMLInputElement).value} />
+              <label class="mp-label" for="mp-at-url">API URL (optional)</label>
+              <input id="mp-at-url" class="mp-input" type="text" .value=${this.atUrl} @input=${(e: Event) => this.atUrl = (e.target as HTMLInputElement).value} />
+            </div>
+
+            <div style="display:${this.atProvider ? '' : 'none'}">
+              <label class="mp-label">Model</label>
+              ${this.renderAtModel()}
+            </div>
+            <p class="mp-hint">Model used to <b>suggest tags</b> for each transcript (you approve before they apply). <b>Same as post-processing</b> reuses your cleanup connection. Turn auto-tagging on/off in <b>Settings → Post-Processing</b>.</p>
+          </div>
+
           <div class="mp-panel" ?hidden=${this.activeTab !== 'preview'}>
             <label class="mp-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" class="toggle-switch" .checked=${this.prevDedicated} @change=${(e: Event) => this.prevDedicated = (e.target as HTMLInputElement).checked} />
@@ -592,9 +788,22 @@ export class ModelPickerElement extends LitElement {
             </div>
           </div>
 
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'semantic'}>
+            <label class="mp-label" for="mp-sem-dir">Embedding model folder</label>
+            <input id="mp-sem-dir" class="mp-input" type="text" .value=${this.semModelDir}
+              placeholder="Folder containing model.onnx + tokenizer.json"
+              @input=${(e: Event) => this.semModelDir = (e.target as HTMLInputElement).value} />
+            <p class="mp-hint">The local ONNX model that powers <b>semantic search</b> (✨). Point this at any folder with a sentence-embedding model (<code>model.onnx</code> + <code>tokenizer.json</code>). Download/manage models — and tune chunking — in <b>Settings → System → Semantic Search</b>. Changing the model re-indexes new recordings; existing ones re-embed on their next transcript change.</p>
+          </div>
+
           <div class="modal-actions">
             <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
-            <button id="mp-save" class="modal-btn modal-btn-primary" @click=${this.save}>Save</button>
+            <!-- Both modes show both buttons; the primary (rightmost) one flips
+                 with the mode: Run once for a Re-run, Save as default for the
+                 Quick Switcher. -->
+            ${this.activeMode === "oneshot"
+              ? html`${this.renderSaveBtn()}${this.renderRunOnceBtn()}`
+              : html`${this.renderRunOnceBtn()}${this.renderSaveBtn()}`}
           </div>
         </div>
       </div>
@@ -605,6 +814,7 @@ export class ModelPickerElement extends LitElement {
 export async function openModelPicker(
   initialTab: MpTab = "transcription",
   anchor?: HTMLElement,
+  opts?: { mode?: "default" | "oneshot"; recordingId?: string; recordingIds?: string[] },
 ): Promise<boolean> {
   let config: any;
   try {
@@ -622,6 +832,11 @@ export async function openModelPicker(
     el.initialTab = initialTab;
     if (anchor) el.anchor = anchor;
     el.config = config;
+    el.activeMode = opts?.mode ?? "default";
+    el.recordingIds = opts?.recordingIds ?? [];
+    // With no explicit target, fall back to whatever recording the detail pane
+    // is showing, so the header's Quick Switcher can still "Run once" on it.
+    el.recordingId = opts?.recordingId ?? (el.recordingIds.length ? "" : (getOpenRecordingId() ?? ""));
 
     el.addEventListener('resolved', (e: Event) => {
       const customEvent = e as CustomEvent<boolean>;

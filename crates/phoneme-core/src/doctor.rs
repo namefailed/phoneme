@@ -117,8 +117,37 @@ pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
         name: "Whisper server".into(),
         ok: whisper_ok,
         detail: whisper_detail,
-        fix_action: None,
+        // Bundled modes: the daemon supervises the server, so "Fix" can sweep
+        // hung/orphaned processes and respawn it. External servers are the
+        // user's own — nothing for us to restart.
+        fix_action: if cfg.whisper.mode == WhisperMode::External {
+            None
+        } else {
+            Some("restart_whisper".into())
+        },
     });
+
+    // Dedicated live-preview server (only when configured on its own port).
+    if cfg.preview_needs_own_server() {
+        if let Some(pv) = cfg.preview_whisper.as_ref() {
+            let url = format!("http://127.0.0.1:{}", pv.bundled_server_port);
+            let probe = format!("{url}/health");
+            let (ok, detail) = match client.get(&probe).send().await {
+                Ok(resp) => (
+                    resp.status().is_success() || resp.status().as_u16() == 404,
+                    format!("{url} — HTTP {}", resp.status().as_u16()),
+                ),
+                Err(e) if e.is_timeout() => (false, format!("{url} — timed out")),
+                Err(_) => (false, format!("{url} — not reachable")),
+            };
+            out.push(CheckResult {
+                name: "Live-preview server".into(),
+                ok,
+                detail,
+                fix_action: Some("restart_whisper".into()),
+            });
+        }
+    }
 
     // Ollama (check if LLM post-processing uses Ollama, or if Ollama default
     // port is open regardless, so users know it's available).
