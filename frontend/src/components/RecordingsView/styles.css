@@ -1751,6 +1751,19 @@ ph-sidebar {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--fg-default);
 }
+/* Sidebar grid cursor on everything that ISN'T a filter row — section headers,
+   the queue header, queue item cells and their buttons. Same accent outline the
+   detail pane's grid cursor uses, for one keyboard look app-wide. */
+ph-sidebar .kbd-cursor:not(.sidebar-item) {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: 6px;
+}
+/* The queue item's clickable main area is a plain div — give the cursor a hint
+   of fill so it reads as the focused row, not just an outline. */
+ph-sidebar .queue-item-main.kbd-cursor {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 .sidebar-icon {
   font-size: 14px;
 }

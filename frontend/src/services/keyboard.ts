@@ -547,14 +547,17 @@ function onKeyDown(e: KeyboardEvent) {
     switch (e.key) {
       case "h":
         e.preventDefault();
-        // In the detail pane, h walks LEFT through the focused row's items (and
-        // steps out to the list at the leftmost); elsewhere it switches pane.
+        // In the detail pane (and the sidebar), h walks LEFT through the focused
+        // row's items; elsewhere it switches pane. The sidebar steps out to the
+        // list on l past its rightmost cell (it's the leftmost pane).
         if (activeWithin(".rv-detail")) dispatchVim("detail-left");
+        else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-left");
         else dispatchVim("pane-left");
         return;
       case "l":
         e.preventDefault();
         if (activeWithin(".rv-detail")) dispatchVim("detail-right");
+        else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-right");
         else dispatchVim("pane-right");
         return;
       case "G":

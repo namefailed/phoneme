@@ -30,6 +30,8 @@ export class QueuePanelElement extends LitElement {
   @state() private clearingFailed = false;
   private unsub: (() => void) | null = null;
   private pollTimer: number | null = null;
+  /** Snapshot of the last-rendered queue, to skip no-op re-renders (see load). */
+  private lastItemsJson = "";
 
   /** Live, non-terminal pipeline stage per recording id (drives the stage
    *  label AND lets re-runs that aren't in the inbox queue still show here). */
@@ -102,8 +104,17 @@ export class QueuePanelElement extends LitElement {
 
   private async load() {
     try {
-      this.items = await listQueue();
+      const items = await listQueue();
+      // Only re-render when the queue actually changed. The 3s poll otherwise
+      // replaces the array (and re-renders) every tick, which wipes transient
+      // DOM state like the sidebar's keyboard-cursor highlight on queue rows.
+      const json = JSON.stringify(items);
+      if (json !== this.lastItemsJson) {
+        this.lastItemsJson = json;
+        this.items = items;
+      }
     } catch {
+      this.lastItemsJson = "[]";
       this.items = [];
     }
     try {

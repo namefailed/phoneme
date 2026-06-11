@@ -28,6 +28,8 @@ const LS_SIDEBAR_WIDTH = "phoneme.layout.sidebarWidth";
 /** Last-selected recording (or `session:<id>`), restored on a soft reload.
  *  Cleared by "Reset interface preferences" like the other phoneme.* keys. */
 const LS_SELECTED = "phoneme.layout.selectedId";
+/** List-pane zoom factor (Ctrl+scroll / Ctrl+= / Ctrl+-), per device. */
+const LS_LIST_ZOOM = "phoneme.layout.listZoom";
 const SIDEBAR_MIN = 160;
 const SIDEBAR_MAX = 480;
 
@@ -77,13 +79,18 @@ export class RecordingsView {
    *  Only ever set while `interface.vim_nav` is on, so the focus ring never
    *  appears for non-vim users. */
   private focusedPane: "sidebar" | "list" | "detail" | null = null;
-  /** Keyboard cursor within the sidebar's filter items (vim j/k), -1 = none. */
-  private sidebarCursor = -1;
+  /** Keyboard cursor in the sidebar's 2D grid (vim): row into sidebarGrid()
+   *  (section headers · filter items · queue rows), col = cell within the row
+   *  (queue rows have several buttons). row -1 = not in sidebar nav. */
+  private sidebarRow = -1;
+  private sidebarCol = 0;
   /** Keyboard cursor in the detail pane's 2D grid: row = vertical section
    *  (top buttons · action row · tags · transcript · notes), col = item within
    *  that row. row -1 = not in detail nav. */
   private detailRow = -1;
   private detailCol = 0;
+  /** Zoom factor for the list pane (1 = 100%). Clamped 0.6–2, persisted. */
+  private listZoom = 1;
   private vimHandler: ((e: Event) => void) | null = null;
   /** Any component can request an undoable recording delete by dispatching
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
@@ -150,6 +157,20 @@ export class RecordingsView {
 
     this.applyLayout();
     this.setupSidebarResize();
+    // List zoom (per-device): restore + apply; Ctrl+scroll over the list pane
+    // adjusts it live (Ctrl+= / Ctrl+- / Ctrl+0 work too — see handleKeydown).
+    const z = Number((() => { try { return localStorage.getItem(LS_LIST_ZOOM); } catch { return null; } })());
+    if (Number.isFinite(z) && z >= 0.6 && z <= 2) this.listZoom = z;
+    this.applyListZoom();
+    this.container.querySelector<HTMLElement>("#rv-list")?.addEventListener(
+      "wheel",
+      (e) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        this.adjustListZoom(e.deltaY < 0 ? 0.1 : -0.1);
+      },
+      { passive: false },
+    );
     void this.refresh();
     void this.subscribeToEvents();
     this.keydownHandler = this.handleKeydown.bind(this);
@@ -299,9 +320,11 @@ export class RecordingsView {
   private focusPane(pane: "sidebar" | "list" | "detail") {
     const panes = this.panesInOrder();
     if (!panes.includes(pane)) pane = panes[0];
-    // Re-home the sidebar + detail keyboard cursors whenever pane focus changes.
-    this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
-    this.sidebarCursor = -1;
+    // Re-home the per-pane keyboard cursors whenever pane focus changes: clear
+    // both highlights, drop the cursor of any pane being LEFT (re-entering
+    // lands fresh), and let the entered pane re-land below.
+    this.clearSidebarCursorHighlight();
+    if (pane !== "sidebar") { this.sidebarRow = -1; this.sidebarCol = 0; }
     this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
     // Leaving the detail pane drops its grid cursor; coming back lands fresh on
     // the transcript (see enterDetailNav below).
@@ -327,6 +350,12 @@ export class RecordingsView {
         if (this.detailRow < 0) this.enterDetailNav();
         else this.highlightDetail();
       }
+      // Sidebar: land the cursor immediately (on the active filter, else the
+      // top row) so j/k/h/l work without a priming keypress.
+      if (pane === "sidebar") {
+        if (this.sidebarRow < 0) this.enterSidebarNav();
+        else this.highlightSidebar();
+      }
     }
   }
 
@@ -351,9 +380,11 @@ export class RecordingsView {
       case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
       case "edit": this.focusEditor(); break;
       case "delete": this.vimDelete(); break;
-      case "sidebar-down": this.moveSidebarCursor(1); break;
-      case "sidebar-up": this.moveSidebarCursor(-1); break;
-      case "sidebar-activate": this.activateSidebarItem(); break;
+      case "sidebar-down": this.moveSidebarRow(1); break;
+      case "sidebar-up": this.moveSidebarRow(-1); break;
+      case "sidebar-left": this.moveSidebarCol(-1); break;
+      case "sidebar-right": this.moveSidebarCol(1); break;
+      case "sidebar-activate": this.activateSidebarCell(); break;
       case "detail-down": this.moveDetailRow(1); break;
       case "detail-up": this.moveDetailRow(-1); break;
       case "detail-left": this.moveDetailCol(-1); break;
@@ -387,6 +418,23 @@ export class RecordingsView {
     await openTagManager();
   }
 
+  /** Apply the list-pane zoom. Uses Chromium's `zoom` property (WebView2 is
+   *  Chromium), which scales text and layout together — exactly the "make the
+   *  list bigger/smaller" ask, with the row grid staying proportional. */
+  private applyListZoom() {
+    this.container.querySelector<HTMLElement>("#rv-list")?.style.setProperty("zoom", String(this.listZoom));
+  }
+
+  private adjustListZoom(delta: number) {
+    this.setListZoom(this.listZoom + delta);
+  }
+
+  private setListZoom(z: number) {
+    this.listZoom = Math.round(Math.max(0.6, Math.min(2, z)) * 100) / 100;
+    this.applyListZoom();
+    try { localStorage.setItem(LS_LIST_ZOOM, String(this.listZoom)); } catch { /* private mode */ }
+  }
+
   /** Leave the panes for the header search box (vim k at the top of the list).
    *  Clears the pane focus ring + sidebar cursor since the header isn't one of
    *  our panes; ArrowDown / Esc from the search box come back to the list. */
@@ -395,34 +443,97 @@ export class RecordingsView {
     for (const p of ["sidebar", "list", "detail"] as const) {
       this.paneEl(p)?.classList.remove("rv-pane-focused");
     }
-    this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
+    this.clearSidebarCursorHighlight();
+    this.sidebarRow = -1;
+    this.sidebarCol = 0;
     document.querySelector<HTMLInputElement>(".headerbar input.search")?.focus();
   }
 
-  /** The sidebar's clickable filter rows (Library kinds + tags), in order. */
-  private sidebarItems(): HTMLElement[] {
-    return [...this.container.querySelectorAll<HTMLElement>("ph-sidebar .sidebar-item")];
+  /** The sidebar as a vertical stack of rows, each a horizontal list of
+   *  interactive cells (the detail pane's grid model). Visual order top→bottom:
+   *  Library header · kind filters · Tags header · tag filters · the queue's
+   *  pending items (furthest-out first) · the pinned active item(s) · the queue
+   *  header (the panel is column-reverse, so its header renders at the bottom).
+   *  Most rows are one cell; queue rows expose their buttons to h/l. Computed
+   *  fresh per keypress — the queue re-renders on daemon events. */
+  private sidebarGrid(): HTMLElement[][] {
+    const sb = this.container.querySelector<HTMLElement>("ph-sidebar");
+    if (!sb) return [];
+    const rows: HTMLElement[][] = [];
+    sb.querySelectorAll<HTMLElement>(".rv-sidebar-scroll .sidebar-header, .rv-sidebar-scroll .sidebar-item")
+      .forEach((el) => rows.push([el]));
+    const queueItemCells = (item: HTMLElement): HTMLElement[] =>
+      [
+        item.querySelector<HTMLElement>(".queue-item-main"),
+        ...item.querySelectorAll<HTMLElement>(".queue-move, .queue-cancel"),
+      ].filter((el): el is HTMLElement => !!el);
+    sb.querySelectorAll<HTMLElement>(".queue-list .queue-item").forEach((i) => rows.push(queueItemCells(i)));
+    sb.querySelectorAll<HTMLElement>(".queue-active .queue-item").forEach((i) => rows.push(queueItemCells(i)));
+    const qh = sb.querySelector<HTMLElement>(".queue-header");
+    if (qh) rows.push([qh, ...qh.querySelectorAll<HTMLElement>(".queue-failed, .queue-action")]);
+    return rows.filter((r) => r.length > 0);
   }
 
-  /** vim j/k inside the focused sidebar: first press lands on the active filter
-   *  (or the top), then steps. The cursor row gets a highlight. */
-  private moveSidebarCursor(delta: number) {
-    const items = this.sidebarItems();
-    if (!items.length) return;
-    items.forEach((i) => i.classList.remove("kbd-cursor"));
-    if (this.sidebarCursor < 0) {
-      const active = items.findIndex((i) => i.classList.contains("active"));
-      this.sidebarCursor = active >= 0 ? active : 0;
-    } else {
-      this.sidebarCursor = Math.max(0, Math.min(items.length - 1, this.sidebarCursor + delta));
-    }
-    const el = items[this.sidebarCursor];
+  private clearSidebarCursorHighlight() {
+    this.container.querySelectorAll("ph-sidebar .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+  }
+
+  /** Highlight the current sidebar cell (clamping the cursor to the live grid —
+   *  queue rows come and go as the daemon works). */
+  private highlightSidebar() {
+    this.clearSidebarCursorHighlight();
+    const rows = this.sidebarGrid();
+    if (this.sidebarRow < 0 || !rows.length) return;
+    this.sidebarRow = Math.min(this.sidebarRow, rows.length - 1);
+    const row = rows[this.sidebarRow];
+    this.sidebarCol = Math.max(0, Math.min(this.sidebarCol, row.length - 1));
+    const el = row[this.sidebarCol];
     el.classList.add("kbd-cursor");
     el.scrollIntoView({ block: "nearest" });
   }
 
-  private activateSidebarItem() {
-    this.sidebarItems()[this.sidebarCursor]?.click();
+  /** First landing in the sidebar: start on the active filter row, else the top. */
+  private enterSidebarNav() {
+    const rows = this.sidebarGrid();
+    if (!rows.length) return;
+    const active = rows.findIndex((r) => r[0].classList.contains("sidebar-item") && r[0].classList.contains("active"));
+    this.sidebarRow = active >= 0 ? active : 0;
+    this.sidebarCol = 0;
+    this.highlightSidebar();
+  }
+
+  private moveSidebarRow(delta: number) {
+    const rows = this.sidebarGrid();
+    if (!rows.length) return;
+    if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
+    this.sidebarRow = Math.max(0, Math.min(rows.length - 1, this.sidebarRow + delta));
+    this.sidebarCol = 0;
+    this.highlightSidebar();
+  }
+
+  /** h/l within the sidebar walk the focused row's cells (queue buttons). The
+   *  sidebar is the leftmost pane, so h at the left edge stays put; l past the
+   *  rightmost cell moves on to the list pane (single-cell rows step out on the
+   *  first l — the old pane-switch behavior). */
+  private moveSidebarCol(delta: number) {
+    const rows = this.sidebarGrid();
+    if (!rows.length) return;
+    if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
+    const row = rows[Math.min(this.sidebarRow, rows.length - 1)];
+    const next = this.sidebarCol + delta;
+    if (next >= row.length) { this.focusPane("list"); return; }
+    this.sidebarCol = Math.max(0, next);
+    this.highlightSidebar();
+  }
+
+  /** Enter on the current cell: click it (filter row, section header toggle,
+   *  queue button). A click can re-render the sidebar — re-highlight after. */
+  private activateSidebarCell() {
+    const rows = this.sidebarGrid();
+    if (this.sidebarRow < 0 || !rows.length) return;
+    const row = rows[Math.min(this.sidebarRow, rows.length - 1)];
+    row[Math.max(0, Math.min(this.sidebarCol, row.length - 1))]?.click();
+    requestAnimationFrame(() => this.highlightSidebar());
   }
 
   /** The detail pane as a vertical stack of rows, each a horizontal list of
@@ -837,6 +948,14 @@ export class RecordingsView {
     // the key (keyboard.ts preventDefaults the keys it owns).
     if (document.activeElement?.closest(".headerbar")) return;
     if (e.defaultPrevented) return;
+
+    // Ctrl+= / Ctrl+- zoom the recordings list (Ctrl+0 resets) — the keyboard
+    // counterpart to Ctrl+scroll over the list pane.
+    if (e.ctrlKey && !e.altKey) {
+      if (e.key === "=" || e.key === "+") { e.preventDefault(); this.adjustListZoom(0.1); return; }
+      if (e.key === "-") { e.preventDefault(); this.adjustListZoom(-0.1); return; }
+      if (e.key === "0") { e.preventDefault(); this.setListZoom(1); return; }
+    }
 
     // Escape: exit focus mode if active, otherwise clear the selection (which
     // collapses the detail pane). Not while typing in the transcript/notes editor
