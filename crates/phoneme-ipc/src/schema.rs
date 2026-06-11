@@ -206,6 +206,12 @@ pub enum Request {
     /// summary / tagging — the LLM stages). The stage aborts and the pipeline
     /// continues with the next step, as if the stage failed non-fatally.
     SkipCurrentStage,
+    /// Switch which meeting track feeds the live preview (`"mic"` /
+    /// `"system"`). Only meaningful while a meeting is recording with
+    /// `recording.meeting_preview = "toggle"`; emits `PreviewSourceChanged`.
+    SetPreviewSource {
+        track: String,
+    },
     /// Set (or clear) the custom display name for one diarized speaker label of
     /// a recording. `speaker_label` is the 1-based index from the transcript's
     /// `[Speaker N]` marker. A blank `name` clears the mapping (the label
@@ -432,6 +438,11 @@ pub enum DaemonEvent {
         /// events apart from single-recording events without guessing.
         #[serde(default)]
         meeting_id: Option<String>,
+        /// Which meeting track this is (`"mic"` / `"system"`); `None` for a
+        /// single recording. Lets the live-preview overlay label and route
+        /// each track's partials without a catalog round-trip.
+        #[serde(default)]
+        track: Option<String>,
     },
     RecordingStopped {
         id: RecordingId,
@@ -542,6 +553,11 @@ pub enum DaemonEvent {
     /// dismissed). The UI re-reads the recording to show the current list.
     TagSuggestionsUpdated {
         id: RecordingId,
+    },
+    /// The live preview switched to following this meeting track (`"mic"` /
+    /// `"system"`). The overlay's source toggle reflects it.
+    PreviewSourceChanged {
+        track: String,
     },
     /// A recording's custom speaker-name map changed (a label was renamed or
     /// cleared). Clients re-fetch the recording to pick up the new names.

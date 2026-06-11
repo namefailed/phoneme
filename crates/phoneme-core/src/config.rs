@@ -678,6 +678,22 @@ pub struct RecordingConfig {
     /// the CLI still honors whatever record mode it is given.
     #[serde(default)]
     pub auto_stop_on_silence: bool,
+    /// How the live preview handles a MEETING's two tracks (requires
+    /// `streaming_preview`):
+    ///
+    /// * `"toggle"` (default) — one preview loop follows a single track (the
+    ///   mic first); the overlay's 🎤/🔊 button switches which track feeds it.
+    ///   Same cost as a single-recording preview.
+    /// * `"both"` — two preview loops run concurrently, one per track, and the
+    ///   overlay shows both captions stacked. Roughly double the preview
+    ///   transcription work; the loops interleave on the shared transcription
+    ///   semaphore so they never run two requests at once.
+    #[serde(default = "default_meeting_preview")]
+    pub meeting_preview: String,
+}
+
+fn default_meeting_preview() -> String {
+    "toggle".into()
 }
 
 /// A conditional hook: when a transcript matches `pattern`, `command` is run in
@@ -993,6 +1009,7 @@ impl Default for Config {
                 pre_roll_ms: 1500,
                 streaming_preview: false,
                 auto_stop_on_silence: false,
+                meeting_preview: default_meeting_preview(),
             },
             hook: HookConfig {
                 commands: vec![

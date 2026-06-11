@@ -285,6 +285,7 @@ pub fn run() {
             commands::set_favorite,
             commands::restart_whisper,
             commands::save_window_state,
+            commands::set_preview_source,
             commands::skip_current_stage,
             commands::suggest_tags,
             commands::approve_tag_suggestion,

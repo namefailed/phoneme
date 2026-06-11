@@ -140,6 +140,20 @@ export class SectionPreview {
         </div>
 
         <div class="settings-field">
+          <label>Meetings (two tracks)
+            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+              How the overlay captions a meeting's mic + system audio.
+            </span>
+          </label>
+          <div>
+            <select id="prev-meeting-mode">
+              <option value="toggle" ${(this.config.recording?.meeting_preview ?? "toggle") !== "both" ? "selected" : ""}>One track at a time — 🎤/🔊 toggle in the overlay (lighter)</option>
+              <option value="both" ${this.config.recording?.meeting_preview === "both" ? "selected" : ""}>Both tracks at once — stacked captions (~double the preview work)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="settings-field">
           <label>Preview source</label>
           <div>
             <select id="prev-source">
@@ -180,6 +194,9 @@ export class SectionPreview {
       } catch (e) {
         showToast(`Could not show overlay: ${errText(e)}`, "error");
       }
+    });
+    this.container.querySelector<HTMLSelectElement>("#prev-meeting-mode")?.addEventListener("change", (e) => {
+      this.config.recording.meeting_preview = (e.target as HTMLSelectElement).value;
     });
     this.container.querySelector<HTMLSelectElement>("#prev-source")?.addEventListener("change", (e) => {
       const v = (e.target as HTMLSelectElement).value as PreviewSource;

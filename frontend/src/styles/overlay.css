@@ -84,6 +84,56 @@ body.ov-dim .ov-card {
   scroll-behavior: smooth;
 }
 
+/* The caption area: a single .ov-text line, or (meetings in "both" mode) two
+   stacked .ov-row lines, one per track. */
+.ov-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ov-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+}
+.ov-row .ov-row-ico {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1.45;
+}
+/* In two-row mode each track gets one tail-anchored line so both fit the card. */
+.ov-row .ov-text {
+  max-height: calc(1.45em * 1);
+}
+
+/* Meeting source toggle (🎤/🔊) — "toggle" mode only. Shows which track the
+   caption follows; clicking switches to the other. */
+.ov-src {
+  flex: 0 0 auto;
+  height: 22px;
+  min-width: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent, #89b4fa) 12%, transparent);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.ov-src:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent, #89b4fa) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #89b4fa) 50%, transparent);
+}
+.ov-src:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 /* Small close button. Excluded from the drag region (see overlay.ts markup —
    it's outside data-tauri-drag-region's effect via pointer handling) so a click
    hides the window instead of dragging it. */

@@ -453,6 +453,13 @@ pub async fn restart_whisper(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RestartWhisper).await
 }
 
+/// Switch which meeting track ("mic" / "system") feeds the live preview —
+/// the overlay's source toggle (meeting_preview = "toggle").
+#[tauri::command]
+pub async fn set_preview_source(bridge: Br<'_>, track: String) -> Result<Value, CommandError> {
+    forward(&bridge, Request::SetPreviewSource { track }).await
+}
+
 /// Skip the pipeline step currently running for the active queue item (the
 /// LLM stages — cleanup / summary / tagging). The pipeline continues.
 #[tauri::command]

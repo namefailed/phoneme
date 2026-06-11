@@ -24,7 +24,7 @@ export function stageLabel(stage: PipelineStage): string {
 }
 
 export type DaemonEvent =
-  | { event: "recording_started"; id: string; started_at: string }
+  | { event: "recording_started"; id: string; started_at: string; meeting_id?: string | null; track?: string | null }
   | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string }
   | { event: "transcription_started"; id: string }
   | { event: "transcription_partial"; id: string; text: string }
@@ -52,7 +52,8 @@ export type DaemonEvent =
   | { event: "tag_deleted"; id: number }
   | { event: "tag_attached"; tag_id: number }
   | { event: "tag_detached"; tag_id: number }
-  | { event: "tag_suggestions_updated"; id: string };
+  | { event: "tag_suggestions_updated"; id: string }
+  | { event: "preview_source_changed"; track: string };
 
 export type EventHandler = (event: DaemonEvent) => void;
 

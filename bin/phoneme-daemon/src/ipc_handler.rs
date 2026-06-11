@@ -845,6 +845,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 "message": "whisper-server processes swept; supervisors respawning"
             }))
         }
+        Request::SetPreviewSource { track } => {
+            match state.recorder.set_preview_source(state, &track).await {
+                Ok(()) => Response::Ok(serde_json::Value::Null),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::SkipCurrentStage => {
             // Wakes whichever LLM stage is currently streaming (no-op when none
             // is — the notify has no waiter then and stores nothing).
