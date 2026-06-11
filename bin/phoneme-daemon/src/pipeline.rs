@@ -485,10 +485,42 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
                 let have: Vec<String> = rec.tags.iter().map(|t| t.name.to_lowercase()).collect();
                 names.retain(|n| !have.contains(&n.to_lowercase()));
             }
-            if names.is_empty() {
+            // Auto-accept matches of EXISTING tags when enabled: a suggestion
+            // whose tag already exists (any tag, attached anywhere or not) is
+            // attached right away; only names that would CREATE a new tag stay
+            // behind as approve/dismiss chips.
+            let mut accepted = 0usize;
+            if cfg.auto_tag.auto_accept_existing && !names.is_empty() {
+                let all_lc: Vec<String> = match state.catalog.list_all_tags().await {
+                    Ok(tags) => tags.into_iter().map(|t| t.name.to_lowercase()).collect(),
+                    Err(_) => vec![],
+                };
+                let (accept, keep): (Vec<String>, Vec<String>) = names
+                    .into_iter()
+                    .partition(|n| all_lc.contains(&n.to_lowercase()));
+                names = keep;
+                for name in accept {
+                    match state.catalog.add_tag(&name, None).await {
+                        Ok(tag) => match state.catalog.attach_tag(id, tag.id).await {
+                            Ok(()) => {
+                                accepted += 1;
+                                state.events.emit(DaemonEvent::TagAttached { tag_id: tag.id });
+                            }
+                            Err(e) => tracing::warn!(error = %e, "auto-accept: attach failed"),
+                        },
+                        Err(e) => tracing::warn!(error = %e, "auto-accept: tag lookup failed"),
+                    }
+                }
+                if accepted > 0 {
+                    tracing::info!(id = %id.as_str(), accepted, "auto-accepted existing-tag suggestions");
+                }
+            }
+            if names.is_empty() && accepted == 0 {
                 tracing::info!(id = %id.as_str(), "tag suggestion produced nothing new");
                 return;
             }
+            // Persist the remaining (new-tag) names — empty clears any previous
+            // suggestions, which is right when everything was auto-accepted.
             match state.catalog.set_tag_suggestions(id, &names).await {
                 Ok(()) => {
                     tracing::info!(id = %id.as_str(), count = names.len(), "tag suggestions saved");

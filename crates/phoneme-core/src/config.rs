@@ -404,6 +404,12 @@ pub struct AutoTagConfig {
     /// Maximum number of suggested tags per recording.
     #[serde(default = "default_auto_tag_max")]
     pub max_tags: u32,
+    /// Auto-apply a suggestion when a tag with that name ALREADY EXISTS (e.g.
+    /// you have a `code` tag and the model suggests `code`): it is attached
+    /// immediately instead of waiting for approval. Suggestions that would
+    /// CREATE a new tag always wait as approve/dismiss chips.
+    #[serde(default)]
+    pub auto_accept_existing: bool,
 }
 
 impl AutoTagConfig {
@@ -430,6 +436,7 @@ impl std::fmt::Debug for AutoTagConfig {
             .field("model", &self.model)
             .field("prompt", &self.prompt)
             .field("max_tags", &self.max_tags)
+            .field("auto_accept_existing", &self.auto_accept_existing)
             .finish()
     }
 }
@@ -443,6 +450,7 @@ impl PartialEq for AutoTagConfig {
             && self.model == other.model
             && self.prompt == other.prompt
             && self.max_tags == other.max_tags
+            && self.auto_accept_existing == other.auto_accept_existing
     }
 }
 
@@ -456,6 +464,7 @@ impl Default for AutoTagConfig {
             model: String::new(),
             prompt: default_auto_tag_prompt(),
             max_tags: default_auto_tag_max(),
+            auto_accept_existing: false,
         }
     }
 }

@@ -22,6 +22,7 @@ export class SectionAutoTag {
         model: "",
         prompt: "",
         max_tags: 5,
+        auto_accept_existing: false,
       };
     }
     this.render();
@@ -45,6 +46,13 @@ export class SectionAutoTag {
         <div class="settings-field">
           <label>Suggest tags automatically</label>
           <div><input type="checkbox" class="toggle-switch" id="at-auto" data-key="auto_tag.auto" ${t.auto ? "checked" : ""} /></div>
+        </div>
+
+        <div class="settings-field">
+          <label>Auto-apply existing tags
+            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">A suggestion matching a tag you already have (e.g. <code>code</code>) is applied immediately; only brand-new tag names wait for approval.</span>
+          </label>
+          <div><input type="checkbox" class="toggle-switch" id="at-accept" data-key="auto_tag.auto_accept_existing" ${t.auto_accept_existing ? "checked" : ""} /></div>
         </div>
 
         <div class="settings-field">
@@ -100,6 +108,9 @@ export class SectionAutoTag {
 
     this.container.querySelector<HTMLInputElement>("#at-auto")?.addEventListener("change", (e) => {
       t.auto = (e.target as HTMLInputElement).checked;
+    });
+    this.container.querySelector<HTMLInputElement>("#at-accept")?.addEventListener("change", (e) => {
+      t.auto_accept_existing = (e.target as HTMLInputElement).checked;
     });
     this.container.querySelector<HTMLSelectElement>("#at-provider")?.addEventListener("change", (e) => {
       t.provider = (e.target as HTMLSelectElement).value;

@@ -63,7 +63,9 @@ export class TagChipsElement extends LitElement {
     void subscribe((e: DaemonEvent) => {
       if (e.event === "tag_suggestions_updated" && e.id === this.recordingId) {
         this.suggesting = false;
-        void this.loadSuggestions();
+        // Full reload (not just suggestions): with auto-accept-existing on, a
+        // suggestion run may have ATTACHED tags too — show those chips as well.
+        void this.load();
       }
     }).then((un) => { this.unsubEvents = un; });
   }
@@ -147,6 +149,18 @@ export class TagChipsElement extends LitElement {
       }
     }
     await this.load();
+  }
+
+  private async dismissAllSuggestions() {
+    for (const name of [...this.suggestions]) {
+      try {
+        await dismissTagSuggestion(this.recordingId, name);
+      } catch (e) {
+        showToast(`Couldn't dismiss "${name}": ${errText(e)}`, "error");
+        break;
+      }
+    }
+    await this.loadSuggestions();
   }
 
   private async detach(tagId: number) {
@@ -397,6 +411,7 @@ export class TagChipsElement extends LitElement {
             `)}
             ${this.suggestions.length > 1 ? html`
               <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>✓ All</button>
+              <button class="tag-manage tag-suggest-all" title="Dismiss every suggested tag" @click=${() => void this.dismissAllSuggestions()}>✕ All</button>
             ` : null}
           </span>
         ` : null}

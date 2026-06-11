@@ -178,6 +178,7 @@ like `[summary]`.
 | `api_url` | `""` | Empty → inherit / provider default |
 | `model` | `""` | Empty → the cleanup model |
 | `prompt` | (built-in) | Tagger instructions; the existing-tag list and transcript are appended at run time |
+| `auto_accept_existing` | `false` | Auto-apply a suggestion whose tag already exists (any tag in your library, matched case-insensitively); only suggestions that would create a brand-new tag wait as approve/dismiss chips. |
 | `max_tags` | `5` | Maximum suggestions per recording (clamped 1–12) |
 
 Suggestions land on the recording (`tag_suggestions`) and are surfaced in the

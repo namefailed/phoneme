@@ -61,3 +61,15 @@ prompt = "You tag voice-note transcripts. …"
 
 Auto-tagging sends the transcript to whichever provider you configure — with
 **Local Ollama** everything stays on your machine, exactly like Smart Cleanup.
+
+## Auto-applying existing tags
+
+With **Settings → Post-Processing → Auto-Tagging → Auto-apply existing tags**
+on, a suggestion that matches a tag you already have (say the model suggests
+`code` and a `code` tag exists) is applied immediately — no chip, no click.
+Only suggestions that would **create a brand-new tag** wait for your approval.
+Matching is case-insensitive and considers every tag in your library, attached
+or not.
+
+The suggestion chips also have **✓ All** / **✕ All** buttons to apply or
+dismiss everything at once.
