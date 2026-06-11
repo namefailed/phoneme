@@ -22,6 +22,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Getting Started](user-guide/getting_started.md) — First Run Wizard, first recording, detail pane
 - [Hotkeys & Recording Modes](user-guide/hotkeys_and_recording_modes.md) — Hold, toggle, oneshot, pause, meeting hotkey
 - [Settings Overview](user-guide/settings_overview.md) — Every settings screen explained (with screenshots)
+- [Keyboard Navigation](user-guide/keyboard_navigation.md) — Every shortcut: vim panes, g-chords, list zoom, bulk bar
 
 ### Capture & transcription
 - [Providers & Models](user-guide/providers_and_models.md) — Independent STT/LLM providers, keys, local vs cloud
@@ -31,7 +32,8 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Streaming Preview & Pre-Roll](user-guide/streaming_preview_and_preroll.md) — Live partial transcripts, anti-clip buffer
 
 ### Organize & export
-- [Search & Organization](user-guide/search_and_organization.md) — FTS5 keyword search, tags, filters, bulk actions
+- [Search & Organization](user-guide/search_and_organization.md) — Keyword search, tags, favorites, saved searches, side-by-side, bulk actions
+- [Auto-Tagging](user-guide/auto_tagging.md) — AI-suggested tags, approved by you before they apply
 - [Semantic Search](user-guide/semantic_search.md) — Meaning-based search (offline ONNX embeddings)
 - [Importing Audio](user-guide/importing_audio.md) — Bring `.wav` / `.mp3` / `.m4a` into the pipeline
 - [Exporting & Backup](user-guide/exporting_and_backup.md) — JSON, CSV, TXT, catalog backup

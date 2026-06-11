@@ -109,6 +109,13 @@ phoneme show 20260519T143500823
 
 # Print only the audio path (useful for shell piping)
 phoneme show 20260519T143500823 --audio-path-only
+
+# Print the preserved ORIGINAL (machine) transcript, before AI cleanup
+phoneme show 20260519T143500823 --original
+
+# Print the unedited pipeline transcript (transcribed + cleaned, before your
+# hand edits)
+phoneme show 20260519T143500823 --unedited
 ```
 
 ### 🔁 `phoneme retranscribe <ID>` (alias: `phoneme replay`)
@@ -323,8 +330,17 @@ phoneme profile use work_mode
 
 Run a health check on your system. Checks Whisper status, Diarization status, and hook executability.
 
+Checks: config file presence, audio-directory writability, hook command
+resolvability, Whisper model file, Whisper server reachability, the dedicated
+live-preview server (when configured on its own port), and Ollama (optional).
+
 ```bash
 phoneme doctor
+
+# Attempt repairs for failed checks: when the Whisper / live-preview server
+# probe fails, asks the daemon to sweep hung/orphaned whisper-server processes
+# and respawn them from config, then re-probes and reports the fresh results.
+phoneme doctor --fix
 
 # Force the catalog to rebuild itself from orphan files on disk
 phoneme doctor --rebuild-catalog

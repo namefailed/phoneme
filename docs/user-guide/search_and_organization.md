@@ -45,6 +45,38 @@ Here you can:
 
 In a recording's detail view, tags appear as colored chips. Click a chip to edit its name and color inline, or add a new tag right there — no need to open the Tag Manager for quick edits.
 
+## ⭐ Favorites
+
+Click the **star column** (the leading ★ in the recordings list) to mark a
+recording as a favorite. The Library sidebar's **Favorites** filter shows only
+starred recordings, alongside All / Voice Notes / Meetings. Stars are stored in
+the catalog, so they survive restarts and travel with exports.
+
+## 🔖 Saved searches
+
+A saved search snapshots **everything** the library is filtered by — search
+text, the semantic toggle, library type (including Favorites), tag, status,
+date range, and sort order — and restores it all in one click.
+
+- **Quick popup:** the 🔖 button in the header saves the current filters under
+  a name and re-applies saved ones.
+- **Full manager:** **Settings → Managers → Saved searches** (or `g` then `S`)
+  lists every saved search with its full description, and can apply, rename,
+  **update to the current filters**, or delete each one.
+
+## ◫ Side-by-side
+
+Multi-select exactly **two** recordings and press **`\`** (or use the bulk
+bar's *Side by side* button) to open both transcripts next to each other in
+full editors — vim keys and `:w` work per pane. Great for comparing takes or
+cross-referencing two meetings.
+
+## 🔍 List zoom
+
+`Ctrl + =` / `Ctrl + -` zoom the recordings list bigger/smaller (`Ctrl + 0`
+resets; `Ctrl + scroll` over the list works too). The zoom level is remembered
+per device.
+
 ## 🔎 Filtering Views
 
 You can drill down into your catalog using the Filter pills above the recordings list.
