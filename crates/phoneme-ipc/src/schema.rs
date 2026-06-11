@@ -197,6 +197,11 @@ pub enum Request {
         id: RecordingId,
         name: String,
     },
+    /// Force-restart the bundled whisper-server(s): best-effort kill of every
+    /// whisper-server process (covers hung servers and orphans holding the
+    /// port), then the supervisors respawn the main + preview servers from the
+    /// current config. The Doctor's "Fix" for an unreachable local Whisper.
+    RestartWhisper,
     /// Set (or clear) the custom display name for one diarized speaker label of
     /// a recording. `speaker_label` is the 1-based index from the transcript's
     /// `[Speaker N]` marker. A blank `name` clears the mapping (the label

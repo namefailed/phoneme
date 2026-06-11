@@ -171,6 +171,15 @@ pub async fn run_with(
                     exited = true;
                     break;
                 }
+                // Explicit restart (the Doctor's "Fix"): bounce the child with
+                // the backoff reset. This heals a HUNG server — the exit-based
+                // auto-restart only sees processes that die on their own.
+                _ = state.whisper_restart.notified() => {
+                    tracing::info!("whisper-server restart requested; bouncing");
+                    let _ = kill_gracefully(&mut child).await;
+                    backoff = RESTART_BACKOFF_INITIAL;
+                    break;
+                }
                 // React promptly to a set/clear of the one-job model override so
                 // the override job doesn't wait out the 1s poll for its model.
                 _ = state.whisper_model_override.changed.notified() => {
@@ -334,6 +343,14 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
                     exited = true;
                     break;
                 }
+                // Explicit restart (the Doctor's "Fix") — same semantics as the
+                // main supervisor's arm above.
+                _ = state.whisper_restart.notified() => {
+                    tracing::info!("preview whisper-server restart requested; bouncing");
+                    let _ = kill_gracefully(&mut child).await;
+                    backoff = RESTART_BACKOFF_INITIAL;
+                    break;
+                }
                 _ = check_interval.tick() => {
                     let cur = state.config.load();
                     let spec_changed = match (cur.preview_whisper.as_ref(), watch.as_ref()) {
@@ -361,6 +378,28 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         if exited {
             continue;
         }
+    }
+}
+
+/// Best-effort kill of EVERY whisper-server process on the machine — including
+/// orphans from a previous daemon still holding our port (the classic "Whisper
+/// unreachable after an unclean shutdown") and hung children. Safe because
+/// every whisper-server on the box belongs to Phoneme; the supervisors respawn
+/// the main/preview servers from the current config within seconds.
+pub fn sweep_stray_servers() {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "whisper-server.exe"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("pkill")
+            .args(["-x", "whisper-server"])
+            .status();
     }
 }
 

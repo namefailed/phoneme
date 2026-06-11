@@ -12,6 +12,7 @@ const FIX_LABELS: Record<string, string> = {
   open_config: "Open config",
   open_audio_dir: "Open folder",
   open_hooks_folder: "Open hooks",
+  restart_whisper: "Restart server",
 };
 
 /**
@@ -72,6 +73,14 @@ export class DoctorModalElement extends LitElement {
           const { open } = await import("@tauri-apps/plugin-shell");
           await open(dir);
         }
+      } else if (action === "restart_whisper") {
+        // Sweep hung/orphaned whisper-server processes; the daemon's
+        // supervisors respawn the servers. Re-check after they've had a few
+        // seconds to come up (the generic 600ms below is too soon for this).
+        await invoke("restart_whisper");
+        showToast("Whisper server restarting…", "info");
+        setTimeout(() => void this.refresh(), 5000);
+        return;
       }
       // Re-check after a fix (give the daemon a beat to come up, etc.).
       setTimeout(() => void this.refresh(), 600);

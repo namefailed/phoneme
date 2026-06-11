@@ -110,6 +110,11 @@ pub struct AppState {
     /// global-config override didn't survive a restart either.
     pub pending_overrides:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
+    /// Explicit whisper-server restart requests (the Doctor's "Fix"). Both
+    /// supervisors select on this and bounce their child with the backoff
+    /// reset — the path that heals a HUNG server, which the exit-based
+    /// auto-restart can't see.
+    pub whisper_restart: Arc<tokio::sync::Notify>,
 }
 
 /// Coordination cell between a model-override re-transcription (in the pipeline)
@@ -188,6 +193,7 @@ impl AppState {
             processing: Arc::new(std::sync::Mutex::new(None)),
             whisper_model_override: Arc::new(WhisperModelOverride::default()),
             pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            whisper_restart: Arc::new(tokio::sync::Notify::new()),
         })
     }
 }

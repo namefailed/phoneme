@@ -3,7 +3,7 @@ import { LitElement, html } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 
 import { filterStore, type UiFilter } from '../state/filter';
-import { listTags, type Tag } from '../services/ipc';
+import { listTags, runDoctor, type Tag } from '../services/ipc';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
@@ -29,6 +29,12 @@ export class HeaderBarElement extends LitElement {
   @state() private recordMode: "recording" | "meeting" =
     (localStorage.getItem("phoneme.recordMode") as "recording" | "meeting") || "recording";
   @state() private modeMenuOpen = false;
+  /** App health from the Doctor checks: drives the header pill, the pulsing
+   *  Settings button, and the failure banner. "unknown" until the first run. */
+  @state() private health: "ok" | "bad" | "unknown" = "unknown";
+  @state() private healthIssues: { name: string; fix: string | null }[] = [];
+  @state() private bannerDismissed = false;
+  private healthTimer: number | null = null;
   @state() private settingsMenuOpen = false;
   @state() private previewText: string | null = null;
   /** When the system-wide desktop preview overlay is on, the in-app live-preview
@@ -90,6 +96,10 @@ export class HeaderBarElement extends LitElement {
     void this.syncStatusFromDaemon();
     void this.initSemanticDefault();
     void this.loadPreviewOverlayPref();
+    // Health: run the Doctor checks now and every 30s (cheap local IPC); the
+    // whisper_status_changed event below re-checks immediately on a transition.
+    void this.checkHealth();
+    this.healthTimer = window.setInterval(() => void this.checkHealth(), 30000);
     // Re-read the overlay pref on every settings save so toggling it takes effect
     // immediately (no reload).
     window.addEventListener("config:saved", this.onConfigSavedOverlay);
@@ -130,6 +140,9 @@ export class HeaderBarElement extends LitElement {
         this.isPaused = true;
       } else if (eventName === "recording_resumed") {
         this.isPaused = false;
+      } else if (eventName === "whisper_status_changed") {
+        // A reachability flip — refresh the health pill/banner right away.
+        void this.checkHealth();
       } else if (eventName === "summary_failed") {
         showToast(`Summary failed: ${p.error ?? "check the AI provider in Settings"}`, "error");
       } else if (eventName === "retention_warning") {
@@ -163,8 +176,55 @@ export class HeaderBarElement extends LitElement {
     });
   }
 
+  /** Run the shared Doctor checks and distill app health. A check marked
+   *  "(optional)" never fails health; a daemon that can't even answer is the
+   *  reddest possible state. Re-arms the banner when health returns to ok. */
+  private async checkHealth() {
+    try {
+      const checks = await runDoctor();
+      const failing = checks.filter((c) => !c.ok && !c.name.toLowerCase().includes("(optional)"));
+      this.healthIssues = failing.map((c) => ({ name: c.name, fix: c.fix_action ?? null }));
+      const next: "ok" | "bad" = failing.length ? "bad" : "ok";
+      if (next === "ok") this.bannerDismissed = false;
+      this.health = next;
+    } catch {
+      this.healthIssues = [{ name: "Daemon not reachable", fix: "start_daemon" }];
+      this.health = "bad";
+    }
+  }
+
+  /** Banner "Fix now": run the first failing check's one-click remediation
+   *  (restart the whisper-server / relaunch the daemon), then re-check. */
+  private async fixNow() {
+    const fix = this.healthIssues.find((i) => i.fix)?.fix;
+    if (!fix) {
+      void this.openDoctor();
+      return;
+    }
+    try {
+      if (fix === "restart_whisper") {
+        await invoke("restart_whisper");
+        showToast("Whisper server restarting…", "info");
+      } else if (fix === "start_daemon") {
+        await invoke("start_daemon");
+        showToast("Starting the daemon…", "info");
+      } else {
+        void this.openDoctor();
+        return;
+      }
+      window.setTimeout(() => void this.checkHealth(), 5000);
+    } catch (e) {
+      showToast(`Fix failed: ${errText(e)} — opening Doctor`, "error");
+      void this.openDoctor();
+    }
+  }
+
   disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.healthTimer !== null) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
+    }
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }
@@ -582,8 +642,38 @@ export class HeaderBarElement extends LitElement {
             </div>
           </div>
         </div>
+        <button class="hb-health ${this.health}" title=${this.health === "bad"
+            ? `Problems found: ${this.healthIssues.map((i) => i.name).join(", ")} — click to open Doctor`
+            : this.health === "ok" ? "All systems healthy — click to open Doctor" : "Checking health…"}
+          aria-label="App health" @click=${this.openDoctor}>
+          <span class="hb-health-dot" aria-hidden="true"></span>${this.health === "bad" ? html`<span class="hb-health-n">${this.healthIssues.length}</span>` : null}
+        </button>
         <div class="hb-settings-group" style="position: relative; display: inline-flex;">
           <style>
+            /* Health pill (left of Settings): green dot = all checks pass, red =
+               something the Doctor can explain is wrong. The Settings button
+               pulses too so trouble is visible even if the pill goes unnoticed. */
+            .hb-health {
+              display: inline-flex; align-items: center; gap: 5px;
+              background: none; border: 1px solid transparent; border-radius: 999px;
+              padding: 5px 8px; cursor: pointer;
+              transition: background 0.15s ease, border-color 0.15s ease;
+            }
+            .hb-health:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--border-subtle); }
+            .hb-health-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-faded); }
+            .hb-health.ok .hb-health-dot { background: var(--ok, #a6e3a1); box-shadow: 0 0 6px color-mix(in srgb, var(--ok, #a6e3a1) 60%, transparent); }
+            .hb-health.bad .hb-health-dot { background: var(--err, #f38ba8); box-shadow: 0 0 8px color-mix(in srgb, var(--err, #f38ba8) 70%, transparent); animation: hbHealthBlink 1.2s ease-in-out infinite; }
+            .hb-health-n { font-size: 11px; font-weight: 700; color: var(--err, #f38ba8); }
+            @keyframes hbHealthBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+            .hb-settings-main.unhealthy {
+              border-color: color-mix(in srgb, var(--err, #f38ba8) 55%, transparent) !important;
+              animation: hbSettingsPulse 1.6s ease-in-out infinite;
+            }
+            @keyframes hbSettingsPulse {
+              0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--err, #f38ba8) 45%, transparent); }
+              50% { box-shadow: 0 0 0 5px transparent; }
+            }
+          </style>
             .hb-settings-menu { animation: hbMenuIn 0.12s ease-out; }
             .hb-menu-item {
               display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
@@ -597,7 +687,7 @@ export class HeaderBarElement extends LitElement {
             .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
             .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
-          <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
+          <button class="icon-btn hb-settings-main ${this.health === "bad" ? "unhealthy" : ""}" aria-label="Open settings" title="Open settings"
             style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
           <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings & actions" aria-haspopup="menu"
             aria-expanded=${this.settingsMenuOpen} title="Quick settings & actions"
@@ -626,6 +716,30 @@ export class HeaderBarElement extends LitElement {
         </span>
         <span class="hb-preview-text">${this.previewText ?? ''}</span>
       </div>
+      ${this.health === "bad" && !this.bannerDismissed ? html`
+        <style>
+          .hb-health-banner {
+            display: flex; align-items: center; gap: 10px;
+            padding: 7px 14px; font-size: 12px;
+            background: color-mix(in srgb, var(--err, #f38ba8) 14%, var(--bg-elevated, #1e1e2e));
+            border-bottom: 1px solid color-mix(in srgb, var(--err, #f38ba8) 45%, transparent);
+            color: var(--fg-default);
+          }
+          .hb-health-banner .hbb-ico { flex: 0 0 auto; }
+          .hb-health-banner .hbb-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .hb-health-banner button { flex: 0 0 auto; }
+        </style>
+        <div class="hb-health-banner" role="alert">
+          <span class="hbb-ico">⚠</span>
+          <span class="hbb-text">${this.healthIssues.map((i) => i.name).join(" · ")} — something needs attention.</span>
+          ${this.healthIssues.some((i) => i.fix === "restart_whisper" || i.fix === "start_daemon")
+            ? html`<button class="inline-button" @click=${() => void this.fixNow()}>🔧 Fix now</button>`
+            : null}
+          <button class="inline-button" @click=${() => void this.openDoctor()}>🩺 Open Doctor</button>
+          <button class="icon-btn" title="Dismiss until it recurs" style="width:24px; height:24px; font-size:11px;"
+            @click=${() => { this.bannerDismissed = true; }}>✕</button>
+        </div>
+      ` : null}
     `;
   }
 }

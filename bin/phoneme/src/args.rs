@@ -264,6 +264,10 @@ pub struct DoctorArgs {
     /// Rebuild the catalog from inbox + audio_dir.
     #[arg(long)]
     pub rebuild_catalog: bool,
+    /// Attempt repairs for failed checks (currently: restart the bundled
+    /// whisper-server(s) when the Whisper / live-preview probe fails).
+    #[arg(long)]
+    pub fix: bool,
 }
 
 #[derive(Debug, clap::Args)]

@@ -834,6 +834,17 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             checks.extend(phoneme_core::doctor::run_backend_checks(&cfg).await);
             serialize_response(checks)
         }
+        Request::RestartWhisper => {
+            // Sweep every whisper-server process (hung children AND orphans
+            // from a dead daemon still holding the port), then wake both
+            // supervisors so the main + preview servers respawn from config.
+            crate::whisper_supervisor::sweep_stray_servers();
+            state.whisper_restart.notify_waiters();
+            tracing::info!("whisper-server restart requested via IPC (Doctor fix)");
+            Response::Ok(serde_json::json!({
+                "message": "whisper-server processes swept; supervisors respawning"
+            }))
+        }
         Request::ListQueue => {
             let pending = state.inbox.list_pending().await;
             let processing = state.inbox.list_processing().await;

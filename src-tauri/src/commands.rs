@@ -431,6 +431,14 @@ pub async fn set_favorite(
     forward(&bridge, Request::SetFavorite { id, favorite }).await
 }
 
+/// Force-restart the bundled whisper-server(s) — the Doctor's "Fix" for an
+/// unreachable local Whisper (sweeps hung/orphaned processes; supervisors
+/// respawn from the current config).
+#[tauri::command]
+pub async fn restart_whisper(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RestartWhisper).await
+}
+
 /// Run the LLM tag-suggestion step for one recording on demand.
 #[tauri::command]
 pub async fn suggest_tags(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {

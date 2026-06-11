@@ -88,6 +88,14 @@ export class DoctorViewElement extends LitElement {
           await invoke("open_hooks_folder").catch(() => {});
           break;
         }
+        case "restart_whisper": {
+          // Sweep hung/orphaned whisper-server processes; the daemon's
+          // supervisors respawn the main + preview servers. Give them a few
+          // seconds to come up before the re-check below.
+          await invoke("restart_whisper");
+          await new Promise((r) => setTimeout(r, 5000));
+          break;
+        }
       }
     } catch (e) {
       console.error("Doctor fix action failed:", action, e);
