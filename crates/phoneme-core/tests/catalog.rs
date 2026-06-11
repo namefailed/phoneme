@@ -800,7 +800,10 @@ async fn user_edit_preserves_original_transcript() {
         Some("edited by user"),
         "live transcript must reflect the user edit"
     );
-    assert!(got.user_edited, "user_edited flag must be set after a hand edit");
+    assert!(
+        got.user_edited,
+        "user_edited flag must be set after a hand edit"
+    );
     assert_eq!(
         got.model.as_deref(),
         Some("m"),
@@ -827,7 +830,12 @@ async fn user_edit_preserves_clean_transcript() {
     // Pipeline: raw machine output → original_transcript, cleaned → transcript +
     // clean_transcript.
     catalog
-        .update_transcript(&rec.id, "We talked about the thing.", "um so like the thing", "m")
+        .update_transcript(
+            &rec.id,
+            "We talked about the thing.",
+            "um so like the thing",
+            "m",
+        )
         .await
         .unwrap();
 
@@ -839,18 +847,32 @@ async fn user_edit_preserves_clean_transcript() {
 
     // Raw (pre-cleanup) version untouched.
     assert_eq!(
-        catalog.get_original_transcript(&rec.id).await.unwrap().as_deref(),
+        catalog
+            .get_original_transcript(&rec.id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("um so like the thing"),
     );
     // Unedited (cleaned, pre-edit) version untouched.
     assert_eq!(
-        catalog.get_clean_transcript(&rec.id).await.unwrap().as_deref(),
+        catalog
+            .get_clean_transcript(&rec.id)
+            .await
+            .unwrap()
+            .as_deref(),
         Some("We talked about the thing."),
         "clean_transcript must survive user edits",
     );
     // Live transcript reflects the user edit.
     assert_eq!(
-        catalog.get(&rec.id).await.unwrap().unwrap().transcript.as_deref(),
+        catalog
+            .get(&rec.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .transcript
+            .as_deref(),
         Some("We discussed the proposal."),
     );
 }

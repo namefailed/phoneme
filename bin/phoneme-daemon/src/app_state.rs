@@ -84,7 +84,14 @@ pub struct AppState {
     /// The currently-processing recording and its cancellation token, set by the
     /// queue worker around each `pipeline::run` call and cleared after. The
     /// `CancelProcessing` IPC cancels this token to abort the in-flight item.
-    pub processing: Arc<std::sync::Mutex<Option<(phoneme_core::RecordingId, tokio_util::sync::CancellationToken)>>>,
+    pub processing: Arc<
+        std::sync::Mutex<
+            Option<(
+                phoneme_core::RecordingId,
+                tokio_util::sync::CancellationToken,
+            )>,
+        >,
+    >,
     /// A ONE-JOB-SCOPED override of the bundled whisper-server's model file,
     /// used by a model-override re-transcription. `None` (the default) means the
     /// supervisor runs the configured `whisper.model_path`.

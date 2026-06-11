@@ -86,7 +86,8 @@ pub async fn run_with(
         // override is read here (not merged into the global config) so previews
         // and other jobs keep seeing the configured model.
         let spawned_override = state.whisper_model_override.get();
-        let model_to_run = effective_model_path(&cfg.whisper.model_path, spawned_override.as_deref());
+        let model_to_run =
+            effective_model_path(&cfg.whisper.model_path, spawned_override.as_deref());
 
         if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
             tracing::info!("whisper model file is empty or missing, waiting for download...");

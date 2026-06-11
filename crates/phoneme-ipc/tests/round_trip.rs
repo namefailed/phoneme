@@ -1,6 +1,6 @@
 use phoneme_ipc::{
-    IpcError, IpcErrorKind, NamedPipeListener, NamedPipeTransport, Request, Response, ServerRequest,
-    Transport,
+    IpcError, IpcErrorKind, NamedPipeListener, NamedPipeTransport, Request, Response,
+    ServerRequest, Transport,
 };
 
 /// Generate a unique pipe name for parallel test runs.

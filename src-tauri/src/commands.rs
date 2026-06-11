@@ -543,7 +543,13 @@ const MASKED_SECRET: &str = "__phoneme_secret_kept__";
 
 /// Replace every non-empty API key in a serialized config with the mask.
 fn mask_config_secrets(v: &mut Value) {
-    for section in ["whisper", "llm_post_process", "summary", "auto_tag", "preview_whisper"] {
+    for section in [
+        "whisper",
+        "llm_post_process",
+        "summary",
+        "auto_tag",
+        "preview_whisper",
+    ] {
         if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
             if key.as_str().is_some_and(|k| !k.is_empty()) {
                 *key = Value::String(MASKED_SECRET.to_string());
@@ -556,7 +562,9 @@ fn mask_config_secrets(v: &mut Value) {
 /// so saving without changing a key keeps it rather than writing the placeholder.
 fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
     if incoming.whisper.api_key_str() == MASKED_SECRET {
-        incoming.whisper.set_api_key(current.whisper.api_key_str().to_owned());
+        incoming
+            .whisper
+            .set_api_key(current.whisper.api_key_str().to_owned());
     }
     if incoming.llm_post_process.api_key_str() == MASKED_SECRET {
         incoming
@@ -836,7 +844,8 @@ pub fn list_profiles_detailed() -> Result<Vec<phoneme_core::profiles::ProfileInf
 /// Rename a saved profile. Fails if the source is missing or the target exists.
 #[tauri::command]
 pub fn rename_profile(from: String, to: String) -> Result<(), CommandError> {
-    phoneme_core::profiles::rename_profile(&from, &to).map_err(|e| CommandError::from(e.to_string()))
+    phoneme_core::profiles::rename_profile(&from, &to)
+        .map_err(|e| CommandError::from(e.to_string()))
 }
 
 /// Check if a `config.toml` file already exists on disk.

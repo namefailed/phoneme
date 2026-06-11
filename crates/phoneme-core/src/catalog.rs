@@ -436,8 +436,12 @@ impl Catalog {
     /// unsearchable until re-embedded.
     pub async fn clear_all_embeddings(&self) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM embedding_chunks").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM embeddings").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM embedding_chunks")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM embeddings")
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -734,10 +738,14 @@ impl Catalog {
         let mut rec_id_by_key: std::collections::HashMap<String, RecordingId> =
             std::collections::HashMap::new();
         for (key, id, _c) in &vec_rank {
-            rec_id_by_key.entry(key.clone()).or_insert_with(|| id.clone());
+            rec_id_by_key
+                .entry(key.clone())
+                .or_insert_with(|| id.clone());
         }
         for (key, id) in &lex_rank {
-            rec_id_by_key.entry(key.clone()).or_insert_with(|| id.clone());
+            rec_id_by_key
+                .entry(key.clone())
+                .or_insert_with(|| id.clone());
         }
         let lexical_keys: std::collections::HashSet<String> =
             lex_rank.iter().map(|(key, _id)| key.clone()).collect();
@@ -1016,11 +1024,10 @@ impl Catalog {
     /// no attachments are simply absent from the map (treated as zero by callers).
     /// Powers the Tag Manager usage counts.
     pub async fn tag_usage_counts(&self) -> Result<std::collections::HashMap<i64, i64>> {
-        let rows = sqlx::query(
-            "SELECT tag_id, COUNT(*) AS cnt FROM recording_tags GROUP BY tag_id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query("SELECT tag_id, COUNT(*) AS cnt FROM recording_tags GROUP BY tag_id")
+                .fetch_all(&self.pool)
+                .await?;
         let mut map = std::collections::HashMap::with_capacity(rows.len());
         for r in rows {
             let id: i64 = r.try_get("tag_id")?;
@@ -1190,13 +1197,11 @@ impl Catalog {
     ) -> Result<()> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
-            sqlx::query(
-                "DELETE FROM speaker_names WHERE recording_id = ? AND speaker_label = ?",
-            )
-            .bind(recording_id.as_str())
-            .bind(speaker_label)
-            .execute(&self.pool)
-            .await?;
+            sqlx::query("DELETE FROM speaker_names WHERE recording_id = ? AND speaker_label = ?")
+                .bind(recording_id.as_str())
+                .bind(speaker_label)
+                .execute(&self.pool)
+                .await?;
         } else {
             sqlx::query(
                 "INSERT INTO speaker_names (recording_id, speaker_label, name) VALUES (?, ?, ?) \
@@ -1215,10 +1220,7 @@ impl Catalog {
     /// when none have been set. Used to populate `Recording::speaker_names` and
     /// by the IPC layer so the frontend can map `[Speaker N]` → name at display
     /// and export time.
-    pub async fn speaker_names_for(
-        &self,
-        recording_id: &RecordingId,
-    ) -> Result<Vec<SpeakerName>> {
+    pub async fn speaker_names_for(&self, recording_id: &RecordingId) -> Result<Vec<SpeakerName>> {
         let rows = sqlx::query(
             "SELECT speaker_label, name FROM speaker_names \
              WHERE recording_id = ? ORDER BY speaker_label",
@@ -1540,10 +1542,7 @@ mod tests {
 
         // Empty re-embed clears all chunks.
         db.upsert_chunk_embeddings(&a.id, &[]).await.unwrap();
-        let none = db
-            .list_recordings_without_chunk_embeddings()
-            .await
-            .unwrap();
+        let none = db.list_recordings_without_chunk_embeddings().await.unwrap();
         assert!(
             none.iter().any(|rec| rec.id.as_str() == a.id.as_str()),
             "after clearing, the recording reappears as needing chunks"
@@ -1674,10 +1673,7 @@ mod tests {
 
         // Sanity: a pure keyword search for the query terms finds NOTHING — the
         // words don't appear in either transcript. This is the gap vectors close.
-        let lexical = db
-            .lexical_ranking("database migration")
-            .await
-            .unwrap();
+        let lexical = db.lexical_ranking("database migration").await.unwrap();
         assert!(
             lexical.is_empty(),
             "precondition: naive keyword search must miss the paraphrase"
@@ -1689,7 +1685,10 @@ mod tests {
             .hybrid_search("database migration", &query_vec, 10, 0.12)
             .await
             .unwrap();
-        assert!(!results.is_empty(), "paraphrase must be recalled by meaning");
+        assert!(
+            !results.is_empty(),
+            "paraphrase must be recalled by meaning"
+        );
         assert_eq!(
             results[0].0.as_str(),
             target.id.as_str(),
@@ -1894,7 +1893,10 @@ mod tests {
         // The transcription model is preserved — a hand edit is surfaced by the
         // user_edited flag / "Edited" column, not by overwriting the model field.
         assert_eq!(got.model.as_deref(), Some("ggml-base"));
-        assert!(got.user_edited, "a manual edit must set the user_edited flag");
+        assert!(
+            got.user_edited,
+            "a manual edit must set the user_edited flag"
+        );
         assert_eq!(
             db.get_original_transcript(&r.id).await.unwrap().as_deref(),
             Some("machine output")
@@ -2096,8 +2098,14 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                SpeakerName { speaker_label: 1, name: "Sarah".into() },
-                SpeakerName { speaker_label: 2, name: "Alex".into() },
+                SpeakerName {
+                    speaker_label: 1,
+                    name: "Sarah".into()
+                },
+                SpeakerName {
+                    speaker_label: 2,
+                    name: "Alex".into()
+                },
             ]
         );
 
@@ -2109,14 +2117,20 @@ mod tests {
 
         // Names are trimmed on the way in.
         db.set_speaker_name(&r.id, 2, "  Alex P.  ").await.unwrap();
-        assert_eq!(db.speaker_names_for(&r.id).await.unwrap()[1].name, "Alex P.");
+        assert_eq!(
+            db.speaker_names_for(&r.id).await.unwrap()[1].name,
+            "Alex P."
+        );
 
         // A blank/whitespace name clears the mapping (reverts to "Speaker N").
         db.set_speaker_name(&r.id, 1, "   ").await.unwrap();
         let names = db.speaker_names_for(&r.id).await.unwrap();
         assert_eq!(
             names,
-            vec![SpeakerName { speaker_label: 2, name: "Alex P.".into() }],
+            vec![SpeakerName {
+                speaker_label: 2,
+                name: "Alex P.".into()
+            }],
             "clearing speaker 1 leaves only speaker 2"
         );
     }
@@ -2132,7 +2146,10 @@ mod tests {
         let got = db.get(&r.id).await.unwrap().unwrap();
         assert_eq!(
             got.speaker_names,
-            vec![SpeakerName { speaker_label: 1, name: "Sarah".into() }]
+            vec![SpeakerName {
+                speaker_label: 1,
+                name: "Sarah".into()
+            }]
         );
 
         // list() carries it too.
@@ -2157,7 +2174,13 @@ mod tests {
         assert_eq!(tracks.len(), 2);
         for t in &tracks {
             let expected = if t.id == mic.id { "Me" } else { "Caller" };
-            assert_eq!(t.speaker_names, vec![SpeakerName { speaker_label: 1, name: expected.into() }]);
+            assert_eq!(
+                t.speaker_names,
+                vec![SpeakerName {
+                    speaker_label: 1,
+                    name: expected.into()
+                }]
+            );
         }
     }
 

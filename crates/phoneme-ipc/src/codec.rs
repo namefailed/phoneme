@@ -112,11 +112,17 @@ mod tests {
         let mut buf = BytesMut::from(
             "{\"type\":\"some_future_request\"}\n{\"type\":\"daemon_status\"}\n".as_bytes(),
         );
-        match codec.decode(&mut buf).expect("unknown frame must not error") {
+        match codec
+            .decode(&mut buf)
+            .expect("unknown frame must not error")
+        {
             Some(ServerRequest::Unknown { .. }) => {}
             other => panic!("expected Unknown, got {other:?}"),
         }
-        match codec.decode(&mut buf).expect("following frame must still decode") {
+        match codec
+            .decode(&mut buf)
+            .expect("following frame must still decode")
+        {
             Some(ServerRequest::Known(req)) => assert!(matches!(*req, Request::DaemonStatus)),
             other => panic!("expected Known(DaemonStatus), got {other:?}"),
         }

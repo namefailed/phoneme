@@ -145,7 +145,9 @@ pub fn chunk_transcript(text: &str) -> Vec<String> {
         // Step the window forward, leaving `CHUNK_OVERLAP_SENTENCES` of the just-
         // emitted chunk as the start of the next. `max(i+1)` guarantees forward
         // progress so we can't loop forever when a single sentence fills a chunk.
-        let advance = chunk_sentences.len().saturating_sub(CHUNK_OVERLAP_SENTENCES);
+        let advance = chunk_sentences
+            .len()
+            .saturating_sub(CHUNK_OVERLAP_SENTENCES);
         i = (i + advance).max(i + 1);
     }
 

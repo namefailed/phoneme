@@ -34,9 +34,7 @@ where
 /// Read an API key from config, decrypting an at-rest DPAPI value
 /// (`dpapi:v1:…`) and passing a legacy plaintext value through unchanged (so old
 /// configs migrate transparently and get re-encrypted on the next save).
-fn deserialize_secret_string<'de, D>(
-    deserializer: D,
-) -> std::result::Result<SecretString, D::Error>
+fn deserialize_secret_string<'de, D>(deserializer: D) -> std::result::Result<SecretString, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
