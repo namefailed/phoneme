@@ -20,6 +20,7 @@ vim-style pane navigation is opt-in: **Settings → Appearance → Vim navigatio
 | `Ctrl + ,` | Open Settings |
 | `Ctrl + B` | Toggle the sidebar |
 | `Ctrl + \` | Toggle the detail pane |
+| `Ctrl + /` | Hide / show the top (search/header) bar |
 | `Ctrl + =` / `Ctrl + -` / `Ctrl + 0` | Zoom the recordings list bigger / smaller / reset |
 | `Ctrl + scroll` | Zoom the list (while the pointer is over it) |
 | `Esc` | Close popups · step back out a level |

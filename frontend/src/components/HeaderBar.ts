@@ -674,6 +674,7 @@ export class HeaderBarElement extends LitElement {
               50% { box-shadow: 0 0 0 5px transparent; }
             }
           </style>
+          <style>
             .hb-settings-menu { animation: hbMenuIn 0.12s ease-out; }
             .hb-menu-item {
               display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;

@@ -39,6 +39,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "Ctrl + ,", label: "Open Settings" },
       { combo: "Ctrl + B", label: "Toggle the sidebar" },
       { combo: "Ctrl + \\", label: "Toggle the detail pane" },
+      { combo: "Ctrl + /", label: "Hide / show the top bar" },
       { combo: "Ctrl + = / − / 0", label: "Zoom the list bigger / smaller / reset" },
       { combo: "Ctrl + scroll", label: "Zoom the list (over the list pane)" },
       { combo: "Esc", label: "Close popups / leave search" },
@@ -148,6 +149,18 @@ function focusList() {
 
 function navigate(view: string, section?: string) {
   window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view, section } }));
+}
+
+/** Per-device "top bar hidden" preference (Ctrl+/). */
+const LS_HEADER_HIDDEN = "phoneme.layout.headerHidden";
+
+/** Hide/show the header (search/top) bar. The class lives on <body> so the
+ *  rule applies regardless of which view is mounted; the preference persists
+ *  per device and is re-applied at startup by initKeyboard. */
+function toggleHeaderBar(force?: boolean) {
+  const hide = force ?? !document.body.classList.contains("phoneme-hide-header");
+  document.body.classList.toggle("phoneme-hide-header", hide);
+  try { localStorage.setItem(LS_HEADER_HIDDEN, String(hide)); } catch { /* private mode */ }
 }
 
 /** Ask the open recording's action row to run an action (no-op if none open). */
@@ -361,6 +374,12 @@ function onKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === ",") {
     e.preventDefault();
     navigate("settings");
+    return;
+  }
+  // Ctrl+/ → hide/show the top (search/header) bar. Persisted per device.
+  if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+    e.preventDefault();
+    toggleHeaderBar();
     return;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -663,6 +682,10 @@ export function initKeyboard() {
   if (installed) return;
   installed = true;
   document.addEventListener("keydown", onKeyDown);
+  // Restore the Ctrl+/ "top bar hidden" preference.
+  try {
+    if (localStorage.getItem(LS_HEADER_HIDDEN) === "true") toggleHeaderBar(true);
+  } catch { /* private mode */ }
   // Load the vim-nav preference and keep it in sync with Settings saves so the
   // layer turns on/off the moment the toggle is saved (no reload needed).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

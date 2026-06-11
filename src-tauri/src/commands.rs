@@ -439,7 +439,9 @@ pub async fn set_favorite(
 #[tauri::command]
 pub fn save_window_state(app: tauri::AppHandle) -> Result<(), CommandError> {
     use tauri_plugin_window_state::{AppHandleExt, StateFlags};
-    app.save_window_state(StateFlags::all())
+    // Everything EXCEPT visibility — saving "visible" while the overlay was up
+    // (preview/drag) made it restore visible and pop open on every app start.
+    app.save_window_state(StateFlags::all() & !StateFlags::VISIBLE)
         .map_err(|e| CommandError::new("internal", e.to_string()))
 }
 

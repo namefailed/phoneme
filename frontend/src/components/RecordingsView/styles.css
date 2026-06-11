@@ -1005,6 +1005,12 @@ ph-sidebar:focus-visible,
   background: color-mix(in srgb, var(--accent) 17%, transparent);
 }
 
+/* Ctrl+/ hides the top (search/header) bar app-wide — body-scoped so it works
+   regardless of which view is mounted. Ctrl+/ again brings it back. */
+body.phoneme-hide-header ph-header-bar {
+  display: none;
+}
+
 /* AI tag suggestions — dashed "ghost" chips awaiting approval. ✓ applies (the
    tag becomes a real chip), ✕ dismisses. Visually distinct from real chips so
    nothing looks applied before the user confirms. */
