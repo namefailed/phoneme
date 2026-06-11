@@ -9,6 +9,7 @@ import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from '../services
 import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModels } from '../services/sttProviders';
 import { fetchLlmModels } from '../services/llmModels';
 import { curatedCleanupModelIds } from '../data/curatedModels';
+import { applyRerun, rerunToastMessage, type RerunPayload } from './RecordingsView/rerunActions';
 
 type ProviderOption = { value: string; label: string };
 
@@ -57,6 +58,11 @@ export class ModelPickerElement extends LitElement {
   @property({ type: String }) initialTab: MpTab = "transcription";
   @property({ type: Object }) anchor?: HTMLElement;
   @property({ type: Object }) config: any = null;
+  /** "default" → Save as default (persist to config). "oneshot" → Run once on
+   *  `recordingId` (re-run that recording with these models, not saved). */
+  @property() activeMode: "default" | "oneshot" = "default";
+  /** Set when opened from a recording's Re-run; enables the "Run once" mode. */
+  @property({ type: String }) recordingId = "";
 
   @state() private activeTab: MpTab = "transcription";
   @state() private downloadedModels: string[] = [];
@@ -304,6 +310,40 @@ export class ModelPickerElement extends LitElement {
       this.close(true);
     } catch (e) {
       showToast(`Save failed: ${errText(e)}`, "error");
+    }
+  }
+
+  /** "Run once": re-run the open recording's whole pipeline (transcribe →
+   *  cleanup → summary → hooks) with the models chosen here, applied this one
+   *  time only — nothing is written to config. (Live preview is a capture-time
+   *  setting, so it doesn't apply to a one-shot re-run.) */
+  private async runOnce() {
+    if (!this.recordingId) return;
+    const transcriptionModel =
+      this.sttRealProvider === "local" ? this.sttLocalModel : this.sttModel.trim();
+    const llmOn = this.llmRealProvider !== "none";
+    const isApi = ["openai", "groq", "anthropic"].includes(this.llmRealProvider);
+    const orNull = (s: string) => (s.trim() === "" ? null : s.trim());
+    const payload: RerunPayload = {
+      step: "all",
+      model: transcriptionModel || null,
+      overrides: llmOn
+        ? {
+            cleanupProvider: this.llmRealProvider || null,
+            cleanupModel: orNull(this.llmModel),
+            cleanupPrompt: null,
+            cleanupApiUrl: isApi ? orNull(this.llmUrl) : null,
+            summaryModel: orNull(this.sumModel),
+            summaryPrompt: null,
+          }
+        : null,
+    };
+    try {
+      await applyRerun(this.recordingId, payload);
+      showToast(rerunToastMessage(payload), "info");
+      this.close(false);
+    } catch (e) {
+      showToast(`Re-run failed: ${errText(e)}`, "error");
     }
   }
 
@@ -594,7 +634,14 @@ export class ModelPickerElement extends LitElement {
 
           <div class="modal-actions">
             <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
-            <button id="mp-save" class="modal-btn modal-btn-primary" @click=${this.save}>Save</button>
+            ${this.recordingId
+              ? html`<button class="modal-btn ${this.activeMode === "oneshot" ? "modal-btn-primary" : ""}"
+                  title="Re-run this recording once with the models above (not saved)"
+                  @click=${this.runOnce}>↻ Run once</button>`
+              : null}
+            <button id="mp-save" class="modal-btn ${this.activeMode === "default" ? "modal-btn-primary" : ""}"
+              title="Save these models as your defaults"
+              @click=${this.save}>💾 Save as default</button>
           </div>
         </div>
       </div>
@@ -605,6 +652,7 @@ export class ModelPickerElement extends LitElement {
 export async function openModelPicker(
   initialTab: MpTab = "transcription",
   anchor?: HTMLElement,
+  opts?: { mode?: "default" | "oneshot"; recordingId?: string },
 ): Promise<boolean> {
   let config: any;
   try {
@@ -622,6 +670,8 @@ export async function openModelPicker(
     el.initialTab = initialTab;
     if (anchor) el.anchor = anchor;
     el.config = config;
+    el.activeMode = opts?.mode ?? "default";
+    el.recordingId = opts?.recordingId ?? "";
 
     el.addEventListener('resolved', (e: Event) => {
       const customEvent = e as CustomEvent<boolean>;

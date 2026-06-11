@@ -1,11 +1,9 @@
 import { errText } from "../../utils/error";
-import { LitElement, html, nothing } from 'lit';
+import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { type SpeakerName } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
-import "./RerunForm";
-import { applyRerun, rerunToastMessage, type RerunPayload } from "./rerunActions";
 import { applySpeakerNames } from "./mergeMeeting";
 
 export type ActionRowCallbacks = {
@@ -30,11 +28,7 @@ export class ActionRowElement extends LitElement {
   @property({ type: Object }) cbs!: ActionRowCallbacks;
 
   @state() private copyText = "📋 Copy";
-  // Unified "Re-run…" menu. The robust form (ph-rerun-form) is shared with the
-  // bulk-action bar so both surfaces are identical; this just toggles it open.
-  @state() private rerunMenuOpen = false;
 
-  private docClickHandler: ((e: MouseEvent) => void) | null = null;
   /** Global keyboard-shortcut bridge (keyboard.ts dispatches phoneme:action). */
   private actionHandler = (e: Event) => {
     const action = (e as CustomEvent).detail?.action;
@@ -42,39 +36,17 @@ export class ActionRowElement extends LitElement {
       case "play": this.handlePlay(); break;
       case "copy": void this.handleCopy(); break;
       case "export": void this.handleExport(); break;
-      case "rerun": this.rerunMenuOpen = true; break;
-    }
-  };
-  /** Close the Re-run modal on Escape (capture-phase so it beats the global vim
-   *  layer). Only acts while the modal is open. */
-  private escHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && this.rerunMenuOpen) {
-      e.stopPropagation();
-      e.preventDefault();
-      this.rerunMenuOpen = false;
+      case "rerun": void this.openRerun(); break;
     }
   };
 
   connectedCallback() {
     super.connectedCallback();
-    this.docClickHandler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest(".split-btn")) {
-        this.rerunMenuOpen = false;
-        this.requestUpdate();
-      }
-    };
-    document.addEventListener("click", this.docClickHandler);
-    document.addEventListener("keydown", this.escHandler, true);
     window.addEventListener("phoneme:action", this.actionHandler);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    if (this.docClickHandler) {
-      document.removeEventListener("click", this.docClickHandler);
-    }
-    document.removeEventListener("keydown", this.escHandler, true);
     window.removeEventListener("phoneme:action", this.actionHandler);
   }
 
@@ -82,31 +54,13 @@ export class ActionRowElement extends LitElement {
     this.cbs.onTogglePlay();
   }
 
-  private toggleRerunMenu(e: Event) {
-    e.stopPropagation();
-    this.rerunMenuOpen = !this.rerunMenuOpen;
-  }
-
-  /** Apply the form's chosen step+options to this one recording. */
-  private async onRerun(e: Event) {
-    const payload = (e as CustomEvent<RerunPayload>).detail;
-    this.rerunMenuOpen = false;
-    try {
-      await applyRerun(this.recordingId, payload);
-      showToast(rerunToastMessage(payload), "info");
-      this.cbs.onRefresh();
-    } catch (err) {
-      showToast(`Re-run failed: ${errText(err)}`, "error");
-    }
-  }
-
-  private onCancelRerun() {
-    this.rerunMenuOpen = false;
-  }
-
-  /** Close only when the backdrop itself is clicked (not the form inside it). */
-  private onOverlayClick(e: MouseEvent) {
-    if (e.target === e.currentTarget) this.rerunMenuOpen = false;
+  /** Re-run: open the unified Models modal in "Run once" mode — pick models and
+   *  apply them as a one-time re-run of this recording (or flip the footer to
+   *  "Save as default" to persist them as the new defaults instead). */
+  private async openRerun() {
+    const { openModelPicker } = await import("../ModelPicker");
+    await openModelPicker("transcription", undefined, { mode: "oneshot", recordingId: this.recordingId });
+    this.cbs.onRefresh();
   }
 
   /** The transcript with any custom speaker names applied, for copy/export. */
@@ -163,17 +117,7 @@ export class ActionRowElement extends LitElement {
     return html`
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
-
-        <div class="split-btn" style="position: relative;">
-          <button class="rerun-trigger" title="Re-run a step on this recording" aria-haspopup="dialog" aria-expanded=${this.rerunMenuOpen ? "true" : "false"} @click=${this.toggleRerunMenu}>↻ Re-run… <svg class="ph-caret-ico ${this.rerunMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
-
-          ${this.rerunMenuOpen ? html`
-            <div class="modal-overlay" @click=${this.onOverlayClick}>
-              <ph-rerun-form modal @rerun=${this.onRerun} @cancel=${this.onCancelRerun}></ph-rerun-form>
-            </div>
-          ` : nothing}
-        </div>
-
+        <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <button @click=${this.handleCopy}>${this.copyText}</button>
         <button @click=${this.handleExport}>⬇ Export</button>
         <button @click=${this.handleReveal}>📂 Reveal</button>
