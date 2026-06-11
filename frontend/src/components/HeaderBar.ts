@@ -31,6 +31,9 @@ export class HeaderBarElement extends LitElement {
   @state() private modeMenuOpen = false;
   @state() private settingsMenuOpen = false;
   @state() private previewText: string | null = null;
+  /** When the system-wide desktop preview overlay is on, the in-app live-preview
+   *  ticker is redundant — suppress it. Synced from config on load + save. */
+  private previewOverlayOn = false;
   @state() private filterState: UiFilter = filterStore.get();
   // Coalescing throttle for partials. The daemon emits a fresh re-transcription
   // of the trailing audio window every ~1-2s, and a stalled tick can let two
@@ -86,6 +89,10 @@ export class HeaderBarElement extends LitElement {
     void this.loadTags();
     void this.syncStatusFromDaemon();
     void this.initSemanticDefault();
+    void this.loadPreviewOverlayPref();
+    // Re-read the overlay pref on every settings save so toggling it takes effect
+    // immediately (no reload).
+    window.addEventListener("config:saved", this.onConfigSavedOverlay);
 
     this.unsubEvent = await listen<any>("daemon-event", async (e) => {
       const p = e.payload;
@@ -162,6 +169,7 @@ export class HeaderBarElement extends LitElement {
       document.removeEventListener("click", this.docClickHandler);
     }
     document.removeEventListener("keydown", this.escHandler, true);
+    window.removeEventListener("config:saved", this.onConfigSavedOverlay);
     if (this.unsubEvent) {
       this.unsubEvent();
       this.unsubEvent = null;
@@ -217,6 +225,9 @@ export class HeaderBarElement extends LitElement {
    * never drop the newest text.
    */
   private queuePreview(text: string | null) {
+    // The desktop overlay already shows the live preview — don't double it up in
+    // the app's header too.
+    if (this.previewOverlayOn) { this.clearPreview(); return; }
     this.pendingPreviewText = text;
     const now = Date.now();
     const sinceLast = now - this.previewLastRenderAt;
@@ -251,6 +262,21 @@ export class HeaderBarElement extends LitElement {
     this.pendingPreviewText = null;
     this.previewText = null;
   }
+
+  private async loadPreviewOverlayPref() {
+    try {
+      const cfg = await invoke<any>("read_config");
+      this.previewOverlayOn = !!cfg?.interface?.preview_overlay;
+    } catch { /* default off */ }
+  }
+
+  private onConfigSavedOverlay = (e: Event) => {
+    const cfg = (e as CustomEvent).detail;
+    if (cfg) {
+      this.previewOverlayOn = !!cfg?.interface?.preview_overlay;
+      if (this.previewOverlayOn) this.clearPreview();
+    }
+  };
 
   async toggleMeeting() {
     if (this.isMeeting) {

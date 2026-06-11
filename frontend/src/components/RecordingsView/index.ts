@@ -498,14 +498,15 @@ export class RecordingsView {
     this.highlightDetail();
   }
 
-  /** h/l: move left/right within the row, clamped at both ends. h at the start
-   *  no longer steps out to the list — Escape does that. */
+  /** h/l: move left/right within the row. h past the first item steps back to
+   *  the recordings list; l past the last item stays put. */
   private moveDetailCol(delta: number) {
     const rows = this.detailGrid();
     const row = rows[this.detailRow];
-    if (!row) return;
+    if (!row) { this.focusPane("list"); return; }
     const next = this.detailCol + delta;
-    if (next < 0 || next >= row.length) return; // stay at the row's edges
+    if (next < 0) { this.focusPane("list"); return; } // h at the start → list
+    if (next >= row.length) return; // l at the end stays
     this.detailCol = next;
     this.highlightDetail();
   }

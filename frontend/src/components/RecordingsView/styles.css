@@ -1373,6 +1373,12 @@ ph-sidebar {
   letter-spacing: 0.6px;
   color: var(--fg-muted);
   user-select: none;
+  /* Stay on ONE line in a narrow sidebar — never wrap to a second row or bleed
+     past the sidebar into the list. The title ellipsizes first; if it's still
+     too tight, the right-hand badges get clipped (info cut off, not wrapped). */
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
 }
 .queue-header:hover { color: var(--fg-default); }
 .queue-chevron {
@@ -1386,7 +1392,9 @@ ph-sidebar {
 .queue-chevron svg { display: block; }
 /* Points up when open — the panel expands upward. */
 .queue-chevron.open { transform: rotate(-90deg); }
-.queue-title { flex: 1; }
+.queue-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Badges keep their size and never wrap; the header's overflow clips them last. */
+.queue-count, .queue-failed { flex: 0 0 auto; white-space: nowrap; }
 .queue-count {
   font-size: 10px;
   font-weight: 700;
