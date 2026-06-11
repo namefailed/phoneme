@@ -78,12 +78,37 @@ export function removeSavedSearch(id: string): SavedSearch[] {
   return list;
 }
 
+/** Rename a saved search in place (no-op on a blank name or unknown id). */
+export function renameSavedSearch(id: string, name: string): SavedSearch[] {
+  const trimmed = name.trim();
+  const list = loadSavedSearches();
+  const s = list.find((x) => x.id === id);
+  if (s && trimmed) {
+    s.name = trimmed;
+    persist(list);
+  }
+  return list;
+}
+
+/** Overwrite a saved search's filter snapshot (e.g. "update to current"). */
+export function updateSavedSearchFilter(id: string, filter: UiFilter): SavedSearch[] {
+  const list = loadSavedSearches();
+  const s = list.find((x) => x.id === id);
+  if (s) {
+    s.filter = { ...filter };
+    persist(list);
+  }
+  return list;
+}
+
 /** A short, human description of what a saved filter matches, for the menu. */
 export function describeFilter(f: UiFilter): string {
   const parts: string[] = [];
   if (f.search) parts.push(`"${f.search}"${f.semantic ? " ✨" : ""}`);
   else if (f.semantic) parts.push("✨ semantic");
-  if (f.kind && f.kind !== "all") parts.push(f.kind === "meeting" ? "meetings" : "single-track");
+  if (f.kind && f.kind !== "all") {
+    parts.push(f.kind === "meeting" ? "meetings" : f.kind === "favorite" ? "favorites" : "single-track");
+  }
   if (f.tag_id != null) parts.push("tagged");
   if (f.status) parts.push(String(f.status));
   if (f.since || f.until) {

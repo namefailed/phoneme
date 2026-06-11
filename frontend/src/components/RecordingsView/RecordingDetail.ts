@@ -164,6 +164,7 @@ export class RecordingDetail {
             <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
               <span>${formatDuration(r.duration_ms)}</span>
               <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
+              <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="Where this recording's audio came from"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span><span class="rec-source-label">${r.track === "system" ? "System audio" : "Microphone"}</span></span>
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">

@@ -802,12 +802,13 @@ export class RecordingsListElement extends LitElement {
     const sourceLabel = sourceIsSystem ? "System audio" : "Microphone";
     const sourceIcon = sourceIsSystem ? "🔊" : "🎤";
 
-    // When the dedicated Source column is visible, the badge lives there; only
-    // fall back to prefixing the transcript (legacy behaviour) when it isn't,
-    // so meeting tracks never lose their source label.
+    // When the dedicated Source column is visible, the badge lives there; when
+    // it's hidden, fall back to a compact icon prefixed to the transcript (the
+    // worded label lives in the detail header) so meeting tracks never lose
+    // their source entirely.
     const sourceColVisible = visibleCols.includes("source");
     const trackBadge = track && !sourceColVisible
-      ? html`<span class="rec-track-badge">${trackLabel(track)}</span> `
+      ? html`<span class="rec-track-badge rec-track-badge--ico" title=${sourceLabel} aria-label=${sourceLabel}>${sourceIcon}</span> `
       : nothing;
 
     // Semantic-search relevance chip: only present when this row came from a

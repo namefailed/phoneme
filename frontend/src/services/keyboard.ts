@@ -123,8 +123,8 @@ function focusList() {
   document.querySelector<HTMLElement>(".rec-table")?.focus();
 }
 
-function navigate(view: string) {
-  window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view } }));
+function navigate(view: string, section?: string) {
+  window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view, section } }));
 }
 
 /** Ask the open recording's action row to run an action (no-op if none open). */
@@ -348,6 +348,11 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === "l") { e.preventDefault(); navigate("recordings"); return; }
     if (e.key === "s") { e.preventDefault(); navigate("settings"); return; }
     if (e.key === "d") { e.preventDefault(); navigate("doctor"); return; }
+    // Capital chords jump to the managers: g T = quick Tag Manager popup,
+    // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches.
+    if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
+    if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
+    if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
     if (vimNav && e.key === "g" && activeWithin(".rv-list")) {
       e.preventDefault();
       dispatchVim("list-top");
