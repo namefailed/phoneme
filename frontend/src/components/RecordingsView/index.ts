@@ -442,6 +442,10 @@ export class RecordingsView {
     if (tags) rows.push([{ el: tags, kind: "tags" }]);
     const transcript = q1("#rv-detail .transcript-block");
     if (transcript) rows.push([{ el: transcript, kind: "editor" }]);
+    // The buttons INSIDE the transcript box (Speakers · Summary · Compare ·
+    // Original · Unedited) get their own row, between the transcript and notes.
+    const tbtns = qa("#rv-detail .transcript-history button");
+    if (tbtns.length) rows.push(tbtns.map((el) => ({ el, kind: "button" as const })));
     const notes = q1("#rv-detail .notes-block");
     if (notes) rows.push([{ el: notes, kind: "editor" }]);
     return rows;
@@ -494,15 +498,14 @@ export class RecordingsView {
     this.highlightDetail();
   }
 
-  /** h/l: move left/right within the row. Left past the first item drops back to
-   *  the recordings list; right past the last item stays put. */
+  /** h/l: move left/right within the row, clamped at both ends. h at the start
+   *  no longer steps out to the list — Escape does that. */
   private moveDetailCol(delta: number) {
     const rows = this.detailGrid();
     const row = rows[this.detailRow];
-    if (!row) { this.focusPane("list"); return; }
+    if (!row) return;
     const next = this.detailCol + delta;
-    if (next < 0) { this.focusPane("list"); return; }
-    if (next >= row.length) return;
+    if (next < 0 || next >= row.length) return; // stay at the row's edges
     this.detailCol = next;
     this.highlightDetail();
   }

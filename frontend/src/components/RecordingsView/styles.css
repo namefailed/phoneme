@@ -918,11 +918,12 @@ mark.search-hit {
   box-shadow: inset 0 0 0 2px var(--accent),
     inset 0 0 16px color-mix(in srgb, var(--accent) 10%, transparent);
 }
-/* vim j/k cursor on a detail-pane option button (so it's clear what you're on). */
+/* vim j/k cursor on a detail-pane option button (so it's clear what you're on).
+   Tight to the control — a wide outline-offset reads as an oversized halo. */
 .rv-detail .kbd-cursor {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 7px;
+  outline-offset: -1px;
+  border-radius: 6px;
 }
 /* The list scroll-area and the detail/sidebar containers take focus (tabindex)
    so h/l can move between them; suppress the browser's own focus outline in
