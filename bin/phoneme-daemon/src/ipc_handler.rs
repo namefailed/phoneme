@@ -292,19 +292,31 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         let bg = state.clone();
                         tokio::spawn(async move {
                             let guard = bg.embedder.read().await;
-                            let Some(embedder) = guard.as_ref() else { return };
+                            let Some(embedder) = guard.as_ref() else {
+                                return;
+                            };
                             match bg.catalog.list_recordings_without_chunk_embeddings().await {
                                 Ok(records) => {
                                     let n = records.len();
-                                    tracing::info!("re-embedding {n} recordings with the current model");
+                                    tracing::info!(
+                                        "re-embedding {n} recordings with the current model"
+                                    );
                                     for r in records {
                                         if let Some(t) = r.transcript.as_ref() {
-                                            crate::pipeline::embed_and_store(embedder, &bg.catalog, &r.id, t).await;
+                                            crate::pipeline::embed_and_store(
+                                                embedder,
+                                                &bg.catalog,
+                                                &r.id,
+                                                t,
+                                            )
+                                            .await;
                                         }
                                     }
                                     tracing::info!("re-embed complete ({n} recordings)");
                                 }
-                                Err(e) => tracing::error!(error = %e, "re-embed: failed to list recordings"),
+                                Err(e) => {
+                                    tracing::error!(error = %e, "re-embed: failed to list recordings")
+                                }
                             }
                         });
                         Response::Ok(serde_json::Value::Null)
@@ -365,7 +377,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Ok(()) => {
                     let embedder_guard = state.embedder.read().await;
                     if let Some(embedder) = embedder_guard.as_ref() {
-                        crate::pipeline::embed_and_store(embedder, &state.catalog, &id, &text).await;
+                        crate::pipeline::embed_and_store(embedder, &state.catalog, &id, &text)
+                            .await;
                     }
                     drop(embedder_guard);
 
@@ -405,15 +418,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
-        Request::GetCleanTranscript { id } => {
-            match state.catalog.get_clean_transcript(&id).await {
-                Ok(clean) => serialize_response(clean),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
-            }
-        }
+        Request::GetCleanTranscript { id } => match state.catalog.get_clean_transcript(&id).await {
+            Ok(clean) => serialize_response(clean),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::SetFavorite { id, favorite } => {
             match state.catalog.set_favorite(&id, favorite).await {
                 Ok(()) => Response::Ok(serde_json::Value::Null),
@@ -455,7 +466,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             match state.catalog.add_tag(&name, None).await {
                 Ok(tag) => match state.catalog.attach_tag(&id, tag.id).await {
                     Ok(()) => {
-                        state.events.emit(DaemonEvent::TagAttached { tag_id: tag.id });
+                        state
+                            .events
+                            .emit(DaemonEvent::TagAttached { tag_id: tag.id });
                         if let Ok(Some(rec)) = state.catalog.get(&id).await {
                             let rest: Vec<String> = rec
                                 .tag_suggestions
@@ -466,9 +479,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                 tracing::warn!(error = %e, "failed to drop approved tag suggestion");
                             }
                         }
-                        state
-                            .events
-                            .emit(DaemonEvent::TagSuggestionsUpdated { id });
+                        state.events.emit(DaemonEvent::TagSuggestionsUpdated { id });
                         Response::Ok(serde_json::to_value(tag).unwrap_or_default())
                     }
                     Err(e) => Response::Err(IpcError {
@@ -482,37 +493,33 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
-        Request::DismissTagSuggestion { id, name } => {
-            match state.catalog.get(&id).await {
-                Ok(Some(rec)) => {
-                    let rest: Vec<String> = rec
-                        .tag_suggestions
-                        .into_iter()
-                        .filter(|n| !n.eq_ignore_ascii_case(&name))
-                        .collect();
-                    match state.catalog.set_tag_suggestions(&id, &rest).await {
-                        Ok(()) => {
-                            state
-                                .events
-                                .emit(DaemonEvent::TagSuggestionsUpdated { id });
-                            Response::Ok(serde_json::Value::Null)
-                        }
-                        Err(e) => Response::Err(IpcError {
-                            kind: error_to_kind(&e),
-                            message: e.to_string(),
-                        }),
+        Request::DismissTagSuggestion { id, name } => match state.catalog.get(&id).await {
+            Ok(Some(rec)) => {
+                let rest: Vec<String> = rec
+                    .tag_suggestions
+                    .into_iter()
+                    .filter(|n| !n.eq_ignore_ascii_case(&name))
+                    .collect();
+                match state.catalog.set_tag_suggestions(&id, &rest).await {
+                    Ok(()) => {
+                        state.events.emit(DaemonEvent::TagSuggestionsUpdated { id });
+                        Response::Ok(serde_json::Value::Null)
                     }
+                    Err(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: e.to_string(),
+                    }),
                 }
-                Ok(None) => Response::Err(IpcError {
-                    kind: IpcErrorKind::NotFound,
-                    message: format!("no recording {}", id.as_str()),
-                }),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
             }
-        }
+            Ok(None) => Response::Err(IpcError {
+                kind: IpcErrorKind::NotFound,
+                message: format!("no recording {}", id.as_str()),
+            }),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::NotesUpdated { id });
@@ -1850,7 +1857,7 @@ mod tests {
             diarized: false,
             user_edited: false,
             favorite: false,
-        tag_suggestions: vec![],
+            tag_suggestions: vec![],
             summary: None,
             summary_model: None,
             tags: vec![],
@@ -1894,7 +1901,10 @@ mod tests {
             &state,
         )
         .await;
-        assert!(matches!(resp, Response::Ok(_)), "retranscribe should be accepted");
+        assert!(
+            matches!(resp, Response::Ok(_)),
+            "retranscribe should be accepted"
+        );
 
         // The GLOBAL config is untouched — this is the crux of the fix. The
         // supervisor never sees a model change here, so it never thrashes.
@@ -1909,13 +1919,16 @@ mod tests {
         );
 
         // The override is instead recorded against just this recording id, to be
-        // applied by the pipeline when this single job runs.
-        let pending = state.pending_overrides.lock().unwrap();
-        assert_eq!(
-            pending.get(&id).map(String::as_str),
-            Some("C:/models/ggml-large-v3.bin"),
-            "the per-job override should be queued for this recording only"
-        );
+        // applied by the pipeline when this single job runs. (Scoped so the std
+        // MutexGuard drops before the await below — clippy::await_holding_lock.)
+        {
+            let pending = state.pending_overrides.lock().unwrap();
+            assert_eq!(
+                pending.get(&id).map(String::as_str),
+                Some("C:/models/ggml-large-v3.bin"),
+                "the per-job override should be queued for this recording only"
+            );
+        }
 
         // And the recording was put back into the transcribing state + enqueued.
         let rec = state.catalog.get(&id).await.unwrap().unwrap();

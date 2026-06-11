@@ -7,7 +7,9 @@ use phoneme_core::config::{
     Config, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
 };
 use phoneme_core::error::Result;
-use phoneme_core::{Catalog, Embedder, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus};
+use phoneme_core::{
+    Catalog, Embedder, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus,
+};
 use phoneme_ipc::{DaemonEvent, PipelineStage};
 use std::sync::Arc;
 
@@ -72,12 +74,7 @@ async fn apply_model_override(
 ) -> (WhisperConfig, WhisperOverrideGuard) {
     let model = match requested {
         Some(m) if !m.trim().is_empty() => m.trim().to_string(),
-        _ => {
-            return (
-                configured.clone(),
-                WhisperOverrideGuard { inner: None },
-            )
-        }
+        _ => return (configured.clone(), WhisperOverrideGuard { inner: None }),
     };
 
     let mut whisper_cfg = configured.clone();
@@ -92,7 +89,10 @@ async fn apply_model_override(
             whisper_cfg.model_path = model;
             // Only the bundled server is ours to wait on; External is a
             // user-managed endpoint we never restart.
-            if matches!(configured.mode, WhisperMode::BundledModel | WhisperMode::BundledDownload) {
+            if matches!(
+                configured.mode,
+                WhisperMode::BundledModel | WhisperMode::BundledDownload
+            ) {
                 wait_for_whisper_ready(&whisper_cfg.server_base_url(), WHISPER_READY_TIMEOUT).await;
             }
             (
@@ -251,7 +251,11 @@ pub(crate) async fn embed_and_store(
             if let Err(e) = catalog.upsert_chunk_embeddings(id, &chunks).await {
                 tracing::warn!(error = %e, "Failed to save chunk embeddings");
             } else {
-                tracing::info!(chunks = chunks.len(), "Saved chunk embeddings for {}", id.as_str());
+                tracing::info!(
+                    chunks = chunks.len(),
+                    "Saved chunk embeddings for {}",
+                    id.as_str()
+                );
             }
         }
         Err(e) => tracing::warn!(error = %e, "Failed to embed transcript chunks"),
@@ -323,7 +327,16 @@ pub async fn generate_summary(
             return None;
         }
     };
-    match run_llm_stage(state, id, PipelineStage::Summarizing, &*llm, &cfg.summary.prompt, transcript).await {
+    match run_llm_stage(
+        state,
+        id,
+        PipelineStage::Summarizing,
+        &*llm,
+        &cfg.summary.prompt,
+        transcript,
+    )
+    .await
+    {
         Ok(summary) if !summary.trim().is_empty() => Some((summary, model)),
         Ok(_) => {
             tracing::warn!("summary LLM returned empty output");
@@ -339,12 +352,7 @@ pub async fn generate_summary(
 /// Generate a summary (if `summary.auto`) and persist it. Runs as the final
 /// pipeline step, after post-processing/cleanup, so it summarizes the text the
 /// user will actually see.
-async fn maybe_auto_summarize(
-    state: &AppState,
-    cfg: &Config,
-    id: &RecordingId,
-    transcript: &str,
-) {
+async fn maybe_auto_summarize(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
     if !cfg.summary.auto {
         return;
     }
@@ -354,7 +362,11 @@ async fn maybe_auto_summarize(
     });
     match generate_summary(state, cfg, id, transcript).await {
         Some((summary, model)) => {
-            if let Err(e) = state.catalog.update_summary(id, &summary, Some(&model)).await {
+            if let Err(e) = state
+                .catalog
+                .update_summary(id, &summary, Some(&model))
+                .await
+            {
                 tracing::warn!(error = %e, "failed to persist auto summary");
                 state.events.emit(DaemonEvent::SummaryFailed {
                     id: id.clone(),
@@ -362,7 +374,9 @@ async fn maybe_auto_summarize(
                 });
             } else {
                 tracing::info!(id = %id.as_str(), "auto summary saved");
-                state.events.emit(DaemonEvent::SummaryUpdated { id: id.clone() });
+                state
+                    .events
+                    .emit(DaemonEvent::SummaryUpdated { id: id.clone() });
             }
         }
         None => {
@@ -406,14 +420,17 @@ pub fn auto_tag_llm_config(cfg: &Config) -> LlmPostProcessConfig {
 /// and case-insensitive duplicates, and caps the list at `max`.
 fn parse_tag_names(raw: &str, max: usize) -> Vec<String> {
     let cleaned = raw.trim();
-    let jsonish = cleaned
-        .find('[')
-        .and_then(|s| cleaned.rfind(']').filter(|e| *e > s).map(|e| &cleaned[s..=e]));
+    let jsonish = cleaned.find('[').and_then(|s| {
+        cleaned
+            .rfind(']')
+            .filter(|e| *e > s)
+            .map(|e| &cleaned[s..=e])
+    });
     let candidates: Vec<String> = jsonish
         .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
         .unwrap_or_else(|| {
             cleaned
-                .split(|c| c == ',' || c == '\n' || c == ';')
+                .split([',', '\n', ';'])
                 .map(str::to_string)
                 .collect()
         });
@@ -474,10 +491,23 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
     let prompt = format!(
         "{}\n\nEXISTING TAGS: {}\nSuggest at most {} tags.",
         cfg.auto_tag.prompt,
-        if existing.is_empty() { "(none yet)".to_string() } else { existing.join(", ") },
+        if existing.is_empty() {
+            "(none yet)".to_string()
+        } else {
+            existing.join(", ")
+        },
         max,
     );
-    match run_llm_stage(state, id, PipelineStage::Tagging, &*llm, &prompt, transcript).await {
+    match run_llm_stage(
+        state,
+        id,
+        PipelineStage::Tagging,
+        &*llm,
+        &prompt,
+        transcript,
+    )
+    .await
+    {
         Ok(reply) => {
             let mut names = parse_tag_names(&reply, max);
             // Don't suggest tags the recording already has.
@@ -504,7 +534,9 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
                         Ok(tag) => match state.catalog.attach_tag(id, tag.id).await {
                             Ok(()) => {
                                 accepted += 1;
-                                state.events.emit(DaemonEvent::TagAttached { tag_id: tag.id });
+                                state
+                                    .events
+                                    .emit(DaemonEvent::TagAttached { tag_id: tag.id });
                             }
                             Err(e) => tracing::warn!(error = %e, "auto-accept: attach failed"),
                         },
@@ -969,7 +1001,13 @@ pub async fn run(
 
     // Only POST when a non-blank URL is configured — an empty string (e.g. the
     // Settings field was filled then cleared) must not fire a request per run.
-    if let Some(url) = cfg.hook.webhook_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+    if let Some(url) = cfg
+        .hook
+        .webhook_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+    {
         if let Err(e) = state
             .webhook
             .post(url, Duration::from_secs(cfg.hook.timeout_secs), &payload)
