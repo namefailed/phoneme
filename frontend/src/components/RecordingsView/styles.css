@@ -1467,6 +1467,17 @@ ph-sidebar {
   flex-direction: column;
   gap: 4px;
 }
+/* The active (processing) item(s), pinned just above the header so the one being
+   processed stays visible while the pending list scrolls above it. Not part of
+   the scroll area — it's a separate, content-sized block. */
+.queue-active {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border-subtle);
+}
 /* Drag handle pinned to the visual TOP of the queue panel (it's the last DOM
    child of the column-reverse panel). Dragging it up grows the queue list,
    down shrinks it; the chosen height persists per device. */

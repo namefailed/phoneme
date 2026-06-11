@@ -282,15 +282,20 @@ export class QueuePanelElement extends LitElement {
     // hook) that aren't in the inbox, so every running step shows in the queue.
     const extras = [...this.extraEntries.values()].filter((e) => !this.items.some((i) => i.id === e.id));
     const items = [...this.items, ...extras];
-    const active = items.filter((i) => i.state === "processing").length;
-    const pending = items.length - active;
+    const processing = items.filter((i) => i.state === "processing");
+    const pending = items.filter((i) => i.state === "pending");
+    const active = processing.length;
+    // Inverted display: pending shown furthest-out (top) → next-up (bottom), with
+    // the active item(s) pinned just below the list (above the header) so the one
+    // being processed is always visible even while the pending list scrolls.
+    const pendingRev = [...pending].reverse();
     return html`
       <div class="queue-panel ${this.collapsed ? "collapsed" : "expanded"}">
         <div class="queue-header" @click=${() => this.toggle()} title="Transcription pipeline queue">
           <span class="queue-chevron ${this.collapsed ? "" : "open"}" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg></span>
           <span class="queue-title">Queue</span>
           ${items.length
-            ? html`<span class="queue-count">${pending}${active ? ` +${active}⟳` : ""}</span>`
+            ? html`<span class="queue-count">${pending.length}${active ? ` +${active}⟳` : ""}</span>`
             : html`<span class="queue-count ${this.paused ? "paused" : "idle"}">${this.paused ? "paused" : "idle"}</span>`}
           ${this.failed > 0
             ? html`<button class="queue-failed" ?disabled=${this.clearingFailed}
@@ -304,7 +309,7 @@ export class QueuePanelElement extends LitElement {
                     @click=${(e: Event) => this.togglePause(e)}>${this.paused
                       ? html`<svg class="qa-ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="7 4 20 12 7 20"></polygon></svg>`
                       : html`<svg class="qa-ico" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>`}</button>
-                  <button class="queue-action" title="Clear all pending items" ?disabled=${pending === 0}
+                  <button class="queue-action" title="Clear all pending items" ?disabled=${pending.length === 0}
                     @click=${(e: Event) => this.clearAll(e)}><svg class="qa-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg></button>
                 </span>`
             : null}
@@ -312,41 +317,50 @@ export class QueuePanelElement extends LitElement {
         ${this.collapsed
           ? null
           : html`
-              <div class="queue-list" style=${this.listHeight != null ? `max-height:${this.listHeight}px` : ""}>
-                ${(() => {
-                  const pendingIds = items.filter((i) => i.state === "pending").map((i) => i.id);
-                  return items.length === 0
-                    ? html`<div class="queue-empty">Nothing queued — recordings transcribe as they arrive.</div>`
-                    : items.map((it) => {
-                        const pIdx = pendingIds.indexOf(it.id);
-                        return html`
-                          <div class="queue-item ${it.state}">
-                            <span class="queue-item-icon">${it.state === "processing" ? "⟳" : "•"}</span>
-                            <div class="queue-item-main" title="Open this recording" @click=${() => this.select(it.id)}>
-                              <div class="queue-item-title">${formatTime(it.timestamp, false)} · ${formatDuration(it.duration_ms)}</div>
-                              <div class="queue-item-sub">${this.stages.has(it.id) ? stageLabel(this.stages.get(it.id)!) : (it.state === "processing" ? "Transcribing…" : "Queued")}</div>
-                            </div>
-                            ${it.state === "pending"
-                              ? html`
-                                  <span class="queue-reorder">
-                                    <button class="queue-move" title="Move up" ?disabled=${pIdx <= 0} @click=${() => this.move(it.id, -1)}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg></button>
-                                    <button class="queue-move" title="Move down" ?disabled=${pIdx === pendingIds.length - 1} @click=${() => this.move(it.id, 1)}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
-                                  </span>
-                                  <button class="queue-cancel" title="Remove from queue" @click=${() => this.cancel(it.id)}>✕</button>
-                                `
-                              : html`
-                                  <span class="queue-spin" aria-hidden="true"></span>
-                                  ${this.items.some((i) => i.id === it.id)
-                                    ? html`<button class="queue-cancel" title="Cancel the in-progress item" @click=${() => this.cancelActive(it.id)}>✕</button>`
-                                    : null}
-                                `}
-                          </div>
-                        `;
-                      });
-                })()}
-              </div>
-              ${items.length
+              ${active
+                ? html`<div class="queue-active">${processing.map((it) => this.renderItem(it, null))}</div>`
+                : null}
+              ${pending.length
+                ? html`<div class="queue-list" style=${this.listHeight != null ? `max-height:${this.listHeight}px` : ""}>
+                    ${pendingRev.map((it, vIdx) => this.renderItem(it, { vIdx, total: pendingRev.length }))}
+                  </div>`
+                : (active
+                    ? null
+                    : html`<div class="queue-list"><div class="queue-empty">Nothing queued — recordings transcribe as they arrive.</div></div>`)}
+              ${pending.length
                 ? html`<div class="queue-resizer" title="Drag to resize the queue" @mousedown=${(e: MouseEvent) => this.startResize(e)}></div>`
+                : null}
+            `}
+      </div>
+    `;
+  }
+
+  /** One queue row. `vis` is set for pending items (drives the visual-intuitive
+   *  reorder arrows — in this inverted list ▲ = process later, ▼ = sooner);
+   *  null for the pinned active item(s). */
+  private renderItem(it: QueueEntry, vis: { vIdx: number; total: number } | null) {
+    const sub = this.stages.has(it.id)
+      ? stageLabel(this.stages.get(it.id)!)
+      : (it.state === "processing" ? "Transcribing…" : "Queued");
+    return html`
+      <div class="queue-item ${it.state}">
+        <span class="queue-item-icon">${it.state === "processing" ? "⟳" : "•"}</span>
+        <div class="queue-item-main" title="Open this recording" @click=${() => this.select(it.id)}>
+          <div class="queue-item-title">${formatTime(it.timestamp, false)} · ${formatDuration(it.duration_ms)}</div>
+          <div class="queue-item-sub">${sub}</div>
+        </div>
+        ${vis
+          ? html`
+              <span class="queue-reorder">
+                <button class="queue-move" title="Process later (move up)" ?disabled=${vis.vIdx <= 0} @click=${() => this.move(it.id, 1)}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"></polyline></svg></button>
+                <button class="queue-move" title="Process sooner (move down)" ?disabled=${vis.vIdx >= vis.total - 1} @click=${() => this.move(it.id, -1)}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+              </span>
+              <button class="queue-cancel" title="Remove from queue" @click=${() => this.cancel(it.id)}>✕</button>
+            `
+          : html`
+              <span class="queue-spin" aria-hidden="true"></span>
+              ${this.items.some((i) => i.id === it.id)
+                ? html`<button class="queue-cancel" title="Cancel the in-progress item" @click=${() => this.cancelActive(it.id)}>✕</button>`
                 : null}
             `}
       </div>
