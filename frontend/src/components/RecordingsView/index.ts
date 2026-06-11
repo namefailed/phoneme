@@ -2,6 +2,7 @@
 
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { Store } from "../../state/store";
+import { setOpenRecordingId } from "../../state/openRecording";
 import { RecordingsList, type RecordingsListState } from "./RecordingsList";
 import { RecordingDetail } from "./RecordingDetail";
 // Side-effect import is REQUIRED. `MergedConversationDetail` below is referenced
@@ -260,6 +261,7 @@ export class RecordingsView {
     const s = this.state.get();
     if (!s.selectedId) return;
     this.state.set({ ...s, selectedId: null });
+    setOpenRecordingId(null);
     try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
     this.detail.clear();
     this.mergedDetail.meetingId = "";
@@ -731,6 +733,9 @@ export class RecordingsView {
     // have no per-recording LLM activity of their own).
     const tp = this.container.querySelector<HTMLElement & { recordingId: string }>("#rv-thinking");
     if (tp) tp.recordingId = id.startsWith("session:") ? "" : id;
+    // Keep the shared "open recording" in sync so the header Quick Switcher's
+    // "Run once" can target it (sessions clear it — no single id to re-run).
+    setOpenRecordingId(id.startsWith("session:") ? null : id);
     const singleContainer = this.container.querySelector<HTMLElement>("#rv-single-detail")!;
     if (id.startsWith("session:")) {
       singleContainer.style.display = "none";

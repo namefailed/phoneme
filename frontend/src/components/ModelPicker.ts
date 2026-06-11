@@ -10,6 +10,7 @@ import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModel
 import { fetchLlmModels } from '../services/llmModels';
 import { curatedCleanupModelIds } from '../data/curatedModels';
 import { applyRerun, rerunToastMessage, type RerunPayload } from './RecordingsView/rerunActions';
+import { getOpenRecordingId } from '../state/openRecording';
 
 type ProviderOption = { value: string; label: string };
 
@@ -63,6 +64,17 @@ export class ModelPickerElement extends LitElement {
   @property() activeMode: "default" | "oneshot" = "default";
   /** Set when opened from a recording's Re-run; enables the "Run once" mode. */
   @property({ type: String }) recordingId = "";
+  /** Multiple targets (the bulk bar's selection). Takes precedence over the
+   *  single `recordingId` when non-empty so "Run once" re-runs each one. */
+  @property({ type: Array }) recordingIds: string[] = [];
+
+  /** The recordings "Run once" will act on. Bulk selection wins; otherwise the
+   *  single recording id (which openModelPicker seeds from the open recording
+   *  when nothing explicit was passed). Empty → "Run once" is disabled. */
+  private get targets(): string[] {
+    if (this.recordingIds.length) return this.recordingIds;
+    return this.recordingId ? [this.recordingId] : [];
+  }
 
   @state() private activeTab: MpTab = "transcription";
   @state() private downloadedModels: string[] = [];
@@ -318,7 +330,8 @@ export class ModelPickerElement extends LitElement {
    *  time only — nothing is written to config. (Live preview is a capture-time
    *  setting, so it doesn't apply to a one-shot re-run.) */
   private async runOnce() {
-    if (!this.recordingId) return;
+    const targets = this.targets;
+    if (!targets.length) return;
     const transcriptionModel =
       this.sttRealProvider === "local" ? this.sttLocalModel : this.sttModel.trim();
     const llmOn = this.llmRealProvider !== "none";
@@ -338,13 +351,16 @@ export class ModelPickerElement extends LitElement {
           }
         : null,
     };
-    try {
-      await applyRerun(this.recordingId, payload);
-      showToast(rerunToastMessage(payload), "info");
-      this.close(false);
-    } catch (e) {
-      showToast(`Re-run failed: ${errText(e)}`, "error");
+    // Apply to every target (one or the whole bulk selection). Identical path to
+    // the old per-surface Re-run, so single and bulk behave the same.
+    let ok = 0;
+    let failed = 0;
+    for (const id of targets) {
+      try { await applyRerun(id, payload); ok++; } catch { failed++; }
     }
+    if (failed === 0) showToast(rerunToastMessage(payload, ok), "info");
+    else showToast(`${ok} ok, ${failed} failed`, "error");
+    this.close(false);
   }
 
   private onSttProviderChange() {
@@ -478,6 +494,24 @@ export class ModelPickerElement extends LitElement {
       </select>`;
   }
 
+  /** "Run once" — applies the chosen models to the target recording(s) as a
+   *  one-time re-run. Disabled (but always shown) when there's no target. */
+  private renderRunOnceBtn() {
+    const n = this.targets.length;
+    const has = n > 0;
+    return html`<button class="modal-btn ${this.activeMode === "oneshot" ? "modal-btn-primary" : ""}"
+      ?disabled=${!has}
+      title=${has ? "Re-run with these models once — not saved to your config" : "Open a recording (or select some) to run these once"}
+      @click=${this.runOnce}>↻ Run once${n > 1 ? ` · ${n}` : ""}</button>`;
+  }
+
+  /** "Save as default" — persists the chosen models to config. */
+  private renderSaveBtn() {
+    return html`<button id="mp-save" class="modal-btn ${this.activeMode === "default" ? "modal-btn-primary" : ""}"
+      title="Save these models as your defaults"
+      @click=${this.save}>💾 Save as default</button>`;
+  }
+
   render() {
     const isSttLocal = this.sttRealProvider === "local";
     const isLlmCloud = this.llmRealProvider === "openai" || this.llmRealProvider === "groq" || this.llmRealProvider === "anthropic";
@@ -503,7 +537,11 @@ export class ModelPickerElement extends LitElement {
       <div class=${"modal-overlay " + (this.anchor ? "mp-anchored" : "")} @click=${this.handleOverlayClick}>
         <div class="modal-dialog mp-dialog" role="dialog" aria-modal="true" aria-labelledby="mp-title">
           <div class="modal-header">
-            <h3 class="modal-title" id="mp-title">Choose Models</h3>
+            <h3 class="modal-title" id="mp-title">${
+              this.activeMode === "oneshot"
+                ? (this.targets.length > 1 ? `Re-run · ${this.targets.length} recordings` : "Re-run with these models")
+                : "Quick model switch"
+            }</h3>
           </div>
 
           <div class="mp-tabs" role="tablist">
@@ -634,14 +672,12 @@ export class ModelPickerElement extends LitElement {
 
           <div class="modal-actions">
             <button id="mp-cancel" class="modal-btn" @click=${() => this.close(false)}>Cancel</button>
-            ${this.recordingId
-              ? html`<button class="modal-btn ${this.activeMode === "oneshot" ? "modal-btn-primary" : ""}"
-                  title="Re-run this recording once with the models above (not saved)"
-                  @click=${this.runOnce}>↻ Run once</button>`
-              : null}
-            <button id="mp-save" class="modal-btn ${this.activeMode === "default" ? "modal-btn-primary" : ""}"
-              title="Save these models as your defaults"
-              @click=${this.save}>💾 Save as default</button>
+            <!-- Both modes show both buttons; the primary (rightmost) one flips
+                 with the mode: Run once for a Re-run, Save as default for the
+                 Quick Switcher. -->
+            ${this.activeMode === "oneshot"
+              ? html`${this.renderSaveBtn()}${this.renderRunOnceBtn()}`
+              : html`${this.renderRunOnceBtn()}${this.renderSaveBtn()}`}
           </div>
         </div>
       </div>
@@ -652,7 +688,7 @@ export class ModelPickerElement extends LitElement {
 export async function openModelPicker(
   initialTab: MpTab = "transcription",
   anchor?: HTMLElement,
-  opts?: { mode?: "default" | "oneshot"; recordingId?: string },
+  opts?: { mode?: "default" | "oneshot"; recordingId?: string; recordingIds?: string[] },
 ): Promise<boolean> {
   let config: any;
   try {
@@ -671,7 +707,10 @@ export async function openModelPicker(
     if (anchor) el.anchor = anchor;
     el.config = config;
     el.activeMode = opts?.mode ?? "default";
-    el.recordingId = opts?.recordingId ?? "";
+    el.recordingIds = opts?.recordingIds ?? [];
+    // With no explicit target, fall back to whatever recording the detail pane
+    // is showing, so the header's Quick Switcher can still "Run once" on it.
+    el.recordingId = opts?.recordingId ?? (el.recordingIds.length ? "" : (getOpenRecordingId() ?? ""));
 
     el.addEventListener('resolved', (e: Event) => {
       const customEvent = e as CustomEvent<boolean>;

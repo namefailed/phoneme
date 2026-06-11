@@ -7,8 +7,6 @@ import {
   type Tag,
 } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import "./RerunForm";
-import { applyRerun, rerunToastMessage, type RerunPayload } from "./rerunActions";
 
 export type BulkActionCallbacks = {
   onRefresh: () => void;
@@ -33,7 +31,7 @@ export class BulkActionBarElement extends LitElement {
   /** Floating position; null = default (bottom-center). Persisted per device. */
   @state() private pos: { x: number; y: number } | null = null;
   @state() private allTags: Tag[] = [];
-  @state() private openMenu: "rerun" | "tag" | "export" | null = null;
+  @state() private openMenu: "tag" | "export" | null = null;
 
   private docClick = (e: MouseEvent) => {
     // Close an open dropdown when clicking outside the bar.
@@ -220,25 +218,20 @@ export class BulkActionBarElement extends LitElement {
     this.callbacks.onRefresh();
   }
 
-  /** Apply the shared Re-run form's chosen step+options to every selected
-   *  recording. Identical form/logic to the single-recording detail panel. */
-  private async onRerun(e: Event) {
+  /** Open the unified Models modal in one-shot mode for the whole selection —
+   *  the same context-aware modal the detail Re-run and the header Quick
+   *  Switcher use, so bulk and single Re-run are identical. "Run once" there
+   *  re-runs each selected recording's whole pipeline; "Save as default"
+   *  persists the chosen models. (Replaces the old per-step RerunForm, which is
+   *  what had broken for the bulk surface.) */
+  private async openBulkRerun() {
     if (this.busy) return;
-    const payload = (e as CustomEvent<RerunPayload>).detail;
+    const ids = [...this.selected];
+    if (!ids.length) return;
     this.openMenu = null;
-    this.busy = true;
-    const recs = this.selectedRecordings();
-    let ok = 0;
-    let failed = 0;
-    for (const r of recs) {
-      try { await applyRerun(r.id, payload); ok++; } catch { failed++; }
-    }
-    this.busy = false;
-    if (failed === 0) showToast(rerunToastMessage(payload, ok), "info");
-    else showToast(`${ok} ok, ${failed} failed.`, "error");
-    // Transcribe/all re-queue the audio (clear the selection); cleanup/summary/
-    // hook act in place, so keep the selection for follow-up actions.
-    if (payload.step === "transcribe" || payload.step === "all") this.callbacks.onClear();
+    const { openModelPicker } = await import("../ModelPicker");
+    await openModelPicker("transcription", undefined, { mode: "oneshot", recordingIds: ids });
+    // The daemon emits queue events that refresh the list as each re-run starts.
     this.callbacks.onRefresh();
   }
 
@@ -304,7 +297,7 @@ export class BulkActionBarElement extends LitElement {
     window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids } }));
   }
 
-  private toggleMenu(menu: "rerun" | "tag" | "export", e: Event) {
+  private toggleMenu(menu: "tag" | "export", e: Event) {
     e.stopPropagation();
     this.openMenu = this.openMenu === menu ? null : menu;
   }
@@ -322,9 +315,7 @@ export class BulkActionBarElement extends LitElement {
         <span class="bulk-grip" title="Drag to move · Ctrl+Shift-click to reset" @mousedown=${(e: MouseEvent) => this.startDrag(e)}>⠿</span>
         <span class="bulk-count">${this.busy ? "Working…" : `${n} selected`}</span>
         <div class="bulk-actions">
-          <span class="bulk-menu-wrap">
-            <button class="bulk-btn" title="Re-run a step on the selected recordings" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("rerun", e)}>↻ Re-run <svg class="ph-caret-ico ${this.openMenu === "rerun" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
-          </span>
+          <button class="bulk-btn" title="Re-run the selected recordings with chosen models" .disabled=${this.busy} @click=${this.openBulkRerun}>↻ Re-run</button>
 
           <span class="bulk-menu-wrap">
             <button class="bulk-btn" title="Add a tag to selected" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("tag", e)}>🏷 Tag <svg class="ph-caret-ico ${this.openMenu === "tag" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
@@ -353,11 +344,6 @@ export class BulkActionBarElement extends LitElement {
           <button class="bulk-btn bulk-btn--muted" title="Deselect all" .disabled=${this.busy} @click=${() => this.callbacks.onClear()}>✕ Deselect</button>
         </div>
       </div>
-
-      ${this.openMenu === "rerun" ? html`
-        <div class="modal-overlay" @click=${(e: MouseEvent) => { if (e.target === e.currentTarget) this.openMenu = null; }}>
-          <ph-rerun-form modal .busy=${this.busy} .submitLabel=${`Re-run · ${n}`} @rerun=${this.onRerun} @cancel=${() => { this.openMenu = null; }}></ph-rerun-form>
-        </div>` : null}
     `;
   }
 }
