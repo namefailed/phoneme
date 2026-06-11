@@ -23,6 +23,7 @@ import { SectionAdvanced } from "./SectionAdvanced";
 import { SectionTags } from "./SectionTags";
 import { SectionProfiles } from "./SectionProfiles";
 import { SectionSavedSearches } from "./SectionSavedSearches";
+import { SectionAutoTag } from "./SectionAutoTag";
 import "./styles.css";
 
 // ── Settings-search helpers ────────────────────────────────────────────────
@@ -243,6 +244,7 @@ export class SettingsViewElement extends LitElement {
       { tab: "managers", label: "Managers", mount: (h) => { new SectionProfiles(h, this.config); } },
       { tab: "managers", label: "Managers", mount: (h) => { new SectionSavedSearches(h, this.config); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, this.config); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, this.config); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionSemantic(h, this.config); } },
@@ -294,6 +296,7 @@ export class SettingsViewElement extends LitElement {
           break;
         case "postprocessing":
           new SectionPostProcessing(createSubHost(), this.config);
+          new SectionAutoTag(createSubHost(), this.config);
           new SectionHook(createSubHost(), this.config);
           break;
         case "system":

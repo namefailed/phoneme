@@ -368,6 +368,146 @@ async fn maybe_auto_summarize(
     }
 }
 
+/// Build the effective LLM config for tag suggestions, mirroring
+/// `summary_llm_config`: start from `[llm_post_process]` and overlay any
+/// auto-tag-specific provider / URL / key / model. Always `enabled` — the
+/// auto-tag step has its own gate (`auto_tag.auto` / the on-demand request).
+pub fn auto_tag_llm_config(cfg: &Config) -> LlmPostProcessConfig {
+    let mut llm = cfg.llm_post_process.clone();
+    llm.enabled = true;
+    let t = &cfg.auto_tag;
+    if !t.provider.trim().is_empty() {
+        llm.provider = t.provider.clone();
+    }
+    if !t.api_url.trim().is_empty() {
+        llm.api_url = t.api_url.clone();
+    }
+    let key = t.api_key_str();
+    if !key.trim().is_empty() {
+        llm.set_api_key(key.to_string());
+    }
+    if !t.model.trim().is_empty() {
+        llm.model = t.model.clone();
+    }
+    llm
+}
+
+/// Parse the tagger LLM's reply into clean tag names: prefer a JSON string
+/// array anywhere in the output (models often wrap it in code fences); fall
+/// back to comma/newline splitting. Trims quotes/hashes/bullets, drops empties
+/// and case-insensitive duplicates, and caps the list at `max`.
+fn parse_tag_names(raw: &str, max: usize) -> Vec<String> {
+    let cleaned = raw.trim();
+    let jsonish = cleaned
+        .find('[')
+        .and_then(|s| cleaned.rfind(']').filter(|e| *e > s).map(|e| &cleaned[s..=e]));
+    let candidates: Vec<String> = jsonish
+        .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
+        .unwrap_or_else(|| {
+            cleaned
+                .split(|c| c == ',' || c == '\n' || c == ';')
+                .map(str::to_string)
+                .collect()
+        });
+    let mut seen: Vec<String> = Vec::new();
+    let mut out: Vec<String> = Vec::new();
+    for c in candidates {
+        let name = c
+            .trim()
+            .trim_matches(|ch| ch == '"' || ch == '\'' || ch == '`')
+            .trim_start_matches(['#', '-', '*', '•'])
+            .trim()
+            .to_string();
+        // Tag names are short labels; anything sentence-length is the model
+        // ignoring instructions — drop it rather than creating a junk tag.
+        if name.is_empty() || name.len() > 40 {
+            continue;
+        }
+        let key = name.to_lowercase();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        out.push(name);
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
+/// Ask the LLM for tag suggestions for `transcript` and persist them on the
+/// recording (replacing any previous suggestions), emitting
+/// `TagSuggestionsUpdated` so the UI shows the approval chips. The existing
+/// tag list is included in the prompt so the model prefers reusing tags.
+/// Non-fatal: failures are logged and leave existing suggestions untouched.
+pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
+    if transcript.trim().is_empty() {
+        return;
+    }
+    let llm_cfg = auto_tag_llm_config(cfg);
+    let llm = match state.llm.provider(&llm_cfg) {
+        Some(llm) => llm,
+        None => {
+            tracing::warn!(
+                provider = %llm_cfg.provider,
+                "tag suggestions requested but no usable LLM provider is configured"
+            );
+            return;
+        }
+    };
+    // The existing tags (attached anywhere) — the model is told to prefer these.
+    let existing: Vec<String> = match state.catalog.list_tags().await {
+        Ok(tags) => tags.into_iter().map(|t| t.name).collect(),
+        Err(_) => vec![],
+    };
+    let max = cfg.auto_tag.max_tags.clamp(1, 12) as usize;
+    let prompt = format!(
+        "{}\n\nEXISTING TAGS: {}\nSuggest at most {} tags.",
+        cfg.auto_tag.prompt,
+        if existing.is_empty() { "(none yet)".to_string() } else { existing.join(", ") },
+        max,
+    );
+    match run_llm_stage(state, id, PipelineStage::Tagging, &*llm, &prompt, transcript).await {
+        Ok(reply) => {
+            let mut names = parse_tag_names(&reply, max);
+            // Don't suggest tags the recording already has.
+            if let Ok(Some(rec)) = state.catalog.get(id).await {
+                let have: Vec<String> = rec.tags.iter().map(|t| t.name.to_lowercase()).collect();
+                names.retain(|n| !have.contains(&n.to_lowercase()));
+            }
+            if names.is_empty() {
+                tracing::info!(id = %id.as_str(), "tag suggestion produced nothing new");
+                return;
+            }
+            match state.catalog.set_tag_suggestions(id, &names).await {
+                Ok(()) => {
+                    tracing::info!(id = %id.as_str(), count = names.len(), "tag suggestions saved");
+                    state
+                        .events
+                        .emit(DaemonEvent::TagSuggestionsUpdated { id: id.clone() });
+                }
+                Err(e) => tracing::warn!(error = %e, "failed to persist tag suggestions"),
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "tag suggestion LLM call failed"),
+    }
+}
+
+/// Run the auto-tag step when enabled (`auto_tag.auto`). Best-effort and
+/// quiet: the transcript is already saved; only the optional suggestions step
+/// is affected by a failure.
+async fn maybe_auto_tag(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
+    if !cfg.auto_tag.auto {
+        return;
+    }
+    state.events.emit(DaemonEvent::PipelineStageChanged {
+        id: id.clone(),
+        stage: PipelineStage::Tagging,
+    });
+    suggest_tags(state, cfg, id, transcript).await;
+}
+
 /// Finalize an in-flight item canceled by the user: move the inbox file out of
 /// `processing/`, mark the recording terminal, and emit the cancel events.
 /// Best-effort — logs (but doesn't propagate) errors so a cancel always settles.
@@ -660,8 +800,10 @@ pub async fn run(
     // (e.g. re-appending to an Obsidian daily note).
     if !cfg.hook.run_on_transcribe {
         // Auto-summary is the final step — runs after post-processing so it
-        // summarizes the text the user actually sees.
+        // summarizes the text the user actually sees; auto-tag suggestions ride
+        // along after it (approve-to-apply, so they're side-effect free).
         maybe_auto_summarize(state, &cfg, &id, &transcript).await;
+        maybe_auto_tag(state, &cfg, &id, &transcript).await;
         state
             .catalog
             .update_status(&id, RecordingStatus::Done)
@@ -765,8 +907,10 @@ pub async fn run(
     }
 
     // Auto-summary is the final step — runs after post-processing and hooks so
-    // it summarizes the text the user actually sees.
+    // it summarizes the text the user actually sees; auto-tag suggestions ride
+    // along after it (approve-to-apply, so they're side-effect free).
     maybe_auto_summarize(state, &cfg, &id, &payload.transcript).await;
+    maybe_auto_tag(state, &cfg, &id, &payload.transcript).await;
 
     state
         .catalog

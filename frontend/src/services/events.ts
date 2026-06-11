@@ -5,6 +5,7 @@ export type PipelineStage =
   | "transcribing"
   | "cleaning_up"
   | "summarizing"
+  | "tagging"
   | "running_hook"
   | "done"
   | "failed";
@@ -15,6 +16,7 @@ export function stageLabel(stage: PipelineStage): string {
     case "transcribing": return "Transcribing…";
     case "cleaning_up": return "Cleaning up…";
     case "summarizing": return "Summarizing…";
+    case "tagging": return "Suggesting tags…";
     case "running_hook": return "Running hook…";
     case "done": return "Done";
     case "failed": return "Failed";
@@ -49,7 +51,8 @@ export type DaemonEvent =
   | { event: "tag_updated"; id: number }
   | { event: "tag_deleted"; id: number }
   | { event: "tag_attached"; tag_id: number }
-  | { event: "tag_detached"; tag_id: number };
+  | { event: "tag_detached"; tag_id: number }
+  | { event: "tag_suggestions_updated"; id: string };
 
 export type EventHandler = (event: DaemonEvent) => void;
 

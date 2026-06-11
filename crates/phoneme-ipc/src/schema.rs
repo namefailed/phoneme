@@ -180,6 +180,23 @@ pub enum Request {
         id: RecordingId,
         favorite: bool,
     },
+    /// Run the LLM tag-suggestion step for one recording on demand (regardless
+    /// of the `auto_tag.auto` gate). Suggestions land on the recording and a
+    /// `TagSuggestionsUpdated` event fires when they're ready.
+    SuggestTags {
+        id: RecordingId,
+    },
+    /// Approve one suggested tag: create the tag if needed, attach it, and
+    /// remove the name from the recording's suggestion list.
+    ApproveTagSuggestion {
+        id: RecordingId,
+        name: String,
+    },
+    /// Dismiss one suggested tag (drop it from the suggestion list).
+    DismissTagSuggestion {
+        id: RecordingId,
+        name: String,
+    },
     /// Set (or clear) the custom display name for one diarized speaker label of
     /// a recording. `speaker_label` is the 1-based index from the transcript's
     /// `[Speaker N]` marker. A blank `name` clears the mapping (the label
@@ -384,6 +401,8 @@ pub enum PipelineStage {
     CleaningUp,
     /// Running the LLM summary step.
     Summarizing,
+    /// Running the LLM tag-suggestion (auto-tag) step.
+    Tagging,
     /// Running an action hook.
     RunningHook,
     /// All work finished successfully.
@@ -508,6 +527,11 @@ pub enum DaemonEvent {
         error: String,
     },
     NotesUpdated {
+        id: RecordingId,
+    },
+    /// A recording's LLM tag suggestions changed (generated, approved away, or
+    /// dismissed). The UI re-reads the recording to show the current list.
+    TagSuggestionsUpdated {
         id: RecordingId,
     },
     /// A recording's custom speaker-name map changed (a label was renamed or

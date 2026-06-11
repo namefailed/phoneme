@@ -98,6 +98,9 @@ pub struct Config {
     /// Auto-summary settings (an LLM summary of each transcript).
     #[serde(default)]
     pub summary: SummaryConfig,
+    /// LLM tag suggestions, approved by the user before they apply.
+    #[serde(default)]
+    pub auto_tag: AutoTagConfig,
     /// Optional semantic search indexing and querying parameters.
     #[serde(default)]
     pub semantic_search: SemanticSearchConfig,
@@ -366,6 +369,103 @@ impl Default for SummaryConfig {
 
 fn default_summary_prompt() -> String {
     "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.".into()
+}
+
+/// LLM auto-tagging: propose up to `max_tags` tags for each recording,
+/// preferring the user's existing tags. Suggestions are stored on the recording
+/// and surfaced in the UI for approval — nothing is applied until the user
+/// confirms (or dismisses) each one. Blank provider/key/URL/model fields
+/// inherit the `[llm_post_process]` connection, like summaries.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AutoTagConfig {
+    /// Suggest tags automatically as a pipeline step on every recording.
+    #[serde(default)]
+    pub auto: bool,
+    /// Provider override (`ollama`, `openai`, `groq`, `anthropic`). Empty → inherit.
+    #[serde(default)]
+    pub provider: String,
+    /// API key for the auto-tag provider. Empty → inherit the cleanup key.
+    #[serde(
+        default = "default_secret_string",
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
+    )]
+    pub api_key: SecretString,
+    /// Base URL for the auto-tag provider. Empty → inherit / provider default.
+    #[serde(default)]
+    pub api_url: String,
+    /// Model used for tag suggestions. Empty → fall back to the cleanup model.
+    #[serde(default)]
+    pub model: String,
+    /// Instructions for the tagger; the existing-tag list and the transcript
+    /// are appended to this at run time.
+    #[serde(default = "default_auto_tag_prompt")]
+    pub prompt: String,
+    /// Maximum number of suggested tags per recording.
+    #[serde(default = "default_auto_tag_max")]
+    pub max_tags: u32,
+}
+
+impl AutoTagConfig {
+    /// Replace the API key from a plain string (encapsulates `SecretString`).
+    pub fn set_api_key(&mut self, key: impl Into<String>) {
+        self.api_key = SecretString::from(key.into());
+    }
+
+    /// The auto-tag API key as a plain `&str`, so callers outside this crate
+    /// can read it without depending on `secrecy`.
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for AutoTagConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AutoTagConfig")
+            .field("auto", &self.auto)
+            .field("provider", &self.provider)
+            .field("api_key", &redact_key(self.api_key.expose_secret()))
+            .field("api_url", &self.api_url)
+            .field("model", &self.model)
+            .field("prompt", &self.prompt)
+            .field("max_tags", &self.max_tags)
+            .finish()
+    }
+}
+
+impl PartialEq for AutoTagConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.auto == other.auto
+            && self.provider == other.provider
+            && self.api_key.expose_secret() == other.api_key.expose_secret()
+            && self.api_url == other.api_url
+            && self.model == other.model
+            && self.prompt == other.prompt
+            && self.max_tags == other.max_tags
+    }
+}
+
+impl Default for AutoTagConfig {
+    fn default() -> Self {
+        Self {
+            auto: false,
+            provider: String::new(),
+            api_key: SecretString::from(String::new()),
+            api_url: String::new(),
+            model: String::new(),
+            prompt: default_auto_tag_prompt(),
+            max_tags: default_auto_tag_max(),
+        }
+    }
+}
+
+fn default_auto_tag_prompt() -> String {
+    "You tag voice-note transcripts. Suggest concise topical tags (1-3 words each) for the transcript. Strongly prefer reusing tags from the EXISTING TAGS list when they fit; only invent a new tag when nothing existing applies. Reply with ONLY a JSON array of tag-name strings — no preamble, no explanations.".into()
+}
+
+fn default_auto_tag_max() -> u32 {
+    5
 }
 
 fn default_llm_timeout_secs() -> u64 {
@@ -956,6 +1056,7 @@ impl Default for Config {
                 timeout_secs: 30,
             },
             summary: SummaryConfig::default(),
+            auto_tag: AutoTagConfig::default(),
             semantic_search: SemanticSearchConfig::default(),
             retention: RetentionConfig::default(),
         }

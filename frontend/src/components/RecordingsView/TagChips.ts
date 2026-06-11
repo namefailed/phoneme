@@ -1,7 +1,8 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, css, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { addTag, attachTag, detachTag, listAllTags, tagsFor, updateTag, type Tag } from "../../services/ipc";
+import { addTag, attachTag, detachTag, listAllTags, tagsFor, updateTag, getRecording, suggestTags, approveTagSuggestion, dismissTagSuggestion, type Tag } from "../../services/ipc";
+import { subscribe, type DaemonEvent } from "../../services/events";
 import { showToast } from "../../utils/toast";
 import { fuzzyFilter } from "../../utils/fuzzy";
 
@@ -39,7 +40,12 @@ export class TagChipsElement extends LitElement {
   @state() private editingTagId: number | null = null;
   @state() private editName = "";
   @state() private editColor = "#cba6f7";
+  /** LLM tag suggestions awaiting approval (auto-tagging). */
+  @state() private suggestions: string[] = [];
+  /** True while an on-demand ✨ Suggest run is in flight. */
+  @state() private suggesting = false;
   private docClickHandler: ((e: MouseEvent) => void) | null = null;
+  private unsubEvents: (() => void) | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -52,6 +58,14 @@ export class TagChipsElement extends LitElement {
       if (this.editingTagId !== null) this.editingTagId = null;
     };
     document.addEventListener("click", this.docClickHandler);
+    // Live-refresh the suggestion chips when the daemon finishes a suggestion
+    // run (auto pipeline or the ✨ button) for THIS recording.
+    void subscribe((e: DaemonEvent) => {
+      if (e.event === "tag_suggestions_updated" && e.id === this.recordingId) {
+        this.suggesting = false;
+        void this.loadSuggestions();
+      }
+    }).then((un) => { this.unsubEvents = un; });
   }
 
   disconnectedCallback() {
@@ -60,6 +74,8 @@ export class TagChipsElement extends LitElement {
       document.removeEventListener("click", this.docClickHandler);
       this.docClickHandler = null;
     }
+    this.unsubEvents?.();
+    this.unsubEvents = null;
   }
 
   updated(changedProperties: PropertyValues) {
@@ -75,6 +91,62 @@ export class TagChipsElement extends LitElement {
     } catch (e) {
       showToast(`Failed to load tags: ${errText(e)}`, "error");
     }
+    void this.loadSuggestions();
+  }
+
+  private async loadSuggestions() {
+    try {
+      const rec = await getRecording(this.recordingId);
+      this.suggestions = rec.tag_suggestions ?? [];
+    } catch {
+      this.suggestions = [];
+    }
+  }
+
+  /** ✨ Suggest: ask the LLM for tag proposals for this recording, now. */
+  private async runSuggest() {
+    if (this.suggesting) return;
+    this.suggesting = true;
+    try {
+      await suggestTags(this.recordingId);
+      // The tag_suggestions_updated event refreshes the chips; this fallback
+      // covers the no-new-suggestions case (no event fires then).
+      await this.loadSuggestions();
+    } catch (e) {
+      showToast(`Tag suggestion failed: ${errText(e)}`, "error");
+    } finally {
+      this.suggesting = false;
+    }
+  }
+
+  private async approveSuggestion(name: string) {
+    try {
+      await approveTagSuggestion(this.recordingId, name);
+      await this.load();
+    } catch (e) {
+      showToast(`Couldn't apply tag: ${errText(e)}`, "error");
+    }
+  }
+
+  private async dismissSuggestion(name: string) {
+    try {
+      await dismissTagSuggestion(this.recordingId, name);
+      this.suggestions = this.suggestions.filter((n) => n !== name);
+    } catch (e) {
+      showToast(`Couldn't dismiss: ${errText(e)}`, "error");
+    }
+  }
+
+  private async approveAllSuggestions() {
+    for (const name of [...this.suggestions]) {
+      try {
+        await approveTagSuggestion(this.recordingId, name);
+      } catch (e) {
+        showToast(`Couldn't apply "${name}": ${errText(e)}`, "error");
+        break;
+      }
+    }
+    await this.load();
   }
 
   private async detach(tagId: number) {
@@ -312,6 +384,22 @@ export class TagChipsElement extends LitElement {
           ` : null}
         </div>
         <button class="tag-manage" title="Create, rename, recolor, and delete tags" @click=${this.onManageClick}>🏷 Manage tags</button>
+        <button class="tag-manage tag-suggest" title="Ask the AI to suggest tags for this recording (you approve before they apply)"
+          ?disabled=${this.suggesting} @click=${() => void this.runSuggest()}>${this.suggesting ? "✨ Suggesting…" : "✨ Suggest"}</button>
+        ${this.suggestions.length ? html`
+          <span class="tag-suggestions" title="AI-suggested tags — ✓ applies one, ✕ dismisses it">
+            ${this.suggestions.map((name) => html`
+              <span class="tag-chip tag-chip--suggested">
+                ✨ ${name}
+                <button class="tag-x tag-ok" title="Apply this tag" @click=${(e: Event) => { e.stopPropagation(); void this.approveSuggestion(name); }}>✓</button>
+                <button class="tag-x" title="Dismiss this suggestion" @click=${(e: Event) => { e.stopPropagation(); void this.dismissSuggestion(name); }}>×</button>
+              </span>
+            `)}
+            ${this.suggestions.length > 1 ? html`
+              <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>✓ All</button>
+            ` : null}
+          </span>
+        ` : null}
       </div>
     `;
   }

@@ -431,6 +431,35 @@ pub async fn set_favorite(
     forward(&bridge, Request::SetFavorite { id, favorite }).await
 }
 
+/// Run the LLM tag-suggestion step for one recording on demand.
+#[tauri::command]
+pub async fn suggest_tags(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SuggestTags { id }).await
+}
+
+/// Approve one suggested tag (create if needed + attach + drop the suggestion).
+#[tauri::command]
+pub async fn approve_tag_suggestion(
+    bridge: Br<'_>,
+    id: String,
+    name: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::ApproveTagSuggestion { id, name }).await
+}
+
+/// Dismiss one suggested tag (drop it from the recording's suggestion list).
+#[tauri::command]
+pub async fn dismiss_tag_suggestion(
+    bridge: Br<'_>,
+    id: String,
+    name: String,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::DismissTagSuggestion { id, name }).await
+}
+
 /// Set (or clear) the custom display name for one diarized speaker label of a
 /// recording. `speaker_label` is the 1-based `[Speaker N]` index; a blank `name`
 /// clears the mapping. The stored transcript is never rewritten — names are
@@ -478,7 +507,7 @@ const MASKED_SECRET: &str = "__phoneme_secret_kept__";
 
 /// Replace every non-empty API key in a serialized config with the mask.
 fn mask_config_secrets(v: &mut Value) {
-    for section in ["whisper", "llm_post_process", "summary", "preview_whisper"] {
+    for section in ["whisper", "llm_post_process", "summary", "auto_tag", "preview_whisper"] {
         if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
             if key.as_str().is_some_and(|k| !k.is_empty()) {
                 *key = Value::String(MASKED_SECRET.to_string());
@@ -502,6 +531,11 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
         incoming
             .summary
             .set_api_key(current.summary.api_key_str().to_owned());
+    }
+    if incoming.auto_tag.api_key_str() == MASKED_SECRET {
+        incoming
+            .auto_tag
+            .set_api_key(current.auto_tag.api_key_str().to_owned());
     }
     if let Some(pw) = incoming.preview_whisper.as_mut() {
         if pw.api_key_str() == MASKED_SECRET {

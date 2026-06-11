@@ -423,6 +423,96 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::SuggestTags { id } => {
+            // On-demand tag suggestions (the UI's ✨ Suggest button). Runs the
+            // same step as the auto pipeline, regardless of `auto_tag.auto`.
+            let cfg = state.config.load();
+            match state.catalog.get(&id).await {
+                Ok(Some(rec)) => {
+                    let transcript = rec.transcript.unwrap_or_default();
+                    if transcript.trim().is_empty() {
+                        Response::Err(IpcError {
+                            kind: IpcErrorKind::InvalidConfig,
+                            message: "recording has no transcript to tag yet".into(),
+                        })
+                    } else {
+                        crate::pipeline::suggest_tags(state, &cfg, &id, &transcript).await;
+                        Response::Ok(serde_json::Value::Null)
+                    }
+                }
+                Ok(None) => Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: format!("no recording {}", id.as_str()),
+                }),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::ApproveTagSuggestion { id, name } => {
+            // Create-or-fetch the tag, attach it, then drop the suggestion.
+            match state.catalog.add_tag(&name, None).await {
+                Ok(tag) => match state.catalog.attach_tag(&id, tag.id).await {
+                    Ok(()) => {
+                        state.events.emit(DaemonEvent::TagAttached { tag_id: tag.id });
+                        if let Ok(Some(rec)) = state.catalog.get(&id).await {
+                            let rest: Vec<String> = rec
+                                .tag_suggestions
+                                .into_iter()
+                                .filter(|n| !n.eq_ignore_ascii_case(&name))
+                                .collect();
+                            if let Err(e) = state.catalog.set_tag_suggestions(&id, &rest).await {
+                                tracing::warn!(error = %e, "failed to drop approved tag suggestion");
+                            }
+                        }
+                        state
+                            .events
+                            .emit(DaemonEvent::TagSuggestionsUpdated { id });
+                        Response::Ok(serde_json::to_value(tag).unwrap_or_default())
+                    }
+                    Err(e) => Response::Err(IpcError {
+                        kind: error_to_kind(&e),
+                        message: e.to_string(),
+                    }),
+                },
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::DismissTagSuggestion { id, name } => {
+            match state.catalog.get(&id).await {
+                Ok(Some(rec)) => {
+                    let rest: Vec<String> = rec
+                        .tag_suggestions
+                        .into_iter()
+                        .filter(|n| !n.eq_ignore_ascii_case(&name))
+                        .collect();
+                    match state.catalog.set_tag_suggestions(&id, &rest).await {
+                        Ok(()) => {
+                            state
+                                .events
+                                .emit(DaemonEvent::TagSuggestionsUpdated { id });
+                            Response::Ok(serde_json::Value::Null)
+                        }
+                        Err(e) => Response::Err(IpcError {
+                            kind: error_to_kind(&e),
+                            message: e.to_string(),
+                        }),
+                    }
+                }
+                Ok(None) => Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: format!("no recording {}", id.as_str()),
+                }),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::NotesUpdated { id });
@@ -1558,6 +1648,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         diarized: false,
         user_edited: false,
         favorite: false,
+        tag_suggestions: vec![],
         summary: None,
         summary_model: None,
         tags: vec![],
@@ -1732,6 +1823,7 @@ mod tests {
             diarized: false,
             user_edited: false,
             favorite: false,
+        tag_suggestions: vec![],
             summary: None,
             summary_model: None,
             tags: vec![],

@@ -34,6 +34,8 @@ export type Recording = {
   user_edited?: boolean;
   /** Whether the user has starred this recording (the Favorites view). */
   favorite?: boolean;
+  /** LLM-suggested tags awaiting approval (auto-tagging). Names only. */
+  tag_suggestions?: string[];
   /** LLM-generated summary of the transcript, if one has been produced. */
   summary?: string | null;
   /** The LLM model used to produce `summary`, if any. */
@@ -337,6 +339,23 @@ export async function updateNotes(id: string, notes: string): Promise<void> {
 /** Star or unstar a recording (the Favorites view). Cosmetic organisation only. */
 export async function setFavorite(id: string, favorite: boolean): Promise<void> {
   await tauriInvoke("set_favorite", { id, favorite });
+}
+
+/** Ask the LLM to suggest tags for a recording now (on demand). Suggestions
+ *  land on the recording; a `tag_suggestions_updated` event fires when ready. */
+export async function suggestTags(id: string): Promise<void> {
+  await tauriInvoke("suggest_tags", { id });
+}
+
+/** Approve one suggested tag: creates the tag if needed, attaches it, and
+ *  removes it from the suggestion list. Returns the (created) tag. */
+export async function approveTagSuggestion(id: string, name: string): Promise<Tag> {
+  return await tauriInvoke<Tag>("approve_tag_suggestion", { id, name });
+}
+
+/** Dismiss one suggested tag (drops it from the suggestion list). */
+export async function dismissTagSuggestion(id: string, name: string): Promise<void> {
+  await tauriInvoke("dismiss_tag_suggestion", { id, name });
 }
 
 /**
