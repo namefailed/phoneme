@@ -845,6 +845,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 "message": "whisper-server processes swept; supervisors respawning"
             }))
         }
+        Request::SkipCurrentStage => {
+            // Wakes whichever LLM stage is currently streaming (no-op when none
+            // is — the notify has no waiter then and stores nothing).
+            state.skip_stage.notify_waiters();
+            tracing::info!("skip-current-stage requested via IPC");
+            Response::Ok(serde_json::Value::Null)
+        }
         Request::ListQueue => {
             let pending = state.inbox.list_pending().await;
             let processing = state.inbox.list_processing().await;

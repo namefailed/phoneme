@@ -272,6 +272,8 @@ pub fn run() {
             commands::update_notes,
             commands::set_favorite,
             commands::restart_whisper,
+            commands::save_window_state,
+            commands::skip_current_stage,
             commands::suggest_tags,
             commands::approve_tag_suggestion,
             commands::dismiss_tag_suggestion,

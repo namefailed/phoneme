@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, getQueueCounts, clearFailed, type QueueEntry } from "../../services/ipc";
+import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, getQueueCounts, clearFailed, skipCurrentStage, type QueueEntry } from "../../services/ipc";
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
 import { formatTime, formatDuration } from "../../utils/format";
 import { showToast } from "../../utils/toast";
@@ -220,6 +220,17 @@ export class QueuePanelElement extends LitElement {
     }
   }
 
+  /** Skip the active item's current LLM step (cleanup / summary / tagging) —
+   *  the pipeline continues with whatever comes next. */
+  private async skipStep() {
+    try {
+      await skipCurrentStage();
+      showToast("Skipping this step…", "info");
+    } catch (e) {
+      showToast(`Couldn't skip: ${errText(e)}`, "error");
+    }
+  }
+
   /** Cancel the item currently being processed (abort the in-flight work). */
   private async cancelActive(id: string) {
     try {
@@ -370,6 +381,16 @@ export class QueuePanelElement extends LitElement {
             `
           : html`
               <span class="queue-spin" aria-hidden="true"></span>
+              ${(() => {
+                // Skip applies to the LLM stages only — transcription has nothing
+                // downstream without text (cancel covers that), and hooks are
+                // external processes.
+                const stage = this.stages.get(it.id);
+                const skippable = stage === "cleaning_up" || stage === "summarizing" || stage === "tagging";
+                return skippable
+                  ? html`<button class="queue-cancel" title="Skip this step — continue with the next" @click=${() => this.skipStep()}>⏭</button>`
+                  : null;
+              })()}
               ${this.items.some((i) => i.id === it.id)
                 ? html`<button class="queue-cancel" title="Cancel the in-progress item" @click=${() => this.cancelActive(it.id)}>✕</button>`
                 : null}

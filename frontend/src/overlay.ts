@@ -170,3 +170,26 @@ void listen("overlay-preview", async () => {
   await showOverlay();
   renderText(DUMMY_PREVIEW);
 });
+
+// ── Position/size persistence ───────────────────────────────────────────────
+// tauri-plugin-window-state restores geometry per window label, but it only
+// SAVES on a graceful app exit — a crash, force-kill, or dev rebuild loses any
+// drag/resize since launch. Save explicitly (debounced) after each move/resize
+// so the overlay's placement survives anything.
+let saveTimer: number | null = null;
+function queueStateSave() {
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    saveTimer = null;
+    void (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("save_window_state");
+      } catch {
+        /* non-fatal — exit-time save still applies */
+      }
+    })();
+  }, 600);
+}
+void win.onMoved(() => queueStateSave());
+void win.onResized(() => queueStateSave());

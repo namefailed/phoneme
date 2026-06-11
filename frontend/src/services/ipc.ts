@@ -341,6 +341,12 @@ export async function setFavorite(id: string, favorite: boolean): Promise<void> 
   await tauriInvoke("set_favorite", { id, favorite });
 }
 
+/** Skip the LLM step (cleanup / summary / tagging) currently running for the
+ *  active queue item; the pipeline continues with the next step. */
+export async function skipCurrentStage(): Promise<void> {
+  await tauriInvoke("skip_current_stage");
+}
+
 /** Ask the LLM to suggest tags for a recording now (on demand). Suggestions
  *  land on the recording; a `tag_suggestions_updated` event fires when ready. */
 export async function suggestTags(id: string): Promise<void> {

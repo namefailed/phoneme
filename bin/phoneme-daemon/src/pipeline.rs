@@ -168,7 +168,9 @@ pub(crate) async fn run_llm_stage(
         done: false,
     });
 
-    // (2) Stream deltas, coalesced and capped.
+    // (2) Stream deltas, coalesced and capped. The stream races the queue UI's
+    // "skip this step" signal — a skip aborts just this stage (the pipeline
+    // treats it like a non-fatal stage failure and moves on).
     let mut pending = String::new();
     let mut streamed = 0usize;
     let result = {
@@ -198,7 +200,13 @@ pub(crate) async fn run_llm_stage(
                 });
             }
         };
-        provider.process_streaming(prompt, text, &mut on_delta).await
+        tokio::select! {
+            r = provider.process_streaming(prompt, text, &mut on_delta) => r,
+            _ = state.skip_stage.notified() => {
+                tracing::info!(?stage, "stage skipped by user");
+                Err(phoneme_core::Error::Internal("step skipped by user".into()))
+            }
+        }
     };
 
     // (3) Flush any tail and the terminal `done` marker (regardless of outcome).
@@ -456,8 +464,9 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
             return;
         }
     };
-    // The existing tags (attached anywhere) — the model is told to prefer these.
-    let existing: Vec<String> = match state.catalog.list_tags().await {
+    // EVERY existing tag (attached or not) — the model is told to prefer these
+    // over inventing new ones, so the user's tag vocabulary stays canonical.
+    let existing: Vec<String> = match state.catalog.list_all_tags().await {
         Ok(tags) => tags.into_iter().map(|t| t.name).collect(),
         Err(_) => vec![],
     };

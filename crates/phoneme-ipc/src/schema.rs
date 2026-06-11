@@ -202,6 +202,10 @@ pub enum Request {
     /// port), then the supervisors respawn the main + preview servers from the
     /// current config. The Doctor's "Fix" for an unreachable local Whisper.
     RestartWhisper,
+    /// Skip the pipeline step currently running for the active item (cleanup /
+    /// summary / tagging — the LLM stages). The stage aborts and the pipeline
+    /// continues with the next step, as if the stage failed non-fatally.
+    SkipCurrentStage,
     /// Set (or clear) the custom display name for one diarized speaker label of
     /// a recording. `speaker_label` is the 1-based index from the transcript's
     /// `[Speaker N]` marker. A blank `name` clears the mapping (the label

@@ -431,12 +431,31 @@ pub async fn set_favorite(
     forward(&bridge, Request::SetFavorite { id, favorite }).await
 }
 
+/// Persist every window's position/size NOW. tauri-plugin-window-state only
+/// saves on a graceful exit — a crash, force-kill, or dev-watcher rebuild
+/// loses any move/resize since launch. The live-preview overlay calls this
+/// (debounced) after the user drags or resizes it, so its placement survives
+/// anything.
+#[tauri::command]
+pub fn save_window_state(app: tauri::AppHandle) -> Result<(), CommandError> {
+    use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+    app.save_window_state(StateFlags::all())
+        .map_err(|e| CommandError::new("internal", e.to_string()))
+}
+
 /// Force-restart the bundled whisper-server(s) — the Doctor's "Fix" for an
 /// unreachable local Whisper (sweeps hung/orphaned processes; supervisors
 /// respawn from the current config).
 #[tauri::command]
 pub async fn restart_whisper(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::RestartWhisper).await
+}
+
+/// Skip the pipeline step currently running for the active queue item (the
+/// LLM stages — cleanup / summary / tagging). The pipeline continues.
+#[tauri::command]
+pub async fn skip_current_stage(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::SkipCurrentStage).await
 }
 
 /// Run the LLM tag-suggestion step for one recording on demand.
