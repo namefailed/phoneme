@@ -6,7 +6,7 @@ import { showToast } from "../../utils/toast";
 import { applyVimrc, defineVimWrite, VIM_SAVE_EVENT } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
-import { standardKeymap } from "@codemirror/commands";
+import { standardKeymap, history, historyKeymap } from "@codemirror/commands";
 import { vim, Vim, getCM } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -16,6 +16,9 @@ export class TranscriptEditorElement extends LitElement {
 
   @property({ type: String }) recordingId = "";
   @property({ type: String }) initialText = "";
+  /** Whether this transcript was manually edited before (the catalog's
+   *  `user_edited` flag) — surfaced as an "Edited" badge next to Save. */
+  @property({ type: Boolean }) userEdited = false;
 
   @state() private currentText = "";
   @state() private vimMode = false;
@@ -25,9 +28,19 @@ export class TranscriptEditorElement extends LitElement {
 
   private view: EditorView | null = null;
 
-  private vimSaveHandler = () => {
-    // Only the focused editor responds to a global `:w`.
-    if (this.view?.hasFocus) void this.save();
+  private vimSaveHandler = (e: Event) => {
+    // Only the focused editor responds to a global `:w` / `:wq` / `:q`.
+    if (!this.view?.hasFocus) return;
+    const detail = (e as CustomEvent)?.detail ?? {};
+    const save = detail.save !== false; // default true for a plain `:w`
+    const quit = !!detail.quit;
+    // Saving (when dirty) clears the "Save Changes" button via the re-render;
+    // a quit (`:wq` / `:q`) then leaves the editor back to the pane nav.
+    const leave = () => {
+      if (quit) window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } }));
+    };
+    if (save) void this.save().then(leave);
+    else leave();
   };
 
   connectedCallback() {
@@ -146,10 +159,13 @@ export class TranscriptEditorElement extends LitElement {
 
     const extensions = [
       theme,
+      // REQUIRED for undo/redo to exist at all — without the history state field,
+      // both vim's `u` (normal mode) and Ctrl+Z call `undo` against nothing.
+      history(),
       EditorView.lineWrapping,
       updateListener,
       drawSelection({ cursorBlinkRate: 1200 }),
-      keymap.of(standardKeymap),
+      keymap.of([...historyKeymap, ...standardKeymap]),
     ];
 
     if (this.vimMode) {
@@ -200,6 +216,15 @@ export class TranscriptEditorElement extends LitElement {
     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
       e.preventDefault();
       void this.save();
+      return;
+    }
+    // Shift+Esc leaves the editor and hands focus back to the keyboard-nav layer
+    // (the detail pane), so h/l/j/k work again. Plain Esc can't do this here —
+    // it's bound to the editor's own vim normal mode.
+    if (e.shiftKey && e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } }));
     }
   }
 
@@ -254,6 +279,11 @@ export class TranscriptEditorElement extends LitElement {
           padding: 1px 4px;
           border-radius: 4px;
         }
+        ph-transcript-editor .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
         ph-transcript-editor .btn-save {
           background: var(--accent);
           color: var(--accent-fg);
@@ -264,12 +294,26 @@ export class TranscriptEditorElement extends LitElement {
           cursor: pointer;
           font-weight: bold;
         }
+        /* "Edited" status badge — same footprint as Save, but a non-interactive
+           accent-tinted pill so it reads as a marker, not an action. */
+        ph-transcript-editor .edited-badge {
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-weight: bold;
+          background: color-mix(in srgb, var(--accent) 16%, transparent);
+          color: var(--accent);
+          border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+        }
       </style>
       <div class="header">
         <span class="title">
           Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
-        <button class="btn-save" style="display: ${this.isDirty() ? 'block' : 'none'};" @click=${this.save}>Save Changes</button>
+        <div class="header-actions">
+          ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
+          <button class="btn-save" style="display: ${this.isDirty() ? 'inline-flex' : 'none'};" @click=${this.save}>Save Changes</button>
+        </div>
       </div>
       <div id="cm-editor-root" @keydown=${this.handleKeydown}></div>
     `;
@@ -284,10 +328,12 @@ export class TranscriptEditor {
     id: string,
     initial: string,
     onDirtyChange: (dirty: boolean) => void,
+    userEdited = false,
   ) {
     this.element = document.createElement('ph-transcript-editor') as TranscriptEditorElement;
     this.element.recordingId = id;
     this.element.initialText = initial;
+    this.element.userEdited = userEdited;
     this.element.addEventListener('dirty-change', (e: Event) => {
       onDirtyChange((e as CustomEvent<boolean>).detail);
     });

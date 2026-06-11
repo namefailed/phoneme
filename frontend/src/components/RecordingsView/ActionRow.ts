@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { deleteRecording, type SpeakerName } from "../../services/ipc";
+import { type SpeakerName } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import "./RerunForm";
@@ -45,6 +45,15 @@ export class ActionRowElement extends LitElement {
       case "rerun": this.rerunMenuOpen = true; break;
     }
   };
+  /** Close the Re-run modal on Escape (capture-phase so it beats the global vim
+   *  layer). Only acts while the modal is open. */
+  private escHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && this.rerunMenuOpen) {
+      e.stopPropagation();
+      e.preventDefault();
+      this.rerunMenuOpen = false;
+    }
+  };
 
   connectedCallback() {
     super.connectedCallback();
@@ -56,6 +65,7 @@ export class ActionRowElement extends LitElement {
       }
     };
     document.addEventListener("click", this.docClickHandler);
+    document.addEventListener("keydown", this.escHandler, true);
     window.addEventListener("phoneme:action", this.actionHandler);
   }
 
@@ -64,6 +74,7 @@ export class ActionRowElement extends LitElement {
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }
+    document.removeEventListener("keydown", this.escHandler, true);
     window.removeEventListener("phoneme:action", this.actionHandler);
   }
 
@@ -91,6 +102,11 @@ export class ActionRowElement extends LitElement {
 
   private onCancelRerun() {
     this.rerunMenuOpen = false;
+  }
+
+  /** Close only when the backdrop itself is clicked (not the form inside it). */
+  private onOverlayClick(e: MouseEvent) {
+    if (e.target === e.currentTarget) this.rerunMenuOpen = false;
   }
 
   /** The transcript with any custom speaker names applied, for copy/export. */
@@ -136,17 +152,11 @@ export class ActionRowElement extends LitElement {
     }
   }
 
-  private async handleDelete() {
-    const { confirmDelete } = await import("../ConfirmDelete");
-    if (await confirmDelete()) {
-      try {
-        await deleteRecording(this.recordingId, false);
-        showToast("Recording deleted", "success");
-        this.cbs.onRefresh();
-      } catch (e) {
-        showToast(`Delete failed: ${errText(e)}`, "error");
-      }
-    }
+  private handleDelete() {
+    // RecordingsView runs the grace-period Undo flow: it hides the row, closes
+    // this detail pane (the open recording is the one being deleted), and only
+    // deletes for real when the Undo toast lapses.
+    window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids: [this.recordingId] } }));
   }
 
   render() {
@@ -155,11 +165,11 @@ export class ActionRowElement extends LitElement {
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
 
         <div class="split-btn" style="position: relative;">
-          <button class="rerun-trigger" title="Re-run a step on this recording" aria-haspopup="menu" aria-expanded=${this.rerunMenuOpen ? "true" : "false"} @click=${this.toggleRerunMenu}>↻ Re-run… <svg class="ph-caret-ico ${this.rerunMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+          <button class="rerun-trigger" title="Re-run a step on this recording" aria-haspopup="dialog" aria-expanded=${this.rerunMenuOpen ? "true" : "false"} @click=${this.toggleRerunMenu}>↻ Re-run… <svg class="ph-caret-ico ${this.rerunMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 
           ${this.rerunMenuOpen ? html`
-            <div role="menu" style="position: absolute; top: calc(100% + 4px); left: 0; z-index: 100;">
-              <ph-rerun-form @rerun=${this.onRerun} @cancel=${this.onCancelRerun}></ph-rerun-form>
+            <div class="modal-overlay" @click=${this.onOverlayClick}>
+              <ph-rerun-form modal @rerun=${this.onRerun} @cancel=${this.onCancelRerun}></ph-rerun-form>
             </div>
           ` : nothing}
         </div>

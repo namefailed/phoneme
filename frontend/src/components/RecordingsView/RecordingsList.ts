@@ -15,10 +15,17 @@ import {
   highlightMatch,
   escapeHtml,
 } from "../../utils/format";
-import { groupRecordings, visibleRecordings, trackLabel } from "./grouping";
+import { groupRecordings, trackLabel } from "./grouping";
 import { getContrastColor } from "./TagChips";
 import "../shared/styles.css";
 import "./styles.css";
+
+/** A keyboard-navigable row: either a recording or a meeting group header. The
+ *  cursor (j/k) lands on both, so a header can be focused and Enter/Space toggle
+ *  its expand/collapse — previously j/k skipped over headers entirely. */
+type NavRow =
+  | { kind: "rec"; rec: Recording }
+  | { kind: "header"; meetingId: string; tracks: Recording[]; expanded: boolean };
 
 /** Which meeting groups are expanded — remembered across reloads (per device). */
 const LS_EXPANDED_MEETINGS = "phoneme.expandedMeetings";
@@ -115,6 +122,27 @@ export class RecordingsListElement extends LitElement {
    * used to render a "% relevant" chip. Empty for ordinary (non-semantic) lists.
    */
   private relevanceById = new Map<string, number>();
+
+  /** The navigable rows as last rendered (meeting headers + singles + expanded
+   *  meeting tracks), in display order. Mirrors what arrow/j-k navigation steps
+   *  through, and lets the vim layer jump to an edge (gg/G) or read the focused
+   *  row's id (dd). */
+  private lastNavRows: NavRow[] = [];
+
+  /** Ids hidden by an in-flight undoable delete. They stay in the store (so the
+   *  delete can be cancelled) but are filtered out of the rendered list until
+   *  the undo window passes (committed → daemon refresh drops them) or is undone
+   *  (cleared → they reappear). Survives daemon-event refreshes by design. */
+  private pendingDelete = new Set<string>();
+
+  /** Show/hide rows for the undoable-delete flow (see RecordingsView). */
+  setPendingDelete(ids: string[], pending: boolean) {
+    for (const id of ids) {
+      if (pending) this.pendingDelete.add(id);
+      else this.pendingDelete.delete(id);
+    }
+    this.requestUpdate();
+  }
 
   private unsubStore: (() => void) | null = null;
   private unsubFilter: (() => void) | null = null;
@@ -252,10 +280,11 @@ export class RecordingsListElement extends LitElement {
     this.requestUpdate();
   }
 
-  private selectRange(from: number, to: number, recs: Recording[]) {
+  private selectRange(from: number, to: number, rows: NavRow[]) {
     const [lo, hi] = from < to ? [from, to] : [to, from];
     for (let i = lo; i <= hi; i++) {
-      if (recs[i]) this.multiSelected.add(recs[i].id);
+      const row = rows[i];
+      if (row?.kind === "rec") this.multiSelected.add(row.rec.id);
     }
     this.anchorIndex = to;
     this.onSelectionChangeCb(new Set(this.multiSelected));
@@ -312,7 +341,7 @@ export class RecordingsListElement extends LitElement {
     }
   }
 
-  private handleKeyDown(e: KeyboardEvent, visibleRows: Recording[]) {
+  private handleKeyDown(e: KeyboardEvent, navRows: NavRow[]) {
     // Don't hijack keys (especially Space) while the user is typing in an
     // input — e.g. renaming a meeting. Otherwise Space would toggle the
     // focused row's checkbox instead of inserting a space in the name.
@@ -321,8 +350,8 @@ export class RecordingsListElement extends LitElement {
       return;
     }
 
-    const recs = visibleRows;
-    if (!recs.length) return;
+    const rows = navRows;
+    if (!rows.length) return;
 
     if (e.ctrlKey && e.key === "a") {
       e.preventDefault();
@@ -335,47 +364,127 @@ export class RecordingsListElement extends LitElement {
       return;
     }
 
-    if (e.key === "ArrowDown") {
+    // With vim navigation on, j / k are plain down / up within the list (no
+    // shift-extend — that stays on the arrow keys). They're inert otherwise so
+    // a stray keystroke on the focused list never moves the cursor for users
+    // who haven't opted in.
+    const vim = !!this.config?.interface?.vim_nav;
+    const key = vim && e.key === "j" ? "ArrowDown" : vim && e.key === "k" ? "ArrowUp" : e.key;
+
+    if (key === "ArrowDown") {
       e.preventDefault();
-      const next = Math.min(this.focusedIndex + 1, recs.length - 1);
+      const next = Math.min(this.focusedIndex + 1, rows.length - 1);
       if (e.shiftKey) {
         if (this.anchorIndex < 0) this.anchorIndex = this.focusedIndex;
-        this.selectRange(this.anchorIndex, next, recs);
+        this.selectRange(this.anchorIndex, next, rows);
       }
       this.focusedIndex = next;
       this.scrollFocusedIntoView();
-    } else if (e.key === "ArrowUp") {
+    } else if (key === "ArrowUp") {
       e.preventDefault();
+      // With vim nav on, pressing up (k) at the very top steps OUT of the list
+      // into the header search box — ArrowDown / Esc there come back down.
+      if (vim && this.focusedIndex <= 0) {
+        // Highlight (not focus) the search box so h/l can roam the header.
+        window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
+        return;
+      }
       const prev = Math.max(this.focusedIndex - 1, 0);
       if (e.shiftKey) {
         if (this.anchorIndex < 0) this.anchorIndex = this.focusedIndex;
-        this.selectRange(this.anchorIndex, prev, recs);
+        this.selectRange(this.anchorIndex, prev, rows);
       }
       this.focusedIndex = prev;
       this.scrollFocusedIntoView();
     } else if (e.key === "Enter" && this.focusedIndex >= 0) {
       e.preventDefault();
-      const id = recs[this.focusedIndex]?.id;
-      if (id) this.onSelectCb(id);
+      const row = rows[this.focusedIndex];
+      if (!row) return;
+      // Enter on a meeting header expands/collapses it; on a recording it opens
+      // the recording.
+      if (row.kind === "header") this.toggleSession(row.meetingId);
+      else this.onSelectCb(row.rec.id);
     } else if (e.key === " " && this.focusedIndex >= 0) {
       e.preventDefault();
-      const id = recs[this.focusedIndex]?.id;
-      if (id) this.toggleId(id, this.focusedIndex);
+      const row = rows[this.focusedIndex];
+      if (!row) return;
+      // Space on a header toggles selection of all its tracks (mirrors the group
+      // checkbox); on a recording it toggles that row's multi-select.
+      if (row.kind === "header") this.toggleMeetingTracks(row.meetingId, row.tracks);
+      else this.toggleId(row.rec.id, this.focusedIndex);
     }
+  }
+
+  /** Expand / collapse a meeting group (keyboard Enter on its header). Unlike a
+   *  header click this only folds — it doesn't open the merged conversation. */
+  private toggleSession(sid: string) {
+    if (this.expandedSessions.has(sid)) this.expandedSessions.delete(sid);
+    else this.expandedSessions.add(sid);
+    saveExpandedMeetings(this.expandedSessions);
+    this.requestUpdate();
+  }
+
+  /** Toggle multi-selection of every track in a meeting (Space on its header). */
+  private toggleMeetingTracks(_sid: string, tracks: Recording[]) {
+    const ids = tracks.map((t) => t.id);
+    const allSelected = ids.length > 0 && ids.every((id) => this.multiSelected.has(id));
+    if (allSelected) ids.forEach((id) => this.multiSelected.delete(id));
+    else ids.forEach((id) => this.multiSelected.add(id));
+    this.onSelectionChangeCb(new Set(this.multiSelected));
+    this.requestUpdate();
   }
 
   private scrollFocusedIntoView() {
     this.updateComplete.then(() => {
-      const rows = this.querySelectorAll<HTMLElement>(".rec-row");
+      // Both recording rows and meeting headers are navigable; querySelectorAll
+      // returns them in document (== nav) order so focusedIndex lines up.
+      const rows = this.querySelectorAll<HTMLElement>(".rec-row, .rec-group-head");
       rows[this.focusedIndex]?.scrollIntoView({ block: "nearest" });
     });
   }
 
-  private handleRowClick(e: MouseEvent, id: string, index: number, visibleRows: Recording[]) {
+  /** Vim `gg` / `G`: jump the keyboard cursor to the first / last visible row. */
+  focusEdge(edge: "top" | "bottom") {
+    const rows = this.lastNavRows;
+    if (!rows.length) return;
+    this.focusedIndex = edge === "top" ? 0 : rows.length - 1;
+    this.scrollFocusedIntoView();
+    this.requestUpdate();
+  }
+
+  /** The id of the recording under the keyboard cursor, or null when none is
+   *  focused (or the cursor is on a meeting header — `dd` shouldn't delete a
+   *  whole meeting). Used by `dd` to delete the row the cursor is on. */
+  getFocusedId(): string | null {
+    if (this.focusedIndex < 0) return null;
+    const row = this.lastNavRows[this.focusedIndex];
+    return row?.kind === "rec" ? row.rec.id : null;
+  }
+
+  /** When the list pane takes keyboard focus (vim h/l), make sure a cursor row
+   *  is visible — land on the open recording if there is one, else the top — so
+   *  it's immediately obvious what j/k will move. No-op if a cursor is already
+   *  set; the focus-scoped CSS hides the cursor whenever the list isn't focused. */
+  ensureCursor() {
+    const rows = this.lastNavRows;
+    if (!rows.length) return;
+    if (this.focusedIndex >= 0 && this.focusedIndex < rows.length) return;
+    const selId = this.listState.selectedId;
+    const idx = selId
+      ? rows.findIndex((r) =>
+          r.kind === "rec" ? r.rec.id === selId : "session:" + r.meetingId === selId,
+        )
+      : -1;
+    this.focusedIndex = idx >= 0 ? idx : 0;
+    this.scrollFocusedIntoView();
+    this.requestUpdate();
+  }
+
+  private handleRowClick(e: MouseEvent, id: string, index: number, navRows: NavRow[]) {
     const target = e.target as HTMLElement;
     if (target.classList.contains("row-cb") || target.closest(".col-checkbox")) {
       if (e.shiftKey && this.anchorIndex >= 0) {
-        this.selectRange(this.anchorIndex, index, visibleRows);
+        this.selectRange(this.anchorIndex, index, navRows);
       } else {
         this.toggleId(id, index);
       }
@@ -383,7 +492,7 @@ export class RecordingsListElement extends LitElement {
     }
 
     if (e.shiftKey && this.anchorIndex >= 0) {
-      this.selectRange(this.anchorIndex, index, visibleRows);
+      this.selectRange(this.anchorIndex, index, navRows);
       return;
     }
 
@@ -456,7 +565,12 @@ export class RecordingsListElement extends LitElement {
     if (s.error) {
       return html`<div class="empty error">${s.error}</div>`;
     }
-    if (s.recordings.length === 0) {
+    // Rows hidden by an in-flight undoable delete are filtered out here; they
+    // remain in the store so an Undo can bring them straight back.
+    const recs = this.pendingDelete.size
+      ? s.recordings.filter((r) => !this.pendingDelete.has(r.id))
+      : s.recordings;
+    if (recs.length === 0) {
       return html`<div class="empty">
         <h3 style="margin-bottom: 8px; color: var(--fg-default);">No recordings found</h3>
         <p style="color: var(--fg-muted); margin-bottom: 12px;">Press your global hotkey to start speaking, or click the Record button in the top right.</p>
@@ -464,16 +578,27 @@ export class RecordingsListElement extends LitElement {
       </div>`;
     }
 
-    const visibleCols: string[] = this.config?.interface?.visible_columns || [
+    let visibleCols: string[] = this.config?.interface?.visible_columns || [
       "time",
       "duration",
       "status",
       "source",
       "transcript",
     ];
+    // The transcript snippet is ALWAYS the last column — its read-more horizontal
+    // scroll requires it and any other position misbehaves (Settings pins it last
+    // too; this is the defensive guarantee). If a stale config had it elsewhere,
+    // moving it would misalign the positional column widths, so drop those and
+    // let the widths recompute in the corrected order.
+    const tIdx = visibleCols.indexOf("transcript");
+    const transcriptMoved = tIdx >= 0 && tIdx !== visibleCols.length - 1;
+    if (transcriptMoved) {
+      visibleCols = [...visibleCols.filter((_, i) => i !== tIdx), "transcript"];
+      this.currentWidths = null;
+    }
     let activeWidths = this.currentWidths;
     if (!activeWidths || activeWidths.length !== visibleCols.length) {
-      activeWidths = this.config?.interface?.column_widths || null;
+      activeWidths = transcriptMoved ? null : this.config?.interface?.column_widths || null;
       const colWidths: Record<string, string> = {
         day: "85px",
         time: "94px",
@@ -495,32 +620,43 @@ export class RecordingsListElement extends LitElement {
     }
 
     const checkboxColWidth = "28px";
-    // The grid MUST keep a flexible track so the table always fills the list
-    // pane up to the splitter. The transcript column is that fill column (its
-    // default width is `1fr`); coerce it to `minmax(<floor>, 1fr)` so that even
-    // a fixed px persisted from a column-resize still STRETCHES to the pane edge
-    // (keeping the resized width as a usable floor) instead of freezing the whole
-    // grid to a fixed total width. A frozen all-px grid is the resize bug: when
-    // the pane is wider than the column sum the rows stop short of the splitter
-    // (a gap), and when it's narrower the table forces a horizontal scrollbar.
+    // The transcript "read more by scrolling" behavior (Option A) applies ONLY
+    // when transcript is the LAST column: there it sizes to its content
+    // (`max-content`, capped at 1200px via `.transcript-tail .rec-preview`) so the
+    // row grows past the pane and you scroll to read more. Anywhere else (when
+    // rearranged in Appearance settings) it's a normal, resizable, fixed-width
+    // column like the rest — never ballooning mid-row. A cell-less `minmax(0,1fr)`
+    // filler is appended only when no column is already flexible, so the row
+    // always fills the pane to the splitter.
+    const transcriptIsLast = visibleCols[visibleCols.length - 1] === "transcript";
+    const parsePx = (w: string) => {
+      const m = /([\d.]+)px/.exec(w);
+      return m ? parseFloat(m[1]) : 0;
+    };
     const widthsForGrid = activeWidths!.map((w, i) => {
       if (visibleCols[i] !== "transcript") return w;
-      const floor = w.trim().endsWith("px") ? w.trim() : "160px";
-      return `minmax(${floor}, 1fr)`;
+      const px = w.trim().endsWith("px") ? w.trim() : null;
+      if (transcriptIsLast) return `minmax(${px ?? "160px"}, max-content)`;
+      return px ?? "300px"; // not last → a normal, resizable fixed-width column
     });
-    // Fallback for when the transcript column is hidden: with no flexible track
-    // at all the grid would freeze to fixed px and leave a gap, so append a
-    // cell-less filler track that absorbs the slack as clean blank space (head
-    // and rows share this template and both have the same cell count, so the
-    // extra track stays empty in both — no misalignment).
-    const hasFlexTrack = widthsForGrid.some((w) => w.includes("fr"));
+    const hasFlexTrack = widthsForGrid.some((t) => t.includes("fr"));
     const gridTemplate = [
       checkboxColWidth,
       ...widthsForGrid,
       ...(hasFlexTrack ? [] : ["minmax(0, 1fr)"]),
     ].join(" ");
+    // Row min-width (used only when transcript is NOT the tail) so a row's
+    // background/selection extends the full scrolled width when the fixed columns
+    // overflow the pane, instead of stopping at the pane edge.
+    const gridMinWidth =
+      28 +
+      activeWidths!.reduce((sum, w, i) => {
+        const px = parsePx(w);
+        if (visibleCols[i] === "transcript") return sum + (px || (transcriptIsLast ? 160 : 300));
+        return sum + (px || 120);
+      }, 0);
 
-    const allSelected = s.recordings.length > 0 && s.recordings.every((r) => this.multiSelected.has(r.id));
+    const allSelected = recs.length > 0 && recs.every((r) => this.multiSelected.has(r.id));
     const someSelected = this.multiSelected.size > 0 && !allSelected;
 
     const colLabels: Record<string, string> = {
@@ -569,37 +705,38 @@ export class RecordingsListElement extends LitElement {
       </div>
     `;
 
-    const grouped = groupRecordings(s.recordings);
-    const visibleRows = visibleRecordings(grouped, (sid) => this.expandedSessions.has(sid));
-    
-    if (this.focusedIndex >= visibleRows.length) {
-      this.focusedIndex = visibleRows.length - 1;
+    const grouped = groupRecordings(recs);
+    // Flatten into navigable rows: a header per meeting (always), followed by
+    // its tracks only when expanded. j/k step through this exact list, and the
+    // DOM is rendered from it in the same order so focusedIndex always aligns.
+    const navRows: NavRow[] = [];
+    for (const item of grouped) {
+      if (item.kind === "single") {
+        navRows.push({ kind: "rec", rec: item.recording });
+      } else {
+        const expanded = this.expandedSessions.has(item.meetingId);
+        navRows.push({ kind: "header", meetingId: item.meetingId, tracks: item.tracks, expanded });
+        if (expanded) for (const r of item.tracks) navRows.push({ kind: "rec", rec: r });
+      }
+    }
+    this.lastNavRows = navRows;
+
+    if (this.focusedIndex >= navRows.length) {
+      this.focusedIndex = navRows.length - 1;
     }
 
-    let rowIndex = 0;
-    const body = grouped.map((item) => {
-      if (item.kind === "single") {
-        const htmlRow = this.renderRow(item.recording, rowIndex, visibleCols, gridTemplate, null, visibleRows);
-        rowIndex++;
-        return htmlRow;
-      }
-
-      const expanded = this.expandedSessions.has(item.meetingId);
-      const header = this.renderGroupHeader(item.meetingId, item.tracks, expanded, gridTemplate);
-      if (!expanded) return header;
-      
-      const memberRows = item.tracks.map((r) => {
-        const htmlRow = this.renderRow(r, rowIndex, visibleCols, gridTemplate, r.track ?? null, visibleRows);
-        rowIndex++;
-        return htmlRow;
-      });
-      return html`${header}${memberRows}`;
-    });
+    const body = navRows.map((row, index) =>
+      row.kind === "header"
+        ? this.renderGroupHeader(row.meetingId, row.tracks, row.expanded, gridTemplate, index)
+        : this.renderRow(row.rec, index, visibleCols, gridTemplate, row.rec.track ?? null, navRows),
+    );
 
     return html`
-      <div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, visibleRows)}>
-        ${head}
-        ${body}
+      <div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, navRows)}>
+        <div class="rec-table-inner${transcriptIsLast ? " transcript-tail" : ""}" style="${transcriptIsLast ? "" : `min-width: ${gridMinWidth}px;`}">
+          ${head}
+          ${body}
+        </div>
       </div>
       ${!this.reachedEnd ? html`
         <div class="rec-loadmore">
@@ -617,7 +754,7 @@ export class RecordingsListElement extends LitElement {
     visibleCols: string[],
     gridTemplate: string,
     track: string | null,
-    visibleRows: Recording[]
+    navRows: NavRow[]
   ) {
     const active = r.id === this.listState.selectedId;
     const kbFocused = index === this.focusedIndex;
@@ -687,7 +824,7 @@ export class RecordingsListElement extends LitElement {
         role="option" 
         aria-selected="${active}" 
         style="grid-template-columns: ${gridTemplate}"
-        @click=${(e: MouseEvent) => this.handleRowClick(e, r.id, index, visibleRows)}
+        @click=${(e: MouseEvent) => this.handleRowClick(e, r.id, index, navRows)}
       >
         <span class="col-checkbox">
           <input
@@ -706,7 +843,8 @@ export class RecordingsListElement extends LitElement {
     meetingId: string,
     tracks: Recording[],
     expanded: boolean,
-    gridTemplate: string
+    gridTemplate: string,
+    index: number
   ) {
     const use24h = this.config?.interface?.format_24h ?? false;
     const startIso = tracks.map((t) => t.started_at).sort()[0];
@@ -719,12 +857,13 @@ export class RecordingsListElement extends LitElement {
     const someChecked = selectedCount > 0 && selectedCount < count;
     
     const isActive = this.listState.selectedId === "session:" + meetingId;
+    const kbFocused = index === this.focusedIndex;
     const isEditing = this.editingMeetingId === meetingId;
     const meetingName = tracks[0].meeting_name ? tracks[0].meeting_name : `Meeting — ${count} tracks`;
 
     return html`
-      <div 
-        class="rec-group-head ${isActive ? "active" : ""}" 
+      <div
+        class="rec-group-head ${isActive ? "active" : ""} ${kbFocused ? "kbd-focused" : ""}"
         data-session="${meetingId}" 
         role="group" 
         aria-expanded="${expanded}"
@@ -853,5 +992,21 @@ export class RecordingsList {
 
   getMultiSelected(): Set<string> {
     return this.element.getMultiSelected();
+  }
+
+  focusEdge(edge: "top" | "bottom") {
+    this.element.focusEdge(edge);
+  }
+
+  getFocusedId(): string | null {
+    return this.element.getFocusedId();
+  }
+
+  setPendingDelete(ids: string[], pending: boolean) {
+    this.element.setPendingDelete(ids, pending);
+  }
+
+  ensureCursor() {
+    this.element.ensureCursor();
   }
 }

@@ -31,6 +31,10 @@ export class RerunFormElement extends LitElement {
   @property({ type: Boolean }) busy = false;
   /** Label for the confirm button (e.g. "Re-run" or "Re-run · 8"). */
   @property({ type: String }) submitLabel = "Re-run";
+  /** Render as a centered modal panel (wider, scrolls) instead of the compact
+   *  280px dropdown card. The parent wraps it in a `.modal-overlay`. The "All"
+   *  step is too tall for a dropdown, so the detail + bulk surfaces use this. */
+  @property({ type: Boolean }) modal = false;
 
   @state() private config: any = null;
   @state() private availableModels: { value: string; label: string }[] = [];
@@ -52,6 +56,15 @@ export class RerunFormElement extends LitElement {
 
   @state() private summaryModel = "";
   @state() private summaryPrompt = "";
+  // Summary uses an LLM too — give it the same auto-detected model list as the
+  // cleanup picker (fetched for the summary provider, which inherits the
+  // post-process provider/key/URL when its own fields are blank).
+  @state() private summaryProvider = "";
+  @state() private summaryApiUrl = "";
+  @state() private summaryApiKey = "";
+  @state() private summaryModelOptions: string[] = [];
+  @state() private summaryModelsLoading = false;
+  @state() private summaryModelsError: string | null = null;
 
   @state() private configuredHookCommands: string[] = [];
   @state() private selectedHookCommand = "";
@@ -91,8 +104,20 @@ export class RerunFormElement extends LitElement {
       }
 
       if (this.config && this.config.summary) {
-        this.summaryModel = this.config.summary.model ?? "";
-        this.summaryPrompt = this.config.summary.prompt ?? "";
+        const sum = this.config.summary;
+        const pp = this.config.llm_post_process ?? {};
+        this.summaryModel = sum.model ?? "";
+        this.summaryPrompt = sum.prompt ?? "";
+        // Provider/key/URL inherit the post-process config when the summary's own
+        // are blank (mirrors the daemon's pipeline behaviour).
+        const sumProv = typeof sum.provider === "string" ? sum.provider.trim() : "";
+        const ppProv = typeof pp.provider === "string" ? pp.provider.trim() : "";
+        const provRaw = sumProv && sumProv.toLowerCase() !== "none" ? sumProv : ppProv;
+        const lc = provRaw.toLowerCase();
+        this.summaryProvider = (CLEANUP_PROVIDERS as readonly string[]).includes(lc) ? lc : "ollama";
+        this.summaryApiUrl = sum.api_url || pp.api_url || "";
+        this.summaryApiKey = sum.api_key || pp.api_key || "";
+        void this.fetchSummaryModels();
       }
 
       if (this.config && this.config.whisper) {
@@ -172,6 +197,33 @@ export class RerunFormElement extends LitElement {
     } finally {
       this.cleanupModelsLoading = false;
     }
+  }
+
+  /** Auto-detect available summary models for the (inherited) summary provider,
+   *  exactly like the cleanup picker — live list, curated fallback, custom entry
+   *  preserved. Blank model stays valid ("use the configured summary model"). */
+  private async fetchSummaryModels() {
+    const provider = this.summaryProvider;
+    if (!provider) return;
+    const curated = curatedCleanupModelIds(provider);
+    this.summaryModelsLoading = true;
+    this.summaryModelsError = null;
+    try {
+      const fetched = await fetchLlmModels(provider, this.summaryApiUrl, this.summaryApiKey);
+      const models = fetched.length ? fetched : curated;
+      this.summaryModelOptions =
+        this.summaryModel && !models.includes(this.summaryModel) ? [...models, this.summaryModel] : models;
+    } catch (e) {
+      this.summaryModelOptions =
+        this.summaryModel && !curated.includes(this.summaryModel) ? [...curated, this.summaryModel] : curated;
+      this.summaryModelsError = errText(e);
+    } finally {
+      this.summaryModelsLoading = false;
+    }
+  }
+
+  private handleSummaryModelSelect(e: Event) {
+    this.summaryModel = (e.target as HTMLSelectElement).value;
   }
 
   private handleCleanupProviderChange(e: Event) {
@@ -311,10 +363,25 @@ export class RerunFormElement extends LitElement {
     const sLabel = "font-size: 11px; color: var(--fg-muted);";
     return html`
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <label style=${sLabel}>Summary model</label>
-        <input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
-          placeholder="Leave blank to use the configured summary model"
-          @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />
+        <label style="display: flex; justify-content: space-between; align-items: center; ${sLabel}">
+          <span>Summary model</span>
+          <button type="button" title="Refresh model list"
+            style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0;"
+            ?disabled=${this.summaryModelsLoading} @click=${() => this.fetchSummaryModels()}>↻ Refresh</button>
+        </label>
+        ${this.summaryModelOptions.length > 0
+          ? html`<select class="rerun-summary-model-select" style=${sInput} @change=${this.handleSummaryModelSelect}>
+              <option value="" ?selected=${!this.summaryModel}>— Use configured summary model —</option>
+              ${this.summaryModelOptions.map(m => html`<option value=${m} ?selected=${m === this.summaryModel}>${m}</option>`)}
+            </select>`
+          : html`<input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
+              placeholder="Leave blank to use the configured summary model"
+              @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />`}
+        ${this.summaryModelsLoading
+          ? html`<p style="margin: 0; ${sLabel}">Loading models…</p>`
+          : this.summaryModelsError
+            ? html`<p style="margin: 0; ${sLabel}">Couldn't list models (${this.summaryModelsError}). Pick a suggestion or type one.</p>`
+            : nothing}
       </div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <label style=${sLabel}>Summary instructions</label>
@@ -509,10 +576,15 @@ export class RerunFormElement extends LitElement {
   }
 
   render() {
+    // Modal: a centered, wider, scrollable panel (the "All" step is too tall for
+    // a dropdown). Dropdown: the original compact 280px anchored card.
+    const rootStyle = this.modal
+      ? "width: min(460px, calc(100vw - 48px)); max-height: 85vh; overflow-y: auto; background: var(--bg-elevated); border: var(--popup-border); border-radius: 10px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04); display: flex; flex-direction: column; gap: 12px; text-align: left; align-items: stretch;"
+      : "width: 280px; background: var(--bg-elevated); border: var(--popup-border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;";
     return html`
-      <div class="rerun-form" @click=${(e: Event) => e.stopPropagation()}
-        style="width: 280px; background: var(--bg-elevated); border: var(--popup-border); border-radius: 8px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; gap: 10px; text-align: left; align-items: stretch;">
-        <h4 style="margin: 0; font-size: 13px; font-weight: 600; color: var(--fg-default);">Re-run</h4>
+      <div class="rerun-form ${this.modal ? "rerun-form--modal" : ""}" @click=${(e: Event) => e.stopPropagation()}
+        style=${rootStyle}>
+        <h4 style="margin: 0; font-size: ${this.modal ? "15px" : "13px"}; font-weight: 600; color: var(--fg-default); display: flex; align-items: center; gap: 7px;">↻ Re-run</h4>
 
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label style="font-size: 11px; color: var(--fg-muted);">Step</label>

@@ -78,6 +78,62 @@ export function showToast(
   }
 }
 
+/**
+ * Show a toast with an action button (e.g. "Undo") plus a thin countdown bar.
+ *
+ * Three exits, each fires exactly one callback:
+ *   • the action button  → `onAction`  (and NOT onExpire)
+ *   • the × / auto-timeout → `onExpire`
+ * Used by the undoable-delete flow: the row is hidden immediately, the real
+ * delete is deferred to `onExpire`, and `onAction` cancels it.
+ */
+export function showActionToast(opts: {
+  message: string;
+  actionLabel: string;
+  onAction: () => void;
+  onExpire?: () => void;
+  durationMs?: number;
+  icon?: string;
+}): void {
+  const { message, actionLabel, onAction, onExpire, durationMs = 6000, icon = "i" } = opts;
+  const container = getContainer();
+
+  const toast = document.createElement("div");
+  toast.className = "toast toast-info toast-action-toast";
+  toast.setAttribute("role", "alert");
+  toast.innerHTML = `
+    <span class="toast-icon" aria-hidden="true">${escapeHtml(icon)}</span>
+    <span class="toast-msg">${escapeHtml(message)}</span>
+    <button class="toast-action"></button>
+    <button class="toast-close" aria-label="Dismiss notification">×</button>
+    <span class="toast-countdown" style="animation-duration:${durationMs}ms"></span>
+  `;
+  toast.querySelector<HTMLButtonElement>(".toast-action")!.textContent = actionLabel;
+
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const removeEl = () => {
+    if (!toast.isConnected) return;
+    toast.classList.add("toast-out");
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+  };
+  const finish = (cb?: () => void) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    removeEl();
+    cb?.();
+  };
+
+  toast.querySelector<HTMLButtonElement>(".toast-action")!
+    .addEventListener("click", () => finish(onAction));
+  toast.querySelector<HTMLButtonElement>(".toast-close")!
+    .addEventListener("click", () => finish(onExpire));
+
+  container.appendChild(toast);
+  timer = setTimeout(() => finish(onExpire), durationMs);
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

@@ -4,9 +4,17 @@ import { subscribe, type DaemonEvent } from "../../services/events";
 import { Store } from "../../state/store";
 import { RecordingsList, type RecordingsListState } from "./RecordingsList";
 import { RecordingDetail } from "./RecordingDetail";
-import { MergedConversationDetail } from "./MergedConversationDetail";
+// Side-effect import is REQUIRED. `MergedConversationDetail` below is referenced
+// ONLY as a type (annotation + `as` cast), so a plain named import gets elided
+// by esbuild/Vite — which means the `@customElement("ph-merged-conversation-detail")`
+// registration never runs and the meeting (merged) detail renders as an empty,
+// un-upgraded element. The bare import forces the module to run; the `import type`
+// keeps the type available and makes the intent explicit so this can't regress.
+import "./MergedConversationDetail";
+import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
+import { showActionToast } from "../../utils/toast";
 import "./Sidebar";
 import "./ThinkingPopout";
 import "./styles.css";
@@ -39,6 +47,11 @@ function readStoredSidebar(): boolean {
   return localStorage.getItem(LS_SIDEBAR) !== "false";
 }
 
+/** One keyboard-navigable target in the detail pane's 2D grid. `button` clicks
+ *  on Enter; `tags` focuses the add-tag input (Shift+Enter → Tag Manager);
+ *  `editor` focuses the editable area inside its block (transcript / notes). */
+type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" };
+
 export class RecordingsView {
   private container: HTMLElement;
   private list: RecordingsList;
@@ -46,7 +59,10 @@ export class RecordingsView {
   private mergedDetail: MergedConversationDetail;
   private state: Store<RecordingsListState>;
   private splitPercent = readStoredSplit();
-  private detailVisible = true;
+  // Starts hidden: the detail pane is shown only when a recording is selected,
+  // so the recordings list gets the full width when nothing is selected.
+  private detailVisible = false;
+  private focusMode = false;
   private sidebarVisible = readStoredSidebar();
   private sidebarWidth = readStoredSidebarWidth();
   private unsub: (() => void) | null = null;
@@ -55,6 +71,25 @@ export class RecordingsView {
   private splitter: Splitter;
   private keydownHandler: (e: KeyboardEvent) => void;
   private selectHandler: ((e: Event) => void) | null = null;
+  private focusHandler: (() => void) | null = null;
+  /** Pane that the vim navigation layer is focused on (null = not driven yet).
+   *  Only ever set while `interface.vim_nav` is on, so the focus ring never
+   *  appears for non-vim users. */
+  private focusedPane: "sidebar" | "list" | "detail" | null = null;
+  /** Keyboard cursor within the sidebar's filter items (vim j/k), -1 = none. */
+  private sidebarCursor = -1;
+  /** Keyboard cursor in the detail pane's 2D grid: row = vertical section
+   *  (top buttons · action row · tags · transcript · notes), col = item within
+   *  that row. row -1 = not in detail nav. */
+  private detailRow = -1;
+  private detailCol = 0;
+  private vimHandler: ((e: Event) => void) | null = null;
+  /** Any component can request an undoable recording delete by dispatching
+   *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
+   *  flow (the bulk bar and the detail action row both use it). */
+  private deleteReqHandler: ((e: Event) => void) | null = null;
+  /** The detail header's → close button dismisses the pane back to the list. */
+  private closeDetailHandler: (() => void) | null = null;
 
   /** Current multi-selection. Empty when no checkboxes are checked. */
   private multiSelected = new Set<string>();
@@ -76,7 +111,6 @@ export class RecordingsView {
         <div class="rv-sidebar-resizer" id="rv-sidebar-resize"></div>
         <div class="rv-list" id="rv-list">
           <div id="rv-list-inner" style="height:100%; overflow:hidden;"></div>
-          <div id="rv-bulk-bar" style="display:none;"></div>
         </div>
         <div class="rv-splitter" id="rv-split"></div>
         <div class="rv-detail" id="rv-detail">
@@ -84,6 +118,9 @@ export class RecordingsView {
           <ph-merged-conversation-detail id="rv-merged-detail" style="display:none; height: 100%;"></ph-merged-conversation-detail>
         </div>
       </div>
+      <!-- Bulk bar lives OUTSIDE the shell/list so the list↔detail splitter
+           (a grid item with its own stacking context) can't paint over it. -->
+      <div id="rv-bulk-bar" style="display:none;"></div>
       <ph-thinking-popout id="rv-thinking"></ph-thinking-popout>
     `;
 
@@ -123,6 +160,22 @@ export class RecordingsView {
       if (typeof id === "string") this.onSelect(id);
     };
     window.addEventListener("phoneme:select-recording", this.selectHandler);
+    this.focusHandler = () => this.toggleFocusMode();
+    window.addEventListener("phoneme:toggle-focus-mode", this.focusHandler);
+    // System-wide vim navigation (keyboard.ts owns the gate + key sequencing and
+    // emits these; this view owns the pane DOM, so it performs the movement).
+    this.vimHandler = (e: Event) => this.handleVim((e as CustomEvent).detail?.action);
+    window.addEventListener("phoneme:vim", this.vimHandler);
+    this.deleteReqHandler = (e: Event) => {
+      const ids = (e as CustomEvent<{ ids?: string[] }>).detail?.ids;
+      if (Array.isArray(ids)) this.requestUndoableDelete(ids);
+    };
+    window.addEventListener("phoneme:request-delete", this.deleteReqHandler);
+    this.closeDetailHandler = () => {
+      if (this.focusMode) this.toggleFocusMode();
+      this.deselect();
+    };
+    window.addEventListener("phoneme:close-detail", this.closeDetailHandler);
   }
 
   async refresh() {
@@ -152,6 +205,9 @@ export class RecordingsView {
       this.detail.clear();
       this.mergedDetail.meetingId = "";
       try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
+      // No selection → collapse the detail pane so the list uses the full width.
+      this.detailVisible = false;
+      this.applyLayout();
     } else if (selectedId && !this.detail.hasDirtyEdits()) {
       if (selectedId.startsWith("session:")) {
         const mid = selectedId.substring(8);
@@ -174,10 +230,375 @@ export class RecordingsView {
     this.applyLayout();
   }
 
+  /** Focus mode: hide the recordings list (+ sidebar/splitter) so the detail
+   *  pane fills the view for full-width editing. Toggled from the detail
+   *  header's ⛶ button and exited with Escape. */
+  toggleFocusMode() {
+    this.focusMode = !this.focusMode;
+    const shell = this.container.querySelector<HTMLElement>("#rv-shell");
+    shell?.classList.toggle("rv-focus", this.focusMode);
+    // Full-screen focus mode also hides the top header bar (same as Settings).
+    document.body.classList.toggle("phoneme-hide-header", this.focusMode);
+    this.applyLayout();
+  }
+
+  /** Clear the current selection: empty the detail pane and collapse it so the
+   *  recordings list gets the full width (used by Escape, and when the selected
+   *  recording is removed). */
+  private deselect() {
+    const s = this.state.get();
+    if (!s.selectedId) return;
+    // Closing the pane with unsaved transcript/notes edits would lose them.
+    if (this.detail.hasDirtyEdits()) {
+      void this.confirmLeaveUnsaved().then((discard) => { if (discard) this.applyDeselect(); });
+      return;
+    }
+    this.applyDeselect();
+  }
+
+  private applyDeselect() {
+    const s = this.state.get();
+    if (!s.selectedId) return;
+    this.state.set({ ...s, selectedId: null });
+    try { localStorage.removeItem(LS_SELECTED); } catch { /* private mode */ }
+    this.detail.clear();
+    this.mergedDetail.meetingId = "";
+    this.mergedDetail.style.display = "none";
+    const single = this.container.querySelector<HTMLElement>("#rv-single-detail");
+    if (single) single.style.display = "block";
+    const tp = this.container.querySelector<HTMLElement & { recordingId: string }>("#rv-thinking");
+    if (tp) tp.recordingId = "";
+    this.detailVisible = false;
+    // Drop the vim focus ring with the pane it was on (if any).
+    this.container.querySelector(".rv-detail")?.classList.remove("rv-pane-focused");
+    if (this.focusedPane === "detail") this.focusedPane = "list";
+    this.applyLayout();
+  }
+
+  // ── Vim navigation (active only when `interface.vim_nav` is on; keyboard.ts
+  //    gates the keys and emits `phoneme:vim` actions that land in handleVim). ──
+
+  /** Panes that currently exist, left-to-right. Hidden panes are skipped so
+   *  h/l never lands focus on a collapsed sidebar or an absent detail pane. */
+  private panesInOrder(): Array<"sidebar" | "list" | "detail"> {
+    const panes: Array<"sidebar" | "list" | "detail"> = [];
+    if (this.sidebarVisible && !this.focusMode) panes.push("sidebar");
+    panes.push("list");
+    if (this.detailVisible) panes.push("detail");
+    return panes;
+  }
+
+  private paneEl(pane: "sidebar" | "list" | "detail"): HTMLElement | null {
+    const sel = pane === "sidebar" ? "ph-sidebar" : pane === "list" ? "#rv-list" : "#rv-detail";
+    return this.container.querySelector<HTMLElement>(sel);
+  }
+
+  /** Move the focus ring + DOM focus onto a pane (clamped to a visible one). */
+  private focusPane(pane: "sidebar" | "list" | "detail") {
+    const panes = this.panesInOrder();
+    if (!panes.includes(pane)) pane = panes[0];
+    // Re-home the sidebar + detail keyboard cursors whenever pane focus changes.
+    this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
+    this.sidebarCursor = -1;
+    this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
+    // Leaving the detail pane drops its grid cursor; coming back lands fresh on
+    // the transcript (see enterDetailNav below).
+    if (pane !== "detail") { this.detailRow = -1; this.detailCol = 0; }
+    this.focusedPane = pane;
+    for (const p of ["sidebar", "list", "detail"] as const) {
+      this.paneEl(p)?.classList.toggle("rv-pane-focused", p === pane);
+    }
+    const el = this.paneEl(pane);
+    if (!el) return;
+    if (pane === "list") {
+      // The list owns j/k/Enter/Space when its scroll container is focused.
+      (el.querySelector<HTMLElement>(".rec-table") ?? el).focus({ preventScroll: true });
+      // Land a visible cursor immediately so it's obvious what j/k will move.
+      this.list.ensureCursor();
+    } else {
+      // Focus the pane container itself (not the editor) so h/l/j/k keep working.
+      el.setAttribute("tabindex", "-1");
+      el.focus({ preventScroll: true });
+      // Detail pane: enter the grid nav (on the transcript when arriving fresh,
+      // else re-highlight where the cursor was — e.g. after leaving the editor).
+      if (pane === "detail") {
+        if (this.detailRow < 0) this.enterDetailNav();
+        else this.highlightDetail();
+      }
+    }
+  }
+
+  private movePaneFocus(dir: "left" | "right") {
+    const panes = this.panesInOrder();
+    if (!panes.length) return;
+    let idx = this.focusedPane ? panes.indexOf(this.focusedPane) : -1;
+    // First-ever move (or the remembered pane is now hidden): enter from the
+    // matching edge so h lands on the rightmost pane, l on the leftmost.
+    if (idx < 0) idx = dir === "right" ? -1 : panes.length;
+    const next = Math.max(0, Math.min(panes.length - 1, idx + (dir === "right" ? 1 : -1)));
+    this.focusPane(panes[next]);
+  }
+
+  private handleVim(action: string | undefined) {
+    switch (action) {
+      case "pane-left": this.movePaneFocus("left"); break;
+      case "pane-right": this.movePaneFocus("right"); break;
+      case "list-top": this.list.focusEdge("top"); this.focusPane("list"); break;
+      case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
+      case "edit": this.focusEditor(); break;
+      case "delete": this.vimDelete(); break;
+      case "sidebar-down": this.moveSidebarCursor(1); break;
+      case "sidebar-up": this.moveSidebarCursor(-1); break;
+      case "sidebar-activate": this.activateSidebarItem(); break;
+      case "detail-down": this.moveDetailRow(1); break;
+      case "detail-up": this.moveDetailRow(-1); break;
+      case "detail-left": this.moveDetailCol(-1); break;
+      case "detail-right": this.moveDetailCol(1); break;
+      case "detail-enter": this.activateDetail(false); break;
+      case "detail-enter-shift": this.activateDetail(true); break;
+      // Shift+Esc out of the transcript editor → back to the detail pane nav.
+      case "exit-editor": this.focusPane("detail"); break;
+      // ArrowDown from the header search box → drop into the list.
+      case "focus-list": this.focusPane("list"); break;
+      // k at the top of the list → up into the header search box.
+      case "focus-search": this.focusSearchBar(); break;
+      // t → focus the open recording's tag box; Shift+T → Tag Manager.
+      case "focus-tags": this.focusTags(); break;
+      case "open-tag-manager": void this.openTagManagerModal(); break;
+    }
+  }
+
+  /** Focus the open recording's tag input (vim `t`). No-op when nothing is open
+   *  or the detail pane has no tag box (e.g. a merged meeting view). */
+  private focusTags() {
+    const chips = this.container.querySelector<HTMLElement & { focusTagInput?: () => void }>(
+      "#rv-detail ph-tag-chips",
+    );
+    chips?.focusTagInput?.();
+  }
+
+  /** Open the global Tag Manager modal (vim `Shift+T`). */
+  private async openTagManagerModal() {
+    const { openTagManager } = await import("../TagManager");
+    await openTagManager();
+  }
+
+  /** Leave the panes for the header search box (vim k at the top of the list).
+   *  Clears the pane focus ring + sidebar cursor since the header isn't one of
+   *  our panes; ArrowDown / Esc from the search box come back to the list. */
+  private focusSearchBar() {
+    this.focusedPane = null;
+    for (const p of ["sidebar", "list", "detail"] as const) {
+      this.paneEl(p)?.classList.remove("rv-pane-focused");
+    }
+    this.sidebarItems().forEach((i) => i.classList.remove("kbd-cursor"));
+    document.querySelector<HTMLInputElement>(".headerbar input.search")?.focus();
+  }
+
+  /** The sidebar's clickable filter rows (Library kinds + tags), in order. */
+  private sidebarItems(): HTMLElement[] {
+    return [...this.container.querySelectorAll<HTMLElement>("ph-sidebar .sidebar-item")];
+  }
+
+  /** vim j/k inside the focused sidebar: first press lands on the active filter
+   *  (or the top), then steps. The cursor row gets a highlight. */
+  private moveSidebarCursor(delta: number) {
+    const items = this.sidebarItems();
+    if (!items.length) return;
+    items.forEach((i) => i.classList.remove("kbd-cursor"));
+    if (this.sidebarCursor < 0) {
+      const active = items.findIndex((i) => i.classList.contains("active"));
+      this.sidebarCursor = active >= 0 ? active : 0;
+    } else {
+      this.sidebarCursor = Math.max(0, Math.min(items.length - 1, this.sidebarCursor + delta));
+    }
+    const el = items[this.sidebarCursor];
+    el.classList.add("kbd-cursor");
+    el.scrollIntoView({ block: "nearest" });
+  }
+
+  private activateSidebarItem() {
+    this.sidebarItems()[this.sidebarCursor]?.click();
+  }
+
+  /** The detail pane as a vertical stack of rows, each a horizontal list of
+   *  navigable cells. Order matches the layout, top→bottom:
+   *  [fullscreen, close] · [action buttons] · [tags] · [transcript] · [notes]. */
+  private detailGrid(): DetailCell[][] {
+    const qa = (sel: string) =>
+      [...this.container.querySelectorAll<HTMLElement>(sel)].filter(
+        (b) => b.offsetParent !== null && !b.hasAttribute("disabled"),
+      );
+    const q1 = (sel: string) => {
+      const el = this.container.querySelector<HTMLElement>(sel);
+      return el && el.offsetParent !== null ? el : null;
+    };
+    const rows: DetailCell[][] = [];
+    const top = qa("#rv-detail .detail-header button");
+    if (top.length) rows.push(top.map((el) => ({ el, kind: "button" as const })));
+    const action = qa("#rv-detail #actions button");
+    if (action.length) rows.push(action.map((el) => ({ el, kind: "button" as const })));
+    const tags = q1("#rv-detail #tags .tag-add");
+    if (tags) rows.push([{ el: tags, kind: "tags" }]);
+    const transcript = q1("#rv-detail .transcript-block");
+    if (transcript) rows.push([{ el: transcript, kind: "editor" }]);
+    // The buttons INSIDE the transcript box (Speakers · Summary · Compare ·
+    // Original · Unedited) get their own row, between the transcript and notes.
+    const tbtns = qa("#rv-detail .transcript-history button");
+    if (tbtns.length) rows.push(tbtns.map((el) => ({ el, kind: "button" as const })));
+    const notes = q1("#rv-detail .notes-block");
+    if (notes) rows.push([{ el: notes, kind: "editor" }]);
+    return rows;
+  }
+
+  /** Paint the grid cursor on the current (row, col) cell. */
+  private highlightDetail() {
+    this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+    const cell = this.detailGrid()[this.detailRow]?.[this.detailCol];
+    if (cell) {
+      cell.el.classList.add("kbd-cursor");
+      cell.el.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  /** Enter detail-pane nav, landing on the transcript editor — the entry point
+   *  for `l` from the list. */
+  private enterDetailNav() {
+    const rows = this.detailGrid();
+    if (!rows.length) return;
+    const t = rows.findIndex((row) => row[0]?.el.classList.contains("transcript-block"));
+    this.detailRow = t >= 0 ? t : 0;
+    this.detailCol = 0;
+    this.highlightDetail();
+  }
+
+  /** j/k: move down/up a row. Up past the top row drops into the header search
+   *  box (like the list); down past the last row stays put. Always lands on the
+   *  first item of the new row. */
+  private moveDetailRow(delta: number) {
+    const rows = this.detailGrid();
+    if (!rows.length) return;
+    if (this.detailRow < 0) { this.enterDetailNav(); return; }
+    const next = this.detailRow + delta;
+    if (next < 0) {
+      // Up past the top row → the header search bar in ROVING (highlight) mode —
+      // exactly like k at the top of the list, NOT focused for typing. Release
+      // the detail pane first.
+      this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+      this.paneEl("detail")?.classList.remove("rv-pane-focused");
+      this.detailRow = -1;
+      this.detailCol = 0;
+      this.focusedPane = null;
+      window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
+      return;
+    }
+    if (next >= rows.length) return;
+    this.detailRow = next;
+    this.detailCol = 0;
+    this.highlightDetail();
+  }
+
+  /** h/l: move left/right within the row, clamped at both ends. h at the start
+   *  no longer steps out to the list — Escape does that. */
+  private moveDetailCol(delta: number) {
+    const rows = this.detailGrid();
+    const row = rows[this.detailRow];
+    if (!row) return;
+    const next = this.detailCol + delta;
+    if (next < 0 || next >= row.length) return; // stay at the row's edges
+    this.detailCol = next;
+    this.highlightDetail();
+  }
+
+  /** Enter / Shift+Enter on the current cell: click a button, focus an editor's
+   *  editable area (transcript / notes), or focus the add-tag box (Shift+Enter
+   *  opens the Tag Manager instead). */
+  private activateDetail(shift: boolean) {
+    const cell = this.detailGrid()[this.detailRow]?.[this.detailCol];
+    if (!cell) return;
+    if (cell.kind === "button") {
+      cell.el.click();
+    } else if (cell.kind === "tags") {
+      if (shift) void this.openTagManagerModal();
+      else cell.el.focus();
+    } else {
+      const ed =
+        cell.el.querySelector<HTMLElement>(".cm-content") ??
+        cell.el.querySelector<HTMLElement>("textarea") ??
+        cell.el.querySelector<HTMLElement>('[contenteditable="true"]');
+      ed?.focus();
+    }
+  }
+
+  /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */
+  private focusEditor() {
+    const ed =
+      this.container.querySelector<HTMLElement>("#rv-detail .cm-content") ??
+      this.container.querySelector<HTMLElement>("#rv-detail textarea") ??
+      this.container.querySelector<HTMLElement>('#rv-detail [contenteditable="true"]');
+    ed?.focus();
+  }
+
+  /** `dd`: delete the recording under the list cursor (falls back to the open
+   *  one) via the undoable flow. Sessions are skipped — they're deleted
+   *  track-by-track or via the bulk bar. */
+  private vimDelete() {
+    const id = this.list.getFocusedId() ?? this.state.get().selectedId;
+    if (!id) return;
+    this.requestUndoableDelete([id]);
+  }
+
+  /**
+   * Delete one or more recordings with a grace-period Undo: the rows vanish
+   * immediately, but the real (permanent) delete only fires when the Undo toast
+   * expires — clicking Undo cancels it entirely, so nothing is ever lost to a
+   * stray keystroke. Sessions are skipped (they're deleted via their own flow).
+   */
+  private requestUndoableDelete(rawIds: string[]) {
+    const ids = [...new Set(rawIds)].filter((id) => id && !id.startsWith("session:"));
+    if (!ids.length) return;
+
+    // Optimistically hide the rows, drop them from the selection (so the bulk
+    // bar count stays honest), and close the detail if the open one is going.
+    this.list.setPendingDelete(ids, true);
+    this.list.clearSelection();
+    const sel = this.state.get().selectedId;
+    if (sel && ids.includes(sel)) this.deselect();
+
+    const label = ids.length === 1 ? "Recording deleted" : `${ids.length} recordings deleted`;
+    showActionToast({
+      message: label,
+      actionLabel: "Undo",
+      icon: "🗑",
+      durationMs: 6000,
+      onAction: () => {
+        // Cancelled — just un-hide; nothing was ever sent to the backend.
+        this.list.setPendingDelete(ids, false);
+      },
+      onExpire: async () => {
+        const { deleteRecording } = await import("../../services/ipc");
+        for (const id of ids) {
+          try {
+            await deleteRecording(id, false);
+          } catch (err) {
+            console.error("Failed to delete recording:", err);
+          }
+        }
+        // The daemon's RecordingDeleted events refresh the store; clear the hide
+        // set so it never grows, and refresh to reconcile.
+        this.list.setPendingDelete(ids, false);
+        void this.refresh();
+      },
+    });
+  }
+
   private disposed = false;
 
   dispose() {
     this.disposed = true;
+    // Don't leave the header hidden if we're torn down while in focus mode
+    // (mount() re-applies the right value for the next view).
+    document.body.classList.remove("phoneme-hide-header");
     if (this.unsub) {
       this.unsub();
       this.unsub = null;
@@ -185,6 +606,10 @@ export class RecordingsView {
     this.splitter.dispose();
     document.removeEventListener("keydown", this.keydownHandler);
     if (this.selectHandler) window.removeEventListener("phoneme:select-recording", this.selectHandler);
+    if (this.focusHandler) window.removeEventListener("phoneme:toggle-focus-mode", this.focusHandler);
+    if (this.vimHandler) window.removeEventListener("phoneme:vim", this.vimHandler);
+    if (this.deleteReqHandler) window.removeEventListener("phoneme:request-delete", this.deleteReqHandler);
+    if (this.closeDetailHandler) window.removeEventListener("phoneme:close-detail", this.closeDetailHandler);
   }
 
   private applyLayout() {
@@ -201,7 +626,7 @@ export class RecordingsView {
     }
 
     const sidebarWidth = this.sidebarVisible ? `${this.sidebarWidth}px` : "0px";
-    const resizerWidth = this.sidebarVisible ? "4px" : "0px";
+    const resizerWidth = this.sidebarVisible ? "6px" : "0px";
     const resizer = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
     // IMPORTANT: never `display:none` the resizer. The grid has five explicit
     // column tracks (sidebar, resizer, list, splitter, detail); removing the
@@ -211,12 +636,16 @@ export class RecordingsView {
     // hidden. Keep it in the grid and just give it a 0px-wide track instead.
     if (resizer) resizer.style.display = "";
 
-    if (this.detailVisible) {
+    if (this.detailVisible && this.focusMode) {
+      // Focus mode: collapse the sidebar, resizer, list, and splitter so the
+      // detail pane fills the whole view for distraction-free, full-width editing.
+      shell.style.gridTemplateColumns = `0px 0px 0 0 1fr`;
+    } else if (this.detailVisible) {
       // The detail (right) pane is the percentage track and the list is the
       // flexible 1fr track, so collapsing the sidebar grows the LIST and leaves
       // the detail pane's width unchanged (detail% is of the constant shell
       // width). The splitter drag is delta-based, so this stays consistent.
-      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} minmax(0, 1fr) 3px ${100 - this.splitPercent}%`;
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} minmax(0, 1fr) 6px ${100 - this.splitPercent}%`;
     } else {
       shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} 1fr 0 0`;
     }
@@ -236,6 +665,7 @@ export class RecordingsView {
         const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + (m.clientX - startX)));
         this.sidebarWidth = w;
         this.applyLayout();
+        window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed"));
       };
       const onUp = () => {
         document.removeEventListener("mousemove", onMove);
@@ -261,9 +691,37 @@ export class RecordingsView {
       window.setTimeout(() => shell.classList.remove("rv-animate-sidebar"), 260);
     }
     this.applyLayout();
+    // Let the AI-activity button re-anchor to the new sidebar edge (now + after
+    // the slide animation settles).
+    window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed"));
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed")), 300);
   }
 
   private onSelect(id: string) {
+    const currentId = this.state.get().selectedId;
+    // Switching away from a recording with unsaved transcript/notes edits would
+    // lose them (the editors no longer auto-save) — confirm first.
+    if (currentId && currentId !== id && this.detail.hasDirtyEdits()) {
+      void this.confirmLeaveUnsaved().then((discard) => { if (discard) this.applySelect(id); });
+      return;
+    }
+    this.applySelect(id);
+  }
+
+  /** Prompt before discarding unsaved transcript/notes edits when leaving the
+   *  open recording. Resolves true to discard + proceed, false to keep editing. */
+  private async confirmLeaveUnsaved(): Promise<boolean> {
+    const { confirmDialog } = await import("../confirmDialog");
+    return confirmDialog({
+      title: "Unsaved changes",
+      body: "This recording has unsaved edits in its transcript or notes. Discard them?",
+      confirmLabel: "Discard changes",
+      cancelLabel: "Keep editing",
+      danger: true,
+    });
+  }
+
+  private applySelect(id: string) {
     this.state.set({ ...this.state.get(), selectedId: id });
     try { localStorage.setItem(LS_SELECTED, id); } catch { /* private mode */ }
     // Point the AI-activity popout at the selected single recording (sessions
@@ -281,6 +739,12 @@ export class RecordingsView {
       singleContainer.style.display = "block";
       this.mergedDetail.meetingId = "";
       void this.detail.show(id);
+    }
+    // A recording is selected → ensure the detail pane is shown (it auto-hides
+    // when nothing is selected, giving the list the full width).
+    if (!this.detailVisible) {
+      this.detailVisible = true;
+      this.applyLayout();
     }
   }
 
@@ -353,29 +817,60 @@ export class RecordingsView {
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
 
-    if (e.ctrlKey && e.key === "\\") {
+    // A modal/popup is open: it owns the keyboard (Escape closes IT, not the
+    // recording). This view-level handler runs before the modal's own listener,
+    // so the overlay is still in the DOM here — bail and let the modal handle it.
+    if (document.querySelector(".modal-overlay")) return;
+
+    // The header bar owns its own keyboard nav while focused (roving cursor +
+    // the status-select / Record / Settings dropdown cycling). Don't let this
+    // view act on those keys — e.g. Escape leaving the status cycle must NOT
+    // also close the open recording. Also stand down if someone already handled
+    // the key (keyboard.ts preventDefaults the keys it owns).
+    if (document.activeElement?.closest(".headerbar")) return;
+    if (e.defaultPrevented) return;
+
+    // Escape: exit focus mode if active, otherwise clear the selection (which
+    // collapses the detail pane). Not while typing in the transcript/notes editor
+    // (CodeMirror's contenteditable, where Esc is vim's normal-mode).
+    if (e.key === "Escape" && !target.isContentEditable) {
+      if (this.focusMode) {
+        e.preventDefault();
+        this.toggleFocusMode();
+        return;
+      }
+      // Vim step-out ladder: from the detail pane, Esc returns to the list
+      // (keeping the recording open) before a second Esc deselects it.
+      if (this.focusedPane === "detail") {
+        e.preventDefault();
+        this.focusPane("list");
+        return;
+      }
+      if (this.state.get().selectedId) {
+        e.preventDefault();
+        this.deselect();
+        return;
+      }
+    }
+
+    if (e.ctrlKey && (e.key === "b" || e.key === "B") && !target.isContentEditable) {
+      // Hide / show the left sidebar (VS Code-style).
+      e.preventDefault();
+      this.toggleSidebar();
+    } else if (e.ctrlKey && e.key === "\\") {
+      // Hide / show the right detail pane.
       e.preventDefault();
       this.toggleDetail();
     } else if (e.key === "Delete") {
-      // If we have a multi-selection, bulk-delete via the bar; otherwise single-delete.
-      if (this.multiSelected.size > 1) {
-        // Delegate to BulkActionBar by programmatically clicking its delete button.
-        const btn = this.bulkBarRoot?.querySelector<HTMLButtonElement>("#bulk-delete");
-        btn?.click();
-        return;
-      }
-      const id = this.state.get().selectedId;
-      if (id) {
+      // Undoable: a multi-selection deletes all selected, otherwise the open one.
+      if (this.multiSelected.size > 0) {
         e.preventDefault();
-        const { confirmDelete } = await import("../ConfirmDelete");
-        if (await confirmDelete()) {
-          try {
-            const { deleteRecording } = await import("../../services/ipc");
-            await deleteRecording(id, false);
-            this.refresh();
-          } catch (err) {
-            console.error("Failed to delete recording:", err);
-          }
+        this.requestUndoableDelete([...this.multiSelected]);
+      } else {
+        const id = this.state.get().selectedId;
+        if (id) {
+          e.preventDefault();
+          this.requestUndoableDelete([id]);
         }
       }
     }

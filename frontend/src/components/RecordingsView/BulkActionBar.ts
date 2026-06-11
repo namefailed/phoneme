@@ -1,7 +1,6 @@
 import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import {
-  deleteRecording,
   listTags,
   attachTag,
   type Recording,
@@ -42,6 +41,79 @@ export class BulkActionBarElement extends LitElement {
       this.openMenu = null;
     }
   };
+  /** Escape closes the open menu/modal (rerun · tag · export) — capture-phase +
+   *  stopPropagation so it never reaches the list (which would clear the
+   *  selection) or close the recording. */
+  private onEsc = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && this.openMenu) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.openMenu = null;
+    }
+  };
+
+  /** Roving keyboard cursor over the bar's buttons (Shift+Enter from the list
+   *  enters this); -1 = not active. */
+  @state() private navIndex = -1;
+
+  private bulkButtons(): HTMLElement[] {
+    return [...this.querySelectorAll<HTMLElement>(".bulk-bar .bulk-btn")].filter((b) => b.offsetParent !== null);
+  }
+
+  private highlightBulkNav() {
+    this.querySelectorAll(".bulk-btn.kbd-cursor").forEach((b) => b.classList.remove("kbd-cursor"));
+    this.bulkButtons()[this.navIndex]?.classList.add("kbd-cursor");
+  }
+
+  /** Shift+Enter from the list hands keyboard control to the bar. */
+  private onEnterBulkBar = () => {
+    if (this.selected.size === 0) return;
+    this.navIndex = 0;
+    void this.updateComplete.then(() => this.highlightBulkNav());
+  };
+
+  private exitBulkNav() {
+    this.navIndex = -1;
+    this.querySelectorAll(".bulk-btn.kbd-cursor").forEach((b) => b.classList.remove("kbd-cursor"));
+    // Back to the recordings list, on the last-selected file.
+    window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-list" } }));
+  }
+
+  /** Keyboard nav inside the bar: h/l move, Enter activates, j/k/Esc exit.
+   *  Capture-phase + stopPropagation so it beats the list/global handlers; only
+   *  active once Shift+Enter entered the nav and no dropdown/modal owns keys. */
+  private onBulkNavKey = (e: KeyboardEvent) => {
+    // Shift+Enter (while a selection exists, and not typing in a field) hands
+    // control to the bar. The bar is only mounted when something is selected, so
+    // this listener is dormant otherwise.
+    if (e.key === "Enter" && e.shiftKey && this.navIndex < 0 && !this.openMenu) {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (!typing && this.selected.size > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.onEnterBulkBar();
+      }
+      return;
+    }
+    if (this.navIndex < 0 || this.openMenu) return;
+    const btns = this.bulkButtons();
+    if (!btns.length) return;
+    switch (e.key) {
+      case "h": case "ArrowLeft":
+        e.preventDefault(); e.stopPropagation();
+        this.navIndex = Math.max(0, this.navIndex - 1); this.highlightBulkNav(); return;
+      case "l": case "ArrowRight":
+        e.preventDefault(); e.stopPropagation();
+        this.navIndex = Math.min(btns.length - 1, this.navIndex + 1); this.highlightBulkNav(); return;
+      case "Enter": case " ":
+        e.preventDefault(); e.stopPropagation();
+        btns[this.navIndex]?.click(); return;
+      case "j": case "k": case "ArrowDown": case "ArrowUp": case "Escape":
+        e.preventDefault(); e.stopPropagation();
+        this.exitBulkNav(); return;
+    }
+  };
 
   connectedCallback() {
     super.connectedCallback();
@@ -49,16 +121,33 @@ export class BulkActionBarElement extends LitElement {
       const raw = localStorage.getItem(POS_LS);
       if (raw) {
         const p = JSON.parse(raw);
-        if (typeof p?.x === "number" && typeof p?.y === "number") this.pos = p;
+        // Only honour a saved drag position that's still on-screen — a stale
+        // off-screen position (window was resized smaller, or it was dragged
+        // out) would mount the whole bar where it can't be seen ("bar gone").
+        if (
+          typeof p?.x === "number" && typeof p?.y === "number" &&
+          p.x >= 0 && p.x <= window.innerWidth - 80 &&
+          p.y >= 0 && p.y <= window.innerHeight - 40
+        ) {
+          this.pos = p;
+        } else {
+          localStorage.removeItem(POS_LS);
+        }
       }
     } catch { /* ignore */ }
     void this.loadTags();
     document.addEventListener("click", this.docClick);
+    document.addEventListener("keydown", this.onEsc, true);
+    document.addEventListener("keydown", this.onBulkNavKey, true);
+    window.addEventListener("phoneme:enter-bulk-bar", this.onEnterBulkBar);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("click", this.docClick);
+    document.removeEventListener("keydown", this.onEsc, true);
+    document.removeEventListener("keydown", this.onBulkNavKey, true);
+    window.removeEventListener("phoneme:enter-bulk-bar", this.onEnterBulkBar);
   }
 
   private async loadTags() {
@@ -83,6 +172,13 @@ export class BulkActionBarElement extends LitElement {
   // ── Drag ────────────────────────────────────────────────────────────────
   private startDrag(e: MouseEvent) {
     e.preventDefault();
+    // Ctrl+Shift-click resets to the default bottom-centre position.
+    if (e.ctrlKey && e.shiftKey) {
+      e.stopPropagation();
+      this.pos = null;
+      try { localStorage.removeItem(POS_LS); } catch { /* ignore */ }
+      return;
+    }
     const startX = e.clientX;
     const startY = e.clientY;
     const bar = (e.currentTarget as HTMLElement).closest<HTMLElement>(".bulk-bar");
@@ -198,21 +294,14 @@ export class BulkActionBarElement extends LitElement {
     showToast(`Exported ${this.selectedRecordings().filter((r) => r.transcript).length} transcript(s) as ${format.toUpperCase()}.`, "success");
   }
 
-  private async handleDelete() {
+  private handleDelete() {
     if (this.busy) return;
     this.openMenu = null;
-    const n = this.selected.size;
-    const { confirmDelete } = await import("../ConfirmDelete");
-    const confirmed = await confirmDelete({
-      title: n === 1 ? "Delete Recording?" : `Delete ${n} Recordings?`,
-      body: n === 1
-        ? "This will permanently delete the recording and its audio file. This action cannot be undone."
-        : `This will permanently delete ${n} recordings and their audio files. This action cannot be undone.`,
-      confirmLabel: n === 1 ? "Delete" : `Delete ${n} Recordings`,
-      skipKey: "phoneme_skip_bulk_delete_confirm",
-    });
-    if (!confirmed) return;
-    await this.runOverSelection((r) => deleteRecording(r.id, false), "Deleted");
+    const ids = [...this.selected];
+    if (!ids.length) return;
+    // RecordingsView runs the grace-period Undo flow (hides the rows now, only
+    // deletes for real when the Undo toast lapses) and clears this selection.
+    window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids } }));
   }
 
   private toggleMenu(menu: "rerun" | "tag" | "export", e: Event) {
@@ -225,20 +314,16 @@ export class BulkActionBarElement extends LitElement {
     if (n === 0) return html``;
 
     const style = this.pos
-      ? `position:fixed; left:${this.pos.x}px; top:${this.pos.y}px;`
+      ? `position:fixed; left:${Math.max(8, Math.min(window.innerWidth - 80, this.pos.x))}px; top:${Math.max(8, Math.min(window.innerHeight - 40, this.pos.y))}px;`
       : `position:fixed; left:50%; bottom:24px; transform:translateX(-50%);`;
 
     return html`
       <div class="bulk-bar" style=${style}>
-        <span class="bulk-grip" title="Drag to move" @mousedown=${(e: MouseEvent) => this.startDrag(e)}>⠿</span>
+        <span class="bulk-grip" title="Drag to move · Ctrl+Shift-click to reset" @mousedown=${(e: MouseEvent) => this.startDrag(e)}>⠿</span>
         <span class="bulk-count">${this.busy ? "Working…" : `${n} selected`}</span>
         <div class="bulk-actions">
           <span class="bulk-menu-wrap">
             <button class="bulk-btn" title="Re-run a step on the selected recordings" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("rerun", e)}>↻ Re-run <svg class="ph-caret-ico ${this.openMenu === "rerun" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
-            ${this.openMenu === "rerun" ? html`
-              <div class="bulk-rerun-pop" @click=${(e: Event) => e.stopPropagation()}>
-                <ph-rerun-form .busy=${this.busy} .submitLabel=${`Re-run · ${n}`} @rerun=${this.onRerun} @cancel=${() => { this.openMenu = null; }}></ph-rerun-form>
-              </div>` : null}
           </span>
 
           <span class="bulk-menu-wrap">
@@ -268,6 +353,11 @@ export class BulkActionBarElement extends LitElement {
           <button class="bulk-btn bulk-btn--muted" title="Deselect all" .disabled=${this.busy} @click=${() => this.callbacks.onClear()}>✕ Deselect</button>
         </div>
       </div>
+
+      ${this.openMenu === "rerun" ? html`
+        <div class="modal-overlay" @click=${(e: MouseEvent) => { if (e.target === e.currentTarget) this.openMenu = null; }}>
+          <ph-rerun-form modal .busy=${this.busy} .submitLabel=${`Re-run · ${n}`} @rerun=${this.onRerun} @cancel=${() => { this.openMenu = null; }}></ph-rerun-form>
+        </div>` : null}
     `;
   }
 }

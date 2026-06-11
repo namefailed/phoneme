@@ -70,6 +70,44 @@
 }
 .toast-close:hover { opacity: 1; }
 
+/* ── Action toast (e.g. Undo) ─────────────────────────────────────────────── */
+.toast-action-toast {
+  position: relative;
+  overflow: hidden;
+}
+.toast-action {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.toast-action:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+}
+/* Thin bar that drains left-to-right over the toast's lifetime, so the undo
+   window is visible. Duration is set inline (matches the delete defer). */
+.toast-countdown {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: toast-countdown linear forwards;
+}
+@keyframes toast-countdown {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
 /* Slide in from the right */
 @keyframes toast-in {
   from {

@@ -16,10 +16,33 @@
   font-size: 18px;
   color: var(--fg-default);
 }
-/* Search box: replace the harsh default focus outline with a soft accent ring
-   that matches the rest of the app's inputs. */
+/* ── Settings search box ──────────────────────────────────────────────────── */
+.sv-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 16px 16px;
+}
+.sv-search-ico {
+  position: absolute;
+  left: 11px;
+  color: var(--fg-faded);
+  pointer-events: none;
+}
 .settings-search {
+  width: 100%;
+  /* Room for the magnifier (left) and our own clear button (right). */
+  padding: 8px 30px 8px 32px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--fg-default);
+  font-size: 13px;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.settings-search::placeholder {
+  color: var(--fg-faded);
 }
 .settings-search:focus,
 .settings-search:focus-visible {
@@ -27,8 +50,134 @@
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
+/* Hide the native clear affordance — we render our own ✕ so it can sit inside
+   the padded box and match the app's styling. */
 .settings-search::-webkit-search-cancel-button {
+  display: none;
+}
+.sv-search-clear {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-faded);
+  font-size: 11px;
+  line-height: 1;
   cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.sv-search-clear:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--fg-default);
+}
+.sv-search-clear.is-hidden {
+  display: none;
+}
+
+/* ── Search results: highlight, results bar, empty state, breadcrumbs ─────── */
+mark.settings-hit {
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+/* The result the ↑/↓ search-box cursor is on. */
+.settings-field.sv-result-active {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  border-radius: 4px;
+}
+#settings-search-header.sv-search-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 7px 14px 7px 11px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 999px;
+}
+#settings-search-header.sv-search-count strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+#settings-search-header .sv-count-ico {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.sv-search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 56px 24px;
+  text-align: center;
+}
+.sv-empty-icon {
+  font-size: 30px;
+  opacity: 0.5;
+}
+.sv-empty-title {
+  font-size: 15px;
+  color: var(--fg-default);
+  font-weight: 600;
+}
+.sv-empty-hint {
+  font-size: 12px;
+  color: var(--fg-faded);
+  max-width: 360px;
+  line-height: 1.5;
+}
+.sv-result-host {
+  position: relative;
+}
+.sv-result-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px 2px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.sv-result-breadcrumb:hover {
+  border-color: var(--accent);
+  color: var(--fg-default);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.sv-bc-tab {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.sv-bc-go {
+  color: var(--accent);
+  font-weight: 500;
+}
+/* Brief pulse on the section you jumped to from a search result. */
+@keyframes sv-flash-pulse {
+  0% {
+    box-shadow: 0 0 0 2px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.settings-section.sv-flash {
+  animation: sv-flash-pulse 1.2s ease-out;
 }
 .sv-tab {
   padding: 10px 20px;
@@ -53,6 +202,68 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* Anchor for the floating Save/Close actions: there's no footer bar, so the
+     body uses the full height and the buttons float over its bottom-right. */
+  position: relative;
+}
+/* Floating ⚙ Settings button (top-right) — the only header control kept in the
+   Settings view, since the header bar itself is hidden. Closes Settings. */
+.settings-float-toggle {
+  position: absolute;
+  /* Sit exactly where the header's ⚙ Settings split-button was AND look
+     identical to it (.headerbar .icon-btn / .hb-settings-main) so opening
+     Settings doesn't make the button appear to jump or restyle. right:42px
+     lands on the header main-button's right edge — the header group hugs the
+     corner at 14px and the dropdown caret to its right is ~28px wide. */
+  top: 18px;
+  right: 42px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 6px;
+  padding: 4px 11px;
+  font-size: 16px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: all 0.15s ease-out;
+}
+.settings-float-toggle:hover {
+  background: var(--border-subtle);
+  color: var(--fg-default);
+  border-color: var(--accent);
+}
+.settings-float-actions {
+  position: absolute;
+  bottom: 18px;
+  right: 22px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+.settings-float-actions button {
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  color: var(--fg-default);
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.settings-float-actions button:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+}
+.settings-float-actions button.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  border-color: var(--accent);
 }
 .settings-toolbar {
   padding: 12px 24px;
@@ -93,7 +304,8 @@
 .settings-body {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  /* Extra bottom padding so content scrolls clear of the floating Save/Close. */
+  padding: 24px 24px 84px;
 }
 .settings-section {
   background: var(--bg-elevated);
@@ -341,6 +553,11 @@ select[data-key="daemon.log_level"] {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+  /* Left-align/fill children. Without this the wrapper inherits `align-items:
+     center` from `.settings-field > div`, which — with `flex-direction: column`
+     — centres the preset row and textarea horizontally (the "not lined up with
+     our UI" bug). Same fix as `.settings-field.stacked > div` above. */
+  align-items: stretch;
 }
 .ai-preset-row {
   display: flex;
@@ -368,6 +585,40 @@ select[data-key="daemon.log_level"] {
   font-size: 13px;
   padding: 8px 10px;
   line-height: 1.5;
+}
+
+/* Advanced disclosure (<details>) — replace the browser's default triangle
+   marker with a chevron that rotates down when the section is open. */
+.settings-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.settings-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-advanced > summary::marker {
+  content: "";
+}
+.settings-advanced-chev {
+  flex-shrink: 0;
+  color: var(--fg-faded);
+  transition: transform 0.18s ease;
+}
+.settings-advanced[open] > summary .settings-advanced-chev {
+  transform: rotate(90deg);
+}
+.settings-advanced > summary:hover {
+  color: var(--fg-default);
+}
+.settings-advanced > summary:hover .settings-advanced-chev {
+  color: var(--accent);
 }
 
 /* Generic helper text below a control (reusable across any section). */

@@ -7,6 +7,7 @@ import { listTags, type Tag } from '../services/ipc';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
+import { setSettingsAnchor } from './shared/settingsAnchor';
 import './SavedSearches';
 
 export type HeaderBarCallbacks = {
@@ -51,6 +52,17 @@ export class HeaderBarElement extends LitElement {
   private unsubEvent: UnlistenFn | null = null;
   private unsubFilter: (() => void) | null = null;
   private docClickHandler: ((e: MouseEvent) => void) | null = null;
+  /** Escape closes an open Record/Settings dropdown — capture-phase +
+   *  stopPropagation so it doesn't fall through to the list (which would close
+   *  the open recording). */
+  private escHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && (this.modeMenuOpen || this.settingsMenuOpen)) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.modeMenuOpen = false;
+      this.settingsMenuOpen = false;
+    }
+  };
 
   constructor() {
     super();
@@ -65,7 +77,8 @@ export class HeaderBarElement extends LitElement {
   async connectedCallback() {
     super.connectedCallback();
     document.addEventListener("click", this.docClickHandler!);
-    
+    document.addEventListener("keydown", this.escHandler, true);
+
     this.unsubFilter = filterStore.subscribe((f) => {
       this.filterState = f;
     });
@@ -148,6 +161,7 @@ export class HeaderBarElement extends LitElement {
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }
+    document.removeEventListener("keydown", this.escHandler, true);
     if (this.unsubEvent) {
       this.unsubEvent();
       this.unsubEvent = null;
@@ -380,6 +394,13 @@ export class HeaderBarElement extends LitElement {
 
   private openAllSettings() {
     this.settingsMenuOpen = false;
+    // Record exactly where this button is, so the Settings view's floating
+    // ⚙ Settings button can sit in the identical spot (no jump on open).
+    const btn = document.querySelector<HTMLElement>(".hb-settings-main");
+    if (btn) {
+      const r = btn.getBoundingClientRect();
+      setSettingsAnchor({ top: r.top, left: r.left, width: r.width, height: r.height });
+    }
     this.callbacks?.onOpenSettings();
   }
 
@@ -516,11 +537,11 @@ export class HeaderBarElement extends LitElement {
               .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
               .hb-mode-item.selected { color: var(--accent); }
               .hb-mode-item .hb-mode-ico { font-size: 15px; width: 20px; text-align: center; flex: 0 0 auto; }
-              .hb-mode-item .hb-mode-label { flex: 1; }
-              .hb-mode-item .hb-mode-check { color: var(--accent); font-weight: 700; }
+              .hb-mode-item .hb-mode-label { flex: 0 1 auto; }
+              .hb-mode-item .hb-mode-check { margin-left: 4px; color: var(--accent); font-weight: 700; }
             </style>
             <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
-              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:200px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:168px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
               <div class="hb-mode-cap">Record as</div>
               <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
                 <span class="hb-mode-ico">🎙️</span>
@@ -544,6 +565,9 @@ export class HeaderBarElement extends LitElement {
               border-radius: 7px; cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
             }
             .hb-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+            /* Fixed-width icon column so every label starts at the same x — emoji
+               glyph widths vary, which otherwise leaves the first row out of line. */
+            .hb-menu-ico { flex-shrink: 0; width: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; }
             .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
             .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
@@ -555,16 +579,16 @@ export class HeaderBarElement extends LitElement {
             @click=${this.toggleSettingsMenu}><svg class="ph-caret-ico ${this.settingsMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
           <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
             style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
-            <button class="hb-menu-item" role="menuitem" @click=${this.openModels}>🎛 Quick model switch…</button>
-            <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}>🩺 Doctor — health check</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}><span class="hb-menu-ico">🩺</span>Doctor — health check</button>
             <div class="hb-menu-sep"></div>
             <div class="hb-menu-label">Jump to settings</div>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}>🗣️ Transcription</button>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("postprocessing")}>✨ Post-Processing</button>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}>🎙️ Capture &amp; hotkeys</button>
-            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}>🎨 Appearance</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}><span class="hb-menu-ico">🗣️</span>Transcription</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("postprocessing")}><span class="hb-menu-ico">✨</span>Post-Processing</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}><span class="hb-menu-ico">🎙️</span>Capture &amp; hotkeys</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}><span class="hb-menu-ico">🎨</span>Appearance</button>
             <div class="hb-menu-sep"></div>
-            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}>⚙ All settings…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙</span>All settings…</button>
           </div>
         </div>
       </div>

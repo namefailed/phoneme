@@ -73,6 +73,52 @@ export function speakerLabelsIn(transcript: string | null | undefined): number[]
   return [...seen].sort((a, b) => a - b);
 }
 
+/**
+ * Every speaker the rename UI should offer for a recording: the labels still
+ * present as `[Speaker N]` markers PLUS any that have already been renamed
+ * (their markers are gone from the baked text, but the names map remembers
+ * them). This is what keeps a speaker renamable AFTER the first rename — the
+ * marker-only `speakerLabelsIn` would drop it once its name is baked in.
+ */
+export function speakersForRename(
+  transcript: string | null | undefined,
+  speakerNames: SpeakerName[] | undefined,
+): number[] {
+  const labels = new Set<number>(speakerLabelsIn(transcript));
+  for (const s of speakerNames ?? []) labels.add(s.speaker_label);
+  return [...labels].sort((a, b) => a - b);
+}
+
+/**
+ * Rewrite a transcript so speaker `label` reads as `newName`, replacing BOTH its
+ * canonical `[Speaker N]:` marker AND a previously-baked `oldName:` turn label —
+ * so renaming works the first time and every time after. An empty `newName`
+ * restores the `[Speaker N]:` marker so the speaker stays trackable/renamable.
+ *
+ * Literal (not regex) replacement; the `Name:` shape is the diarization turn
+ * marker. A custom name that also occurs verbatim as "Name:" in the speech is a
+ * rare edge it can't distinguish.
+ */
+export function renameSpeakerInTranscript(
+  transcript: string,
+  label: number,
+  oldName: string,
+  newName: string,
+): string {
+  const marker = `[Speaker ${label}]:`;
+  const fresh = newName.trim();
+  const wasCustom = !!oldName && oldName !== `Speaker ${label}`;
+  let out = transcript;
+  if (fresh) {
+    out = out.split(marker).join(`${fresh}:`);
+    if (wasCustom) out = out.split(`${oldName}:`).join(`${fresh}:`);
+  } else if (wasCustom) {
+    // Clearing → put the canonical marker back so it's renamable again.
+    out = out.split(`${oldName}:`).join(marker);
+  }
+  return out;
+}
+
 /** Which track a block came from, plus how to label it. */
 export type MergedSource = {
   /** Raw track value from the catalog ("mic" / "system" / other). */

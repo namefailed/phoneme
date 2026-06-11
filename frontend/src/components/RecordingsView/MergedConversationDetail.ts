@@ -6,6 +6,23 @@ import { showToast } from "../../utils/toast";
 import { formatDuration } from "../../utils/format";
 import { mergeMeeting, mergedPlainText, type MergedBlock } from "./mergeMeeting";
 
+/** Distinct, theme-agnostic colors so each speaker is easy to follow at a glance.
+ *  Indexed by the 1-based speaker label; wraps for meetings with many speakers. */
+const SPEAKER_COLORS = [
+  "#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8",
+  "#cba6f7", "#fab387", "#94e2d5", "#f5c2e7",
+];
+function speakerColor(label: number): string {
+  return SPEAKER_COLORS[(Math.max(1, label) - 1) % SPEAKER_COLORS.length];
+}
+/** Short avatar text: the speaker number for default "Speaker N" labels, else
+ *  the first letter of a custom name. */
+function avatarText(displayName: string | null, label: number): string {
+  const name = (displayName ?? "").trim();
+  if (!name || name === `Speaker ${label}`) return String(label);
+  return name.charAt(0).toUpperCase();
+}
+
 /**
  * The merged meeting view: a single, unified reading of every track in a
  * meeting, rendered in the right pane when the meeting's group header is
@@ -107,6 +124,9 @@ export class MergedConversationDetail extends LitElement {
     this.editing = null;
     try {
       await setSpeakerName(recordingId, label, value.trim());
+      // The merged view renders names from the speaker-names map (mergeMeeting)
+      // and splits turns on the [Speaker N] markers — so DON'T bake names into
+      // the track transcript here; that would destroy the per-speaker structure.
       await this.loadSession();
       this.onRefresh?.();
     } catch (e) {
@@ -174,6 +194,8 @@ export class MergedConversationDetail extends LitElement {
       0,
     );
     const sourceCount = new Set(this.recordings.map((r) => r.track ?? "")).size;
+    const speakerCount = new Set(blocks.filter((b) => b.speaker != null).map((b) => b.speaker)).size;
+    const turnCount = blocks.length;
 
     return html`
       <div class="merged-detail">
@@ -197,8 +219,11 @@ export class MergedConversationDetail extends LitElement {
             </div>
           </div>
           <div class="merged-meta">
-            ${sourceCount} ${sourceCount === 1 ? "track" : "tracks"} ·
-            ${formatDuration(totalDuration)} · merged reading (read-only)
+            <span class="merged-meta-pill">${sourceCount} ${sourceCount === 1 ? "track" : "tracks"}</span>
+            <span class="merged-meta-pill">${formatDuration(totalDuration)}</span>
+            ${speakerCount > 0 ? html`<span class="merged-meta-pill">${speakerCount} ${speakerCount === 1 ? "speaker" : "speakers"}</span>` : nothing}
+            <span class="merged-meta-pill">${turnCount} ${turnCount === 1 ? "turn" : "turns"}</span>
+            <span class="merged-meta-ro">merged reading · read-only</span>
           </div>
         </div>
 
@@ -216,6 +241,8 @@ export class MergedConversationDetail extends LitElement {
    *  contiguous section. */
   private renderBlock(b: MergedBlock, prev: MergedBlock | undefined) {
     const newSource = !prev || prev.source.track !== b.source.track;
+    const hasSpeaker = b.speaker != null;
+    const color = hasSpeaker ? speakerColor(b.speaker as number) : "var(--fg-faded)";
     return html`
       ${newSource
         ? html`<div class="merged-source" data-track=${b.source.track}>
@@ -223,9 +250,14 @@ export class MergedConversationDetail extends LitElement {
             <span class="merged-source-label">${b.source.label}</span>
           </div>`
         : nothing}
-      <div class="merged-turn">
-        ${b.speaker != null ? this.renderSpeakerChip(b) : nothing}
-        <span class="merged-text">${b.text}</span>
+      <div class="merged-turn ${hasSpeaker ? "" : "merged-turn--prose"}" style=${`--spk:${color}`}>
+        ${hasSpeaker
+          ? html`<div class="merged-avatar" aria-hidden="true">${avatarText(b.displayName, b.speaker as number)}</div>`
+          : nothing}
+        <div class="merged-turn-body">
+          ${hasSpeaker ? html`<div class="merged-turn-head">${this.renderSpeakerChip(b)}</div>` : nothing}
+          <div class="merged-text">${b.text}</div>
+        </div>
       </div>
     `;
   }

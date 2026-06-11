@@ -58,6 +58,10 @@ export class FirstRunWizardElement extends LitElement {
   @property({ type: Object }) onComplete!: () => void;
   @property({ type: Object }) config: any = null;
   @state() private step: WizardStep = "welcome";
+  /** Express mode (default): a one-click "recommended local setup" path that
+   *  installs everything, then just mic → hotkey → review → done. "Customize
+   *  setup" flips this off to reveal the full per-feature flow. */
+  @state() private express = true;
 
   // Shared state across steps
   @state() private systemRamMb: number = 0;
@@ -95,16 +99,31 @@ export class FirstRunWizardElement extends LitElement {
       
       this.devices = await invoke<string[]>("list_input_devices").catch(() => []);
       this.downloadedModels = await invoke<string[]>("wizard_list_downloaded_models").catch(() => []);
+      // Pre-fill the recommended local setup so the express welcome can show the
+      // plan immediately (idempotent; the customize picker reuses these choices).
+      this.applyRecommendedSetup();
+      this.requestUpdate();
     } catch (e) {
       console.error("Wizard init error:", e);
     }
   }
 
+  /** The active step sequence — trimmed in express mode (the per-feature config
+   *  screens are auto-applied, so skip them), full in customize mode. */
+  private steps(): WizardStep[] {
+    return this.express
+      ? ["welcome", "configure", "mic", "hotkey", "review", "done"]
+      : ALL_STEPS;
+  }
+
   private go(direction: "next" | "back") {
-    const idx = ALL_STEPS.indexOf(this.step);
-    const next = direction === "next" ? Math.min(idx + 1, ALL_STEPS.length - 1) : Math.max(idx - 1, 0);
-    this.step = ALL_STEPS[next];
-    if (this.step === "configure") {
+    const seq = this.steps();
+    const idx = seq.indexOf(this.step);
+    const ni = direction === "next" ? Math.min(idx + 1, seq.length - 1) : Math.max(idx - 1, 0);
+    this.step = seq[ni];
+    // Run the installs when entering the configure step going FORWARD only — a
+    // back-nav onto it must not kick off the downloads again.
+    if (direction === "next" && this.step === "configure") {
       this.runConfigureStep();
     }
   }
@@ -146,19 +165,84 @@ export class FirstRunWizardElement extends LitElement {
   }
 
   private renderProgress() {
-    const idx = ALL_STEPS.indexOf(this.step);
-    const pct = ALL_STEPS.length > 1 ? (idx / (ALL_STEPS.length - 1)) * 100 : 0;
+    const seq = this.steps();
+    const idx = seq.indexOf(this.step);
+    const pct = seq.length > 1 ? (idx / (seq.length - 1)) * 100 : 0;
     return html`
       <div class="wizard-header-top">
         <span class="wizard-brand">🎙 Phoneme — Setup</span>
-        <span class="wizard-steplabel">Step <b>${idx + 1}</b> of ${ALL_STEPS.length} · <b>${STEP_LABELS[this.step]}</b></span>
+        <span class="wizard-steplabel">Step <b>${idx + 1}</b> of ${seq.length} · <b>${STEP_LABELS[this.step]}</b></span>
       </div>
       <div class="wizard-progress"><div class="wizard-progress-fill" style="width: ${pct}%"></div></div>
       <div class="wizard-dots">
-        ${ALL_STEPS.map((s, i) => {
+        ${seq.map((s, i) => {
           const klass = i < idx ? "done" : i === idx ? "active" : "";
           return html`<span class="wizard-dot ${klass}" title="${STEP_LABELS[s]}"></span>`;
         })}
+      </div>
+    `;
+  }
+
+  /** Set an `interface.*` UI preference (vim_nav, format_24h, …) from the wizard. */
+  private setIfacePref(key: string, value: unknown) {
+    if (!this.config) return;
+    if (!this.config.interface) this.config.interface = {};
+    this.config.interface[key] = value;
+    this.requestUpdate();
+  }
+
+  /** Express welcome: the recommended one-click local setup + a "Customize"
+   *  escape hatch to the full per-feature flow. */
+  private renderExpressWelcome() {
+    const gb = Math.round(this.systemRamMb / 1024);
+    const plan = this.recommendedPlan();
+    return html`
+      <div class="wizard-body">
+        <h2 class="wizard-title">Welcome to Phoneme</h2>
+        <p class="wizard-subtitle">Local-first voice notes — press a hotkey, speak, get a transcript, all on your machine. Let's get you fully set up.</p>
+
+        <div class="wizard-express-card">
+          <div class="wizard-express-head">
+            <span class="wizard-express-title">✨ Recommended local setup</span>
+            <span class="wizard-express-specs">Detected ${gb} GB RAM${this.systemVramMb > 0 ? html` · ${Math.round(this.systemVramMb / 1024)} GB VRAM` : ""}</span>
+          </div>
+          <p class="wizard-express-sub">One click installs and configures everything below — it all runs privately on your machine. You can change any of it later in Settings.</p>
+          <ul class="wizard-express-plan">
+            ${plan.map((p) => html`<li>
+              <span class="wizard-express-ico">${p.icon}</span>
+              <span class="wizard-express-text"><b>${p.title}</b><span class="wizard-express-detail">${p.detail}</span></span>
+            </li>`)}
+          </ul>
+        </div>
+
+        <div class="wizard-theme-card">
+          <label>Preferences</label>
+          <select .value=${this.config?.interface?.theme || "catppuccin-mocha"}
+                  @change=${(e: Event) => { this.setIfacePref("theme", (e.target as HTMLSelectElement).value); document.documentElement.setAttribute('data-theme', (e.target as HTMLSelectElement).value); }}>
+            <option value="catppuccin-mocha">Catppuccin Mocha (Default)</option>
+            <option value="catppuccin-macchiato">Catppuccin Macchiato</option>
+            <option value="dracula">Dracula</option>
+            <option value="everforest">Everforest</option>
+            <option value="gruvbox">Gruvbox</option>
+            <option value="nord">Nord</option>
+            <option value="one-dark">One Dark</option>
+            <option value="rose-pine">Rosé Pine</option>
+            <option value="tokyo-night">Tokyo Night</option>
+            <option value="catppuccin-latte">Catppuccin Latte (Light)</option>
+            <option value="solarized-light">Solarized Light</option>
+          </select>
+          <label class="wizard-pref-row">
+            <span>Keyboard (vim) navigation
+              <span class="wizard-pref-hint">— h/l/j/k to move, ? for the cheat-sheet</span></span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.vim_nav}
+              @change=${(e: Event) => this.setIfacePref("vim_nav", (e.target as HTMLInputElement).checked)}>
+          </label>
+        </div>
+      </div>
+      <div class="wizard-footer">
+        <button class="wizard-btn ghost" @click=${() => { this.express = false; this.requestUpdate(); }}>Customize setup</button>
+        <span class="spacer"></span>
+        <button class="wizard-btn primary" @click=${() => { this.applyRecommendedSetup(); this.go("next"); }}>Set it all up automatically →</button>
       </div>
     `;
   }
@@ -199,7 +283,22 @@ export class FirstRunWizardElement extends LitElement {
             <option value="solarized-light">Solarized Light</option>
           </select>
         </div>
-        
+
+        <div class="wizard-theme-card">
+          <label>Preferences</label>
+          <label class="wizard-pref-row">
+            <span>Keyboard (vim) navigation
+              <span class="wizard-pref-hint">— h/l/j/k to move between panes & lists, ? for the cheat-sheet</span></span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.vim_nav}
+              @change=${(e: Event) => this.setIfacePref("vim_nav", (e.target as HTMLInputElement).checked)}>
+          </label>
+          <label class="wizard-pref-row">
+            <span>24-hour time</span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.format_24h}
+              @change=${(e: Event) => this.setIfacePref("format_24h", (e.target as HTMLInputElement).checked)}>
+          </label>
+        </div>
+
         <p class="wizard-subtitle" style="margin-top: 1.5rem;">Let's get it set up.</p>
       </div>
       <div class="wizard-footer">
@@ -209,8 +308,10 @@ export class FirstRunWizardElement extends LitElement {
     `;
   }
 
-  private renderModePicker() {
-    // First run initializations
+  /** Pre-select the locally-recommended features + models for the detected
+   *  hardware (idempotent — only fills choices that aren't already set). Shared
+   *  by the express path and the customize feature picker. */
+  private applyRecommendedSetup() {
     if (this.config._setup_whisper === undefined) {
       if (this.systemRamMb >= 16000 || this.systemVramMb >= 6000) {
         this.config._setup_whisper = true;
@@ -232,7 +333,6 @@ export class FirstRunWizardElement extends LitElement {
         this.config._setup_native_streaming = false;
       }
     }
-    
     if (!this.config._whisper_model_choice) {
       if (this.systemRamMb >= 32000 || this.systemVramMb >= 8000) this.config._whisper_model_choice = "ggml-large-v3-turbo-q5_0.bin";
       else if (this.systemRamMb >= 16000 || this.systemVramMb >= 4000) this.config._whisper_model_choice = "ggml-medium.en.bin";
@@ -245,6 +345,36 @@ export class FirstRunWizardElement extends LitElement {
       else if (this.systemRamMb >= 16000 || this.systemVramMb >= 6000) this.config._ollama_model_choice = "llama3.1:8b";
       else this.config._ollama_model_choice = "llama3.2:3b";
     }
+  }
+
+  /** Human "what will be installed" plan for the detected hardware, used by the
+   *  express welcome's summary (and as the model labels). */
+  private recommendedPlan(): { icon: string; title: string; detail: string }[] {
+    const WHISPER_LABELS: Record<string, string> = {
+      "ggml-large-v3-turbo-q5_0.bin": "Whisper Large v3 Turbo (~1.1 GB)",
+      "ggml-large-v3.bin": "Whisper Large v3 (~3.1 GB)",
+      "ggml-medium.en.bin": "Whisper Medium (~1.5 GB)",
+      "ggml-small.en.bin": "Whisper Small (~480 MB)",
+      "ggml-base.en.bin": "Whisper Base (~140 MB)",
+    };
+    const plan: { icon: string; title: string; detail: string }[] = [
+      { icon: "🎙️", title: "Speech-to-text engine", detail: `whisper.cpp + ${WHISPER_LABELS[this.config._whisper_model_choice] ?? "a Whisper model"}` },
+    ];
+    if (this.config._setup_ollama) {
+      plan.push({ icon: "✨", title: "Local AI (cleanup + summaries)", detail: `Ollama + ${this.config._ollama_model_choice}` });
+    }
+    if (this.config.semantic_search?.enabled) {
+      plan.push({ icon: "🔍", title: "Semantic search", detail: "all-MiniLM embedding model (~90 MB)" });
+    }
+    if (this.config._setup_diarization) {
+      plan.push({ icon: "🗣️", title: "Speaker labels", detail: "speakrs diarization models (~500 MB)" });
+    }
+    return plan;
+  }
+
+  private renderModePicker() {
+    // Pre-select recommended features/models for the detected hardware.
+    this.applyRecommendedSetup();
 
     const gb = Math.round(this.systemRamMb / 1024);
     const sw = (id: string, checked: boolean, handler: (e: Event) => void) => html`
@@ -577,7 +707,9 @@ export class FirstRunWizardElement extends LitElement {
       </div>
       <div class="wizard-footer">
         <span class="spacer"></span>
-        <button class="wizard-btn primary" disabled>Please wait...</button>
+        ${this.isDownloading
+          ? html`<button class="wizard-btn primary" disabled>Please wait…</button>`
+          : html`<button class="wizard-btn primary" @click=${() => this.go("next")}>Continue →</button>`}
       </div>
     `;
   }
@@ -1221,29 +1353,66 @@ export class FirstRunWizardElement extends LitElement {
       c.in_place_hotkey?.combo ? `In-place: ${c.in_place_hotkey.combo}` : null,
     ].filter(Boolean).join("  ·  ") || "None set";
 
-    // [key, value, isOff]
-    const rows: [string, string, boolean][] = [
-      ["Speech-to-text", stt, !c._setup_whisper],
-      ["Real-time streaming", c._setup_whisper && c._setup_native_streaming ? "On" : "Off", !(c._setup_whisper && c._setup_native_streaming)],
-      ["AI cleanup", cleanup, cleanup === "Off"],
-      ["Auto summary", c.summary?.auto ? "On — every recording" : "On demand only", !c.summary?.auto],
-      ["Speaker diarization", c._setup_diarization ? "On (local)" : "Off", !c._setup_diarization],
-      ["Semantic search", c.semantic_search?.enabled ? "On" : "Off", !c.semantic_search?.enabled],
-      ["Microphone", mic, false],
-      ["Live preview", preview, preview === "Off"],
-      ["Destination", dest, dest === "Show in Phoneme"],
-      ["Hotkeys", hotkeys, hotkeys === "None set"],
+    // A small inline toggle, matching the switches used on the Configure step.
+    const sw = (checked: boolean, handler: (on: boolean) => void) => html`
+      <label class="wizard-switch review-switch" title="Toggle" @click=${(e: Event) => e.stopPropagation()}>
+        <input type="checkbox" .checked=${checked}
+          @change=${(e: Event) => { handler((e.target as HTMLInputElement).checked); this.requestUpdate(); }}>
+        <span class="track"></span><span class="thumb"></span>
+      </label>`;
+
+    // key · value · optional inline toggle (the boolean features can be flipped
+    // here without going back; provider-bound rows stay read-only).
+    type ReviewRow = { key: string; value: string; off: boolean; toggle?: ReturnType<typeof html> };
+    const rows: ReviewRow[] = [
+      { key: "Speech-to-text", value: stt, off: !c._setup_whisper },
+      {
+        key: "Real-time streaming",
+        value: c._setup_whisper && c._setup_native_streaming ? "On" : "Off",
+        off: !(c._setup_whisper && c._setup_native_streaming),
+        // Native streaming rides on local Whisper; only offer it when that's on.
+        toggle: c._setup_whisper ? sw(!!c._setup_native_streaming, (on) => { c._setup_native_streaming = on; }) : undefined,
+      },
+      { key: "AI cleanup", value: cleanup, off: cleanup === "Off" },
+      {
+        key: "Auto summary",
+        value: c.summary?.auto ? "On — every recording" : "On demand only",
+        off: !c.summary?.auto,
+        toggle: sw(!!c.summary?.auto, (on) => { if (!c.summary) c.summary = {}; c.summary.auto = on; }),
+      },
+      {
+        key: "Speaker diarization",
+        value: c._setup_diarization ? "On (local)" : "Off",
+        off: !c._setup_diarization,
+        toggle: sw(!!c._setup_diarization, (on) => { c._setup_diarization = on; }),
+      },
+      {
+        key: "Semantic search",
+        value: c.semantic_search?.enabled ? "On" : "Off",
+        off: !c.semantic_search?.enabled,
+        toggle: sw(!!c.semantic_search?.enabled, (on) => { if (!c.semantic_search) c.semantic_search = {}; c.semantic_search.enabled = on; }),
+      },
+      { key: "Microphone", value: mic, off: false },
+      {
+        key: "Live preview",
+        value: preview,
+        off: preview === "Off",
+        toggle: sw(!!c.recording?.streaming_preview, (on) => { if (!c.recording) c.recording = {}; c.recording.streaming_preview = on; }),
+      },
+      { key: "Destination", value: dest, off: dest === "Show in Phoneme" },
+      { key: "Hotkeys", value: hotkeys, off: hotkeys === "None set" },
     ];
 
     return html`
       <div class="wizard-body">
         <h2 class="wizard-title">Review your setup</h2>
-        <p class="wizard-subtitle">Here's what Phoneme will use. You can change any of this anytime in Settings.</p>
+        <p class="wizard-subtitle">Here's what Phoneme will use — flip a switch to change it now, or adjust anything later in Settings.</p>
         <div class="review-list">
-          ${rows.map(([k, v, off]) => html`
+          ${rows.map((r) => html`
             <div class="review-row">
-              <span class="review-key">${k}</span>
-              <span class="review-val ${off ? "off" : ""}">${v}</span>
+              <span class="review-key">${r.key}</span>
+              <span class="review-val ${r.off ? "off" : ""}">${r.value}</span>
+              ${r.toggle ?? ""}
             </div>`)}
         </div>
       </div>
@@ -1284,7 +1453,7 @@ export class FirstRunWizardElement extends LitElement {
         <div class="wizard-header">
           ${this.renderProgress()}
         </div>
-        ${this.step === 'welcome' ? this.renderWelcome() : ''}
+        ${this.step === 'welcome' ? (this.express ? this.renderExpressWelcome() : this.renderWelcome()) : ''}
         ${this.step === 'mode' ? this.renderModePicker() : ''}
         ${this.step === 'configure' ? this.renderConfigure() : ''}
         ${this.step === 'connect' ? this.renderConnect() : ''}

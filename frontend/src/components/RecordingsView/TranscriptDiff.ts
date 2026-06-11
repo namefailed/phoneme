@@ -1,5 +1,5 @@
 import { escapeHtml } from "../../utils/format";
-import { diffText, type DiffOp, type DiffMode } from "../../utils/diff";
+import { diffText, type DiffOp, type DiffOpType, type DiffMode } from "../../utils/diff";
 
 /**
  * Read-only side-by-side-ish DIFF of a recording's transcript layers
@@ -77,7 +77,7 @@ export class TranscriptDiff {
         <div class="tdiff-bar">
           <div class="tdiff-pickers">
             ${this.selectHtml("left", this.left)}
-            <span class="tdiff-arrow" aria-hidden="true">→</span>
+            <button class="tdiff-swap" title="Swap sides" aria-label="Swap the two versions">⇄</button>
             ${this.selectHtml("right", this.right)}
           </div>
           <div class="tdiff-modes" role="group" aria-label="Diff granularity">
@@ -86,9 +86,10 @@ export class TranscriptDiff {
           </div>
         </div>
         <div class="tdiff-legend">
+          <span class="tdiff-stat" id="tdiff-stats">${this.statsHtml()}</span>
+          <span class="tdiff-spacer"></span>
           <span class="tdiff-key tdiff-del">removed</span>
           <span class="tdiff-key tdiff-ins">added</span>
-          <span class="tdiff-hint">Comparing the left version against the right (read-only)</span>
         </div>
         <div class="tdiff-body" id="tdiff-body">${this.bodyHtml()}</div>
       </div>
@@ -128,27 +129,102 @@ export class TranscriptDiff {
     const ops = diffText(leftVal ?? "", rightVal ?? "", this.mode);
     if (ops.every((o) => o.type === "equal")) {
       return `<div class="tdiff-same">These two versions are identical.</div>
-        <div class="tdiff-text">${this.renderOps(ops)}</div>`;
+        <div class="tdiff-text tdiff-text--numbered">${this.renderUnified(ops)}</div>`;
     }
-    return `<div class="tdiff-text">${this.renderOps(ops)}</div>`;
+    return `<div class="tdiff-text tdiff-text--numbered">${this.renderUnified(ops)}</div>`;
   }
 
-  /** Turn diff ops into highlighted, HTML-escaped spans. */
-  private renderOps(ops: DiffOp[]): string {
-    return ops
-      .map((op) => {
-        const safe = escapeHtml(op.value);
-        if (op.type === "insert") return `<span class="tdiff-ins">${safe}</span>`;
-        if (op.type === "delete") return `<span class="tdiff-del">${safe}</span>`;
-        return `<span class="tdiff-eq">${safe}</span>`;
+  /** Render a unified, line-numbered diff: an old + new line-number gutter, a
+   *  per-line marker (+ added · − removed · ~ changed-in-place · blank context),
+   *  and the row's inline word/line highlights inside the content column. */
+  private renderUnified(ops: DiffOp[]): string {
+    type Seg = { type: DiffOpType; text: string };
+    type Line = { segs: Seg[]; hasOld: boolean; hasNew: boolean };
+
+    // Split the op stream into logical lines, tracking whether each line exists
+    // in the old side (equal|delete) and/or the new side (equal|insert) so the
+    // two gutters advance correctly — even for blank lines with no segments.
+    const lines: Line[] = [];
+    let segs: Seg[] = [];
+    let hasOld = false;
+    let hasNew = false;
+    const finalize = () => {
+      lines.push({ segs, hasOld, hasNew });
+      segs = [];
+      hasOld = false;
+      hasNew = false;
+    };
+    for (const op of ops) {
+      const isOld = op.type === "equal" || op.type === "delete";
+      const isNew = op.type === "equal" || op.type === "insert";
+      const parts = op.value.split("\n");
+      for (let p = 0; p < parts.length; p++) {
+        const text = parts[p];
+        const endsLine = p < parts.length - 1;
+        if (endsLine || text !== "") {
+          if (isOld) hasOld = true;
+          if (isNew) hasNew = true;
+          if (text) segs.push({ type: op.type, text });
+        }
+        if (endsLine) finalize();
+      }
+    }
+    if (segs.length || hasOld || hasNew) finalize();
+
+    let oldNo = 0;
+    let newNo = 0;
+    const cls = (t: DiffOpType) => (t === "insert" ? "ins" : t === "delete" ? "del" : "eq");
+    return lines
+      .map((line) => {
+        const oldNum = line.hasOld ? (++oldNo).toString() : "";
+        const newNum = line.hasNew ? (++newNo).toString() : "";
+        const ins = line.segs.some((s) => s.type === "insert");
+        const del = line.segs.some((s) => s.type === "delete");
+        let kind = "ctx";
+        let mark = " ";
+        if (ins || del) {
+          if (line.hasOld && line.hasNew) { kind = "mod"; mark = "~"; }
+          else if (line.hasNew) { kind = "add"; mark = "+"; }
+          else { kind = "del"; mark = "−"; }
+        }
+        const content =
+          line.segs.map((s) => `<span class="tdiff-${cls(s.type)}">${escapeHtml(s.text)}</span>`).join("") ||
+          "&nbsp;";
+        return (
+          `<div class="tdiff-row tdiff-row--${kind}">` +
+          `<span class="tdiff-ln">${oldNum}</span>` +
+          `<span class="tdiff-ln">${newNum}</span>` +
+          `<span class="tdiff-mark">${mark}</span>` +
+          `<span class="tdiff-content">${content}</span>` +
+          `</div>`
+        );
       })
       .join("");
   }
 
-  /** Re-render only the diff body (after a picker/mode change). */
-  private refreshBody() {
+  /** A short "+N added · −M removed" (by word count) summary of the diff. */
+  private statsHtml(): string {
+    if (this.left === this.right || !this.hasContent(this.left) || !this.hasContent(this.right)) {
+      return "";
+    }
+    const ops = diffText(this.valueOf(this.left) ?? "", this.valueOf(this.right) ?? "", this.mode);
+    const words = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+    let added = 0;
+    let removed = 0;
+    for (const op of ops) {
+      if (op.type === "insert") added += words(op.value);
+      else if (op.type === "delete") removed += words(op.value);
+    }
+    if (added === 0 && removed === 0) return `<span class="tdiff-stat-same">No differences</span>`;
+    return `<span class="tdiff-stat-add">+${added} added</span> · <span class="tdiff-stat-del">−${removed} removed</span>`;
+  }
+
+  /** Re-render the diff body + the stats (after a picker/mode/swap change). */
+  private refresh() {
     const body = this.container.querySelector<HTMLElement>("#tdiff-body");
     if (body) body.innerHTML = this.bodyHtml();
+    const stats = this.container.querySelector<HTMLElement>("#tdiff-stats");
+    if (stats) stats.innerHTML = this.statsHtml();
   }
 
   private wire() {
@@ -158,8 +234,12 @@ export class TranscriptDiff {
         const key = sel.value as LayerKey;
         if (side === "left") this.left = key;
         else this.right = key;
-        this.refreshBody();
+        this.refresh();
       });
+    });
+    this.container.querySelector<HTMLButtonElement>(".tdiff-swap")?.addEventListener("click", () => {
+      [this.left, this.right] = [this.right, this.left];
+      this.render();
     });
     this.container.querySelectorAll<HTMLButtonElement>(".tdiff-mode").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -167,10 +247,10 @@ export class TranscriptDiff {
         if (next === this.mode) return;
         this.mode = next;
         // Toggle the active class without a full re-render so the pickers keep
-        // their state, then refresh the diff body.
+        // their state, then refresh the diff body + stats.
         this.container.querySelectorAll(".tdiff-mode").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        this.refreshBody();
+        this.refresh();
       });
     });
   }

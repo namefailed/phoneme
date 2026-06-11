@@ -44,7 +44,12 @@ export class SectionSemantic {
         </div>
 
         <details class="settings-advanced">
-          <summary>Advanced — model compatibility</summary>
+          <summary>
+            <svg class="settings-advanced-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+              <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            Advanced — model compatibility
+          </summary>
           <span style="display:block; font-size:11px; color:var(--fg-faded); margin:4px 0 10px;">
             Defaults match all-MiniLM. Adjust these to use other ONNX sentence-transformers (E5, BGE, GTE, MPNet…).
           </span>

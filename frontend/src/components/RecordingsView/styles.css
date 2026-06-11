@@ -3,6 +3,20 @@
   overflow-y: auto;
   background: var(--bg-deep);
 }
+.rec-table-inner.transcript-tail {
+  /* Transcript is the LAST column: grow with the columns (so the row + its
+     background extend the full horizontally-scrolled width) but never narrower
+     than the pane (so the trailing 1fr filler fills to the splitter when the
+     columns fit). When transcript is elsewhere, the inner instead gets an inline
+     min-width and stays pane-width — no content-driven growth. */
+  width: max-content;
+  min-width: 100%;
+}
+.rec-table-inner.transcript-tail .rec-preview {
+  /* Cap the transcript column's content-driven growth so the scroll stays
+     bounded (only meaningful when transcript is the tail column). */
+  max-width: 1200px;
+}
 .rec-table::-webkit-scrollbar {
   width: 6px;
 }
@@ -79,14 +93,18 @@
 .rec-row.active .rec-preview {
   color: var(--fg-default);
 }
-/* Keyboard-focus ring only matters on rows that AREN'T the selected one —
-   otherwise this (equal specificity, declared after .rec-row.active) would
-   override the much stronger selected look, which is the "selection reverts to
-   a faint border" bug. The active row keeps its full highlight. */
-.rec-row.kbd-focused:not(.active) {
+/* Keyboard cursor row. Scoped to `.rec-table:focus-within` so it shows ONLY
+   while the list actually holds focus — it clears the instant you move to
+   another pane (vim h/l) or click away, instead of lingering and making it
+   ambiguous which pane is active. A left accent bar + ring + tint make the
+   cursor unmistakable while you're in the list. Rows that are the SELECTED one
+   keep their full selected look (`:not(.active)` never overrides it). */
+.rec-table:focus-within .rec-row.kbd-focused:not(.active),
+.rec-table:focus-within .rec-group-head.kbd-focused:not(.active) {
   outline: none;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
-  background: rgba(203, 166, 247, 0.05);
+  box-shadow: inset 3px 0 0 var(--accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .rec-table:focus {
   outline: none;
@@ -308,20 +326,43 @@ mark.search-hit {
   color: var(--accent);
 }
 
-/* Transcript history row holding the View summary / unedited / original
-   toggles. Horizontal and right-aligned; wraps only if the pane is too narrow
-   to fit all three on one line. */
+/* Transcript view-toggle row: Speakers + Summary anchor left, Compare /
+   Original / Unedited anchor right. Each group wraps internally if the pane is
+   too narrow. */
 .transcript-history {
+  margin-top: 6px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
-.transcript-history .inline-button {
-  white-space: nowrap;
+.transcript-history .th-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+/* Compact, icon-led "view" buttons that wrap gracefully on a narrow pane
+   (replacing the wide "View original transcript"-style labels). */
+.view-btn {
   flex: 0 0 auto;
+  white-space: nowrap;
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.view-btn:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .transcript-block {
   /* Tighter bottom margin: it sits directly above the notes block, so this is
@@ -422,6 +463,93 @@ mark.search-hit {
   border-color: var(--accent);
   background: var(--bg-surface);
 }
+
+/* Focus-mode toggle in the detail header — collapses the list for full-width
+   editing. */
+.detail-focus-btn {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+/* Block display + explicit size so the icon is crisply centered in the button
+   (an inline SVG otherwise sits a hair off-center on its text baseline). */
+.detail-focus-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+.detail-focus-btn:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.detail-focus-btn.active {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
+/* Rename-speakers modal — opened from the "Speakers" button so renaming never
+   stretches the detail pane. The inner `.speakers-block` reuses the speaker-row
+   styling above; the inline overrides strip its standalone-panel chrome. */
+.speakers-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: speakersFadeIn 0.12s ease-out;
+}
+@keyframes speakersFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.speakers-modal {
+  width: min(420px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.speakers-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.speakers-modal-close {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.speakers-modal-close:hover { background: var(--bg-surface); color: var(--accent); }
+.speakers-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .cm-editor-root, .cm-editor {
   flex: 1;
   height: 100%;
@@ -539,7 +667,9 @@ mark.search-hit {
   color: var(--fg-default);
   border-bottom: 1px solid var(--border-subtle);
   user-select: none;
+  cursor: move; /* drag the panel by its title bar */
 }
+.thinking-close { cursor: pointer; }
 /* Polished header title: brain glyph + name, an animated "live" pill, and a
    muted total-entries badge. */
 .thinking-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
@@ -758,7 +888,7 @@ mark.search-hit {
   background: var(--border-subtle);
   position: relative;
   cursor: col-resize;
-  width: 3px;
+  width: 6px;
   height: 100%;
   z-index: 100;
   transition: background 0.15s ease-out, box-shadow 0.15s ease-out;
@@ -769,11 +899,44 @@ mark.search-hit {
 }
 .splitter-handle {
   position: absolute;
-  inset: 0;
+  /* Extend the grabbable area a few px each side of the thin visible bar so the
+     splitter is easy to grab without making the divider itself look chunky. */
+  inset: 0 -5px;
 }
 .rv-detail {
   height: 100%;
   overflow: hidden;
+}
+
+/* ── Vim navigation: focus ring on the active pane ────────────────────────── */
+/* Toggled by RecordingsView only while `interface.vim_nav` is on, so non-vim
+   users never see it. An INSET shadow (not an outline) so the panes'
+   `overflow:hidden` can't clip it and it never bleeds over the splitter. */
+.rv-pane-focused {
+  /* A 2px accent border plus a soft inner glow so the active pane reads clearly
+     at a glance — the ring alone was easy to miss across a busy list. */
+  box-shadow: inset 0 0 0 2px var(--accent),
+    inset 0 0 16px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+/* vim j/k cursor on a detail-pane option button (so it's clear what you're on).
+   Tight to the control — a wide outline-offset reads as an oversized halo. */
+.rv-detail .kbd-cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: 6px;
+}
+/* The list scroll-area and the detail/sidebar containers take focus (tabindex)
+   so h/l can move between them; suppress the browser's own focus outline in
+   favour of the accent ring above. */
+.rv-list:focus,
+.rv-list:focus-visible,
+.rv-detail:focus,
+.rv-detail:focus-visible,
+ph-sidebar:focus,
+ph-sidebar:focus-visible,
+.rec-table:focus,
+.rec-table:focus-visible {
+  outline: none;
 }
 
 /* ── Checkbox column ──────────────────────────────────────────────────────── */
@@ -854,7 +1017,8 @@ mark.search-hit {
 /* Floating, draggable bulk-action popup (position set inline by the component). */
 .bulk-bar {
   pointer-events: all;
-  z-index: 150;
+  /* Above the list↔detail splitter (100) and the AI-activity button (200). */
+  z-index: 300;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -945,6 +1109,13 @@ mark.search-hit {
   color: var(--fg-default);
   cursor: pointer;
   white-space: nowrap;
+}
+/* Keyboard roving cursor inside the bulk bar (Shift+Enter → h/l/Enter). */
+.bulk-btn.kbd-cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .bulk-btn:hover:not(:disabled) {
   border-color: var(--accent);
@@ -1464,12 +1635,19 @@ ph-sidebar {
 
 /* Sidebar resize handle (between the sidebar and the recordings list). */
 .rv-sidebar-resizer {
-  width: 4px;
+  width: 6px;
   height: 100%;
   cursor: col-resize;
   background: transparent;
   z-index: 100;
+  position: relative;
   transition: background 0.15s ease-out;
+}
+/* Invisible wider hit area so the thin handle is easy to grab. */
+.rv-sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
 }
 .rv-sidebar-resizer:hover { background: var(--accent); }
 .sidebar-header {
@@ -1526,6 +1704,12 @@ ph-sidebar {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   font-weight: 500;
+}
+/* vim j/k cursor within the focused sidebar. */
+.sidebar-item.kbd-cursor {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-default);
 }
 .sidebar-icon {
   font-size: 14px;
@@ -1597,89 +1781,148 @@ ph-sidebar {
   flex-shrink: 0;
 }
 .merged-meta {
-  margin-top: 6px;
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   color: var(--fg-muted);
   font-size: 12px;
 }
+.merged-meta-pill {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-default);
+  font-weight: 600;
+  font-size: 11px;
+}
+.merged-meta-ro {
+  color: var(--fg-faded);
+  font-style: italic;
+}
 .merged-body {
-  padding: 12px 18px 24px;
+  padding: 10px 16px 28px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
-/* Source section divider — repeated whenever the speaking track changes. */
+/* Source section divider — a pill, repeated whenever the speaking track changes. */
 .merged-source {
-  display: flex;
+  align-self: flex-start;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin: 14px 0 4px;
-  font-size: 12px;
+  gap: 7px;
+  margin: 20px 0 8px;
+  padding: 4px 12px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 999px;
 }
 .merged-source:first-child {
   margin-top: 0;
 }
 .merged-source-icon {
-  font-size: 14px;
+  font-size: 13px;
 }
 .merged-source-label {
   color: var(--accent);
 }
-/* One speaker turn (or one prose block for an un-diarized track). */
+/* One speaker turn — a chat-style row: colored avatar + name + text. The turn's
+   accent (`--spk`, set inline per block) is that speaker's color. */
 .merged-turn {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-left: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 8px;
-  padding: 10px 14px;
-  line-height: 1.6;
-  color: var(--fg-default);
-  font-size: 14px;
-  white-space: pre-wrap;
-}
-.merged-speaker {
-  display: inline-block;
-  margin-right: 8px;
-  padding: 1px 8px;
+  display: flex;
+  gap: 11px;
+  padding: 8px 10px;
   border-radius: 10px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  vertical-align: 2px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: background 0.12s ease;
 }
-/* The speaker chip is a click-to-rename button. Inherit the chip look and add a
-   pointer + hover so it reads as interactive without changing the layout. */
-.merged-speaker-button {
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s ease, border-color 0.15s ease;
+.merged-turn:hover {
+  background: color-mix(in srgb, var(--spk, var(--accent)) 8%, transparent);
 }
-.merged-speaker-button:hover {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  border-color: var(--accent);
+/* Un-diarized prose: no avatar, so indent the body to line up with diarized turns. */
+.merged-turn--prose .merged-turn-body {
+  padding-left: 41px;
 }
-.merged-speaker-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.merged-avatar {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--spk, var(--accent));
+  background: color-mix(in srgb, var(--spk, var(--accent)) 18%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--spk, var(--accent)) 50%, transparent);
 }
-/* Inline rename field — same pill footprint as the chip, sized to fit a name. */
-.merged-speaker-input {
-  width: 12ch;
-  font-family: inherit;
-  outline: none;
+.merged-turn-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
-.merged-speaker-input:focus {
-  border-color: var(--accent);
-  background: var(--bg-surface);
+.merged-turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 16px;
 }
 .merged-text {
   color: var(--fg-default);
+  line-height: 1.6;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+/* The speaker name (click to rename), in the speaker's color. */
+.merged-speaker {
+  display: inline-block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--spk, var(--accent));
+}
+.merged-speaker-button {
+  cursor: pointer;
+  font-family: inherit;
+  background: none;
+  border: none;
+  padding: 1px 5px;
+  margin-left: -5px;
+  border-radius: 5px;
+  transition: background 0.12s ease;
+}
+.merged-speaker-button:hover {
+  background: color-mix(in srgb, var(--spk, var(--accent)) 16%, transparent);
+}
+.merged-speaker-button:focus-visible {
+  outline: 2px solid var(--spk, var(--accent));
+  outline-offset: 1px;
+}
+/* Inline rename field — compact, in the speaker color. */
+.merged-speaker-input {
+  width: 14ch;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--spk, var(--accent));
+  background: var(--bg-surface);
+  border: 1px solid var(--spk, var(--accent));
+  border-radius: 5px;
+  padding: 1px 6px;
+  outline: none;
+}
+.merged-speaker-input:focus {
+  border-color: var(--spk, var(--accent));
 }
 
 /* ── Transcript version diff (Compare versions) ───────────────────── */
@@ -1784,6 +2027,46 @@ ph-sidebar {
   font-size: 14px;
   color: var(--fg-default);
 }
+/* Line-numbered unified view: old + new gutters, a marker, then the content. */
+.tdiff-text--numbered {
+  white-space: normal;
+  font-size: 13px;
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  line-height: 1.55;
+}
+.tdiff-row {
+  display: flex;
+  align-items: flex-start;
+}
+.tdiff-row .tdiff-ln {
+  flex: 0 0 auto;
+  width: 38px;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--fg-faded);
+  user-select: none;
+  border-right: 1px solid var(--border-subtle);
+}
+.tdiff-row .tdiff-mark {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  color: var(--fg-faded);
+  user-select: none;
+}
+.tdiff-row .tdiff-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 8px;
+}
+.tdiff-row--add { background: color-mix(in srgb, var(--ok) 9%, transparent); }
+.tdiff-row--add .tdiff-mark { color: var(--ok); }
+.tdiff-row--del { background: color-mix(in srgb, var(--err) 9%, transparent); }
+.tdiff-row--del .tdiff-mark { color: var(--err); }
+.tdiff-row--mod { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.tdiff-row--mod .tdiff-mark { color: var(--accent); }
 .tdiff-eq {
   color: var(--fg-default);
 }
@@ -1812,4 +2095,87 @@ ph-sidebar {
   margin-bottom: 8px;
   font-style: italic;
   color: var(--fg-faded);
+}
+/* Swap-sides button between the two version pickers. */
+.tdiff-swap {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.tdiff-swap:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Diff stats (left of the legend) — +N added / −M removed by word count. */
+.tdiff-spacer { flex: 1 1 auto; }
+.tdiff-stat { font-weight: 600; }
+.tdiff-stat-add { color: color-mix(in srgb, var(--ok) 85%, var(--fg-default)); }
+.tdiff-stat-del { color: color-mix(in srgb, var(--err) 85%, var(--fg-default)); }
+.tdiff-stat-same { color: var(--fg-faded); font-style: italic; }
+
+/* "Compare versions" modal — a roomy home for the diff (the in-pane peek was
+   far too cramped). The .tdiff inside fills the body and scrolls. */
+.tdiff-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 4vw;
+  animation: speakersFadeIn 0.12s ease-out;
+}
+.tdiff-modal {
+  width: min(960px, 100%);
+  height: min(80vh, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: var(--popup-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.tdiff-modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.tdiff-modal-close {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 15px;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.tdiff-modal-close:hover { background: var(--bg-surface); color: var(--accent); }
+.tdiff-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 18px;
+  overflow: hidden;
+}
+.tdiff-loading {
+  color: var(--fg-muted);
+  font-size: 13px;
 }
