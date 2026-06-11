@@ -81,6 +81,18 @@ export class BulkActionBarElement extends LitElement {
    *  Capture-phase + stopPropagation so it beats the list/global handlers; only
    *  active once Shift+Enter entered the nav and no dropdown/modal owns keys. */
   private onBulkNavKey = (e: KeyboardEvent) => {
+    // `\` with exactly two recordings selected (and not typing) opens them side
+    // by side — same action as the bar's "Side by side" button.
+    if (e.key === "\\" && this.selected.size === 2) {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (!typing) {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.openSideBySide();
+      }
+      return;
+    }
     // Shift+Enter (while a selection exists, and not typing in a field) hands
     // control to the bar. The bar is only mounted when something is selected, so
     // this listener is dormant otherwise.
@@ -218,6 +230,16 @@ export class BulkActionBarElement extends LitElement {
     this.callbacks.onRefresh();
   }
 
+  /** Open the two selected recordings side by side (vim editors). Only
+   *  meaningful with exactly two selected — the button only shows then, and the
+   *  `\` shortcut is gated the same way. */
+  private async openSideBySide() {
+    if (this.selected.size !== 2) return;
+    const [a, b] = [...this.selected];
+    const { openSideBySide } = await import("./SideBySide");
+    await openSideBySide(a, b);
+  }
+
   /** Open the unified Models modal in one-shot mode for the whole selection —
    *  the same context-aware modal the detail Re-run and the header Quick
    *  Switcher use, so bulk and single Re-run are identical. "Run once" there
@@ -316,6 +338,8 @@ export class BulkActionBarElement extends LitElement {
         <span class="bulk-count">${this.busy ? "Working…" : `${n} selected`}</span>
         <div class="bulk-actions">
           <button class="bulk-btn" title="Re-run the selected recordings with chosen models" .disabled=${this.busy} @click=${this.openBulkRerun}>↻ Re-run</button>
+
+          ${n === 2 ? html`<button class="bulk-btn" title="View the two selected recordings side by side (\\)" .disabled=${this.busy} @click=${this.openSideBySide}>◫ Side by side</button>` : null}
 
           <span class="bulk-menu-wrap">
             <button class="bulk-btn" title="Add a tag to selected" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("tag", e)}>🏷 Tag <svg class="ph-caret-ico ${this.openMenu === "tag" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
