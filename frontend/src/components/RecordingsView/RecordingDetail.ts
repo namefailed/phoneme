@@ -7,7 +7,6 @@ import {
   rerunSummary,
   setSpeakerName,
   type Recording,
-  type SpeakerName,
 } from "../../services/ipc";
 import {
   formatDuration,
@@ -18,7 +17,7 @@ import {
   escapeAttr,
 } from "../../utils/format";
 import { showToast } from "../../utils/toast";
-import { speakerLabelsIn, speakerDisplayName, applySpeakerNames } from "./mergeMeeting";
+import { speakerDisplayName, speakersForRename, renameSpeakerInTranscript } from "./mergeMeeting";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptDiff } from "./TranscriptDiff";
@@ -427,7 +426,9 @@ export class RecordingDetail {
   private renderSpeakers(r: Recording) {
     const btn = this.container.querySelector<HTMLButtonElement>("#rename-speakers");
     if (!btn) return;
-    const labels = speakerLabelsIn(r.transcript);
+    // Include already-renamed speakers (from the names map), not just the ones
+    // still carrying a [Speaker N] marker — so they stay renamable.
+    const labels = speakersForRename(r.transcript, r.speaker_names);
     if (labels.length === 0) {
       btn.style.display = "none";
       btn.onclick = null;
@@ -529,24 +530,26 @@ export class RecordingDetail {
   ) {
     if (value.trim() === previous.trim()) return; // nothing changed
     try {
+      // The speaker's CURRENT display name (before this rename) — needed to find
+      // an already-baked label in the text on the 2nd/3rd rename.
+      const oldName = speakerDisplayName(this.recording?.speaker_names, label);
       await setSpeakerName(id, label, value.trim());
-      // Keep local state in sync so an in-place refresh shows the new name.
-      let names: SpeakerName[] = [];
       if (this.recording?.id === id) {
-        names = (this.recording.speaker_names ?? []).filter(
+        const names = (this.recording.speaker_names ?? []).filter(
           (s) => s.speaker_label !== label,
         );
         if (value.trim()) names.push({ speaker_label: label, name: value.trim() });
         this.recording.speaker_names = names;
-      }
-      // Bake the names into the transcript text itself: replace every
-      // `[Speaker N]` marker with its chosen name and persist that. This is what
-      // makes the rename "stick" in the actual transcription.
-      if (this.recording?.id === id && this.recording.transcript) {
-        const baked = applySpeakerNames(this.recording.transcript, names);
-        if (baked !== this.recording.transcript) {
-          await updateTranscript(id, baked);
-          this.recording.transcript = baked;
+        // Bake the name into the transcript text so it sticks AND stays
+        // renamable: replace the [Speaker N] marker OR a previously-baked name.
+        // Skip meeting tracks — the merged view splits turns on the markers, so
+        // baking would break it (it shows names from the map there instead).
+        if (this.recording.transcript && !this.recording.meeting_id) {
+          const rewritten = renameSpeakerInTranscript(this.recording.transcript, label, oldName, value);
+          if (rewritten !== this.recording.transcript) {
+            await updateTranscript(id, rewritten);
+            this.recording.transcript = rewritten;
+          }
         }
       }
       showToast(value.trim() ? "Speaker renamed" : "Speaker name cleared", "success");
