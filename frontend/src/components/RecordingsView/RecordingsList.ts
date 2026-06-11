@@ -400,10 +400,16 @@ export class RecordingsListElement extends LitElement {
       e.preventDefault();
       const row = rows[this.focusedIndex];
       if (!row) return;
-      // Enter on a meeting header expands/collapses it; on a recording it opens
-      // the recording.
-      if (row.kind === "header") this.toggleSession(row.meetingId);
-      else this.onSelectCb(row.rec.id);
+      // On a meeting header: Enter expands/collapses it; Shift+Enter opens the
+      // merged conversation view (same as clicking the header). On a recording,
+      // Enter opens it (single recordings have no merged view, so Shift is a
+      // no-op distinction there).
+      if (row.kind === "header") {
+        if (e.shiftKey) this.onSelectCb("session:" + row.meetingId);
+        else this.toggleSession(row.meetingId);
+      } else {
+        this.onSelectCb(row.rec.id);
+      }
     } else if (e.key === " " && this.focusedIndex >= 0) {
       e.preventDefault();
       const row = rows[this.focusedIndex];

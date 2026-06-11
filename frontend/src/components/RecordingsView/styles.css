@@ -1713,10 +1713,14 @@ ph-sidebar {
   color: var(--accent);
   font-weight: 500;
 }
-/* vim j/k cursor within the focused sidebar. */
+/* vim j/k cursor within the focused sidebar — matches the recordings-list row
+   cursor (.rec-row.kbd-focused) exactly so keyboard nav looks identical in both
+   vertical lists: 3px accent rail + faint accent ring + accent-tinted fill
+   (was a thin 2px rail + a plain white wash, the odd one out app-wide). */
 .sidebar-item.kbd-cursor {
-  box-shadow: inset 2px 0 0 var(--accent);
-  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 3px 0 0 var(--accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--fg-default);
 }
 .sidebar-icon {

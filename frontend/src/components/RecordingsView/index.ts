@@ -332,9 +332,11 @@ export class RecordingsView {
     const panes = this.panesInOrder();
     if (!panes.length) return;
     let idx = this.focusedPane ? panes.indexOf(this.focusedPane) : -1;
-    // First-ever move (or the remembered pane is now hidden): enter from the
-    // matching edge so h lands on the rightmost pane, l on the leftmost.
-    if (idx < 0) idx = dir === "right" ? -1 : panes.length;
+    // First-ever move (or the remembered pane is now hidden): start from the
+    // list (the central pane) so h goes left and l goes right — matching the
+    // direction the keys imply. (Wrapping in from the far edge made the first
+    // h after a reload jump *right* and the first l jump *left* — swapped.)
+    if (idx < 0) idx = panes.indexOf("list");
     const next = Math.max(0, Math.min(panes.length - 1, idx + (dir === "right" ? 1 : -1)));
     this.focusPane(panes[next]);
   }
