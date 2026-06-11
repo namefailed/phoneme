@@ -201,13 +201,17 @@ export class TagChipsElement extends LitElement {
     }
     if (e.key === "Escape") {
       // Leave the tag box entirely (back to the detail pane's grid nav), closing
-      // the suggestions dropdown on the way out.
+      // the suggestions dropdown on the way out. Blur the input directly, then
+      // (next frame, so the blur settles before focus moves) hand control back
+      // to the detail grid — otherwise it just looks like the dropdown closed.
       e.preventDefault();
       e.stopPropagation();
       this._showDropdown = false;
       this.activeIndex = -1;
-      (e.target as HTMLElement).blur();
-      window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } }));
+      this.renderRoot.querySelector<HTMLInputElement>(".tag-add")?.blur();
+      requestAnimationFrame(() =>
+        window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } })),
+      );
       return;
     }
     if (e.key === "Enter") {

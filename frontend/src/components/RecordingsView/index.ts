@@ -477,8 +477,15 @@ export class RecordingsView {
     if (this.detailRow < 0) { this.enterDetailNav(); return; }
     const next = this.detailRow + delta;
     if (next < 0) {
+      // Up past the top row → the header search bar in ROVING (highlight) mode —
+      // exactly like k at the top of the list, NOT focused for typing. Release
+      // the detail pane first.
       this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
-      this.focusSearchBar();
+      this.paneEl("detail")?.classList.remove("rv-pane-focused");
+      this.detailRow = -1;
+      this.detailCol = 0;
+      this.focusedPane = null;
+      window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
       return;
     }
     if (next >= rows.length) return;

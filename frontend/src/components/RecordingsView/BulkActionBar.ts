@@ -172,6 +172,13 @@ export class BulkActionBarElement extends LitElement {
   // ── Drag ────────────────────────────────────────────────────────────────
   private startDrag(e: MouseEvent) {
     e.preventDefault();
+    // Ctrl+Shift-click resets to the default bottom-centre position.
+    if (e.ctrlKey && e.shiftKey) {
+      e.stopPropagation();
+      this.pos = null;
+      try { localStorage.removeItem(POS_LS); } catch { /* ignore */ }
+      return;
+    }
     const startX = e.clientX;
     const startY = e.clientY;
     const bar = (e.currentTarget as HTMLElement).closest<HTMLElement>(".bulk-bar");
@@ -312,7 +319,7 @@ export class BulkActionBarElement extends LitElement {
 
     return html`
       <div class="bulk-bar" style=${style}>
-        <span class="bulk-grip" title="Drag to move" @mousedown=${(e: MouseEvent) => this.startDrag(e)}>⠿</span>
+        <span class="bulk-grip" title="Drag to move · Ctrl+Shift-click to reset" @mousedown=${(e: MouseEvent) => this.startDrag(e)}>⠿</span>
         <span class="bulk-count">${this.busy ? "Working…" : `${n} selected`}</span>
         <div class="bulk-actions">
           <span class="bulk-menu-wrap">
