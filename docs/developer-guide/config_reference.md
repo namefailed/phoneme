@@ -158,6 +158,12 @@ Stored results: `summary` and `summary_model` columns on the recording.
 
 ---
 
+## `[recording]` — meeting preview
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `meeting_preview` | `"toggle"` | How the live preview handles a meeting's two tracks (needs `streaming_preview`). `"toggle"` — one preview loop follows a single track; the overlay's 🎤/🔊 button switches it (same cost as a single recording). `"both"` — one loop per track, captions stacked in the overlay (~double the preview work; the loops interleave on the shared transcription semaphore). |
+
 ## `[auto_tag]`
 
 LLM tag suggestions, approved by the user before they apply. Blank

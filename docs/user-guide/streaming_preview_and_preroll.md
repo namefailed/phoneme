@@ -74,3 +74,19 @@ With `interface.preview_overlay = true`, the live caption also appears in a fram
 | Both | Long-form voice notes where you care about start *and* mid-flight feedback |
 
 In **Meeting Mode**, the preview follows your **microphone** track (your dense local voice), so you still see live feedback during a call. Neither feature affects Meeting Mode timeline alignment — see [Meeting Mode](meeting_mode.md).
+
+## 👥 Meetings: two tracks in the overlay
+
+A meeting records your **microphone** and the **system audio** as two tracks.
+**Settings → Transcription → Live Preview → Meetings** picks how the overlay
+captions them:
+
+- **One track at a time** (default) — one caption line plus a **🎤/🔊 button**
+  on the overlay that switches which track the preview follows. Starts on your
+  mic; same cost as a single-recording preview.
+- **Both tracks at once** — two stacked caption lines, one per track, updating
+  together. Roughly double the preview transcription work — pair it with a
+  small dedicated preview model. The two loops take turns on the transcription
+  server, so they never run two requests at once.
+
+Config: `recording.meeting_preview = "toggle" | "both"`.
