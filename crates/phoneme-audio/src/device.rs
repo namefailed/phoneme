@@ -8,7 +8,10 @@ use phoneme_core::error::{Error, Result};
 /// Lightweight info about an audio input device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DeviceInfo {
+    /// Host-reported device name. This doubles as the device's identity: it is
+    /// what the config stores and what [`resolve_input_device`] looks up.
     pub name: String,
+    /// Whether this device is the host's current default input.
     pub is_default: bool,
 }
 
@@ -58,8 +61,13 @@ pub fn find_device_by_name(name: &str) -> Result<Option<cpal::Device>> {
     Ok(None)
 }
 
-/// Resolve the CPAL `Device` for the configured input. If `requested == "default"`,
-/// returns the default; otherwise looks up by name.
+/// Resolve the configured input down to a concrete CPAL device.
+///
+/// `"default"` or an empty string selects the host default; anything else is
+/// matched against device names. Returns `Err` when the default is requested but
+/// the host reports none, or when a named device can't be found (so a stale
+/// config naming an unplugged device surfaces a clear error rather than silently
+/// falling back).
 pub fn resolve_input_device(requested: &str) -> Result<cpal::Device> {
     let host = cpal::default_host();
     if requested == "default" || requested.is_empty() {

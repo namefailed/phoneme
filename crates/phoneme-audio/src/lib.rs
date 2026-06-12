@@ -1,4 +1,16 @@
 //! phoneme-audio — audio capture and WAV encoding for Phoneme.
+//!
+//! Everything Phoneme records or imports is funneled into one canonical PCM
+//! format — 16-bit signed samples, 16 kHz, mono — before it reaches the
+//! transcription pipeline. The modules here cover the path from a live capture
+//! device (or an imported file) to that canonical WAV: device enumeration
+//! ([`device`]), the capture state machine ([`recorder`]) over a pluggable
+//! sample [`source`], sample-format conversion ([`convert`]), silence detection
+//! for auto-stop ([`silence`]), a pre-roll ring buffer ([`preroll`]), WAV
+//! read/write ([`wav`]), arbitrary-file decoding ([`decode`]), and wall-clock
+//! alignment of meeting-mode dual tracks ([`meeting_align`]).
+
+#![warn(missing_docs)]
 
 pub mod convert;
 pub mod decode;
