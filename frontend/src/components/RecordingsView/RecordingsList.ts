@@ -1053,4 +1053,8 @@ export class RecordingsList {
   ensureCursor() {
     this.element.ensureCursor();
   }
+
+  centerCursor() {
+    this.element.centerCursor();
+  }
 }
