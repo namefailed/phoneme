@@ -373,7 +373,7 @@ impl DaemonRecorder {
     /// next tick is skipped — never two in flight), and stops when told to via
     /// `stop_tx`.
     ///
-    /// `snapshot` is a [`SnapshotHandle`] cloned from the recorder whose audio
+    /// `snapshot` is a `SnapshotHandle` cloned from the recorder whose audio
     /// the preview should reflect: the single recording's recorder, or a
     /// meeting's mic track. Passing the handle (rather than reaching into
     /// `self.handle`) is what lets one preview implementation serve BOTH the
@@ -711,7 +711,9 @@ impl DaemonRecorder {
     /// Stop the current recording, write the WAV, and mark the catalog row
     /// Transcribing. Normal recordings enqueue into the inbox for the serial
     /// pipeline; in-place dictations (unless `[in_place].full_pipeline`) hand
-    /// off to the dictation fast lane instead — see `in_place.rs`.
+    /// off to the dictation fast lane instead — and with `full_pipeline` +
+    /// `type_first`, a type-only pass runs in addition to the enqueue so the
+    /// text lands before the pipeline finishes. See `in_place.rs`.
     pub async fn stop(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
         let active = active_lock.take().ok_or(Error::NotRecording)?;
@@ -734,7 +736,8 @@ impl DaemonRecorder {
         // queue and the full pipeline (cleanup/summary/tags/hooks) unless
         // `[in_place].full_pipeline` opts back in — transcribe → polish →
         // type, with persistence off the latency path. See `in_place.rs`.
-        let fast_lane = active.in_place && !state.config.load().in_place.full_pipeline;
+        let in_place_cfg = state.config.load().in_place.clone();
+        let fast_lane = active.in_place && !in_place_cfg.full_pipeline;
         if fast_lane {
             crate::in_place::spawn_fast_lane(
                 state.clone(),
@@ -742,6 +745,18 @@ impl DaemonRecorder {
                 active.audio_path.clone(),
             );
         } else {
+            // Full-pipeline dictation with `type_first`: the text shouldn't
+            // wait for the queue, so a type-only pass types the quick
+            // transcription NOW, alongside the normal enqueue below — the
+            // pipeline still runs every step for the library copy, but skips
+            // its own end-of-run typing so the text lands exactly once.
+            if active.in_place && in_place_cfg.type_first {
+                crate::in_place::spawn_type_first(
+                    state.clone(),
+                    active.id.clone(),
+                    active.audio_path.clone(),
+                );
+            }
             let payload = HookPayload {
                 id: active.id.clone(),
                 timestamp: active.started_at,

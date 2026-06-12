@@ -1,5 +1,5 @@
 import { errText } from "../../utils/error";
-import { LitElement, html, css } from 'lit';
+import { LitElement, html } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../../utils/toast";

@@ -5,7 +5,7 @@ import { showToast } from "../../utils/toast";
 import { pickAndImportAudio } from "../../utils/import";
 
 export class SectionStorage {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     container: HTMLElement,
     private config: any,
@@ -147,7 +147,7 @@ export class SectionStorage {
         try {
           const recordings = await listRecordings({ limit: 10000 });
           let content = "";
-          let ext = format;
+          const ext = format;
           if (format === "json") {
             content = JSON.stringify(recordings, null, 2);
           } else if (format === "csv") {

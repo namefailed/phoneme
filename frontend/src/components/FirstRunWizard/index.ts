@@ -494,8 +494,8 @@ export class FirstRunWizardElement extends LitElement {
   private async doWhisper() {
     this.downloadTitle = "Whisper Setup";
     // Use selected whisper model from picker
-    let filename = this.config._whisper_model_choice || "ggml-small.en.bin";
-    let url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${filename}`;
+    const filename = this.config._whisper_model_choice || "ggml-small.en.bin";
+    const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${filename}`;
     
     if (filename === "ggml-large-v3-turbo-q5_0.bin") {
       this.downloadSubtitle = "Fetching the Whisper large-v3-turbo model (approx 1.1GB)...";
@@ -509,7 +509,7 @@ export class FirstRunWizardElement extends LitElement {
       this.downloadSubtitle = "Fetching the Whisper base.en model (approx 140MB)...";
     }
 
-    let unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
+    const unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
       if (e.payload.total) {
         this.progressMax = e.payload.total;
         this.progressValue = e.payload.downloaded;
@@ -517,7 +517,7 @@ export class FirstRunWizardElement extends LitElement {
       }
     });
 
-    let path = "";
+    let path: string;
     try {
       path = await invoke<string>("wizard_download_model", { url, filename });
     } finally {
@@ -535,7 +535,7 @@ export class FirstRunWizardElement extends LitElement {
     this.progressValue = 0;
     this.downloadStatus = "Starting server download...";
 
-    let serverUnlisten = await listen<{ downloaded: number; total: number | null }>("server_download_progress", (e) => {
+    const serverUnlisten = await listen<{ downloaded: number; total: number | null }>("server_download_progress", (e) => {
       if (e.payload.total) {
         this.progressMax = e.payload.total;
         this.progressValue = e.payload.downloaded;
@@ -576,7 +576,7 @@ export class FirstRunWizardElement extends LitElement {
         this.downloadSubtitle = "Downloading Ollama installer...";
         this.progressValue = 0;
         
-        let unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
+        const unlisten = await listen<{ downloaded: number; total: number | null }>("download_progress", (e) => {
           if (e.payload.total) {
             this.progressMax = e.payload.total;
             this.progressValue = e.payload.downloaded;
@@ -614,7 +614,7 @@ export class FirstRunWizardElement extends LitElement {
     this.progressValue = 0;
     this.downloadStatus = "Starting pull...";
 
-    let pullUnlisten = await listen<{ status: string; completed: number | null; total: number | null }>("ollama_pull_progress", (e) => {
+    const pullUnlisten = await listen<{ status: string; completed: number | null; total: number | null }>("ollama_pull_progress", (e) => {
       this.downloadStatus = e.payload.status;
       if (e.payload.total && e.payload.completed) {
         this.progressMax = e.payload.total;
@@ -641,7 +641,7 @@ export class FirstRunWizardElement extends LitElement {
     this.progressValue = 0;
     this.downloadStatus = "Starting download...";
 
-    let unlisten = await listen<{ downloaded: number; total: number | null }>("semantic_download_progress", (e) => {
+    const unlisten = await listen<{ downloaded: number; total: number | null }>("semantic_download_progress", (e) => {
       if (e.payload.total) {
         this.progressMax = e.payload.total;
         this.progressValue = e.payload.downloaded;
@@ -649,7 +649,7 @@ export class FirstRunWizardElement extends LitElement {
       }
     });
 
-    let path = "";
+    let path: string;
     try {
       path = await invoke<string>("wizard_download_semantic_model");
     } finally {
@@ -668,7 +668,7 @@ export class FirstRunWizardElement extends LitElement {
     this.downloadStatus = "Starting download...";
 
     // We'll add the new tauri command wizard_download_diarization_model shortly
-    let unlisten = await listen<{ downloaded: number; total: number | null }>("diarization_download_progress", (e) => {
+    const unlisten = await listen<{ downloaded: number; total: number | null }>("diarization_download_progress", (e) => {
       if (e.payload.total) {
         this.progressMax = e.payload.total;
         this.progressValue = e.payload.downloaded;

@@ -36,6 +36,27 @@ jobs:
       - name: Test
         run: cargo test --workspace -- --test-threads=1
 
+  docs:
+    name: Rustdoc
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # src-tauri's build.rs needs a frontendDist dir to exist before the Tauri
+      # macro will compile (and therefore doc), same as the rust job above.
+      - name: Create dummy frontendDist for Tauri macro
+        run: mkdir -p frontend/dist
+
+      - name: Build docs (deny warnings)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
+
   frontend:
     name: Frontend
     runs-on: windows-latest
@@ -56,6 +77,9 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Lint
+        working-directory: frontend
+        run: pnpm lint
       - name: Test
         working-directory: frontend
         run: pnpm exec vitest run

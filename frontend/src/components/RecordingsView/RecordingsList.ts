@@ -13,9 +13,8 @@ import {
   statusToClass,
   statusLabel,
   highlightMatch,
-  escapeHtml,
 } from "../../utils/format";
-import { groupRecordings, trackLabel } from "./grouping";
+import { groupRecordings } from "./grouping";
 import { getContrastColor } from "./TagChips";
 import "../shared/styles.css";
 import "./styles.css";

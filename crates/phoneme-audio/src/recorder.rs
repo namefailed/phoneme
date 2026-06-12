@@ -364,7 +364,7 @@ impl Recorder {
         Ok(samples)
     }
 
-    /// Like [`snapshot`], but clones at most the last `max_tail` samples and also
+    /// Like [`Self::snapshot`], but clones at most the last `max_tail` samples and also
     /// returns the full captured length so far as `(total_len, tail_samples)`.
     /// The streaming preview uses this to transcribe a bounded trailing window
     /// (constant per-tick cost) while still knowing how much total audio exists

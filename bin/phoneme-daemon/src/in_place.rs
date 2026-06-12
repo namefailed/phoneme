@@ -11,14 +11,21 @@
 //! the recording. Stage events still fire (Transcribing → Done/Failed), so
 //! the queue panel, status column, and step notifications all track a
 //! dictation exactly like a queued recording.
+//!
+//! With `full_pipeline` + `type_first` there is a second, type-only variant
+//! ([`spawn_type_first`]): the same transcribe → polish → type core runs for
+//! the instant typing, but the recording itself rides the normal queue — the
+//! pipeline owns every catalog write, status, and event, and skips its own
+//! end-of-run typing so the text never lands twice.
 
 use crate::app_state::AppState;
 use phoneme_core::config::DiarizationConfig;
 use phoneme_core::id::RecordingId;
+use phoneme_core::transcription::Transcription;
 use phoneme_core::types::RecordingStatus;
 use phoneme_core::Error;
 use phoneme_ipc::schema::{DaemonEvent, PipelineStage};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Run the fast lane for a just-stopped in-place recording. Detached: errors
 /// surface through the catalog status + `TranscriptionFailed` (toasted by the
@@ -43,6 +50,35 @@ pub fn spawn_fast_lane(state: AppState, id: RecordingId, audio_path: PathBuf) {
     });
 }
 
+/// Run the type-only pass for a just-stopped in-place recording when
+/// `[in_place].full_pipeline` AND `[in_place].type_first` are on: type the
+/// quick transcription at the cursor now, while the queued pipeline — the
+/// recorder enqueued the recording alongside spawning this — does everything
+/// else in the background. The pipeline owns ALL of the recording's state:
+/// catalog writes, segments, statuses, stage events, the inbox item, and the
+/// library copy. This task touches none of it, and the pipeline skips its own
+/// end-of-run typing (see `pipeline_should_type`) so the text lands exactly
+/// once.
+///
+/// Detached. A failure here costs only the instant typing — and since the
+/// pipeline won't type either in this mode, the toast tells the user their
+/// words are still coming to the library, just not to the cursor.
+pub fn spawn_type_first(state: AppState, id: RecordingId, audio_path: PathBuf) {
+    tokio::spawn(async move {
+        if let Err(e) = transcribe_polish_type(&state, &id, &audio_path).await {
+            tracing::error!(id = %id.as_str(), error = %e, "in-place type-first pass failed");
+            // No status flip, no Failed stage: the recording is fine — it's
+            // still queued and the pipeline retries transcription itself.
+            state.events.emit(DaemonEvent::TranscriptionFailed {
+                id,
+                error: format!(
+                    "dictation couldn't type your text right away ({e}) — the recording is still processing and the transcript will be in the library"
+                ),
+            });
+        }
+    });
+}
+
 async fn run(state: &AppState, id: &RecordingId, audio_path: &PathBuf) -> Result<(), Error> {
     let cfg = state.config.load();
     state.events.emit(DaemonEvent::PipelineStageChanged {
@@ -50,52 +86,8 @@ async fn run(state: &AppState, id: &RecordingId, audio_path: &PathBuf) -> Result
         stage: PipelineStage::Transcribing,
     });
 
-    // Same gate the pipeline takes: for the local server this yields the live
-    // preview; a dictation clip is short, so in practice this jumps straight
-    // past the serial inbox queue the normal pipeline waits in.
-    let permit = state.whisper_sem.acquire().await;
-    // Diarization is never run for dictation — speaker labels in typed text
-    // would be noise, and the model pass costs more than the transcription.
-    let provider = state.transcription.provider(
-        cfg.in_place_provider_config(),
-        &DiarizationConfig::default(),
-    );
-    let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
-    let transcription = provider
-        .transcribe_with_segments(audio_path, language.as_deref())
-        .await?;
-    drop(permit);
-
+    let (transcription, polished) = transcribe_polish_type(state, id, audio_path).await?;
     let raw = transcription.text.clone();
-    let polished = match cfg.in_place.cleanup.as_str() {
-        "off" => raw.clone(),
-        // A full LLM round-trip through the configured post-processing
-        // provider — the user explicitly chose polish over latency.
-        "llm" => match state.llm.provider(&cfg.llm_post_process) {
-            Some(llm) => match llm.process(&cfg.llm_post_process.prompt, &raw).await {
-                Ok(out) => out,
-                Err(e) => {
-                    tracing::warn!(error = %e, "in-place llm cleanup failed; typing raw text");
-                    phoneme_core::dictation::fast_polish(&raw)
-                }
-            },
-            None => phoneme_core::dictation::fast_polish(&raw),
-        },
-        // "fast" and anything unrecognized: the zero-latency rule polish.
-        _ => phoneme_core::dictation::fast_polish(&raw),
-    };
-
-    if polished.trim().is_empty() {
-        tracing::info!(id = %id.as_str(), "in-place dictation: nothing to type (empty transcript)");
-    } else if let Err(e) = type_at_cursor(&polished, &cfg.in_place.type_mode).await {
-        // Typing failing must not lose the words — the transcript still
-        // persists below (when saving), and the error reaches the UI.
-        tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to insert text");
-        state.events.emit(DaemonEvent::TranscriptionFailed {
-            id: id.clone(),
-            error: format!("dictation transcribed but couldn't type at the cursor: {e}"),
-        });
-    }
 
     if cfg.in_place.save_to_library {
         // Persist AFTER the text has landed — the user already has their
@@ -137,6 +129,74 @@ async fn run(state: &AppState, id: &RecordingId, audio_path: &PathBuf) -> Result
         stage: PipelineStage::Done,
     });
     Ok(())
+}
+
+/// The transcribe → polish → type core shared by both dictation variants:
+/// the fast lane ([`run`], which persists afterwards) and the type-only pass
+/// ([`spawn_type_first`], which does nothing else). Returns the raw
+/// transcription (the fast lane persists its segments) and the polished text
+/// that was typed.
+///
+/// A typing failure is deliberately NOT an `Err`: the words exist, so it is
+/// logged and toasted (`TranscriptionFailed`) while the caller proceeds — the
+/// fast lane still persists the transcript, and the type-first pass leaves
+/// the queued pipeline to deliver it to the library.
+async fn transcribe_polish_type(
+    state: &AppState,
+    id: &RecordingId,
+    audio_path: &Path,
+) -> Result<(Transcription, String), Error> {
+    let cfg = state.config.load();
+
+    // Same gate the pipeline takes: for the local server this yields the live
+    // preview; a dictation clip is short, so in practice this jumps straight
+    // past the serial inbox queue the normal pipeline waits in.
+    let permit = state.whisper_sem.acquire().await;
+    // Diarization is never run for dictation — speaker labels in typed text
+    // would be noise, and the model pass costs more than the transcription.
+    let provider = state.transcription.provider(
+        cfg.in_place_provider_config(),
+        &DiarizationConfig::default(),
+    );
+    let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
+    let transcription = provider
+        .transcribe_with_segments(audio_path, language.as_deref())
+        .await?;
+    drop(permit);
+
+    let raw = transcription.text.clone();
+    let polished = match cfg.in_place.cleanup.as_str() {
+        "off" => raw.clone(),
+        // A full LLM round-trip through the configured post-processing
+        // provider — the user explicitly chose polish over latency.
+        "llm" => match state.llm.provider(&cfg.llm_post_process) {
+            Some(llm) => match llm.process(&cfg.llm_post_process.prompt, &raw).await {
+                Ok(out) => out,
+                Err(e) => {
+                    tracing::warn!(error = %e, "in-place llm cleanup failed; typing raw text");
+                    phoneme_core::dictation::fast_polish(&raw)
+                }
+            },
+            None => phoneme_core::dictation::fast_polish(&raw),
+        },
+        // "fast" and anything unrecognized: the zero-latency rule polish.
+        _ => phoneme_core::dictation::fast_polish(&raw),
+    };
+
+    if polished.trim().is_empty() {
+        tracing::info!(id = %id.as_str(), "in-place dictation: nothing to type (empty transcript)");
+    } else if let Err(e) = type_at_cursor(&polished, &cfg.in_place.type_mode).await {
+        // Typing failing must not lose the words — the transcript still
+        // persists (fast lane) or rides the queued pipeline into the library
+        // (type-first), and the error reaches the UI.
+        tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to insert text");
+        state.events.emit(DaemonEvent::TranscriptionFailed {
+            id: id.clone(),
+            error: format!("dictation transcribed but couldn't type at the cursor: {e}"),
+        });
+    }
+
+    Ok((transcription, polished))
 }
 
 /// Insert `text` at the system cursor. `mode` `"paste"` goes via the

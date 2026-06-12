@@ -727,7 +727,7 @@ impl Catalog {
     /// This function implements Reciprocal Rank Fusion (RRF) to merge the ordered
     /// listings from two distinct retrievers:
     /// 1. A vector-based semantic retriever that scores using cosine similarity
-    ///    over ONNX embedding chunks (see [`Embedder`]).
+    ///    over ONNX embedding chunks (see [`crate::embed::Embedder`]).
     /// 2. A lexical prefix query over the FTS5 full-text search virtual table.
     ///
     /// ### Meeting Collapsing

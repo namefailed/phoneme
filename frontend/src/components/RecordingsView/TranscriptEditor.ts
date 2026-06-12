@@ -1,5 +1,5 @@
 import { errText } from "../../utils/error";
-import { LitElement, html, css, PropertyValues } from 'lit';
+import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { updateTranscript } from "../../services/ipc";
 import { showToast } from "../../utils/toast";

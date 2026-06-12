@@ -98,6 +98,16 @@ cd frontend
 pnpm test
 ```
 
+## 📚 API docs
+
+The Rust backend is documented inline with rustdoc comments. Render the full
+API reference and open it in your browser with:
+```bash
+cargo doc --workspace --no-deps --open
+```
+CI builds the same docs with `-D warnings`, so the reference stays
+warning-clean (broken intra-doc links fail the build like any other lint).
+
 ## 🚑 Troubleshooting Build Errors
 
 **Error:** `Could not find 'libclang'.`

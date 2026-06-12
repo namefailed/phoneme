@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 
 export class SectionAdvanced {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     container: HTMLElement,
     private config: any,
