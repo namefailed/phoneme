@@ -1196,6 +1196,9 @@ export class RecordingsView {
         eventName === "recording_stopped" ||
         eventName === "transcription_done" ||
         eventName === "transcription_failed" ||
+        // Each pipeline step writes its own status (Transcribing → Cleaning Up
+        // → Summarizing → …) — refresh so the Status column tracks it live.
+        eventName === "pipeline_stage_changed" ||
         eventName === "hook_done" ||
         eventName === "hook_failed" ||
         eventName === "recording_deleted" ||

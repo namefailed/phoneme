@@ -370,6 +370,17 @@ pub async fn generate_summary(
 /// Generate a summary (if `summary.auto`) and persist it. Runs as the final
 /// pipeline step, after post-processing/cleanup, so it summarizes the text the
 /// user will actually see.
+/// Whether the auto-summary step will run — drives the `Summarizing` status,
+/// which is only set when true so disabled steps never flash in the UI.
+fn summary_enabled(cfg: &Config) -> bool {
+    cfg.summary.auto
+}
+
+/// Whether the auto-tag step will run (same contract as [`summary_enabled`]).
+fn auto_tag_enabled(cfg: &Config) -> bool {
+    cfg.auto_tag.auto
+}
+
 async fn maybe_auto_summarize(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
     if !cfg.summary.auto {
         return;
@@ -801,6 +812,14 @@ pub async fn run(
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
     if let Some(llm) = state.llm.provider(&cfg.llm_post_process) {
+        // The list/detail/activity views read the DB status, so it tracks the
+        // stage events step for step — "transcribing" no longer covers the
+        // whole pipeline. Best-effort: a status write failing must not kill
+        // the stage itself.
+        let _ = state
+            .catalog
+            .update_status(&id, RecordingStatus::CleaningUp)
+            .await;
         state.events.emit(DaemonEvent::PipelineStageChanged {
             id: id.clone(),
             stage: PipelineStage::CleaningUp,
@@ -910,7 +929,21 @@ pub async fn run(
         // Auto-summary is the final step — runs after post-processing so it
         // summarizes the text the user actually sees; auto-tag suggestions ride
         // along after it (approve-to-apply, so they're side-effect free).
+        // Statuses only flip when the step will actually run, so a recording
+        // with summaries off never flashes "Summarizing".
+        if summary_enabled(&cfg) {
+            let _ = state
+                .catalog
+                .update_status(&id, RecordingStatus::Summarizing)
+                .await;
+        }
         maybe_auto_summarize(state, &cfg, &id, &transcript).await;
+        if auto_tag_enabled(&cfg) {
+            let _ = state
+                .catalog
+                .update_status(&id, RecordingStatus::Tagging)
+                .await;
+        }
         maybe_auto_tag(state, &cfg, &id, &transcript).await;
         state
             .catalog
@@ -1017,7 +1050,19 @@ pub async fn run(
     // Auto-summary is the final step — runs after post-processing and hooks so
     // it summarizes the text the user actually sees; auto-tag suggestions ride
     // along after it (approve-to-apply, so they're side-effect free).
+    if summary_enabled(&cfg) {
+        let _ = state
+            .catalog
+            .update_status(&id, RecordingStatus::Summarizing)
+            .await;
+    }
     maybe_auto_summarize(state, &cfg, &id, &payload.transcript).await;
+    if auto_tag_enabled(&cfg) {
+        let _ = state
+            .catalog
+            .update_status(&id, RecordingStatus::Tagging)
+            .await;
+    }
     maybe_auto_tag(state, &cfg, &id, &payload.transcript).await;
 
     state
