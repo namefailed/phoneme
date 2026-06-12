@@ -33,6 +33,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "g then l", label: "Go to Library" },
       { combo: "g then s", label: "Go to Settings" },
       { combo: "g then d", label: "Go to Doctor" },
+      { combo: "g then /", label: "Highlight the search bar (h/l roam the header)" },
       { combo: "g then T", label: "Open the Tag Manager" },
       { combo: "g then P", label: "Managers → Profiles" },
       { combo: "g then S", label: "Managers → Saved searches" },
@@ -395,6 +396,9 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
     if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
     if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
+    // g / — HIGHLIGHT the search bar (roving header cursor, same as k at the
+    // top of the list) rather than focusing it like plain `/` does.
+    if (e.key === "/") { e.preventDefault(); enterHeaderNav(); return; }
     if (vimNav && e.key === "g" && activeWithin(".rv-list")) {
       e.preventDefault();
       dispatchVim("list-top");
@@ -689,7 +693,15 @@ export function initKeyboard() {
   // Load the vim-nav preference and keep it in sync with Settings saves so the
   // layer turns on/off the moment the toggle is saved (no reload needed).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const apply = (cfg: any) => { vimNav = !!cfg?.interface?.vim_nav; };
+  const apply = (cfg: any) => {
+    vimNav = !!cfg?.interface?.vim_nav;
+    // Pane show/hide animation speed (sidebar / detail / focus toggles): the
+    // setting becomes a CSS duration var the layout transition reads. "off"
+    // (0ms) short-circuits the animation entirely.
+    const speeds: Record<string, string> = { off: "0ms", fast: "110ms", normal: "200ms", slow: "320ms" };
+    const dur = speeds[String(cfg?.interface?.animation_speed ?? "normal")] ?? "200ms";
+    document.documentElement.style.setProperty("--pane-anim", dur);
+  };
   invoke("read_config").then(apply).catch(() => {});
   window.addEventListener("config:saved", (e: Event) => apply((e as CustomEvent).detail));
   // The list dispatches this when k is pressed at the top — highlight the search

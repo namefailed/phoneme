@@ -846,6 +846,15 @@ pub struct InterfaceConfig {
     /// (search `/`, help `?`, `g`-prefix jumps) are active.
     #[serde(default)]
     pub vim_nav: bool,
+    /// UI animation speed for pane show/hide (the sidebar, detail pane, and
+    /// focus-mode toggles): `"off"`, `"fast"`, `"normal"` (default), `"slow"`.
+    /// `"off"` makes every pane toggle instant.
+    #[serde(default = "default_animation_speed")]
+    pub animation_speed: String,
+}
+
+fn default_animation_speed() -> String {
+    "normal".into()
 }
 
 fn default_column_widths() -> Vec<String> {
@@ -1057,6 +1066,7 @@ impl Default for Config {
                 column_widths: default_column_widths(),
                 preview_overlay: false,
                 vim_nav: false,
+                animation_speed: default_animation_speed(),
             },
             editor: EditorConfig {
                 vim_mode: false,

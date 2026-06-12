@@ -99,6 +99,13 @@
    ambiguous which pane is active. A left accent bar + ring + tint make the
    cursor unmistakable while you're in the list. Rows that are the SELECTED one
    keep their full selected look (`:not(.active)` never overrides it). */
+/* While the list owns the keyboard, rows must not TRANSITION: with the default
+   0.2s all-transition, holding j/k leaves a trail of half-faded highlights (the
+   cursor appears to flicker). Snapping makes the cursor crisp at any speed. */
+.rec-table:focus-within .rec-row,
+.rec-table:focus-within .rec-group-head {
+  transition: none;
+}
 .rec-table:focus-within .rec-row.kbd-focused:not(.active),
 .rec-table:focus-within .rec-group-head.kbd-focused:not(.active) {
   outline: none;
@@ -875,10 +882,13 @@ mark.search-hit {
      leaving the sidebar (and its pinned queue panel) short of the bottom. */
   grid-template-rows: minmax(0, 1fr);
 }
-/* Smooth sidebar open/close. The class is added only during a toggle (not while
-   dragging the splitter or sidebar-resizer), so drags stay instant/non-laggy. */
-.rv-shell.rv-animate-sidebar {
-  transition: grid-template-columns 0.2s ease;
+/* Smooth pane show/hide (sidebar · detail pane · focus mode). The class is
+   added only for the duration of a TOGGLE — never while dragging the splitter
+   or sidebar-resizer — so drags stay instant. Duration comes from the
+   "Animation speed" setting via --pane-anim (0ms = off); the snappy
+   ease-out-quint curve front-loads the motion so it reads fast, not laggy. */
+.rv-shell.rv-animate {
+  transition: grid-template-columns var(--pane-anim, 200ms) cubic-bezier(0.22, 1, 0.36, 1);
 }
 .rv-list {
   height: 100%;

@@ -247,8 +247,21 @@ export class RecordingsView {
     }
   }
 
+  /** Animate the next layout change (pane show/hide toggles only — drags stay
+   *  instant). Adds the transition class for one slide, sized by the
+   *  "Animation speed" setting (`--pane-anim`; 0ms = off), then strips it. */
+  private animateLayout() {
+    const shell = this.container.querySelector<HTMLElement>("#rv-shell");
+    if (!shell) return;
+    const dur = parseFloat(getComputedStyle(shell).getPropertyValue("--pane-anim")) || 0;
+    if (dur <= 0) return; // animations off — keep toggles instant
+    shell.classList.add("rv-animate");
+    window.setTimeout(() => shell.classList.remove("rv-animate"), dur + 60);
+  }
+
   toggleDetail() {
     this.detailVisible = !this.detailVisible;
+    this.animateLayout();
     this.applyLayout();
   }
 
@@ -261,6 +274,7 @@ export class RecordingsView {
     shell?.classList.toggle("rv-focus", this.focusMode);
     // Full-screen focus mode also hides the top header bar (same as Settings).
     document.body.classList.toggle("phoneme-hide-header", this.focusMode);
+    this.animateLayout();
     this.applyLayout();
   }
 
@@ -798,14 +812,7 @@ export class RecordingsView {
   toggleSidebar() {
     this.sidebarVisible = !this.sidebarVisible;
     try { localStorage.setItem(LS_SIDEBAR, String(this.sidebarVisible)); } catch { /* private mode */ }
-    // Animate only the toggle (not splitter/resizer drags): add the transition
-    // class for the duration of the slide, then strip it so subsequent drags
-    // stay instant.
-    const shell = this.container.querySelector<HTMLElement>("#rv-shell");
-    if (shell) {
-      shell.classList.add("rv-animate-sidebar");
-      window.setTimeout(() => shell.classList.remove("rv-animate-sidebar"), 260);
-    }
+    this.animateLayout();
     this.applyLayout();
     // Let the AI-activity button re-anchor to the new sidebar edge (now + after
     // the slide animation settles).
