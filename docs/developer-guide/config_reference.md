@@ -187,7 +187,8 @@ it.
 
 ## `[in_place]`
 
-Dictation (transcription-in-place) behavior — the fast lane.
+Dictation (transcription-in-place) behavior — the fast lane. Edited by
+Settings → Capture → Dictation, including the `stt` picker (Automatic ↔ Custom).
 
 | Key | Default | Meaning |
 |-----|---------|---------|
