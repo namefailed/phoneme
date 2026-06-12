@@ -21,6 +21,8 @@ Keyword search only matches words you actually said. **Semantic search** uses of
 
 Enable it from the **Semantic Search** settings section (search Settings for "Semantic", or set `semantic_search.enabled = true`). Full guide: [Semantic Search](semantic_search.md).
 
+Once a recording is indexed you can also search *from* it: the **✨ Similar** button in its detail view fills the list with the semantically closest recordings — no query to type. See ["More like this"](semantic_search.md#more-like-this).
+
 ## 🏷️ Organizing with Tags
 
 Tags are the primary way to organize your recordings into projects, categories, or states.

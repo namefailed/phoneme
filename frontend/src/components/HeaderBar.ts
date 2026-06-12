@@ -2,7 +2,7 @@ import { errText } from "../utils/error";
 import { LitElement, html } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 
-import { filterStore, type UiFilter } from '../state/filter';
+import { filterStore, clearMoreLikeThis, type UiFilter } from '../state/filter';
 import { listTags, runDoctor, type Tag } from '../services/ipc';
 import {
   loadStopMode, saveStopMode, stopModeToRecordMode, resolveRecordStartMode,
@@ -638,9 +638,16 @@ export class HeaderBarElement extends LitElement {
           ${f.sort_desc === false ? "↑ Oldest" : "↓ Newest"}
         </button>
         <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:1 100 220px; min-width:170px;">
-          <input type="search" class="search" style="flex:1;" placeholder="Search transcripts…" 
-            .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />
-          <button class="icon-btn ${f.semantic ? 'active' : ''}" 
+          ${f.like_id
+            ? html`<div class="filter-pill hb-like-pill" style="flex:1; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"
+                title="Showing recordings similar to “${f.like_label || f.like_id}” — ranked by meaning, from its stored index">
+                <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">~similar: ${f.like_label || f.like_id}</span>
+                <button class="icon-btn hb-like-clear" style="flex-shrink:0;" aria-label="Back to all recordings"
+                  title="Back to all recordings" @click=${() => clearMoreLikeThis()}>✕</button>
+              </div>`
+            : html`<input type="search" class="search" style="flex:1;" placeholder="Search transcripts…"
+            .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />`}
+          <button class="icon-btn ${f.semantic ? 'active' : ''}"
             title="Toggle Semantic Search (finds meaning, not exact words)"
             @click=${this.toggleSemantic}>✨</button>
           <ph-saved-searches></ph-saved-searches>

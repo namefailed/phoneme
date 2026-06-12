@@ -344,6 +344,18 @@ pub enum Request {
         query: String,
         limit: usize,
     },
+    /// "More like this": find recordings semantically similar to a stored
+    /// one, using its already-stored vectors as the query — no fresh query
+    /// embedding, so it works even when the embedding model isn't loaded.
+    /// Responds with the same `[{ "recording": …, "score": … }]` array shape
+    /// as `SemanticSearch` (calibrated 0..1 scores), never including the
+    /// source recording itself (nor the other track of its own meeting).
+    /// Errors with a clear "isn't indexed yet" message when the recording has
+    /// no stored embeddings.
+    MoreLikeThis {
+        id: RecordingId,
+        limit: usize,
+    },
     /// Clear every stored embedding and re-embed the whole library with the
     /// currently-configured model. Use after changing the embedding model (a
     /// different model/dimension makes old vectors unsearchable). Returns

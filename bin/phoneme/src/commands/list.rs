@@ -11,7 +11,8 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
     if let Some(query) = args.semantic.clone() {
         return crate::commands::search::run(
             crate::args::SearchArgs {
-                query,
+                query: Some(query),
+                like: None,
                 limit: args.limit.map(|n| n as usize).unwrap_or(20),
             },
             cfg,

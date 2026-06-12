@@ -23,6 +23,16 @@ use phoneme_ipc::{
 /// process begins to exit, so the caller always sees the acknowledgement.
 const SHUTDOWN_REPLY_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// Minimum *calibrated* relevance (0..1) a semantic-only hit must clear to
+/// surface. Hybrid search ranks by per-chunk best-match cosine fused (RRF)
+/// with the FTS5 lexical ranking, so this is no longer a fragile raw-cosine
+/// floor that silently dropped good paraphrase matches: a lexical (exact-term)
+/// hit is never filtered by this, and the score is calibrated so 0.12 ≈
+/// "barely related". See `catalog::hybrid_search`. `MoreLikeThis` applies the
+/// same floor to its pure-vector ranking so both search paths agree on what's
+/// too weak to show.
+const SEMANTIC_MIN_RELEVANCE: f32 = 0.12;
+
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
         // Read one request. An unrecognized-but-well-formed request (a client
@@ -105,11 +115,25 @@ pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
 
 pub async fn handle_request(req: Request, state: &AppState) -> Response {
     match req {
-        Request::DaemonStatus => Response::Ok(serde_json::json!({
-            "running": true,
-            "pid": std::process::id(),
-            "version": env!("CARGO_PKG_VERSION"),
-        })),
+        Request::DaemonStatus => {
+            // Bundled whisper-server ports: `preferred` is the configured
+            // value, `effective` is the port the supervisor actually bound —
+            // it falls back to a free port when the preferred one is held by
+            // another app, and is `null` while that server isn't running.
+            // Clients probing the local server (the tray's connection test,
+            // doctor wiring) should dial the effective port when present.
+            let cfg = state.config.load();
+            Response::Ok(serde_json::json!({
+                "running": true,
+                "pid": std::process::id(),
+                "version": env!("CARGO_PKG_VERSION"),
+                "whisper_preferred_port": cfg.whisper.bundled_server_port,
+                "whisper_effective_port": state.whisper_ports.main(),
+                "preview_whisper_preferred_port":
+                    cfg.preview_whisper.as_ref().map(|p| p.bundled_server_port),
+                "preview_whisper_effective_port": state.whisper_ports.preview(),
+            }))
+        }
         Request::RecordStatus => {
             let active = state.recorder.current().await;
             let meeting_active = state.recorder.meeting_active().await;
@@ -245,13 +269,6 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }),
         },
         Request::SemanticSearch { query, limit } => {
-            // Minimum *calibrated* relevance (0..1) a semantic-only hit must clear
-            // to surface. Hybrid search ranks by per-chunk best-match cosine fused
-            // (RRF) with the FTS5 lexical ranking, so this is no longer a fragile
-            // raw-cosine floor that silently dropped good paraphrase matches: a
-            // lexical (exact-term) hit is never filtered by this, and the score is
-            // calibrated so 0.12 ≈ "barely related". See catalog::hybrid_search.
-            const SEMANTIC_MIN_RELEVANCE: f32 = 0.12;
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {
                 match embedder.embed_query(&query) {
@@ -287,6 +304,37 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     kind: IpcErrorKind::Internal,
                     message: "Semantic search is not enabled or model is missing.".to_string(),
                 })
+            }
+        }
+        Request::MoreLikeThis { id, limit } => {
+            // No embedder needed: the source recording's STORED vectors are the
+            // query (that's the whole point — recall is free once indexed), so
+            // this works even while the embedding model isn't loaded. The
+            // catalog returns a clear "isn't indexed yet" error when the
+            // recording has no vectors; forward it verbatim for the UI/CLI.
+            match state
+                .catalog
+                .more_like_this(&id, limit, SEMANTIC_MIN_RELEVANCE)
+                .await
+            {
+                Ok(results) => {
+                    // Same `[{ recording, score }]` shape as SemanticSearch so
+                    // clients reuse the relevance-chip rendering unchanged.
+                    let mut full_results = Vec::new();
+                    for (rec_id, score) in results {
+                        if let Ok(Some(r)) = state.catalog.get(&rec_id).await {
+                            full_results.push(serde_json::json!({
+                                "recording": r,
+                                "score": score,
+                            }));
+                        }
+                    }
+                    Response::Ok(serde_json::Value::Array(full_results))
+                }
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
             }
         }
         Request::ReembedAll => {
@@ -1919,6 +1967,35 @@ mod tests {
     async fn override_test_state(tmp: &std::path::Path, cfg: Config) -> AppState {
         std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
         AppState::new(cfg).await.expect("build test AppState")
+    }
+
+    /// `daemon_status` surfaces the bundled-server ports: the configured
+    /// (preferred) one and the one the supervisor actually bound, so clients
+    /// probing the local server dial it even after a port fallback.
+    #[tokio::test]
+    async fn daemon_status_reports_preferred_and_effective_ports() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.bundled_server_port = 5809;
+        let state = override_test_state(tmp.path(), cfg).await;
+
+        // Server not (yet) running: preferred mirrors config, effective null.
+        let Response::Ok(v) = handle_request(Request::DaemonStatus, &state).await else {
+            panic!("daemon_status should answer ok");
+        };
+        assert_eq!(v["whisper_preferred_port"], 5809);
+        assert!(v["whisper_effective_port"].is_null());
+        assert!(v["preview_whisper_preferred_port"].is_null());
+        assert!(v["preview_whisper_effective_port"].is_null());
+
+        // The supervisor published a fallback port: effective reports it
+        // while preferred keeps naming the configured value.
+        state.whisper_ports.set_main(Some(51234));
+        let Response::Ok(v) = handle_request(Request::DaemonStatus, &state).await else {
+            panic!("daemon_status should answer ok");
+        };
+        assert_eq!(v["whisper_preferred_port"], 5809);
+        assert_eq!(v["whisper_effective_port"], 51234);
     }
 
     /// Insert a minimal Done recording row so a retranscribe has something to act

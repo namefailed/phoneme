@@ -267,6 +267,7 @@ export class RecordingDetail {
         getTranscript: () => this.recording?.transcript ?? "",
         getAudioPath: () => this.recording?.audio_path ?? "",
         getSpeakerNames: () => this.recording?.speaker_names ?? [],
+        getTitle: () => this.recording?.title ?? null,
       });
       this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
     }

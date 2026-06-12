@@ -199,6 +199,20 @@ phoneme search "database migration plan" --limit 5
 
 > `phoneme list --semantic "<query>"` runs the same search, reusing `--limit`.
 
+**`--like <RECORDING_ID>`** — "more like this": instead of embedding a text
+query, rank the library by similarity to a stored recording, using its
+already-stored vectors. The source recording (and the other track of its own
+meeting) never appears in the results. Works even when the embedding model
+isn't loaded — only requires that the source recording is indexed; a
+recording with no embeddings yet errors with a clear "isn't indexed yet"
+message (re-embed or wait for the pipeline). `--like` and a text query are
+mutually exclusive; `--limit` applies as usual.
+
+```bash
+phoneme search --like 20260519T143500823
+phoneme search --like 20260519T143500823 --limit 5
+```
+
 ### 🧬 `phoneme reembed`
 
 Clear every stored embedding and re-embed the whole library with the

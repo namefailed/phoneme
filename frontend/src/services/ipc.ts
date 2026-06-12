@@ -115,6 +115,16 @@ export async function semanticSearch(query: string, limit: number = 20): Promise
   return await tauriInvoke<SemanticSearchResult[]>("semantic_search", { query, limit });
 }
 
+/** "More like this": recordings semantically similar to a stored one, scored
+ *  from its already-stored vectors (no fresh query embedding — works even when
+ *  the embedding model isn't loaded). Same result shape as `semanticSearch`;
+ *  the source recording (and the other track of its own meeting) is never
+ *  included. Rejects with a clear "isn't indexed yet" message when the
+ *  recording has no embeddings. */
+export async function moreLikeThis(id: string, limit: number = 20): Promise<SemanticSearchResult[]> {
+  return await tauriInvoke<SemanticSearchResult[]>("more_like_this", { id, limit });
+}
+
 /** Clear all embeddings and re-embed the whole library with the current model.
  *  Run after changing the embedding model. Returns at once; the daemon
  *  re-embeds in the background. */

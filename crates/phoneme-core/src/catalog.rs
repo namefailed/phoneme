@@ -869,6 +869,122 @@ impl Catalog {
         Ok(results)
     }
 
+    /// "More like this": rank the library by semantic similarity to a stored
+    /// recording, reusing its already-stored vectors — no fresh embedding, so
+    /// it costs one corpus scan and works even when the embedding model isn't
+    /// loaded.
+    ///
+    /// The query vector is the **mean of the source's chunk vectors**,
+    /// L2-renormalized. The centroid captures what the whole note is about,
+    /// while candidates are still scored by their own best-matching chunk via
+    /// [`Self::vector_ranking`] — the exact retrieval path a typed semantic
+    /// query takes — so a long candidate ranks on its closest idea instead of
+    /// an averaged blur. A source that only has a legacy whole-recording
+    /// vector uses that vector directly (it *is* that recording's mean).
+    ///
+    /// The source never appears in the results. Exclusion is by the
+    /// meeting-stable dedupe key, so for a meeting track the *other* track of
+    /// the same meeting — a near-identical transcript that would trivially
+    /// rank #1 — is excluded too. Scores are calibrated like a normal
+    /// semantic search ([`crate::fusion::calibrate_cosine`]); hits under
+    /// `min_relevance` are dropped, and at most `limit` results return,
+    /// best-first.
+    ///
+    /// Errors: [`crate::error::Error::NotFound`] when `id` doesn't exist, and
+    /// a "not indexed yet" [`crate::error::Error::Internal`] when the
+    /// recording has no usable stored vectors (not embedded yet, or every
+    /// blob was corrupt) — the caller can surface that message as-is.
+    pub async fn more_like_this(
+        &self,
+        id: &RecordingId,
+        limit: usize,
+        min_relevance: f32,
+    ) -> Result<Vec<(RecordingId, f32)>> {
+        // Resolve the source row first so a missing id reports NotFound rather
+        // than "not indexed", and grab its meeting for the dedupe-key exclusion.
+        let row = sqlx::query("SELECT meeting_id FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else {
+            return Err(crate::error::Error::NotFound { id: id.to_string() });
+        };
+        let meeting_id: Option<String> = row.try_get("meeting_id")?;
+        let source_key = meeting_id.unwrap_or_else(|| id.as_str().to_string());
+
+        // The source's stored chunk vectors; a not-yet-chunked recording falls
+        // back to its legacy whole-recording vector (same precedence as
+        // `vector_ranking`).
+        let mut rows = sqlx::query(
+            "SELECT vector FROM embedding_chunks WHERE recording_id = ? ORDER BY chunk_index",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.is_empty() {
+            rows = sqlx::query("SELECT vector FROM embeddings WHERE id = ?")
+                .bind(id.as_str())
+                .fetch_all(&self.pool)
+                .await?;
+        }
+
+        // Component-wise mean of the source vectors, skipping any corrupt or
+        // odd-dimension blob (same guards as the search paths), then
+        // L2-renormalize — cosine is a plain dot product over unit vectors, and
+        // a mean of unit vectors is shorter than unit.
+        let mut mean: Vec<f32> = Vec::new();
+        let mut count = 0usize;
+        for row in rows {
+            let bytes: Vec<u8> = row.try_get("vector")?;
+            if !bytes.len().is_multiple_of(4) {
+                tracing::warn!(id = %id, len = bytes.len(), "skipping source embedding: not 4-byte aligned");
+                continue;
+            }
+            let vec: Vec<f32> = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                .collect();
+            if mean.is_empty() {
+                mean = vec;
+                count = 1;
+            } else if vec.len() == mean.len() {
+                for (m, v) in mean.iter_mut().zip(&vec) {
+                    *m += v;
+                }
+                count += 1;
+            } else {
+                tracing::warn!(id = %id, dim = vec.len(), mean_dim = mean.len(), "skipping source embedding: dimension mismatch");
+            }
+        }
+        if count == 0 {
+            return Err(crate::error::Error::Internal(format!(
+                "recording {id} isn't indexed for semantic search yet — re-embed the library or wait for the pipeline to index it"
+            )));
+        }
+        for m in &mut mean {
+            *m /= count as f32;
+        }
+        crate::embed::l2_normalize(&mut mean);
+
+        // Score every OTHER recording by its best chunk against the centroid.
+        let ranking = self.vector_ranking(&mean).await?;
+        let mut results: Vec<(RecordingId, f32)> = Vec::new();
+        for (key, rec_id, cosine) in ranking {
+            if results.len() >= limit {
+                break;
+            }
+            if key == source_key {
+                continue; // never recommend the source (or its meeting sibling)
+            }
+            let relevance = crate::fusion::calibrate_cosine(cosine);
+            if relevance < min_relevance {
+                continue;
+            }
+            results.push((rec_id, relevance));
+        }
+        Ok(results)
+    }
+
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
         let mut sql = String::from("SELECT recordings.* FROM recordings");
 
@@ -1835,6 +1951,140 @@ mod tests {
         assert!(
             (legacy_score - 0.8).abs() < 1e-6,
             "legacy-only recording scored from its whole-recording vector"
+        );
+    }
+
+    #[tokio::test]
+    async fn more_like_this_excludes_source_and_ranks_by_similarity() {
+        // The recall flow: open a recording → find its semantic neighbours from
+        // the vectors already in the catalog. The source itself must never be a
+        // result, neighbours come back best-first with calibrated scores, and
+        // near-orthogonal noise is dropped by the relevance floor.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let source = embedded_recording(None);
+        let close = embedded_recording(None);
+        let loose = embedded_recording(None);
+        let unrelated = embedded_recording(None);
+        for r in [&source, &close, &loose, &unrelated] {
+            db.insert(r).await.unwrap();
+        }
+
+        // Source has two chunks; its (renormalized) mean is ~[0.707, 0.707, 0].
+        db.upsert_chunk_embeddings(&source.id, &[vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+        // close: cosine vs the centroid ≈ 0.707 (calibrates to 1.0, the ceiling).
+        db.upsert_chunk_embeddings(&close.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        // loose: cosine ≈ 0.42 (calibrates to ~0.5 — clearly mid-strength).
+        db.upsert_chunk_embeddings(&loose.id, &[vec![0.6, 0.0, 0.8]])
+            .await
+            .unwrap();
+        // unrelated: orthogonal to the centroid → calibrated 0 → floored out.
+        db.upsert_chunk_embeddings(&unrelated.id, &[vec![0.0, 0.0, 1.0]])
+            .await
+            .unwrap();
+
+        let results = db.more_like_this(&source.id, 10, 0.12).await.unwrap();
+        let ids: Vec<&str> = results.iter().map(|(id, _)| id.as_str()).collect();
+        assert!(
+            !ids.contains(&source.id.as_str()),
+            "the source recording must never be in its own results"
+        );
+        assert_eq!(
+            ids,
+            vec![close.id.as_str(), loose.id.as_str()],
+            "neighbours best-first; orthogonal noise floored out"
+        );
+        assert!(
+            results[0].1 > results[1].1,
+            "scores must be calibrated and descending, got {results:?}"
+        );
+
+        // `limit` caps the result count at the top of the ranking.
+        let top1 = db.more_like_this(&source.id, 1, 0.12).await.unwrap();
+        assert_eq!(top1.len(), 1);
+        assert_eq!(top1[0].0.as_str(), close.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn more_like_this_excludes_the_sources_own_meeting_sibling() {
+        // A meeting's two tracks have near-identical transcripts, so the
+        // sibling track would always trivially rank #1 — useless as a
+        // recommendation. Exclusion is by the meeting dedupe key, so the
+        // sibling is dropped along with the source while other recordings
+        // still surface.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let mic = embedded_recording(Some("meeting-1"));
+        let sys = embedded_recording(Some("meeting-1"));
+        let other = embedded_recording(None);
+        for r in [&mic, &sys, &other] {
+            db.insert(r).await.unwrap();
+        }
+        db.upsert_chunk_embeddings(&mic.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&sys.id, &[vec![0.99, 0.01, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&other.id, &[vec![0.9, 0.1, 0.0]])
+            .await
+            .unwrap();
+
+        let results = db.more_like_this(&mic.id, 10, 0.12).await.unwrap();
+        let ids: Vec<&str> = results.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![other.id.as_str()],
+            "the source's own meeting sibling must be excluded, got {ids:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn more_like_this_falls_back_to_the_legacy_whole_recording_vector() {
+        // A source from before per-chunk embedding (backfill pending) still
+        // works: its legacy whole-recording vector is the query.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let legacy_source = embedded_recording(None);
+        let neighbour = embedded_recording(None);
+        db.insert(&legacy_source).await.unwrap();
+        db.insert(&neighbour).await.unwrap();
+        db.upsert_embedding(&legacy_source.id, &[1.0, 0.0, 0.0])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&neighbour.id, &[vec![0.95, 0.05, 0.0]])
+            .await
+            .unwrap();
+
+        let results = db
+            .more_like_this(&legacy_source.id, 10, 0.12)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.as_str(), neighbour.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn more_like_this_errors_clearly_when_source_missing_or_not_indexed() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+
+        // Unknown id → NotFound (not the "not indexed" message).
+        let ghost = RecordingId::new();
+        let err = db.more_like_this(&ghost, 10, 0.12).await.unwrap_err();
+        assert!(
+            matches!(err, crate::error::Error::NotFound { .. }),
+            "missing recording must be NotFound, got {err:?}"
+        );
+
+        // Existing but never embedded → a clear "not indexed yet" error the UI
+        // can show verbatim.
+        let bare = embedded_recording(None);
+        db.insert(&bare).await.unwrap();
+        let err = db.more_like_this(&bare.id, 10, 0.12).await.unwrap_err();
+        assert!(
+            matches!(&err, crate::error::Error::Internal(msg) if msg.contains("isn't indexed")),
+            "unembedded recording must report it isn't indexed, got {err:?}"
         );
     }
 
