@@ -11,9 +11,19 @@ use phoneme_ipc::DaemonEvent;
 use std::time::Duration;
 use tokio::sync::watch;
 
+/// Give up on an item after this many consecutive TRANSIENT transcribe
+/// failures (unreachable / timeout). High on purpose: with max backoff this is
+/// ~25 minutes of a dead server before an item is declared failed — Doctor's
+/// restart usually heals it long before. Permanent errors never retry.
+const MAX_TRANSIENT_ATTEMPTS: u32 = 5;
+
 pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow::Result<()> {
     let mut backoff = Duration::from_secs(30);
     let max_backoff = Duration::from_secs(300);
+    // Consecutive transient-failure count per recording, so a persistently
+    // failing item eventually lands in failed/ instead of looping forever.
+    let mut attempts: std::collections::HashMap<phoneme_core::RecordingId, u32> =
+        std::collections::HashMap::new();
 
     loop {
         if *shutdown.borrow() {
@@ -53,6 +63,9 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 // Publish a fresh cancellation token for this in-flight item so
                 // `CancelProcessing` can abort the whisper/LLM work mid-flight.
                 let token = tokio_util::sync::CancellationToken::new();
+                // The payload moves into the pipeline; keep the id for the
+                // retry bookkeeping below.
+                let rec_id = payload.id.clone();
                 if let Ok(mut slot) = state.processing.lock() {
                     *slot = Some((payload.id.clone(), token.clone()));
                 }
@@ -63,11 +76,44 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 match result {
                     Ok(()) => {
                         backoff = Duration::from_secs(30); // reset on success
+                        attempts.remove(&rec_id);
                     }
-                    Err(Error::WhisperUnreachable { .. }) | Err(Error::WhisperTimeout { .. }) => {
+                    Err(e @ Error::WhisperUnreachable { .. })
+                    | Err(e @ Error::WhisperTimeout { .. }) => {
                         state
                             .events
                             .emit(DaemonEvent::WhisperStatusChanged { reachable: false });
+                        // The pipeline left this transient failure CLAIMED (it
+                        // never reaches failed/) — put it back in pending so the
+                        // SAME recording retries after the backoff, instead of
+                        // being silently lost while the worker moves on.
+                        let tries = attempts.entry(rec_id.clone()).or_insert(0);
+                        *tries += 1;
+                        if *tries >= MAX_TRANSIENT_ATTEMPTS {
+                            tracing::error!(
+                                id = %rec_id.as_str(),
+                                tries = *tries,
+                                "giving up after repeated transient whisper failures"
+                            );
+                            attempts.remove(&rec_id);
+                            let _ = state
+                                .catalog
+                                .update_status(
+                                    &rec_id,
+                                    phoneme_core::RecordingStatus::TranscribeFailed,
+                                )
+                                .await;
+                            let _ = state
+                                .inbox
+                                .finish_failed(&rec_id, "whisper_error", &e.to_string())
+                                .await;
+                            state.events.emit(DaemonEvent::TranscriptionFailed {
+                                id: rec_id.clone(),
+                                error: format!("{e} (after {MAX_TRANSIENT_ATTEMPTS} attempts)"),
+                            });
+                        } else if let Err(rq) = state.inbox.requeue(&rec_id).await {
+                            tracing::error!(id = %rec_id.as_str(), error = %rq, "failed to requeue after transient error");
+                        }
                         tracing::warn!(?backoff, "Whisper unreachable; sleeping before retry");
                         tokio::select! {
                             _ = tokio::time::sleep(backoff) => {}
@@ -76,6 +122,7 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                         backoff = (backoff * 2).min(max_backoff);
                     }
                     Err(e) => {
+                        attempts.remove(&rec_id);
                         tracing::error!(error = %e, "fatal pipeline error (failed)");
                     }
                 }

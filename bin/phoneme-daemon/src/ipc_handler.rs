@@ -1716,6 +1716,11 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         metadata: HookMetadata::current(),
     };
     if let Err(e) = state.inbox.enqueue(&payload).await {
+        // No queue entry means this import would never be processed — roll the
+        // catalog row and the canonical WAV back so it can't sit in the list
+        // stuck on Transcribing forever. The caller can simply retry.
+        let _ = state.catalog.delete(&id).await;
+        let _ = tokio::fs::remove_file(&audio_path).await;
         return Response::Err(IpcError {
             kind: error_to_kind(&e),
             message: e.to_string(),

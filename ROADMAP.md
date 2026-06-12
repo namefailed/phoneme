@@ -430,11 +430,11 @@ saved-searches, and curated-models features audited **clean**.
 - [ ] `native-whisper` won't compile — `model_path` (a `String`) used as an `Option` (`transcription.rs:78`) *(A2-H2)*
 - [ ] tray `Bridge` stays `None` after a down-at-launch daemon; no real reconnect (`commands.rs` / `lib.rs`) *(A2-H3)*
 - [ ] `wizard_download_model` / `wizard_run_installer` lack a URL allowlist + canonicalize (`commands.rs`) *(A2-H4/H5)*
-- [ ] Delete key sends `session:<id>` to `deleteRecording` (`RecordingsView/index.ts:366`) *(A1-H1)*
-- [ ] PostProcessing cloud `/models` fetch sends the masked sentinel key (`SectionPostProcessing.ts`) *(A1-H2)*
+- [x] Delete key sends `session:<id>` to `deleteRecording` — fixed by the undoable-delete flow (`requestUndoableDelete` filters session ids) *(A1-H1)*
+- [x] PostProcessing cloud `/models` fetch sends the masked sentinel key — `fetchLlmModels` guards the sentinel (cloud → manual entry, local → blank key) *(A1-H2)*
 - [ ] `open_file` has no path allowlist (`commands.rs`) *(A1-H3)*
-- [ ] Import enqueue failure orphans a catalog row (`ipc_handler.rs`) *(A1-H4)*
-- [ ] Whisper transient failure never requeues; model-override readiness races (`pipeline.rs` / `queue_worker.rs`) *(A1-H5 / A2-M7)*
+- [x] Import enqueue failure orphans a catalog row — the row and canonical WAV roll back so a failed import is simply retryable *(A1-H4)*
+- [x] Whisper transient failure never requeues — unreachable/timeout now skip failed/, the worker requeues the same item with backoff (capped at 5 attempts) *(A1-H5)*. *Model-override readiness race (A2-M7) still open — Wave 2.*
 
 **Wave 2 — Perf & UX correctness** — embed read-lock contention + `spawn_blocking` + diarizer pipeline cache (A2-M8), cancel → distinct status (not `TranscribeFailed`), meeting-stop best-effort per track (A2-M6), poisoned model download (A2-M1), per-request retranscribe override (A2-M21), server-side `kind` filter for sparse pages.
 

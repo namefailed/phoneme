@@ -736,25 +736,41 @@ pub async fn run(
         res = provider.transcribe_with_segments(&audio_path, language.as_deref()) => match res {
             Ok(t) => t,
             Err(e) => {
+                let transient = matches!(
+                    e,
+                    phoneme_core::Error::WhisperUnreachable { .. }
+                        | phoneme_core::Error::WhisperTimeout { .. }
+                );
                 state.events.emit(DaemonEvent::LlmActivity {
                     id: id.clone(),
                     stage: PipelineStage::Transcribing,
                     prompt: String::new(),
-                    delta: format!("✕ failed: {e}"),
+                    delta: if transient {
+                        format!("✕ {e} — will retry")
+                    } else {
+                        format!("✕ failed: {e}")
+                    },
                     done: true,
                 });
-                state
-                    .catalog
-                    .update_status(&id, RecordingStatus::TranscribeFailed)
-                    .await?;
-                state
-                    .inbox
-                    .finish_failed(&id, "whisper_error", &e.to_string())
-                    .await?;
-                state.events.emit(DaemonEvent::TranscriptionFailed {
-                    id: id.clone(),
-                    error: e.to_string(),
-                });
+                // A transient error (server down / restarting, request timed
+                // out) must NOT bury the item in failed/ — the queue worker
+                // requeues it and retries with backoff, so a whisper-server
+                // blip never costs a recording. Only permanent errors (bad
+                // audio, 4xx, decode failures) take the failed path.
+                if !transient {
+                    state
+                        .catalog
+                        .update_status(&id, RecordingStatus::TranscribeFailed)
+                        .await?;
+                    state
+                        .inbox
+                        .finish_failed(&id, "whisper_error", &e.to_string())
+                        .await?;
+                    state.events.emit(DaemonEvent::TranscriptionFailed {
+                        id: id.clone(),
+                        error: e.to_string(),
+                    });
+                }
                 return Err(e);
             }
         }

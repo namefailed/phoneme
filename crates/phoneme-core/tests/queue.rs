@@ -348,3 +348,63 @@ proptest! {
         });
     }
 }
+
+#[tokio::test]
+async fn requeue_returns_a_claimed_item_to_pending() {
+    // The transient-failure retry path: a claimed item that hit a whisper
+    // blip goes BACK to pending (same payload), so the very next claim picks
+    // it up again instead of the recording being lost to failed/.
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    q.enqueue(&make_payload(id.clone())).await.unwrap();
+
+    let claimed = q.claim_next().await.unwrap().expect("claims the item");
+    assert_eq!(claimed.id, id);
+    assert!(dir
+        .path()
+        .join("processing")
+        .join(format!("{id}.json"))
+        .exists());
+
+    q.requeue(&id).await.unwrap();
+    assert!(
+        dir.path()
+            .join("pending")
+            .join(format!("{id}.json"))
+            .exists(),
+        "requeue must move the entry back to pending"
+    );
+    assert!(!dir
+        .path()
+        .join("processing")
+        .join(format!("{id}.json"))
+        .exists());
+    assert!(!dir
+        .path()
+        .join("failed")
+        .join(format!("{id}.json"))
+        .exists());
+
+    let again = q
+        .claim_next()
+        .await
+        .unwrap()
+        .expect("re-claims after requeue");
+    assert_eq!(again.id, id, "the same recording retries");
+}
+
+#[tokio::test]
+async fn requeue_is_a_noop_for_unclaimed_ids() {
+    // Defensive: requeueing something that isn't in processing/ (already
+    // finished, cancelled, or never claimed) must not error or invent files.
+    let dir = TempDir::new().unwrap();
+    let q = InboxQueue::new(dir.path()).await.unwrap();
+    let id = RecordingId::new();
+    q.requeue(&id).await.unwrap();
+    assert!(!dir
+        .path()
+        .join("pending")
+        .join(format!("{id}.json"))
+        .exists());
+}
