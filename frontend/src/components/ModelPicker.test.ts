@@ -32,6 +32,17 @@ function cancel() {
   queryEl<HTMLButtonElement>("#mp-cancel")!.click();
 }
 
+/** Wait for the picker's Lit render plus the shared model fields it mounts.
+ *  llm-mode fields kick an async initial refresh; one macrotask lets it settle
+ *  (the mocked / masked-key paths used here never touch the network). */
+async function settled() {
+  const el = document.querySelector("ph-model-picker") as
+    | (HTMLElement & { updateComplete: Promise<unknown> })
+    | null;
+  await el?.updateComplete;
+  await new Promise((r) => setTimeout(r, 0));
+}
+
 describe("openModelPicker", () => {
   it("renders a centered modal (not anchored) when no anchor is given", async () => {
     const p = openModelPicker("transcription");
@@ -81,5 +92,88 @@ describe("openModelPicker", () => {
 
     cancel();
     await p;
+  });
+});
+
+describe("model slots", () => {
+  it("mounts the shared model field into every slot host", async () => {
+    const p = openModelPicker("transcription");
+    await vi.waitFor(() =>
+      expect(queryEl(".modal-overlay")).toBeTruthy(),
+    );
+    await settled();
+
+    // One host per model slot — whisper/STT, cleanup LLM, summary, auto-tag,
+    // live preview — each filled by the shared field (its .mf-select), not a
+    // hand-rolled per-slot dropdown.
+    for (const slot of ["stt", "llm", "sum", "at", "prev"]) {
+      const host = queryEl<HTMLElement>(`#mp-${slot}-model-host`);
+      expect(host, `host div for "${slot}" slot`).toBeTruthy();
+      expect(host!.querySelector(".mf-select"), `shared field in "${slot}" slot`).toBeTruthy();
+    }
+
+    cancel();
+    await p;
+  });
+
+  it("shows the saved cleanup model as selected and ✓-marks the matching preset", async () => {
+    vi.mocked(tauriCore.invoke).mockImplementation(async (cmd: string): Promise<any> => {
+      if (cmd === "read_config") {
+        return {
+          llm_post_process: {
+            provider: "groq",
+            // The Groq preset's exact endpoint → its entry is "current".
+            api_url: "https://api.groq.com/openai/v1/chat/completions",
+            // Masked key, as the daemon hands it to the WebView — the field
+            // skips the live fetch, so this never touches the network.
+            api_key: "__phoneme_secret_kept__",
+            model: "llama-3.1-8b-instant",
+          },
+        };
+      }
+      if (cmd === "wizard_list_downloaded_models") return [];
+      return {};
+    });
+
+    const p = openModelPicker("postprocessing");
+    await vi.waitFor(() =>
+      expect(queryEl(".modal-overlay")).toBeTruthy(),
+    );
+    await settled();
+
+    const modelSelect = queryEl<HTMLSelectElement>("#mp-llm-model-host .mf-select")!;
+    expect(modelSelect).toBeTruthy();
+    expect(modelSelect.value).toBe("llama-3.1-8b-instant");
+
+    const provider = queryEl<HTMLSelectElement>("#mp-llm-provider")!;
+    const optText = (value: string) =>
+      Array.from(provider.options).find((o) => o.value === value)?.textContent ?? "";
+    expect(optText("preset:groq")).toContain("✓");
+    expect(optText("preset:groq")).toContain("Groq");
+    expect(optText("preset:openai")).not.toContain("✓");
+
+    cancel();
+    await p;
+  });
+
+  it("saving an untouched default config writes the same keys as before", async () => {
+    const p = openModelPicker("transcription");
+    await vi.waitFor(() =>
+      expect(queryEl("#mp-save")).toBeTruthy(),
+    );
+    queryEl<HTMLButtonElement>("#mp-save")!.click();
+    await expect(p).resolves.toBe(true);
+
+    const write = vi.mocked(tauriCore.invoke).mock.calls.find(([cmd]) => cmd === "write_config");
+    expect(write).toBeTruthy();
+    const cfg = (write![1] as { config: any }).config;
+    expect(cfg.whisper).toEqual({ provider: "local", model: "", api_key: "", api_url: "" });
+    expect(cfg.llm_post_process).toEqual({ provider: "none", model: "", api_key: "", api_url: "", enabled: false });
+    // An empty config reads as diarization-on (provider unset ≠ "none") → "local".
+    expect(cfg.diarization).toEqual({ provider: "local" });
+    expect(cfg.summary).toEqual({ provider: "", model: "", api_key: "", api_url: "" });
+    expect(cfg.auto_tag).toEqual({ provider: "", model: "", api_key: "", api_url: "" });
+    expect(cfg.semantic_search).toEqual({ model_dir: "" });
+    expect(cfg.preview_whisper).toBeNull();
   });
 });
