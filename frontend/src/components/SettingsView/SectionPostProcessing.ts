@@ -6,14 +6,28 @@ import {
   findLlmPreset,
   type LlmPreset,
 } from "../../services/llmProviders";
-import { curatedCleanupModels, modelHint } from "../../data/curatedModels";
 
-/** Sentinel <option> value that flips a provider model select into free-text. */
-const SENTINEL_OTHER = "__other__";
+/** True when `apiUrl` matches the preset's endpoint, treating a blank url as
+ * "the provider's default" (so it equals the preset that owns that default).
+ * Both sides are trimmed and trailing slashes ignored, mirroring the matching
+ * in `matchLlmPreset`. */
+function urlMatchesPreset(apiUrl: string, preset: LlmPreset): boolean {
+  const norm = (s: string) => s.trim().replace(/\/+$/, "");
+  const url = norm(apiUrl);
+  return url === "" || url === norm(preset.apiUrl);
+}
 
-/** Grouped <option> list (Local / Cloud) for a provider-preset dropdown. */
-function presetOptionsHtml(): string {
-  const opt = (p: LlmPreset) => `<option value="${p.id}">${p.label}${p.needsKey ? "" : ""}</option>`;
+/**
+ * Grouped <option> list (Local / Cloud) for a provider-preset dropdown. The
+ * entry matching the CURRENT effective provider+endpoint is prefixed "✓ " so
+ * the user can see at a glance which preset their connection came from — picking
+ * any entry still applies it as normal.
+ */
+function presetOptionsHtml(currentKind: string, currentUrl: string): string {
+  const opt = (p: LlmPreset) => {
+    const isCurrent = p.kind === currentKind && urlMatchesPreset(currentUrl, p);
+    return `<option value="${p.id}">${isCurrent ? "✓ " : ""}${p.label}</option>`;
+  };
   return `
     <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(opt).join("")}</optgroup>
     <optgroup label="Cloud (API key)">${CLOUD_LLM_PRESETS.map(opt).join("")}</optgroup>`;
@@ -49,153 +63,21 @@ export class SectionPostProcessing {
       };
     }
 
-    // State for provider models
-    const providerModels: Record<string, string[]> = { ollama: [], openai: [], groq: [], anthropic: [] };
-    const fetchingModels: Record<string, boolean> = { ollama: false, openai: false, groq: false, anthropic: false };
-
-    const fetchProviderModels = async (provider: string) => {
-      fetchingModels[provider] = true;
-      updateProviderSelect(provider);
-      try {
-        let urlStr = config.llm_post_process.api_url || "";
-        const apiKey = config.llm_post_process.api_key || "";
-        let endpoint = "";
-        let headers: Record<string, string> = {};
-        
-        if (provider === "ollama") {
-          if (!urlStr) urlStr = "http://127.0.0.1:11434/api/generate";
-          const url = new URL(urlStr);
-          endpoint = `${url.protocol}//${url.host}/api/tags`;
-        } else if (provider === "openai" || provider === "groq") {
-          if (!urlStr) {
-            urlStr = provider === "openai" 
-              ? "https://api.openai.com/v1/chat/completions" 
-              : "https://api.groq.com/openai/v1/chat/completions";
-          }
-          const url = new URL(urlStr);
-          let path = url.pathname;
-          if (path.endsWith("/chat/completions")) {
-            path = path.replace("/chat/completions", "/models");
-          } else if (!path.endsWith("/models")) {
-            path = path.endsWith("/") ? path + "models" : path + "/models";
-          }
-          endpoint = `${url.protocol}//${url.host}${path}`;
-          headers["Authorization"] = `Bearer ${apiKey}`;
-        } else if (provider === "anthropic") {
-          if (!urlStr) urlStr = "https://api.anthropic.com/v1/messages";
-          const url = new URL(urlStr);
-          endpoint = `${url.protocol}//${url.host}/v1/models`;
-          headers["x-api-key"] = apiKey;
-          headers["anthropic-version"] = "2023-06-01";
-        }
-
-        const res = await fetch(endpoint, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        
-        if (provider === "ollama") {
-          providerModels[provider] = (data.models || []).map((m: any) => m.name);
-        } else if (provider === "openai" || provider === "groq" || provider === "anthropic") {
-          providerModels[provider] = (data.data || []).map((m: any) => m.id);
-        }
-      } catch (e) {
-        console.warn(`Failed to fetch ${provider} models:`, e);
-        providerModels[provider] = [];
-      } finally {
-        fetchingModels[provider] = false;
-        updateProviderSelect(provider);
-      }
-    };
-
-    // Whether a provider's model field is currently a free-text input (user
-    // chose "Other…"). Lets a custom model id always be typeable even when a
-    // curated/fetched list is shown.
-    const freeText: Record<string, boolean> = { ollama: false, openai: false, groq: false, anthropic: false };
-
-    const updateProviderSelect = (provider: string) => {
-      const host = container.querySelector<HTMLElement>(`#${provider}-model-host`);
-      if (!host) return;
-
-      const currentModel = config.llm_post_process.model || "";
-
-      // Free-text mode: a plain input + a "List" button to return to the picker.
-      if (freeText[provider]) {
-        host.innerHTML = `
-          <div style="display:flex; gap:8px;">
-            <input type="text" class="pp-model-text" style="flex:1; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" value="${(currentModel).replace(/"/g, "&quot;")}" placeholder="Model id" />
-            <button class="inline-button pp-model-list" type="button" style="padding: 4px 10px;">List</button>
-          </div>`;
-        const input = host.querySelector<HTMLInputElement>(".pp-model-text")!;
-        input.addEventListener("input", () => { config.llm_post_process.model = input.value; });
-        host.querySelector<HTMLButtonElement>(".pp-model-list")?.addEventListener("click", () => {
-          freeText[provider] = false;
-          updateProviderSelect(provider);
-        });
-        return;
-      }
-
-      // Live-fetched list wins; otherwise fall back to the curated suggestions
-      // so the dropdown is never empty before/without a fetch.
-      const curated = curatedCleanupModels(provider);
-      const fetched = providerModels[provider];
-      const ids = fetched.length ? fetched : curated.map((m) => m.id);
-      const metaById = new Map(curated.map((m) => [m.id, m]));
-      const labelFor = (m: string) => {
-        const meta = metaById.get(m);
-        return meta ? `${meta.recommended ? "⭐ " : ""}${meta.label} — ${modelHint(meta)}` : m;
-      };
-
-      const select = document.createElement("select");
-      select.id = `${provider}-model-select`;
-      select.style.cssText = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
-
-      if (fetchingModels[provider] && !ids.length) {
-        const o = document.createElement("option");
-        o.disabled = true;
-        o.textContent = "Loading models...";
-        select.appendChild(o);
-      } else {
-        ids.forEach((m) => {
-          const o = document.createElement("option");
-          o.value = m;
-          o.textContent = labelFor(m);
-          if (m === currentModel) o.selected = true;
-          select.appendChild(o);
-        });
-        // Keep a saved/preset model visible even if it isn't in the list.
-        if (currentModel && !ids.includes(currentModel)) {
-          const o = document.createElement("option");
-          o.value = currentModel;
-          o.textContent = `${currentModel} (current)`;
-          o.selected = true;
-          select.appendChild(o);
-        }
-        const other = document.createElement("option");
-        other.value = SENTINEL_OTHER;
-        other.textContent = "Other… (type a model id)";
-        select.appendChild(other);
-      }
-
-      select.addEventListener("change", () => {
-        if (select.value === SENTINEL_OTHER) {
-          freeText[provider] = true;
-          updateProviderSelect(provider);
-          return;
-        }
-        config.llm_post_process.model = select.value;
-      });
-
-      host.innerHTML = "";
-      host.appendChild(select);
-
-      // A one-line hint for the selected curated model, when we have one.
-      const meta = metaById.get(currentModel);
-      if (meta) {
-        const hint = document.createElement("p");
-        hint.style.cssText = "margin: 4px 0 0; font-size: 11px; color: var(--fg-faded);";
-        hint.textContent = meta.description;
-        host.appendChild(hint);
-      }
+    // The effective cleanup connection as currently shown in the form (live DOM
+    // values win over stale config so the model field fetches what the user is
+    // actually editing, not the last-saved values). Falls back to config before
+    // the inputs exist / when a provider hides its url+key fields.
+    const cleanupEff = (which: "provider" | "api_url" | "api_key"): string => {
+      const providerEl = container.querySelector<HTMLSelectElement>("[data-key='llm_post_process.provider']");
+      const provider = providerEl?.value || config.llm_post_process.provider || "none";
+      if (which === "provider") return provider.toString();
+      // For url/key read only the input inside the CURRENTLY selected provider
+      // block (each provider renders its own copy), so a hidden block's value
+      // never leaks into the active connection.
+      const el = container.querySelector<HTMLInputElement>(
+        `.provider-settings[data-provider='${provider}'] [data-key='llm_post_process.${which}']`,
+      );
+      return (el?.value ?? config.llm_post_process[which] ?? "").toString();
     };
 
     container.innerHTML = `
@@ -246,7 +128,7 @@ export class SectionPostProcessing {
           <div>
             <select id="llm-preset-select" style="max-width: 400px;">
               <option value="">— Pick a provider —</option>
-              ${presetOptionsHtml()}
+              ${presetOptionsHtml(config.llm_post_process.provider || "none", config.llm_post_process.api_url || "")}
             </select>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
@@ -255,31 +137,11 @@ export class SectionPostProcessing {
         </div>
 
         <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
-          <label>Model Name</label>
-          <div>
-            <div style="display: flex; gap: 8px;">
-              <div id="ollama-model-host" style="flex: 1;"></div>
-              <button class="inline-button fetch-models-btn" data-provider="ollama" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-field provider-settings" data-provider="ollama" style="display: none;">
           <label>Ollama API URL</label>
           <div>${renderField(
             { key: "llm_post_process.api_url", label: "", kind: "text" },
             config.llm_post_process.api_url || "http://127.0.0.1:11434/api/generate",
           )}</div>
-        </div>
-
-        <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
-          <label>OpenAI Model</label>
-          <div>
-            <div style="display: flex; gap: 8px;">
-              <div id="openai-model-host" style="flex: 1;"></div>
-              <button class="inline-button fetch-models-btn" data-provider="openai" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
-            </div>
-          </div>
         </div>
 
         <div class="settings-field provider-settings" data-provider="openai" style="display: none;">
@@ -299,15 +161,6 @@ export class SectionPostProcessing {
         </div>
 
         <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
-          <label>Groq Model</label>
-          <div>
-            <div style="display: flex; gap: 8px;">
-              <div id="groq-model-host" style="flex: 1;"></div>
-              <button class="inline-button fetch-models-btn" data-provider="groq" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
-            </div>
-          </div>
-        </div>
-        <div class="settings-field provider-settings" data-provider="groq" style="display: none;">
           <label>API Key</label>
           <div>${renderField(
             { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
@@ -323,15 +176,6 @@ export class SectionPostProcessing {
         </div>
 
         <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
-          <label>Claude Model</label>
-          <div>
-            <div style="display: flex; gap: 8px;">
-              <div id="anthropic-model-host" style="flex: 1;"></div>
-              <button class="inline-button fetch-models-btn" data-provider="anthropic" type="button" style="padding: 4px 10px; align-self: flex-start;">Refresh</button>
-            </div>
-          </div>
-        </div>
-        <div class="settings-field provider-settings" data-provider="anthropic" style="display: none;">
           <label>API Key</label>
           <div>${renderField(
             { key: "llm_post_process.api_key", label: "", kind: "text", type: "password" },
@@ -344,6 +188,11 @@ export class SectionPostProcessing {
             { key: "llm_post_process.api_url", label: "", kind: "text" },
             config.llm_post_process.api_url || "https://api.anthropic.com/v1/messages",
           )}</div>
+        </div>
+
+        <div class="settings-field" id="cleanup-model-field" style="display: none;">
+          <label>Model</label>
+          <div id="cleanup-model-host"></div>
         </div>
 
         <div id="llm-cloud-note" style="display:none; border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin:4px 0 12px; font-size:12px; line-height:1.45;">
@@ -436,7 +285,7 @@ export class SectionPostProcessing {
           <div>
             <select id="summary-provider-preset" style="max-width: 400px;">
               <option value="">— Pick a provider —</option>
-              ${presetOptionsHtml()}
+              ${presetOptionsHtml(config.summary.provider || "", config.summary.api_url || "")}
             </select>
           </div>
           <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
@@ -503,17 +352,37 @@ export class SectionPostProcessing {
 
     bindFieldEvents(container, config);
 
-    // Render each provider's model picker (curated suggestions + live fetch +
-    // "Other…" free-text) and wire its Refresh button. The picker's own change
-    // handler writes config.llm_post_process.model — see updateProviderSelect.
-    ["ollama", "openai", "groq", "anthropic"].forEach(provider => {
-      updateProviderSelect(provider);
-
-      const refreshBtn = container.querySelector<HTMLButtonElement>(`.fetch-models-btn[data-provider='${provider}']`);
-      refreshBtn?.addEventListener("click", () => {
-        void fetchProviderModels(provider);
+    // ── Cleanup model field ──────────────────────────────────────────────────
+    // One shared model picker (curated suggestions + live fetch + "Other…"), fed
+    // the EFFECTIVE cleanup connection read live from the form so it always lists
+    // models for whatever provider/url/key is currently shown. The field owns its
+    // host's DOM and writes config.llm_post_process.model itself.
+    const cleanupModelHost = container.querySelector<HTMLElement>("#cleanup-model-host");
+    // Re-mount only when the connection actually changes (provider|url|key); a
+    // keystroke in the prompt or timeout must not reset the picker.
+    let cleanupMountKey = "";
+    const mountCleanupModel = (force = false) => {
+      if (!cleanupModelHost) return;
+      const key = `${cleanupEff("provider")}|${cleanupEff("api_url")}|${cleanupEff("api_key")}`;
+      if (!force && key === cleanupMountKey) return;
+      cleanupMountKey = key;
+      mountModelField(cleanupModelHost, {
+        mode: "llm",
+        getProvider: () => cleanupEff("provider"),
+        getApiUrl: () => cleanupEff("api_url"),
+        getApiKey: () => cleanupEff("api_key"),
+        getModel: () => config.llm_post_process.model || "",
+        setModel: (m) => { config.llm_post_process.model = m; },
       });
-    });
+    };
+
+    // Re-mount the cleanup field when its url/key inputs change (those live in
+    // the per-provider blocks). The mount-key guard skips no-op churn.
+    container
+      .querySelectorAll<HTMLInputElement>(
+        ".provider-settings[data-provider] [data-key='llm_post_process.api_url'], .provider-settings[data-provider] [data-key='llm_post_process.api_key']",
+      )
+      .forEach((el) => el.addEventListener("input", () => mountCleanupModel()));
 
     // Open the Ollama download page in the user's browser. (Was a broken inline
     // `onclick="require(...)"` — `require` doesn't exist in the Vite/ESM bundle,
@@ -592,14 +461,31 @@ export class SectionPostProcessing {
       summaryProviderSelect.addEventListener("change", () => {
         updateSummaryProviderVisibility();
         mountSummaryModel(); // provider changed → re-fetch its model list
+        refreshSummaryPresetMarker();
       });
       updateSummaryProviderVisibility();
+    }
+    // Summary url/key edits move the "✓ current" marker (a custom endpoint can
+    // match — or stop matching — a preset). Re-render the marker, not the field.
+    container
+      .querySelector<HTMLInputElement>(".summary-needs-url [data-key='summary.api_url']")
+      ?.addEventListener("input", () => refreshSummaryPresetMarker());
+
+    // Recompute the "✓ current" prefix on the summary preset dropdown from the
+    // effective summary provider+url. Cheap enough to rebuild the option list.
+    const summaryProviderPreset = container.querySelector<HTMLSelectElement>("#summary-provider-preset");
+    function refreshSummaryPresetMarker() {
+      if (!summaryProviderPreset) return;
+      const provider = summaryProviderSelect?.value || "";
+      const url = (config.summary.api_url ?? "").toString();
+      summaryProviderPreset.innerHTML = `
+        <option value="">— Pick a provider —</option>
+        ${presetOptionsHtml(provider, url)}`;
     }
 
     // Summary provider presets — map a named entry onto the OpenAI-compatible
     // provider and prefill the endpoint + a default model (mirrors the cleanup
     // presets, but writes to the summary.* keys).
-    const summaryProviderPreset = container.querySelector<HTMLSelectElement>("#summary-provider-preset");
     summaryProviderPreset?.addEventListener("change", () => {
       const preset = findLlmPreset(summaryProviderPreset.value);
       if (!preset || !summaryProviderSelect) return;
@@ -613,6 +499,7 @@ export class SectionPostProcessing {
       }
       config.summary.model = preset.defaultModel;
       mountSummaryModel(); // re-fetch for the new provider + show its default model
+      refreshSummaryPresetMarker();
       summaryProviderPreset.value = "";
     });
 
@@ -628,33 +515,44 @@ export class SectionPostProcessing {
           el.style.display = "none";
         }
       });
-      // Timeout applies to every active provider; the cloud note only to remote ones.
+      // Timeout + model apply to every active provider; the cloud note only to remote ones.
       const isCloud = provider === "openai" || provider === "groq" || provider === "anthropic";
+      const modelEl = container.querySelector<HTMLElement>("#cleanup-model-field");
+      if (modelEl) modelEl.style.display = provider === "none" ? "none" : "grid";
       const timeoutEl = container.querySelector<HTMLElement>("#llm-timeout-field");
       if (timeoutEl) timeoutEl.style.display = provider === "none" ? "none" : "";
       const cloudNote = container.querySelector<HTMLElement>("#llm-cloud-note");
       if (cloudNote) cloudNote.style.display = isCloud ? "" : "none";
-      
-      // Fetch models when provider is selected
-      if (provider !== "none") {
-        void fetchProviderModels(provider);
-      }
+
+      // Provider changed → re-point the model field at the new connection and
+      // re-render the preset marker.
+      mountCleanupModel();
+      refreshCleanupPresetMarker();
     };
 
     if (providerSelect) {
       providerSelect.addEventListener("change", updateProviderVisibility);
-      updateProviderVisibility(); // Initial run
+      updateProviderVisibility(); // Initial run (also performs the first model mount)
+    }
+
+    // Recompute the "✓ current" prefix on the cleanup preset dropdown from the
+    // effective cleanup provider+url.
+    const llmPresetSelect = container.querySelector<HTMLSelectElement>("#llm-preset-select");
+    function refreshCleanupPresetMarker() {
+      if (!llmPresetSelect) return;
+      llmPresetSelect.innerHTML = `
+        <option value="">— Pick a provider —</option>
+        ${presetOptionsHtml(cleanupEff("provider"), cleanupEff("api_url"))}`;
     }
 
     // Provider presets — one click applies a named provider from the shared
     // catalog: its protocol kind, endpoint, and a default model. The user only
     // needs to add an API key (cloud) or have the local server running.
-    const llmPresetSelect = container.querySelector<HTMLSelectElement>("#llm-preset-select");
     llmPresetSelect?.addEventListener("change", () => {
       const preset = findLlmPreset(llmPresetSelect.value);
       if (!preset || !providerSelect) return;
-      // Write the config directly so the model survives the panel's async model
-      // fetch (which repopulates the per-provider <select> on provider change).
+      // Write the config directly so the model survives the provider-change
+      // handler (which re-mounts the model field on the new connection).
       config.llm_post_process.provider = preset.kind;
       config.llm_post_process.api_url = preset.apiUrl;
       config.llm_post_process.model = preset.defaultModel;
@@ -668,9 +566,11 @@ export class SectionPostProcessing {
         urlInput.value = preset.apiUrl;
         urlInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      // Re-render the model <select> so the preset's default model shows even
-      // before a live fetch returns.
-      updateProviderSelect(preset.kind);
+      // Force a re-mount so the preset's default model shows selected even
+      // before a live fetch returns (provider may be unchanged, e.g. re-picking
+      // a different openai-kind preset, so the mount-key guard wouldn't fire).
+      mountCleanupModel(true);
+      refreshCleanupPresetMarker();
       llmPresetSelect.value = ""; // reset to placeholder after applying
     });
 
