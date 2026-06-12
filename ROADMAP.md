@@ -605,6 +605,21 @@ alongside the feature releases above.*
 - [x] Frontend: ESLint + Prettier (*shipped — flat config, 0-error baseline, lint in CI*); still open: stricter TS (`noUnusedLocals`/`noUnusedParameters`); `types/` + `constants/` dirs.
 
 **Performance**
+- [ ] Persist `error_kind`/`error_message` onto the catalog row at failure
+  time — the columns exist but no daemon path writes them; real error text
+  only travels in events + the failed/ quarantine JSON. Writing them makes
+  failure reasons survive restarts and retires the queue panel's session
+  cache.
+- [ ] Per-item failed-quarantine dismiss — the inbox failed/ store only
+  supports all-or-nothing ClearFailed; the failure panel wants per-recording
+  dismiss IPC.
+- [ ] Settings/wizard URL hints should show the EFFECTIVE whisper port —
+  after a port fallback the text still names the configured port; read
+  daemon_status in SectionWhisper/SectionInPlace/the wizard.
+- [ ] Doctor probes should follow effective whisper ports — the daemon-side
+  RunDoctor handler and tray-side backend checks still build URLs from
+  config; rewrite via the published effective ports and say "running on
+  51234 (fallback from 5809)" when they differ.
 - [ ] Record the request model id for cloud STT — the catalog/webhook `model` field is the file-stem of `whisper.model_path`, so cloud transcriptions record "unknown" (pinned by the pipeline integration test).
 - [ ] Doctor: decide whether local whisper model/server checks should skip (or downgrade) when a cloud STT provider is configured — today they run regardless (behavior parity kept on purpose).
 - [ ] Trim redundant `http.clone()` (transcription.rs ×7, llm.rs ×4); avoid the `attention_mask` clone in `embed.rs`.
