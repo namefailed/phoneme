@@ -112,13 +112,15 @@ impl Transcriber {
             TranscriptionBackend::Local => {
                 #[cfg(feature = "native-whisper")]
                 {
-                    if let Some(path) = &whisper.model_path {
-                        if !path.trim().is_empty() {
-                            if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(
-                                std::path::Path::new(path),
-                            ) {
-                                return Box::new(provider);
-                            }
+                    // `model_path` is a plain String — this block used to
+                    // pattern-match it as an Option, which broke the feature
+                    // build (cfg'd-out code is never type-checked; audit A2-H2).
+                    let native_path = whisper.model_path.trim();
+                    if !native_path.is_empty() {
+                        if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(
+                            std::path::Path::new(native_path),
+                        ) {
+                            return Box::new(provider);
                         }
                     }
                 }
