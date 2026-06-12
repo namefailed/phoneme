@@ -708,8 +708,10 @@ impl DaemonRecorder {
         Ok(id)
     }
 
-    /// Stop the current recording, write WAV, enqueue inbox, mark catalog
-    /// row as transcribing.
+    /// Stop the current recording, write the WAV, and mark the catalog row
+    /// Transcribing. Normal recordings enqueue into the inbox for the serial
+    /// pipeline; in-place dictations (unless `[in_place].full_pipeline`) hand
+    /// off to the dictation fast lane instead — see `in_place.rs`.
     pub async fn stop(&self, state: &AppState) -> Result<RecordingId> {
         let mut active_lock = self.active.lock().await;
         let active = active_lock.take().ok_or(Error::NotRecording)?;

@@ -893,13 +893,12 @@ pub async fn run(
     if let Some(rec) = recording {
         if rec.in_place && !transcript.is_empty() {
             tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
-            // Surface failures instead of `unwrap()`-panicking the worker or
-            // silently dropping the typing result (the previous behavior, which
-            // made a failed in-place dictation look like nothing happened with
-            // no clue why). enigo can fail to initialize (e.g. no interactive
-            // input session) or to send input; we log either case at error
-            // level so the cause is visible in the daemon log. Typing is
-            // best-effort — a failure never fails the recording.
+            // This is the FULL-PIPELINE dictation path ([in_place].full_pipeline
+            // = true): the text lands only after every configured step. The
+            // insertion itself (typing vs clipboard-paste, input-simulator
+            // failure modes) lives in `in_place::type_at_cursor`, shared with
+            // the fast lane. Best-effort — a failure is logged loudly but
+            // never fails the recording.
             if let Err(e) =
                 crate::in_place::type_at_cursor(&transcript, &cfg.in_place.type_mode).await
             {

@@ -5,11 +5,12 @@
 //! transcription time by [`Transcriber::provider`], which reuses one shared
 //! HTTP client so the connection pool stays warm across recordings.
 //!
-//! Today the only implementation is [`OpenAiCompatProvider`], which speaks the
-//! OpenAI `/v1/audio/transcriptions` multipart contract — that single shape
-//! covers local whisper.cpp as well as OpenAI and Groq (which are wire
-//! compatible). Cloud backends with bespoke protocols (Deepgram, AssemblyAI)
-//! will add their own `TranscriptionProvider` implementations.
+//! [`OpenAiCompatProvider`] speaks the OpenAI `/v1/audio/transcriptions`
+//! multipart contract — one shape covering local whisper.cpp, OpenAI, Groq,
+//! and any Custom endpoint (they are wire compatible). The bespoke-protocol
+//! backends have their own implementations: [`DeepgramProvider`] (raw-body
+//! `/v1/listen`), [`AssemblyAiProvider`] (upload → create → poll), and
+//! `ElevenLabsProvider`.
 
 use crate::config::{TranscriptionBackend, WhisperConfig};
 use crate::error::{Error, Result};
