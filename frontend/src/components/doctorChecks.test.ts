@@ -89,6 +89,13 @@ describe("checkGroup", () => {
     expect(checkGroup("Hook command")).toBe("Configuration");
   });
 
+  it("groups the provider-aware connection checks, including dynamic LLM names", () => {
+    expect(checkGroup("Transcription API key")).toBe("Servers");
+    expect(checkGroup("Dictation STT endpoint")).toBe("Servers");
+    expect(checkGroup("LLM endpoint (cleanup, summary, titles)")).toBe("Servers");
+    expect(checkGroup("LLM API key (tags)")).toBe("Servers");
+  });
+
   it("falls back to Other for names it doesn't know", () => {
     expect(checkGroup("Brand-new check")).toBe("Other");
     expect(checkGroup("")).toBe("Other");

@@ -69,6 +69,12 @@ const GROUP_BY_NAME: Record<string, CheckGroup> = {
   "Whisper server": "Servers",
   "Live-preview server": "Servers",
   "Ollama (optional)": "Servers",
+  "Transcription API key": "Servers",
+  "Transcription endpoint": "Servers",
+  "Live-preview API key": "Servers",
+  "Live-preview endpoint": "Servers",
+  "Dictation STT key": "Servers",
+  "Dictation STT endpoint": "Servers",
   "Whisper model file": "Models",
   "Live-preview model": "Models",
   "Semantic search model": "Models",
@@ -82,6 +88,11 @@ const GROUP_BY_NAME: Record<string, CheckGroup> = {
 
 /** The subsystem group a check name belongs to; unknown names go to "Other". */
 export function checkGroup(name: string): CheckGroup {
+  // The per-connection LLM checks carry a dynamic step list in the name —
+  // "LLM endpoint (cleanup, summary)" — so they match by prefix.
+  if (name.startsWith("LLM API key (") || name.startsWith("LLM endpoint (")) {
+    return "Servers";
+  }
   return GROUP_BY_NAME[name] ?? "Other";
 }
 

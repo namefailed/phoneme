@@ -67,6 +67,17 @@ trust boundary. Verified against current code.*
   into a config-keyed cache (speakrs' queued worker thread), serialize
   overlapping runs, invalidate on `[diarization]` changes, and never cache a
   failed load - a mid-session model download just works on the next run.
+- [x] **Doctor: provider-aware + triage layout** — checks now follow your
+  actual providers: cloud STT swaps the local model/server checks for
+  "API key configured" + "endpoint reachable" (a 401 still proves the wire;
+  explanations say that's the most Doctor can verify without billing a
+  request), per-step LLM connections are resolved (inheritance included),
+  deduped per endpoint, and probed via free model-list routes. The
+  diarization check now probes the Hugging Face cache the loader actually
+  reads instead of the unwired local_model_path key. Both Doctor surfaces
+  got a triage layout: sticky health strip with category count chips,
+  failures first in full detail, passing checks folded into a grouped
+  "<check> N passing" disclosure; re-runs no longer blank the list.
 - [x] **Webhook SSRF guard + hook-test redaction** — webhooks classify their
   target before any bytes leave: loopback always allowed (local n8n/Home
   Assistant stay zero-config), private ranges need `[webhook]

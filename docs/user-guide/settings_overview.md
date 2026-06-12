@@ -163,7 +163,11 @@ The Doctor covers config presence, the audio folder, **free disk space** on
 the volumes holding your recordings and the app data (a warning under ~2 GB,
 critical under ~500 MB), the hook command, **model-file integrity** (a
 missing, 0-byte or truncated model download is flagged before it bites), and
-the Whisper / live-preview / Ollama servers.
+the Whisper / live-preview / Ollama servers. The checks **follow your
+providers**: run transcription, the live preview, dictation, or an AI step on
+a cloud provider and its local model/server checks make way for what can
+still be verified — the API key is set and the endpoint answers — without
+ever sending a billable request.
 
 Each check shows a category badge when it fails — **Critical** (red: recording
 or transcription is broken), **Warning** (amber: something is degraded but

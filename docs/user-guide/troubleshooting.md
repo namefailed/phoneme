@@ -99,6 +99,28 @@ fails with "couldn't reach":
   the server itself, but the first generation may still need a model pull
   (`ollama pull <model>` once, manually).
 
+## 🔑 Doctor says my API key is missing
+
+With a cloud provider selected, the Doctor verifies a key is actually set for
+each thing that will use one — **Transcription API key** for the main
+provider, **Live-preview API key** / **Dictation STT key** for those
+features, and **LLM API key (…)** for the AI steps. AI steps inherit the
+cleanup connection's key whenever their own key field is blank, so the check
+only fails when there is no key anywhere along that chain.
+
+> [!TIP]
+> **Fix:** Paste the key where the feature is configured — Settings →
+> Transcription for the main provider, Settings → Transcription → Live
+> Preview for the preview, Settings → Capture → Dictation for dictation, or
+> Settings → Post-Processing → Connection for the AI steps. For AI steps you
+> can also set the key once on the cleanup connection and leave the step's
+> own field blank to inherit it.
+
+The Doctor checks **presence, not validity** — it never sends a billable
+request, so a typo'd key still shows as "configured" and only fails on the
+first real run. A reachable endpoint (any HTTP answer counts, even 401) plus
+a configured key is the most it can verify for free.
+
 ## 🛑 Model Download Wizard Fails Mid-Stream
 
 If you were downloading the default model inside the First Run Wizard and the application crashed or the network dropped, you might be left with a corrupted, partially downloaded `.gguf` file.
