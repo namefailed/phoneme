@@ -962,6 +962,25 @@ impl Catalog {
     }
 
     pub async fn add_tag(&self, name: &str, color: Option<&str>) -> Result<Tag> {
+        // Tags are case-INSENSITIVELY unique at the application level: "Code"
+        // and "code" are the same tag, so adding either reuses the existing
+        // row (keeping its color and recording links — the first-created
+        // casing wins). The UNIQUE index on `name` is byte-wise, which is why
+        // this lookup guards the insert. COLLATE NOCASE is ASCII-only; that
+        // covers the realistic duplicate ("Test"/"test") without rewriting
+        // non-ASCII tag names.
+        let existing =
+            sqlx::query("SELECT id, name, color FROM tags WHERE name = ? COLLATE NOCASE")
+                .bind(name)
+                .fetch_optional(&self.pool)
+                .await?;
+        if let Some(row) = existing {
+            return Ok(Tag {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                color: row.try_get("color")?,
+            });
+        }
         sqlx::query("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)")
             .bind(name)
             .bind(color)
@@ -2281,6 +2300,19 @@ mod tests {
             db.speaker_names_for(&r.id).await.unwrap().is_empty(),
             "speaker names must be cascade-deleted with their recording"
         );
+    }
+
+    #[tokio::test]
+    async fn add_tag_is_case_insensitive() {
+        // "Code" and "code" are the same tag: the second add must reuse the
+        // first row (same id, its casing, its color) instead of minting a
+        // byte-wise-unique duplicate.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let first = db.add_tag("Code", Some("#f00")).await.unwrap();
+        let second = db.add_tag("code", None).await.unwrap();
+        assert_eq!(first.id, second.id, "casing variants must reuse the tag");
+        assert_eq!(second.name, "Code", "the first-created casing wins");
+        assert_eq!(second.color.as_deref(), Some("#f00"), "existing color kept");
     }
 
     #[tokio::test]
