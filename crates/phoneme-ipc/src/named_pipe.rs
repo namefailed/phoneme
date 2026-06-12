@@ -208,11 +208,20 @@ pub struct NamedPipeTransport {
 impl NamedPipeTransport {
     pub async fn connect(name: &str) -> TransportResult<Self> {
         let path = pipe_path(name);
+        // ERROR_PIPE_BUSY (231) means every server instance is momentarily
+        // taken — normal under bursts, so retry. But BOUNDED: a stale handle
+        // (daemon wedged with the pipe held) used to spin this loop forever,
+        // hanging the caller. 5s is far beyond any legitimate busy window;
+        // past it, fail with the underlying error like any other connect
+        // failure so callers surface "daemon not reachable".
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let client = loop {
             match ClientOptions::new().open(&path) {
                 Ok(c) => break c,
                 Err(e) if e.raw_os_error() == Some(231) => {
-                    // ERROR_PIPE_BUSY — retry briefly
+                    if std::time::Instant::now() >= deadline {
+                        return Err(IpcTransportError::Connect(e));
+                    }
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
                 Err(e) => return Err(IpcTransportError::Connect(e)),

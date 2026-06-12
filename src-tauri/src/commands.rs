@@ -1078,7 +1078,12 @@ pub async fn wizard_download_model(
         .map_err(|e| format!("failed to create models dir: {}", e))?;
 
     let dest_path = models_dir.join(&filename);
-    if tokio::fs::metadata(&dest_path).await.is_ok() {
+    // A 0-byte file is a husk from a previously failed download, not a model —
+    // fall through and re-download over it.
+    if tokio::fs::metadata(&dest_path)
+        .await
+        .is_ok_and(|m| m.len() > 0)
+    {
         // Emit a fake progress event so the UI knows it's 100%
         let _ = window.emit(
             "download_progress",
@@ -1090,10 +1095,6 @@ pub async fn wizard_download_model(
         return Ok(dest_path.to_string_lossy().into_owned());
     }
 
-    let mut file = tokio::fs::File::create(&dest_path)
-        .await
-        .map_err(|e| format!("failed to create file: {}", e))?;
-
     let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("request failed: {}", e))?;
@@ -1101,6 +1102,14 @@ pub async fn wizard_download_model(
     if !response.status().is_success() {
         return Err(format!("download failed with status: {}", response.status()).into());
     }
+
+    // Create the destination only once the server said yes — creating it
+    // first left a 0-byte file behind on request failure, and the
+    // already-downloaded check then treated that husk as a finished
+    // download forever.
+    let mut file = tokio::fs::File::create(&dest_path)
+        .await
+        .map_err(|e| format!("failed to create file: {}", e))?;
 
     let total = response.content_length();
     let mut downloaded: u64 = 0;
@@ -1162,10 +1171,6 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
             continue;
         }
 
-        let mut file = tokio::fs::File::create(&dest_path)
-            .await
-            .map_err(|e| format!("failed to create file: {}", e))?;
-
         let response = reqwest::get(url)
             .await
             .map_err(|e| format!("request failed: {}", e))?;
@@ -1173,6 +1178,11 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
         if !response.status().is_success() {
             return Err(format!("download failed with status: {}", response.status()).into());
         }
+
+        // Create only after a successful response (see wizard_download_model).
+        let mut file = tokio::fs::File::create(&dest_path)
+            .await
+            .map_err(|e| format!("failed to create file: {}", e))?;
 
         let total = response.content_length();
         let mut downloaded: u64 = 0;
@@ -1392,10 +1402,6 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
 
     // Download into a temp file
     let temp_zip = bin_dir.join("whisper-temp.zip");
-    let mut file = tokio::fs::File::create(&temp_zip)
-        .await
-        .map_err(|e| format!("failed to create temp zip file: {}", e))?;
-
     let response = reqwest::get(url)
         .await
         .map_err(|e| format!("request failed: {}", e))?;
@@ -1403,6 +1409,11 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
     if !response.status().is_success() {
         return Err(format!("download failed with status: {}", response.status()).into());
     }
+
+    // Create only after a successful response (see wizard_download_model).
+    let mut file = tokio::fs::File::create(&temp_zip)
+        .await
+        .map_err(|e| format!("failed to create temp zip file: {}", e))?;
 
     let total = response.content_length();
     let mut downloaded: u64 = 0;
@@ -1734,10 +1745,6 @@ pub async fn wizard_download_file(
 
     let dest_path = std::env::temp_dir().join(&filename);
 
-    let mut file = tokio::fs::File::create(&dest_path)
-        .await
-        .map_err(|e| format!("failed to create file: {}", e))?;
-
     let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("request failed: {}", e))?;
@@ -1745,6 +1752,11 @@ pub async fn wizard_download_file(
     if !response.status().is_success() {
         return Err(format!("download failed: {}", response.status()).into());
     }
+
+    // Create only after a successful response (see wizard_download_model).
+    let mut file = tokio::fs::File::create(&dest_path)
+        .await
+        .map_err(|e| format!("failed to create file: {}", e))?;
 
     let total = response.content_length();
     let mut downloaded: u64 = 0;

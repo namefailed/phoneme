@@ -987,9 +987,12 @@ pub struct RetentionConfig {
 pub struct DaemonConfig {
     /// The verbosity of the daemon's internal log (e.g., `info`, `debug`, `trace`).
     pub log_level: String,
-    /// The maximum size in megabytes before the log file is rotated.
+    /// CURRENTLY UNUSED — rotation is daily, not size-based (the tracing
+    /// appender has no size rotation). Kept for config compatibility; a future
+    /// size-based rotator would honor it.
     pub log_max_size_mb: u32,
-    /// The maximum number of rotated log files to retain before old ones are deleted.
+    /// The maximum number of rotated daily log files to retain; older ones are
+    /// pruned at daemon startup.
     pub log_max_files: u32,
     /// The Named Pipe (Windows) or Unix Socket path used for IPC communication.
     pub pipe_name: String,
@@ -1197,6 +1200,40 @@ impl Config {
 
     /// Validate constraints not enforced by the type system.
     pub fn validate(&self) -> Result<()> {
+        // A cloud LLM step that is ON with no key anywhere (own field empty
+        // AND nothing to inherit from cleanup) can only fail at runtime —
+        // catch it at save/load instead. Local providers (ollama, lmstudio,
+        // …) need no key, and a blank provider inherits cleanup wholesale.
+        if self.auto_tag.auto {
+            let p = self.auto_tag.provider.trim();
+            let cloud =
+                !p.is_empty() && !matches!(p, "ollama" | "lmstudio" | "jan" | "llamacpp" | "none");
+            let own = !self.auto_tag.api_key_str().trim().is_empty();
+            let inherited = !self.llm_post_process.api_key_str().trim().is_empty();
+            if cloud && !own && !inherited {
+                return Err(Error::InvalidConfig(
+                    "auto_tag uses a cloud provider but has no API key (set auto_tag.api_key \
+                     or configure llm_post_process.api_key to inherit)"
+                        .into(),
+                ));
+            }
+        }
+        if let Some(pw) = &self.preview_whisper {
+            let needs_key = matches!(
+                pw.provider,
+                TranscriptionBackend::Openai
+                    | TranscriptionBackend::Groq
+                    | TranscriptionBackend::Deepgram
+                    | TranscriptionBackend::Assemblyai
+                    | TranscriptionBackend::Elevenlabs
+            );
+            if needs_key && pw.api_key_str().trim().is_empty() {
+                return Err(Error::InvalidConfig(
+                    "preview_whisper uses a cloud provider but preview_whisper.api_key is empty"
+                        .into(),
+                ));
+            }
+        }
         if self.recording.sample_rate < 8000 || self.recording.sample_rate > 96000 {
             return Err(Error::InvalidConfig(format!(
                 "recording.sample_rate must be between 8000 and 96000 (got {})",
