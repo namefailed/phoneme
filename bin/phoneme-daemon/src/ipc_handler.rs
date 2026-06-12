@@ -227,6 +227,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        // An unknown id yields an empty list, not NotFound — "no segments" is
+        // a normal state (pre-capture recordings, providers without timing)
+        // and callers treat the two identically.
+        Request::GetSegments { id } => match state.catalog.segments_for(&id).await {
+            Ok(segments) => serialize_response(segments),
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::SemanticSearch { query, limit } => {
             // Minimum *calibrated* relevance (0..1) a semantic-only hit must clear
             // to surface. Hybrid search ranks by per-chunk best-match cosine fused

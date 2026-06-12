@@ -709,7 +709,7 @@ pub async fn run(
     // Race transcription against cancellation. Dropping the transcribe future on
     // cancel tears down the in-flight HTTP request (reqwest futures are
     // cancel-safe); the native path stops at the next stage boundary.
-    let transcript = tokio::select! {
+    let transcription = tokio::select! {
         biased;
         _ = cancel.cancelled() => {
             state.events.emit(DaemonEvent::LlmActivity {
@@ -722,7 +722,7 @@ pub async fn run(
             finalize_canceled(state, &id).await;
             return Ok(());
         }
-        res = provider.transcribe(&audio_path, language.as_deref()) => match res {
+        res = provider.transcribe_with_segments(&audio_path, language.as_deref()) => match res {
             Ok(t) => t,
             Err(e) => {
                 state.events.emit(DaemonEvent::LlmActivity {
@@ -754,6 +754,14 @@ pub async fn run(
         finalize_canceled(state, &id).await;
         return Ok(());
     }
+
+    // The segment timeline is machine truth (it describes the raw whisper
+    // output, not the LLM-cleaned text), so split it off here — the rest of
+    // the pipeline only transforms the text.
+    let phoneme_core::transcription::Transcription {
+        text: transcript,
+        segments,
+    } = transcription;
 
     // Finish the Transcribing activity entry with timing + size for the popout.
     {
@@ -840,6 +848,13 @@ pub async fn run(
         .catalog
         .update_transcript(&id, &transcript, &raw_transcript, &payload.model)
         .await?;
+
+    // Persist the provider's segment timeline (replacing any previous one —
+    // a retranscribe describes a new machine output). Best-effort: a failure
+    // here costs the timeline views, not the recording.
+    if let Err(e) = state.catalog.replace_segments(&id, &segments).await {
+        tracing::warn!(id = %id.as_str(), "failed to persist transcript segments: {e}");
+    }
 
     // Record which post-processing model was used and whether diarization was
     // actually applied. Diarization is only meaningfully "applied" when it

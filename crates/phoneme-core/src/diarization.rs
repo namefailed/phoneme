@@ -101,27 +101,11 @@ fn speaker_for_segment(speakers: &[SpeakerSpan], start: f64, end: f64) -> Option
 /// When `speakers` is empty (diarization produced nothing) the segments are
 /// joined into plain text with no speaker prefixes and a speaker count of 0.
 pub fn assign_speakers(segments: &[TextSegment], speakers: &[SpeakerSpan]) -> (String, usize) {
-    use std::collections::HashMap;
-
-    let mut label_to_idx: HashMap<&str, usize> = HashMap::new();
-    let mut next_idx = 1usize;
+    let (labeled, num_speakers) = label_segments(segments, speakers);
     let mut out = String::new();
     let mut current: Option<usize> = None;
 
-    for seg in segments {
-        let text = seg.text.trim();
-        if text.is_empty() {
-            continue;
-        }
-        let idx = match speaker_for_segment(speakers, seg.start, seg.end) {
-            Some(label) => *label_to_idx.entry(label).or_insert_with(|| {
-                let i = next_idx;
-                next_idx += 1;
-                i
-            }),
-            None => 0, // no diarization info at all → unlabeled, plain text
-        };
-
+    for (seg, idx) in labeled {
         if current != Some(idx) {
             if !out.is_empty() {
                 out.push_str("\n\n");
@@ -133,7 +117,41 @@ pub fn assign_speakers(segments: &[TextSegment], speakers: &[SpeakerSpan]) -> (S
         } else {
             out.push(' ');
         }
-        out.push_str(text);
+        out.push_str(seg.text.trim());
+    }
+
+    (out, num_speakers)
+}
+
+/// Per-segment speaker attribution: each non-empty transcript segment paired
+/// with its stable 1-based speaker index (0 = no diarization info), plus the
+/// number of distinct speakers used. This is the structural primitive behind
+/// [`assign_speakers`] — callers that persist segment timing (the timeline
+/// views) take the per-segment indices from here, so the stored `speaker`
+/// labels always agree with the `[Speaker N]` markers in the formatted text.
+pub fn label_segments<'a>(
+    segments: &'a [TextSegment],
+    speakers: &[SpeakerSpan],
+) -> (Vec<(&'a TextSegment, usize)>, usize) {
+    use std::collections::HashMap;
+
+    let mut label_to_idx: HashMap<&str, usize> = HashMap::new();
+    let mut next_idx = 1usize;
+    let mut out = Vec::new();
+
+    for seg in segments {
+        if seg.text.trim().is_empty() {
+            continue;
+        }
+        let idx = match speaker_for_segment(speakers, seg.start, seg.end) {
+            Some(label) => *label_to_idx.entry(label).or_insert_with(|| {
+                let i = next_idx;
+                next_idx += 1;
+                i
+            }),
+            None => 0, // no diarization info at all → unlabeled, plain text
+        };
+        out.push((seg, idx));
     }
 
     (out, next_idx - 1)

@@ -42,6 +42,31 @@ fn list_recordings_request_roundtrips() {
 }
 
 #[test]
+fn get_segments_request_roundtrips() {
+    roundtrip(&Request::GetSegments {
+        id: RecordingId::new(),
+    });
+}
+
+#[test]
+fn transcript_segment_roundtrips() {
+    // The GetSegments payload (Vec<TranscriptSegment>) crosses the pipe as the
+    // generic Ok(Value); pin the segment wire shape itself.
+    roundtrip(&phoneme_core::TranscriptSegment {
+        start_ms: 1500,
+        end_ms: 4200,
+        text: "hello there".into(),
+        speaker: Some("1".into()),
+    });
+    roundtrip(&phoneme_core::TranscriptSegment {
+        start_ms: 0,
+        end_ms: 900,
+        text: "unlabeled".into(),
+        speaker: None,
+    });
+}
+
+#[test]
 fn ok_response_with_null_payload_roundtrips() {
     roundtrip(&Response::Ok(serde_json::Value::Null));
 }

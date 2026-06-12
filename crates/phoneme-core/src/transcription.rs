@@ -13,6 +13,7 @@
 
 use crate::config::{TranscriptionBackend, WhisperConfig};
 use crate::error::{Error, Result};
+use crate::types::TranscriptSegment;
 use async_trait::async_trait;
 use reqwest::multipart;
 use secrecy::ExposeSecret;
@@ -21,6 +22,26 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::fs;
 
+/// A transcription result: the formatted text plus the provider's segment
+/// timing, when it produced any. The segments power the timeline features
+/// (per-track timing, transcript↔waveform seek, the chronological meeting
+/// merge); providers without timing data return an empty `segments`.
+#[derive(Debug, Clone)]
+pub struct Transcription {
+    pub text: String,
+    pub segments: Vec<TranscriptSegment>,
+}
+
+impl Transcription {
+    /// Text-only result for providers/paths with no timing data.
+    pub fn plain(text: String) -> Self {
+        Self {
+            text,
+            segments: Vec::new(),
+        }
+    }
+}
+
 /// A transcription backend: turns an audio file into text.
 #[async_trait]
 pub trait TranscriptionProvider: Send + Sync {
@@ -28,6 +49,21 @@ pub trait TranscriptionProvider: Send + Sync {
     /// string. This blocking/async method should return only when complete or
     /// on failure.
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String>;
+
+    /// Like [`transcribe`](Self::transcribe), but also returns the provider's
+    /// segment timing when it has any. The default wraps `transcribe` with no
+    /// segments, so simple providers — and the live-preview path, which only
+    /// wants text — are unaffected; providers with real timing data override
+    /// this and implement `transcribe` as its text projection.
+    async fn transcribe_with_segments(
+        &self,
+        audio_path: &Path,
+        language: Option<&str>,
+    ) -> Result<Transcription> {
+        Ok(Transcription::plain(
+            self.transcribe(audio_path, language).await?,
+        ))
+    }
 
     /// Returns true if the provider runs directly within the current process (i.e. whisper-rs).
     fn is_native(&self) -> bool {
@@ -93,6 +129,9 @@ impl Transcriber {
                     None,
                     timeout,
                     local_diar,
+                    // whisper.cpp always supports verbose_json — capture
+                    // segment timing even with diarization off.
+                    true,
                 ))
             }
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
@@ -102,8 +141,11 @@ impl Transcriber {
                 Some(model_or(&whisper.model, "whisper-1")),
                 timeout,
                 // whisper-1 returns segments with verbose_json; enables local
-                // diarization on OpenAI transcripts.
+                // diarization on OpenAI transcripts. Segment capture rides on
+                // the same flag — gpt-4o-transcribe rejects verbose_json, so
+                // it is never requested unconditionally here.
                 local_diar,
+                false,
             )),
             TranscriptionBackend::Groq => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
@@ -112,6 +154,7 @@ impl Transcriber {
                 Some(model_or(&whisper.model, "whisper-large-v3")),
                 timeout,
                 local_diar,
+                false,
             )),
 
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
@@ -147,8 +190,11 @@ impl Transcriber {
                 timeout,
                 // Custom OpenAI-compatible endpoints that return verbose_json
                 // segments get local diarization too; ones that don't simply
-                // fall back to the plain transcript (no hard failure).
+                // fall back to the plain transcript (no hard failure). Like
+                // OpenAI/Groq, verbose_json is only requested when diarization
+                // asks for it — an arbitrary endpoint may not accept it.
                 local_diar,
+                false,
             )),
         }
     }
@@ -226,6 +272,12 @@ pub struct OpenAiCompatProvider {
     model: Option<String>,
     timeout: Duration,
     local_diarize: bool,
+    /// Request `verbose_json` (segment timing) even when local diarization is
+    /// off. Always true for the bundled/local whisper.cpp server, which is
+    /// known to support it; cloud + Custom endpoints only get verbose_json
+    /// when diarization needs it, since some OpenAI-compatible backends (e.g.
+    /// `gpt-4o-transcribe`) reject the verbose format.
+    request_segments: bool,
 }
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
@@ -252,6 +304,7 @@ impl OpenAiCompatProvider {
         model: Option<String>,
         timeout: Duration,
         local_diarize: bool,
+        request_segments: bool,
     ) -> Self {
         Self {
             http,
@@ -260,6 +313,7 @@ impl OpenAiCompatProvider {
             model,
             timeout,
             local_diarize,
+            request_segments,
         }
     }
 }
@@ -267,6 +321,17 @@ impl OpenAiCompatProvider {
 #[async_trait]
 impl TranscriptionProvider for OpenAiCompatProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
+        Ok(self
+            .transcribe_with_segments(audio_path, language)
+            .await?
+            .text)
+    }
+
+    async fn transcribe_with_segments(
+        &self,
+        audio_path: &Path,
+        language: Option<&str>,
+    ) -> Result<Transcription> {
         let bytes = fs::read(audio_path).await?;
         let part = multipart::Part::bytes(bytes)
             .file_name(
@@ -291,8 +356,11 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         // decodes below. OpenAI/Groq already default to this, but a Custom
         // OpenAI-compatible proxy may default to plain text or verbose_json,
         // which would fail the decode. whisper.cpp's server also accepts (and
-        // defaults to) json, so this is a no-op for the local backend.
-        if self.local_diarize {
+        // defaults to) json. verbose_json adds the segment timing that local
+        // diarization and the persisted timeline both consume — requested
+        // whenever either wants it (always for the local server; see
+        // `request_segments`).
+        if self.local_diarize || self.request_segments {
             form = form.text("response_format", "verbose_json");
             form = form.text("timestamp_granularities[]", "segment");
         } else {
@@ -337,26 +405,49 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .await
             .map_err(|e| Error::Internal(format!("decoding transcription response: {e}")))?;
 
-        if self.local_diarize {
-            if let Some(whisper_segments) = parsed.segments {
-                let segs = whisper_segments
-                    .into_iter()
-                    .map(|w| crate::diarization::TextSegment {
-                        start: w.start as f64,
-                        end: w.end as f64,
-                        text: w.text,
-                    })
-                    .collect();
-                return Ok(diarize_transcript(audio_path, segs, parsed.text).await);
-            }
+        let segs: Vec<crate::diarization::TextSegment> = parsed
+            .segments
+            .unwrap_or_default()
+            .into_iter()
+            .map(|w| crate::diarization::TextSegment {
+                start: w.start as f64,
+                end: w.end as f64,
+                text: w.text,
+            })
+            .collect();
+
+        if self.local_diarize && !segs.is_empty() {
+            return Ok(diarize_transcript(audio_path, segs, parsed.text).await);
         }
 
-        Ok(parsed.text)
+        // No diarization: keep the provider's timing with no speaker attribution.
+        let segments = segs
+            .into_iter()
+            .map(|s| TranscriptSegment {
+                start_ms: secs_to_ms(s.start),
+                end_ms: secs_to_ms(s.end),
+                text: s.text.trim().to_string(),
+                speaker: None,
+            })
+            .filter(|s| !s.text.is_empty())
+            .collect();
+        Ok(Transcription {
+            text: parsed.text,
+            segments,
+        })
     }
 }
 
-/// Run local diarization for a transcript and return the speaker-labeled text,
-/// falling back to `plain_text` when diarization fails or finds ≤1 speaker.
+/// Audio-relative seconds (provider wire format) → whole milliseconds (the
+/// persisted segment format).
+fn secs_to_ms(secs: f64) -> i64 {
+    (secs * 1000.0).round() as i64
+}
+
+/// Run local diarization for a transcript and return the speaker-labeled text
+/// plus the per-segment timeline, falling back to `plain_text` (with unlabeled
+/// segments — the timing is still good) when diarization fails or finds ≤1
+/// speaker.
 ///
 /// The CPU-bound model inference is run on a blocking thread so it never stalls
 /// the async runtime. Shared by the local whisper-server and native-whisper
@@ -365,7 +456,23 @@ pub(crate) async fn diarize_transcript(
     audio_path: &std::path::Path,
     segments: Vec<crate::diarization::TextSegment>,
     plain_text: String,
-) -> String {
+) -> Transcription {
+    // Diarization failing must not cost the timeline its timing data, so the
+    // fallback carries the whisper segments with no speaker attribution.
+    let unlabeled = |text: String, segments: &[crate::diarization::TextSegment]| Transcription {
+        text,
+        segments: segments
+            .iter()
+            .filter(|s| !s.text.trim().is_empty())
+            .map(|s| TranscriptSegment {
+                start_ms: secs_to_ms(s.start),
+                end_ms: secs_to_ms(s.end),
+                text: s.text.trim().to_string(),
+                speaker: None,
+            })
+            .collect(),
+    };
+
     let path = audio_path.to_path_buf();
     let speakers =
         match tokio::task::spawn_blocking(move || crate::diarization::run_local_diarization(&path))
@@ -377,15 +484,15 @@ pub(crate) async fn diarize_transcript(
             }
             Ok(Err(e)) => {
                 tracing::warn!("local diarization failed, falling back to raw whisper: {e}");
-                return plain_text;
+                return unlabeled(plain_text, &segments);
             }
             Err(e) => {
                 tracing::warn!("local diarization task panicked: {e}");
-                return plain_text;
+                return unlabeled(plain_text, &segments);
             }
         };
 
-    let (labeled, num_speakers) = crate::diarization::assign_speakers(&segments, &speakers);
+    let (labeled, num_speakers) = crate::diarization::label_segments(&segments, &speakers);
     // Surface the assignment result so "why isn't this diarized?" is answerable
     // from the log: a recording is only labeled when ≥2 distinct speakers are
     // found (a single voice reads better as plain prose, so it stays unlabeled).
@@ -396,9 +503,40 @@ pub(crate) async fn diarize_transcript(
         "local diarization assignment",
     );
     if num_speakers <= 1 {
-        plain_text
-    } else {
-        labeled
+        return unlabeled(plain_text, &segments);
+    }
+
+    // Build the formatted text and the persisted timeline from the SAME
+    // per-segment attribution, so the stored `speaker` labels always agree
+    // with the `[Speaker N]` markers in the text.
+    let mut text = String::new();
+    let mut current: Option<usize> = None;
+    let mut out_segments = Vec::with_capacity(labeled.len());
+    for (seg, idx) in labeled {
+        let trimmed = seg.text.trim();
+        if current != Some(idx) {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            if idx > 0 {
+                text.push_str(&format!("[Speaker {idx}]: "));
+            }
+            current = Some(idx);
+        } else {
+            text.push(' ');
+        }
+        text.push_str(trimmed);
+        out_segments.push(TranscriptSegment {
+            start_ms: secs_to_ms(seg.start),
+            end_ms: secs_to_ms(seg.end),
+            text: trimmed.to_string(),
+            speaker: (idx > 0).then(|| idx.to_string()),
+        });
+    }
+
+    Transcription {
+        text,
+        segments: out_segments,
     }
 }
 
@@ -476,11 +614,26 @@ struct DeepgramAlternative {
 struct DeepgramWord {
     word: String,
     speaker: Option<u32>,
+    /// Word timing in seconds — present on every Deepgram word; optional here
+    /// so a missing field degrades to "no timeline" instead of a decode error.
+    start: Option<f64>,
+    end: Option<f64>,
 }
 
 #[async_trait]
 impl TranscriptionProvider for DeepgramProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
+        Ok(self
+            .transcribe_with_segments(audio_path, language)
+            .await?
+            .text)
+    }
+
+    async fn transcribe_with_segments(
+        &self,
+        audio_path: &Path,
+        language: Option<&str>,
+    ) -> Result<Transcription> {
         let bytes = fs::read(audio_path).await?;
         let url = format!("{}/v1/listen", self.base_url.trim_end_matches('/'));
         let mut query: Vec<(&str, &str)> =
@@ -538,7 +691,7 @@ impl TranscriptionProvider for DeepgramProvider {
             .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))?;
 
         if !self.diarize || alt.words.is_none() {
-            return Ok(alt.transcript);
+            return Ok(Transcription::plain(alt.transcript));
         }
 
         let words = alt.words.unwrap();
@@ -550,26 +703,52 @@ impl TranscriptionProvider for DeepgramProvider {
         }
 
         if unique_speakers.len() <= 1 {
-            return Ok(alt.transcript);
+            return Ok(Transcription::plain(alt.transcript));
         }
 
+        // Group the speaker-tagged words into turns, building the formatted
+        // text and the persisted timeline from the same pass so the stored
+        // `speaker` labels always agree with the `[Speaker N]` markers
+        // (Deepgram speakers are 0-based and stay that way in both).
         let mut final_transcript = String::new();
         let mut current_speaker: Option<u32> = None;
+        let mut segments: Vec<TranscriptSegment> = Vec::new();
 
         for w in words {
             let spk = w.speaker.unwrap_or(0);
+            let start_ms = w.start.map(secs_to_ms);
+            let end_ms = w.end.map(secs_to_ms);
             if current_speaker != Some(spk) {
                 if !final_transcript.is_empty() {
                     final_transcript.push_str("\n\n");
                 }
                 final_transcript.push_str(&format!("[Speaker {}]: ", spk));
                 current_speaker = Some(spk);
+                // A word missing timing (shouldn't happen) chains from the
+                // previous turn's end rather than poisoning the timeline.
+                let fallback_start = segments.last().map(|s| s.end_ms).unwrap_or(0);
+                segments.push(TranscriptSegment {
+                    start_ms: start_ms.unwrap_or(fallback_start),
+                    end_ms: end_ms.or(start_ms).unwrap_or(fallback_start),
+                    text: w.word.clone(),
+                    speaker: Some(spk.to_string()),
+                });
             } else {
                 final_transcript.push(' ');
+                if let Some(seg) = segments.last_mut() {
+                    seg.text.push(' ');
+                    seg.text.push_str(&w.word);
+                    if let Some(end) = end_ms {
+                        seg.end_ms = end.max(seg.end_ms);
+                    }
+                }
             }
             final_transcript.push_str(&w.word);
         }
-        Ok(final_transcript)
+        Ok(Transcription {
+            text: final_transcript,
+            segments,
+        })
     }
 }
 
@@ -682,6 +861,11 @@ struct AaiTranscript {
 struct AaiUtterance {
     speaker: String,
     text: String,
+    /// Utterance timing in **milliseconds** (AssemblyAI's native unit) —
+    /// optional so a missing field degrades to "no timeline", not a decode
+    /// error.
+    start: Option<i64>,
+    end: Option<i64>,
 }
 
 /// Delay between AssemblyAI status polls.
@@ -690,6 +874,17 @@ const ASSEMBLYAI_POLL_INTERVAL: Duration = Duration::from_secs(2);
 #[async_trait]
 impl TranscriptionProvider for AssemblyAiProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
+        Ok(self
+            .transcribe_with_segments(audio_path, language)
+            .await?
+            .text)
+    }
+
+    async fn transcribe_with_segments(
+        &self,
+        audio_path: &Path,
+        language: Option<&str>,
+    ) -> Result<Transcription> {
         let bytes = fs::read(audio_path).await?;
         let base = self.base_url.trim_end_matches('/').to_string();
         // One overall budget: subtract upload+create time from the poll wait so
@@ -747,7 +942,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                 match t.status.as_str() {
                     "completed" => {
                         if !self.diarize || t.utterances.is_none() {
-                            return t.text.ok_or_else(|| {
+                            return t.text.map(Transcription::plain).ok_or_else(|| {
                                 Error::Internal("AssemblyAI completed without text".into())
                             });
                         }
@@ -759,20 +954,34 @@ impl TranscriptionProvider for AssemblyAiProvider {
                         }
 
                         if unique_speakers.len() <= 1 {
-                            return t.text.ok_or_else(|| {
+                            return t.text.map(Transcription::plain).ok_or_else(|| {
                                 Error::Internal("AssemblyAI completed without text".into())
                             });
                         }
 
+                        // One segment per utterance, labels matching the
+                        // `[Speaker X]` markers (AssemblyAI uses "A"/"B"-style
+                        // speakers; both text and timeline carry them as-is).
                         let mut final_transcript = String::new();
+                        let mut segments: Vec<TranscriptSegment> = Vec::new();
                         for u in utterances {
                             if !final_transcript.is_empty() {
                                 final_transcript.push_str("\n\n");
                             }
                             final_transcript
                                 .push_str(&format!("[Speaker {}]: {}", u.speaker, u.text));
+                            let fallback_start = segments.last().map(|s| s.end_ms).unwrap_or(0);
+                            segments.push(TranscriptSegment {
+                                start_ms: u.start.unwrap_or(fallback_start),
+                                end_ms: u.end.or(u.start).unwrap_or(fallback_start),
+                                text: u.text,
+                                speaker: Some(u.speaker),
+                            });
                         }
-                        return Ok(final_transcript);
+                        return Ok(Transcription {
+                            text: final_transcript,
+                            segments,
+                        });
                     }
                     "error" => {
                         return Err(Error::WhisperError {
@@ -921,6 +1130,7 @@ mod tests {
             Some(SECRET.to_string()),
             Some("whisper-1".to_string()),
             Duration::from_secs(30),
+            false,
             false,
         );
         let dbg = format!("{p:?}");

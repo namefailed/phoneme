@@ -56,7 +56,7 @@ list is the `Request` enum in `crates/phoneme-ipc/src/schema.rs`.
 - `start_meeting`, `stop_meeting`, `meeting_toggle`
 
 **Catalog & editing:**
-- `list_recordings` (with a `filter`), `get_recording`, `list_meeting`
+- `list_recordings` (with a `filter`), `get_recording`, `list_meeting`, `get_segments` (machine transcript segments with ms timing + speaker labels; empty list when none are stored)
 - `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`)
 - `update_transcript`, `update_notes`, `update_meeting_name`
 - `get_original_transcript` (raw machine transcript), `get_clean_transcript` (cleaned, pre-edit)

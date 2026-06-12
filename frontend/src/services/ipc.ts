@@ -79,6 +79,27 @@ export async function getRecording(id: string): Promise<Recording> {
   return await tauriInvoke<Recording>("get_recording", { id });
 }
 
+/** One machine transcript segment with its audio-relative timing.
+ *  `start_ms`/`end_ms` are offsets into the track's audio file; `speaker` is
+ *  the label exactly as it appears in the transcript's `[Speaker …]` marker
+ *  ("1", "0", "A" — providers differ; numeric ones map onto `speaker_names`),
+ *  or null for undiarized segments. Machine truth: user edits to the live
+ *  transcript never rewrite these. */
+export type TranscriptSegment = {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  speaker?: string | null;
+};
+
+/** A recording's machine transcript segments in timeline order. An empty list
+ *  is a normal state (older recordings predate segment capture; some providers
+ *  return no timing data), so callers should fall back to the plain transcript
+ *  rather than treating it as an error. */
+export async function getSegments(id: string): Promise<TranscriptSegment[]> {
+  return await tauriInvoke<TranscriptSegment[]>("get_segments", { id });
+}
+
 export interface SemanticSearchResult {
   recording: Recording;
   score: number;

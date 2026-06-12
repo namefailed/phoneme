@@ -253,6 +253,7 @@ pub fn run() {
             commands::reembed_all,
             commands::get_recording,
             commands::list_meeting,
+            commands::get_segments,
             commands::delete_recording,
             commands::record_start,
             commands::record_stop,

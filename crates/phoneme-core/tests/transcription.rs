@@ -16,7 +16,15 @@ async fn fake_wav(dir: &TempDir) -> std::path::PathBuf {
 /// Local whisper.cpp shape: no API key, no model field — identical wire
 /// behaviour to the pre-trait `TranscriptionClient`.
 fn local_provider(base_url: impl Into<String>, timeout: Duration) -> OpenAiCompatProvider {
-    OpenAiCompatProvider::new(reqwest::Client::new(), base_url, None, None, timeout, false)
+    OpenAiCompatProvider::new(
+        reqwest::Client::new(),
+        base_url,
+        None,
+        None,
+        timeout,
+        false,
+        false,
+    )
 }
 
 #[tokio::test]
@@ -170,6 +178,7 @@ async fn sends_bearer_auth_when_api_key_set() {
         Some("whisper-1".into()),
         Duration::from_secs(5),
         false,
+        false,
     );
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "authed");
@@ -195,6 +204,7 @@ async fn sends_model_field_when_set() {
         None,
         Some("whisper-large-v3".into()),
         Duration::from_secs(5),
+        false,
         false,
     );
     let result = provider.transcribe(&wav, None).await.unwrap();
@@ -369,4 +379,89 @@ async fn factory_builds_custom_openai_compatible_provider() {
         .provider(&whisper, &Default::default());
     let result = provider.transcribe(&wav, None).await.unwrap();
     assert_eq!(result, "custom");
+}
+
+/// With segment capture on (the local whisper.cpp shape), verbose_json
+/// segments come back as a ms-converted, unlabeled timeline alongside the
+/// text — and the plain `transcribe` projection still returns just the text.
+#[tokio::test]
+async fn local_provider_captures_segment_timeline() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .and(body_string_contains("verbose_json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "hello world again",
+            "segments": [
+                {"start": 0.0,  "end": 1.5,  "text": " hello world"},
+                {"start": 1.5,  "end": 3.25, "text": " again"},
+                {"start": 3.25, "end": 3.25, "text": "   "}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    // diarize off, segments on — the bundled-server configuration.
+    let provider = OpenAiCompatProvider::new(
+        reqwest::Client::new(),
+        server.uri(),
+        None,
+        None,
+        Duration::from_secs(5),
+        false,
+        true,
+    );
+
+    let result = provider.transcribe_with_segments(&wav, None).await.unwrap();
+    assert_eq!(result.text, "hello world again");
+    assert_eq!(result.segments.len(), 2, "blank segments must be dropped");
+    assert_eq!(result.segments[0].start_ms, 0);
+    assert_eq!(result.segments[0].end_ms, 1500);
+    assert_eq!(result.segments[0].text, "hello world");
+    assert_eq!(result.segments[0].speaker, None);
+    assert_eq!(result.segments[1].start_ms, 1500);
+    assert_eq!(result.segments[1].end_ms, 3250);
+
+    let text_only = provider.transcribe(&wav, None).await.unwrap();
+    assert_eq!(text_only, "hello world again");
+}
+
+/// With segment capture off (cloud default, diarize off), the request must
+/// keep asking for plain `json` — some OpenAI-compatible backends reject
+/// verbose_json — and the result simply has no timeline.
+#[tokio::test]
+async fn cloud_provider_without_diarize_requests_plain_json() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "plain"})),
+        )
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let provider = OpenAiCompatProvider::new(
+        reqwest::Client::new(),
+        server.uri(),
+        Some("key".into()),
+        Some("whisper-1".into()),
+        Duration::from_secs(5),
+        false,
+        false,
+    );
+
+    let result = provider.transcribe_with_segments(&wav, None).await.unwrap();
+    assert_eq!(result.text, "plain");
+    assert!(result.segments.is_empty());
+
+    let requests = server.received_requests().await.unwrap();
+    let body = String::from_utf8_lossy(&requests[0].body).to_string();
+    assert!(
+        !body.contains("verbose_json"),
+        "cloud provider without diarize must not request verbose_json: {body}"
+    );
 }

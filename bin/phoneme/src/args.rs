@@ -166,6 +166,10 @@ pub struct ShowArgs {
     /// Print the unedited pipeline transcript (before hand edits) instead.
     #[arg(long, conflicts_with_all = ["audio_path_only", "original"])]
     pub unedited: bool,
+    /// Print the machine transcript segments as a timeline (start–end, speaker,
+    /// text). Empty for recordings transcribed before segment capture existed.
+    #[arg(long, conflicts_with_all = ["audio_path_only", "original", "unedited"])]
+    pub segments: bool,
 }
 
 #[derive(Debug, clap::Args)]

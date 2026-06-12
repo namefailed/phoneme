@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
-use crate::types::{ListFilter, Recording, RecordingStatus, SpeakerName};
+use crate::types::{ListFilter, Recording, RecordingStatus, SpeakerName, TranscriptSegment};
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
@@ -1256,6 +1256,65 @@ impl Catalog {
             })
             .collect()
     }
+
+    /// Replace a recording's machine transcript segments with a fresh set.
+    ///
+    /// Called by the pipeline after every transcribe/retranscribe — segments
+    /// always describe the *current* machine output, so the old rows are
+    /// dropped first (in the same transaction, so a crash can't leave a
+    /// half-replaced timeline). An empty slice simply clears them (e.g. a
+    /// provider that returns no timing data).
+    pub async fn replace_segments(
+        &self,
+        recording_id: &RecordingId,
+        segments: &[TranscriptSegment],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM transcript_segments WHERE recording_id = ?")
+            .bind(recording_id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        for (idx, seg) in segments.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO transcript_segments (recording_id, idx, start_ms, end_ms, text, speaker) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(recording_id.as_str())
+            .bind(idx as i64)
+            .bind(seg.start_ms)
+            .bind(seg.end_ms)
+            .bind(&seg.text)
+            .bind(&seg.speaker)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// A recording's machine transcript segments in timeline order. Empty when
+    /// the recording predates segment capture or its provider returned no
+    /// timing data — callers must treat "no segments" as a normal state, not
+    /// an error.
+    pub async fn segments_for(&self, recording_id: &RecordingId) -> Result<Vec<TranscriptSegment>> {
+        let rows = sqlx::query(
+            "SELECT start_ms, end_ms, text, speaker FROM transcript_segments \
+             WHERE recording_id = ? ORDER BY idx",
+        )
+        .bind(recording_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(TranscriptSegment {
+                    start_ms: r.try_get("start_ms")?,
+                    end_ms: r.try_get("end_ms")?,
+                    text: r.try_get("text")?,
+                    speaker: r.try_get("speaker")?,
+                })
+            })
+            .collect()
+    }
 }
 
 fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
@@ -2215,6 +2274,50 @@ mod tests {
         assert!(
             db.speaker_names_for(&r.id).await.unwrap().is_empty(),
             "speaker names must be cascade-deleted with their recording"
+        );
+    }
+
+    #[tokio::test]
+    async fn segments_replace_round_trip_and_cascade() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+
+        // No segments yet is a normal (empty) state, not an error.
+        assert!(db.segments_for(&r.id).await.unwrap().is_empty());
+
+        let first = vec![
+            TranscriptSegment {
+                start_ms: 0,
+                end_ms: 1200,
+                text: "hello".into(),
+                speaker: Some("1".into()),
+            },
+            TranscriptSegment {
+                start_ms: 1200,
+                end_ms: 2500,
+                text: "hi there".into(),
+                speaker: Some("2".into()),
+            },
+        ];
+        db.replace_segments(&r.id, &first).await.unwrap();
+        assert_eq!(db.segments_for(&r.id).await.unwrap(), first);
+
+        // A retranscribe REPLACES the timeline — fewer rows must not leave
+        // stale tail segments behind.
+        let second = vec![TranscriptSegment {
+            start_ms: 0,
+            end_ms: 900,
+            text: "rerun".into(),
+            speaker: None,
+        }];
+        db.replace_segments(&r.id, &second).await.unwrap();
+        assert_eq!(db.segments_for(&r.id).await.unwrap(), second);
+
+        db.delete(&r.id).await.unwrap();
+        assert!(
+            db.segments_for(&r.id).await.unwrap().is_empty(),
+            "segments must be cascade-deleted with their recording"
         );
     }
 }

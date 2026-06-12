@@ -76,6 +76,16 @@ pub enum Request {
     ListMeeting {
         meeting_id: String,
     },
+    /// Fetch one recording's machine transcript segments in timeline order
+    /// (`Vec<TranscriptSegment>`: `start_ms`/`end_ms` offsets into the track's
+    /// audio, the segment text, and the optional speaker label matching the
+    /// transcript's `[Speaker …]` markers). An empty list is a normal state —
+    /// the recording predates segment capture or its provider returned no
+    /// timing data — not an error. Powers the timeline views
+    /// (transcript↔waveform seek, the chronological meeting merge).
+    GetSegments {
+        id: RecordingId,
+    },
     DeleteRecording {
         id: RecordingId,
         keep_audio: bool,
