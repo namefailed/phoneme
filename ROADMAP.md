@@ -351,7 +351,32 @@ persona actually wants — still needs the alignment + timestamp substrate below
   and a CI job that can run the ONNX model.
 - [ ] **"Ask my archive" (local RAG chat)** — "What did we decide about the API
   redesign?" → answer with citations/links to recordings. Builds on chunking +
-  retrieval; needs a chat UI + citation UX. The headline differentiated feature.
+  retrieval; needs a chat UI + citation UX. The headline differentiated feature
+  *and the retrieval foundation for the Phoneme Agent below — ship this first,
+  then the agent turns its retrieval into one tool among many.*
+- [ ] **Phoneme Agent** — a fully phoneme-aware agent living right inside the
+  app: a chat panel that doesn't just *answer* from the archive but *acts* on
+  it. "Find every standup from this week, tag them `standup`, and give me the
+  open action items" — it searches (hybrid/semantic), reads transcripts, then
+  tags, titles, summarizes, re-runs steps, exports captions, starts/stops
+  recordings, and adjusts filters, chaining steps until the job is done.
+  - **Tool layer = the IPC surface we already have.** Tools are typed wrappers
+    over the existing `Request` enum via the `Transport` trait — the same thin
+    layer the v2.0 MCP server and REST API translate. Write the tool registry
+    once; the in-app agent, MCP (external agents), and REST all consume it.
+  - **Trust model, local-first:** runs on any configured LLM with tool calling
+    (local Ollama models included — curated "agent-capable" picks in the model
+    field); every tool call renders in the chat as a visible step; destructive
+    ops (delete, bulk edits) require an in-chat confirm and route through the
+    existing undo paths; a per-session action log makes everything auditable.
+    No screen access, no shell — its hands are the app's own IPC, nothing else.
+  - **UI:** a right-side companion panel (g-chord + header button), streaming
+    responses, citations linking into recordings like Ask-my-archive, tool
+    steps collapsible like the Doctor's passing checks.
+  - Sequencing: needs Ask-my-archive's retrieval + citation UX, the unified
+    provider/model picker (shipped), and the granular status/event plumbing
+    (shipped). Pairs naturally with the v2.0 MCP server — same tool registry,
+    opposite direction.
 - [ ] **Transcript ↔ waveform sync** — click a paragraph → seek playback. *(Needs
   word-level timestamps from v1.9.)*
 - [x] **Compare transcript versions** — side-by-side diff of original Whisper vs
@@ -389,7 +414,7 @@ persona actually wants — still needs the alignment + timestamp substrate below
 > **Architecture decision (locked):** the daemon already speaks newline-delimited JSON over a named pipe behind the `phoneme-ipc` `Transport` trait. v2.0 adds an **HTTP front-end, not a new eventing model**: an `axum` server maps one-off `Request`s to REST endpoints (`POST /api/record/start`, `GET /api/recordings`) and streams `DaemonEvent`s as **Server-Sent Events** (`GET /api/events`, an `EventSource` in the frontend). REST API, browser extension, Raycast scripts, and the MCP server then all share one `fetch()`/`EventSource` surface.
 
 - [ ] **Local REST API** — `localhost:3737` `axum` server (off by default): REST endpoints over the existing `Request`/`Response` enums + an SSE `/api/events` stream over `DaemonEvent`. Add an `HttpTransport` impl of the `Transport` trait so clients reuse the same typed surface.
-- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). A **thin translator over the existing `Transport` trait**: `CallTool("start_recording")` maps to `Request::RecordStart` — near-zero business logic. Tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`.
+- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). A **thin translator over the existing `Transport` trait**: `CallTool("start_recording")` maps to `Request::RecordStart` — near-zero business logic. Tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`. Shares the tool registry with the v1.10 **Phoneme Agent** — same typed wrappers, opposite direction (external agents in, instead of the in-app agent out).
 - [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers.
 - [ ] **Browser extension** — toolbar icon; one click starts a recording and pastes the finished transcript into the focused field or clipboard. Requires the v2.0 REST API as the bridge.
 
