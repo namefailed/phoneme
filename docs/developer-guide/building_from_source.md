@@ -83,6 +83,21 @@ cd frontend && pnpm build && cd ..
 cargo run --bin phoneme-tray
 ```
 
+## 🔒 Download verification
+
+The first-run wizard downloads its model weights and the bundled whisper-server
+from a small allow-list of hosts (Hugging Face, GitHub releases). On top of the
+host allow-list, every artifact Phoneme itself loads or extracts is pinned to an
+exact **SHA-256**: the whisper GGML models, the semantic-search ONNX model and
+tokenizer, and the `whisper-bin-x64.zip` (verified *before* it's unzipped). A
+download whose contents don't match its pin — or that comes from a URL with no
+pin — is deleted and the wizard surfaces a clear error rather than loading the
+file. The pin table and its hash provenance live in
+`src-tauri/src/checksums.rs`; if you add a new download URL to the wizard, add
+its SHA-256 there too (a unit test fails if a wizard URL has no pin). The Ollama
+installer is intentionally not pinned — it's a third-party auto-updating
+installer the user launches themselves from a floating URL.
+
 ## 🧪 Testing
 
 Phoneme has a comprehensive test suite. We use `SyntheticSource` audio generators so you can run the entire test suite without needing a physical microphone.

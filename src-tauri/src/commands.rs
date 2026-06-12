@@ -1106,20 +1106,34 @@ pub async fn wizard_download_model(
 
     let dest_path = models_dir.join(&filename);
     // A 0-byte file is a husk from a previously failed download, not a model —
-    // fall through and re-download over it.
+    // fall through and re-download over it. A non-empty file only counts as
+    // "already downloaded" once it passes its pinned checksum: an interrupted
+    // run (or a tampered cache) can leave a non-zero but wrong file behind, and
+    // it must not skip hashing. A failed check deletes the file (inside
+    // verify_file_or_delete) and falls through to a clean re-download.
     if tokio::fs::metadata(&dest_path)
         .await
         .is_ok_and(|m| m.len() > 0)
     {
-        // Emit a fake progress event so the UI knows it's 100%
-        let _ = window.emit(
-            "download_progress",
-            DownloadProgress {
-                downloaded: 1,
-                total: Some(1),
-            },
-        );
-        return Ok(dest_path.to_string_lossy().into_owned());
+        let verify_path = dest_path.clone();
+        let verify_url = url.clone();
+        let cached_ok = tokio::task::spawn_blocking(move || {
+            crate::checksums::verify_file_or_delete(&verify_path, &verify_url)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking error: {}", e))?
+        .is_ok();
+        if cached_ok {
+            // Emit a fake progress event so the UI knows it's 100%
+            let _ = window.emit(
+                "download_progress",
+                DownloadProgress {
+                    downloaded: 1,
+                    total: Some(1),
+                },
+            );
+            return Ok(dest_path.to_string_lossy().into_owned());
+        }
     }
 
     let response = reqwest::get(&url)
@@ -1161,6 +1175,20 @@ pub async fn wizard_download_model(
         let _ = window.emit("download_progress", DownloadProgress { downloaded, total });
     }
 
+    // Flush before hashing so every downloaded byte is on disk, then verify the
+    // finished file against its pin. A mismatch (or an unpinned URL) deletes the
+    // file and fails — the model is never handed back to be loaded.
+    file.sync_all()
+        .await
+        .map_err(|e| format!("failed to flush model file: {}", e))?;
+    drop(file);
+    let verify_path = dest_path.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::checksums::verify_file_or_delete(&verify_path, &url)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {}", e))??;
+
     Ok(dest_path.to_string_lossy().into_owned())
 }
 
@@ -1186,16 +1214,27 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
 
     for (filename, url) in files {
         let dest_path = semantic_dir.join(filename);
+        // Treat a pre-existing file as done only if it passes its pin; a partial
+        // or tampered cache otherwise re-downloads (verify deletes it first).
         if tokio::fs::metadata(&dest_path).await.is_ok() {
-            // Already downloaded this file
-            let _ = window.emit(
-                "semantic_download_progress",
-                DownloadProgress {
-                    downloaded: 1,
-                    total: Some(1),
-                },
-            );
-            continue;
+            let verify_path = dest_path.clone();
+            let verify_url = url.to_string();
+            let cached_ok = tokio::task::spawn_blocking(move || {
+                crate::checksums::verify_file_or_delete(&verify_path, &verify_url)
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking error: {}", e))?
+            .is_ok();
+            if cached_ok {
+                let _ = window.emit(
+                    "semantic_download_progress",
+                    DownloadProgress {
+                        downloaded: 1,
+                        total: Some(1),
+                    },
+                );
+                continue;
+            }
         }
 
         let response = reqwest::get(url)
@@ -1236,6 +1275,20 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
                 DownloadProgress { downloaded, total },
             );
         }
+
+        // Verify each file against its pin before moving on; a bad file is
+        // deleted and the whole download fails (the model loads both files).
+        file.sync_all()
+            .await
+            .map_err(|e| format!("failed to flush {}: {}", filename, e))?;
+        drop(file);
+        let verify_path = dest_path.clone();
+        let verify_url = url.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::checksums::verify_file_or_delete(&verify_path, &verify_url)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking error: {}", e))??;
     }
 
     Ok(semantic_dir.to_string_lossy().into_owned())
@@ -1474,6 +1527,18 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
         return Err(format!("failed to flush zip file: {}", e).into());
     }
     drop(file);
+
+    // Verify the zip against its pin BEFORE extracting (S-H7): we are about to
+    // write executables out of this archive, so a mismatched or unpinned zip is
+    // deleted and rejected here rather than unpacked. The pin is keyed on the
+    // version-locked release URL above.
+    let verify_zip = temp_zip.clone();
+    let verify_url = url.to_string();
+    tokio::task::spawn_blocking(move || {
+        crate::checksums::verify_file_or_delete(&verify_zip, &verify_url)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {}", e))??;
 
     let zip_path = temp_zip.clone();
     let bin_path = bin_dir.clone();

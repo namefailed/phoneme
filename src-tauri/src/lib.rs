@@ -2,6 +2,7 @@
 
 mod auto_spawn;
 mod bridge;
+mod checksums;
 mod commands;
 mod config_io;
 mod doctor;

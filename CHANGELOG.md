@@ -62,6 +62,11 @@ trust boundary. Verified against current code.*
   attempts instead of failing recordings, retention honors delete_audio,
   wizard downloads are URL-allowlisted and only create files on success,
   open-file paths allowlisted, daily logs pruned to `log_max_files`.
+- [x] **Pinned download checksums (S-H7)** — every wizard artifact (whisper GGML
+  weights, the semantic model + tokenizer, the whisper-server zip) is verified
+  against a pinned SHA-256 before use; the zip is checked before extraction,
+  mismatches are deleted with a retry/compromised-mirror message, and an
+  allowed-host URL without a pin fails closed (`src-tauri/src/checksums.rs`).
 - [x] **Full-pipeline integration test** — transcribe → LLM stages → hook
   subprocess → webhook listener → catalog/inbox/audio, all asserted against
   fakes; plus tests for the wizard URL allowlist, `path_within`, and the
