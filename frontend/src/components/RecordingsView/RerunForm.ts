@@ -1,9 +1,9 @@
-import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { fetchLlmModels, isApiLlmProvider } from "../../services/llmModels";
+import { isApiLlmProvider } from "../../services/llmModels";
 import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
-import { curatedTranscriptionModels, curatedCleanupModelIds } from "../../data/curatedModels";
+import { curatedTranscriptionModels } from "../../data/curatedModels";
+import { mountModelField } from "../SettingsView/modelField";
 import { invoke } from "@tauri-apps/api/core";
 import type { RerunPayload } from "./rerunActions";
 
@@ -49,22 +49,16 @@ export class RerunFormElement extends LitElement {
   @state() private cleanupPrompt = "";
   @state() private cleanupApiUrl = "";
   @state() private cleanupApiKey = "";
-  @state() private cleanupModelOptions: string[] = [];
-  @state() private cleanupModelsLoading = false;
-  @state() private cleanupModelsError: string | null = null;
   @state() private llmPostProcessEnabled = false;
 
   @state() private summaryModel = "";
   @state() private summaryPrompt = "";
-  // Summary uses an LLM too — give it the same auto-detected model list as the
-  // cleanup picker (fetched for the summary provider, which inherits the
-  // post-process provider/key/URL when its own fields are blank).
+  // Summary uses an LLM too — its model picker inherits the post-process
+  // provider/key/URL when the summary's own fields are blank (mirrors the
+  // daemon's pipeline), so the model list matches whatever will actually run.
   @state() private summaryProvider = "";
   @state() private summaryApiUrl = "";
   @state() private summaryApiKey = "";
-  @state() private summaryModelOptions: string[] = [];
-  @state() private summaryModelsLoading = false;
-  @state() private summaryModelsError: string | null = null;
 
   @state() private configuredHookCommands: string[] = [];
   @state() private selectedHookCommand = "";
@@ -100,7 +94,6 @@ export class RerunFormElement extends LitElement {
         this.cleanupPrompt = llm.prompt ?? "";
         this.cleanupApiUrl = llm.api_url ?? "";
         this.cleanupApiKey = llm.api_key ?? "";
-        void this.fetchCleanupModels();
       }
 
       if (this.config && this.config.summary) {
@@ -117,7 +110,6 @@ export class RerunFormElement extends LitElement {
         this.summaryProvider = (CLEANUP_PROVIDERS as readonly string[]).includes(lc) ? lc : "ollama";
         this.summaryApiUrl = sum.api_url || pp.api_url || "";
         this.summaryApiKey = sum.api_key || pp.api_key || "";
-        void this.fetchSummaryModels();
       }
 
       if (this.config && this.config.whisper) {
@@ -169,67 +161,81 @@ export class RerunFormElement extends LitElement {
     this.selectedModel = (e.target as HTMLSelectElement).value;
   }
 
-  private async fetchCleanupModels() {
-    const provider = this.cleanupProvider;
-    if (!provider) return;
-    // Curated suggestions for this provider — used as the fallback when the
-    // live fetch returns nothing (no key yet, masked key, offline Ollama) so
-    // the dropdown still offers good models. Custom entry stays available.
-    const curated = curatedCleanupModelIds(provider);
-    this.cleanupModelsLoading = true;
-    this.cleanupModelsError = null;
-    try {
-      const fetched = await fetchLlmModels(provider, this.cleanupApiUrl, this.cleanupApiKey);
-      const models = fetched.length ? fetched : curated;
-      this.cleanupModelOptions = models;
-      if (this.cleanupModel && !models.includes(this.cleanupModel)) {
-        this.cleanupModelOptions = [...models, this.cleanupModel];
-      } else if (!this.cleanupModel && models.length > 0) {
-        this.cleanupModel = models[0];
+  // The cleanup/summary model pickers are the shared `mountModelField` control
+  // (live `/models` list + curated fallback + ↻ Refresh + "Other…" free text),
+  // mounted imperatively into stable host divs. We remember which provider each
+  // host was last mounted against so Lit re-renders don't re-fetch on every
+  // keystroke — we only re-mount when the host node or its effective provider
+  // changes (e.g. the user switches cleanup provider or picks a preset).
+  private cleanupModelHost: HTMLElement | null = null;
+  private cleanupModelHostKey = "";
+  private summaryModelHost: HTMLElement | null = null;
+  private summaryModelHostKey = "";
+
+  /** Effective summary connection: the summary's own field, or the inherited
+   *  cleanup (post-process) value when blank — matching the daemon's pipeline
+   *  and the loaded `summaryProvider/Url/Key` state. */
+  private summaryEffective(which: "provider" | "url" | "key"): string {
+    if (which === "provider") return this.summaryProvider || this.cleanupProvider;
+    if (which === "url") return this.summaryApiUrl || this.cleanupApiUrl;
+    return this.summaryApiKey || this.cleanupApiKey;
+  }
+
+  /** (Re)mount the cleanup/summary model fields after a render. Idempotent: a
+   *  field is only re-created when its host element or effective provider
+   *  changed, so typing in another field never disturbs (or re-fetches) it. */
+  private mountModelFields() {
+    const cleanupHost = this.querySelector<HTMLElement>(".rerun-cleanup-model-host");
+    if (cleanupHost) {
+      const key = `${this.cleanupProvider}|${this.cleanupApiUrl}|${this.cleanupApiKey}`;
+      if (cleanupHost !== this.cleanupModelHost || key !== this.cleanupModelHostKey) {
+        this.cleanupModelHost = cleanupHost;
+        this.cleanupModelHostKey = key;
+        mountModelField(cleanupHost, {
+          mode: "llm",
+          blankLabel: "Use configured model",
+          getProvider: () => this.cleanupProvider,
+          getApiUrl: () => this.cleanupApiUrl,
+          getApiKey: () => this.cleanupApiKey,
+          getModel: () => this.cleanupModel,
+          setModel: (m) => { this.cleanupModel = m; },
+        });
       }
-    } catch (e) {
-      // Live listing failed — fall back to curated suggestions rather than an
-      // empty list, but surface the error so the user knows it's a fallback.
-      this.cleanupModelOptions = this.cleanupModel && !curated.includes(this.cleanupModel)
-        ? [...curated, this.cleanupModel]
-        : curated;
-      this.cleanupModelsError = errText(e);
-    } finally {
-      this.cleanupModelsLoading = false;
+    } else {
+      this.cleanupModelHost = null;
+      this.cleanupModelHostKey = "";
+    }
+
+    const summaryHost = this.querySelector<HTMLElement>(".rerun-summary-model-host");
+    if (summaryHost) {
+      const key = `${this.summaryEffective("provider")}|${this.summaryEffective("url")}|${this.summaryEffective("key")}`;
+      if (summaryHost !== this.summaryModelHost || key !== this.summaryModelHostKey) {
+        this.summaryModelHost = summaryHost;
+        this.summaryModelHostKey = key;
+        mountModelField(summaryHost, {
+          mode: "llm",
+          blankLabel: "Same as cleanup model",
+          getProvider: () => this.summaryEffective("provider"),
+          getApiUrl: () => this.summaryEffective("url"),
+          getApiKey: () => this.summaryEffective("key"),
+          getModel: () => this.summaryModel,
+          setModel: (m) => { this.summaryModel = m; },
+        });
+      }
+    } else {
+      this.summaryModelHost = null;
+      this.summaryModelHostKey = "";
     }
   }
 
-  /** Auto-detect available summary models for the (inherited) summary provider,
-   *  exactly like the cleanup picker — live list, curated fallback, custom entry
-   *  preserved. Blank model stays valid ("use the configured summary model"). */
-  private async fetchSummaryModels() {
-    const provider = this.summaryProvider;
-    if (!provider) return;
-    const curated = curatedCleanupModelIds(provider);
-    this.summaryModelsLoading = true;
-    this.summaryModelsError = null;
-    try {
-      const fetched = await fetchLlmModels(provider, this.summaryApiUrl, this.summaryApiKey);
-      const models = fetched.length ? fetched : curated;
-      this.summaryModelOptions =
-        this.summaryModel && !models.includes(this.summaryModel) ? [...models, this.summaryModel] : models;
-    } catch (e) {
-      this.summaryModelOptions =
-        this.summaryModel && !curated.includes(this.summaryModel) ? [...curated, this.summaryModel] : curated;
-      this.summaryModelsError = errText(e);
-    } finally {
-      this.summaryModelsLoading = false;
-    }
-  }
-
-  private handleSummaryModelSelect(e: Event) {
-    this.summaryModel = (e.target as HTMLSelectElement).value;
+  protected updated() {
+    this.mountModelFields();
   }
 
   private handleCleanupProviderChange(e: Event) {
     this.cleanupProvider = (e.target as HTMLSelectElement).value;
-    this.cleanupModelOptions = [];
-    void this.fetchCleanupModels();
+    // Re-mount the model field for the new provider (its list + curated
+    // fallback are provider-specific); the host-key guard handles the rest.
   }
 
   private handleCleanupPreset(e: Event) {
@@ -240,12 +246,6 @@ export class RerunFormElement extends LitElement {
     this.cleanupProvider = preset.kind;
     this.cleanupApiUrl = preset.apiUrl;
     this.cleanupModel = preset.defaultModel;
-    this.cleanupModelOptions = [];
-    void this.fetchCleanupModels();
-  }
-
-  private handleCleanupModelSelect(e: Event) {
-    this.cleanupModel = (e.target as HTMLSelectElement).value;
   }
 
   private handleCleanupPromptInput(e: Event) {
@@ -266,10 +266,6 @@ export class RerunFormElement extends LitElement {
     window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view: "settings", section: "postprocessing" } }));
   }
 
-  private handleCleanupModelInput(e: Event) {
-    this.cleanupModel = (e.target as HTMLInputElement).value;
-  }
-
   private handleHookCommandSelect(e: Event) {
     const val = (e.target as HTMLSelectElement).value;
     if (val === "__custom__") {
@@ -285,12 +281,12 @@ export class RerunFormElement extends LitElement {
     this.selectedHookCommand = (e.target as HTMLInputElement).value;
   }
 
-  /** Whether the chosen step can't run yet (missing provider/model). */
+  /** Whether the chosen step can't run yet (no AI provider configured). The
+   *  model itself may be left blank — that means "use the configured model" — so
+   *  only the missing-provider case blocks Cleanup/Summarize. */
   private get runDisabled(): boolean {
     return (
-      (this.rerunStep === "cleanup"
-        && (!this.llmPostProcessEnabled
-          || (this.cleanupModel.trim() === "" && this.cleanupModelOptions.length === 0)))
+      (this.rerunStep === "cleanup" && !this.llmPostProcessEnabled)
       || (this.rerunStep === "summarize" && !this.llmPostProcessEnabled)
     );
   }
@@ -363,25 +359,10 @@ export class RerunFormElement extends LitElement {
     const sLabel = "font-size: 11px; color: var(--fg-muted);";
     return html`
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <label style="display: flex; justify-content: space-between; align-items: center; ${sLabel}">
-          <span>Summary model</span>
-          <button type="button" title="Refresh model list"
-            style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0;"
-            ?disabled=${this.summaryModelsLoading} @click=${() => this.fetchSummaryModels()}>↻ Refresh</button>
-        </label>
-        ${this.summaryModelOptions.length > 0
-          ? html`<select class="rerun-summary-model-select" style=${sInput} @change=${this.handleSummaryModelSelect}>
-              <option value="" ?selected=${!this.summaryModel}>— Use configured summary model —</option>
-              ${this.summaryModelOptions.map(m => html`<option value=${m} ?selected=${m === this.summaryModel}>${m}</option>`)}
-            </select>`
-          : html`<input type="text" class="rerun-summary-model" style=${sInput} .value=${this.summaryModel}
-              placeholder="Leave blank to use the configured summary model"
-              @input=${(e: Event) => this.summaryModel = (e.target as HTMLInputElement).value} />`}
-        ${this.summaryModelsLoading
-          ? html`<p style="margin: 0; ${sLabel}">Loading models…</p>`
-          : this.summaryModelsError
-            ? html`<p style="margin: 0; ${sLabel}">Couldn't list models (${this.summaryModelsError}). Pick a suggestion or type one.</p>`
-            : nothing}
+        <label style=${sLabel}>Summary model</label>
+        <!-- Shared model picker (live list + curated fallback + ↻ Refresh +
+             "Other…"). Blank = "Same as cleanup model"; mounted in updated(). -->
+        <div class="rerun-summary-model-host"></div>
       </div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <label style=${sLabel}>Summary instructions</label>
@@ -420,34 +401,21 @@ export class RerunFormElement extends LitElement {
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label style=${labelStyle}>API URL (blank = provider default)</label>
           <input type="text" class="rerun-cleanup-url" style=${inputStyle}
-            .value=${this.cleanupApiUrl} @input=${this.handleCleanupApiUrlInput} @change=${() => this.fetchCleanupModels()} placeholder="Provider default" />
+            .value=${this.cleanupApiUrl} @input=${this.handleCleanupApiUrlInput} placeholder="Provider default" />
         </div>
         <div style="display: flex; flex-direction: column; gap: 4px;">
           <label style=${labelStyle}>API key</label>
           <input type="password" class="rerun-cleanup-key" style=${inputStyle}
-            .value=${this.cleanupApiKey} @input=${this.handleCleanupApiKeyInput} @change=${() => this.fetchCleanupModels()} placeholder="Configured key" />
+            .value=${this.cleanupApiKey} @input=${this.handleCleanupApiKeyInput} placeholder="Configured key" />
         </div>
       ` : nothing}
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <label style="display: flex; justify-content: space-between; align-items: center; ${labelStyle}">
-          <span>Model</span>
-          <button type="button" class="rerun-cleanup-refresh" title="Refresh model list"
-            style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0;"
-            ?disabled=${this.cleanupModelsLoading} @click=${() => this.fetchCleanupModels()}>↻ Refresh</button>
-        </label>
-        ${this.cleanupModelOptions.length > 0
-          ? html`<select class="rerun-cleanup-model-select" style=${inputStyle} @change=${this.handleCleanupModelSelect}>
-              ${this.cleanupModelOptions.map(m => html`<option value=${m} ?selected=${m === this.cleanupModel}>${m}</option>`)}
-            </select>`
-          : html`<input type="text" class="rerun-cleanup-model" style=${inputStyle}
-              .value=${this.cleanupModel} @input=${this.handleCleanupModelInput} placeholder="Model id" />`}
-        ${this.cleanupModelsLoading
-          ? html`<p style="margin: 0; ${labelStyle}">Loading models…</p>`
-          : this.cleanupModelOptions.length === 0
-            ? html`<p style="margin: 0; ${labelStyle}">${this.cleanupModelsError
-                ? `Couldn't list models (${this.cleanupModelsError}). Type a model id or Refresh.`
-                : "No models listed — type one or click Refresh."}</p>`
-            : nothing}
+        <label style=${labelStyle}>Model</label>
+        <!-- Shared model picker: live model list for the chosen provider,
+             curated fallback, Refresh, and an "Other" free-text escape.
+             Blank means use the configured model. Re-mounts on
+             provider/url/key change via updated(). -->
+        <div class="rerun-cleanup-model-host"></div>
       </div>
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <label style=${labelStyle}>Prompt</label>
