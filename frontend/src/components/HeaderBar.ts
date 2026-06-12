@@ -4,6 +4,11 @@ import { customElement, state, property } from 'lit/decorators.js';
 
 import { filterStore, type UiFilter } from '../state/filter';
 import { listTags, runDoctor, type Tag } from '../services/ipc';
+import {
+  loadStopMode, saveStopMode, stopModeToRecordMode, resolveRecordStartMode,
+  stopModeTitle, clampDurationSecs, DEFAULT_DURATION_SECS, MIN_DURATION_SECS,
+  MAX_DURATION_SECS, type StopMode, type StopModeKind,
+} from '../services/recordStopMode';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
@@ -29,6 +34,13 @@ export class HeaderBarElement extends LitElement {
   @state() private recordMode: "recording" | "meeting" =
     (localStorage.getItem("phoneme.recordMode") as "recording" | "meeting") || "recording";
   @state() private modeMenuOpen = false;
+  /** Explicit stop-behavior choice for the Record button (Toggle / Silence /
+   *  Fixed length), or null when never picked — the config default applies. */
+  @state() private stopMode: StopMode | null = loadStopMode();
+  /** Mirror of `recording.auto_stop_on_silence`, so the dropdown's checkmark
+   *  and the button tooltip reflect the real default when no explicit
+   *  stop-mode choice is stored. */
+  @state() private autoStopConfig = false;
   /** App health from the Doctor checks: drives the header pill, the pulsing
    *  Settings button, and the failure banner. "unknown" until the first run. */
   @state() private health: "ok" | "bad" | "unknown" = "unknown";
@@ -95,7 +107,7 @@ export class HeaderBarElement extends LitElement {
     void this.loadTags();
     void this.syncStatusFromDaemon();
     void this.initSemanticDefault();
-    void this.loadPreviewOverlayPref();
+    void this.loadConfigPrefs();
     // Health: run the Doctor checks now and every 30s (cheap local IPC); the
     // whisper_status_changed event below re-checks immediately on a transition.
     void this.checkHealth();
@@ -325,11 +337,15 @@ export class HeaderBarElement extends LitElement {
     this.previewText = null;
   }
 
-  private async loadPreviewOverlayPref() {
+  /** Config values the header mirrors for display: the desktop-overlay flag
+   *  (suppresses the in-app ticker) and auto-stop-on-silence (the Record
+   *  button's default stop behavior when no explicit choice is stored). */
+  private async loadConfigPrefs() {
     try {
       const cfg = await invoke<any>("read_config");
       this.previewOverlayOn = !!cfg?.interface?.preview_overlay;
-    } catch { /* default off */ }
+      this.autoStopConfig = !!cfg?.recording?.auto_stop_on_silence;
+    } catch { /* defaults off */ }
   }
 
   private onConfigSavedOverlay = (e: Event) => {
@@ -337,8 +353,20 @@ export class HeaderBarElement extends LitElement {
     if (cfg) {
       this.previewOverlayOn = !!cfg?.interface?.preview_overlay;
       if (this.previewOverlayOn) this.clearPreview();
+      this.autoStopConfig = !!cfg?.recording?.auto_stop_on_silence;
     }
   };
+
+  /** The stop behavior the next Record click will use, for display: the
+   *  explicit dropdown choice, else the config-driven default. */
+  private effectiveStopMode(): StopMode {
+    return (
+      this.stopMode ?? {
+        kind: this.autoStopConfig ? "silence" : "toggle",
+        durationSecs: DEFAULT_DURATION_SECS,
+      }
+    );
+  }
 
   async toggleMeeting() {
     if (this.isMeeting) {
@@ -370,18 +398,25 @@ export class HeaderBarElement extends LitElement {
       if (this.isRecording) {
         await invoke("record_stop");
       } else {
-        // The GUI Record button is a Start/Stop toggle by default ("hold"): it
-        // records until the user clicks stop, so a quiet mic or a natural pause
-        // never cuts it off. Only when the user has opted into auto-stop on
-        // silence do we use "oneshot" (stops once the silence window is quiet).
-        // Read the flag at click-time so the latest saved setting always wins
-        // without HeaderBar subscribing to config changes; fall back to the
-        // safe toggle behavior if the config read fails.
-        let mode = "hold";
-        try {
-          const cfg = await invoke<any>("read_config");
-          if (cfg?.recording?.auto_stop_on_silence) mode = "oneshot";
-        } catch { /* keep toggle (hold) */ }
+        // Stop behavior: an explicit choice from the Record dropdown wins
+        // (Toggle / Silence / Fixed length, persisted per device). With none
+        // stored, keep the pre-dropdown default, read at click time so the
+        // latest saved setting always wins without HeaderBar subscribing to
+        // config changes: "oneshot" when the user opted into auto-stop on
+        // silence, else "hold" — a Start/Stop toggle that records until the
+        // user clicks stop, so a quiet mic never cuts it off.
+        const stored = loadStopMode();
+        let mode: string;
+        if (stored) {
+          mode = stopModeToRecordMode(stored);
+        } else {
+          let autoStop = false;
+          try {
+            const cfg = await invoke<any>("read_config");
+            autoStop = !!cfg?.recording?.auto_stop_on_silence;
+          } catch { /* keep the safe toggle (hold) behavior */ }
+          mode = resolveRecordStartMode(null, autoStop);
+        }
         await invoke("record_start", { mode });
       }
     } catch (e) {
@@ -513,6 +548,31 @@ export class HeaderBarElement extends LitElement {
     this.modeMenuOpen = false;
   }
 
+  /** Pick how a voice note stops (Toggle / Silence / Fixed length). Persisted
+   *  beside the other UI prefs; applies to the next Record click. */
+  private selectStopMode(kind: StopModeKind, e: Event) {
+    e.stopPropagation();
+    const next: StopMode = {
+      kind,
+      durationSecs: this.effectiveStopMode().durationSecs,
+    };
+    this.stopMode = next;
+    saveStopMode(next);
+    this.modeMenuOpen = false;
+  }
+
+  /** Editing the seconds field implies fixed-length mode: persist both and
+   *  keep the menu open so the value can still be adjusted. */
+  private handleDurationChange(e: Event) {
+    e.stopPropagation();
+    const input = e.target as HTMLInputElement;
+    const secs = clampDurationSecs(input.value);
+    input.value = String(secs); // reflect the clamp so the field never lies
+    const next: StopMode = { kind: "duration", durationSecs: secs };
+    this.stopMode = next;
+    saveStopMode(next);
+  }
+
   private async cancelRecording() {
     try {
       await invoke("record_cancel");
@@ -547,9 +607,10 @@ export class HeaderBarElement extends LitElement {
                       : this.isRecording ? "⏹ Stop"
                       : this.recordMode === "meeting" ? "👥 Meeting"
                       : "🔴 Record";
+    const effStop = this.effectiveStopMode();
     const actionTitle = this.recordMode === "meeting"
       ? "Meeting Mode: record your mic and the system audio as two linked tracks"
-      : "Start/Stop a single recording (or use your global hotkey)";
+      : `Start a single recording — ${stopModeTitle(effStop)} (or use your global hotkey)`;
     return html`
       <div class="headerbar" data-tauri-drag-region>
         <style>
@@ -611,8 +672,8 @@ export class HeaderBarElement extends LitElement {
           <div class="hb-rec-group" style="position:relative; display:flex; align-items:stretch;">
             <button class="record-btn ${isCapturing ? 'recording-active' : ''}" title=${actionTitle} 
               style="border-top-right-radius:0; border-bottom-right-radius:0;" @click=${this.handleActionClick}>${actionLabel}</button>
-            <button class="record-btn hb-mode-caret ${isCapturing ? 'recording-active' : ''}" aria-haspopup="menu" aria-expanded=${this.modeMenuOpen} 
-              title="Switch capture mode (single recording or meeting)" ?disabled=${isCapturing} 
+            <button class="record-btn hb-mode-caret ${isCapturing ? 'recording-active' : ''}" aria-haspopup="menu" aria-expanded=${this.modeMenuOpen}
+              title="Capture options: voice note or meeting, and how a voice note stops" ?disabled=${isCapturing}
               style="padding:6px 8px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid rgba(0,0,0,0.25);"
               @click=${this.toggleModeMenu}><svg class="ph-caret-ico ${this.modeMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             <style>
@@ -630,9 +691,18 @@ export class HeaderBarElement extends LitElement {
               .hb-mode-item .hb-mode-ico { font-size: 15px; width: 20px; text-align: center; flex: 0 0 auto; }
               .hb-mode-item .hb-mode-label { flex: 0 1 auto; }
               .hb-mode-item .hb-mode-check { margin-left: 4px; color: var(--accent); font-weight: 700; }
+              .hb-mode-menu .hb-mode-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
+              /* The fixed-length row is a div (a button can't contain an input)
+                 but dresses and behaves like its .hb-mode-item siblings. */
+              .hb-mode-item.hb-mode-duration { cursor: pointer; }
+              .hb-mode-item .hb-mode-secs {
+                width: 58px; padding: 3px 6px; font-size: 12px; text-align: right;
+                background: var(--bg-surface); color: var(--fg-default);
+                border: 1px solid var(--border-subtle); border-radius: 6px;
+              }
             </style>
             <div class="hb-mode-menu" role="menu" ?hidden=${!this.modeMenuOpen}
-              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:168px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:218px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 12px 34px rgba(0,0,0,0.55);">
               <div class="hb-mode-cap">Record as</div>
               <button class="hb-mode-item ${this.recordMode === 'recording' ? 'selected' : ''}" role="menuitemradio" aria-checked=${this.recordMode === 'recording'} @click=${(e: Event) => this.selectMode('recording', e)}>
                 <span class="hb-mode-ico">🎙️</span>
@@ -644,6 +714,34 @@ export class HeaderBarElement extends LitElement {
                 <span class="hb-mode-label">Meeting</span>
                 ${this.recordMode === 'meeting' ? html`<span class="hb-mode-check">✓</span>` : ""}
               </button>
+              <div class="hb-mode-sep"></div>
+              <div class="hb-mode-cap">A voice note stops</div>
+              <button class="hb-mode-item ${effStop.kind === 'toggle' ? 'selected' : ''}" role="menuitemradio" aria-checked=${effStop.kind === 'toggle'}
+                title="Records until you click Stop — never cut off by a quiet mic" @click=${(e: Event) => this.selectStopMode('toggle', e)}>
+                <span class="hb-mode-ico">⏹</span>
+                <span class="hb-mode-label">When I click Stop</span>
+                ${effStop.kind === 'toggle' ? html`<span class="hb-mode-check">✓</span>` : ""}
+              </button>
+              <button class="hb-mode-item ${effStop.kind === 'silence' ? 'selected' : ''}" role="menuitemradio" aria-checked=${effStop.kind === 'silence'}
+                title="Stops by itself after the silence window set in Settings → Capture" @click=${(e: Event) => this.selectStopMode('silence', e)}>
+                <span class="hb-mode-ico">🤫</span>
+                <span class="hb-mode-label">When I go quiet</span>
+                ${effStop.kind === 'silence' ? html`<span class="hb-mode-check">✓</span>` : ""}
+              </button>
+              <div class="hb-mode-item hb-mode-duration ${effStop.kind === 'duration' ? 'selected' : ''}" role="menuitemradio" tabindex="0"
+                aria-checked=${effStop.kind === 'duration'} title="Stops by itself after a fixed number of seconds"
+                @click=${(e: Event) => this.selectStopMode('duration', e)}
+                @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.selectStopMode('duration', e); } }}>
+                <span class="hb-mode-ico">⏱</span>
+                <span class="hb-mode-label">After</span>
+                <input class="hb-mode-secs" type="number" min=${MIN_DURATION_SECS} max=${MAX_DURATION_SECS} step="1"
+                  .value=${String(effStop.durationSecs)} aria-label="Recording length in seconds"
+                  @click=${(e: Event) => e.stopPropagation()}
+                  @keydown=${(e: KeyboardEvent) => e.stopPropagation()}
+                  @change=${this.handleDurationChange} />
+                <span class="hb-mode-label">seconds</span>
+                ${effStop.kind === 'duration' ? html`<span class="hb-mode-check">✓</span>` : ""}
+              </div>
             </div>
           </div>
         </div>

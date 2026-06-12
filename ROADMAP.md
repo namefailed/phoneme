@@ -234,7 +234,12 @@ persona actually wants — still needs the alignment + timestamp substrate below
   still pending* — today clear only removes the failed marker; the recording and
   its transcript are untouched.
 - [ ] **Doctor: rebuild catalog** — `phoneme doctor --rebuild-catalog` is CLI-only.
-- [ ] **Delete modes (keep-audio / transcript-only)** — CLI supports it; the GUI always deletes both.
+- [x] **Delete modes (keep-audio / transcript-only)** — the delete confirmation
+  (single, bulk, `Delete` key, `dd`) now offers **Delete everything** (default) or
+  **Keep the audio file** (`ConfirmDelete.ts` `confirmRecordingDelete` →
+  `delete_recording { keep_audio }`); one chosen mode applies to the whole bulk
+  selection, the Undo grace period covers both, and "Don't ask again" replays the
+  mode chosen when it was set.
 - [x] **Bulk tag from multi-select** — the floating bulk bar now has Tag plus the full shared Re-run form, Export, and Delete.
 - [x] **Semantic search settings + re-index** — a dedicated **Semantic Search**
   settings section (`SectionSemantic.ts`) exposes the toggle, model directory, and
@@ -247,7 +252,12 @@ persona actually wants — still needs the alignment + timestamp substrate below
 - [x] **Import file picker** — wired as an **Import audio** button in Settings →
   Storage (`SectionStorage.ts` → `pickAndImportAudio`), alongside drag-drop.
 - [x] **FLAC import** — symphonia `flac` feature enabled; wav/mp3/m4a/flac all accepted.
-- [ ] **Recording mode on the main button** — hotkeys support hold/toggle/duration; the header Record button is always one-shot.
+- [x] **Recording mode on the main button** — the Record split-button dropdown
+  gained an **"A voice note stops"** group: **When I click Stop** (wire `hold`),
+  **When I go quiet** (`oneshot`), or **After N seconds** (`duration:N`, inline
+  seconds field). Persisted per device (`recordStopMode.ts`), shown in the button
+  tooltip; with no explicit choice the old `auto_stop_on_silence` default still
+  applies. Push-to-talk hold stays hotkey-only — a click can't be held.
 
 ### 🎙️ Meetings
 

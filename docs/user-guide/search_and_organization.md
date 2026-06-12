@@ -91,7 +91,16 @@ Each recording has a **Re-run** menu for reprocessing without re-recording: **Re
 
 ## 📦 Bulk actions
 
-Select multiple rows with **Shift+Click** or **Ctrl+A**. The action bar supports batch **delete**, **re-transcribe**, and **export**.
+Select multiple rows with **Shift+Click** or **Ctrl+A**. The action bar supports batch **delete**, **re-transcribe**, and **export**. A bulk delete asks for the delete mode once and applies it to every selected recording.
+
+## 🗑️ Deleting recordings
+
+Delete from the action row under an open recording, the bulk action bar, the `Delete` key, or `dd` (vim navigation). The confirmation offers two modes:
+
+- **Delete everything** (default) — removes the recording and its audio file from disk.
+- **Keep the audio file** — removes the entry from your library (transcript, notes, tags) but leaves the audio file on disk. Same as the CLI's `phoneme delete --keep-audio`.
+
+Either way the rows disappear immediately with an **Undo** toast. Nothing is actually deleted until the toast runs out, so Undo always brings everything back. Check **Don't ask again** to skip the dialog from then on — future deletes reuse the mode you had selected when you checked it.
 
 ## 📄 Pagination
 

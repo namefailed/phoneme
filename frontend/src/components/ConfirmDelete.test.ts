@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // Stub the CSS import so Vitest doesn't choke on stylesheet syntax.
 vi.mock("./modal.css", () => ({}));
 
-const { confirmDelete } = await import("./ConfirmDelete");
+const { confirmDelete, confirmRecordingDelete, deleteModeKeepsAudio } = await import("./ConfirmDelete");
 
 function getOverlay() {
   // ConfirmDelete uses createRenderRoot() { return this; } so it renders to light DOM
@@ -157,5 +157,105 @@ describe("confirmDelete — ConfirmDeleteOpts customisation", () => {
     expect(queryEl<HTMLButtonElement>("#btn-confirm")?.textContent?.trim()).toBe("Delete");
     queryEl<HTMLButtonElement>("#btn-cancel")?.click();
     await promise;
+  });
+
+  it("plain confirmDelete shows NO mode radios (tag/profile dialogs unchanged)", async () => {
+    const promise = confirmDelete();
+    await new Promise(r => setTimeout(r, 0));
+    expect(queryEl(".modal-mode-group")).toBeNull();
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
+    await promise;
+  });
+});
+
+describe("confirmRecordingDelete — delete modes", () => {
+  it("offers both modes with 'Delete everything' selected by default", async () => {
+    const promise = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    const everything = queryEl<HTMLInputElement>("#mode-everything")!;
+    const keepAudio = queryEl<HTMLInputElement>("#mode-keep-audio")!;
+    expect(everything.checked).toBe(true);
+    expect(keepAudio.checked).toBe(false);
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
+    await promise;
+  });
+
+  it("default mode: confirming untouched resolves 'everything'", async () => {
+    const promise = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
+    expect(await promise).toBe("everything");
+  });
+
+  it("keep-audio: selecting the keep option resolves 'keep_audio'", async () => {
+    const promise = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    const keepAudio = queryEl<HTMLInputElement>("#mode-keep-audio")!;
+    keepAudio.checked = true;
+    keepAudio.dispatchEvent(new Event("change", { bubbles: true }));
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
+    expect(await promise).toBe("keep_audio");
+  });
+
+  it("resolves null when cancelled", async () => {
+    const promise = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
+    expect(await promise).toBeNull();
+  });
+
+  it("resolves null on Escape", async () => {
+    const promise = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(await promise).toBeNull();
+  });
+
+  it("bulk path: pluralizes the title and says the mode applies to all selected", async () => {
+    const promise = confirmRecordingDelete(3);
+    await new Promise(r => setTimeout(r, 0));
+    expect(queryEl(".modal-title")?.textContent).toContain("Delete 3 Recordings?");
+    expect(queryEl(".modal-body")?.textContent).toContain("all 3 selected recordings");
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
+    await promise;
+  });
+
+  it("skip pref set with no remembered mode resolves 'everything' without a dialog", async () => {
+    localStorage.setItem("phoneme_skip_delete_confirm", "true");
+    const result = await confirmRecordingDelete();
+    expect(result).toBe("everything");
+    expect(getOverlay()).toBeNull();
+  });
+
+  it("skip pref set replays a remembered keep-audio mode without a dialog", async () => {
+    localStorage.setItem("phoneme_skip_delete_confirm", "true");
+    localStorage.setItem("phoneme_delete_mode", "keep_audio");
+    const result = await confirmRecordingDelete();
+    expect(result).toBe("keep_audio");
+    expect(getOverlay()).toBeNull();
+  });
+
+  it("'Don't ask again' remembers the mode chosen at that moment", async () => {
+    const promise = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    const keepAudio = queryEl<HTMLInputElement>("#mode-keep-audio")!;
+    keepAudio.checked = true;
+    keepAudio.dispatchEvent(new Event("change", { bubbles: true }));
+    const cb = queryEl<HTMLInputElement>("#dont-ask-again")!;
+    cb.checked = true;
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
+    expect(await promise).toBe("keep_audio");
+    expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBe("true");
+    expect(localStorage.getItem("phoneme_delete_mode")).toBe("keep_audio");
+    // …and the next call replays that choice with no dialog.
+    expect(await confirmRecordingDelete()).toBe("keep_audio");
+    expect(getOverlay()).toBeNull();
+  });
+});
+
+describe("deleteModeKeepsAudio", () => {
+  it("maps the dialog modes to the delete request's keep_audio flag", () => {
+    expect(deleteModeKeepsAudio("everything")).toBe(false);
+    expect(deleteModeKeepsAudio("keep_audio")).toBe(true);
   });
 });
