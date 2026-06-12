@@ -38,7 +38,7 @@ Floating captions during Meeting Mode without alt-tabbing.
   `src-tauri/src/overlay.rs`, `frontend/overlay.*`). It shows the **live preview**
   stream (a rolling re-transcription), not yet true word-by-word real-time captions.
 - **Remaining:** lower-latency real-time captioning and the multi-monitor / click-through
-  UX decisions noted in [docs/design/live-preview-overlay.md](design/live-preview-overlay.md).
+  UX decisions.
 
 ### Team glossary sync
 Shared names/terms (custom vocabulary) across machines/teammates.

@@ -30,10 +30,10 @@ function avatarText(displayName: string | null, label: number): string {
  *
  * Per-segment timestamps aren't persisted, so this is a *coarse* merge — tracks
  * ordered by start time, each rendered as a labelled section, with the
- * pipeline's embedded `[Speaker N]:` turns surfaced inside. See
- * docs/design/merged-meeting-view.md for the full rationale and the follow-up
- * that would unlock true time-interleaving. The view is read-only; clicking an
- * individual track row still opens the editable single-recording detail.
+ * pipeline's embedded `[Speaker N]:` turns surfaced inside. This is a read-only
+ * view; clicking an individual track row still opens the editable single-recording
+ * detail. True time-interleaving by segment requires per-segment timestamps
+ * which are not yet persisted.
  */
 @customElement("ph-merged-conversation-detail")
 export class MergedConversationDetail extends LitElement {
