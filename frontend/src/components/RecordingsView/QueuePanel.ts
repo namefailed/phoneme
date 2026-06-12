@@ -1,4 +1,4 @@
-import { LitElement, html } from "lit";
+import { LitElement, html, PropertyValues } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, getQueueCounts, clearFailed, skipCurrentStage, type QueueEntry } from "../../services/ipc";
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
@@ -39,6 +39,8 @@ export class QueuePanelElement extends LitElement {
   /** Synthetic queue rows for active stage items NOT in the inbox (e.g. a
    *  cleanup/summary re-run), keyed by id; fetched on first stage event. */
   private extraEntries = new Map<string, QueueEntry>();
+  private wasListRendered = false;
+  private lastPendingCount = 0;
 
   /** Min/max drag bounds for the queue list height. */
   private static readonly MIN_H = 120;
@@ -101,6 +103,28 @@ export class QueuePanelElement extends LitElement {
     if (this.unsub) this.unsub();
     if (this.pollTimer !== null) clearInterval(this.pollTimer);
   }
+
+  protected async updated(changedProperties: PropertyValues) {
+    super.updated(changedProperties);
+
+    const pending = this.items.filter((i) => i.state === "pending");
+    const currentPendingCount = pending.length;
+
+    const queueList = this.querySelector(".queue-list");
+    const isListRendered = !!queueList;
+
+    const justRendered = isListRendered && !this.wasListRendered;
+    const itemsAdded = currentPendingCount > this.lastPendingCount;
+
+    this.wasListRendered = isListRendered;
+    this.lastPendingCount = currentPendingCount;
+
+    if (queueList && (justRendered || itemsAdded)) {
+      await this.updateComplete;
+      queueList.scrollTop = queueList.scrollHeight;
+    }
+  }
+
 
   private async load() {
     try {
