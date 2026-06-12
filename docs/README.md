@@ -53,6 +53,9 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [Architecture Overview](developer-guide/architecture.md) — Daemon / CLI / tray triad
 - [Internals](developer-guide/internals.md) — Async topology, audio path, pipeline, semantic search, meeting alignment
 - [Developer Onboarding](developer-guide/onboarding.md) — Coding conventions, Light/Shadow DOM, and styling guidelines
+- [How to Extend Phoneme](developer-guide/how_to_extend.md) — Step-by-step guide for custom providers, IPC commands, and hotkeys
+- [Frontend Development](developer-guide/frontend_guide.md) — Custom state store, Lit templates, and Vim pane layout
+- [Backend Development](developer-guide/backend_guide.md) — Async actors, SQLx/WAL settings, and loopback alignment
 - [Data Directories](developer-guide/data_directories.md) — Config, catalog, inbox, logs, models
 - [Threat Model](developer-guide/threat_model.md) — Trust boundaries, mitigations, open hardening items
 

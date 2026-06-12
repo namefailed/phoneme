@@ -1,52 +1,123 @@
 # 🚀 New Developer Onboarding Guide
 
-Welcome to Phoneme! This guide outlines the key design patterns, technologies, and styling conventions used across the project to help you get up to speed.
+Welcome to Phoneme! This guide walks you through setting up your local environment, the three-terminal development workflow, and the coding conventions used across our frontend and backend.
 
 ---
 
-## 🎨 Frontend Architecture & Conventions (`frontend/src`)
+## 💻 1. Development Environment Setup
 
-The Phoneme user interface is a desktop single-page application built on a modern, lightweight web stack: **Vite**, **TypeScript**, **Lit**, and **Vanilla CSS**.
+To work on Phoneme, you will need the following tools installed on your development machine:
 
-### 1. Web Components with Lit
-Instead of a virtual-DOM framework (like React or Vue), Phoneme uses native Web Components managed by **Lit** ([`App.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/App.ts)).
-- Lit provides lightweight, reactive property bindings. When a `@property()` or `@state()` changes, Lit efficiently re-renders the element.
+1. **Rust Toolchain:** Install Rust via [rustup](https://rustup.rs/). We use the stable toolchain.
+2. **NodeJS & pnpm:** Install Node.js (version 20+ recommended) and the `pnpm` package manager (version 9+):
+   ```bash
+   corepack enable
+   corepack prepare pnpm@9.0.0 --activate
+   ```
+3. **Tauri CLI:** Install the Tauri command-line tool globally:
+   ```bash
+   cargo install tauri-cli --version "^2.0" --locked
+   ```
+4. **SQLite Client:** A database viewer (like DB Browser for SQLite) is highly recommended for auditing the local `catalog.db` database.
+
+---
+
+## 🚦 2. The Three-Terminal Developer Workflow
+
+Because Phoneme separates the background daemon from the GUI window, local development requires launching the services in three separate terminals:
+
+### Terminal 1: Start the Background Daemon
+Runs the headless daemon which hosts the named pipe IPC server and audio capture engine:
+```bash
+cargo run --bin phoneme-daemon
+```
+
+### Terminal 2: Run the Webpack/Vite Dev Server
+Serves the Lit/TypeScript web application:
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+*Vite will start a local server, usually at `http://localhost:5173`.*
+
+### Terminal 3: Run the Tauri App Window
+Launches the system tray app, webview container, and global shortcut hooks:
+```bash
+cargo tauri dev
+```
+*Tauri automatically connects to the Vite dev server and opens the GUI window.*
+
+---
+
+## 🎨 3. Frontend Architecture & Conventions (`frontend/src`)
+
+The frontend is a single-page app built with **Vite**, **TypeScript**, **Lit**, and **Vanilla CSS**.
+
+### Lit Components
+All views extend Lit's `LitElement` class ([`App.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/App.ts)). 
 
 > [!IMPORTANT]
 > **Light DOM vs. Shadow DOM:**
-> By default, Lit components encapsulate their templates inside a Shadow DOM. However, to allow global stylesheet variables (Vim cursors, themes, headers) to style components seamlessly without complex styling proxies, most Phoneme components override `createRenderRoot()` to render directly in the **Light DOM**:
+> We override `createRenderRoot()` to bypass the Shadow DOM boundary. This allows global stylesheet rules (like Vim cursors or theme variables) to apply cleanly across components:
 > ```typescript
 > override createRenderRoot() {
->   return this; // Renders directly into Light DOM instead of creating a Shadow Root
+>   return this; // Renders directly into Light DOM
 > }
 > ```
 
-### 2. State Management & Store
-Reactive state is orchestrated via a lightweight, custom store implementation ([`store.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/state/store.ts)).
-- Components subscribe to the store upon mounting (`connectedCallback`) and unsubscribe when unmounting (`disconnectedCallback`).
-- This minimizes re-renders and decouples data fetching (over IPC) from visual drawing logic.
+### Reactive Store
+UI data is synchronized via a custom reactive store ([`store.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/state/store.ts)):
+- Components subscribe to state changes inside `connectedCallback` and release their subscriptions inside `disconnectedCallback`.
+- The store acts as a single source of truth, receiving state updates over the Tauri IPC channel.
 
-### 3. Styling Guidelines
-- **Vanilla CSS:** We use vanilla CSS stylesheets (e.g. `index.css`, `modal.css`) with CSS custom properties (variables) for theme-matching.
-- **No Tailwind CSS:** Avoid adding Tailwind utility classes unless explicitly requested. Design systems, margins, and layouts are defined cleanly in CSS files using flex/grid rules.
-- **Chrome Toggles:** Pane slides and animations are managed by applying state classes (e.g., `.phoneme-zen-active`, `.phoneme-hide-header`) to the top-level `<body>` tag, allowing global CSS to smoothly transition positions.
+### Styling Conventions
+- **Vanilla CSS:** Maintain design systems inside vanilla CSS files (e.g. `index.css`, `modal.css`). Do not use Tailwind utility classes.
+- **Chrome Transitions:** Slides and collapses are triggered by applying state classes (e.g., `.phoneme-zen-active`, `.phoneme-hide-header`) to `<body>` and animating layouts using CSS transitions.
 
 ---
 
-## 🦀 Backend Architecture & Conventions (`crates/`, `bin/`)
+## 🦀 4. Backend Architecture & Conventions (`crates/`, `bin/`)
 
-The backend is built in **Rust** using the **Tokio** asynchronous runtime and **Tauri** for system integration.
+The backend is built in **Rust** using the **Tokio** async runtime.
 
-### 1. SQLite Database & Migrations (`phoneme-core`)
-The database catalog is powered by SQLite ([`catalog.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/catalog.rs)).
-- **`sqlx` Migrations:** Database schemas are versioned and managed under [`crates/phoneme-core/migrations/`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/migrations). Never modify a completed migration file directly; instead, create a new chronologically-prefix-named SQL file to execute schema changes.
-- **Connection Pools:** The SQLite pool is shared across async tasks and initialized in WAL mode.
+### SQLite Database & sqlx
+The catalog is stored in `catalog.db` ([`catalog.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/catalog.rs)).
+- **Migrations:** All schema changes must be versioned. Schema migration files are placed under [`crates/phoneme-core/migrations/`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/migrations).
+- **WAL Mode:** The catalog is opened in Write-Ahead Logging mode to ensure read queries don't block concurrent writes.
 
-### 2. Async Task Lifecycle & Cancellation
-The daemon uses Tokio tasks to run operations in the background:
-- **Abort Tokens:** Long-running pipeline operations accept a `CancellationToken` from `tokio-util`. If the user cancels a recording or transcription, the token is cancelled, and the async task exits early, reverting state.
-- **Process Supervision:** Bundled server executables are spawned and monitored as child processes. If a child process crashes, the supervisor ([`whisper_supervisor.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/whisper_supervisor.rs)) handles exponential backoff and respawn attempts.
+### Async Task Cancellation
+Background tasks (transcription, cleanup, hooks) accept a `CancellationToken` from `tokio-util`. If the user cancels an operation or quits the app, the token is aborted, allowing the tokio task to unwind and clean up its lock permits safely.
 
-### 3. IPC (JSON Line Named Pipes)
-- Communication between the tray, CLI, and daemon runs over Windows Named Pipes using the `JsonLineCodec` (JSON objects separated by `\n`).
-- All message types are strictly typed. The shared crate `phoneme-ipc` ([`schema.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-ipc/src/schema.rs)) forces compile-time safety: you cannot add a new action to the CLI or frontend without handling it in the daemon's IPC routing loops.
+---
+
+## 🧪 5. Testing & Code Quality
+
+Before opening a pull request, run the test suites and code linters locally.
+
+### Running Tests
+- **Rust backend unit tests:**
+  ```bash
+  cargo test --workspace
+  ```
+  *(Unit tests use a synthetic audio source, so they can run successfully on headless CI runners without physical microphones).*
+- **Frontend Vitest unit tests:**
+  ```bash
+  cd frontend
+  pnpm test
+  ```
+
+### Code Formatters & Linters
+- **Rust formatting:**
+  ```bash
+  cargo fmt --all -- --check
+  ```
+- **Rust clippy linting:**
+  ```bash
+  cargo clippy --workspace --all-targets -- -D warnings
+  ```
+- **TypeScript type checking:**
+  ```bash
+  cd frontend
+  pnpm type-check
+  ```
