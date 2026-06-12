@@ -53,6 +53,7 @@ export type DaemonEvent =
   | { event: "tag_attached"; tag_id: number }
   | { event: "tag_detached"; tag_id: number }
   | { event: "tag_suggestions_updated"; id: string }
+  | { event: "all_tag_suggestions_cleared"; cleared: number }
   | { event: "preview_source_changed"; track: string };
 
 export type EventHandler = (event: DaemonEvent) => void;

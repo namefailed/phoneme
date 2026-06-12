@@ -207,6 +207,10 @@ pub enum Request {
         id: RecordingId,
         name: String,
     },
+    /// Drop every pending tag suggestion across the whole library (the
+    /// Auto-Tagging settings' bulk clear). Responds `{ "cleared": n }` and
+    /// emits [`DaemonEvent::AllTagSuggestionsCleared`] so open views refresh.
+    ClearAllTagSuggestions,
     /// Force-restart the bundled whisper-server(s): best-effort kill of every
     /// whisper-server process (covers hung servers and orphans holding the
     /// port), then the supervisors respawn the main + preview servers from the
@@ -565,6 +569,12 @@ pub enum DaemonEvent {
     /// dismissed). The UI re-reads the recording to show the current list.
     TagSuggestionsUpdated {
         id: RecordingId,
+    },
+    /// Every recording's pending tag suggestions were just cleared in one
+    /// sweep (`ClearAllTagSuggestions`). Carries the count for the toast;
+    /// views refresh their lists rather than tracking individual ids.
+    AllTagSuggestionsCleared {
+        cleared: u64,
     },
     /// The live preview switched to following this meeting track (`"mic"` /
     /// `"system"`). The overlay's source toggle reflects it.

@@ -503,6 +503,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::ClearAllTagSuggestions => match state.catalog.clear_all_tag_suggestions().await {
+            Ok(cleared) => {
+                state
+                    .events
+                    .emit(DaemonEvent::AllTagSuggestionsCleared { cleared });
+                Response::Ok(serde_json::json!({ "cleared": cleared }))
+            }
+            Err(e) => Response::Err(IpcError {
+                kind: error_to_kind(&e),
+                message: e.to_string(),
+            }),
+        },
         Request::DismissTagSuggestion { id, name } => match state.catalog.get(&id).await {
             Ok(Some(rec)) => {
                 let rest: Vec<String> = rec

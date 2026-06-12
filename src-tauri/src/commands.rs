@@ -152,6 +152,14 @@ pub async fn get_segments(bridge: Br<'_>, id: String) -> Result<Value, CommandEr
     forward(&bridge, Request::GetSegments { id }).await
 }
 
+/// Drop every pending tag suggestion across the whole library. Returns
+/// `{ "cleared": n }`; the daemon's AllTagSuggestionsCleared event refreshes
+/// any open views.
+#[tauri::command]
+pub async fn clear_all_tag_suggestions(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ClearAllTagSuggestions).await
+}
+
 /// Delete a recording from the catalog.
 /// If `keep_audio` is false, the `.wav` file on disk will also be permanently deleted.
 #[tauri::command]

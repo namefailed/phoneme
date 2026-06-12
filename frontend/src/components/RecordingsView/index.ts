@@ -1208,6 +1208,7 @@ export class RecordingsView {
         // Tag mutations change the Tags column — refresh so it updates live
         // instead of needing a manual reload.
         eventName === "tag_attached" ||
+        eventName === "all_tag_suggestions_cleared" ||
         eventName === "tag_detached" ||
         eventName === "tag_updated" ||
         eventName === "tag_deleted" ||

@@ -262,6 +262,20 @@ impl Catalog {
         Ok(())
     }
 
+    /// Drop EVERY pending tag suggestion across the whole library (the
+    /// Auto-Tagging settings' "Clear all suggestions" action). Returns how
+    /// many recordings actually had suggestions to clear.
+    pub async fn clear_all_tag_suggestions(&self) -> Result<u64> {
+        let result = sqlx::query(
+            r#"UPDATE recordings
+               SET tag_suggestions = NULL, updated_at = datetime('now')
+               WHERE tag_suggestions IS NOT NULL"#,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Set or clear the "favorite"/star flag for a recording (Favorites view).
     pub async fn set_favorite(&self, id: &RecordingId, favorite: bool) -> Result<()> {
         sqlx::query(
@@ -2379,6 +2393,32 @@ mod tests {
         let paths = db.apply_retention(&cfg).await.unwrap();
         assert_eq!(paths.len(), 1);
         assert!(db.get(&r.id).await.unwrap().is_none(), "row deleted");
+    }
+
+    #[tokio::test]
+    async fn clear_all_tag_suggestions_sweeps_every_recording() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        let c = embedded_recording(None); // never had suggestions
+        db.insert(&a).await.unwrap();
+        db.insert(&b).await.unwrap();
+        db.insert(&c).await.unwrap();
+        db.set_tag_suggestions(&a.id, &["alpha".into()])
+            .await
+            .unwrap();
+        db.set_tag_suggestions(&b.id, &["beta".into(), "gamma".into()])
+            .await
+            .unwrap();
+
+        let cleared = db.clear_all_tag_suggestions().await.unwrap();
+        assert_eq!(cleared, 2, "only rows that HAD suggestions count");
+        for id in [&a.id, &b.id, &c.id] {
+            let rec = db.get(id).await.unwrap().unwrap();
+            assert!(rec.tag_suggestions.is_empty());
+        }
+        // Sweep again: nothing left to clear.
+        assert_eq!(db.clear_all_tag_suggestions().await.unwrap(), 0);
     }
 
     #[tokio::test]

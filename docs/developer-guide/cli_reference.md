@@ -315,6 +315,10 @@ phoneme tag for 20260519T143500823
 # Show how many recordings each tag is attached to
 phoneme tag usage
 
+# Drop every pending auto-tag suggestion across the whole library (approved
+# tags stay attached; only not-yet-decided proposals are discarded)
+phoneme tag clear-suggestions
+
 # Merge one tag into another: re-point all recordings, then delete the source
 phoneme tag merge old-name work
 ```
