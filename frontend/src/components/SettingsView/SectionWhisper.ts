@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
-import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, sttMeta, curatedSttModels } from "../../services/sttProviders";
+import { sttMeta, curatedSttModels } from "../../services/sttProviders";
+import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
 import { curatedTranscriptionModels } from "../../data/curatedModels";
 
@@ -51,7 +52,7 @@ export class SectionWhisper {
       const downloadedPath = downloadedPaths.find(p => p.endsWith(m.filename));
       const isDownloaded = !!downloadedPath;
       const isSelected = this.config.whisper.model_path === downloadedPath;
-      
+
       const card = this.container.querySelector(`#model-card-${m.id}`);
       if (!card) return;
 
@@ -101,7 +102,7 @@ export class SectionWhisper {
         const url = target.dataset.url!;
         const filename = target.dataset.filename!;
         const progressEl = target.parentElement?.querySelector(".progress-text") as HTMLElement;
-        
+
         target.disabled = true;
         target.textContent = "Downloading...";
         if (progressEl) {
@@ -141,6 +142,20 @@ export class SectionWhisper {
     });
   }
 
+  /**
+   * What the connection block's Test button probes. For the local provider
+   * this mirrors the daemon's `server_base_url()` exactly: external mode →
+   * the configured endpoint, bundled modes → the supervised server's port.
+   * For the custom provider it's the OpenAI-compatible base URL.
+   */
+  private testUrl(): string {
+    const w = this.config.whisper ?? {};
+    if (String(w.provider ?? "local") !== "local") return String(w.api_url ?? "").trim();
+    return w.mode === "external"
+      ? String(w.external_url ?? "").replace(/\/+$/, "")
+      : `http://127.0.0.1:${w.bundled_server_port ?? 5809}`;
+  }
+
   private render(container: HTMLElement) {
     const modelCardsHtml = MODELS.map(m => `
       <div id="model-card-${m.id}" style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 4px; background: var(--bg-deep);">
@@ -161,49 +176,13 @@ export class SectionWhisper {
     container.innerHTML = `
       <div class="settings-section">
         <h3>Whisper</h3>
-        <div class="settings-field">
-          <label>Provider</label>
-          <div>${renderField(
-            {
-              key: "whisper.provider",
-              label: "",
-              kind: "select",
-              options: STT_PROVIDERS.map((p) => ({ value: p.value, label: p.label })),
-            },
-            this.config.whisper.provider ?? "local",
-          )}</div>
-          <span style="${HELP}">
-            Where your audio is transcribed. <b>Local</b> runs entirely on your machine; cloud options send audio to a third-party API.
-          </span>
-        </div>
+        <!-- Shared connection block: provider select (grouped local/cloud/
+             advanced), key row when the provider needs one, Test, and the
+             cloud endpoint override under its Advanced fold. The model row
+             stays ours, below, because local "models" are files on disk. -->
+        <div id="whisper-connection"></div>
 
         <div id="whisper-cloud" style="display:none">
-          <div
-            id="cloud-warning"
-            style="border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin-bottom:14px; font-size:12px; line-height:1.45;"
-          ></div>
-          <div class="settings-field long-input">
-            <label>Quick preset</label>
-            <div>
-              <select id="stt-preset-select">
-                <option value="">— Pick a provider preset —</option>
-                ${STT_CUSTOM_PRESETS.map((p) => `<option value="${p.id}">${p.label}</option>`).join("")}
-              </select>
-            </div>
-            <span style="${HELP}">
-              Sets provider to <b>Custom (OpenAI-compatible)</b> and fills in the API URL and a default model. Add your own API key below.
-            </span>
-          </div>
-          <div class="settings-field long-input">
-            <label>API key</label>
-            <div>${renderField(
-              { key: "whisper.api_key", label: "", kind: "text", type: "password" },
-              this.config.whisper.api_key ?? "",
-            )}</div>
-            <span style="${HELP}">
-              Your <span id="cloud-name">cloud</span> API key. Stored locally in your <code>config.toml</code>; never sent anywhere except the provider.
-            </span>
-          </div>
           <div class="settings-field long-input">
             <label>Model</label>
             <div id="whisper-model-host"></div>
@@ -211,34 +190,9 @@ export class SectionWhisper {
               Leave blank to use the provider default.
             </span>
           </div>
-          <div class="settings-field long-input">
-            <label>API URL (optional)</label>
-            <div>${renderField(
-              { key: "whisper.api_url", label: "", kind: "text" },
-              this.config.whisper.api_url ?? "",
-            )}</div>
-            <span style="${HELP}">
-              Optional. Override the endpoint for a proxy or OpenAI-compatible gateway. Leave blank for the provider default.
-            </span>
-          </div>
         </div>
 
         <div id="whisper-local">
-          <div class="settings-field long-input">
-            <label>External URL</label>
-            <div>
-              ${renderField(
-                { key: "whisper.external_url", label: "", kind: "text" },
-                this.config.whisper.external_url,
-              )}
-              <button class="inline-button" id="test-whisper">Test</button>
-              <div class="test-result" id="whisper-result" style="display:none"></div>
-            </div>
-            <span style="${HELP}">
-              The endpoint to send audio to when using <b>External</b> mode. Must be a Whisper-compatible API (e.g., <code>http://127.0.0.1:8080/inference</code>).
-            </span>
-          </div>
-          
           <div class="settings-field stacked">
             <label>Bundled Model</label>
             <!-- Hidden input to maintain form binding -->
@@ -258,6 +212,29 @@ export class SectionWhisper {
               </span>
             </div>
           </div>
+
+          <details class="settings-advanced">
+            <summary>
+              <svg class="settings-advanced-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              Advanced — local server connection
+            </summary>
+            <span style="display:block; font-size:11px; color:var(--fg-faded); margin:4px 0 10px;">
+              Normally the app starts and manages its own whisper server for the model picked
+              above — nothing to configure. Fill the URL below only to use a server you run yourself.
+            </span>
+            <div class="settings-field long-input">
+              <label>External URL</label>
+              <div>${renderField(
+                { key: "whisper.external_url", label: "", kind: "text" },
+                this.config.whisper.external_url,
+              )}</div>
+              <span style="${HELP}">
+                The endpoint to send audio to when using <b>External</b> mode. Must be a Whisper-compatible API (e.g., <code>http://127.0.0.1:8080/inference</code>). The Test button above checks whichever endpoint is in effect.
+              </span>
+            </div>
+          </details>
         </div>
 
         <div class="settings-field">
@@ -328,7 +305,8 @@ export class SectionWhisper {
       });
     };
 
-    // Show local vs cloud settings based on the selected provider.
+    // Local providers keep the file cards + external-server machinery; cloud
+    // providers get the shared model field with that provider's suggestions.
     const applyProviderVisibility = (provider: string) => {
       const isLocal = provider === "local";
       container.querySelector<HTMLElement>("#whisper-local")!.style.display = isLocal
@@ -340,55 +318,31 @@ export class SectionWhisper {
       if (isLocal) return;
 
       // provider metadata is from the shared STT catalog, not user input.
-      const { name, host, model: defaultModel } = sttMeta(provider);
-      container.querySelector<HTMLElement>("#cloud-warning")!.innerHTML =
-        `⚠️ <b>Cloud transcription.</b> Selecting ${name} uploads your recorded audio to ` +
-        `${host} for processing — your audio leaves your machine. Switch back to ` +
-        `<b>Local</b> to keep everything offline.`;
-      const cloudName = container.querySelector<HTMLElement>("#cloud-name");
-      if (cloudName) cloudName.textContent = name;
+      const { model: defaultModel } = sttMeta(provider);
       const modelHelp = container.querySelector<HTMLElement>("#cloud-model-help");
       if (modelHelp)
         modelHelp.textContent = `Leave blank to use the provider default (${defaultModel}).`;
       mountWhisperModel();
     };
 
-    const providerSelect = container.querySelector<HTMLSelectElement>(
-      `[data-key="whisper.provider"]`,
-    );
-    providerSelect?.addEventListener("change", () =>
-      applyProviderVisibility(providerSelect.value),
-    );
+    // The provider/key/endpoint/Test UI is the shared connection block. It
+    // reads and writes the same `[whisper]` keys the old controls did —
+    // provider kind, api_url, api_key — so configs round-trip untouched. The
+    // local mode/port/external_url machinery stays out of its reach: the
+    // block only resolves the URL its Test button probes via testUrl().
+    const connHost = container.querySelector<HTMLElement>("#whisper-connection")!;
+    mountConnectionField(connHost, {
+      catalog: "stt",
+      getKind: () => String(this.config.whisper.provider ?? "local"),
+      setKind: (k: string) => { this.config.whisper.provider = k; },
+      getApiUrl: () => String(this.config.whisper.api_url ?? ""),
+      setApiUrl: (u: string) => { this.config.whisper.api_url = u; },
+      getApiKey: () => String(this.config.whisper.api_key ?? ""),
+      setApiKey: (k: string) => { this.config.whisper.api_key = k; },
+      onProviderChanged: () => applyProviderVisibility(this.config.whisper.provider ?? "local"),
+      resolveTestUrl: () => this.testUrl(),
+    });
     applyProviderVisibility(this.config.whisper.provider ?? "local");
-
-    // Transcription provider presets — map onto the existing `custom`
-    // (OpenAI-compatible) provider and prefill the base URL + default model.
-    // Frontend-only: the backend appends /v1/audio/transcriptions.
-    const sttPresetSelect = container.querySelector<HTMLSelectElement>("#stt-preset-select");
-    sttPresetSelect?.addEventListener("change", () => {
-      const preset = findSttCustomPreset(sttPresetSelect.value);
-      if (!preset || !providerSelect) return;
-      providerSelect.value = "custom";
-      providerSelect.dispatchEvent(new Event("change", { bubbles: true }));
-      const urlInput = container.querySelector<HTMLInputElement>(`[data-key="whisper.api_url"]`);
-      if (urlInput) {
-        urlInput.value = preset.apiUrl;
-        urlInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      this.config.whisper.model = preset.model;
-      mountWhisperModel(); // reflect the preset's default model
-      sttPresetSelect.value = "";
-    });
-
-    container.querySelector("#test-whisper")?.addEventListener("click", async () => {
-      const result = await invoke<{ ok: boolean; message: string }>("wizard_test_whisper", {
-        url: this.config.whisper.external_url,
-      });
-      const el = container.querySelector<HTMLElement>("#whisper-result")!;
-      el.style.display = "block";
-      el.className = `test-result ${result.ok ? "ok" : "err"}`;
-      el.textContent = result.message;
-    });
 
     container.querySelector("#pick-model")?.addEventListener("click", async () => {
       const { open } = await import("@tauri-apps/plugin-dialog");

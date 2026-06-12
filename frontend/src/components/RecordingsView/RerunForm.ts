@@ -373,20 +373,21 @@ export class RerunFormElement extends LitElement {
     `;
   }
 
-  /** Cleanup provider/preset/model/prompt panel (shared by the Cleanup and All steps). */
+  /** Cleanup provider/model/prompt panel, with a quick provider pick that
+   *  fills provider + URL + model in one go (shared by the Cleanup and All steps). */
   private renderCleanupPanel() {
     const inputStyle = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
     const labelStyle = "font-size: 11px; color: var(--fg-muted);";
     const isApi = isApiLlmProvider(this.cleanupProvider);
     return html`
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <label style=${labelStyle}>Quick preset</label>
+        <label style=${labelStyle}>Quick pick</label>
         <select class="rerun-cleanup-preset" style=${inputStyle} @change=${this.handleCleanupPreset}>
           <option value="">— Pick a provider —</option>
-          <optgroup label="Local / offline">
+          <optgroup label="On this computer">
             ${LOCAL_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
           </optgroup>
-          <optgroup label="Cloud (API key)">
+          <optgroup label="Cloud">
             ${CLOUD_LLM_PRESETS.map(p => html`<option value=${p.id}>${p.label}</option>`)}
           </optgroup>
         </select>
