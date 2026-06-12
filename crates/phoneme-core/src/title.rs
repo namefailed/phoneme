@@ -23,7 +23,7 @@ const FILLERS: &[&str] = &[
 
 /// Derive a short display title from a transcript: the first meaningful
 /// sentence or clause, minus leading filler and non-speech annotations,
-/// whitespace collapsed, cut on a word boundary near [`MAX_TITLE_CHARS`],
+/// whitespace collapsed, cut on a word boundary near `MAX_TITLE_CHARS` (60),
 /// with no trailing punctuation.
 ///
 /// Returns `None` when the text holds nothing usable (empty, whitespace,
