@@ -49,6 +49,8 @@ async fn seed_recording(
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        title: None,
+        title_is_auto: true,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -145,6 +147,8 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        title: None,
+        title_is_auto: true,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -193,6 +197,14 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         Some("test-llm"),
         "the cleanup model should be recorded"
     );
+    // [title] defaults: enabled, heuristic-only — the title is the first
+    // clause of the CLEANED transcript (the text the user sees).
+    assert_eq!(
+        rec.title.as_deref(),
+        Some("PROCESSED OUTPUT"),
+        "the heuristic auto title should come from the cleaned transcript"
+    );
+    assert!(rec.title_is_auto, "a pipeline-set title is auto-owned");
 
     // The raw machine transcript is preserved separately from the cleaned one.
     let original = state.catalog.get_original_transcript(&id).await.unwrap();
@@ -378,6 +390,182 @@ async fn permanent_whisper_failure_still_fails_the_recording() {
 
     let rec = state.catalog.get(&id).await.unwrap().expect("row exists");
     assert_eq!(rec.status, RecordingStatus::TranscribeFailed);
+}
+
+/// The auto-title step end to end: a fresh run sets a heuristic title from
+/// the transcript (no LLM configured); a re-run refreshes that auto title;
+/// and once the user has set their own title, re-runs leave it alone forever.
+#[tokio::test]
+async fn pipeline_sets_heuristic_title_and_never_clobbers_a_user_title() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "Um, okay so plan the Denver trip. Then book the flights."
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.llm_post_process.enabled = false;
+    cfg.hook.run_on_transcribe = false;
+    // [title] left at defaults: enabled = true, use_llm = false.
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+    let payload = || HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    crate::pipeline::run(&state, payload(), CancellationToken::new())
+        .await
+        .expect("first run succeeds");
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(
+        rec.title.as_deref(),
+        Some("plan the Denver trip"),
+        "filler stripped, first clause, no trailing punctuation"
+    );
+    assert!(rec.title_is_auto);
+
+    // The user takes ownership of the title…
+    state
+        .catalog
+        .set_title(&id, Some("Trip planning"), false)
+        .await
+        .unwrap();
+
+    // …so a retranscribe must NOT touch it (the run itself still succeeds and
+    // rewrites the transcript).
+    crate::pipeline::run(&state, payload(), CancellationToken::new())
+        .await
+        .expect("re-run succeeds");
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(
+        rec.title.as_deref(),
+        Some("Trip planning"),
+        "a user title survives a retranscribe"
+    );
+    assert!(!rec.title_is_auto, "ownership stays with the user");
+}
+
+/// The LLM title path: when `[title].use_llm` is on and the provider answers,
+/// the (sanitized) LLM title wins; when the provider is unreachable, the run
+/// still succeeds and the heuristic title is stored — an LLM problem can
+/// never cost the recording or leave it untitled.
+#[tokio::test]
+async fn llm_title_applies_and_falls_back_to_heuristic_on_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "Notes about the quarterly budget review meeting."
+        })))
+        .mount(&server)
+        .await;
+    // The title LLM replies with the quotes-and-prefix mess models love.
+    Mock::given(method("POST"))
+        .and(path("/title-llm"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "Title: \"Quarterly Budget Review\"" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.llm_post_process.enabled = false;
+    cfg.hook.run_on_transcribe = false;
+    cfg.title.use_llm = true;
+    cfg.title.provider = "openai".into();
+    cfg.title.api_url = format!("{}/title-llm", server.uri());
+    cfg.title.model = "test-titler".into();
+
+    let state = test_state(tmp.path(), cfg.clone()).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("run with LLM titles succeeds");
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(
+        rec.title.as_deref(),
+        Some("Quarterly Budget Review"),
+        "the LLM title is used, quotes and 'Title:' prefix stripped"
+    );
+    assert!(rec.title_is_auto, "an LLM title is still auto-owned");
+
+    // Same config, but the title endpoint is now unreachable: the run still
+    // succeeds and the heuristic fills in.
+    let mut broken = cfg;
+    broken.title.api_url = "http://127.0.0.1:9".into();
+    let state = test_state(tmp.path(), broken).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("an unreachable title LLM must not fail the run");
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(
+        rec.title.as_deref(),
+        Some("Notes about the quarterly budget review meeting"),
+        "the heuristic title is the fallback on any LLM error"
+    );
+}
+
+/// `sanitize_llm_title` tames real-world model replies; anything unusable
+/// falls back to the heuristic (None).
+#[test]
+fn sanitize_llm_title_strips_wrappers_and_caps_words() {
+    use crate::pipeline::sanitize_llm_title;
+
+    assert_eq!(
+        sanitize_llm_title("\"Plan the Denver Trip\"").as_deref(),
+        Some("Plan the Denver Trip")
+    );
+    assert_eq!(
+        sanitize_llm_title("Title: Weekly sync notes.").as_deref(),
+        Some("Weekly sync notes")
+    );
+    // First non-empty line only, and at most 8 words.
+    assert_eq!(
+        sanitize_llm_title("\n\none two three four five six seven eight nine ten\nmore")
+            .as_deref(),
+        Some("one two three four five six seven eight")
+    );
+    assert_eq!(sanitize_llm_title(""), None);
+    assert_eq!(sanitize_llm_title("  \n \"\" \n"), None);
 }
 
 /// The pipeline's end-of-run typing decision for in-place dictations. Tested

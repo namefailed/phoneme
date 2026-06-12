@@ -444,6 +444,29 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }),
             }
         }
+        Request::SetRecordingTitle { id, title } => {
+            // A blank title means "clear back to auto" — same as None. `Some`
+            // marks the title user-owned, so the pipeline never overwrites it;
+            // `None` resets ownership and the next run generates a fresh one.
+            let title = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+            let is_auto = title.is_none();
+            match state.catalog.set_title(&id, title.as_deref(), is_auto).await {
+                Ok(true) => {
+                    // Same event a transcript edit emits — open views re-fetch
+                    // the recording and pick the new title up.
+                    state.events.emit(DaemonEvent::TranscriptUpdated { id });
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Ok(false) => Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: format!("no recording {}", id.as_str()),
+                }),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
         Request::SuggestTags { id } => {
             // On-demand tag suggestions (the UI's ✨ Suggest button). Runs the
             // same step as the auto pipeline, regardless of `auto_tag.auto`.
@@ -1706,6 +1729,8 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        title: None,
+        title_is_auto: true,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1886,6 +1911,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };

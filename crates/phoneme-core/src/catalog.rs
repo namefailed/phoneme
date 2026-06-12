@@ -276,6 +276,52 @@ impl Catalog {
         Ok(result.rows_affected())
     }
 
+    /// Set or clear a recording's display title.
+    ///
+    /// Ownership rule: a user title (`title_is_auto = 0`) wins forever — an
+    /// auto write (`is_auto = true` with a title) only lands while the title
+    /// is still auto-owned, so the pipeline can refresh its own titles on
+    /// retranscribe but can never clobber one the user typed. Explicit user
+    /// writes always apply: `Some` + `is_auto = false` takes ownership;
+    /// `None` clears the title AND reverts ownership to auto, so the next
+    /// pipeline run generates a fresh one.
+    ///
+    /// Returns whether a row was actually updated (`false` = unknown id, or
+    /// an auto write skipped because the user owns the title).
+    pub async fn set_title(
+        &self,
+        id: &RecordingId,
+        title: Option<&str>,
+        is_auto: bool,
+    ) -> Result<bool> {
+        // A cleared title is always auto-owned — `None` means "no title,
+        // generate one next run", never "user-owned empty title".
+        let is_auto = is_auto || title.is_none();
+        let result = if is_auto && title.is_some() {
+            sqlx::query(
+                r#"UPDATE recordings
+                   SET title = ?, title_is_auto = 1, updated_at = datetime('now')
+                   WHERE id = ? AND title_is_auto = 1"#,
+            )
+            .bind(title)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"UPDATE recordings
+                   SET title = ?, title_is_auto = ?, updated_at = datetime('now')
+                   WHERE id = ?"#,
+            )
+            .bind(title)
+            .bind(is_auto)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?
+        };
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Set or clear the "favorite"/star flag for a recording (Favorites view).
     pub async fn set_favorite(&self, id: &RecordingId, favorite: bool) -> Result<()> {
         sqlx::query(
@@ -1428,6 +1474,8 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
             .unwrap_or_default(),
         summary: row.try_get("summary").unwrap_or(None),
         summary_model: row.try_get("summary_model").unwrap_or(None),
+        title: row.try_get("title").unwrap_or(None),
+        title_is_auto: row.try_get("title_is_auto").unwrap_or(true),
         tags: Vec::new(),
         // Populated separately (joined from `speaker_names`) by list/get/list_by_meeting.
         speaker_names: Vec::new(),
@@ -1539,6 +1587,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         }
@@ -1960,6 +2010,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -2023,6 +2075,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -2088,6 +2142,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -2132,6 +2188,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn set_title_auto_writes_never_overwrite_a_user_title() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+
+        // Fresh rows are untitled and auto-owned (the migration default).
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.title, None);
+        assert!(got.title_is_auto, "fresh rows must be auto-owned");
+
+        // An auto write lands while the title is auto-owned (and a later auto
+        // write — e.g. a retranscribe — refreshes it).
+        assert!(db.set_title(&r.id, Some("first pass"), true).await.unwrap());
+        assert!(db.set_title(&r.id, Some("second pass"), true).await.unwrap());
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.title.as_deref(), Some("second pass"));
+        assert!(got.title_is_auto);
+
+        // The user takes ownership; from now on auto writes are no-ops.
+        assert!(db.set_title(&r.id, Some("My title"), false).await.unwrap());
+        assert!(
+            !db.set_title(&r.id, Some("auto again"), true).await.unwrap(),
+            "an auto write must be skipped once the user owns the title"
+        );
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.title.as_deref(), Some("My title"));
+        assert!(!got.title_is_auto, "title_is_auto = 0 wins forever");
+
+        // Clearing (None) empties the title and reverts ownership to auto, so
+        // the next pipeline run may fill it again.
+        assert!(db.set_title(&r.id, None, true).await.unwrap());
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.title, None);
+        assert!(got.title_is_auto, "a cleared title reverts to auto-owned");
+        assert!(db.set_title(&r.id, Some("fresh auto"), true).await.unwrap());
+        assert_eq!(
+            db.get(&r.id).await.unwrap().unwrap().title.as_deref(),
+            Some("fresh auto")
+        );
+
+        // Unknown ids report no update.
+        assert!(!db
+            .set_title(&RecordingId::new(), Some("x"), false)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
     async fn meeting_session_two_tracks_share_meeting_id_and_round_trip() {
         // Meeting Mode (v1.6): a meeting produces TWO recordings that share a
         // freshly-minted meeting_id and differ only by `track`. Both must
@@ -2169,6 +2273,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -2216,6 +2322,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };

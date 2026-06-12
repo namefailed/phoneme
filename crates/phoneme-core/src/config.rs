@@ -103,6 +103,9 @@ pub struct Config {
     /// LLM tag suggestions, approved by the user before they apply.
     #[serde(default)]
     pub auto_tag: AutoTagConfig,
+    /// Auto-generated recording titles (heuristic by default, optional LLM).
+    #[serde(default)]
+    pub title: TitleConfig,
     /// Optional semantic search indexing and querying parameters.
     #[serde(default)]
     pub semantic_search: SemanticSearchConfig,
@@ -481,6 +484,101 @@ fn default_auto_tag_prompt() -> String {
 
 fn default_auto_tag_max() -> u32 {
     5
+}
+
+/// Auto-generated recording titles. The free text heuristic (first meaningful
+/// sentence of the transcript) runs by default; `use_llm` upgrades it to a
+/// short LLM-written title, falling back to the heuristic on any error. Blank
+/// provider/key/URL/model fields inherit the `[llm_post_process]` connection,
+/// like summaries and auto-tags. A title the user sets by hand is never
+/// overwritten by either path.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TitleConfig {
+    /// Generate a title for each recording as a pipeline step. Defaults to
+    /// true — the heuristic is free and local.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Ask the LLM for the title instead of using the heuristic alone.
+    /// Defaults to false; the heuristic remains the fallback on any error.
+    #[serde(default)]
+    pub use_llm: bool,
+    /// Provider override (`ollama`, `openai`, `groq`, `anthropic`). Empty → inherit.
+    #[serde(default)]
+    pub provider: String,
+    /// API key for the title provider. Empty → inherit the cleanup key.
+    #[serde(
+        default = "default_secret_string",
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
+    )]
+    pub api_key: SecretString,
+    /// Base URL for the title provider. Empty → inherit / provider default.
+    #[serde(default)]
+    pub api_url: String,
+    /// Model used for titles. Empty → fall back to the cleanup model.
+    #[serde(default)]
+    pub model: String,
+    /// Instructions for the title LLM; the transcript is appended at run time.
+    #[serde(default = "default_title_prompt")]
+    pub prompt: String,
+}
+
+impl TitleConfig {
+    /// Replace the API key from a plain string (encapsulates `SecretString`).
+    pub fn set_api_key(&mut self, key: impl Into<String>) {
+        self.api_key = SecretString::from(key.into());
+    }
+
+    /// The title API key as a plain `&str`, so callers outside this crate can
+    /// read it without depending on `secrecy`.
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
+}
+
+// Manual `Debug` so the API key is never rendered verbatim into logs.
+impl std::fmt::Debug for TitleConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TitleConfig")
+            .field("enabled", &self.enabled)
+            .field("use_llm", &self.use_llm)
+            .field("provider", &self.provider)
+            .field("api_key", &redact_key(self.api_key.expose_secret()))
+            .field("api_url", &self.api_url)
+            .field("model", &self.model)
+            .field("prompt", &self.prompt)
+            .finish()
+    }
+}
+
+impl PartialEq for TitleConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.enabled == other.enabled
+            && self.use_llm == other.use_llm
+            && self.provider == other.provider
+            && self.api_key.expose_secret() == other.api_key.expose_secret()
+            && self.api_url == other.api_url
+            && self.model == other.model
+            && self.prompt == other.prompt
+    }
+}
+
+impl Default for TitleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            use_llm: false,
+            provider: String::new(),
+            api_key: SecretString::from(String::new()),
+            api_url: String::new(),
+            model: String::new(),
+            prompt: default_title_prompt(),
+        }
+    }
+}
+
+fn default_title_prompt() -> String {
+    "You title voice-note transcripts. Reply with ONLY a short title for the transcript: at most 8 words, plain text, no quotes, no trailing punctuation, no preamble.".into()
 }
 
 fn default_llm_timeout_secs() -> u64 {
@@ -1199,6 +1297,7 @@ impl Default for Config {
             },
             summary: SummaryConfig::default(),
             auto_tag: AutoTagConfig::default(),
+            title: TitleConfig::default(),
             semantic_search: SemanticSearchConfig::default(),
             retention: RetentionConfig::default(),
         }
@@ -1229,6 +1328,23 @@ impl Config {
             if cloud && !own && !inherited {
                 return Err(Error::InvalidConfig(
                     "auto_tag uses a cloud provider but has no API key (set auto_tag.api_key \
+                     or configure llm_post_process.api_key to inherit)"
+                        .into(),
+                ));
+            }
+        }
+        // Same check for LLM titles: an enabled cloud title step with no key
+        // anywhere would only ever fall back to the heuristic at runtime —
+        // surface the misconfiguration at save/load instead.
+        if self.title.enabled && self.title.use_llm {
+            let p = self.title.provider.trim();
+            let cloud =
+                !p.is_empty() && !matches!(p, "ollama" | "lmstudio" | "jan" | "llamacpp" | "none");
+            let own = !self.title.api_key_str().trim().is_empty();
+            let inherited = !self.llm_post_process.api_key_str().trim().is_empty();
+            if cloud && !own && !inherited {
+                return Err(Error::InvalidConfig(
+                    "title uses a cloud provider but has no API key (set title.api_key \
                      or configure llm_post_process.api_key to inherit)"
                         .into(),
                 ));
@@ -1801,6 +1917,57 @@ mod tests {
             expanded.hook.commands[0].contains("phoneme/hooks/to-clipboard.ps1"),
             "path suffix should be preserved"
         );
+    }
+
+    #[test]
+    fn title_defaults_to_heuristic_only() {
+        // The heuristic title is free and local, so it ships ON; the LLM pass
+        // is an opt-in enhancement.
+        let cfg = Config::default();
+        assert!(cfg.title.enabled);
+        assert!(!cfg.title.use_llm);
+        assert!(cfg.title.provider.is_empty(), "blank provider inherits cleanup");
+        assert!(!cfg.title.prompt.is_empty());
+    }
+
+    #[test]
+    fn title_absent_in_legacy_toml_uses_defaults() {
+        // A config written before `[title]` existed must still load, with the
+        // heuristic enabled and the LLM pass off.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        toml_val.as_table_mut().unwrap().remove("title");
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy config without [title]");
+        assert!(parsed.title.enabled);
+        assert!(!parsed.title.use_llm);
+    }
+
+    #[test]
+    fn title_llm_cloud_provider_requires_a_key_somewhere() {
+        // Same contract as auto_tag: a cloud title step with no own key and
+        // nothing to inherit fails validation; a local provider needs none.
+        let mut cfg = Config::default();
+        cfg.title.use_llm = true;
+        cfg.title.provider = "openai".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(format!("{err}").contains("title"));
+
+        // An inherited cleanup key satisfies it.
+        cfg.llm_post_process.set_api_key("sk-cleanup");
+        cfg.validate().expect("inherited key is enough");
+
+        // So does the title step's own key.
+        cfg.llm_post_process.set_api_key("");
+        cfg.title.set_api_key("sk-title");
+        cfg.validate().expect("own key is enough");
+
+        // Local providers never need a key.
+        cfg.title.set_api_key("");
+        cfg.title.provider = "ollama".into();
+        cfg.validate().expect("local provider needs no key");
     }
 
     #[test]

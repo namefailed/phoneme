@@ -855,7 +855,14 @@ export class RecordingsListElement extends LitElement {
       user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span><span class="rec-source-label">${sourceLabel}</span></span>`,
-      transcript: html`<span class="rec-preview">${relevanceChip}${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
+      // A titled recording gets the title as a bold first line of the
+      // transcript cell (block-level, so the snippet wraps under it); untitled
+      // rows render exactly as before.
+      transcript: html`<span class="rec-preview">${
+        r.title
+          ? html`<span class="rec-title" style="display:block; font-weight:600; color:var(--fg-default); overflow:hidden; text-overflow:ellipsis;">${r.title}</span>`
+          : nothing
+      }${relevanceChip}${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
     const cells = visibleCols.map((c) => cellMap[c] || nothing);

@@ -625,6 +625,110 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
     }
 }
 
+/// Build the effective LLM config for titles, mirroring `summary_llm_config`:
+/// start from `[llm_post_process]` and overlay any title-specific provider /
+/// URL / key / model. Always `enabled` — the title step has its own gates
+/// (`title.enabled` + `title.use_llm`).
+pub fn title_llm_config(cfg: &Config) -> LlmPostProcessConfig {
+    let mut llm = cfg.llm_post_process.clone();
+    llm.enabled = true;
+    let t = &cfg.title;
+    if !t.provider.trim().is_empty() {
+        llm.provider = t.provider.clone();
+    }
+    if !t.api_url.trim().is_empty() {
+        llm.api_url = t.api_url.clone();
+    }
+    let key = t.api_key_str();
+    if !key.trim().is_empty() {
+        llm.set_api_key(key.to_string());
+    }
+    if !t.model.trim().is_empty() {
+        llm.model = t.model.clone();
+    }
+    llm
+}
+
+/// Tame an LLM's title reply into something displayable: first non-empty
+/// line, wrapping quotes/markdown and a "Title:" prefix stripped, capped at
+/// 8 words, no trailing punctuation. `None` when nothing usable remains —
+/// the caller keeps the heuristic title instead.
+fn sanitize_llm_title(raw: &str) -> Option<String> {
+    let unwrap_quotes = |s: &str| -> String {
+        s.trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '*' | '#' | '_'))
+            .trim()
+            .to_string()
+    };
+    let line = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let line = unwrap_quotes(line);
+    // Models love announcing "Title: …" despite instructions — and quote the
+    // value as often as the whole reply, so unwrap on both sides of the strip.
+    let line = line
+        .strip_prefix("Title:")
+        .or_else(|| line.strip_prefix("title:"))
+        .map(|rest| unwrap_quotes(rest.trim()))
+        .unwrap_or(line);
+    let capped = line.split_whitespace().take(8).collect::<Vec<_>>().join(" ");
+    let title = capped.trim_end_matches(|c: char| !c.is_alphanumeric());
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_string())
+    }
+}
+
+/// Generate and store the recording's auto title. The heuristic (first
+/// meaningful sentence) is computed from the clean transcript, falling back
+/// to the raw one; when `[title].use_llm` is on AND a provider resolves, the
+/// LLM's title replaces it — and the heuristic remains the fallback on ANY
+/// LLM problem (no provider, call error, unusable reply).
+///
+/// The write goes through `Catalog::set_title`'s auto-guard, so a title the
+/// user typed is never overwritten — a retranscribe refreshes auto titles
+/// and silently skips user-owned ones. Best-effort: a failure here costs
+/// only the title. No status flip and no events — the title lands before
+/// `TranscriptionDone`, whose refresh paints it.
+async fn maybe_auto_title(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+    raw_transcript: &str,
+) {
+    if !cfg.title.enabled {
+        return;
+    }
+    let heuristic = phoneme_core::title::heuristic_title(transcript)
+        .or_else(|| phoneme_core::title::heuristic_title(raw_transcript));
+    let mut title = heuristic;
+    if cfg.title.use_llm && !transcript.trim().is_empty() {
+        if let Some(llm) = state.llm.provider(&title_llm_config(cfg)) {
+            match llm.process(&cfg.title.prompt, transcript).await {
+                Ok(reply) => match sanitize_llm_title(&reply) {
+                    Some(t) => title = Some(t),
+                    None => {
+                        tracing::warn!("title LLM returned nothing usable; keeping the heuristic")
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(error = %e, "title LLM call failed; keeping the heuristic")
+                }
+            }
+        }
+    }
+    let Some(title) = title else {
+        // Nothing usable in the transcript either — leave any stored title be.
+        return;
+    };
+    match state.catalog.set_title(id, Some(&title), true).await {
+        Ok(true) => tracing::info!(id = %id.as_str(), title = %title, "auto title saved"),
+        Ok(false) => {
+            tracing::debug!(id = %id.as_str(), "auto title skipped — the user owns this title")
+        }
+        Err(e) => tracing::warn!(error = %e, "failed to persist auto title"),
+    }
+}
+
 /// Run the auto-tag step when enabled (`auto_tag.auto`). Best-effort and
 /// quiet: the transcript is already saved; only the optional suggestions step
 /// is affected by a failure.
@@ -931,6 +1035,12 @@ pub async fn run(
         .catalog
         .update_processing_meta(&id, cleanup_model.as_deref(), diarized)
         .await?;
+
+    // Auto title, right after the transcript settles (cleanup included) and
+    // before TranscriptionDone fires, so the refreshed list shows the title
+    // together with the new text. A retranscribe re-runs this and refreshes
+    // auto titles; user-set titles are protected inside.
+    maybe_auto_title(state, &cfg, &id, &transcript, &raw_transcript).await;
 
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {

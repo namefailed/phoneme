@@ -32,6 +32,22 @@ export class SectionPostProcessing {
       };
     }
 
+    // Auto titles. The heuristic (first meaningful sentence) is free and on
+    // by default; the LLM pass is opt-in and falls back to the heuristic on
+    // any error. Connection fields inherit the cleanup connection when blank,
+    // exactly like summaries. The prompt default mirrors the daemon's.
+    if (!config.title) {
+      config.title = {
+        enabled: true,
+        use_llm: false,
+        provider: "",
+        api_key: "",
+        api_url: "",
+        model: "",
+        prompt: "You title voice-note transcripts. Reply with ONLY a short title for the transcript: at most 8 words, plain text, no quotes, no trailing punctuation, no preamble.",
+      };
+    }
+
     const lp = config.llm_post_process;
 
     // The effective cleanup connection. The shared connection block writes the
@@ -171,6 +187,60 @@ export class SectionPostProcessing {
             <span class="settings-help-text">
               How the AI should summarize the transcript.
             </span>
+          </div>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 20px 0 16px;" />
+
+        <h3 style="margin-bottom: 4px;">Auto Titles</h3>
+        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+          Name each recording from its first meaningful sentence — free, instant, and fully
+          offline. Optionally let the AI write a short title instead; if the AI fails for any
+          reason, the built-in heuristic still applies. A title you type on a recording yourself
+          is <b>never</b> overwritten; clear it (save an empty title) to go back to automatic.
+        </p>
+
+        <div class="settings-field">
+          <label>Title every recording</label>
+          <div>${renderField(
+            { key: "title.enabled", label: "", kind: "checkbox" },
+            config.title.enabled,
+          )}</div>
+        </div>
+
+        <div class="settings-field">
+          <label>Use the AI for titles</label>
+          <div>${renderField(
+            { key: "title.use_llm", label: "", kind: "checkbox" },
+            config.title.use_llm,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            Off = the built-in heuristic (first sentence of the transcript). On = ask the model
+            below for a short title, falling back to the heuristic on any error.
+          </span>
+        </div>
+
+        <div id="title-llm-fields" style="${config.title.use_llm ? "" : "display: none;"}">
+          <div class="settings-field stacked">
+            <label>Title provider</label>
+            <div id="title-conn-host"></div>
+          </div>
+
+          <div class="settings-field">
+            <label>Title model (optional)</label>
+            <div id="title-model-host"></div>
+            <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+              Leave on "Same as cleanup model" to reuse the post-processing model, or pick a
+              small/fast one just for titles.
+            </span>
+          </div>
+
+          <div class="settings-field">
+            <label>Title instructions</label>
+            <div>
+              <textarea data-key="title.prompt" rows="3" style="width:100%; resize:vertical; font-family:inherit;"
+                placeholder="How the AI should title the transcript (the transcript is appended automatically)">${escapeHtml(config.title.prompt ?? "")}</textarea>
+            </div>
           </div>
         </div>
       </div>
@@ -331,5 +401,70 @@ export class SectionPostProcessing {
     // "change" the provider select; the mount-key guard drops the no-ops.
     cleanupConnHost?.addEventListener("input", () => mountSummaryModel());
     cleanupConnHost?.addEventListener("change", () => mountSummaryModel());
+
+    // ── Title connection + model ─────────────────────────────────────────────
+    // Same shared blocks as the summary: a leading "Same as Post-Processing"
+    // anchor blanks the title's own provider/url/key (the daemon's
+    // inherit-when-blank contract), and the model field lists models for the
+    // EFFECTIVE connection (own fields falling back per-field to cleanup).
+    const t = config.title;
+    const titleEff = (which: "provider" | "api_url" | "api_key") => {
+      const own = (t[which] ?? "").toString().trim();
+      return own || (lp[which] ?? "").toString();
+    };
+    const titleModelHost = container.querySelector<HTMLElement>("#title-model-host");
+    let titleMountKey: string | null = null;
+    const mountTitleModel = () => {
+      if (!titleModelHost) return;
+      const key = `${titleEff("provider")}|${titleEff("api_url")}|${titleEff("api_key")}`;
+      if (key === titleMountKey) return;
+      titleMountKey = key;
+      mountModelField(titleModelHost, {
+        mode: "llm",
+        blankLabel: "Same as cleanup model",
+        getProvider: () => titleEff("provider"),
+        getApiUrl: () => titleEff("api_url"),
+        getApiKey: () => titleEff("api_key"),
+        getModel: () => t.model || "",
+        setModel: (m) => { t.model = m; },
+      });
+    };
+
+    const titleConnHost = container.querySelector<HTMLElement>("#title-conn-host");
+    if (titleConnHost) {
+      mountConnectionField(titleConnHost, {
+        catalog: "llm",
+        inheritLabel: "Same as Post-Processing",
+        getKind: () => (t.provider ?? "").toString(),
+        setKind: (k) => { t.provider = k; },
+        getApiUrl: () => (t.api_url ?? "").toString(),
+        setApiUrl: (u) => { t.api_url = u; },
+        getApiKey: () => (t.api_key ?? "").toString(),
+        setApiKey: (k) => { t.api_key = k; },
+        onProviderChanged: () => mountTitleModel(),
+      });
+      titleConnHost.addEventListener("input", () => mountTitleModel());
+    }
+    mountTitleModel();
+
+    // While the title inherits, cleanup connection edits change what its model
+    // field should list — same forwarding the summary block does.
+    cleanupConnHost?.addEventListener("input", () => mountTitleModel());
+    cleanupConnHost?.addEventListener("change", () => mountTitleModel());
+
+    // The provider/model/prompt rows only matter when the LLM pass is on; the
+    // heuristic needs no configuration.
+    const titleLlmFields = container.querySelector<HTMLElement>("#title-llm-fields");
+    container
+      .querySelector<HTMLInputElement>("[data-key='title.use_llm']")
+      ?.addEventListener("change", (e) => {
+        if (titleLlmFields) {
+          titleLlmFields.style.display = (e.target as HTMLInputElement).checked ? "" : "none";
+        }
+      });
   }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

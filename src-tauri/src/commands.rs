@@ -261,7 +261,7 @@ pub async fn retranscribe_recording(
     .await
 }
 
-/// Import an existing audio file (wav/mp3/m4a) as a new recording. The daemon
+/// Import an existing audio file (wav/mp3/m4a/flac) as a new recording. The daemon
 /// decodes it to a canonical WAV and runs it through the normal transcription
 /// pipeline. Returns `{ id }` for the new recording.
 #[tauri::command]
@@ -452,6 +452,19 @@ pub async fn set_favorite(
     forward(&bridge, Request::SetFavorite { id, favorite }).await
 }
 
+/// Set or clear a recording's display title. `Some` marks the title user-owned
+/// (auto generation never overwrites it again); `None` clears it back to auto —
+/// it empties now and regenerates on the next pipeline run.
+#[tauri::command]
+pub async fn set_recording_title(
+    bridge: Br<'_>,
+    id: String,
+    title: Option<String>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SetRecordingTitle { id, title }).await
+}
+
 /// Persist every window's position/size NOW. tauri-plugin-window-state only
 /// saves on a graceful exit — a crash, force-kill, or dev-watcher rebuild
 /// loses any move/resize since launch. The live-preview overlay calls this
@@ -569,6 +582,7 @@ fn mask_config_secrets(v: &mut Value) {
         "llm_post_process",
         "summary",
         "auto_tag",
+        "title",
         "preview_whisper",
     ] {
         if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
@@ -611,6 +625,11 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
         incoming
             .auto_tag
             .set_api_key(current.auto_tag.api_key_str().to_owned());
+    }
+    if incoming.title.api_key_str() == MASKED_SECRET {
+        incoming
+            .title
+            .set_api_key(current.title.api_key_str().to_owned());
     }
     if let Some(pw) = incoming.preview_whisper.as_mut() {
         if pw.api_key_str() == MASKED_SECRET {

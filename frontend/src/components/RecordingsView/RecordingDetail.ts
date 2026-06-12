@@ -5,6 +5,7 @@ import {
   getOriginalTranscript,
   getCleanTranscript,
   rerunSummary,
+  setRecordingTitle,
   setSpeakerName,
   type Recording,
 } from "../../services/ipc";
@@ -97,6 +98,17 @@ export class RecordingDetail {
 
     const hookEl = this.container.querySelector<HTMLElement>("#detail-hook-exit");
     if (hookEl) hookEl.textContent = `Hook exit: ${r.hook_exit_code ?? "—"}`;
+
+    // The title can change underneath us (the title editor's own save, an
+    // auto title landing after transcription) — but never clobber an edit in
+    // progress.
+    const titleHost = this.container.querySelector<HTMLElement>("#detail-title");
+    if (titleHost && !titleHost.querySelector("input")) {
+      const text = titleHost.querySelector<HTMLElement>("#detail-title-text");
+      if (text) text.textContent = r.title ?? formatDate(r.started_at);
+      const dateEl = this.container.querySelector<HTMLElement>("#detail-title-date");
+      if (dateEl) dateEl.style.display = r.title ? "" : "none";
+    }
 
     const modelsEl = this.container.querySelector<HTMLElement>("#detail-models");
     if (modelsEl) modelsEl.innerHTML = modelsLine(r);
@@ -197,9 +209,10 @@ export class RecordingDetail {
     this.container.innerHTML = `
       <div class="detail">
         <div class="detail-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
-          <div>
-            <div class="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px;">${formatDate(r.started_at)}</div>
+          <div style="min-width: 0; flex: 1;">
+            <div class="detail-title" id="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px; cursor: text;" title="Click to edit the title — Enter saves, Esc cancels, empty resets to automatic"><span id="detail-title-text">${escapeHtml(r.title ?? formatDate(r.started_at))}</span></div>
             <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
+              <span id="detail-title-date" style="${r.title ? "" : "display: none;"}">${formatDate(r.started_at)}</span>
               <span>${formatDuration(r.duration_ms)}</span>
               <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
               <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="Where this recording's audio came from"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span><span class="rec-source-label">${r.track === "system" ? "System audio" : "Microphone"}</span></span>
@@ -444,7 +457,69 @@ export class RecordingDetail {
       closeBtn.onclick = () => window.dispatchEvent(new CustomEvent("phoneme:close-detail"));
     }
 
+    // Click-to-edit title in the header.
+    this.container
+      .querySelector<HTMLElement>("#detail-title")
+      ?.addEventListener("click", () => this.beginTitleEdit());
+
     this.renderSpeakers(r);
+  }
+
+  /** Swap the header title for an inline input. Enter saves — a non-empty
+   *  value becomes a user-owned title (auto generation never overwrites it),
+   *  an empty one clears back to auto (regenerated on the next pipeline run).
+   *  Esc or clicking away cancels. */
+  private beginTitleEdit() {
+    const r = this.recording;
+    if (!r) return;
+    const host = this.container.querySelector<HTMLElement>("#detail-title");
+    if (!host || host.querySelector("input")) return;
+    const text = host.querySelector<HTMLElement>("#detail-title-text");
+    if (text) text.style.display = "none";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = r.title ?? "";
+    input.placeholder = "Recording title (empty = automatic)";
+    input.setAttribute("aria-label", "Recording title");
+    input.style.cssText =
+      "width: 100%; font-size: 18px; font-weight: 700; padding: 0 4px; background: var(--bg-surface); color: var(--fg-default); border: 1px solid var(--border-subtle); border-radius: 4px;";
+    host.appendChild(input);
+    input.focus();
+    input.select();
+
+    let settled = false;
+    const closeEditor = () => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      if (text) text.style.display = "";
+    };
+    const save = async () => {
+      if (settled) return;
+      const value = input.value.trim();
+      // Nothing changed — just put the header back.
+      if (value === (r.title ?? "")) return closeEditor();
+      settled = true;
+      try {
+        await setRecordingTitle(r.id, value || null);
+        input.remove();
+        if (text) text.style.display = "";
+        this.onRefresh();
+        void this.show(r.id);
+      } catch (e) {
+        showToast(`Couldn't save the title: ${errText(e)}`, "error");
+        settled = false; // keep editing so the value isn't lost
+        input.focus();
+      }
+    };
+    input.addEventListener("keydown", (e) => {
+      // Keep global shortcuts (vim nav, hotkeys) out of the title field.
+      e.stopPropagation();
+      if (e.key === "Enter") void save();
+      else if (e.key === "Escape") closeEditor();
+    });
+    input.addEventListener("blur", () => closeEditor());
   }
 
   /** Open the full "Compare versions" modal — a roomy diff of any two of the

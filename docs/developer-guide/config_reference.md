@@ -185,6 +185,30 @@ Suggestions land on the recording (`tag_suggestions`) and are surfaced in the
 GUI as approve/dismiss chips; approving creates-or-fetches the tag and attaches
 it.
 
+## `[title]`
+
+Auto-generated recording titles. The heuristic (first meaningful sentence of
+the transcript — leading filler stripped, cut at a word boundary near 60
+chars) is free and runs by default; `use_llm` upgrades it to a short
+LLM-written title that falls back to the heuristic on any error. Blank
+provider/key/URL/model fields inherit the `[llm_post_process]` connection,
+like `[summary]` and `[auto_tag]`.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Generate a title for every recording as a pipeline step (and refresh it on retranscribe) |
+| `use_llm` | `false` | Ask the LLM for the title instead of the heuristic; the heuristic remains the fallback on any error |
+| `provider` | `""` | `ollama` / `openai` / `groq` / `anthropic`; empty → inherit |
+| `api_key` | `""` | Empty → inherit the cleanup key (DPAPI-encrypted at rest) |
+| `api_url` | `""` | Empty → inherit / provider default |
+| `model` | `""` | Empty → the cleanup model |
+| `prompt` | (built-in) | Title instructions; the transcript is appended at run time |
+
+Stored results: `title` plus `title_is_auto` on the recording. A title the
+user sets by hand (`SetRecordingTitle` with a value → `title_is_auto = 0`)
+is never overwritten by auto generation; clearing it (`SetRecordingTitle`
+with `null`) reverts to auto and the next pipeline run fills it again.
+
 ## `[in_place]`
 
 Dictation (transcription-in-place) behavior — the fast lane. Edited by
