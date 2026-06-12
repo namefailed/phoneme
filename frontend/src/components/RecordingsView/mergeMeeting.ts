@@ -2,20 +2,23 @@
  * Pure merge logic for the merged meeting view.
  *
  * A meeting is several `recordings` rows sharing a `meeting_id`, each with a
- * `track` ("mic" / "system"). The catalog stores only one whole-transcript
- * string per track — per-segment timestamps are NOT persisted — so we cannot
- * interleave the tracks by time. Instead we order whole tracks by start time and,
- * within each track, recover the speaker structure the pipeline already embedded
- * as `[Speaker N]:` markers.
+ * `track` ("mic" / "system"). Two merge strategies live here:
  *
- * The output is a flat, ordered list of `MergedBlock`s — one per speaker turn
- * (or one per track when a track has no speaker markers). The renderer iterates
- * blocks; `mergedPlainText` serializes the same blocks for copy/export. Keeping
- * this a DOM-free pure function lets it be unit-tested directly, and makes the
- * future time-interleaved upgrade (a different block ORDER, same block SHAPE) a
- * drop-in.
+ * - [`mergeChronological`] — the real timeline: every track's persisted
+ *   transcript segments interleaved by their start offsets (the tracks share
+ *   a wall clock at capture), coalesced into chat-style turns. Used whenever
+ *   every transcribed track has segment timing.
+ * - [`mergeMeeting`] — the coarse fallback for meetings transcribed before
+ *   segment capture existed: whole tracks ordered by start time, with the
+ *   speaker structure recovered from the pipeline's embedded `[Speaker N]:`
+ *   markers.
+ *
+ * Both emit flat, ordered block lists the renderer iterates;
+ * `chronoPlainText` / `mergedPlainText` serialize the same blocks for
+ * copy/export. Everything here is DOM-free and unit-tested directly.
  */
-import type { Recording, SpeakerName } from "../../services/ipc";
+import type { Recording, SpeakerName, TranscriptSegment } from "../../services/ipc";
+import { fmtClock } from "../../utils/format";
 
 /**
  * Resolve a 1-based speaker index to its display name: the user's custom name
@@ -230,6 +233,102 @@ export function mergeMeeting(tracks: Recording[]): MergedBlock[] {
     });
   }
   return blocks;
+}
+
+/** One turn in the CHRONOLOGICAL merged timeline: a [`MergedBlock`] plus its
+ *  audio-relative timing (the tracks share a wall clock at capture, so equal
+ *  offsets across tracks mean "the same moment"). `speakerKey` keeps the raw
+ *  stored label ("1", "0", "A", null) for turn-coalescing; `speaker` carries
+ *  the numeric form when the label is numeric (it joins `speaker_names`). */
+export type ChronoBlock = MergedBlock & {
+  startMs: number;
+  endMs: number;
+  speakerKey: string | null;
+};
+
+/** Coalescing gap: consecutive segments from the same track + speaker merge
+ *  into one turn unless they're separated by more than this much silence —
+ *  whisper emits one row per ASR segment, which reads far too granular as
+ *  chat turns. */
+const TURN_GAP_MS = 5_000;
+
+/**
+ * Build the time-interleaved (chat-style) reading of a meeting from the
+ * persisted segment timelines — the upgrade over [`mergeMeeting`]'s coarse
+ * by-source ordering. Returns `null` when any track with transcript text has
+ * no stored segments (recordings transcribed before segment capture existed):
+ * interleaving a timed track against an untimed one would order it wrong, so
+ * callers fall back to the coarse merge instead.
+ */
+export function mergeChronological(
+  tracks: Recording[],
+  segmentsByRecording: ReadonlyMap<string, TranscriptSegment[]>,
+): ChronoBlock[] | null {
+  const withText = tracks.filter((t) => (t.transcript ?? "").trim());
+  if (withText.length < 2) return null;
+  if (!withText.every((t) => (segmentsByRecording.get(t.id) ?? []).length > 0)) return null;
+
+  // Flatten to (track, segment) pairs ordered by start time; ties order mic
+  // before system so "you" leads when both start speaking together.
+  const all = withText
+    .flatMap((rec) => (segmentsByRecording.get(rec.id) ?? []).map((seg) => ({ rec, seg })))
+    .sort(
+      (x, y) =>
+        x.seg.start_ms - y.seg.start_ms ||
+        (x.rec.track ?? "").localeCompare(y.rec.track ?? ""),
+    );
+
+  const blocks: ChronoBlock[] = [];
+  for (const { rec, seg } of all) {
+    const key = seg.speaker != null && seg.speaker !== "" ? String(seg.speaker) : null;
+    const last = blocks[blocks.length - 1];
+    if (
+      last &&
+      last.recordingId === rec.id &&
+      last.speakerKey === key &&
+      seg.start_ms - last.endMs <= TURN_GAP_MS
+    ) {
+      last.text += ` ${seg.text}`;
+      last.endMs = Math.max(last.endMs, seg.end_ms);
+      continue;
+    }
+    const numeric = key != null && /^\d+$/.test(key) ? Number(key) : null;
+    blocks.push({
+      key: `${rec.id}:${seg.start_ms}`,
+      recordingId: rec.id,
+      source: sourceFor(rec.track),
+      speaker: numeric,
+      // Numeric labels resolve through the recording's custom names; cloud
+      // letter labels ("A"/"B") have no rename mapping and show as-is.
+      displayName:
+        numeric != null
+          ? speakerDisplayName(rec.speaker_names, numeric)
+          : key != null
+            ? `Speaker ${key}`
+            : null,
+      text: seg.text,
+      startMs: seg.start_ms,
+      endMs: seg.end_ms,
+      speakerKey: key,
+    });
+  }
+  return blocks;
+}
+
+/**
+ * Serialize the chronological timeline for copy/export: one line per turn,
+ * each stamped with its clock offset, e.g.
+ *
+ *   [0:04] 🔊 System audio · Speaker 1: hi, thanks for joining
+ *   [0:09] 🎤 Microphone: glad to be here
+ */
+export function chronoPlainText(blocks: ChronoBlock[]): string {
+  return blocks
+    .map((b) => {
+      const speaker = b.displayName != null ? ` · ${b.displayName}` : "";
+      return `[${fmtClock(b.startMs)}] ${b.source.icon} ${b.source.label}${speaker}: ${b.text}`;
+    })
+    .join("\n");
 }
 
 /**

@@ -1,10 +1,17 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listSession, setSpeakerName, type Recording } from "../../services/ipc";
+import { listSession, setSpeakerName, getSegments, type Recording, type TranscriptSegment } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { formatDuration } from "../../utils/format";
-import { mergeMeeting, mergedPlainText, type MergedBlock } from "./mergeMeeting";
+import { formatDuration, fmtClock } from "../../utils/format";
+import {
+  mergeMeeting,
+  mergedPlainText,
+  mergeChronological,
+  chronoPlainText,
+  type MergedBlock,
+  type ChronoBlock,
+} from "./mergeMeeting";
 
 /** Distinct, theme-agnostic colors so each speaker is easy to follow at a glance.
  *  Indexed by the 1-based speaker label; wraps for meetings with many speakers. */
@@ -28,12 +35,15 @@ function avatarText(displayName: string | null, label: number): string {
  * meeting, rendered in the right pane when the meeting's group header is
  * selected (the list emits `session:<meeting_id>` → index.ts sets `meetingId`).
  *
- * Per-segment timestamps aren't persisted, so this is a *coarse* merge — tracks
- * ordered by start time, each rendered as a labelled section, with the
- * pipeline's embedded `[Speaker N]:` turns surfaced inside. This is a read-only
- * view; clicking an individual track row still opens the editable single-recording
- * detail. True time-interleaving by segment requires per-segment timestamps
- * which are not yet persisted.
+ * When every transcribed track carries persisted segment timing, the view is
+ * a CHRONOLOGICAL chat timeline (mic turns left, the meeting's right, each
+ * stamped with its clock offset — the tracks share a wall clock at capture).
+ * Meetings transcribed before segment capture fall back to the coarse
+ * by-source merge: tracks ordered by start time, each a labelled section with
+ * the pipeline's embedded `[Speaker N]:` turns surfaced inside. Read-only
+ * either way; clicking an individual track row still opens the editable
+ * single-recording detail, and the Dual-timeline button explodes the meeting
+ * into the synced split view.
  */
 @customElement("ph-merged-conversation-detail")
 export class MergedConversationDetail extends LitElement {
@@ -45,6 +55,9 @@ export class MergedConversationDetail extends LitElement {
   @property({ type: Object }) onRefresh!: () => void;
 
   @state() private recordings: Recording[] = [];
+  /** Persisted segment timelines per track id — drives the chronological
+   *  (chat-style) merge. A track with no stored segments maps to []. */
+  @state() private segmentsMap: Map<string, TranscriptSegment[]> = new Map();
   @state() private error: string | null = null;
   @state() private loading = false;
   @state() private copyLabel = "📋 Copy";
@@ -84,9 +97,20 @@ export class MergedConversationDetail extends LitElement {
     this.error = null;
     try {
       this.recordings = await listSession(this.meetingId);
+      // Segment timelines make the merge chronological; a track without them
+      // (transcribed before segment capture) just falls back to the coarse
+      // by-source merge, so fetch failures degrade silently to [].
+      const entries = await Promise.all(
+        this.recordings.map(async (r) => {
+          const segs = await getSegments(r.id).catch(() => [] as TranscriptSegment[]);
+          return [r.id, segs] as const;
+        }),
+      );
+      this.segmentsMap = new Map(entries);
     } catch (e) {
       this.error = errText(e);
       this.recordings = [];
+      this.segmentsMap = new Map();
     } finally {
       this.loading = false;
     }
@@ -94,6 +118,12 @@ export class MergedConversationDetail extends LitElement {
 
   private get blocks(): MergedBlock[] {
     return mergeMeeting(this.recordings);
+  }
+
+  /** The time-interleaved reading, or null when any track lacks segment
+   *  timing (then the coarse by-source merge renders instead). */
+  private get chronoBlocks(): ChronoBlock[] | null {
+    return mergeChronological(this.recordings, this.segmentsMap);
   }
 
   private async saveMeetingName(newName: string) {
@@ -163,7 +193,10 @@ export class MergedConversationDetail extends LitElement {
 
   private async handleCopy() {
     try {
-      await navigator.clipboard.writeText(mergedPlainText(this.blocks));
+      const chrono = this.chronoBlocks;
+      await navigator.clipboard.writeText(
+        chrono ? chronoPlainText(chrono) : mergedPlainText(this.blocks),
+      );
       this.copyLabel = "✅ Copied!";
       setTimeout(() => {
         this.copyLabel = "📋 Copy";
@@ -184,7 +217,8 @@ export class MergedConversationDetail extends LitElement {
         filters: [{ name: "Text", extensions: ["txt"] }],
       });
       if (dest) {
-        await writeTextFile(dest, mergedPlainText(this.blocks));
+        const chrono = this.chronoBlocks;
+        await writeTextFile(dest, chrono ? chronoPlainText(chrono) : mergedPlainText(this.blocks));
         showToast("Merged transcript exported", "success");
       }
     } catch (e) {
@@ -203,7 +237,8 @@ export class MergedConversationDetail extends LitElement {
       return html`<div class="empty">No tracks found for this meeting.</div>`;
     }
 
-    const blocks = this.blocks;
+    const chrono = this.chronoBlocks;
+    const blocks: MergedBlock[] = chrono ?? this.blocks;
     const meetingName = this.recordings[0]?.meeting_name || this.meetingId;
     // Both tracks of a meeting share a start time, so any track's is fine.
     const totalDuration = this.recordings.reduce(
@@ -247,15 +282,47 @@ export class MergedConversationDetail extends LitElement {
             <span class="merged-meta-pill">${formatDuration(totalDuration)}</span>
             ${speakerCount > 0 ? html`<span class="merged-meta-pill">${speakerCount} ${speakerCount === 1 ? "speaker" : "speakers"}</span>` : nothing}
             <span class="merged-meta-pill">${turnCount} ${turnCount === 1 ? "turn" : "turns"}</span>
+            ${chrono
+              ? html`<span class="merged-meta-pill merged-meta-pill--chrono" title="Turns are interleaved by their real timestamps — the tracks share a wall clock at capture">🕒 chronological</span>`
+              : nothing}
             <span class="merged-meta-ro">merged reading · read-only</span>
           </div>
         </div>
 
         ${blocks.length === 0
           ? html`<div class="empty">No transcript yet for this meeting.</div>`
-          : html`<div class="merged-body">
-              ${blocks.map((b, i) => this.renderBlock(b, blocks[i - 1]))}
-            </div>`}
+          : chrono
+            ? html`<div class="merged-body chrono-body">
+                ${chrono.map((b) => this.renderChronoBlock(b))}
+              </div>`
+            : html`<div class="merged-body">
+                ${blocks.map((b, i) => this.renderBlock(b, blocks[i - 1]))}
+              </div>`}
+      </div>
+    `;
+  }
+
+  /** Render one CHRONOLOGICAL turn as a chat row: mic ("you") on the left,
+   *  everything else (the meeting) on the right, stamped with its clock
+   *  offset. Numeric speakers keep the renamable chip; cloud letter labels
+   *  render as static text. */
+  private renderChronoBlock(b: ChronoBlock) {
+    const isMic = b.source.track === "mic";
+    const color = b.speaker != null ? speakerColor(b.speaker) : "var(--fg-faded)";
+    return html`
+      <div class="chrono-row ${isMic ? "" : "chrono-row--right"}" data-track=${b.source.track}>
+        <div class="chrono-bubble" style=${`--spk:${color}`}>
+          <div class="chrono-head">
+            <span class="chrono-time">${fmtClock(b.startMs)}</span>
+            <span class="chrono-source" aria-hidden="true" title=${b.source.label}>${b.source.icon}</span>
+            ${b.speaker != null
+              ? this.renderSpeakerChip(b)
+              : b.displayName
+                ? html`<span class="merged-speaker">${b.displayName}</span>`
+                : nothing}
+          </div>
+          <div class="chrono-text">${b.text}</div>
+        </div>
       </div>
     `;
   }

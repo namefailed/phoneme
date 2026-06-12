@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   mergeMeeting,
   mergedPlainText,
+  mergeChronological,
+  chronoPlainText,
   sourceFor,
   speakerDisplayName,
   speakerLabelsIn,
@@ -291,6 +293,113 @@ describe("mergeMeeting speaker names", () => {
     const text = mergedPlainText(mergeMeeting([mic, sys]));
     expect(text).toBe(
       "🎤 Microphone · Me: my line\n\n🔊 System audio · Caller: their line",
+    );
+  });
+});
+
+describe("mergeChronological", () => {
+  const seg = (start_ms: number, end_ms: number, text: string, speaker: string | null = null) => ({
+    start_ms,
+    end_ms,
+    text,
+    speaker,
+  });
+
+  it("interleaves the tracks by segment start time", () => {
+    const mic = track("m", "mic", "hello how is it going");
+    const sys = track("y", "system", "hi good thanks");
+    const segs = new Map([
+      ["m", [seg(0, 1000, "hello"), seg(8000, 9500, "how is it going")]],
+      ["y", [seg(2000, 3500, "hi"), seg(12000, 14000, "good thanks")]],
+    ]);
+    const blocks = mergeChronological([mic, sys], segs)!;
+    expect(blocks.map((b) => b.text)).toEqual(["hello", "hi", "how is it going", "good thanks"]);
+    expect(blocks.map((b) => b.source.track)).toEqual(["mic", "system", "mic", "system"]);
+    expect(blocks[1].startMs).toBe(2000);
+  });
+
+  it("coalesces consecutive same-track same-speaker segments within the gap", () => {
+    const mic = track("m", "mic", "one two");
+    const sys = track("y", "system", "long reply");
+    const segs = new Map([
+      // 1s apart → one turn; the 3rd is 20s later → its own turn.
+      ["m", [seg(0, 1000, "one"), seg(2000, 3000, "two"), seg(23000, 24000, "later")]],
+      ["y", [seg(30000, 31000, "long reply", "1")]],
+    ]);
+    const blocks = mergeChronological([mic, sys], segs)!;
+    expect(blocks.map((b) => b.text)).toEqual(["one two", "later", "long reply"]);
+    expect(blocks[0].endMs).toBe(3000);
+  });
+
+  it("does not coalesce across speakers", () => {
+    const mic = track("m", "mic", "irrelevant");
+    const sys = track("y", "system", "a b");
+    const segs = new Map([
+      ["m", [seg(0, 500, "hey")]],
+      ["y", [seg(1000, 2000, "a", "1"), seg(2100, 3000, "b", "2")]],
+    ]);
+    const blocks = mergeChronological([mic, sys], segs)!;
+    expect(blocks.map((b) => b.text)).toEqual(["hey", "a", "b"]);
+    expect(blocks[1].speaker).toBe(1);
+    expect(blocks[2].speaker).toBe(2);
+  });
+
+  it("resolves numeric speakers through custom names; letters stay as-is", () => {
+    const mic = track("m", "mic", "x");
+    const sys = track("y", "system", "x", "2026-05-19T14:00:00Z", [
+      { speaker_label: 1, name: "Sarah" },
+    ]);
+    const segs = new Map([
+      ["m", [seg(0, 500, "x")]],
+      ["y", [seg(1000, 2000, "from sarah", "1"), seg(3000, 4000, "from letter", "A")]],
+    ]);
+    const blocks = mergeChronological([mic, sys], segs)!;
+    expect(blocks[1].displayName).toBe("Sarah");
+    expect(blocks[2].displayName).toBe("Speaker A");
+    expect(blocks[2].speaker).toBeNull(); // letter labels have no rename mapping
+  });
+
+  it("returns null when any transcribed track lacks segments (fallback to coarse)", () => {
+    const mic = track("m", "mic", "spoken");
+    const sys = track("y", "system", "also spoken");
+    const segs = new Map([
+      ["m", [seg(0, 500, "spoken")]],
+      ["y", [] as ReturnType<typeof seg>[]],
+    ]);
+    expect(mergeChronological([mic, sys], segs)).toBeNull();
+  });
+
+  it("returns null for single-track input", () => {
+    const mic = track("m", "mic", "solo");
+    expect(mergeChronological([mic], new Map([["m", [seg(0, 1, "solo")]]]))).toBeNull();
+  });
+
+  it("ignores untranscribed tracks when deciding usability", () => {
+    // A still-transcribing track (no text) must not block the chrono merge.
+    const mic = track("m", "mic", "spoken");
+    const sys = track("y", "system", "also spoken");
+    const pending = track("p", "aux", null);
+    const segs = new Map([
+      ["m", [seg(0, 500, "spoken")]],
+      ["y", [seg(1000, 1500, "also spoken")]],
+    ]);
+    const blocks = mergeChronological([mic, sys, pending], segs);
+    expect(blocks).not.toBeNull();
+    expect(blocks!.length).toBe(2);
+  });
+});
+
+describe("chronoPlainText", () => {
+  it("stamps each turn with its clock offset and source", () => {
+    const mic = track("m", "mic", "hello");
+    const sys = track("y", "system", "hi");
+    const segs = new Map([
+      ["m", [{ start_ms: 4000, end_ms: 5000, text: "hello", speaker: null }]],
+      ["y", [{ start_ms: 9000, end_ms: 10000, text: "hi", speaker: "1" }]],
+    ]);
+    const blocks = mergeChronological([mic, sys], segs)!;
+    expect(chronoPlainText(blocks)).toBe(
+      "[0:04] 🎤 Microphone: hello\n[0:09] 🔊 System audio · Speaker 1: hi",
     );
   });
 });
