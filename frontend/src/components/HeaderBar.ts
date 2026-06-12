@@ -651,8 +651,8 @@ export class HeaderBarElement extends LitElement {
         <div class="hb-settings-group" style="position: relative; display: inline-flex;">
           <style>
             /* Health pill (left of Settings): green dot = all checks pass, red =
-               something the Doctor can explain is wrong. The Settings button
-               pulses too so trouble is visible even if the pill goes unnoticed. */
+               something the Doctor can explain is wrong; the banner carries the
+               detail. Click opens the Doctor. */
             .hb-health {
               display: inline-flex; align-items: center; gap: 5px;
               background: none; border: 1px solid transparent; border-radius: 999px;
@@ -665,14 +665,6 @@ export class HeaderBarElement extends LitElement {
             .hb-health.bad .hb-health-dot { background: var(--err, #f38ba8); box-shadow: 0 0 8px color-mix(in srgb, var(--err, #f38ba8) 70%, transparent); animation: hbHealthBlink 1.2s ease-in-out infinite; }
             .hb-health-n { font-size: 11px; font-weight: 700; color: var(--err, #f38ba8); }
             @keyframes hbHealthBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-            .hb-settings-main.unhealthy {
-              border-color: color-mix(in srgb, var(--err, #f38ba8) 55%, transparent) !important;
-              animation: hbSettingsPulse 1.6s ease-in-out infinite;
-            }
-            @keyframes hbSettingsPulse {
-              0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--err, #f38ba8) 45%, transparent); }
-              50% { box-shadow: 0 0 0 5px transparent; }
-            }
           </style>
           <style>
             .hb-settings-menu { animation: hbMenuIn 0.12s ease-out; }
@@ -688,7 +680,7 @@ export class HeaderBarElement extends LitElement {
             .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
             .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
-          <button class="icon-btn hb-settings-main ${this.health === "bad" ? "unhealthy" : ""}" aria-label="Open settings" title="Open settings"
+          <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
             style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
           <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings & actions" aria-haspopup="menu"
             aria-expanded=${this.settingsMenuOpen} title="Quick settings & actions"
@@ -697,7 +689,6 @@ export class HeaderBarElement extends LitElement {
           <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
             style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
             <button class="hb-menu-item" role="menuitem" @click=${this.openModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
-            <button class="hb-menu-item" role="menuitem" @click=${this.openDoctor}><span class="hb-menu-ico">🩺</span>Doctor — health check</button>
             <div class="hb-menu-sep"></div>
             <div class="hb-menu-label">Jump to settings</div>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}><span class="hb-menu-ico">🗣️</span>Transcription</button>
