@@ -104,6 +104,10 @@ export class QueuePanelElement extends LitElement {
     if (this.pollTimer !== null) clearInterval(this.pollTimer);
   }
 
+  /** Pin the queue list's scroll to the bottom when it first renders and
+   *  whenever new pending items arrive — the active item is pinned at the
+   *  bottom (inverted order), so "the bottom" is where the action is. Tracked
+   *  via render/count snapshots because `items` mutates in place. */
   protected async updated(changedProperties: PropertyValues) {
     super.updated(changedProperties);
 
@@ -124,7 +128,6 @@ export class QueuePanelElement extends LitElement {
       queueList.scrollTop = queueList.scrollHeight;
     }
   }
-
 
   private async load() {
     try {

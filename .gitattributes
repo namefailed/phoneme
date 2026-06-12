@@ -1,4 +1,24 @@
-# Keep Markdown line endings stable as LF regardless of the editor/OS or
-# tooling that touches them. ROADMAP.md in particular was flip-flopping between
-# CRLF and LF across commits, producing whole-file diffs for one-line edits.
-*.md text eol=lf
+# Normalize every text file to LF in the repo, regardless of the editor/OS or
+# tooling that touches it. This started as *.md only (ROADMAP.md was
+# flip-flopping between CRLF and LF, producing whole-file diffs for one-line
+# edits) — the same churn then showed up in .ts/.css files, so now everything
+# text is pinned. `text=auto` leaves git's binary detection in charge for
+# anything unlisted; the explicit binary entries below are belt and braces.
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF (cmd.exe mis-parses LF-only batch labels).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets — never normalize.
+*.png binary
+*.ico binary
+*.icns binary
+*.gif binary
+*.jpg binary
+*.jpeg binary
+*.wav binary
+*.mp3 binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

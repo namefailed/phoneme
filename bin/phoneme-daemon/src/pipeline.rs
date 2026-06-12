@@ -736,25 +736,41 @@ pub async fn run(
         res = provider.transcribe_with_segments(&audio_path, language.as_deref()) => match res {
             Ok(t) => t,
             Err(e) => {
+                let transient = matches!(
+                    e,
+                    phoneme_core::Error::WhisperUnreachable { .. }
+                        | phoneme_core::Error::WhisperTimeout { .. }
+                );
                 state.events.emit(DaemonEvent::LlmActivity {
                     id: id.clone(),
                     stage: PipelineStage::Transcribing,
                     prompt: String::new(),
-                    delta: format!("✕ failed: {e}"),
+                    delta: if transient {
+                        format!("✕ {e} — will retry")
+                    } else {
+                        format!("✕ failed: {e}")
+                    },
                     done: true,
                 });
-                state
-                    .catalog
-                    .update_status(&id, RecordingStatus::TranscribeFailed)
-                    .await?;
-                state
-                    .inbox
-                    .finish_failed(&id, "whisper_error", &e.to_string())
-                    .await?;
-                state.events.emit(DaemonEvent::TranscriptionFailed {
-                    id: id.clone(),
-                    error: e.to_string(),
-                });
+                // A transient error (server down / restarting, request timed
+                // out) must NOT bury the item in failed/ — the queue worker
+                // requeues it and retries with backoff, so a whisper-server
+                // blip never costs a recording. Only permanent errors (bad
+                // audio, 4xx, decode failures) take the failed path.
+                if !transient {
+                    state
+                        .catalog
+                        .update_status(&id, RecordingStatus::TranscribeFailed)
+                        .await?;
+                    state
+                        .inbox
+                        .finish_failed(&id, "whisper_error", &e.to_string())
+                        .await?;
+                    state.events.emit(DaemonEvent::TranscriptionFailed {
+                        id: id.clone(),
+                        error: e.to_string(),
+                    });
+                }
                 return Err(e);
             }
         }
@@ -893,13 +909,12 @@ pub async fn run(
     if let Some(rec) = recording {
         if rec.in_place && !transcript.is_empty() {
             tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
-            // Surface failures instead of `unwrap()`-panicking the worker or
-            // silently dropping the typing result (the previous behavior, which
-            // made a failed in-place dictation look like nothing happened with
-            // no clue why). enigo can fail to initialize (e.g. no interactive
-            // input session) or to send input; we log either case at error
-            // level so the cause is visible in the daemon log. Typing is
-            // best-effort — a failure never fails the recording.
+            // This is the FULL-PIPELINE dictation path ([in_place].full_pipeline
+            // = true): the text lands only after every configured step. The
+            // insertion itself (typing vs clipboard-paste, input-simulator
+            // failure modes) lives in `in_place::type_at_cursor`, shared with
+            // the fast lane. Best-effort — a failure is logged loudly but
+            // never fails the recording.
             if let Err(e) =
                 crate::in_place::type_at_cursor(&transcript, &cfg.in_place.type_mode).await
             {

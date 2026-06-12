@@ -295,3 +295,87 @@ async fn pipeline_applies_pending_model_override_without_touching_global_config(
     assert_eq!(rec.status, RecordingStatus::Done);
     assert_eq!(rec.transcript.as_deref(), Some("overridden transcript"));
 }
+
+/// A TRANSIENT transcribe failure (server unreachable) must leave the
+/// recording retryable: status stays Transcribing and nothing lands in
+/// failed/ — the queue worker requeues it and tries again with backoff.
+/// (Regression: this used to mark TranscribeFailed + move to failed/ on the
+/// first blip, permanently losing the recording to a server restart.)
+#[tokio::test]
+async fn transient_whisper_failure_keeps_the_recording_retryable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    // Nothing listens here — the provider fails with WhisperUnreachable.
+    cfg.whisper.api_url = "http://127.0.0.1:9".into();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    let result = crate::pipeline::run(&state, payload, CancellationToken::new()).await;
+    assert!(result.is_err(), "unreachable server must surface an error");
+
+    let rec = state.catalog.get(&id).await.unwrap().expect("row exists");
+    assert_eq!(
+        rec.status,
+        RecordingStatus::Transcribing,
+        "a transient failure must NOT mark the recording TranscribeFailed"
+    );
+    let counts = state.inbox.counts().await.unwrap();
+    assert_eq!(
+        counts.failed, 0,
+        "a transient failure must NOT land in failed/"
+    );
+}
+
+/// A PERMANENT transcribe failure (the server answered with an error) takes
+/// the failed path exactly as before: TranscribeFailed + a failed/ entry.
+#[tokio::test]
+async fn permanent_whisper_failure_still_fails_the_recording() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(400).set_body_string("bad audio"))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    let result = crate::pipeline::run(&state, payload, CancellationToken::new()).await;
+    assert!(result.is_err());
+
+    let rec = state.catalog.get(&id).await.unwrap().expect("row exists");
+    assert_eq!(rec.status, RecordingStatus::TranscribeFailed);
+}
