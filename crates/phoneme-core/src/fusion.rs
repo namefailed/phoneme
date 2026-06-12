@@ -14,7 +14,7 @@
 //! ## Reciprocal Rank Fusion (RRF)
 //!
 //! RRF combines ranked lists without needing the two scoring scales to be
-//! comparable (cosine ∈ ~[0,1] vs BM25 which is unbounded and sign-flipped).
+//! comparable (cosine ∈ ~`[0,1]` vs BM25 which is unbounded and sign-flipped).
 //! Each list contributes `1 / (k + rank)` per item; contributions sum across
 //! lists. An item ranked highly by *either* retriever floats up; an item ranked
 //! well by *both* floats highest. This is far more robust than the old approach

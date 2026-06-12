@@ -204,7 +204,7 @@ impl CpalSource {
         Self::open_with_grace(device, Duration::ZERO)
     }
 
-    /// Like [`open`], but tears the stream down `tail_grace` after a stop is
+    /// Like [`Self::open`], but tears the stream down `tail_grace` after a stop is
     /// requested so the audio still sitting in the OS capture buffer at stop
     /// time is delivered instead of being discarded (avoids clipping the final
     /// fraction of a second). Use `Duration::ZERO` for sources where the tail
@@ -228,8 +228,8 @@ impl CpalSource {
         Self::open_kind_with_grace(device, kind, Duration::ZERO)
     }
 
-    /// Like [`open_kind`], but applies a `tail_grace` teardown delay (see
-    /// [`open_with_grace`]) so a manually-stopped recording keeps the audio that
+    /// Like [`Self::open_kind`], but applies a `tail_grace` teardown delay (see
+    /// [`Self::open_with_grace`]) so a manually-stopped recording keeps the audio that
     /// was still buffered in the OS at stop time.
     pub fn open_kind_with_grace(
         device: cpal::Device,
@@ -256,8 +256,8 @@ impl CpalSource {
         Self::system_audio_with_grace(Duration::ZERO)
     }
 
-    /// [`system_audio`] with a `tail_grace` teardown delay (see
-    /// [`open_with_grace`]).
+    /// [`Self::system_audio`] with a `tail_grace` teardown delay (see
+    /// [`Self::open_with_grace`]).
     pub fn system_audio_with_grace(tail_grace: Duration) -> Result<Self> {
         if !cfg!(windows) {
             return Err(Error::Internal(

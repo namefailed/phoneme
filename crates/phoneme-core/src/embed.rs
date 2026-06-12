@@ -145,7 +145,7 @@ impl Embedder {
     }
 
     /// Embed a search query (applies the configured query prefix). For symmetric
-    /// models (all-MiniLM) both prefixes are empty and this matches [`embed`].
+    /// models (all-MiniLM) both prefixes are empty and this matches [`Self::embed`].
     pub fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
         self.embed_with_prefix(text, &self.query_prefix)
     }

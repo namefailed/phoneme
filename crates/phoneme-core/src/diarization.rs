@@ -93,9 +93,9 @@ fn speaker_for_segment(speakers: &[SpeakerSpan], start: f64, end: f64) -> Option
 ///   order**, so any label format works (`"SPEAKER_00"`, `"0"`, `"alice"`, …).
 ///   This fixes the previous `parse::<u8>()` mapping, which silently collapsed
 ///   every non-numeric label to speaker 0 (i.e. one speaker for everyone).
-/// - Each segment is attributed to the speaker turn it overlaps most (see
-///   [`speaker_for_segment`]); one falling in a gap between turns goes to the
-///   nearest turn, never a default speaker 0.
+/// - Each segment is attributed to the speaker turn it overlaps most (by the
+///   internal `speaker_for_segment` helper); one falling in a gap between turns
+///   goes to the nearest turn, never a default speaker 0.
 /// - Empty/whitespace segments are skipped.
 ///
 /// When `speakers` is empty (diarization produced nothing) the segments are
