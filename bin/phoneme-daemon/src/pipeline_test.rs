@@ -63,6 +63,36 @@ async fn test_state(tmp: &std::path::Path, cfg: Config) -> AppState {
     AppState::new(cfg).await.expect("build test AppState")
 }
 
+/// Put a recording's inbox file into `processing/` exactly the way the queue
+/// worker does before calling `pipeline::run`: enqueue it (pending/) then claim
+/// it (→ processing/). The pipeline's `finish_done`/`finish_failed` then have a
+/// real processing file to move, so the inbox `done`/`failed` counts are
+/// meaningful afterwards.
+async fn seed_processing_inbox(
+    state: &AppState,
+    id: &RecordingId,
+    audio_path: &std::path::Path,
+    started_at: chrono::DateTime<chrono::Local>,
+) {
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: started_at,
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 0,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    state.inbox.enqueue(&payload).await.unwrap();
+    let claimed = state
+        .inbox
+        .claim_next()
+        .await
+        .unwrap()
+        .expect("the just-enqueued item is claimable into processing/");
+    assert_eq!(&claimed.id, id, "claimed the item we enqueued");
+}
+
 #[tokio::test]
 async fn run_transcribes_cleans_summarizes_and_persists() {
     // ── Mock the STT + LLM endpoints ──────────────────────────────────────
@@ -541,6 +571,348 @@ async fn llm_title_applies_and_falls_back_to_heuristic_on_error() {
         rec.title.as_deref(),
         Some("Notes about the quarterly budget review meeting"),
         "the heuristic title is the fallback on any LLM error"
+    );
+}
+
+/// THE FULL-PATH test: the single critical path no other test covers end to
+/// end — transcribe → LLM cleanup → summary → auto-tag → auto-title → hook →
+/// catalog/inbox → webhook, all legs live at once against a real `AppState`.
+///
+/// Everything external is faked but exercised for real:
+///   * a whisper endpoint returning `verbose_json` WITH segments,
+///   * one OpenAI-compatible `/v1/chat/completions` serving FOUR distinct
+///     canned replies, routed by a sentinel word planted in each stage's
+///     prompt (cleanup / summary / tags / title) — so the test proves each
+///     stage actually called the LLM with its own prompt,
+///   * a real hook subprocess (`cmd /c echo … > marker`) that drops a file on
+///     disk, proving the hook ran with the recording's data,
+///   * a real webhook listener (a second mock server) whose received POST body
+///     is read back and asserted field-by-field.
+///
+/// Assertions walk the whole promised surface: final status, every persisted
+/// transcript variant, segments, canonicalized tag suggestions, the recorded
+/// hook fields, the webhook body, and the audio file surviving in the
+/// configured audio dir.
+#[tokio::test]
+async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
+    // ── The whisper + LLM endpoints (one mock server, routed by content) ──
+    let server = MockServer::start().await;
+
+    // Whisper returns verbose_json with a two-segment timeline. The cleanup
+    // LLM rewrites the text, so the *raw* transcript (original + segments)
+    // stays distinct from the cleaned live transcript below.
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "um so we shipped the new onboarding flow today",
+            "segments": [
+                {"start": 0.0, "end": 1.4, "text": " um so we shipped"},
+                {"start": 1.4, "end": 3.2, "text": " the new onboarding flow today"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    // Four LLM stages share ONE endpoint; each canned reply is gated on a
+    // sentinel only that stage's prompt carries. A request whose body lacks the
+    // sentinel won't match that mock — so a stage calling the LLM with the
+    // wrong prompt would simply 404 and surface in the assertions.
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("STAGE_CLEANUP"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant",
+                "content": "We shipped the new onboarding flow today." } }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("STAGE_SUMMARY"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant",
+                "content": "- Shipped onboarding flow" } }]
+        })))
+        .mount(&server)
+        .await;
+    // The tagger reply is deliberately messy: a code-fenced JSON array, a
+    // casing-variant of an existing tag ("Onboarding" vs the seeded
+    // "onboarding"), and a duplicate — to prove canonicalization + dedup.
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("STAGE_TAGS"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant",
+                "content": "```json\n[\"Onboarding\", \"release-notes\", \"release-notes\"]\n```" } }]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("STAGE_TITLE"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant",
+                "content": "Title: \"Onboarding Flow Shipped\"" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    // ── The webhook listener: a separate mock server we read back ─────────
+    let webhook_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/webhook"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&webhook_server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    // The audio dir is part of the contract ("audio landed in the configured
+    // dir"), so point it at a known temp dir and drop the fixture wav inside.
+    let audio_dir = tmp.path().join("library-audio");
+    std::fs::create_dir_all(&audio_dir).unwrap();
+    let marker = tmp.path().join("hook-ran.txt");
+
+    // ── Config: every optional stage ON, hooks + webhook firing ───────────
+    let mut cfg = Config::default();
+    cfg.recording.audio_dir = audio_dir.to_string_lossy().into_owned();
+
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+
+    // Cleanup runs on the shared endpoint; the sentinel routes it.
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "cleanup-llm".into();
+    cfg.llm_post_process.prompt = "STAGE_CLEANUP rewrite the transcript".into();
+
+    cfg.summary.auto = true;
+    cfg.summary.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.summary.model = "summary-llm".into();
+    cfg.summary.prompt = "STAGE_SUMMARY summarize the transcript".into();
+
+    cfg.auto_tag.auto = true;
+    cfg.auto_tag.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.auto_tag.model = "tag-llm".into();
+    cfg.auto_tag.prompt = "STAGE_TAGS suggest tags".into();
+    // Keep auto-accept OFF so the canonicalized suggestion stays a chip we can
+    // assert on (auto-accept would silently attach the existing-tag match).
+    cfg.auto_tag.auto_accept_existing = false;
+
+    cfg.title.enabled = true;
+    cfg.title.use_llm = true;
+    cfg.title.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.title.model = "title-llm".into();
+    cfg.title.prompt = "STAGE_TITLE title the transcript".into();
+
+    // Hooks + webhook fire on this path.
+    cfg.hook.run_on_transcribe = true;
+    cfg.hook.timeout_secs = 30;
+    // Windows-safe marker hook: `cmd /c echo ok> "<marker>"`. The redirect has
+    // to be inside the /c string so cmd (not the spawner) performs it.
+    cfg.hook.commands = vec![format!(
+        "cmd /c echo hook-fired> \"{}\"",
+        marker.to_string_lossy()
+    )];
+    cfg.hook.webhook_url = Some(format!("{}/webhook", webhook_server.uri()));
+
+    let state = test_state(tmp.path(), cfg).await;
+
+    // Seed an EXISTING "onboarding" tag so the tagger's "Onboarding" suggestion
+    // is canonicalized to the lower-case existing spelling.
+    state.catalog.add_tag("onboarding", None).await.unwrap();
+
+    // The fixture wav lives in the configured audio dir; its path is what the
+    // recording row (and thus the hook/webhook payload) carries.
+    let audio_path = audio_dir.join(format!("{}.wav", RecordingId::new()));
+    std::fs::write(&audio_path, b"RIFF....not-real-audio").unwrap();
+
+    let id = RecordingId::new();
+    let started_at = chrono::Local::now();
+    let row = Recording {
+        id: id.clone(),
+        started_at,
+        duration_ms: 4200,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        transcript: None,
+        model: None,
+        status: RecordingStatus::Transcribing,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        title: None,
+        title_is_auto: true,
+        tags: vec![],
+        speaker_names: vec![],
+    };
+    state.catalog.insert(&row).await.unwrap();
+    // The inbox file must exist in processing/ for `finish_done` to move it to
+    // done/ — the queue worker would normally have claimed it into processing/.
+    seed_processing_inbox(&state, &id, &audio_path, started_at).await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: started_at,
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 4200,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    // ── Run the whole pipeline ────────────────────────────────────────────
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("full pipeline run should succeed");
+
+    // ── Catalog row: terminal status + every persisted text variant ───────
+    let rec = state.catalog.get(&id).await.unwrap().expect("row exists");
+    assert_eq!(rec.status, RecordingStatus::Done, "pipeline finishes Done");
+    assert_eq!(
+        rec.transcript.as_deref(),
+        Some("We shipped the new onboarding flow today."),
+        "live transcript is the LLM-cleaned text"
+    );
+    assert_eq!(
+        rec.cleanup_model.as_deref(),
+        Some("cleanup-llm"),
+        "the cleanup model is recorded"
+    );
+    assert_eq!(
+        rec.summary.as_deref(),
+        Some("- Shipped onboarding flow"),
+        "auto-summary is generated and persisted"
+    );
+    assert_eq!(
+        rec.summary_model.as_deref(),
+        Some("summary-llm"),
+        "the summary model is recorded"
+    );
+    assert_eq!(
+        rec.title.as_deref(),
+        Some("Onboarding Flow Shipped"),
+        "the LLM title wins (quotes + 'Title:' stripped)"
+    );
+    assert!(rec.title_is_auto, "a pipeline title stays auto-owned");
+
+    // The raw machine transcript and the clean (pipeline-output) transcript are
+    // preserved as separate columns.
+    let original = state.catalog.get_original_transcript(&id).await.unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some("um so we shipped the new onboarding flow today"),
+        "original transcript is the raw whisper output"
+    );
+    let clean = state.catalog.get_clean_transcript(&id).await.unwrap();
+    assert_eq!(
+        clean.as_deref(),
+        Some("We shipped the new onboarding flow today."),
+        "clean transcript snapshots the cleaned pipeline output"
+    );
+
+    // ── Segments: the raw whisper timeline, ms-converted + trimmed ────────
+    let segments = state.catalog.segments_for(&id).await.unwrap();
+    assert_eq!(segments.len(), 2, "both whisper segments persist");
+    assert_eq!(segments[0].start_ms, 0);
+    assert_eq!(segments[0].end_ms, 1400);
+    assert_eq!(segments[0].text, "um so we shipped");
+    assert_eq!(segments[1].start_ms, 1400);
+    assert_eq!(segments[1].end_ms, 3200);
+    assert_eq!(segments[1].text, "the new onboarding flow today");
+
+    // ── Tag suggestions: canonicalized to the existing casing, deduped, and
+    //    the already-present spelling kept (auto-accept is off here) ───────
+    assert_eq!(
+        rec.tag_suggestions,
+        vec!["onboarding".to_string(), "release-notes".to_string()],
+        "‘Onboarding’ canonicalizes to the seeded ‘onboarding’; the duplicate \
+         ‘release-notes’ collapses to one"
+    );
+
+    // ── Hook: marker file written + hook fields recorded on the row ───────
+    assert!(
+        marker.exists(),
+        "the hook subprocess ran and wrote its marker file"
+    );
+    assert_eq!(rec.hook_exit_code, Some(0), "the hook exited 0");
+    assert!(
+        rec.hook_command.as_deref().unwrap_or("").contains("hook-fired"),
+        "the executed hook command is recorded, got {:?}",
+        rec.hook_command
+    );
+    assert!(
+        rec.hook_duration_ms.is_some(),
+        "the hook duration is recorded"
+    );
+
+    // ── Webhook: the POST body carries the documented HookPayload fields ──
+    let received = webhook_server.received_requests().await.unwrap();
+    assert_eq!(received.len(), 1, "the webhook fired exactly once");
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body)
+        .expect("webhook body is the JSON HookPayload");
+    assert_eq!(body["id"], id.as_str(), "payload carries the recording id");
+    assert_eq!(
+        body["transcript"], "We shipped the new onboarding flow today.",
+        "payload carries the FINAL (cleaned) transcript"
+    );
+    assert_eq!(
+        body["audio_path"],
+        audio_path.to_string_lossy().as_ref(),
+        "payload carries the audio path"
+    );
+    assert_eq!(body["duration_ms"], 4200, "payload carries the duration");
+    // The stored `model` is the STEM of the per-job `whisper.model_path`, not the
+    // request-field `whisper.model`. A Custom/cloud backend sends its model in the
+    // request and leaves `model_path` empty, so the recorded model is "unknown" —
+    // the same value the catalog row stores. Assert the real contract, not the
+    // request model id.
+    assert_eq!(
+        body["model"], "unknown",
+        "cloud backend leaves model_path empty, so the recorded model is 'unknown'"
+    );
+    assert_eq!(
+        rec.model.as_deref(),
+        Some("unknown"),
+        "the catalog row and the webhook agree on the recorded model"
+    );
+    assert_eq!(
+        body["metadata"]["hook_version"],
+        phoneme_core::types::HookMetadata::HOOK_VERSION,
+        "payload carries the hook-schema version"
+    );
+
+    // ── Inbox: the item settled in done/ (not failed/) ────────────────────
+    let counts = state.inbox.counts().await.unwrap();
+    assert_eq!(counts.done, 1, "the recording settled in done/");
+    assert_eq!(counts.failed, 0, "nothing went to failed/");
+    assert_eq!(counts.processing, 0, "processing/ was drained");
+
+    // ── Audio: still present in the configured audio dir, untouched ───────
+    assert!(
+        audio_path.exists(),
+        "the audio file remains in the configured audio dir after the run"
+    );
+    assert!(
+        audio_path.starts_with(&audio_dir),
+        "the recording's audio lives under the configured audio dir"
     );
 }
 

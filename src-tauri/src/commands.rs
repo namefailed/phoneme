@@ -1615,6 +1615,187 @@ mod tests {
             );
         }
     }
+
+    // ── is_allowed_download_url (A2-H4) ────────────────────────────────────
+    // The download allow-list is a security boundary: a compromised renderer
+    // must not be able to point a download (whose bytes can later be run via
+    // wizard_run_installer) at an arbitrary host. These pin the real contract:
+    // https-only, host on the allow-list (exact or a true sub-domain), and the
+    // classic spoofs (downgrade, look-alike, userinfo@, sub-domain suffix
+    // confusion) all denied.
+
+    #[test]
+    fn allowed_urls_cover_the_real_wizard_hosts() {
+        // Every host the wizard actually downloads from, as used in commands.rs
+        // (model weights, the whisper-server zip, the semantic ONNX, Ollama).
+        for url in [
+            "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+            "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip",
+            "https://objects.githubusercontent.com/github-production-release-asset/x",
+            "https://ollama.com/library/llama3",
+            "https://registry.ollama.ai/v2/library/llama3/manifests/latest",
+            // A genuine sub-domain of an allowed host is allowed (the `.{a}` arm).
+            "https://cdn-lfs.huggingface.co/repos/abc/model.bin",
+        ] {
+            assert!(is_allowed_download_url(url), "should allow {url}");
+        }
+    }
+
+    #[test]
+    fn http_downgrade_is_denied() {
+        // Plain http (or anything not https) is rejected outright, even for an
+        // otherwise-allowed host — no MITM-able transport for runnable bytes.
+        assert!(!is_allowed_download_url(
+            "http://huggingface.co/model.bin"
+        ));
+        assert!(!is_allowed_download_url("ftp://github.com/x"));
+        assert!(!is_allowed_download_url(
+            "HTTPS://github.com/x"
+        )); // scheme match is case-sensitive by design (starts_with "https://")
+    }
+
+    #[test]
+    fn other_and_lookalike_hosts_are_denied() {
+        for url in [
+            "https://evil.com/payload.exe",
+            // Look-alike: the allowed name as a sub-string but a different host.
+            "https://huggingface.co.evil.com/model.bin",
+            "https://githubXcom/x",
+            "https://notgithub.com/x",
+            // Allowed name only as a path/query component, not the host.
+            "https://evil.com/huggingface.co/model.bin",
+            "https://evil.com/?x=github.com",
+        ] {
+            assert!(!is_allowed_download_url(url), "should deny {url}");
+        }
+    }
+
+    #[test]
+    fn userinfo_at_trick_is_denied() {
+        // The classic `allowed@evil` confusion: a human skims "github.com" but
+        // the real host is evil.com. `Url::host_str` returns the authority host,
+        // not the userinfo, so this is denied.
+        assert!(!is_allowed_download_url(
+            "https://github.com@evil.com/payload.exe"
+        ));
+        assert!(!is_allowed_download_url(
+            "https://huggingface.co:pass@evil.com/model.bin"
+        ));
+        // And the inverse must STILL pass: userinfo in front of a truly-allowed
+        // host is fine (the host is the allowed one).
+        assert!(is_allowed_download_url(
+            "https://user@github.com/ggml-org/whisper.cpp/releases/x.zip"
+        ));
+    }
+
+    #[test]
+    fn suffix_confusion_is_denied() {
+        // `ends_with(".github.com")` must not be satisfied by a host that merely
+        // ENDS with the bare name without the dot boundary.
+        assert!(!is_allowed_download_url("https://fakegithub.com/x"));
+        assert!(!is_allowed_download_url("https://myhuggingface.co/x"));
+        // Garbage / unparseable.
+        assert!(!is_allowed_download_url("not a url"));
+        assert!(!is_allowed_download_url("https://"));
+    }
+
+    // ── path_within (A1-H3 / A2-H5) ───────────────────────────────────────
+    // The reveal/open/run commands hand a renderer-supplied path to the OS, so
+    // `path_within` is the gate that keeps those to an allowed root. It
+    // canonicalizes BOTH sides (so `..` and 8.3/junction tricks can't escape a
+    // lexical prefix) and fails CLOSED when either path can't be canonicalized.
+    // These need real on-disk dirs because canonicalize touches the filesystem.
+
+    #[test]
+    fn path_within_accepts_child_and_root_itself() {
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("sub").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        let file = sub.join("clip.wav");
+        std::fs::write(&file, b"x").unwrap();
+
+        assert!(path_within(&file, root.path()), "a nested file is within");
+        assert!(path_within(&sub, root.path()), "a nested dir is within");
+        assert!(
+            path_within(root.path(), root.path()),
+            "the root is within itself"
+        );
+    }
+
+    #[test]
+    fn path_within_rejects_traversal_escape() {
+        // `<root>/sub/../../outside` canonicalizes ABOVE root → denied, even
+        // though the lexical string starts under it.
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("root");
+        let outside = base.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("secret.txt");
+        std::fs::write(&secret, b"x").unwrap();
+
+        let escaping = root.join("..").join("outside").join("secret.txt");
+        assert!(
+            !path_within(&escaping, &root),
+            "a ..-traversal that lands outside the root is denied"
+        );
+    }
+
+    #[test]
+    fn path_within_rejects_prefix_sibling() {
+        // `C:\data2` must NOT count as inside `C:\data` — the canonical
+        // starts_with compares whole path components, not raw string prefixes.
+        let base = tempfile::tempdir().unwrap();
+        let data = base.path().join("data");
+        let data2 = base.path().join("data2");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&data2).unwrap();
+        let file = data2.join("f.txt");
+        std::fs::write(&file, b"x").unwrap();
+
+        assert!(
+            !path_within(&file, &data),
+            "a sibling dir sharing a name prefix is not within"
+        );
+    }
+
+    #[test]
+    fn path_within_fails_closed_on_nonexistent() {
+        // canonicalize fails for a path that doesn't exist → fail closed
+        // (false), so a not-yet-created target can never slip through.
+        let root = tempfile::tempdir().unwrap();
+        let ghost = root.path().join("does-not-exist.txt");
+        assert!(
+            !path_within(&ghost, root.path()),
+            "a non-existent child fails closed"
+        );
+        let ghost_root = root.path().join("missing-root");
+        let real = root.path().join("real.txt");
+        std::fs::write(&real, b"x").unwrap();
+        assert!(
+            !path_within(&real, &ghost_root),
+            "a non-existent root fails closed"
+        );
+    }
+
+    #[test]
+    fn path_within_handles_mixed_separators() {
+        // The renderer often sends forward slashes on Windows; canonicalize
+        // normalizes separators, so a mixed-separator child still resolves
+        // under the root.
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("a").join("b");
+        std::fs::create_dir_all(&sub).unwrap();
+        let file = sub.join("c.wav");
+        std::fs::write(&file, b"x").unwrap();
+
+        // Rebuild the child path with forward slashes from the root string.
+        let mixed = format!("{}/a/b/c.wav", root.path().to_string_lossy());
+        assert!(
+            path_within(std::path::Path::new(&mixed), root.path()),
+            "a forward-slash child of a backslash root is still within"
+        );
+    }
 }
 
 #[tauri::command]
