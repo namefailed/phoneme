@@ -1,4 +1,5 @@
 import { mountModelField } from "./modelField";
+import { mountConnectionField } from "./connectionField";
 
 /**
  * Auto-tagging settings (Post-Processing tab). The LLM proposes tags for each
@@ -10,7 +11,8 @@ import { mountModelField } from "./modelField";
  *
  * Connection fields mirror the Summary section: blank provider/key/URL/model
  * inherit the `[llm_post_process]` (cleanup) connection, so the common case is
- * just flipping the toggle on.
+ * just flipping the toggle on. The provider/key/endpoint UI is the shared
+ * connection block with a leading "Same as Post-Processing" anchor.
  */
 export class SectionAutoTag {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,7 +34,6 @@ export class SectionAutoTag {
 
   private render() {
     const t = this.config.auto_tag;
-    const isCloud = ["openai", "groq", "anthropic"].includes(t.provider);
 
     this.container.innerHTML = `
       <div class="settings-section">
@@ -57,31 +58,10 @@ export class SectionAutoTag {
           <div><input type="checkbox" class="toggle-switch" id="at-accept" data-key="auto_tag.auto_accept_existing" ${t.auto_accept_existing ? "checked" : ""} /></div>
         </div>
 
-        <div class="settings-field">
-          <label>Provider
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">Blank fields inherit your Post-Processing (cleanup) connection.</span>
-          </label>
-          <div>
-            <select id="at-provider" data-key="auto_tag.provider">
-              <option value="" ${t.provider === "" ? "selected" : ""}>Same as post-processing</option>
-              <option value="ollama" ${t.provider === "ollama" ? "selected" : ""}>Local Ollama</option>
-              <option value="openai" ${t.provider === "openai" ? "selected" : ""}>OpenAI-Compatible Endpoint</option>
-              <option value="groq" ${t.provider === "groq" ? "selected" : ""}>Groq (cloud)</option>
-              <option value="anthropic" ${t.provider === "anthropic" ? "selected" : ""}>Anthropic Claude (cloud)</option>
-            </select>
-          </div>
+        <div class="settings-field stacked">
+          <label>Provider</label>
+          <div id="at-conn-host"></div>
         </div>
-
-        ${isCloud ? `
-          <div class="settings-field">
-            <label>API key</label>
-            <div><input type="password" id="at-key" data-key="auto_tag.api_key" value="${escapeAttr(t.api_key ?? "")}" style="width:100%;" /></div>
-          </div>
-          <div class="settings-field">
-            <label>API URL <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
-            <div><input type="text" id="at-url" data-key="auto_tag.api_url" value="${escapeAttr(t.api_url ?? "")}" placeholder="Provider default" style="width:100%;" /></div>
-          </div>
-        ` : ""}
 
         <div class="settings-field">
           <label>Model</label>
@@ -119,15 +99,18 @@ export class SectionAutoTag {
     // own provider/key/URL when set, else the inherited cleanup connection
     // (blank auto_tag fields fall back to [llm_post_process] in the daemon, so
     // the dropdown must list models for whatever will actually run). The field
-    // owns the host's DOM and writes the model straight into the config — no
-    // re-render here. Provider changes re-run render() (handler below), which
-    // re-mounts it into the fresh host.
+    // owns the host's DOM and writes the model straight into the config.
     const eff = (which: "provider" | "api_url" | "api_key") => {
       const own = (t[which] ?? "").toString().trim();
       return own || (this.config.llm_post_process?.[which] ?? "").toString();
     };
     const modelHost = this.container.querySelector<HTMLElement>("#at-model-host");
-    if (modelHost) {
+    let modelMountKey: string | null = null;
+    const mountAtModel = () => {
+      if (!modelHost) return;
+      const key = `${eff("provider")}|${eff("api_url")}|${eff("api_key")}`;
+      if (key === modelMountKey) return;
+      modelMountKey = key;
       mountModelField(modelHost, {
         mode: "llm",
         blankLabel: "Same as cleanup model",
@@ -137,7 +120,29 @@ export class SectionAutoTag {
         getModel: () => t.model || "",
         setModel: (m) => { t.model = m; },
       });
+    };
+
+    // Provider/key/endpoint — the shared connection block. The leading "Same
+    // as Post-Processing" option blanks provider/url/key (the daemon's
+    // inherit-when-blank contract, same as the Summary section).
+    const connHost = this.container.querySelector<HTMLElement>("#at-conn-host");
+    if (connHost) {
+      mountConnectionField(connHost, {
+        catalog: "llm",
+        inheritLabel: "Same as Post-Processing",
+        getKind: () => (t.provider ?? "").toString(),
+        setKind: (k) => { t.provider = k; },
+        getApiUrl: () => (t.api_url ?? "").toString(),
+        setApiUrl: (u) => { t.api_url = u; },
+        getApiKey: () => (t.api_key ?? "").toString(),
+        setApiKey: (k) => { t.api_key = k; },
+        onProviderChanged: () => mountAtModel(),
+      });
+      // Key/url keystrokes don't fire onProviderChanged; the model list still
+      // follows them (the mount-key guard drops the no-ops).
+      connHost.addEventListener("input", () => mountAtModel());
     }
+    mountAtModel();
 
     this.container.querySelector<HTMLButtonElement>("#at-clear-all")?.addEventListener("click", async () => {
       const { confirmDialog } = await import("../confirmDialog");
@@ -171,16 +176,6 @@ export class SectionAutoTag {
     this.container.querySelector<HTMLInputElement>("#at-accept")?.addEventListener("change", (e) => {
       t.auto_accept_existing = (e.target as HTMLInputElement).checked;
     });
-    this.container.querySelector<HTMLSelectElement>("#at-provider")?.addEventListener("change", (e) => {
-      t.provider = (e.target as HTMLSelectElement).value;
-      this.render();
-    });
-    this.container.querySelector<HTMLInputElement>("#at-key")?.addEventListener("input", (e) => {
-      t.api_key = (e.target as HTMLInputElement).value;
-    });
-    this.container.querySelector<HTMLInputElement>("#at-url")?.addEventListener("input", (e) => {
-      t.api_url = (e.target as HTMLInputElement).value;
-    });
     this.container.querySelector<HTMLInputElement>("#at-max")?.addEventListener("input", (e) => {
       const n = Number((e.target as HTMLInputElement).value);
       t.max_tags = Number.isFinite(n) ? Math.max(1, Math.min(12, Math.round(n))) : 5;
@@ -193,8 +188,4 @@ export class SectionAutoTag {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function escapeAttr(s: string): string {
-  return escapeHtml(s).replace(/"/g, "&quot;");
 }

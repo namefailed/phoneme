@@ -96,17 +96,20 @@ describe("openModelPicker", () => {
 });
 
 describe("model slots", () => {
-  it("mounts the shared model field into every slot host", async () => {
+  it("mounts the shared connection block and model field into every slot host", async () => {
     const p = openModelPicker("transcription");
     await vi.waitFor(() =>
       expect(queryEl(".modal-overlay")).toBeTruthy(),
     );
     await settled();
 
-    // One host per model slot — whisper/STT, cleanup LLM, summary, auto-tag,
-    // live preview — each filled by the shared field (its .mf-select), not a
-    // hand-rolled per-slot dropdown.
+    // One connection host + one model host per slot — whisper/STT, cleanup
+    // LLM, summary, auto-tag, live preview — each filled by the shared blocks
+    // (.cf-provider / .mf-select), not hand-rolled per-slot controls.
     for (const slot of ["stt", "llm", "sum", "at", "prev"]) {
+      const conn = queryEl<HTMLElement>(`#mp-${slot}-conn-host`);
+      expect(conn, `connection host div for "${slot}" slot`).toBeTruthy();
+      expect(conn!.querySelector(".cf-provider"), `connection block in "${slot}" slot`).toBeTruthy();
       const host = queryEl<HTMLElement>(`#mp-${slot}-model-host`);
       expect(host, `host div for "${slot}" slot`).toBeTruthy();
       expect(host!.querySelector(".mf-select"), `shared field in "${slot}" slot`).toBeTruthy();
@@ -116,13 +119,13 @@ describe("model slots", () => {
     await p;
   });
 
-  it("shows the saved cleanup model as selected and ✓-marks the matching preset", async () => {
+  it("shows the saved cleanup model as selected and derives the matching named provider", async () => {
     vi.mocked(tauriCore.invoke).mockImplementation(async (cmd: string): Promise<any> => {
       if (cmd === "read_config") {
         return {
           llm_post_process: {
             provider: "groq",
-            // The Groq preset's exact endpoint → its entry is "current".
+            // The Groq entry's exact endpoint → the provider select derives it.
             api_url: "https://api.groq.com/openai/v1/chat/completions",
             // Masked key, as the daemon hands it to the WebView — the field
             // skips the live fetch, so this never touches the network.
@@ -145,12 +148,13 @@ describe("model slots", () => {
     expect(modelSelect).toBeTruthy();
     expect(modelSelect.value).toBe("llama-3.1-8b-instant");
 
-    const provider = queryEl<HTMLSelectElement>("#mp-llm-provider")!;
-    const optText = (value: string) =>
-      Array.from(provider.options).find((o) => o.value === value)?.textContent ?? "";
-    expect(optText("preset:groq")).toContain("✓");
-    expect(optText("preset:groq")).toContain("Groq");
-    expect(optText("preset:openai")).not.toContain("✓");
+    const provider = queryEl<HTMLSelectElement>("#mp-llm-conn-host .cf-provider")!;
+    expect(provider).toBeTruthy();
+    expect(provider.value).toBe("groq");
+    expect(provider.selectedOptions[0]?.textContent).toContain("Groq");
+    // The saved key round-trips masked — never cleared behind the user's back.
+    const key = queryEl<HTMLInputElement>("#mp-llm-conn-host .cf-key")!;
+    expect(key.value).toBe("__phoneme_secret_kept__");
 
     cancel();
     await p;

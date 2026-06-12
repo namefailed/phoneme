@@ -5,25 +5,15 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 
 import { invoke } from '@tauri-apps/api/core';
 import { showToast } from '../utils/toast';
-import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset, type LlmPreset } from '../services/llmProviders';
-import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModels, type SttCustomPreset } from '../services/sttProviders';
+import { curatedSttModels } from '../services/sttProviders';
 import { mountModelField, type ModelFieldOpts } from './SettingsView/modelField';
+import { mountConnectionField, type ConnectionFieldOpts } from './SettingsView/connectionField';
 import { curatedTranscriptionModels } from '../data/curatedModels';
 import { applyRerun, rerunToastMessage, type RerunPayload } from './RecordingsView/rerunActions';
 import { getOpenRecordingId } from '../state/openRecording';
 
-type ProviderOption = { value: string; label: string };
-
 /** Every surface where a model can be switched from the quick picker. */
 type MpTab = "transcription" | "postprocessing" | "summary" | "autotag" | "preview" | "semantic";
-
-const LLM_PROVIDERS: ProviderOption[] = [
-  { value: "none", label: "None" },
-  { value: "ollama", label: "Local Ollama (http://127.0.0.1:11434)" },
-  { value: "openai", label: "OpenAI-Compatible Endpoint" },
-  { value: "groq", label: "Groq (cloud)" },
-  { value: "anthropic", label: "Anthropic Claude (cloud)" },
-];
 
 /** Size/speed rank for ordering whisper models smallest→largest. Turbo (a
  *  distilled large model, faster than Large v3) sorts just before Large v3. */
@@ -36,11 +26,6 @@ function whisperRank(path: string): number {
   if (f.includes("turbo")) return 4;
   if (f.includes("large")) return 5;
   return 6;
-}
-
-/** Trim + drop trailing slashes so endpoint comparisons ignore cosmetic differences. */
-function normalizeUrl(u: string): string {
-  return (u || "").trim().replace(/\/+$/, "");
 }
 
 function localModelLabel(path: string): string {
@@ -123,8 +108,6 @@ export class ModelPickerElement extends LitElement {
   @state() private prevLocalModel = "";
 
   @query('.mp-dialog') dialog!: HTMLElement;
-  @query('#mp-stt-provider') sttProviderSelect!: HTMLSelectElement;
-  @query('#mp-llm-provider') llmProviderSelect!: HTMLSelectElement;
 
   private keyHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape") this.close(false);
@@ -170,18 +153,88 @@ export class ModelPickerElement extends LitElement {
   private mfKeys = new Map<string, string>();
 
   /**
-   * Mount the shared model field (`mountModelField`) into every slot's host div
-   * after each render. The hosts are empty, binding-free divs in the template,
-   * so Lit never touches what the field puts inside them.
+   * Mount the shared connection block (`mountConnectionField`) and model field
+   * (`mountModelField`) into every slot's host div after each render. The
+   * hosts are empty, binding-free divs in the template, so Lit never touches
+   * what the fields put inside them.
    *
-   * Each slot re-mounts only when its connection changes — provider for the
-   * curated STT-style slots, provider|url|key for the live-fetch LLM slots
-   * (a remount there kicks a fresh fetch with the new credentials). The key
-   * check makes every other re-render of this modal leave the mounted field
-   * alone, so picking a model (which writes @state and re-renders) or typing
-   * in an unrelated input never resets an open dropdown or its "Other…" text.
+   * Connection blocks mount once per host (they read the live @state through
+   * their getters and own their internal re-renders; their setters write
+   * @state, which re-renders the modal for the visibility bindings without
+   * touching the host's contents). Each model field re-mounts only when its
+   * connection changes — provider for the curated STT-style slots,
+   * provider|url|key for the live-fetch LLM slots (a remount there kicks a
+   * fresh fetch with the new credentials). The key check makes every other
+   * re-render of this modal leave the mounted field alone, so picking a model
+   * (which writes @state and re-renders) or typing in an unrelated input
+   * never resets an open dropdown or its "Other…" text.
    */
   protected updated(_changedProperties: PropertyValues) {
+    const mountConn = (slot: string, opts: ConnectionFieldOpts) => {
+      const host = this.querySelector<HTMLElement>(`#mp-${slot}-conn-host`);
+      if (!host || host.firstElementChild) return;
+      mountConnectionField(host, opts);
+    };
+
+    // Transcription + live preview — STT catalog. No local-server test URL in
+    // the quick picker (full Settings owns the server connection), so the
+    // block shows no Test for the local provider here.
+    mountConn("stt", {
+      catalog: "stt",
+      getKind: () => this.sttRealProvider,
+      setKind: (k) => { this.sttRealProvider = k; },
+      getApiUrl: () => this.sttUrl,
+      setApiUrl: (u) => { this.sttUrl = u; },
+      getApiKey: () => this.sttKey,
+      setApiKey: (k) => { this.sttKey = k; },
+    });
+
+    mountConn("prev", {
+      catalog: "stt",
+      getKind: () => this.prevProvider,
+      setKind: (k) => { this.prevProvider = k; },
+      getApiUrl: () => this.prevUrl,
+      setApiUrl: (u) => { this.prevUrl = u; },
+      getApiKey: () => this.prevKey,
+      setApiKey: (k) => { this.prevKey = k; },
+    });
+
+    // Cleanup LLM — "None" switches the step off (save() maps it onto the
+    // `enabled` flag exactly as before).
+    mountConn("llm", {
+      catalog: "llm",
+      getKind: () => this.llmRealProvider,
+      setKind: (k) => { this.llmRealProvider = k; },
+      getApiUrl: () => this.llmUrl,
+      setApiUrl: (u) => { this.llmUrl = u; },
+      getApiKey: () => this.llmKey,
+      setApiKey: (k) => { this.llmKey = k; },
+    });
+
+    // Summary + auto-tag — inherit anchor first; choosing it blanks the slot's
+    // provider/url/key (the daemon's inherit-when-blank contract).
+    mountConn("sum", {
+      catalog: "llm",
+      inheritLabel: "Same as post-processing",
+      getKind: () => this.sumProvider,
+      setKind: (k) => { this.sumProvider = k; },
+      getApiUrl: () => this.sumUrl,
+      setApiUrl: (u) => { this.sumUrl = u; },
+      getApiKey: () => this.sumKey,
+      setApiKey: (k) => { this.sumKey = k; },
+    });
+
+    mountConn("at", {
+      catalog: "llm",
+      inheritLabel: "Same as post-processing",
+      getKind: () => this.atProvider,
+      setKind: (k) => { this.atProvider = k; },
+      getApiUrl: () => this.atUrl,
+      setApiUrl: (u) => { this.atUrl = u; },
+      getApiKey: () => this.atKey,
+      setApiKey: (k) => { this.atKey = k; },
+    });
+
     const mount = (slot: string, key: string, opts: ModelFieldOpts) => {
       const host = this.querySelector<HTMLElement>(`#mp-${slot}-model-host`);
       if (!host) return;
@@ -430,62 +483,6 @@ export class ModelPickerElement extends LitElement {
     this.close(false);
   }
 
-  private onSttProviderChange() {
-    const v = this.sttProviderSelect.value;
-    if (v.startsWith("preset:")) {
-      const preset = findSttCustomPreset(v.slice("preset:".length));
-      if (preset) {
-        this.sttRealProvider = "custom";
-        this.sttUrl = preset.apiUrl;
-        this.sttModel = preset.model;
-      }
-    } else {
-      this.sttRealProvider = v;
-    }
-  }
-
-  private onLlmProviderChange() {
-    const v = this.llmProviderSelect.value;
-    if (v.startsWith("preset:")) {
-      const preset = findLlmPreset(v.slice("preset:".length));
-      if (preset) {
-        this.llmRealProvider = preset.kind;
-        this.llmUrl = preset.apiUrl;
-        this.llmModel = preset.defaultModel;
-      }
-    } else {
-      this.llmRealProvider = v;
-    }
-  }
-
-  private onSumProviderChange(e: Event) {
-    this.sumProvider = (e.target as HTMLSelectElement).value;
-  }
-
-  private onPrevProviderChange(e: Event) {
-    this.prevProvider = (e.target as HTMLSelectElement).value;
-  }
-
-  private onAtProviderChange(e: Event) {
-    this.atProvider = (e.target as HTMLSelectElement).value;
-  }
-
-  /** True when an LLM quick preset's connection (protocol kind + endpoint)
-   *  equals the cleanup slot's current values, so the entry gets a ✓ marker.
-   *  A blank URL means "the kind's default endpoint", which is exactly what
-   *  the canonical preset for that kind (id === kind) configures. */
-  private llmPresetIsCurrent(p: LlmPreset): boolean {
-    if (p.kind !== this.llmRealProvider) return false;
-    const url = normalizeUrl(this.llmUrl);
-    return url ? url === normalizeUrl(p.apiUrl) : p.id === p.kind;
-  }
-
-  /** True when an STT custom preset matches the transcription slot's current
-   *  provider + endpoint (presets always map onto the `custom` provider). */
-  private sttPresetIsCurrent(p: SttCustomPreset): boolean {
-    return this.sttRealProvider === "custom" && normalizeUrl(this.sttUrl) === normalizeUrl(p.apiUrl);
-  }
-
   /** "Run once" — applies the chosen models to the target recording(s) as a
    *  one-time re-run. Disabled (but always shown) when there's no target. */
   private renderRunOnceBtn() {
@@ -506,21 +503,8 @@ export class ModelPickerElement extends LitElement {
 
   render() {
     const isSttLocal = this.sttRealProvider === "local";
-    const isLlmCloud = this.llmRealProvider === "openai" || this.llmRealProvider === "groq" || this.llmRealProvider === "anthropic";
-    const isLlmOllama = this.llmRealProvider === "ollama";
-    const isSumCloud = this.sumProvider === "openai" || this.sumProvider === "groq" || this.sumProvider === "anthropic";
     const isPrevLocal = this.prevProvider === "local";
     const prevNeedsCurrent = this.prevLocalModel && !this.downloadedModels.includes(this.prevLocalModel);
-
-    const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
-    // "✓" marks the preset whose provider + endpoint the slot is currently on,
-    // so re-opening the picker shows which quick preset is in effect.
-    const sttPresetOpts = STT_CUSTOM_PRESETS.map(p => html`<option value="preset:${p.id}">${this.sttPresetIsCurrent(p) ? "✓ " : ""}${p.label}</option>`);
-    const llmRealOpts = LLM_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.llmRealProvider}>${p.label}</option>`);
-    const llmPresetOpt = (p: LlmPreset) => html`<option value="preset:${p.id}">${this.llmPresetIsCurrent(p) ? "✓ " : ""}${p.label}</option>`;
-    const llmPresetOpts = html`
-      <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(llmPresetOpt)}</optgroup>
-      <optgroup label="Cloud (API key)">${CLOUD_LLM_PRESETS.map(llmPresetOpt)}</optgroup>`;
 
     const hasDownloaded = this.downloadedModels.length > 0;
     const currentDownloadedOpts = hasDownloaded ? this.downloadedModels.map(p => html`<option value=${p} ?selected=${p === this.sttLocalModel}>${localModelLabel(p)}</option>`) : html`<option value="">No models downloaded — get one in Settings → Whisper</option>`;
@@ -549,11 +533,8 @@ export class ModelPickerElement extends LitElement {
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'transcription'}>
-            <label class="mp-label" for="mp-stt-provider">Provider</label>
-            <select id="mp-stt-provider" class="mp-input" @change=${this.onSttProviderChange}>
-              ${sttRealOpts}
-              <optgroup label="Presets">${sttPresetOpts}</optgroup>
-            </select>
+            <label class="mp-label">Provider</label>
+            <div class="mp-conn-host" id="mp-stt-conn-host"></div>
 
             <div class="mp-row" style="display:${isSttLocal ? '' : 'none'}">
               <label class="mp-label" for="mp-stt-local-model">Local model</label>
@@ -565,12 +546,6 @@ export class ModelPickerElement extends LitElement {
             </div>
 
             <div class="mp-row" style="display:${!isSttLocal ? '' : 'none'}">
-              <label class="mp-label" for="mp-stt-key">API key</label>
-              <input id="mp-stt-key" class="mp-input" type="password" .value=${this.sttKey} @input=${(e: Event) => this.sttKey = (e.target as HTMLInputElement).value} />
-
-              <label class="mp-label" for="mp-stt-url">API URL (optional)</label>
-              <input id="mp-stt-url" class="mp-input" type="text" .value=${this.sttUrl} @input=${(e: Event) => this.sttUrl = (e.target as HTMLInputElement).value} />
-
               <label class="mp-label">Model</label>
               <div class="mp-model-host" id="mp-stt-model-host"></div>
             </div>
@@ -587,46 +562,17 @@ export class ModelPickerElement extends LitElement {
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'postprocessing'}>
-            <label class="mp-label" for="mp-llm-provider">Provider</label>
-            <select id="mp-llm-provider" class="mp-input" @change=${this.onLlmProviderChange}>
-              ${llmRealOpts}
-              ${llmPresetOpts}
-            </select>
-
-            <div class="mp-row" style="display:${isLlmCloud ? '' : 'none'}">
-              <label class="mp-label" for="mp-llm-key">API key</label>
-              <input id="mp-llm-key" class="mp-input" type="password" .value=${this.llmKey} @input=${(e: Event) => this.llmKey = (e.target as HTMLInputElement).value} />
-
-              <label class="mp-label" for="mp-llm-url">API URL (optional)</label>
-              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} @input=${(e: Event) => this.llmUrl = (e.target as HTMLInputElement).value} />
-            </div>
-
-            <div class="mp-row" style="display:${isLlmOllama ? '' : 'none'}">
-              <label class="mp-label" for="mp-llm-url">Ollama API URL</label>
-              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} placeholder="http://127.0.0.1:11434/api/generate" @input=${(e: Event) => this.llmUrl = (e.target as HTMLInputElement).value} />
-            </div>
+            <label class="mp-label">Provider</label>
+            <div class="mp-conn-host" id="mp-llm-conn-host"></div>
 
             <label class="mp-label" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}">Model</label>
             <div class="mp-model-host" id="mp-llm-model-host" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}"></div>
-            <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Local Ollama</b> keeps everything offline.</p>
+            <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Ollama</b> keeps everything offline.</p>
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'summary'}>
-            <label class="mp-label" for="mp-sum-provider">Provider</label>
-            <select id="mp-sum-provider" class="mp-input" @change=${this.onSumProviderChange}>
-              <option value="" ?selected=${!this.sumProvider}>Same as post-processing</option>
-              <option value="ollama" ?selected=${this.sumProvider === 'ollama'}>Local Ollama</option>
-              <option value="openai" ?selected=${this.sumProvider === 'openai'}>OpenAI-Compatible Endpoint</option>
-              <option value="groq" ?selected=${this.sumProvider === 'groq'}>Groq (cloud)</option>
-              <option value="anthropic" ?selected=${this.sumProvider === 'anthropic'}>Anthropic Claude (cloud)</option>
-            </select>
-
-            <div class="mp-row" style="display:${isSumCloud ? '' : 'none'}">
-              <label class="mp-label" for="mp-sum-key">API key</label>
-              <input id="mp-sum-key" class="mp-input" type="password" .value=${this.sumKey} @input=${(e: Event) => this.sumKey = (e.target as HTMLInputElement).value} />
-              <label class="mp-label" for="mp-sum-url">API URL (optional)</label>
-              <input id="mp-sum-url" class="mp-input" type="text" .value=${this.sumUrl} @input=${(e: Event) => this.sumUrl = (e.target as HTMLInputElement).value} />
-            </div>
+            <label class="mp-label">Provider</label>
+            <div class="mp-conn-host" id="mp-sum-conn-host"></div>
 
             <div style="display:${this.sumProvider ? '' : 'none'}">
               <label class="mp-label">Model</label>
@@ -636,21 +582,8 @@ export class ModelPickerElement extends LitElement {
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'autotag'}>
-            <label class="mp-label" for="mp-at-provider">Provider</label>
-            <select id="mp-at-provider" class="mp-input" @change=${this.onAtProviderChange}>
-              <option value="" ?selected=${!this.atProvider}>Same as post-processing</option>
-              <option value="ollama" ?selected=${this.atProvider === 'ollama'}>Local Ollama</option>
-              <option value="openai" ?selected=${this.atProvider === 'openai'}>OpenAI-Compatible Endpoint</option>
-              <option value="groq" ?selected=${this.atProvider === 'groq'}>Groq (cloud)</option>
-              <option value="anthropic" ?selected=${this.atProvider === 'anthropic'}>Anthropic Claude (cloud)</option>
-            </select>
-
-            <div class="mp-row" style="display:${["openai", "groq", "anthropic"].includes(this.atProvider) ? '' : 'none'}">
-              <label class="mp-label" for="mp-at-key">API key</label>
-              <input id="mp-at-key" class="mp-input" type="password" .value=${this.atKey} @input=${(e: Event) => this.atKey = (e.target as HTMLInputElement).value} />
-              <label class="mp-label" for="mp-at-url">API URL (optional)</label>
-              <input id="mp-at-url" class="mp-input" type="text" .value=${this.atUrl} @input=${(e: Event) => this.atUrl = (e.target as HTMLInputElement).value} />
-            </div>
+            <label class="mp-label">Provider</label>
+            <div class="mp-conn-host" id="mp-at-conn-host"></div>
 
             <div style="display:${this.atProvider ? '' : 'none'}">
               <label class="mp-label">Model</label>
@@ -667,10 +600,8 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Off → the live preview reuses your main transcription model. On → run the preview through a separate (usually small/fast, e.g. Tiny or Base) model so it stays snappy while a larger model does the final transcript. Enable the live preview itself in <b>Settings → Transcription</b>.</p>
 
             <div style="display:${this.prevDedicated ? '' : 'none'}">
-              <label class="mp-label" for="mp-prev-provider">Provider</label>
-              <select id="mp-prev-provider" class="mp-input" @change=${this.onPrevProviderChange}>
-                ${STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.prevProvider}>${p.label}</option>`)}
-              </select>
+              <label class="mp-label">Provider</label>
+              <div class="mp-conn-host" id="mp-prev-conn-host"></div>
 
               <div class="mp-row" style="display:${isPrevLocal ? '' : 'none'}">
                 <label class="mp-label" for="mp-prev-local">Local model</label>
@@ -681,10 +612,6 @@ export class ModelPickerElement extends LitElement {
               </div>
 
               <div class="mp-row" style="display:${!isPrevLocal ? '' : 'none'}">
-                <label class="mp-label" for="mp-prev-key">API key</label>
-                <input id="mp-prev-key" class="mp-input" type="password" .value=${this.prevKey} @input=${(e: Event) => this.prevKey = (e.target as HTMLInputElement).value} />
-                <label class="mp-label" for="mp-prev-url">API URL (optional)</label>
-                <input id="mp-prev-url" class="mp-input" type="text" .value=${this.prevUrl} @input=${(e: Event) => this.prevUrl = (e.target as HTMLInputElement).value} />
                 <label class="mp-label">Model</label>
                 <div class="mp-model-host" id="mp-prev-model-host"></div>
               </div>
