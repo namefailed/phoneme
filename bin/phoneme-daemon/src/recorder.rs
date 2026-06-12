@@ -398,8 +398,13 @@ impl DaemonRecorder {
             // (`preview_whisper`) — a fast local model on a second server, or a
             // cloud API — so it never contends with the final transcription.
             // Falls back to the main provider when unset (unchanged behavior).
+            // `apply` swaps in the port the bundled server actually listens on
+            // (it falls back from the configured port when another app holds it).
+            let preview_cfg = state
+                .whisper_ports
+                .apply(&cfg, cfg.preview_provider_config());
             let provider = state.transcription.provider(
-                cfg.preview_provider_config(),
+                &preview_cfg,
                 &phoneme_core::config::DiarizationConfig::default(),
             );
             let is_native = provider.is_native();

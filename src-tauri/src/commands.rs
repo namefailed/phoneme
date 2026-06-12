@@ -961,9 +961,56 @@ pub async fn start_daemon(bridge: Br<'_>) -> Result<(), CommandError> {
     Ok(())
 }
 
+/// Rewrite a local bundled-whisper probe URL to the port the daemon reports
+/// the server is ACTUALLY listening on. The daemon treats the configured
+/// `bundled_server_port` as a preference and falls back to a free port when
+/// another app holds it; `daemon_status` publishes the live ports as
+/// `whisper_preferred_port`/`whisper_effective_port` (and the
+/// `preview_whisper_*` pair). `None` = leave the URL alone: it isn't the
+/// shape the frontend builds for a local server (`http://127.0.0.1:<port>`),
+/// it doesn't name a preferred port, or no differing effective port is live.
+fn effective_local_whisper_url(url: &str, status: &Value) -> Option<String> {
+    let rest = url.trim().strip_prefix("http://127.0.0.1:")?;
+    let port: u16 = rest.strip_suffix('/').unwrap_or(rest).parse().ok()?;
+    let pairs = [
+        ("whisper_preferred_port", "whisper_effective_port"),
+        (
+            "preview_whisper_preferred_port",
+            "preview_whisper_effective_port",
+        ),
+    ];
+    for (preferred_key, effective_key) in pairs {
+        let preferred = status.get(preferred_key).and_then(Value::as_u64);
+        let effective = status.get(effective_key).and_then(Value::as_u64);
+        if let (Some(p), Some(e)) = (preferred, effective) {
+            if p == u64::from(port) && e != p && u16::try_from(e).is_ok() {
+                return Some(format!("http://127.0.0.1:{e}"));
+            }
+        }
+    }
+    None
+}
+
 #[tauri::command]
-pub async fn wizard_test_whisper(url: String) -> Result<TestConnectResult, CommandError> {
-    Ok(crate::wizard::test_whisper_endpoint(&url).await)
+pub async fn wizard_test_whisper(
+    bridge: Br<'_>,
+    url: String,
+) -> Result<TestConnectResult, CommandError> {
+    // For the local bundled server, probe the port it is ACTUALLY on — the
+    // daemon falls back from the configured port when another app holds it.
+    // `current()` only peeks at an existing connection (never spawns a
+    // daemon), so a wizard run without one probes `url` exactly as before.
+    let mut target = url;
+    if target.starts_with("http://127.0.0.1:") {
+        if let Some(b) = bridge.current() {
+            if let Ok(Response::Ok(status)) = b.request(Request::DaemonStatus).await {
+                if let Some(rewritten) = effective_local_whisper_url(&target, &status) {
+                    target = rewritten;
+                }
+            }
+        }
+    }
+    Ok(crate::wizard::test_whisper_endpoint(&target).await)
 }
 
 #[tauri::command]
@@ -1589,6 +1636,88 @@ mod tests {
     use super::*;
 
     // ── forward() with no bridge ───────────────────────────────────────────
+
+    // ── effective_local_whisper_url ────────────────────────────────────────
+
+    /// A daemon_status payload with the given port fields (null when None).
+    fn status(
+        preferred: Option<u64>,
+        effective: Option<u64>,
+        pv_preferred: Option<u64>,
+        pv_effective: Option<u64>,
+    ) -> Value {
+        serde_json::json!({
+            "running": true,
+            "pid": 1,
+            "whisper_preferred_port": preferred,
+            "whisper_effective_port": effective,
+            "preview_whisper_preferred_port": pv_preferred,
+            "preview_whisper_effective_port": pv_effective,
+        })
+    }
+
+    #[test]
+    fn local_probe_url_follows_the_effective_port() {
+        // The bundled server fell back from 5809 — the wizard's "Test" must
+        // probe where it actually listens, with or without a trailing slash.
+        let s = status(Some(5809), Some(51234), None, None);
+        assert_eq!(
+            effective_local_whisper_url("http://127.0.0.1:5809", &s).as_deref(),
+            Some("http://127.0.0.1:51234")
+        );
+        assert_eq!(
+            effective_local_whisper_url("http://127.0.0.1:5809/", &s).as_deref(),
+            Some("http://127.0.0.1:51234")
+        );
+    }
+
+    #[test]
+    fn preview_probe_url_follows_the_preview_servers_port() {
+        let s = status(Some(5809), Some(5809), Some(5810), Some(52345));
+        assert_eq!(
+            effective_local_whisper_url("http://127.0.0.1:5810", &s).as_deref(),
+            Some("http://127.0.0.1:52345")
+        );
+    }
+
+    #[test]
+    fn non_matching_urls_are_left_alone() {
+        let s = status(Some(5809), Some(51234), None, None);
+        // External hosts, non-preferred local ports, and unparsable URLs are
+        // never rewritten — only the configured bundled endpoint is ours.
+        assert_eq!(
+            effective_local_whisper_url("http://10.0.0.7:5809", &s),
+            None
+        );
+        assert_eq!(
+            effective_local_whisper_url("http://127.0.0.1:9000", &s),
+            None
+        );
+        assert_eq!(effective_local_whisper_url("not a url", &s), None);
+    }
+
+    #[test]
+    fn no_rewrite_when_effective_matches_or_is_missing() {
+        // Server on its preferred port → nothing to fix.
+        let same = status(Some(5809), Some(5809), None, None);
+        assert_eq!(
+            effective_local_whisper_url("http://127.0.0.1:5809", &same),
+            None
+        );
+        // Server not running (effective null) → probe the configured URL so
+        // the test fails with the honest "unreachable" the user should see.
+        let down = status(Some(5809), None, None, None);
+        assert_eq!(
+            effective_local_whisper_url("http://127.0.0.1:5809", &down),
+            None
+        );
+        // Older daemon without the fields at all → unchanged behavior.
+        let old = serde_json::json!({ "running": true, "pid": 1 });
+        assert_eq!(
+            effective_local_whisper_url("http://127.0.0.1:5809", &old),
+            None
+        );
+    }
 
     #[tokio::test]
     async fn forward_disconnected_bridge_returns_descriptive_error() {

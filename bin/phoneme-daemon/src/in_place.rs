@@ -154,10 +154,14 @@ async fn transcribe_polish_type(
     let permit = state.whisper_sem.acquire().await;
     // Diarization is never run for dictation — speaker labels in typed text
     // would be noise, and the model pass costs more than the transcription.
-    let provider = state.transcription.provider(
-        cfg.in_place_provider_config(),
-        &DiarizationConfig::default(),
-    );
+    // Dictation's STT pick may point at the main or the preview bundled
+    // server; `apply` follows either to the port it actually listens on.
+    let stt_cfg = state
+        .whisper_ports
+        .apply(&cfg, cfg.in_place_provider_config());
+    let provider = state
+        .transcription
+        .provider(&stt_cfg, &DiarizationConfig::default());
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
     let transcription = provider
         .transcribe_with_segments(audio_path, language.as_deref())

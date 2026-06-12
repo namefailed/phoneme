@@ -16,7 +16,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | `provider` | `local` \| `openai` \| `groq` \| `deepgram` \| `assemblyai` \| `elevenlabs` \| `custom` | `local` | Transcription backend |
 | `external_url` | string | `http://127.0.0.1:5809` | OpenAI-compatible server base URL |
 | `model_path` | path | `""` | GGML model path (`.bin`) when `mode = bundled_model` |
-| `bundled_server_port` | u16 | `5809` | Local server port |
+| `bundled_server_port` | u16 | `5809` | **Preferred** local server port — when another app already holds it, the daemon starts whisper-server on a free port instead and every consumer follows automatically (see [troubleshooting](../user-guide/troubleshooting.md#-something-else-is-using-port-5809)) |
 | `bundled_server_args` | string[] | `[]` | Extra whisper-server CLI args |
 | `timeout_secs` | u64 | `60` | Transcription HTTP timeout |
 | `language` | string? | `null` | BCP-47 hint; omit for auto-detect |
@@ -28,7 +28,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 
 ## `[preview_whisper]` (optional)
 
-An optional, **independent** transcription provider used only for the live preview, so it never contends with the final transcription. It has the **same keys as `[whisper]`**. Omit the section entirely (the default) to make the preview reuse the main `[whisper]` provider. The final transcript always uses `[whisper]` regardless. Set a distinct `bundled_server_port` if you point it at a second local bundled model. See [Live Preview & Pre-Roll](../user-guide/streaming_preview_and_preroll.md).
+An optional, **independent** transcription provider used only for the live preview, so it never contends with the final transcription. It has the **same keys as `[whisper]`**. Omit the section entirely (the default) to make the preview reuse the main `[whisper]` provider. The final transcript always uses `[whisper]` regardless. Set a distinct `bundled_server_port` if you point it at a second local bundled model — like the main server's, it is a preference: a taken port makes the daemon fall back to a free one, and the preview never picks the main server's port. See [Live Preview & Pre-Roll](../user-guide/streaming_preview_and_preroll.md).
 
 ---
 

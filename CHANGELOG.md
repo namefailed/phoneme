@@ -23,6 +23,15 @@ trust boundary. Verified against current code.*
   settings section exposes them, plus a **Re-embed all recordings** action
   (`ReembedAll` IPC) that re-indexes the library after a model change.
 - [x] **Semantic relevance chip** in the recordings list during a semantic query.
+- [x] **"More like this"** — open a recording → find semantically similar ones,
+  for free: the recording's already-stored chunk vectors are averaged into the
+  query (no fresh embedding; `catalog::more_like_this`, `MoreLikeThis` IPC) and
+  the library is ranked by best-matching chunk, excluding the source and its own
+  meeting's other track. **✨ Similar** button in the detail action row and the
+  merged meeting view fills the list with the results (same relevance chips; a
+  `~similar:` pill in the search box returns to the normal list); CLI parity via
+  `phoneme search --like <RECORDING_ID>`. A not-yet-indexed recording reports it
+  clearly instead of returning nothing.
 
 ### Meetings
 
@@ -85,6 +94,14 @@ trust boundary. Verified against current code.*
   hostnames resolve and the most restrictive class wins; redirects are no
   longer followed. Hook-test output is scrubbed of credential shapes
   (sk-/ghp_/AKIA/Bearer/key= and friends) before it reaches the UI.
+- [x] **Bundled whisper-server ports fall back automatically** — 5809/5810 are
+  now *preferred* ports: when another app already holds one, the daemon starts
+  whisper-server on a free OS-assigned port instead (logged at warn), publishes
+  the live value (`daemon_status` reports preferred + effective per server),
+  and every consumer — final transcription, live preview, dictation, the
+  Settings/wizard "Test" probe — dials the effective port. The preview's
+  choice can never collide with the main server's
+  (`whisper_supervisor.rs`, `app_state.rs`).
 - [x] **Pinned download checksums (S-H7)** — every wizard artifact (whisper GGML
   weights, the semantic model + tokenizer, the whisper-server zip) is verified
   against a pinned SHA-256 before use; the zip is checked before extraction,
@@ -127,8 +144,14 @@ trust boundary. Verified against current code.*
 
 ### UX wiring
 
-- [x] **Queue failed-items count + clear** — the queue panel surfaces the `failed/`
-  count and lets you dismiss it (`QueuePanel.ts`).
+- [x] **Queue failed-items badge + failure details** — the queue panel surfaces the
+  `failed/` count; clicking the badge opens a details panel: one row per failed
+  recording with the step that broke (Transcription / Hook), the error text
+  (captured live off the failure events; selectable), and when — per-row **Retry**
+  (re-runs the whole pipeline) and **Open**, a sequential **Retry all** with a
+  progress count, and the quarantine **Clear failed** moved into the footer (the
+  recordings keep their Failed status and stay in the library)
+  (`QueuePanel.ts`, `FailedPanel.ts`).
 - [x] **Import audio** button in Settings → Storage (`SectionStorage.ts`).
 
 ### Dictation (transcribe in place)

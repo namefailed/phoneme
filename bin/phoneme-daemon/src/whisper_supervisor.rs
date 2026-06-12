@@ -45,6 +45,50 @@ fn effective_model_path(configured_model_path: &str, override_model: Option<&str
     }
 }
 
+/// How many times the fallback probe re-asks the OS for an ephemeral port when
+/// the previous answer landed on an excluded one (or the bind itself raced).
+const PORT_FALLBACK_ATTEMPTS: usize = 5;
+
+/// True when `port` can currently be bound on the loopback interface
+/// whisper-server listens on. The listener is dropped immediately — this is a
+/// pre-flight probe, not a reservation, so another process can still win the
+/// port before whisper-server binds it; the server then exits and the
+/// supervisor loop simply probes again.
+fn port_is_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+/// Pre-flight port choice for a bundled whisper-server: the preferred
+/// (configured) port when it is free, otherwise a free OS-assigned fallback.
+/// The startup sweep has already killed every whisper-server on the box, so
+/// anything still holding the preferred port is a foreign app we must route
+/// around, not ours to fight.
+///
+/// `exclude` lists ports the caller must never pick even when they probe free:
+/// the sibling server's published/configured port, which can be momentarily
+/// unbound while that server restarts. This is what keeps the preview's
+/// fallback from colliding with the main server's choice.
+///
+/// If every fallback attempt fails, the preferred port is returned anyway —
+/// the spawn then fails (or the server exits at bind) and the supervisor
+/// retries on its normal backoff, which matches the pre-probe behavior.
+fn choose_listen_port(preferred: u16, exclude: &[u16]) -> u16 {
+    if !exclude.contains(&preferred) && port_is_free(preferred) {
+        return preferred;
+    }
+    for _ in 0..PORT_FALLBACK_ATTEMPTS {
+        let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 0)) else {
+            continue;
+        };
+        if let Ok(addr) = listener.local_addr() {
+            if !exclude.contains(&addr.port()) {
+                return addr.port();
+            }
+        }
+    }
+    preferred
+}
+
 /// Test-injection-friendly configuration. `binary_override` lets integration
 /// tests substitute a stub for the real `whisper-server.exe`.
 #[allow(dead_code)]
@@ -81,6 +125,7 @@ pub async fn run_with(
 
         if cfg.whisper.mode == WhisperMode::External {
             // In external mode, we don't manage a bundled server. Just wait a bit and re-check.
+            state.whisper_ports.set_main(None);
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
                 _ = shutdown.wait() => return Ok(()),
@@ -92,6 +137,7 @@ pub async fn run_with(
             None => match locate_bundled_server() {
                 Ok(p) => p,
                 Err(e) => {
+                    state.whisper_ports.set_main(None);
                     tracing::error!(error = %e, "whisper-server binary not found, waiting...");
                     tokio::select! {
                         _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
@@ -110,6 +156,7 @@ pub async fn run_with(
             effective_model_path(&cfg.whisper.model_path, spawned_override.as_deref());
 
         if model_to_run.is_empty() || !std::path::Path::new(&model_to_run).exists() {
+            state.whisper_ports.set_main(None);
             tracing::info!("whisper model file is empty or missing, waiting for download...");
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
@@ -117,12 +164,37 @@ pub async fn run_with(
             }
         }
 
+        // Pre-flight port probe: the configured port is a preference. When a
+        // foreign app holds it, route around it with a free OS-assigned port
+        // and publish the choice so consumers dial the right server. The
+        // preview's published + configured ports are excluded so the two
+        // servers can never choose the same one.
+        let preferred_port = cfg.whisper.bundled_server_port;
+        let mut exclude = Vec::new();
+        if let Some(p) = state.whisper_ports.preview() {
+            exclude.push(p);
+        }
+        if cfg.preview_needs_own_server() {
+            if let Some(pv) = cfg.preview_whisper.as_ref() {
+                exclude.push(pv.bundled_server_port);
+            }
+        }
+        let port = choose_listen_port(preferred_port, &exclude);
+        if port != preferred_port {
+            tracing::warn!(
+                "preferred port {preferred_port} in use by another app — whisper-server starting on {port}"
+            );
+        }
+        // Published BEFORE the spawn so the preview's probe excludes it even
+        // while whisper-server is still coming up.
+        state.whisper_ports.set_main(Some(port));
+
         let mut command = Command::new(&server_path);
         command
             .arg("-m")
             .arg(&model_to_run)
             .arg("--port")
-            .arg(cfg.whisper.bundled_server_port.to_string())
+            .arg(port.to_string())
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--inference-path")
@@ -148,6 +220,7 @@ pub async fn run_with(
         let mut child = match command.spawn() {
             Ok(c) => c,
             Err(e) => {
+                state.whisper_ports.set_main(None);
                 tracing::error!(error = %e, "failed to spawn whisper-server");
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
@@ -155,7 +228,11 @@ pub async fn run_with(
             }
         };
         assign_to_daemon_job(&state, &child);
-        tracing::info!(pid = child.id().unwrap_or(0), "whisper-server spawned");
+        tracing::info!(
+            pid = child.id().unwrap_or(0),
+            port,
+            "whisper-server spawned"
+        );
         let spawned_at = Instant::now();
         let mut check_interval = tokio::time::interval(Duration::from_secs(1));
         check_interval.tick().await; // consume first tick
@@ -185,6 +262,10 @@ pub async fn run_with(
                         Ok(status) => tracing::warn!(?status, "whisper-server exited"),
                         Err(e) => tracing::warn!(error = %e, "wait on whisper-server failed"),
                     }
+                    // Down for at least the backoff sleep — consumers fall
+                    // back to the configured port until the respawn publishes
+                    // a fresh choice.
+                    state.whisper_ports.set_main(None);
                     if spawned_at.elapsed() >= Duration::from_secs(60) {
                         backoff = RESTART_BACKOFF_INITIAL;
                     }
@@ -223,6 +304,7 @@ pub async fn run_with(
                 _ = shutdown.wait() => {
                     tracing::info!("shutdown — killing whisper-server");
                     let _ = kill_gracefully(&mut child).await;
+                    state.whisper_ports.set_main(None);
                     return Ok(());
                 }
             }
@@ -264,6 +346,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
 
         if !cfg.preview_needs_own_server() {
+            state.whisper_ports.set_preview(None);
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
                 _ = shutdown.wait() => return Ok(()),
@@ -271,6 +354,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         }
         // Safe: preview_needs_own_server() implies preview_whisper is Some.
         let Some(pv) = cfg.preview_whisper.as_ref() else {
+            state.whisper_ports.set_preview(None);
             tokio::time::sleep(Duration::from_secs(5)).await;
             continue;
         };
@@ -278,6 +362,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         let server_path = match locate_bundled_server() {
             Ok(p) => p,
             Err(e) => {
+                state.whisper_ports.set_preview(None);
                 tracing::error!(error = %e, "preview: whisper-server binary not found, waiting...");
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
@@ -287,6 +372,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         };
 
         if pv.model_path.is_empty() || !std::path::Path::new(&pv.model_path).exists() {
+            state.whisper_ports.set_preview(None);
             tracing::info!("preview model_path empty or missing, waiting for download...");
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
@@ -294,12 +380,31 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
             }
         }
 
+        // Pre-flight port probe, mirroring the main supervisor's — and
+        // excluding the main server's published + configured ports so the
+        // preview can never land on (or race for) the main server's choice.
+        let preferred_port = pv.bundled_server_port;
+        let mut exclude = Vec::new();
+        if let Some(p) = state.whisper_ports.main() {
+            exclude.push(p);
+        }
+        if cfg.whisper.mode != WhisperMode::External {
+            exclude.push(cfg.whisper.bundled_server_port);
+        }
+        let port = choose_listen_port(preferred_port, &exclude);
+        if port != preferred_port {
+            tracing::warn!(
+                "preferred port {preferred_port} in use by another app — preview whisper-server starting on {port}"
+            );
+        }
+        state.whisper_ports.set_preview(Some(port));
+
         let mut command = Command::new(&server_path);
         command
             .arg("-m")
             .arg(&pv.model_path)
             .arg("--port")
-            .arg(pv.bundled_server_port.to_string())
+            .arg(port.to_string())
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--inference-path")
@@ -331,6 +436,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         let mut child = match command.spawn() {
             Ok(c) => c,
             Err(e) => {
+                state.whisper_ports.set_preview(None);
                 tracing::error!(error = %e, "failed to spawn preview whisper-server");
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
@@ -340,7 +446,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         assign_to_daemon_job(&state, &child);
         tracing::info!(
             pid = child.id().unwrap_or(0),
-            port = pv.bundled_server_port,
+            port,
             "preview whisper-server spawned"
         );
         let spawned_at = Instant::now();
@@ -358,6 +464,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
                         Ok(status) => tracing::warn!(?status, "preview whisper-server exited"),
                         Err(e) => tracing::warn!(error = %e, "wait on preview whisper-server failed"),
                     }
+                    state.whisper_ports.set_preview(None);
                     if spawned_at.elapsed() >= Duration::from_secs(60) {
                         backoff = RESTART_BACKOFF_INITIAL;
                     }
@@ -394,6 +501,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
                 _ = shutdown.wait() => {
                     tracing::info!("shutdown — killing preview whisper-server");
                     let _ = kill_gracefully(&mut child).await;
+                    state.whisper_ports.set_preview(None);
                     return Ok(());
                 }
             }
@@ -477,7 +585,7 @@ fn locate_bundled_server() -> anyhow::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::effective_model_path;
+    use super::{choose_listen_port, effective_model_path, port_is_free};
 
     #[test]
     fn effective_model_prefers_override_when_present() {
@@ -511,5 +619,50 @@ mod tests {
             effective_model_path("C:/models/base.bin", Some("")),
             "C:/models/base.bin"
         );
+    }
+
+    /// Ask the OS for a port that is free right now (the listener is dropped
+    /// before returning, the same probe-then-release pattern the supervisor
+    /// uses).
+    fn free_port() -> u16 {
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral");
+        l.local_addr().expect("local_addr").port()
+    }
+
+    #[test]
+    fn port_probe_keeps_a_free_preferred_port() {
+        // The documented default stays the documented default whenever it is
+        // actually available — no gratuitous port hopping.
+        let preferred = free_port();
+        assert_eq!(choose_listen_port(preferred, &[]), preferred);
+    }
+
+    #[test]
+    fn port_probe_falls_back_when_preferred_is_taken() {
+        // Squat a port exactly the way a foreign app would (the startup sweep
+        // killed every whisper-server, so a held port is never ours) and keep
+        // holding it through the probe.
+        let squatter = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind squatter");
+        let taken = squatter.local_addr().expect("local_addr").port();
+        assert!(!port_is_free(taken), "squatted port must probe as taken");
+        let chosen = choose_listen_port(taken, &[]);
+        assert_ne!(chosen, taken, "must not pick the squatted port");
+        assert_ne!(chosen, 0, "fallback must be a real OS-assigned port");
+        drop(squatter);
+    }
+
+    #[test]
+    fn port_probe_never_picks_an_excluded_port() {
+        // The preview excludes the main server's choice even while that port
+        // is momentarily unbound (main mid-restart): a free-but-excluded
+        // preferred port must still fall back, and the fallback itself must
+        // avoid the exclusion list.
+        let reserved = free_port();
+        let chosen = choose_listen_port(reserved, &[reserved]);
+        assert_ne!(
+            chosen, reserved,
+            "an excluded port is off limits even when free"
+        );
+        assert_ne!(chosen, 0);
     }
 }
