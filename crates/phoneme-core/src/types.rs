@@ -9,6 +9,12 @@ pub enum RecordingStatus {
     Recording,
     Paused,
     Transcribing,
+    /// LLM post-processing (cleanup) is rewriting the transcript.
+    CleaningUp,
+    /// The auto-summary LLM step is running.
+    Summarizing,
+    /// The auto-tag LLM step is suggesting tags.
+    Tagging,
     HookRunning,
     Done,
     TranscribeFailed,
@@ -21,6 +27,9 @@ impl RecordingStatus {
             Self::Recording => "recording",
             Self::Paused => "paused",
             Self::Transcribing => "transcribing",
+            Self::CleaningUp => "cleaning_up",
+            Self::Summarizing => "summarizing",
+            Self::Tagging => "tagging",
             Self::HookRunning => "hook_running",
             Self::Done => "done",
             Self::TranscribeFailed => "transcribe_failed",

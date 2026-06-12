@@ -21,6 +21,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { setHeaderHidden } from "./headerBar";
+import { setStepNotifications } from "./notifications";
 
 type HelpItem = { combo: string; label: string };
 type HelpGroup = { title: string; items: HelpItem[] };
@@ -746,6 +747,8 @@ export function initKeyboard() {
     const speeds: Record<string, string> = { off: "0ms", fast: "110ms", normal: "200ms", slow: "320ms" };
     const dur = speeds[String(cfg?.interface?.animation_speed ?? "normal")] ?? "200ms";
     document.documentElement.style.setProperty("--pane-anim", dur);
+    // Step-completion toasts (errors always show regardless).
+    setStepNotifications(cfg?.interface?.step_notifications ?? true);
   };
   invoke("read_config").then(apply).catch(() => {});
   window.addEventListener("config:saved", (e: Event) => apply((e as CustomEvent).detail));

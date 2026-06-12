@@ -38,8 +38,9 @@ export function statusToClass(status: string): "done" | "failed" | "pending" {
 
 /**
  * Returns the full human-readable label for a recording status.
- * Preserves the distinction between Recording, Transcribing, and Hook Running
- * rather than collapsing all three into a generic "Pending".
+ * Every pipeline step has its own label (Transcribing, Cleaning Up,
+ * Summarizing, Tagging, Hook Running) so the list/detail/activity views show
+ * exactly which step a recording is on, never a generic "Pending".
  */
 export function statusLabel(status: string): string {
   switch (status) {
@@ -47,7 +48,11 @@ export function statusLabel(status: string): string {
     case "transcribe_failed": return "Transcription Failed";
     case "hook_failed":       return "Hook Failed";
     case "recording":         return "Recording";
+    case "paused":            return "Paused";
     case "transcribing":      return "Transcribing";
+    case "cleaning_up":       return "Cleaning Up";
+    case "summarizing":       return "Summarizing";
+    case "tagging":           return "Tagging";
     case "hook_running":      return "Hook Running";
     default:                  return status;
   }

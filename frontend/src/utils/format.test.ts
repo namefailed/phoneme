@@ -50,6 +50,9 @@ describe("statusToClass", () => {
   it("maps all in-progress statuses to 'pending'", () => {
     expect(statusToClass("recording")).toBe("pending");
     expect(statusToClass("transcribing")).toBe("pending");
+    expect(statusToClass("cleaning_up")).toBe("pending");
+    expect(statusToClass("summarizing")).toBe("pending");
+    expect(statusToClass("tagging")).toBe("pending");
     expect(statusToClass("hook_running")).toBe("pending");
   });
 
@@ -64,6 +67,9 @@ describe("statusLabel", () => {
     expect(statusLabel("transcribe_failed")).toBe("Transcription Failed");
     expect(statusLabel("hook_failed")).toBe("Hook Failed");
     expect(statusLabel("recording")).toBe("Recording");
+    expect(statusLabel("cleaning_up")).toBe("Cleaning Up");
+    expect(statusLabel("summarizing")).toBe("Summarizing");
+    expect(statusLabel("tagging")).toBe("Tagging");
     expect(statusLabel("transcribing")).toBe("Transcribing");
     expect(statusLabel("hook_running")).toBe("Hook Running");
   });

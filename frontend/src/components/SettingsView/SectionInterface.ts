@@ -232,6 +232,21 @@ export class SectionInterface {
           </div>
         </div>
 
+        <div class="settings-field">
+          <label>Step notifications</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "interface.step_notifications", label: "", kind: "checkbox" },
+              config.interface.step_notifications ?? true,
+            )}</div>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              Show a toast as each processing step finishes (transcribed, cleaned up, summarized,
+              tags suggested) and when a recording is fully ready. Errors always notify, even
+              with this off.
+            </span>
+          </div>
+        </div>
+
         <div class="settings-field" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Visible Columns</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">

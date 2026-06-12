@@ -16,9 +16,16 @@ export type ToastType = "success" | "error" | "info" | "warning";
 const AUTO_DISMISS_MS: Record<ToastType, number> = {
   success: 3000,
   info: 3500,
-  warning: 5000,
-  error: 0, // errors persist until the user dismisses them
+  warning: 6000,
+  // Errors used to persist forever; now they get a long-but-finite window.
+  // Hovering pauses the clock (see below), so "I was reading it" never loses
+  // the message — and callers can still pass duration 0 for a sticky toast.
+  error: 10000,
 };
+
+/** Most toasts visible at once — a burst (e.g. bulk re-run failures) drops the
+ *  oldest instead of wallpapering the screen. */
+const MAX_STACK = 6;
 
 const ICONS: Record<ToastType, string> = {
   success: "✓",
@@ -53,6 +60,11 @@ export function showToast(
   const container = getContainer();
   const dismissAfter = duration ?? AUTO_DISMISS_MS[type];
 
+  // Cap the stack — drop the oldest toast(s) first (the first DOM children).
+  while (container.children.length >= MAX_STACK) {
+    container.firstElementChild?.remove();
+  }
+
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
   toast.setAttribute("role", "alert");
@@ -60,6 +72,7 @@ export function showToast(
     <span class="toast-icon" aria-hidden="true">${ICONS[type]}</span>
     <span class="toast-msg">${escapeHtml(message)}</span>
     <button class="toast-close" aria-label="Dismiss notification">×</button>
+    ${dismissAfter > 0 ? `<span class="toast-countdown" style="animation-duration:${dismissAfter}ms"></span>` : ""}
   `;
 
   const dismiss = () => {
@@ -74,8 +87,33 @@ export function showToast(
   container.appendChild(toast);
 
   if (dismissAfter > 0) {
-    setTimeout(dismiss, dismissAfter);
+    attachPausableTimer(toast, dismissAfter, dismiss);
   }
+}
+
+/**
+ * Auto-dismiss `el` after `totalMs`, but PAUSE the clock while the pointer is
+ * over it — reading or aiming for a button must never race the timeout. The
+ * countdown bar pauses in sync via CSS (`.toast:hover .toast-countdown`).
+ * Resuming always grants a small grace so the toast can't vanish the instant
+ * the pointer leaves.
+ */
+function attachPausableTimer(el: HTMLElement, totalMs: number, onExpire: () => void) {
+  let remaining = totalMs;
+  let startedAt = Date.now();
+  let timer: ReturnType<typeof setTimeout> | null = setTimeout(onExpire, remaining);
+  el.addEventListener("mouseenter", () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+      remaining -= Date.now() - startedAt;
+    }
+  });
+  el.addEventListener("mouseleave", () => {
+    if (!el.isConnected) return;
+    startedAt = Date.now();
+    timer = setTimeout(onExpire, Math.max(800, remaining));
+  });
 }
 
 /**
@@ -131,7 +169,23 @@ export function showActionToast(opts: {
     .addEventListener("click", () => finish(onExpire));
 
   container.appendChild(toast);
-  timer = setTimeout(() => finish(onExpire), durationMs);
+  // Hover pauses the undo window — aiming for the button must not race it.
+  // `finish` is idempotent, so the pausable timer can never double-fire.
+  let remaining = durationMs;
+  let startedAt = Date.now();
+  timer = setTimeout(() => finish(onExpire), remaining);
+  toast.addEventListener("mouseenter", () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = undefined;
+      remaining -= Date.now() - startedAt;
+    }
+  });
+  toast.addEventListener("mouseleave", () => {
+    if (settled) return;
+    startedAt = Date.now();
+    timer = setTimeout(() => finish(onExpire), Math.max(800, remaining));
+  });
 }
 
 function escapeHtml(s: string): string {

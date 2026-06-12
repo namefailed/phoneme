@@ -593,6 +593,9 @@ export class HeaderBarElement extends LitElement {
           <option value="">All status</option>
           <option value="recording" ?selected=${f.status === "recording"}>Recording</option>
           <option value="transcribing" ?selected=${f.status === "transcribing"}>Transcribing</option>
+          <option value="cleaning_up" ?selected=${f.status === "cleaning_up"}>Cleaning Up</option>
+          <option value="summarizing" ?selected=${f.status === "summarizing"}>Summarizing</option>
+          <option value="tagging" ?selected=${f.status === "tagging"}>Tagging</option>
           <option value="hook_running" ?selected=${f.status === "hook_running"}>Hook Running</option>
           <option value="done" ?selected=${f.status === "done"}>Done</option>
           <option value="transcribe_failed" ?selected=${f.status === "transcribe_failed"}>Transcription Failed</option>
