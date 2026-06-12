@@ -298,11 +298,13 @@ pub fn summary_llm_config(cfg: &Config) -> LlmPostProcessConfig {
 }
 
 /// Generate an LLM summary of `transcript`, returning `(summary, model)` on
-/// success or `None` when summarization can't run (no usable provider) or
-/// fails. Non-fatal: callers log and continue.
+/// success or a human-readable reason on failure — the reason reaches the UI
+/// toast verbatim, so it must say WHAT went wrong (a stale endpoint, an
+/// unreachable provider, an empty reply), not just that something did.
+/// Non-fatal: callers surface the error and continue.
 ///
 /// Summaries reuse the `[llm_post_process]` provider connection (endpoint, API
-/// key, provider type); only the model and prompt are summary-specific. The
+/// key, provider type) wherever the `[summary]` fields are blank. The
 /// post-processor's `enabled` flag is irrelevant here — summarization is gated
 /// by its own switch — so we force a working config clone with the summary
 /// model/prompt swapped in.
@@ -311,9 +313,12 @@ pub async fn generate_summary(
     cfg: &Config,
     id: &RecordingId,
     transcript: &str,
-) -> Option<(String, String)> {
+    // `Result` here is std's two-arg form, NOT the crate's `error::Result`
+    // alias that the rest of this module uses — the Err side is a plain
+    // user-facing string, not a phoneme error.
+) -> std::result::Result<(String, String), String> {
     if transcript.trim().is_empty() {
-        return None;
+        return Err("the transcript is empty — nothing to summarize".into());
     }
     let llm_cfg = summary_llm_config(cfg);
     let model = llm_cfg.model.clone();
@@ -324,7 +329,10 @@ pub async fn generate_summary(
                 provider = %llm_cfg.provider,
                 "summary requested but no usable LLM provider is configured"
             );
-            return None;
+            return Err(format!(
+                "no usable AI provider configured (provider \"{}\") — set one under Settings → Post-Processing",
+                llm_cfg.provider
+            ));
         }
     };
     match run_llm_stage(
@@ -337,14 +345,24 @@ pub async fn generate_summary(
     )
     .await
     {
-        Ok(summary) if !summary.trim().is_empty() => Some((summary, model)),
+        Ok(summary) if !summary.trim().is_empty() => Ok((summary, model)),
         Ok(_) => {
             tracing::warn!("summary LLM returned empty output");
-            None
+            Err(format!("the model ({model}) returned empty output"))
         }
         Err(e) => {
             tracing::error!(error = %e, "summary generation failed");
-            None
+            // Name the endpoint when one is overridden — a stale per-step URL
+            // (e.g. left over from trying a different provider) is the classic
+            // cause and invisible in a generic message.
+            if cfg.summary.api_url.trim().is_empty() {
+                Err(e.to_string())
+            } else {
+                Err(format!(
+                    "{e} (summary endpoint override: {})",
+                    cfg.summary.api_url
+                ))
+            }
         }
     }
 }
@@ -361,7 +379,7 @@ async fn maybe_auto_summarize(state: &AppState, cfg: &Config, id: &RecordingId, 
         stage: PipelineStage::Summarizing,
     });
     match generate_summary(state, cfg, id, transcript).await {
-        Some((summary, model)) => {
+        Ok((summary, model)) => {
             if let Err(e) = state
                 .catalog
                 .update_summary(id, &summary, Some(&model))
@@ -379,12 +397,12 @@ async fn maybe_auto_summarize(state: &AppState, cfg: &Config, id: &RecordingId, 
                     .emit(DaemonEvent::SummaryUpdated { id: id.clone() });
             }
         }
-        None => {
-            // Auto-summary failed — surface it distinctly (the transcript itself
-            // is fine; only the optional summary step failed).
+        Err(reason) => {
+            // Auto-summary failed — surface the REAL reason (the transcript
+            // itself is fine; only the optional summary step failed).
             state.events.emit(DaemonEvent::SummaryFailed {
                 id: id.clone(),
-                error: "summary generation failed (check the AI provider)".into(),
+                error: reason,
             });
         }
     }
