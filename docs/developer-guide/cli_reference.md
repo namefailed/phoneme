@@ -278,13 +278,41 @@ Test and manage your post-processing hooks.
 phoneme hook test
 ```
 
-### 🔄 `phoneme export <FILE>`
+### 🔄 `phoneme export`
 
-Bulk export all audio and metadata into a zip archive.
+Bulk export all audio and metadata into a zip archive, or export a recording's
+transcript segments as a caption file (SRT or WebVTT).
+
+**Library zip export**
 
 ```bash
 phoneme export backup.zip
 ```
+
+**Caption export flags**
+
+| Flag | Description |
+|------|-------------|
+| `--captions <RECORDING_ID>` | Export captions for this recording instead of zipping the library. |
+| `--format <srt\|vtt>` | Caption format: `srt` (default) or `vtt`. |
+| `-o <FILE>` | Write captions to FILE. Use `-` for stdout. Defaults to `<recording-id>.srt` / `<recording-id>.vtt` in the current directory. |
+
+**Examples**
+
+```bash
+# Export captions as SRT (default) for a recording — writes 20260519T143500823.srt
+phoneme export --captions 20260519T143500823
+
+# Export as WebVTT to an explicit path
+phoneme export --captions 20260519T143500823 --format vtt -o captions/meeting.vtt
+
+# Pipe SRT directly to another tool
+phoneme export --captions 20260519T143500823 -o -
+```
+
+Recordings that have no stored segments (e.g. transcribed before timing data
+was captured) print a clear message and exit non-zero — retranscribe the
+recording to generate segments first.
 
 ### 🏷️ `phoneme tag`
 

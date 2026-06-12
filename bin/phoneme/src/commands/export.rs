@@ -1,11 +1,115 @@
-use crate::args::ExportArgs;
-use phoneme_core::{Config, ListFilter};
+use crate::args::{CaptionFormat, ExportArgs};
+use phoneme_core::{Config, ListFilter, TranscriptSegment};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::process::ExitCode;
 use zip::write::SimpleFileOptions;
 
 pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
+    // Caption path: --captions present → fetch segments, emit SRT/VTT.
+    if let Some(ref id_str) = args.captions {
+        return run_captions(id_str, args.format, args.out.as_deref(), cfg).await;
+    }
+
+    // Library-zip path: requires the positional output argument.
+    let zip_path = match args.output {
+        Some(ref p) => p.clone(),
+        None => {
+            eprintln!(
+                "error: an output file path is required when --captions is not set\n\
+                 usage: phoneme export <FILE>  or  phoneme export --captions <ID>"
+            );
+            return ExitCode::from(crate::exit::GENERIC_FAIL);
+        }
+    };
+
+    run_zip(&zip_path, cfg).await
+}
+
+// ── caption export ─────────────────────────────────────────────────────────────
+
+async fn run_captions(
+    id_str: &str,
+    format: CaptionFormat,
+    out_path: Option<&str>,
+    cfg: &Config,
+) -> ExitCode {
+    let id = match phoneme_core::RecordingId::parse(id_str) {
+        Some(id) => id,
+        None => {
+            eprintln!("error: '{}' is not a valid recording id", id_str);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let mut conn = match crate::client::Client::connect(cfg).await {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+
+    let value = match conn.send(phoneme_ipc::Request::GetSegments { id }).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    let segments: Vec<TranscriptSegment> = match serde_json::from_value(value) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: parsing segments response: {e}");
+            return ExitCode::from(crate::exit::GENERIC_FAIL);
+        }
+    };
+
+    if segments.is_empty() {
+        eprintln!(
+            "no segments stored — retranscribe this recording to generate them"
+        );
+        return ExitCode::from(crate::exit::NOT_FOUND);
+    }
+
+    let body = match format {
+        CaptionFormat::Srt => phoneme_core::export::segments_to_srt(&segments),
+        CaptionFormat::Vtt => phoneme_core::export::segments_to_vtt(&segments),
+    };
+
+    let ext = match format {
+        CaptionFormat::Srt => "srt",
+        CaptionFormat::Vtt => "vtt",
+    };
+
+    // Determine where to write: "-" → stdout, explicit path → file, else
+    // default to `<recording-id>.<ext>` in the current directory.
+    let dest = out_path.map(str::to_string).unwrap_or_else(|| {
+        format!("{}.{}", id_str, ext)
+    });
+
+    if dest == "-" {
+        if let Err(e) = std::io::stdout().write_all(body.as_bytes()) {
+            eprintln!("error writing to stdout: {e}");
+            return ExitCode::from(crate::exit::GENERIC_FAIL);
+        }
+    } else {
+        match File::create(&dest) {
+            Ok(mut f) => {
+                if let Err(e) = f.write_all(body.as_bytes()) {
+                    eprintln!("error writing to {dest}: {e}");
+                    return ExitCode::from(crate::exit::GENERIC_FAIL);
+                }
+            }
+            Err(e) => {
+                eprintln!("failed to create {dest}: {e}");
+                return ExitCode::from(crate::exit::GENERIC_FAIL);
+            }
+        }
+        println!("captions written to {dest}");
+    }
+
+    ExitCode::SUCCESS
+}
+
+// ── library zip export ─────────────────────────────────────────────────────────
+
+async fn run_zip(zip_path: &str, cfg: &Config) -> ExitCode {
     let mut conn = match crate::client::Client::connect(cfg).await {
         Ok(c) => c,
         Err(e) => return e,
@@ -40,7 +144,7 @@ pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
         }
     };
 
-    let file = match File::create(&args.output) {
+    let file = match File::create(zip_path) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("failed to create output file: {e}");
@@ -110,6 +214,6 @@ pub async fn run(args: ExportArgs, cfg: &Config) -> ExitCode {
         return ExitCode::from(crate::exit::GENERIC_FAIL);
     }
 
-    println!("exported to {}", args.output);
+    println!("exported to {}", zip_path);
     ExitCode::SUCCESS
 }
