@@ -464,6 +464,21 @@ export class RecordingsListElement extends LitElement {
     });
   }
 
+  /** Vim `zz`: scroll so the cursor row sits at the vertical center of the
+   *  list. Smooth unless animations are off (the global --pane-anim is 0). */
+  centerCursor() {
+    if (this.focusedIndex < 0) return;
+    void this.updateComplete.then(() => {
+      const rows = this.querySelectorAll<HTMLElement>(".rec-row, .rec-group-head");
+      const animsOff =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--pane-anim")) === 0;
+      rows[this.focusedIndex]?.scrollIntoView({
+        block: "center",
+        behavior: animsOff ? "auto" : "smooth",
+      });
+    });
+  }
+
   /** Vim `gg` / `G`: jump the keyboard cursor to the first / last visible row. */
   focusEdge(edge: "top" | "bottom") {
     const rows = this.lastNavRows;

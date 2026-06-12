@@ -392,6 +392,10 @@ export class RecordingsView {
       case "pane-right": this.movePaneFocus("right"); break;
       case "list-top": this.list.focusEdge("top"); this.focusPane("list"); break;
       case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
+      // zz — center the list viewport on the cursor row.
+      case "list-center": this.list.centerCursor(); break;
+      // g d — jump the keyboard into the detail pane (no-op when nothing open).
+      case "focus-detail": if (this.detailVisible) this.focusPane("detail"); break;
       case "edit": this.focusEditor(); break;
       case "delete": this.vimDelete(); break;
       case "sidebar-down": this.moveSidebarRow(1); break;
