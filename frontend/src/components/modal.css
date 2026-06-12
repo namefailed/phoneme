@@ -163,25 +163,52 @@
 
 /* ── Doctor (health check) modal ───────────────────────────────────────────── */
 .doctor-dialog { width: 520px; max-width: 92vw; }
-.doctor-summary {
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 9px;
-  border-radius: 999px;
-}
-.doctor-summary.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
-.doctor-summary.bad { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .doctor-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
   max-height: 60vh;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 0 0 4px;
 }
 .doctor-empty { padding: 24px; text-align: center; color: var(--fg-muted); font-size: 13px; }
 .doctor-empty.err { color: var(--err); }
+
+/* Health strip: the one-glance state (count chips per category) plus the
+   Fix All / Re-run actions, pinned to the top while the checks scroll. */
+.doctor-strip {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px 8px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.doctor-strip-state { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.doctor-strip-note { font-size: 12px; color: var(--fg-muted); }
+.doctor-strip-note.err { color: var(--err); }
+.doctor-strip-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.doctor-strip .modal-btn { padding: 4px 12px; font-size: 12px; }
+
+/* Per-category count chips — the house status-pill idiom. */
+.doctor-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.doctor-chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.doctor-chip.critical { color: var(--err); background: color-mix(in srgb, var(--err) 15%, transparent); }
+.doctor-chip.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.doctor-chip.info { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 15%, transparent); }
+
+/* Failing checks: full rows, first in the list. */
 .doctor-row {
   display: flex;
   align-items: center;
@@ -199,7 +226,6 @@
   border-radius: 50%;
   font-size: 12px; font-weight: 700;
 }
-.doctor-row.ok .doctor-icon { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
 .doctor-row.bad .doctor-icon { color: var(--err); background: color-mix(in srgb, var(--err) 16%, transparent); }
 .doctor-main { flex: 1; min-width: 0; }
 .doctor-name { font-size: 13px; font-weight: 600; color: var(--fg-default); }
@@ -228,8 +254,63 @@
 .doctor-hint { font-size: 11px; color: var(--warn); margin-top: 2px; }
 .doctor-hint::before { content: "fix: "; font-weight: 700; }
 
-/* Fix All sits left of Re-run/Close, away from the dismiss actions. */
-.doctor-fix-all { margin-right: auto; }
+/* Passing checks fold behind a <details>, closed by default — the house
+   disclosure idiom (chevron rotates open, see .settings-advanced). */
+.doctor-passing > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.doctor-passing > summary::-webkit-details-marker { display: none; }
+.doctor-passing > summary::marker { content: ""; }
+.doctor-passing > summary:hover { color: var(--fg-default); }
+.doctor-passing > summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.doctor-passing-chev { flex-shrink: 0; color: var(--fg-faded); transition: transform 0.18s ease; }
+.doctor-passing[open] > summary .doctor-passing-chev { transform: rotate(90deg); }
+.doctor-passing > summary:hover .doctor-passing-chev { color: var(--accent); }
+.doctor-passing-mark { color: var(--ok); font-weight: 700; }
+
+/* Expanded: compact one-line rows under small subsystem headers. */
+.doctor-group-title {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-faded);
+  margin: 9px 4px 2px;
+}
+.doctor-pass-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.doctor-pass-row:hover { background: var(--bg-surface); }
+.doctor-pass-row .doctor-pass-mark { flex: 0 0 auto; font-size: 11px; }
+.doctor-pass-name { color: var(--fg-default); font-weight: 600; white-space: nowrap; }
+.doctor-pass-detail {
+  color: var(--fg-muted);
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── Keyboard shortcuts cheat-sheet ("?") ─────────────────────────────────── */
 .kbd-help-dialog {

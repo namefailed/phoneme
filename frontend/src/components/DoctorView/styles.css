@@ -4,11 +4,66 @@
   flex-direction: column;
   background: var(--bg-deep);
 }
+.doctor-loading {
+  padding: 24px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+/* Health strip: the one-glance state (count chips per category) plus the
+   Fix All / Re-run actions, pinned to the top while the checks scroll. */
+.doctor-strip {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px 10px;
+  margin-bottom: 10px;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.doctor-strip-state { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.doctor-strip-note { font-size: 12px; color: var(--fg-muted); }
+.doctor-strip-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.doctor-strip-actions button {
+  background: var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--fg-default);
+  transition: all 0.15s ease-out;
+}
+.doctor-strip-actions button:hover:not(:disabled) {
+  background: var(--border-subtle);
+  border-color: var(--accent);
+}
+.doctor-strip-actions button:disabled { opacity: 0.6; cursor: default; }
+
+/* Per-category count chips — the house status-pill idiom. */
+.doctor-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.doctor-chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.doctor-chip.critical { color: var(--err); background: color-mix(in srgb, var(--err) 15%, transparent); }
+.doctor-chip.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.doctor-chip.info { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 15%, transparent); }
+
+/* Failing checks: full rows, first in the list. */
 .doctor-list {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   overflow: hidden;
+  margin-bottom: 12px;
 }
 .doctor-row {
   display: grid;
@@ -20,9 +75,6 @@
 }
 .doctor-row:last-child {
   border-bottom: none;
-}
-.doctor-row.ok .doctor-mark {
-  color: var(--ok);
 }
 .doctor-row.fail .doctor-mark {
   color: var(--err);
@@ -40,7 +92,7 @@
   font-size: 12px;
 }
 .doctor-fix {
-  background: rgba(203, 166, 247, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   border-radius: 4px;
   padding: 4px 10px;
@@ -75,3 +127,61 @@
   margin-top: 2px;
 }
 .doctor-hint::before { content: "fix: "; font-weight: 700; }
+
+/* Passing checks fold behind a <details>, closed by default — the house
+   disclosure idiom (chevron rotates open, see .settings-advanced). */
+.doctor-passing > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.doctor-passing > summary::-webkit-details-marker { display: none; }
+.doctor-passing > summary::marker { content: ""; }
+.doctor-passing > summary:hover { color: var(--fg-default); }
+.doctor-passing > summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.doctor-passing-chev { flex-shrink: 0; color: var(--fg-faded); transition: transform 0.18s ease; }
+.doctor-passing[open] > summary .doctor-passing-chev { transform: rotate(90deg); }
+.doctor-passing > summary:hover .doctor-passing-chev { color: var(--accent); }
+.doctor-passing-mark { color: var(--ok); font-weight: 700; }
+
+/* Expanded: compact one-line rows under small subsystem headers. */
+.doctor-group-title {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-faded);
+  margin: 10px 6px 2px;
+}
+.doctor-pass-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.doctor-pass-row:hover { background: var(--bg-elevated); }
+.doctor-pass-row .doctor-pass-mark { flex: 0 0 auto; font-size: 11px; }
+.doctor-pass-name { color: var(--fg-default); font-weight: 600; white-space: nowrap; }
+.doctor-pass-detail {
+  color: var(--fg-muted);
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

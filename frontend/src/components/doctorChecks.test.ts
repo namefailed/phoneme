@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { categoryMeta, fixAllPlan, type DoctorCheckInfo } from "./doctorChecks";
+import {
+  categoryMeta,
+  checkGroup,
+  fixAllPlan,
+  groupChecks,
+  healthCounts,
+  type DoctorCheckInfo,
+} from "./doctorChecks";
 
 const check = (over: Partial<DoctorCheckInfo>): DoctorCheckInfo => ({
   name: "x",
@@ -62,5 +69,76 @@ describe("fixAllPlan", () => {
   it("is empty when everything passes", () => {
     expect(fixAllPlan([check({ ok: true, fix_action: "open_config" })])).toEqual([]);
     expect(fixAllPlan([])).toEqual([]);
+  });
+});
+
+describe("checkGroup", () => {
+  it("maps every known check name to its subsystem", () => {
+    expect(checkGroup("Daemon")).toBe("Servers");
+    expect(checkGroup("Whisper server")).toBe("Servers");
+    expect(checkGroup("Live-preview server")).toBe("Servers");
+    expect(checkGroup("Ollama (optional)")).toBe("Servers");
+    expect(checkGroup("Whisper model file")).toBe("Models");
+    expect(checkGroup("Live-preview model")).toBe("Models");
+    expect(checkGroup("Semantic search model")).toBe("Models");
+    expect(checkGroup("Diarization models")).toBe("Models");
+    expect(checkGroup("Audio directory")).toBe("Storage");
+    expect(checkGroup("Disk space (recordings)")).toBe("Storage");
+    expect(checkGroup("Disk space (app data)")).toBe("Storage");
+    expect(checkGroup("Config file")).toBe("Configuration");
+    expect(checkGroup("Hook command")).toBe("Configuration");
+  });
+
+  it("falls back to Other for names it doesn't know", () => {
+    expect(checkGroup("Brand-new check")).toBe("Other");
+    expect(checkGroup("")).toBe("Other");
+    // The table maps the current backend names only; the pre-rename
+    // "Diarization model" (singular) from older daemons still renders,
+    // just ungrouped.
+    expect(checkGroup("Diarization model")).toBe("Other");
+  });
+});
+
+describe("groupChecks", () => {
+  it("buckets in display order, keeping check order within each group", () => {
+    const grouped = groupChecks([
+      check({ name: "Config file", ok: true }),
+      check({ name: "Whisper server", ok: true }),
+      check({ name: "Audio directory", ok: true }),
+      check({ name: "Mystery probe", ok: true }),
+      check({ name: "Ollama (optional)", ok: true }),
+    ]);
+    expect(grouped.map((g) => g.group)).toEqual(["Servers", "Storage", "Configuration", "Other"]);
+    expect(grouped[0].checks.map((c) => c.name)).toEqual(["Whisper server", "Ollama (optional)"]);
+    expect(grouped[3].checks.map((c) => c.name)).toEqual(["Mystery probe"]);
+  });
+
+  it("drops empty groups", () => {
+    expect(groupChecks([])).toEqual([]);
+    expect(groupChecks([check({ name: "Diarization models" })]).map((g) => g.group)).toEqual([
+      "Models",
+    ]);
+  });
+});
+
+describe("healthCounts", () => {
+  it("tallies passing checks and failures per category", () => {
+    expect(
+      healthCounts([
+        check({ ok: true }),
+        check({ ok: true }),
+        check({ ok: false, category: "critical" }),
+        check({ ok: false, category: "warning" }),
+        check({ ok: false, category: "info" }),
+      ]),
+    ).toEqual({ total: 5, passing: 2, critical: 1, warning: 1, info: 1 });
+  });
+
+  it("counts an uncategorized failure as warning (older daemons)", () => {
+    expect(healthCounts([check({ ok: false })]).warning).toBe(1);
+  });
+
+  it("is all zeroes on no checks", () => {
+    expect(healthCounts([])).toEqual({ total: 0, passing: 0, critical: 0, warning: 0, info: 0 });
   });
 });

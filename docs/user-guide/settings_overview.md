@@ -170,6 +170,15 @@ or transcription is broken), **Warning** (amber: something is degraded but
 capture still works) — plus a plain-English line on what the check verifies
 and a `fix:` hint with the next step.
 
+The Doctor triages instead of listing: a **health strip** stays pinned at the
+top with the one-glance state — "All systems good ✓", or count chips per
+category — alongside **Fix All** and **Re-run**. Failing checks come first as
+full rows (badge, explanation, fix hint, per-check Fix), while everything
+healthy folds into a single collapsed **"✓ N checks passing"** line — expand
+it for a compact list grouped by subsystem (Servers / Models / Storage /
+Configuration). Both the quick modal and the Settings Doctor tab use the same
+layout.
+
 The Doctor itself can **restart the bundled whisper-server(s)** with one click
 when the Whisper or live-preview probe fails — it sweeps hung or orphaned
 server processes and respawns them from your config (CLI:
