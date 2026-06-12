@@ -1710,13 +1710,9 @@ mod tests {
     fn http_downgrade_is_denied() {
         // Plain http (or anything not https) is rejected outright, even for an
         // otherwise-allowed host — no MITM-able transport for runnable bytes.
-        assert!(!is_allowed_download_url(
-            "http://huggingface.co/model.bin"
-        ));
+        assert!(!is_allowed_download_url("http://huggingface.co/model.bin"));
         assert!(!is_allowed_download_url("ftp://github.com/x"));
-        assert!(!is_allowed_download_url(
-            "HTTPS://github.com/x"
-        )); // scheme match is case-sensitive by design (starts_with "https://")
+        assert!(!is_allowed_download_url("HTTPS://github.com/x")); // scheme match is case-sensitive by design (starts_with "https://")
     }
 
     #[test]

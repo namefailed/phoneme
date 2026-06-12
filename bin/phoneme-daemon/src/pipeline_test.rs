@@ -854,7 +854,10 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     );
     assert_eq!(rec.hook_exit_code, Some(0), "the hook exited 0");
     assert!(
-        rec.hook_command.as_deref().unwrap_or("").contains("hook-fired"),
+        rec.hook_command
+            .as_deref()
+            .unwrap_or("")
+            .contains("hook-fired"),
         "the executed hook command is recorded, got {:?}",
         rec.hook_command
     );
@@ -866,8 +869,8 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     // ── Webhook: the POST body carries the documented HookPayload fields ──
     let received = webhook_server.received_requests().await.unwrap();
     assert_eq!(received.len(), 1, "the webhook fired exactly once");
-    let body: serde_json::Value = serde_json::from_slice(&received[0].body)
-        .expect("webhook body is the JSON HookPayload");
+    let body: serde_json::Value =
+        serde_json::from_slice(&received[0].body).expect("webhook body is the JSON HookPayload");
     assert_eq!(body["id"], id.as_str(), "payload carries the recording id");
     assert_eq!(
         body["transcript"], "We shipped the new onboarding flow today.",
@@ -932,8 +935,7 @@ fn sanitize_llm_title_strips_wrappers_and_caps_words() {
     );
     // First non-empty line only, and at most 8 words.
     assert_eq!(
-        sanitize_llm_title("\n\none two three four five six seven eight nine ten\nmore")
-            .as_deref(),
+        sanitize_llm_title("\n\none two three four five six seven eight nine ten\nmore").as_deref(),
         Some("one two three four five six seven eight")
     );
     assert_eq!(sanitize_llm_title(""), None);

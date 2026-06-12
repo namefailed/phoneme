@@ -668,7 +668,11 @@ fn sanitize_llm_title(raw: &str) -> Option<String> {
         .or_else(|| line.strip_prefix("title:"))
         .map(|rest| unwrap_quotes(rest.trim()))
         .unwrap_or(line);
-    let capped = line.split_whitespace().take(8).collect::<Vec<_>>().join(" ");
+    let capped = line
+        .split_whitespace()
+        .take(8)
+        .collect::<Vec<_>>()
+        .join(" ");
     let title = capped.trim_end_matches(|c: char| !c.is_alphanumeric());
     if title.is_empty() {
         None

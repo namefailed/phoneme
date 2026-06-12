@@ -1954,7 +1954,10 @@ mod tests {
         let cfg = Config::default();
         assert!(cfg.title.enabled);
         assert!(!cfg.title.use_llm);
-        assert!(cfg.title.provider.is_empty(), "blank provider inherits cleanup");
+        assert!(
+            cfg.title.provider.is_empty(),
+            "blank provider inherits cleanup"
+        );
         assert!(!cfg.title.prompt.is_empty());
     }
 

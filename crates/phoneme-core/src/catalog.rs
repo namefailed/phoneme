@@ -2201,7 +2201,10 @@ mod tests {
         // An auto write lands while the title is auto-owned (and a later auto
         // write — e.g. a retranscribe — refreshes it).
         assert!(db.set_title(&r.id, Some("first pass"), true).await.unwrap());
-        assert!(db.set_title(&r.id, Some("second pass"), true).await.unwrap());
+        assert!(db
+            .set_title(&r.id, Some("second pass"), true)
+            .await
+            .unwrap());
         let got = db.get(&r.id).await.unwrap().unwrap();
         assert_eq!(got.title.as_deref(), Some("second pass"));
         assert!(got.title_is_auto);

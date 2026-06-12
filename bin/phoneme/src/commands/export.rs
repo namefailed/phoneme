@@ -61,9 +61,7 @@ async fn run_captions(
     };
 
     if segments.is_empty() {
-        eprintln!(
-            "no segments stored — retranscribe this recording to generate them"
-        );
+        eprintln!("no segments stored — retranscribe this recording to generate them");
         return ExitCode::from(crate::exit::NOT_FOUND);
     }
 
@@ -79,9 +77,9 @@ async fn run_captions(
 
     // Determine where to write: "-" → stdout, explicit path → file, else
     // default to `<recording-id>.<ext>` in the current directory.
-    let dest = out_path.map(str::to_string).unwrap_or_else(|| {
-        format!("{}.{}", id_str, ext)
-    });
+    let dest = out_path
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}.{}", id_str, ext));
 
     if dest == "-" {
         if let Err(e) = std::io::stdout().write_all(body.as_bytes()) {

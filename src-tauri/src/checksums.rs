@@ -81,7 +81,8 @@ const PINNED: &[Pinned] = &[
         sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
     },
     Pinned {
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        url:
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
         sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
     },
     // ── semantic search model (all-MiniLM-L6-v2) ──────────────────────────────
@@ -229,7 +230,9 @@ mod tests {
     fn expected_sha256_misses_unknown_url() {
         // An allowed host, but not a pinned artifact → no hash (must fail closed).
         assert_eq!(
-            expected_sha256("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-nope.bin"),
+            expected_sha256(
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-nope.bin"
+            ),
             None
         );
         assert_eq!(expected_sha256("https://evil.com/model.bin"), None);
@@ -298,8 +301,7 @@ mod tests {
     fn pinned_table_covers_every_wizard_url() {
         // The whisper GGML weights all resolve from this one repo path; the
         // frontend builds each URL as base + filename.
-        const HF_WHISPER_BASE: &str =
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
+        const HF_WHISPER_BASE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
         // The whisper GGML filenames the wizard + settings sections offer
         // (FirstRunWizard `_whisper_model_choice`, SectionWhisper MODELS,
         // SectionPreview PREVIEW_MODELS, curatedModels CURATED_LOCAL_WHISPER).
@@ -341,7 +343,9 @@ mod tests {
         for p in PINNED {
             assert_eq!(p.sha256.len(), 64, "{} pin is not 64 hex chars", p.url);
             assert!(
-                p.sha256.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+                p.sha256
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
                 "{} pin must be lower-case hex",
                 p.url
             );

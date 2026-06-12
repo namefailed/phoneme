@@ -449,9 +449,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             // A blank title means "clear back to auto" — same as None. `Some`
             // marks the title user-owned, so the pipeline never overwrites it;
             // `None` resets ownership and the next run generates a fresh one.
-            let title = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+            let title = title
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty());
             let is_auto = title.is_none();
-            match state.catalog.set_title(&id, title.as_deref(), is_auto).await {
+            match state
+                .catalog
+                .set_title(&id, title.as_deref(), is_auto)
+                .await
+            {
                 Ok(true) => {
                     // Same event a transcript edit emits — open views re-fetch
                     // the recording and pick the new title up.

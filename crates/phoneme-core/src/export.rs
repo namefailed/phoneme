@@ -123,10 +123,7 @@ mod tests {
     fn srt_single_cue() {
         let segs = [seg(1000, 4500, "Hello world.")];
         let out = segments_to_srt(&segs);
-        assert_eq!(
-            out,
-            "1\n00:00:01,000 --> 00:00:04,500\nHello world.\n"
-        );
+        assert_eq!(out, "1\n00:00:01,000 --> 00:00:04,500\nHello world.\n");
     }
 
     #[test]
@@ -144,7 +141,10 @@ mod tests {
     fn srt_speaker_prefix() {
         let segs = [seg_speaker(0, 1000, "Hi.", "Alice")];
         let out = segments_to_srt(&segs);
-        assert!(out.contains("Alice: Hi."), "expected 'Alice: Hi.' in:\n{out}");
+        assert!(
+            out.contains("Alice: Hi."),
+            "expected 'Alice: Hi.' in:\n{out}"
+        );
     }
 
     #[test]
