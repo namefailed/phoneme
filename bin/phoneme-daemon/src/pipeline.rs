@@ -900,16 +900,10 @@ pub async fn run(
             // input session) or to send input; we log either case at error
             // level so the cause is visible in the daemon log. Typing is
             // best-effort — a failure never fails the recording.
-            match enigo::Enigo::new(&enigo::Settings::default()) {
-                Ok(mut enigo) => {
-                    use enigo::Keyboard;
-                    if let Err(e) = enigo.text(&transcript) {
-                        tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to type transcript");
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to initialize input simulator");
-                }
+            if let Err(e) =
+                crate::in_place::type_at_cursor(&transcript, &cfg.in_place.type_mode).await
+            {
+                tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to insert transcript");
             }
         }
     }

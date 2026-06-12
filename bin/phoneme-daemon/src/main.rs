@@ -6,6 +6,7 @@ use clap::Parser;
 mod app_state;
 mod event_bus;
 mod first_run;
+mod in_place;
 mod ipc_handler;
 mod ipc_server;
 mod logging;

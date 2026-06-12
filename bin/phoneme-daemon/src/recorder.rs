@@ -728,17 +728,30 @@ impl DaemonRecorder {
             )
             .await?;
 
-        let payload = HookPayload {
-            id: active.id.clone(),
-            timestamp: active.started_at,
-            transcript: String::new(),
-            audio_path: active.audio_path.to_string_lossy().into_owned(),
-            duration_ms: result.duration_ms,
-            model: String::new(),
-            metadata: HookMetadata::current(),
-        };
-        state.inbox.enqueue(&payload).await?;
-        crate::queue_worker::emit_queue_depth(state).await;
+        // Dictation fast lane: an in-place recording skips the serial inbox
+        // queue and the full pipeline (cleanup/summary/tags/hooks) unless
+        // `[in_place].full_pipeline` opts back in — transcribe → polish →
+        // type, with persistence off the latency path. See `in_place.rs`.
+        let fast_lane = active.in_place && !state.config.load().in_place.full_pipeline;
+        if fast_lane {
+            crate::in_place::spawn_fast_lane(
+                state.clone(),
+                active.id.clone(),
+                active.audio_path.clone(),
+            );
+        } else {
+            let payload = HookPayload {
+                id: active.id.clone(),
+                timestamp: active.started_at,
+                transcript: String::new(),
+                audio_path: active.audio_path.to_string_lossy().into_owned(),
+                duration_ms: result.duration_ms,
+                model: String::new(),
+                metadata: HookMetadata::current(),
+            };
+            state.inbox.enqueue(&payload).await?;
+            crate::queue_worker::emit_queue_depth(state).await;
+        }
 
         state.events.emit(DaemonEvent::RecordingStopped {
             id: active.id.clone(),
