@@ -4,7 +4,9 @@ import { curatedCleanupModelIds } from "../../data/curatedModels";
  * Auto-tagging settings (Post-Processing tab). The LLM proposes tags for each
  * transcript — preferring tags you already use — and the proposals wait as
  * dashed chips in the recording's tag row until you approve or dismiss them.
- * Nothing is ever applied automatically.
+ * Exception: with "auto-accept existing tags" on, a suggestion that matches a
+ * tag you ALREADY use is attached immediately — only brand-new names wait for
+ * approval.
  *
  * Connection fields mirror the Summary section: blank provider/key/URL/model
  * inherit the `[llm_post_process]` (cleanup) connection, so the common case is
@@ -39,7 +41,8 @@ export class SectionAutoTag {
         <p style="font-size:12px; color:var(--fg-muted); margin:0 0 4px;">
           Let the AI propose tags for each new transcript (it prefers tags you already use).
           Proposals appear as dashed ✨ chips on the recording — <b>you approve or dismiss
-          each one</b>; nothing is tagged automatically. The ✨ Suggest button on a recording
+          each one</b>. With "auto-accept existing tags" on, matches of tags you already
+          use attach immediately; only brand-new names wait for approval. The ✨ Suggest button on a recording
           runs this on demand even when the automatic step is off.
         </p>
 

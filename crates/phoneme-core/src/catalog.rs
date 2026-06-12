@@ -1117,14 +1117,23 @@ impl Catalog {
     ) -> Result<Vec<String>> {
         let mut deleted_paths: Vec<String> = Vec::new();
 
-        // Age-based cleanup — delete everything older than max_age_days.
+        // `delete_audio = true` is the disk-saver mode: the catalog row stays
+        // (transcript searchable forever), only the WAV goes. The row's
+        // audio_path is blanked so the UI doesn't offer a dead player, and so
+        // the row never matches a later sweep again. `false` (default) deletes
+        // row + audio together. This flag was previously ignored — audio-only
+        // users were losing their rows.
+        let audio_only = cfg.delete_audio;
+
+        // Age-based cleanup — everything older than max_age_days.
         if let Some(max_age) = cfg.max_age_days {
             let cutoff =
                 chrono::Utc::now() - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
             let cutoff_str = cutoff.to_rfc3339();
             let rows = sqlx::query(
                 "SELECT id, audio_path FROM recordings \
-                 WHERE started_at < ? AND status IN ('done','transcribe_failed','hook_failed')",
+                 WHERE started_at < ? AND status IN ('done','transcribe_failed','hook_failed') \
+                 AND audio_path != ''",
             )
             .bind(&cutoff_str)
             .fetch_all(&self.pool)
@@ -1132,15 +1141,29 @@ impl Catalog {
             for row in rows {
                 let id: String = row.try_get("id")?;
                 let audio_path: String = row.try_get("audio_path")?;
-                sqlx::query("DELETE FROM recordings WHERE id = ?")
+                if audio_only {
+                    sqlx::query(
+                        "UPDATE recordings SET audio_path = '', updated_at = datetime('now') \
+                         WHERE id = ?",
+                    )
                     .bind(&id)
                     .execute(&self.pool)
                     .await?;
+                } else {
+                    sqlx::query("DELETE FROM recordings WHERE id = ?")
+                        .bind(&id)
+                        .execute(&self.pool)
+                        .await?;
+                }
                 deleted_paths.push(audio_path);
             }
         }
 
-        // Count-based cleanup — delete all but the most recent max_count.
+        // Count-based cleanup — all but the most recent max_count. In
+        // audio-only mode the ranking still counts EVERY terminal row (rows
+        // are kept, so "the most recent N" must mean recordings, not files) —
+        // the audio_path filter above/below only stops re-processing rows
+        // whose audio is already gone.
         if let Some(max_count) = cfg.max_count {
             let rows = sqlx::query(
                 "SELECT id, audio_path FROM recordings \
@@ -1154,10 +1177,23 @@ impl Catalog {
             for row in rows {
                 let id: String = row.try_get("id")?;
                 let audio_path: String = row.try_get("audio_path")?;
-                sqlx::query("DELETE FROM recordings WHERE id = ?")
+                if audio_path.is_empty() {
+                    continue; // audio already reclaimed by an earlier sweep
+                }
+                if audio_only {
+                    sqlx::query(
+                        "UPDATE recordings SET audio_path = '', updated_at = datetime('now') \
+                         WHERE id = ?",
+                    )
                     .bind(&id)
                     .execute(&self.pool)
                     .await?;
+                } else {
+                    sqlx::query("DELETE FROM recordings WHERE id = ?")
+                        .bind(&id)
+                        .execute(&self.pool)
+                        .await?;
+                }
                 deleted_paths.push(audio_path);
             }
         }
@@ -2300,6 +2336,49 @@ mod tests {
             db.speaker_names_for(&r.id).await.unwrap().is_empty(),
             "speaker names must be cascade-deleted with their recording"
         );
+    }
+
+    #[tokio::test]
+    async fn retention_audio_only_keeps_rows_and_is_idempotent() {
+        // delete_audio = true: the WAV path is returned for deletion and
+        // blanked on the row, but the row itself (transcript, metadata)
+        // SURVIVES — and a second sweep finds nothing left to reclaim.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let mut r = embedded_recording(None);
+        r.started_at = Local::now() - chrono::Duration::days(90);
+        db.insert(&r).await.unwrap();
+
+        let cfg = crate::config::RetentionConfig {
+            max_age_days: Some(30),
+            max_count: None,
+            delete_audio: true,
+        };
+        let paths = db.apply_retention(&cfg).await.unwrap();
+        assert_eq!(paths, vec!["x.wav".to_string()]);
+
+        let row = db.get(&r.id).await.unwrap().expect("row must survive");
+        assert_eq!(row.audio_path, "", "audio path blanked after reclaim");
+        assert_eq!(row.transcript.as_deref(), Some("t"), "transcript kept");
+
+        let again = db.apply_retention(&cfg).await.unwrap();
+        assert!(again.is_empty(), "second sweep must be a no-op");
+    }
+
+    #[tokio::test]
+    async fn retention_default_deletes_row_and_audio_together() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let mut r = embedded_recording(None);
+        r.started_at = Local::now() - chrono::Duration::days(90);
+        db.insert(&r).await.unwrap();
+
+        let cfg = crate::config::RetentionConfig {
+            max_age_days: Some(30),
+            max_count: None,
+            delete_audio: false,
+        };
+        let paths = db.apply_retention(&cfg).await.unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(db.get(&r.id).await.unwrap().is_none(), "row deleted");
     }
 
     #[tokio::test]

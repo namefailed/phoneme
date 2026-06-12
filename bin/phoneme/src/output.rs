@@ -46,7 +46,11 @@ pub fn print_list_pretty(rows: &[Recording]) {
     table.set_header(vec!["time", "dur", "status", "transcript"]);
     for r in rows {
         let preview = match &r.transcript {
-            Some(t) if t.len() > 60 => format!("{}…", &t[..60]),
+            // Truncate by CHARACTERS — a byte slice (&t[..60]) panics when
+            // byte 60 lands inside a multi-byte char (CJK, emoji, accents).
+            Some(t) if t.chars().count() > 60 => {
+                format!("{}…", t.chars().take(60).collect::<String>())
+            }
             Some(t) => t.clone(),
             None => String::new(),
         };
