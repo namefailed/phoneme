@@ -15,6 +15,7 @@ import "./MergedConversationDetail";
 import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
+import { confirmRecordingDelete, deleteModeKeepsAudio } from "../ConfirmDelete";
 import { showActionToast, showToast } from "../../utils/toast";
 import { setHeaderHidden, isHeaderHidden } from "../../services/headerBar";
 import "./Sidebar";
@@ -867,16 +868,37 @@ export class RecordingsView {
     this.requestUndoableDelete([id]);
   }
 
+  /** Guards against stacking a second confirm dialog while one is open
+   *  (e.g. mashing Delete with rows still selected). */
+  private deletePromptOpen = false;
+
   /**
    * Delete one or more recordings with a grace-period Undo: the rows vanish
    * immediately, but the real (permanent) delete only fires when the Undo toast
    * expires — clicking Undo cancels it entirely, so nothing is ever lost to a
    * stray keystroke. Sessions are skipped (they're deleted via their own flow).
+   *
+   * The confirm dialog also picks the delete mode — "Delete everything" or
+   * "Keep the audio file" (the CLI's `--keep-audio`) — and a bulk delete
+   * applies the one chosen mode to every selected recording. The "Don't ask
+   * again" pref answers immediately with the remembered mode.
    */
   private requestUndoableDelete(rawIds: string[]) {
     const ids = [...new Set(rawIds)].filter((id) => id && !id.startsWith("session:"));
-    if (!ids.length) return;
+    if (!ids.length || this.deletePromptOpen) return;
+    this.deletePromptOpen = true;
+    void confirmRecordingDelete(ids.length)
+      .then((mode) => {
+        if (mode) this.runUndoableDelete(ids, deleteModeKeepsAudio(mode));
+      })
+      .finally(() => {
+        this.deletePromptOpen = false;
+      });
+  }
 
+  /** The grace-period flow itself: hide now, delete (with the chosen
+   *  `keep_audio` flag) only when the Undo toast lapses. */
+  private runUndoableDelete(ids: string[], keepAudio: boolean) {
     // Optimistically hide the rows, drop them from the selection (so the bulk
     // bar count stays honest), and close the detail if the open one is going.
     this.list.setPendingDelete(ids, true);
@@ -884,7 +906,8 @@ export class RecordingsView {
     const sel = this.state.get().selectedId;
     if (sel && ids.includes(sel)) this.deselect();
 
-    const label = ids.length === 1 ? "Recording deleted" : `${ids.length} recordings deleted`;
+    const noun = ids.length === 1 ? "Recording" : `${ids.length} recordings`;
+    const label = keepAudio ? `${noun} removed — audio kept` : `${noun} deleted`;
     showActionToast({
       message: label,
       actionLabel: "Undo",
@@ -898,7 +921,7 @@ export class RecordingsView {
         const { deleteRecording } = await import("../../services/ipc");
         for (const id of ids) {
           try {
-            await deleteRecording(id, false);
+            await deleteRecording(id, keepAudio);
           } catch (err) {
             console.error("Failed to delete recording:", err);
           }

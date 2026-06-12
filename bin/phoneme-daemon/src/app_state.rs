@@ -67,6 +67,10 @@ pub struct AppState {
     /// Shared transcription HTTP client for the whole process. Holds the warm
     /// connection pool and mints a per-recording `TranscriptionProvider` from
     /// the live config, so the pool is reused instead of rebuilt per recording.
+    /// Also owns the lazily-loaded local diarization pipeline cache (loaded on
+    /// the first diarized recording, reused after); the config-apply paths
+    /// (ReloadConfig, the queue worker's post-run reload) invalidate it via
+    /// `diarizer_cache()` when `[diarization]` changes.
     pub transcription: Transcriber,
     /// Shared LLM post-processing client. Like `transcription`, holds a warm
     /// connection pool and mints an `LlmProvider` per run from the live config.

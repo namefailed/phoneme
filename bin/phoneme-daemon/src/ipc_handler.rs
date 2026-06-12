@@ -10,6 +10,7 @@
 //! its life and streams DaemonEvents (wired up in Task 10).
 
 use crate::app_state::AppState;
+use phoneme_core::hook::redact_secrets;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus};
 use phoneme_ipc::{
     DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, PipelineStage, Request, Response,
@@ -438,6 +439,35 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::SetFavorite { id, favorite } => {
             match state.catalog.set_favorite(&id, favorite).await {
                 Ok(()) => Response::Ok(serde_json::Value::Null),
+                Err(e) => Response::Err(IpcError {
+                    kind: error_to_kind(&e),
+                    message: e.to_string(),
+                }),
+            }
+        }
+        Request::SetRecordingTitle { id, title } => {
+            // A blank title means "clear back to auto" — same as None. `Some`
+            // marks the title user-owned, so the pipeline never overwrites it;
+            // `None` resets ownership and the next run generates a fresh one.
+            let title = title
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty());
+            let is_auto = title.is_none();
+            match state
+                .catalog
+                .set_title(&id, title.as_deref(), is_auto)
+                .await
+            {
+                Ok(true) => {
+                    // Same event a transcript edit emits — open views re-fetch
+                    // the recording and pick the new title up.
+                    state.events.emit(DaemonEvent::TranscriptUpdated { id });
+                    Response::Ok(serde_json::Value::Null)
+                }
+                Ok(false) => Response::Err(IpcError {
+                    kind: IpcErrorKind::NotFound,
+                    message: format!("no recording {}", id.as_str()),
+                }),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
                     message: e.to_string(),
@@ -1072,15 +1102,21 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 model: "test".into(),
                 metadata: HookMetadata::current(),
             };
+            // The test command is caller-supplied and its output is shown in
+            // the UI/CLI verbatim — a script that echoes its environment or a
+            // config file would hand any key it prints to the renderer. Mask
+            // credential-shaped values on BOTH outcomes before the text
+            // crosses the pipe: the Ok path carries stderr directly, and the
+            // HookFailed error embeds the stderr tail in its message.
             match runner.run(&sample).await {
                 Ok(result) => Response::Ok(serde_json::json!({
                     "exit_code": result.exit_code,
                     "duration_ms": result.duration_ms,
-                    "stderr_tail": result.stderr_tail,
+                    "stderr_tail": redact_secrets(&result.stderr_tail),
                 })),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
-                    message: e.to_string(),
+                    message: redact_secrets(&e.to_string()),
                 }),
             }
         }
@@ -1214,6 +1250,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     } else {
                         *embedder_guard = None;
                     }
+
+                    // Drop the cached local diarization pipeline when
+                    // `[diarization]` changed (backend switch / model path) —
+                    // the next run reloads under the new config, and switching
+                    // away from Local frees the model RAM immediately.
+                    state
+                        .transcription
+                        .diarizer_cache()
+                        .invalidate_if_stale(&cfg_arc.diarization);
+
                     drop(cfg_arc);
                     drop(embedder_guard);
 
@@ -1706,6 +1752,8 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        title: None,
+        title_is_auto: true,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1886,6 +1934,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -1989,5 +2039,75 @@ mod tests {
             state.pending_overrides.lock().unwrap().get(&id).is_none(),
             "no model override should be recorded when none was requested"
         );
+    }
+
+    /// HookTest output crosses the pipe to the tray/CLI, and the test command
+    /// is caller-supplied — a script that dumps its environment must not hand
+    /// credentials to the renderer. Both outcomes are redacted: the Ok path's
+    /// `stderr_tail` and the `HookFailed` message (which embeds stderr).
+    #[tokio::test]
+    async fn hook_test_redacts_secrets_on_both_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "C:/models/ggml-base.en.bin".into();
+        let state = override_test_state(tmp.path(), cfg).await;
+
+        // Ok path: the command succeeds but echoes a credential to stderr.
+        #[cfg(windows)]
+        let ok_cmd = "cmd /c \"echo password=hunter2secret 1>&2\"";
+        #[cfg(not(windows))]
+        let ok_cmd = "sh -c \"echo password=hunter2secret 1>&2\"";
+        let resp = handle_request(
+            Request::HookTest {
+                custom_command: Some(ok_cmd.to_string()),
+            },
+            &state,
+        )
+        .await;
+        match resp {
+            Response::Ok(v) => {
+                let tail = v["stderr_tail"].as_str().unwrap_or_default();
+                assert!(
+                    !tail.contains("hunter2secret"),
+                    "secret leaked through HookTest stderr: {tail}"
+                );
+                assert!(
+                    tail.contains("password=<redacted>"),
+                    "mask expected in stderr_tail, got: {tail}"
+                );
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+
+        // Err path: a failing command's stderr rides inside the HookFailed
+        // message — the same redaction must apply there.
+        #[cfg(windows)]
+        let fail_cmd = "cmd /c \"echo token=topsecret123 1>&2 & exit 3\"";
+        #[cfg(not(windows))]
+        let fail_cmd = "sh -c \"echo token=topsecret123 1>&2; exit 3\"";
+        let resp = handle_request(
+            Request::HookTest {
+                custom_command: Some(fail_cmd.to_string()),
+            },
+            &state,
+        )
+        .await;
+        match resp {
+            Response::Err(e) => {
+                assert!(
+                    !e.message.contains("topsecret123"),
+                    "secret leaked through the HookTest failure message: {}",
+                    e.message
+                );
+                assert!(
+                    e.message.contains("token=<redacted>"),
+                    "mask expected in the failure message, got: {}",
+                    e.message
+                );
+            }
+            other => panic!("expected Err, got {other:?}"),
+        }
     }
 }

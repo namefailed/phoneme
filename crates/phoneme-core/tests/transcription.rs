@@ -22,7 +22,7 @@ fn local_provider(base_url: impl Into<String>, timeout: Duration) -> OpenAiCompa
         None,
         None,
         timeout,
-        false,
+        None, // local diarization off
         false,
     )
 }
@@ -177,7 +177,7 @@ async fn sends_bearer_auth_when_api_key_set() {
         Some("test-key".into()),
         Some("whisper-1".into()),
         Duration::from_secs(5),
-        false,
+        None,
         false,
     );
     let result = provider.transcribe(&wav, None).await.unwrap();
@@ -204,7 +204,7 @@ async fn sends_model_field_when_set() {
         None,
         Some("whisper-large-v3".into()),
         Duration::from_secs(5),
-        false,
+        None,
         false,
     );
     let result = provider.transcribe(&wav, None).await.unwrap();
@@ -410,7 +410,7 @@ async fn local_provider_captures_segment_timeline() {
         None,
         None,
         Duration::from_secs(5),
-        false,
+        None,
         true,
     );
 
@@ -450,7 +450,7 @@ async fn cloud_provider_without_diarize_requests_plain_json() {
         Some("key".into()),
         Some("whisper-1".into()),
         Duration::from_secs(5),
-        false,
+        None,
         false,
     );
 

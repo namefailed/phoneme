@@ -96,6 +96,15 @@ The summary uses its **own** provider, model, and prompt (`[summary]`). Leave th
 
 Built-in summary presets include bullet-point summary, 2–3 sentence summary, action items & decisions, a TL;DR paragraph, and meeting minutes.
 
+## 🏷️ Auto titles
+
+Timestamped names don't scan. Phoneme titles every recording automatically — the title shows as a bold first line in the recordings list and as the detail header.
+
+- **Built-in heuristic (default, free, offline):** the first meaningful sentence of the transcript, with leading filler ("um", "okay so", …) stripped and the result cut at a word boundary around 60 characters.
+- **AI titles (optional):** enable **Use the AI for titles** under Settings → Post-Processing → Auto Titles and the model writes a short (≤ 8 words) title instead. Like summaries, the title step inherits your cleanup connection unless you point it at its own provider/model (`[title]`). If the AI call fails for any reason, the heuristic title is used — a flaky provider never leaves recordings unnamed.
+
+Click the title in a recording's detail header to edit it: **Enter** saves, **Esc** cancels, and saving an **empty** title clears it back to automatic. A title you typed yourself is never overwritten — re-transcribing refreshes automatic titles only.
+
 ## 🔁 Re-running cleanup & summary
 
 You can re-process an existing recording without re-recording, using one-time overrides that are **never** saved to your config:

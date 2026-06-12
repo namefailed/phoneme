@@ -8,6 +8,7 @@ Phoneme can import and transcribe the following audio formats:
 - `.wav`
 - `.mp3`
 - `.m4a` (AAC / ALAC)
+- `.flac`
 
 ## 🚀 How to Import
 

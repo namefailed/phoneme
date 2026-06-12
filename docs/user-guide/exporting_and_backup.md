@@ -26,6 +26,27 @@ The export archive is completely portable and contains:
    Each recording row includes the current transcript and the preserved original (raw) transcript, timestamps and durations, and meeting IDs for Meeting Mode sessions.
 2. **`audio/`**: a folder containing all of your `.wav` files, named to match the IDs in `catalog.json`.
 
+## 🎬 Exporting Captions (SRT / WebVTT)
+
+Any transcribed recording can be exported as a subtitle file — handy for
+captioning a Loom/YouTube clip you imported or recorded:
+
+```bash
+# SRT next to your shell's current directory, named <recording-id>.srt
+phoneme export --captions 20260519T143500823
+
+# WebVTT to a specific file
+phoneme export --captions 20260519T143500823 --format vtt -o captions/meeting.vtt
+
+# Straight to stdout (pipe it anywhere)
+phoneme export --captions 20260519T143500823 -o -
+```
+
+Cues come from the per-segment timestamps Whisper stored at transcription
+time, and named speakers appear as a `Name:` prefix on their lines. If a
+recording predates segment storage, retranscribe it once to generate them.
+Find a recording's ID in the detail pane or via `phoneme list`.
+
 ## 🖱️ Exporting from the GUI
 
 The action row (single recording) and the bulk action bar (multi-select) can export transcripts to **JSON**, **CSV**, or **TXT** — handy for sharing a few transcripts without the full archive.

@@ -62,6 +62,22 @@ An optional, **independent** transcription provider used only for the live previ
 
 ---
 
+## `[webhook]`
+
+Network policy (SSRF guard) for the `hook.webhook_url` POST. Loopback targets
+(`127.0.0.1`, `[::1]`, `localhost`) are always allowed, any scheme — webhooks
+into n8n / Home Assistant on this machine are the primary use case and no knob
+can break that. A hostname is resolved and judged by every address it points
+at, so a DNS name aimed at a private IP counts as private; redirects are never
+followed.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `allow_private_network` | bool | `false` | Allow non-loopback private targets — RFC1918, link-local, IPv6 ULA (e.g. n8n on a NAS) |
+| `allow_http` | bool | `false` | Allow plain `http://` for **public** targets; otherwise public targets must be `https://` |
+
+---
+
 ## `[hotkey]` · `[in_place_hotkey]` · `[meeting_hotkey]`
 
 | Key | Type | Record default | In-place default | Meeting default |
@@ -184,6 +200,30 @@ like `[summary]`.
 Suggestions land on the recording (`tag_suggestions`) and are surfaced in the
 GUI as approve/dismiss chips; approving creates-or-fetches the tag and attaches
 it.
+
+## `[title]`
+
+Auto-generated recording titles. The heuristic (first meaningful sentence of
+the transcript — leading filler stripped, cut at a word boundary near 60
+chars) is free and runs by default; `use_llm` upgrades it to a short
+LLM-written title that falls back to the heuristic on any error. Blank
+provider/key/URL/model fields inherit the `[llm_post_process]` connection,
+like `[summary]` and `[auto_tag]`.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | Generate a title for every recording as a pipeline step (and refresh it on retranscribe) |
+| `use_llm` | `false` | Ask the LLM for the title instead of the heuristic; the heuristic remains the fallback on any error |
+| `provider` | `""` | `ollama` / `openai` / `groq` / `anthropic`; empty → inherit |
+| `api_key` | `""` | Empty → inherit the cleanup key (DPAPI-encrypted at rest) |
+| `api_url` | `""` | Empty → inherit / provider default |
+| `model` | `""` | Empty → the cleanup model |
+| `prompt` | (built-in) | Title instructions; the transcript is appended at run time |
+
+Stored results: `title` plus `title_is_auto` on the recording. A title the
+user sets by hand (`SetRecordingTitle` with a value → `title_is_auto = 0`)
+is never overwritten by auto generation; clearing it (`SetRecordingTitle`
+with `null`) reverts to auto and the next pipeline run fills it again.
 
 ## `[in_place]`
 

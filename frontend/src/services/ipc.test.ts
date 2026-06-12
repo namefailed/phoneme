@@ -3,6 +3,7 @@ import {
   listRecordings,
   listSession,
   recordStart,
+  deleteRecording,
   listTags,
   listAllTags,
   addTag,
@@ -52,6 +53,28 @@ describe('IPC Services', () => {
 
     expect(tauriCore.invoke).toHaveBeenCalledWith('record_start', { mode: 'oneshot' });
     expect(res).toEqual({ id: '123' });
+  });
+
+  it('deleteRecording defaults to removing the audio too (keepAudio: false)', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(undefined);
+
+    await deleteRecording('20260519T143500823');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('delete_recording', {
+      id: '20260519T143500823',
+      keepAudio: false,
+    });
+  });
+
+  it('deleteRecording passes keepAudio: true for a keep-audio delete', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(undefined);
+
+    await deleteRecording('20260519T143500823', true);
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('delete_recording', {
+      id: '20260519T143500823',
+      keepAudio: true,
+    });
   });
 });
 

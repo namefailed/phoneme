@@ -48,11 +48,96 @@ trust boundary. Verified against current code.*
   error `Response` and keeps the pipe open instead of tearing down the connection
   (`ServerRequest::Unknown`, `phoneme-ipc`).
 
+- [x] **Baseline CSP + narrowed scopes (S-H4/S-H6)** — real production CSP (scripts
+  locked to the bundle; connect-src open only because Settings fetches provider
+  model lists at user-configured endpoints), devCsp for vite, asset protocol
+  narrowed from the whole home directory to the audio + app-data dirs, unused
+  window capabilities dropped (`tauri.conf.json`, `capabilities/default.json`).
+- [x] **Doctor: categories, disk + model-integrity checks, Fix All** — every check
+  carries Critical/Warning/Info, an explanation, and a fix hint; new disk-space
+  (2 GiB warn / 500 MiB critical) and model-file integrity checks (0-byte husks
+  are critical); Fix All runs every available fix top-down, deduped.
+- [x] **Daemon resilience batch** — tray heals a daemon that was down at launch
+  (lazily-reconnecting bridge), transient whisper outages requeue with bounded
+  attempts instead of failing recordings, retention honors delete_audio,
+  wizard downloads are URL-allowlisted and only create files on success,
+  open-file paths allowlisted, daily logs pruned to `log_max_files`.
+- [x] **Diarization pipeline cached** — the ~500 MB speaker-diarization models
+  used to reload on every diarized transcription; they now load once, lazily,
+  into a config-keyed cache (speakrs' queued worker thread), serialize
+  overlapping runs, invalidate on `[diarization]` changes, and never cache a
+  failed load - a mid-session model download just works on the next run.
+- [x] **Webhook SSRF guard + hook-test redaction** — webhooks classify their
+  target before any bytes leave: loopback always allowed (local n8n/Home
+  Assistant stay zero-config), private ranges need `[webhook]
+  allow_private_network`, public hosts need https unless `allow_http`;
+  hostnames resolve and the most restrictive class wins; redirects are no
+  longer followed. Hook-test output is scrubbed of credential shapes
+  (sk-/ghp_/AKIA/Bearer/key= and friends) before it reaches the UI.
+- [x] **Pinned download checksums (S-H7)** — every wizard artifact (whisper GGML
+  weights, the semantic model + tokenizer, the whisper-server zip) is verified
+  against a pinned SHA-256 before use; the zip is checked before extraction,
+  mismatches are deleted with a retry/compromised-mirror message, and an
+  allowed-host URL without a pin fails closed (`src-tauri/src/checksums.rs`).
+- [x] **Full-pipeline integration test** — transcribe → LLM stages → hook
+  subprocess → webhook listener → catalog/inbox/audio, all asserted against
+  fakes; plus tests for the wizard URL allowlist, `path_within`, and the
+  notification contract.
+
 ### UX wiring
 
 - [x] **Queue failed-items count + clear** — the queue panel surfaces the `failed/`
   count and lets you dismiss it (`QueuePanel.ts`).
 - [x] **Import audio** button in Settings → Storage (`SectionStorage.ts`).
+
+### Dictation (transcribe in place)
+
+- [x] **Dictation fast lane** — in-place dictation skips the inbox queue entirely:
+  own optional STT pick, instant rule-based polish (or LLM, or none), then types
+  or pastes at the cursor before any library bookkeeping (`in_place.rs`,
+  `[in_place]` config). Wispr-Flow-class latency, fully configurable.
+- [x] **Type-first for the full pipeline** — with `[in_place] full_pipeline` on,
+  `type_first` chooses when text lands: instantly from a type-only fast pass
+  (cleanup/summary/tags catch up in the library) or only after the pipeline
+  finishes (`pipeline_should_type`).
+
+### Library & organization
+
+- [x] **Auto-generated titles** — every recording gets a title: free first-clause
+  heuristic by default (filler/annotations stripped, 60-char word-boundary cap),
+  optional LLM titles; user-set titles always win (`title_is_auto` SQL guard);
+  click-to-edit in the detail header (`phoneme-core::title`, `[title]` config).
+- [x] **SRT / WebVTT caption export** — `phoneme export --captions <id>
+  [--format srt|vtt] [-o FILE|-]` renders the stored segment timestamps as
+  subtitles, speaker names prefixed (`phoneme-core::export`).
+- [x] **Delete modes in the GUI** — delete everything, or keep the audio file and
+  remove the recording from the library (the CLI's `--keep-audio`); one funnel
+  for single/bulk/keyboard deletes, "don't ask again" remembers the chosen mode.
+- [x] **Tag counts in the sidebar** — per-tag recording counts as quiet pill
+  badges, case-insensitive tag identity, and a Settings action to clear ALL
+  suggested tags across the library (`ClearAllTagSuggestions`).
+- [x] **FLAC import** — wav / mp3 / m4a / flac, end to end (decoder feature,
+  CLI + GUI filters, docs).
+
+### Status, notifications & pickers
+
+- [x] **Granular pipeline statuses** — recordings show cleaning up / summarizing /
+  tagging (not just "processing"), driven by `PipelineStageChanged` events.
+- [x] **Toast overhaul + step notifications** — errors time out (10 s), hover
+  pauses with a countdown bar, stack capped; opt-in per-step completion toasts
+  (`interface.step_notifications`), errors always surface.
+- [x] **One provider/model picker everywhere** — the preset-vs-provider duality is
+  gone: a single named-provider connection block (On this computer / Cloud /
+  Custom, key row only when needed, "Get a key ↗", Test button, URL under
+  Advanced) plus a shared model field with curated ⭐ suggestions per provider,
+  identical across cleanup / summary / auto-tag / titles / STT / preview /
+  re-run (`connectionField.ts`, `modelField.ts`).
+
+### Recording
+
+- [x] **Stop mode on the Record button** — the header dropdown picks how a voice
+  note ends: on click, on silence, or after N seconds (the hotkeys' RecordMode,
+  now clickable; persisted locally).
 
 ---
 
@@ -143,7 +228,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [x] **Pre-roll audio buffer** — rolling ring buffer so the first syllable isn't clipped when reacting to the hotkey (tunable; off by default)
 - [x] **Notes field** — free-form text area in the detail pane, separate from the transcript; never overwritten by re-transcription or post-processing
 - [x] **Multiple config profiles** — switch between named TOML profiles (e.g., work vs. personal) from the tray menu without editing files
-- [x] **Import audio file** — bring a `.wav`/`.mp3`/`.m4a` into the catalog (or `phoneme import <file>`) to queue it through the same transcription + hook pipeline as a live recording
+- [x] **Import audio file** — bring a `.wav`/`.mp3`/`.m4a`/`.flac` into the catalog (or `phoneme import <file>`) to queue it through the same transcription + hook pipeline as a live recording
 
 ---
 

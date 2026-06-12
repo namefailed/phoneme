@@ -9,7 +9,7 @@ Usage: phoneme.exe [OPTIONS] <COMMAND>
 Commands:
   record        Push-to-talk: read stdin until EOF / Enter, then stop
   meeting       Meeting Mode: record mic + system audio as two linked recordings
-  import        Import an existing audio file (wav/mp3/m4a) and transcribe it
+  import        Import an existing audio file (wav/mp3/m4a/flac) and transcribe it
   list          List recordings
   show          Show one recording
   retranscribe  Re-transcribe a saved recording

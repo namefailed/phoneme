@@ -38,9 +38,14 @@ See [CLI Reference](../developer-guide/cli_reference.md) for the full command se
 
 Click **Record** or use the record hotkey.
 
-- **GUI Record button** — by default a manual **start/stop toggle**: click to start, click again to stop; it never cuts off on a quiet mic. Enable **Auto-stop on silence** (`recording.auto_stop_on_silence`) in **Settings → Capture** to have it stop automatically after the silence window (`silence_window_ms`, default ~3 s).
-- **Built-in record hotkey** — Hold or Toggle, per **Settings → Capture → Hotkeys**. Hold is always hold-to-record regardless of the auto-stop setting.
-- **CLI** — additionally supports one-shot (`--oneshot`, stop on silence) and fixed-duration (`--duration N`) recording.
+- **GUI Record button** — the **▾** next to Record opens a dropdown; under **"A voice note stops"** pick how the recording ends:
+  - **When I click Stop** (default) — a manual start/stop toggle; it never cuts off on a quiet mic.
+  - **When I go quiet** — stops automatically after the silence window (`silence_window_ms`, default ~3 s).
+  - **After N seconds** — stops after exactly the number of seconds you type into the row.
+
+  The choice is remembered on this device, applies to every later click of the Record button, and shows in the button's tooltip. Until you pick one, the old default applies: manual stop, or silence-stop if **Auto-stop on silence** (`recording.auto_stop_on_silence`) is enabled in **Settings → Capture**. Meetings are unaffected — they always run until you end them.
+- **Built-in record hotkey** — Hold or Toggle, per **Settings → Capture → Hotkeys**. Hold is always hold-to-record regardless of the auto-stop setting (the dropdown has no hold option — a mouse click can't be held).
+- **CLI** — the same three behaviors: stop signal, one-shot (`--oneshot`, stop on silence), and fixed-duration (`--duration N`) recording.
 
 ### Pause / resume
 

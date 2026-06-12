@@ -2,6 +2,7 @@
 
 mod auto_spawn;
 mod bridge;
+mod checksums;
 mod commands;
 mod config_io;
 mod doctor;
@@ -319,6 +320,7 @@ pub fn run() {
             commands::get_clean_transcript,
             commands::update_notes,
             commands::set_favorite,
+            commands::set_recording_title,
             commands::restart_whisper,
             commands::save_window_state,
             commands::set_preview_source,

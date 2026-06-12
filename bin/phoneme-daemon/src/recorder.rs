@@ -621,6 +621,8 @@ impl DaemonRecorder {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -1117,6 +1119,8 @@ impl DaemonRecorder {
                 tag_suggestions: vec![],
                 summary: None,
                 summary_model: None,
+                title: None,
+                title_is_auto: true,
                 tags: vec![],
                 speaker_names: vec![],
             };
@@ -1756,6 +1760,8 @@ mod tests {
             tag_suggestions: vec![],
             summary: None,
             summary_model: None,
+            title: None,
+            title_is_auto: true,
             tags: vec![],
             speaker_names: vec![],
         };

@@ -6,6 +6,12 @@
 
 use std::collections::VecDeque;
 
+/// Rolling-window silence detector over canonical 16-bit PCM.
+///
+/// Feed captured `i16` samples in via [`SilenceDetector::push`]; query
+/// [`SilenceDetector::is_silent`] to learn whether the most-recent window has
+/// gone quiet. Used by the recorder's Oneshot mode to auto-stop after the
+/// speaker stops talking. Not thread-safe — drive it from a single task.
 #[derive(Debug)]
 pub struct SilenceDetector {
     threshold_linear: f32, // 10 ^ (dbfs / 20)
@@ -17,6 +23,11 @@ pub struct SilenceDetector {
 }
 
 impl SilenceDetector {
+    /// Build a detector that fires once the trailing `window_ms` of audio sits
+    /// below `threshold_dbfs`. `threshold_dbfs` is full-scale decibels (a
+    /// negative number; quieter = more negative, e.g. -45.0). `window_ms` is the
+    /// span that must stay quiet, converted to a sample count via `sample_rate`
+    /// (Hz); the window is clamped to at least one sample.
     pub fn new(threshold_dbfs: f32, window_ms: u32, sample_rate: u32) -> Self {
         let threshold_linear = 10f32.powf(threshold_dbfs / 20.0);
         let window_samples = (window_ms as u64 * sample_rate as u64 / 1000) as usize;

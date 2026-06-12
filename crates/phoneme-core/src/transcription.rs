@@ -13,6 +13,7 @@
 //! `ElevenLabsProvider`.
 
 use crate::config::{TranscriptionBackend, WhisperConfig};
+use crate::diarization::{LocalDiarizer, LocalDiarizerCache};
 use crate::error::{Error, Result};
 use crate::types::TranscriptSegment;
 use async_trait::async_trait;
@@ -20,6 +21,7 @@ use reqwest::multipart;
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::fs;
 
@@ -76,18 +78,36 @@ pub trait TranscriptionProvider: Send + Sync {
 /// per request from the live config. Cloning is cheap — the inner
 /// `reqwest::Client` is reference-counted, so every minted provider shares one
 /// warm connection pool instead of rebuilding it per recording.
+///
+/// It also owns the process-wide [`LocalDiarizerCache`]: the local diarization
+/// pipeline (~500 MB of ONNX models, seconds to load) is loaded lazily on the
+/// first recording that needs it and then shared by every minted provider —
+/// the same warm-resource pattern as the HTTP pool. The daemon's config-apply
+/// paths reach it through [`diarizer_cache`](Self::diarizer_cache) to drop the
+/// pipeline when `[diarization]` config changes.
 #[derive(Debug, Clone)]
 pub struct Transcriber {
     http: reqwest::Client,
+    diarizer: Arc<LocalDiarizerCache>,
 }
 
 impl Transcriber {
-    /// Create a transcriber with a fresh shared HTTP client.
+    /// Create a transcriber with a fresh shared HTTP client and an empty
+    /// (nothing loaded yet) diarization pipeline cache.
     pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
             .build()
             .map_err(|e| Error::Internal(format!("Failed to build reqwest client: {e}")))?;
-        Ok(Self { http })
+        Ok(Self {
+            http,
+            diarizer: Arc::new(LocalDiarizerCache::new()),
+        })
+    }
+
+    /// The shared local-diarization pipeline cache, for the daemon's
+    /// config-apply invalidation hooks.
+    pub fn diarizer_cache(&self) -> &Arc<LocalDiarizerCache> {
+        &self.diarizer
     }
 
     /// Select and construct the transcription provider described by `[whisper]`
@@ -107,7 +127,12 @@ impl Transcriber {
         // OpenAI, Groq, Custom), each of which returns segments via verbose_json.
         // Cloud diarization (Deepgram/AssemblyAI) is intrinsic to those APIs and
         // only applies when that same provider does the transcription.
-        let local_diar = diarization.provider == crate::config::DiarizationBackend::Local;
+        //
+        // `Some` doubles as the old enabled flag and carries the shared
+        // pipeline cache plus the `[diarization]` config the run is keyed
+        // under, so every minted provider reuses one loaded pipeline.
+        let local_diar = (diarization.provider == crate::config::DiarizationBackend::Local)
+            .then(|| LocalDiarizer::new(self.diarizer.clone(), diarization.clone()));
         match whisper.provider {
             TranscriptionBackend::Local => {
                 #[cfg(feature = "native-whisper")]
@@ -274,7 +299,10 @@ pub struct OpenAiCompatProvider {
     api_key: Option<String>,
     model: Option<String>,
     timeout: Duration,
-    local_diarize: bool,
+    /// `Some` enables local diarization and carries the process-wide pipeline
+    /// cache (plus the `[diarization]` config the run is keyed under); `None`
+    /// disables it. Minted by `Transcriber::provider`.
+    local_diarize: Option<LocalDiarizer>,
     /// Request `verbose_json` (segment timing) even when local diarization is
     /// off. Always true for the bundled/local whisper.cpp server, which is
     /// known to support it; cloud + Custom endpoints only get verbose_json
@@ -306,7 +334,7 @@ impl OpenAiCompatProvider {
         api_key: Option<String>,
         model: Option<String>,
         timeout: Duration,
-        local_diarize: bool,
+        local_diarize: Option<LocalDiarizer>,
         request_segments: bool,
     ) -> Self {
         Self {
@@ -363,7 +391,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         // diarization and the persisted timeline both consume — requested
         // whenever either wants it (always for the local server; see
         // `request_segments`).
-        if self.local_diarize || self.request_segments {
+        if self.local_diarize.is_some() || self.request_segments {
             form = form.text("response_format", "verbose_json");
             form = form.text("timestamp_granularities[]", "segment");
         } else {
@@ -419,8 +447,10 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             })
             .collect();
 
-        if self.local_diarize && !segs.is_empty() {
-            return Ok(diarize_transcript(audio_path, segs, parsed.text).await);
+        if let Some(diarizer) = &self.local_diarize {
+            if !segs.is_empty() {
+                return Ok(diarize_transcript(audio_path, segs, parsed.text, diarizer).await);
+            }
         }
 
         // No diarization: keep the provider's timing with no speaker attribution.
@@ -453,12 +483,13 @@ fn secs_to_ms(secs: f64) -> i64 {
 /// speaker.
 ///
 /// The CPU-bound model inference is run on a blocking thread so it never stalls
-/// the async runtime. Shared by the local whisper-server and native-whisper
-/// providers so they label transcripts identically.
+/// the async runtime. `diarizer` carries the process-wide pipeline cache, so
+/// only the first recording (per config) pays the model load.
 pub(crate) async fn diarize_transcript(
     audio_path: &std::path::Path,
     segments: Vec<crate::diarization::TextSegment>,
     plain_text: String,
+    diarizer: &LocalDiarizer,
 ) -> Transcription {
     // Diarization failing must not cost the timeline its timing data, so the
     // fallback carries the whisper segments with no speaker attribution.
@@ -477,23 +508,21 @@ pub(crate) async fn diarize_transcript(
     };
 
     let path = audio_path.to_path_buf();
-    let speakers =
-        match tokio::task::spawn_blocking(move || crate::diarization::run_local_diarization(&path))
-            .await
-        {
-            Ok(Ok(s)) => {
-                tracing::info!(turns = s.len(), "local diarization completed");
-                s
-            }
-            Ok(Err(e)) => {
-                tracing::warn!("local diarization failed, falling back to raw whisper: {e}");
-                return unlabeled(plain_text, &segments);
-            }
-            Err(e) => {
-                tracing::warn!("local diarization task panicked: {e}");
-                return unlabeled(plain_text, &segments);
-            }
-        };
+    let diarizer = diarizer.clone();
+    let speakers = match tokio::task::spawn_blocking(move || diarizer.run(&path)).await {
+        Ok(Ok(s)) => {
+            tracing::info!(turns = s.len(), "local diarization completed");
+            s
+        }
+        Ok(Err(e)) => {
+            tracing::warn!("local diarization failed, falling back to raw whisper: {e}");
+            return unlabeled(plain_text, &segments);
+        }
+        Err(e) => {
+            tracing::warn!("local diarization task panicked: {e}");
+            return unlabeled(plain_text, &segments);
+        }
+    };
 
     let (labeled, num_speakers) = crate::diarization::label_segments(&segments, &speakers);
     // Surface the assignment result so "why isn't this diarized?" is answerable
@@ -1133,7 +1162,7 @@ mod tests {
             Some(SECRET.to_string()),
             Some("whisper-1".to_string()),
             Duration::from_secs(30),
-            false,
+            None,
             false,
         );
         let dbg = format!("{p:?}");

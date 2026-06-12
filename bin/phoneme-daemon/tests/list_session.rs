@@ -39,6 +39,8 @@ fn meeting_track(meeting_id: &str, track: &str) -> Recording {
         tag_suggestions: vec![],
         summary: None,
         summary_model: None,
+        title: None,
+        title_is_auto: true,
         tags: vec![],
         speaker_names: vec![],
     }

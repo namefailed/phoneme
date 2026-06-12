@@ -261,7 +261,7 @@ pub async fn retranscribe_recording(
     .await
 }
 
-/// Import an existing audio file (wav/mp3/m4a) as a new recording. The daemon
+/// Import an existing audio file (wav/mp3/m4a/flac) as a new recording. The daemon
 /// decodes it to a canonical WAV and runs it through the normal transcription
 /// pipeline. Returns `{ id }` for the new recording.
 #[tauri::command]
@@ -452,6 +452,19 @@ pub async fn set_favorite(
     forward(&bridge, Request::SetFavorite { id, favorite }).await
 }
 
+/// Set or clear a recording's display title. `Some` marks the title user-owned
+/// (auto generation never overwrites it again); `None` clears it back to auto —
+/// it empties now and regenerates on the next pipeline run.
+#[tauri::command]
+pub async fn set_recording_title(
+    bridge: Br<'_>,
+    id: String,
+    title: Option<String>,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::SetRecordingTitle { id, title }).await
+}
+
 /// Persist every window's position/size NOW. tauri-plugin-window-state only
 /// saves on a graceful exit — a crash, force-kill, or dev-watcher rebuild
 /// loses any move/resize since launch. The live-preview overlay calls this
@@ -569,6 +582,7 @@ fn mask_config_secrets(v: &mut Value) {
         "llm_post_process",
         "summary",
         "auto_tag",
+        "title",
         "preview_whisper",
     ] {
         if let Some(key) = v.get_mut(section).and_then(|s| s.get_mut("api_key")) {
@@ -611,6 +625,11 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
         incoming
             .auto_tag
             .set_api_key(current.auto_tag.api_key_str().to_owned());
+    }
+    if incoming.title.api_key_str() == MASKED_SECRET {
+        incoming
+            .title
+            .set_api_key(current.title.api_key_str().to_owned());
     }
     if let Some(pw) = incoming.preview_whisper.as_mut() {
         if pw.api_key_str() == MASKED_SECRET {
@@ -1087,20 +1106,34 @@ pub async fn wizard_download_model(
 
     let dest_path = models_dir.join(&filename);
     // A 0-byte file is a husk from a previously failed download, not a model —
-    // fall through and re-download over it.
+    // fall through and re-download over it. A non-empty file only counts as
+    // "already downloaded" once it passes its pinned checksum: an interrupted
+    // run (or a tampered cache) can leave a non-zero but wrong file behind, and
+    // it must not skip hashing. A failed check deletes the file (inside
+    // verify_file_or_delete) and falls through to a clean re-download.
     if tokio::fs::metadata(&dest_path)
         .await
         .is_ok_and(|m| m.len() > 0)
     {
-        // Emit a fake progress event so the UI knows it's 100%
-        let _ = window.emit(
-            "download_progress",
-            DownloadProgress {
-                downloaded: 1,
-                total: Some(1),
-            },
-        );
-        return Ok(dest_path.to_string_lossy().into_owned());
+        let verify_path = dest_path.clone();
+        let verify_url = url.clone();
+        let cached_ok = tokio::task::spawn_blocking(move || {
+            crate::checksums::verify_file_or_delete(&verify_path, &verify_url)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking error: {}", e))?
+        .is_ok();
+        if cached_ok {
+            // Emit a fake progress event so the UI knows it's 100%
+            let _ = window.emit(
+                "download_progress",
+                DownloadProgress {
+                    downloaded: 1,
+                    total: Some(1),
+                },
+            );
+            return Ok(dest_path.to_string_lossy().into_owned());
+        }
     }
 
     let response = reqwest::get(&url)
@@ -1142,6 +1175,20 @@ pub async fn wizard_download_model(
         let _ = window.emit("download_progress", DownloadProgress { downloaded, total });
     }
 
+    // Flush before hashing so every downloaded byte is on disk, then verify the
+    // finished file against its pin. A mismatch (or an unpinned URL) deletes the
+    // file and fails — the model is never handed back to be loaded.
+    file.sync_all()
+        .await
+        .map_err(|e| format!("failed to flush model file: {}", e))?;
+    drop(file);
+    let verify_path = dest_path.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::checksums::verify_file_or_delete(&verify_path, &url)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {}", e))??;
+
     Ok(dest_path.to_string_lossy().into_owned())
 }
 
@@ -1167,16 +1214,27 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
 
     for (filename, url) in files {
         let dest_path = semantic_dir.join(filename);
+        // Treat a pre-existing file as done only if it passes its pin; a partial
+        // or tampered cache otherwise re-downloads (verify deletes it first).
         if tokio::fs::metadata(&dest_path).await.is_ok() {
-            // Already downloaded this file
-            let _ = window.emit(
-                "semantic_download_progress",
-                DownloadProgress {
-                    downloaded: 1,
-                    total: Some(1),
-                },
-            );
-            continue;
+            let verify_path = dest_path.clone();
+            let verify_url = url.to_string();
+            let cached_ok = tokio::task::spawn_blocking(move || {
+                crate::checksums::verify_file_or_delete(&verify_path, &verify_url)
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking error: {}", e))?
+            .is_ok();
+            if cached_ok {
+                let _ = window.emit(
+                    "semantic_download_progress",
+                    DownloadProgress {
+                        downloaded: 1,
+                        total: Some(1),
+                    },
+                );
+                continue;
+            }
         }
 
         let response = reqwest::get(url)
@@ -1217,6 +1275,20 @@ pub async fn wizard_download_semantic_model(window: tauri::Window) -> Result<Str
                 DownloadProgress { downloaded, total },
             );
         }
+
+        // Verify each file against its pin before moving on; a bad file is
+        // deleted and the whole download fails (the model loads both files).
+        file.sync_all()
+            .await
+            .map_err(|e| format!("failed to flush {}: {}", filename, e))?;
+        drop(file);
+        let verify_path = dest_path.clone();
+        let verify_url = url.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::checksums::verify_file_or_delete(&verify_path, &verify_url)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking error: {}", e))??;
     }
 
     Ok(semantic_dir.to_string_lossy().into_owned())
@@ -1456,6 +1528,18 @@ pub async fn wizard_download_server(window: tauri::Window) -> Result<String, Com
     }
     drop(file);
 
+    // Verify the zip against its pin BEFORE extracting (S-H7): we are about to
+    // write executables out of this archive, so a mismatched or unpinned zip is
+    // deleted and rejected here rather than unpacked. The pin is keyed on the
+    // version-locked release URL above.
+    let verify_zip = temp_zip.clone();
+    let verify_url = url.to_string();
+    tokio::task::spawn_blocking(move || {
+        crate::checksums::verify_file_or_delete(&verify_zip, &verify_url)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {}", e))??;
+
     let zip_path = temp_zip.clone();
     let bin_path = bin_dir.clone();
 
@@ -1595,6 +1679,183 @@ mod tests {
                 "json_kind should be snake_case, got {s:?}"
             );
         }
+    }
+
+    // ── is_allowed_download_url (A2-H4) ────────────────────────────────────
+    // The download allow-list is a security boundary: a compromised renderer
+    // must not be able to point a download (whose bytes can later be run via
+    // wizard_run_installer) at an arbitrary host. These pin the real contract:
+    // https-only, host on the allow-list (exact or a true sub-domain), and the
+    // classic spoofs (downgrade, look-alike, userinfo@, sub-domain suffix
+    // confusion) all denied.
+
+    #[test]
+    fn allowed_urls_cover_the_real_wizard_hosts() {
+        // Every host the wizard actually downloads from, as used in commands.rs
+        // (model weights, the whisper-server zip, the semantic ONNX, Ollama).
+        for url in [
+            "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+            "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip",
+            "https://objects.githubusercontent.com/github-production-release-asset/x",
+            "https://ollama.com/library/llama3",
+            "https://registry.ollama.ai/v2/library/llama3/manifests/latest",
+            // A genuine sub-domain of an allowed host is allowed (the `.{a}` arm).
+            "https://cdn-lfs.huggingface.co/repos/abc/model.bin",
+        ] {
+            assert!(is_allowed_download_url(url), "should allow {url}");
+        }
+    }
+
+    #[test]
+    fn http_downgrade_is_denied() {
+        // Plain http (or anything not https) is rejected outright, even for an
+        // otherwise-allowed host — no MITM-able transport for runnable bytes.
+        assert!(!is_allowed_download_url("http://huggingface.co/model.bin"));
+        assert!(!is_allowed_download_url("ftp://github.com/x"));
+        assert!(!is_allowed_download_url("HTTPS://github.com/x")); // scheme match is case-sensitive by design (starts_with "https://")
+    }
+
+    #[test]
+    fn other_and_lookalike_hosts_are_denied() {
+        for url in [
+            "https://evil.com/payload.exe",
+            // Look-alike: the allowed name as a sub-string but a different host.
+            "https://huggingface.co.evil.com/model.bin",
+            "https://githubXcom/x",
+            "https://notgithub.com/x",
+            // Allowed name only as a path/query component, not the host.
+            "https://evil.com/huggingface.co/model.bin",
+            "https://evil.com/?x=github.com",
+        ] {
+            assert!(!is_allowed_download_url(url), "should deny {url}");
+        }
+    }
+
+    #[test]
+    fn userinfo_at_trick_is_denied() {
+        // The classic `allowed@evil` confusion: a human skims "github.com" but
+        // the real host is evil.com. `Url::host_str` returns the authority host,
+        // not the userinfo, so this is denied.
+        assert!(!is_allowed_download_url(
+            "https://github.com@evil.com/payload.exe"
+        ));
+        assert!(!is_allowed_download_url(
+            "https://huggingface.co:pass@evil.com/model.bin"
+        ));
+        // And the inverse must STILL pass: userinfo in front of a truly-allowed
+        // host is fine (the host is the allowed one).
+        assert!(is_allowed_download_url(
+            "https://user@github.com/ggml-org/whisper.cpp/releases/x.zip"
+        ));
+    }
+
+    #[test]
+    fn suffix_confusion_is_denied() {
+        // `ends_with(".github.com")` must not be satisfied by a host that merely
+        // ENDS with the bare name without the dot boundary.
+        assert!(!is_allowed_download_url("https://fakegithub.com/x"));
+        assert!(!is_allowed_download_url("https://myhuggingface.co/x"));
+        // Garbage / unparseable.
+        assert!(!is_allowed_download_url("not a url"));
+        assert!(!is_allowed_download_url("https://"));
+    }
+
+    // ── path_within (A1-H3 / A2-H5) ───────────────────────────────────────
+    // The reveal/open/run commands hand a renderer-supplied path to the OS, so
+    // `path_within` is the gate that keeps those to an allowed root. It
+    // canonicalizes BOTH sides (so `..` and 8.3/junction tricks can't escape a
+    // lexical prefix) and fails CLOSED when either path can't be canonicalized.
+    // These need real on-disk dirs because canonicalize touches the filesystem.
+
+    #[test]
+    fn path_within_accepts_child_and_root_itself() {
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("sub").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        let file = sub.join("clip.wav");
+        std::fs::write(&file, b"x").unwrap();
+
+        assert!(path_within(&file, root.path()), "a nested file is within");
+        assert!(path_within(&sub, root.path()), "a nested dir is within");
+        assert!(
+            path_within(root.path(), root.path()),
+            "the root is within itself"
+        );
+    }
+
+    #[test]
+    fn path_within_rejects_traversal_escape() {
+        // `<root>/sub/../../outside` canonicalizes ABOVE root → denied, even
+        // though the lexical string starts under it.
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("root");
+        let outside = base.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("secret.txt");
+        std::fs::write(&secret, b"x").unwrap();
+
+        let escaping = root.join("..").join("outside").join("secret.txt");
+        assert!(
+            !path_within(&escaping, &root),
+            "a ..-traversal that lands outside the root is denied"
+        );
+    }
+
+    #[test]
+    fn path_within_rejects_prefix_sibling() {
+        // `C:\data2` must NOT count as inside `C:\data` — the canonical
+        // starts_with compares whole path components, not raw string prefixes.
+        let base = tempfile::tempdir().unwrap();
+        let data = base.path().join("data");
+        let data2 = base.path().join("data2");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&data2).unwrap();
+        let file = data2.join("f.txt");
+        std::fs::write(&file, b"x").unwrap();
+
+        assert!(
+            !path_within(&file, &data),
+            "a sibling dir sharing a name prefix is not within"
+        );
+    }
+
+    #[test]
+    fn path_within_fails_closed_on_nonexistent() {
+        // canonicalize fails for a path that doesn't exist → fail closed
+        // (false), so a not-yet-created target can never slip through.
+        let root = tempfile::tempdir().unwrap();
+        let ghost = root.path().join("does-not-exist.txt");
+        assert!(
+            !path_within(&ghost, root.path()),
+            "a non-existent child fails closed"
+        );
+        let ghost_root = root.path().join("missing-root");
+        let real = root.path().join("real.txt");
+        std::fs::write(&real, b"x").unwrap();
+        assert!(
+            !path_within(&real, &ghost_root),
+            "a non-existent root fails closed"
+        );
+    }
+
+    #[test]
+    fn path_within_handles_mixed_separators() {
+        // The renderer often sends forward slashes on Windows; canonicalize
+        // normalizes separators, so a mixed-separator child still resolves
+        // under the root.
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("a").join("b");
+        std::fs::create_dir_all(&sub).unwrap();
+        let file = sub.join("c.wav");
+        std::fs::write(&file, b"x").unwrap();
+
+        // Rebuild the child path with forward slashes from the root string.
+        let mixed = format!("{}/a/b/c.wav", root.path().to_string_lossy());
+        assert!(
+            path_within(std::path::Path::new(&mixed), root.path()),
+            "a forward-slash child of a backslash root is still within"
+        );
     }
 }
 

@@ -91,7 +91,7 @@ pub enum Request {
         keep_audio: bool,
     },
 
-    /// Import an existing audio file (wav/mp3/m4a) as a new recording.
+    /// Import an existing audio file (wav/mp3/m4a/flac) as a new recording.
     /// The daemon decodes it to a canonical WAV and runs it through the same
     /// transcription pipeline as a microphone recording. Returns the new id.
     ImportRecording {
@@ -189,6 +189,14 @@ pub enum Request {
     SetFavorite {
         id: RecordingId,
         favorite: bool,
+    },
+    /// Set or clear a recording's display title. `Some` marks the title
+    /// user-owned — auto generation never overwrites it again. `None` clears
+    /// it back to auto: the title empties now and is regenerated on the next
+    /// pipeline run (e.g. a retranscribe).
+    SetRecordingTitle {
+        id: RecordingId,
+        title: Option<String>,
     },
     /// Run the LLM tag-suggestion step for one recording on demand (regardless
     /// of the `auto_tag.auto` gate). Suggestions land on the recording and a

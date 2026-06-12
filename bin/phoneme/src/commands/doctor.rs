@@ -2,7 +2,7 @@ use crate::args::DoctorArgs;
 use crate::client::Client;
 use crate::exit;
 use colored::Colorize;
-use phoneme_core::doctor::{self, CheckResult};
+use phoneme_core::doctor::{self, CheckCategory, CheckResult};
 use phoneme_core::Config;
 use phoneme_ipc::Request;
 use std::process::ExitCode;
@@ -52,6 +52,15 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
             Err(_) => "not reachable — run: phoneme daemon start".into(),
         },
         fix_action: None,
+        category: if daemon_ok {
+            CheckCategory::Info
+        } else {
+            CheckCategory::Critical
+        },
+        explanation:
+            "The background daemon does all recording and transcription — nothing works without it."
+                .into(),
+        fix_hint: (!daemon_ok).then(|| "Run: phoneme daemon start".into()),
     });
 
     // Daemon status detail (pid) — only if daemon is reachable.
@@ -62,12 +71,20 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 ok: true,
                 detail: format!("pid {}", value["pid"]),
                 fix_action: None,
+                category: CheckCategory::Info,
+                explanation: "Reports the daemon process id, useful when debugging.".into(),
+                fix_hint: None,
             }),
             Err(_) => checks.push(CheckResult {
                 name: "daemon_pid".into(),
                 ok: false,
                 detail: "no status reply".into(),
                 fix_action: None,
+                // The daemon accepted the connection but won't answer — treat
+                // it like a down daemon.
+                category: CheckCategory::Critical,
+                explanation: "Reports the daemon process id, useful when debugging.".into(),
+                fix_hint: Some("Restart it: phoneme daemon stop && phoneme daemon start".into()),
             }),
         }
     }
@@ -115,14 +132,28 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         }
     }
 
-    // A check whose name is marked "(optional)" never fails the run.
+    // A check whose name is marked "(optional)" never fails the run, and
+    // neither does a failing Info-category check (informational by definition).
     let is_optional = |name: &str| name.to_lowercase().contains("(optional)");
-    let any_failed = checks.iter().any(|c| !c.ok && !is_optional(&c.name));
+    let any_failed = checks
+        .iter()
+        .any(|c| !c.ok && c.category != CheckCategory::Info && !is_optional(&c.name));
 
     if json {
+        // Additive output: the original name/ok/detail keys stay untouched;
+        // category/explanation/fix_hint are new. fix_action stays GUI-only.
         let arr: Vec<_> = checks
             .iter()
-            .map(|c| serde_json::json!({"name": c.name, "ok": c.ok, "detail": c.detail}))
+            .map(|c| {
+                serde_json::json!({
+                    "name": c.name,
+                    "ok": c.ok,
+                    "detail": c.detail,
+                    "category": c.category.label(),
+                    "explanation": c.explanation,
+                    "fix_hint": c.fix_hint,
+                })
+            })
             .collect();
         crate::output::print_json(&serde_json::Value::Array(arr));
     } else {
@@ -132,7 +163,24 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
             } else {
                 "✗".red().to_string()
             };
-            println!("{mark} {:<22} {}", c.name, c.detail);
+            // Passing rows stay one line; failures get a category badge plus
+            // indented explanation and fix-hint lines.
+            if c.ok {
+                println!("{mark} {:<24} {}", c.name, c.detail);
+            } else {
+                let badge = match c.category {
+                    CheckCategory::Critical => "[critical]".red().to_string(),
+                    CheckCategory::Warning => "[warning]".yellow().to_string(),
+                    CheckCategory::Info => "[info]".dimmed().to_string(),
+                };
+                println!("{mark} {:<24} {badge} {}", c.name, c.detail);
+                if !c.explanation.is_empty() {
+                    println!("  {}", c.explanation.dimmed());
+                }
+                if let Some(hint) = &c.fix_hint {
+                    println!("  {} {hint}", "fix:".yellow());
+                }
+            }
         }
         if !daemon_ok {
             println!("\n  Tip: run `phoneme daemon start` to launch the daemon.");

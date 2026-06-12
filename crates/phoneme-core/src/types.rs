@@ -138,6 +138,15 @@ pub struct Recording {
     /// The LLM model used to produce `summary`, if any.
     #[serde(default)]
     pub summary_model: Option<String>,
+    /// Display title for the recording — auto-generated (heuristic or LLM) or
+    /// set by the user. `None` until generated; the UI falls back to the
+    /// `started_at` timestamp.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Whether `title` is auto-generated (`true` — the pipeline may refresh it
+    /// on retranscribe) or user-set (`false` — auto writes never overwrite it).
+    #[serde(default = "default_title_is_auto")]
+    pub title_is_auto: bool,
     /// Tags attached to this recording. Populated by `Catalog::list`/`get`;
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]
@@ -150,6 +159,13 @@ pub struct Recording {
     /// rewrites the transcript. Empty when no speakers have been renamed.
     #[serde(default)]
     pub speaker_names: Vec<SpeakerName>,
+}
+
+/// Serde default for `Recording::title_is_auto`: a row that predates the
+/// title columns (or a wire payload that omits the field) is auto-owned, so
+/// the pipeline may fill its title in.
+fn default_title_is_auto() -> bool {
+    true
 }
 
 /// A custom display name for one diarized speaker label within a recording.

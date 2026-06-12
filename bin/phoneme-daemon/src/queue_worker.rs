@@ -137,6 +137,16 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                 // reverts the server-independent temp settings.
                 match crate::load_config() {
                     Ok(cfg) => {
+                        // Config (re)applied: drop the cached local diarization
+                        // pipeline if `[diarization]` changed on disk since it
+                        // was loaded (backend switch / model path). One of the
+                        // two daemon invalidation points — the other is the
+                        // ReloadConfig IPC handler. A same-config reload (the
+                        // common case here) keeps the warm pipeline.
+                        state
+                            .transcription
+                            .diarizer_cache()
+                            .invalidate_if_stale(&cfg.diarization);
                         state.config.store(std::sync::Arc::new(cfg));
                     }
                     Err(e) => {

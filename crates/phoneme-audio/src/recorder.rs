@@ -44,11 +44,24 @@ fn block_has_content(block: &[i16]) -> bool {
 /// `Oneshot` (auto-stop on silence), `Duration { secs }` (auto-stop after N s).
 pub use phoneme_core::RecordMode as RecordingMode;
 
+/// Stop-condition and silence-detection settings for a single recording.
+///
+/// [`Default`] gives Hold mode, a 5-minute cap, and a -45 dBFS / 3 s silence
+/// gate — the values the daemon uses for an ordinary recording.
 #[derive(Debug)]
 pub struct RecorderConfig {
+    /// How the recording decides to stop (hold until told, stop on silence, or
+    /// stop after a fixed duration). See [`RecordingMode`].
     pub mode: RecordingMode,
+    /// Hard ceiling on captured length, in milliseconds. The recording always
+    /// stops here even in Hold mode, and the buffer is truncated to exactly this
+    /// many samples so the cap is never overshot.
     pub max_duration_ms: u64,
+    /// Silence gate for Oneshot auto-stop, in full-scale decibels (negative;
+    /// quieter = more negative). Ignored in other modes. See [`SilenceDetector`].
     pub silence_threshold_dbfs: f32,
+    /// How long the audio must stay below the gate before Oneshot stops, in
+    /// milliseconds.
     pub silence_window_ms: u32,
 }
 
@@ -63,9 +76,14 @@ impl Default for RecorderConfig {
     }
 }
 
+/// Outcome of a recording that was finalized to a WAV file.
 #[derive(Debug, Clone)]
 pub struct RecordingResult {
+    /// Length of the written audio in milliseconds, derived from the sample
+    /// count at the canonical 16 kHz rate.
     pub duration_ms: i64,
+    /// Number of `i16` samples written to the file (mono, so this equals the
+    /// frame count).
     pub samples_written: usize,
 }
 
@@ -299,6 +317,8 @@ impl Recorder {
         })
     }
 
+    /// The format this recorder captures into — always the source's canonical
+    /// 16 kHz mono config, and the format the finalized WAV will carry.
     pub fn audio_config(&self) -> AudioConfig {
         self.cfg
     }

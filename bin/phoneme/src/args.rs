@@ -27,7 +27,7 @@ pub enum Command {
     Record(RecordArgs),
     /// Meeting Mode: record mic + system audio as two linked recordings.
     Meeting(MeetingArgs),
-    /// Import an existing audio file (wav/mp3/m4a) and transcribe it.
+    /// Import an existing audio file (wav/mp3/m4a/flac) and transcribe it.
     Import(ImportArgs),
     /// List recordings.
     List(ListArgs),
@@ -252,7 +252,7 @@ pub struct SearchArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct ImportArgs {
-    /// Path to an audio file to import (wav/mp3/m4a).
+    /// Path to an audio file to import (wav/mp3/m4a/flac).
     pub file: String,
 }
 
@@ -437,8 +437,30 @@ pub enum ProfileAction {
     Use { name: String },
 }
 
+/// Output format for caption export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum CaptionFormat {
+    Srt,
+    Vtt,
+}
+
 #[derive(Debug, clap::Args)]
 pub struct ExportArgs {
-    /// Path to the output zip file.
-    pub output: String,
+    /// Path to the output zip file (library-zip mode, required when --captions
+    /// is absent).
+    pub output: Option<String>,
+
+    /// Export captions for this recording instead of zipping the library.
+    /// Accepts the same recording ID format as `phoneme show`.
+    #[arg(long, value_name = "RECORDING_ID")]
+    pub captions: Option<String>,
+
+    /// Caption file format: srt (default) or vtt.
+    #[arg(long, default_value = "srt", requires = "captions")]
+    pub format: CaptionFormat,
+
+    /// Write captions to FILE ("-" for stdout). Defaults to
+    /// `<recording-id>.srt` / `<recording-id>.vtt` in the current directory.
+    #[arg(short, long, value_name = "FILE", requires = "captions")]
+    pub out: Option<String>,
 }

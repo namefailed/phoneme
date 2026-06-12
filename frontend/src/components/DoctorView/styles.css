@@ -12,11 +12,11 @@
 }
 .doctor-row {
   display: grid;
-  grid-template-columns: 24px 200px 1fr auto;
+  grid-template-columns: 24px 220px 1fr auto;
   gap: 12px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--border-subtle);
-  align-items: center;
+  align-items: start;
 }
 .doctor-row:last-child {
   border-bottom: none;
@@ -46,3 +46,32 @@
   padding: 4px 10px;
   font-size: 12px;
 }
+
+/* Category badge on failing rows — the house status-pill idiom. */
+.doctor-cat {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.doctor-cat.critical { color: var(--err); background: color-mix(in srgb, var(--err) 15%, transparent); }
+.doctor-cat.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.doctor-cat.info { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 15%, transparent); }
+
+/* What the check verifies (always shown) and how to fix it (on failure). */
+.doctor-explain {
+  color: var(--fg-faded);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.doctor-hint {
+  color: var(--warn);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.doctor-hint::before { content: "fix: "; font-weight: 700; }

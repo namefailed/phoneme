@@ -9,7 +9,7 @@ use std::process::ExitCode;
 /// `phoneme_audio::SUPPORTED_EXTENSIONS`; duplicated here so the CLI doesn't
 /// pull in the heavy audio/codec dependency just for a local pre-check (the
 /// daemon validates authoritatively anyway).
-const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a"];
+const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "flac"];
 
 fn is_supported(path: &Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {

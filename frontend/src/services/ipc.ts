@@ -40,6 +40,12 @@ export type Recording = {
   summary?: string | null;
   /** The LLM model used to produce `summary`, if any. */
   summary_model?: string | null;
+  /** Display title — auto-generated (heuristic/LLM) or user-set. Null until
+   *  generated; the UI falls back to the started-at timestamp. */
+  title?: string | null;
+  /** Whether `title` is auto-generated (true — the pipeline may refresh it)
+   *  or user-set (false — auto writes never overwrite it). */
+  title_is_auto?: boolean;
   /** Tags associated with this recording */
   tags?: Array<{ id: number; name: string; color?: string | null }>;
   /** Custom display names for this recording's diarized speaker labels, e.g.
@@ -200,7 +206,7 @@ export async function retranscribeRecording(
 }
 
 /**
- * Import an existing audio file (wav/mp3/m4a). The daemon decodes it to a
+ * Import an existing audio file (wav/mp3/m4a/flac). The daemon decodes it to a
  * canonical WAV and transcribes it like a normal recording. Returns the new id.
  */
 export async function importRecording(path: string): Promise<{ id: string }> {
@@ -208,7 +214,7 @@ export async function importRecording(path: string): Promise<{ id: string }> {
 }
 
 /** File extensions accepted by the import flow (no leading dot). */
-export const IMPORT_AUDIO_EXTENSIONS = ["wav", "mp3", "m4a"] as const;
+export const IMPORT_AUDIO_EXTENSIONS = ["wav", "mp3", "m4a", "flac"] as const;
 
 export async function refireHook(id: string, command: string | null = null): Promise<void> {
   await tauriInvoke("refire_hook", { id, command });
@@ -360,6 +366,17 @@ export async function updateNotes(id: string, notes: string): Promise<void> {
 /** Star or unstar a recording (the Favorites view). Cosmetic organisation only. */
 export async function setFavorite(id: string, favorite: boolean): Promise<void> {
   await tauriInvoke("set_favorite", { id, favorite });
+}
+
+/**
+ * Set or clear a recording's display title. A non-empty string marks the title
+ * user-owned — auto generation never overwrites it again. `null` (or empty)
+ * clears it back to auto: the title empties now and is regenerated on the next
+ * pipeline run (e.g. a retranscribe). A `transcript_updated` event fires so
+ * open views refresh.
+ */
+export async function setRecordingTitle(id: string, title: string | null): Promise<void> {
+  await tauriInvoke("set_recording_title", { id, title });
 }
 
 /** Skip the LLM step (cleanup / summary / tagging) currently running for the

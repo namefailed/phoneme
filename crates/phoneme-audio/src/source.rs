@@ -62,6 +62,9 @@ pub struct SyntheticSource {
 }
 
 impl SyntheticSource {
+    /// Create a source paired with the sink that feeds it. The source reports
+    /// `cfg` as its format and yields exactly the blocks pushed into the sink, in
+    /// order, until the sink is closed or dropped.
     pub fn new(cfg: AudioConfig) -> (Self, SyntheticSink) {
         let (tx, rx) = mpsc::channel(64);
         (Self { cfg, rx }, SyntheticSink { tx })
@@ -75,6 +78,8 @@ pub struct SyntheticSink {
 }
 
 impl SyntheticSink {
+    /// Enqueue one block for the paired source to yield. Awaits if the channel
+    /// is full. Returns `Err` once the source side has been dropped.
     pub async fn push(&self, block: SampleBlock) -> Result<()> {
         self.tx
             .send(block)

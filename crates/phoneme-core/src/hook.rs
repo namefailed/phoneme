@@ -156,6 +156,65 @@ fn tail_chars(s: &str, max_bytes: usize) -> String {
     }
 }
 
+/// Hard cap on text returned from [`redact_secrets`], in bytes: 8 KiB. Longer
+/// output is cut at a char boundary and suffixed with a truncation marker.
+pub const REDACT_MAX_BYTES: usize = 8 * 1024;
+
+/// What a masked secret is replaced with. Matches the `<redacted>` convention
+/// the config `Debug` impls use for API keys.
+const REDACTED: &str = "<redacted>";
+
+/// Mask credential-shaped substrings in subprocess output before it crosses a
+/// trust boundary (daemon → tray/CLI over IPC). A hook-test command echoes
+/// whatever the user's script prints — and a debugging script often dumps its
+/// environment or a config file, which is exactly where keys live.
+///
+/// Masked shapes:
+/// - bare tokens with well-known prefixes: `sk-…` (OpenAI/Anthropic-style),
+///   `sk_live_…`/`sk_test_…` (Stripe), `ghp_…`/`gho_…`/`github_pat_…`
+///   (GitHub), `AKIA…` (AWS access key ids)
+/// - `Bearer <token>` authorization values
+/// - `key=`/`api_key=`/`token=`/`password=`/`secret=` assignments — the key
+///   name survives, the value is masked
+///
+/// The result is additionally capped at [`REDACT_MAX_BYTES`] (8 KiB). The cap
+/// is applied AFTER masking, so a cut can never expose half a secret. This is
+/// best-effort hygiene against accidental echoes, not a parser for every
+/// credential format — prefer over-masking to leaking.
+pub fn redact_secrets(text: &str) -> String {
+    // Compiled per call like the other small regexes in this crate — this runs
+    // on user-initiated hook tests, never in a hot path.
+    let prefixed = regex::Regex::new(
+        r"\b(?:sk-[A-Za-z0-9_-]{8,}|sk_(?:live|test)_[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{8,}|gho_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|AKIA[0-9A-Z]{12,})",
+    )
+    .unwrap();
+    // `{8,}` keeps prose like "bearer of bad news" intact; real bearer tokens
+    // are far longer.
+    let bearer = regex::Regex::new(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*").unwrap();
+    // The value may be bare or quoted; the key name and the `=` are kept so
+    // the user can still tell WHICH assignment their script printed.
+    let assigned = regex::Regex::new(
+        r#"(?i)\b(api[_-]?key|key|token|password|secret)(\s*=\s*)("[^"]*"|'[^']*'|[^\s"']+)"#,
+    )
+    .unwrap();
+
+    let masked = prefixed.replace_all(text, REDACTED);
+    let masked = bearer.replace_all(&masked, format!("Bearer {REDACTED}"));
+    let mut masked = assigned
+        .replace_all(&masked, format!("${{1}}${{2}}{REDACTED}"))
+        .into_owned();
+
+    if masked.len() > REDACT_MAX_BYTES {
+        let mut end = REDACT_MAX_BYTES;
+        while !masked.is_char_boundary(end) {
+            end -= 1;
+        }
+        masked.truncate(end);
+        masked.push_str("… <truncated>");
+    }
+    masked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +243,104 @@ mod tests {
         let s = "x".repeat(10_000);
         let t = tail_chars(&s, 100);
         assert_eq!(t.len(), 100);
+    }
+
+    // ── redact_secrets ──────────────────────────────────────────────────────
+
+    /// Every well-known token prefix is masked, and the original secret never
+    /// survives into the output.
+    #[test]
+    fn redact_masks_prefixed_tokens() {
+        // Each fixture is split with concat! so secret scanners (e.g. GitHub
+        // push protection) never see a contiguous token in the source; the
+        // runtime string the redactor scans is identical either way.
+        let secrets = [
+            concat!("sk-proj-", "abc123DEF456ghi789"),
+            concat!("sk_live_", "4eC39HqLyjWDarjtT1zdp7dc"),
+            concat!("sk_test_", "4eC39HqLyjWDarjtT1zdp7dc"),
+            concat!("ghp_", "16C7e42F292c6912E7710c838347Ae178B4a"),
+            concat!("gho_", "16C7e42F292c6912E7710c838347Ae178B4a"),
+            concat!("github_pat_", "11ABCDEFG0_abcdefghijklmnop"),
+            concat!("AKIA", "IOSFODNN7EXAMPLE"),
+        ];
+        for secret in secrets {
+            let input = format!("debug: found {secret} in env");
+            let out = redact_secrets(&input);
+            assert!(!out.contains(secret), "{secret} must not survive: {out}");
+            assert!(out.contains("<redacted>"), "mask expected in: {out}");
+            assert!(out.contains("debug: found"), "context survives: {out}");
+        }
+    }
+
+    /// `Bearer <token>` values are masked regardless of header casing.
+    #[test]
+    fn redact_masks_bearer_tokens() {
+        let out = redact_secrets("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig");
+        assert_eq!(out, "Authorization: Bearer <redacted>");
+        let out = redact_secrets("authorization: bearer abc123def456");
+        assert!(!out.contains("abc123def456"), "got: {out}");
+        assert!(out.contains("Bearer <redacted>"), "got: {out}");
+    }
+
+    /// `key=`-style assignments keep the key name (so the user can tell which
+    /// assignment their script printed) but lose the value — bare or quoted,
+    /// any casing, with or without spaces around the `=`.
+    #[test]
+    fn redact_masks_assigned_values_keeping_key_names() {
+        let cases = [
+            ("key=hunter2value", "key=<redacted>"),
+            ("api_key=abcd1234", "api_key=<redacted>"),
+            ("API-KEY=abcd1234", "API-KEY=<redacted>"),
+            ("token = xyz987", "token = <redacted>"),
+            ("password=\"correct horse\"", "password=<redacted>"),
+            ("secret='battery staple'", "secret=<redacted>"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(redact_secrets(input), want);
+        }
+    }
+
+    /// Ordinary hook chatter passes through byte-for-byte — including words
+    /// that merely CONTAIN a sensitive key name (`monkey=`, `max_tokens=`) and
+    /// short prose after "bearer".
+    #[test]
+    fn redact_leaves_benign_text_untouched() {
+        let benign = [
+            "hook finished in 320ms, wrote 2 files",
+            "monkey=banana and donkey=carrot",
+            "max_tokens=256 temperature=0.7",
+            "the bearer of bad news",
+            "ask Skylar about the demo", // "sk" without the token shape
+        ];
+        for input in benign {
+            assert_eq!(redact_secrets(input), input, "benign text must survive");
+        }
+    }
+
+    /// Output is hard-capped at REDACT_MAX_BYTES (plus the truncation marker),
+    /// cutting on a char boundary even for multi-byte text.
+    #[test]
+    fn redact_caps_output_length() {
+        let huge = "x".repeat(REDACT_MAX_BYTES * 3);
+        let out = redact_secrets(&huge);
+        assert!(
+            out.len() <= REDACT_MAX_BYTES + "… <truncated>".len(),
+            "cap not enforced: {} bytes",
+            out.len()
+        );
+        assert!(out.ends_with("<truncated>"), "marker expected");
+
+        // Multi-byte chars: must not panic and must stay within the cap.
+        let unicode = "€".repeat(REDACT_MAX_BYTES); // 3 bytes each
+        let out = redact_secrets(&unicode);
+        assert!(out.len() <= REDACT_MAX_BYTES + "… <truncated>".len());
+
+        // A secret near the cut point is masked BEFORE truncation, so the cap
+        // can never expose a half-cut token.
+        let mut padded = "y".repeat(REDACT_MAX_BYTES - 20);
+        padded.push_str(" sk-abcdef1234567890SECRET");
+        let out = redact_secrets(&padded);
+        assert!(!out.contains("SECRET"), "secret leaked past the cap");
+        assert!(!out.contains("sk-abcdef"), "secret leaked past the cap");
     }
 }

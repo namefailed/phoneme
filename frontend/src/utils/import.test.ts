@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../services/ipc", () => ({
   importRecording: vi.fn(),
-  IMPORT_AUDIO_EXTENSIONS: ["wav", "mp3", "m4a"] as const,
+  IMPORT_AUDIO_EXTENSIONS: ["wav", "mp3", "m4a", "flac"] as const,
 }));
 
 vi.mock("./toast", () => ({
@@ -34,7 +34,7 @@ describe("importAudioPaths", () => {
   });
 
   it("skips files with unsupported or missing extensions without calling import", async () => {
-    const count = await importAudioPaths(["notes.txt", "noext", "clip.flac"]);
+    const count = await importAudioPaths(["notes.txt", "noext", "clip.ogg"]);
 
     expect(count).toBe(0);
     expect(mockImport).not.toHaveBeenCalled();
@@ -43,6 +43,16 @@ describe("importAudioPaths", () => {
       expect.stringContaining("Skipped"),
       "warning",
     );
+  });
+
+  it("imports flac files", async () => {
+    mockImport.mockResolvedValue({ id: "f1" });
+
+    const count = await importAudioPaths(["interview.flac", "mix.FLAC"]);
+
+    expect(count).toBe(2);
+    expect(mockImport).toHaveBeenCalledWith("interview.flac");
+    expect(mockImport).toHaveBeenCalledWith("mix.FLAC");
   });
 
   it("counts only successful imports when some fail", async () => {

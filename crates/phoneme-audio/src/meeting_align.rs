@@ -10,7 +10,12 @@ const SPARSE_DEFICIT_MS: i64 = 500;
 /// One track's raw capture, passed into [`align_meeting_tracks`].
 #[derive(Debug, Clone)]
 pub struct TrackAlignInput {
+    /// This track's raw captured samples (canonical 16 kHz mono i16), exactly as
+    /// the recorder buffered them — not yet placed on the shared timeline.
     pub samples: Vec<i16>,
+    /// How long after the meeting's `wall_started` this track's recorder began
+    /// capturing, in milliseconds. The track's audio is placed this far into the
+    /// output so the two tracks line up at their true wall-clock offsets.
     pub track_late_by_ms: i64,
     /// Milliseconds from meeting `wall_started` when the first non-silent block
     /// arrived. `None` if the track stayed silent throughout.
@@ -27,6 +32,8 @@ pub struct TrackAlignInput {
 /// so callers can log *why* a track landed where it did.
 #[derive(Debug, Clone)]
 pub struct AlignedTrack {
+    /// Output samples, exactly `target_duration_ms` long, with this track's
+    /// content placed at its wall-clock offset and the rest zero-filled silence.
     pub samples: Vec<i16>,
     /// `true` when the track was detected as sparse loopback capture and
     /// relocated to its wall-clock first-content instant.
@@ -145,6 +152,9 @@ fn leading_quiet_len(samples: &[i16]) -> usize {
         .count()
 }
 
+/// Convert a duration in milliseconds to a mono sample count at `sample_rate`
+/// (Hz), rounding down. Negative input clamps to zero, so an offset that lands
+/// before the timeline start yields no samples rather than wrapping.
 pub fn ms_to_samples(ms: i64, sample_rate: u32) -> usize {
     ((ms.max(0) as u64) * sample_rate as u64 / 1000) as usize
 }

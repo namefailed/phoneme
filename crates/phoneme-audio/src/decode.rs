@@ -1,8 +1,8 @@
-//! Decode arbitrary audio files (WAV / MP3 / M4A) to Phoneme's canonical WAV.
+//! Decode arbitrary audio files (WAV / MP3 / M4A / FLAC) to Phoneme's canonical WAV.
 //!
 //! Recorded microphone audio already arrives as canonical 16 kHz mono i16 WAV.
 //! Imported files can be anything — stereo MP3 at 44.1 kHz, AAC/ALAC in an
-//! `.m4a` container, 24-bit WAV, etc. This module uses the pure-Rust
+//! `.m4a` container, 24-bit FLAC, etc. This module uses the pure-Rust
 //! [`symphonia`] demuxer/decoder to turn any supported file into interleaved
 //! f32 samples, then funnels them through the SAME downmix → resample → i16
 //! conversion the recorder uses, so an imported recording is byte-for-byte the
@@ -22,7 +22,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
 /// Extensions accepted for import. Lowercase, no leading dot.
-pub const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a"];
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "flac"];
 
 /// Maximum decoded audio duration accepted for import, in seconds (6 hours).
 ///
@@ -325,7 +325,30 @@ mod tests {
         assert!(is_supported_extension(Path::new("a.wav")));
         assert!(is_supported_extension(Path::new("a.MP3")));
         assert!(is_supported_extension(Path::new("a.m4a")));
+        assert!(is_supported_extension(Path::new("a.flac")));
+        assert!(is_supported_extension(Path::new("a.FLAC")));
         assert!(!is_supported_extension(Path::new("a.txt")));
         assert!(!is_supported_extension(Path::new("noext")));
+    }
+
+    /// Verify that `.flac` passes the extension gate and reaches symphonia's
+    /// FLAC decoder. A fully-decoded round-trip test would require a FLAC
+    /// encoder in the test suite (symphonia is decoder-only and we don't want
+    /// to pull in an extra encoder dep). Instead we confirm the critical
+    /// invariant: a `.flac` path is NOT rejected with "unsupported audio
+    /// format" — any subsequent parse error is expected for a zero-byte
+    /// fixture and is fine.
+    #[test]
+    fn flac_extension_reaches_decoder() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("clip.flac");
+        let dst = dir.path().join("out.wav");
+
+        std::fs::write(&src, b"").unwrap();
+        let err = decode_to_canonical_wav(&src, &dst).unwrap_err();
+        assert!(
+            !err.to_string().contains("unsupported audio format"),
+            "FLAC extension was rejected before reaching the decoder: {err}"
+        );
     }
 }
