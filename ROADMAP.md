@@ -38,6 +38,49 @@ move at least one of these personas closer to "done":
 
 Landed most recently — verified against current code:
 
+- [x] **Auto-tagging** — a `Tagging` pipeline stage where an LLM suggests tags for
+  approval (✓/✕ per tag, ✓ All / ✕ All), with its own `[auto_tag]` provider/model/
+  prompt (inheriting `[llm_post_process]` where blank), a max-tags cap, and an
+  `auto_accept_existing` toggle that silently applies suggestions matching tags the
+  library already has while queueing genuinely new ones for review.
+- [x] **Doctor self-healing** — `RestartWhisper` sweeps stray `whisper-server`
+  processes and bounces both supervisors (backoff reset), surfaced as a header
+  health pill + a failure banner, `phoneme doctor --fix` on the CLI, and the
+  Doctor view reachable from the main UI (`g D`).
+- [x] **True split panes** — `\` opens a second full recording pane (independent
+  editor/actions/dirty state, draggable ratio-persisted splitter, per-pane Esc);
+  replaces the old side-by-side modal.
+- [x] **Meeting live preview** — live captions during meetings with a `toggle`
+  mode (🎤/🔊 source switch on the overlay) or an optional `both` mode streaming
+  the two tracks at once.
+- [x] **Keyboard & layout overhaul** — vim cursor persists across reload and pane
+  switches (dimmed when unfocused), `zz` centers the list, `g d` jumps to the
+  detail pane, `g /` to search, contextual `f` zen (recording open → focus mode,
+  else full-window list) with chrome snapshot/restore, a real animation system
+  (`interface.animation_speed`: off/fast/normal/slow, honors reduced-motion),
+  Ctrl+/ top-bar toggle, list zoom, sidebar + queue 2D nav, and a help sheet that
+  lists every binding.
+- [x] **Named speakers** — rename `Speaker N` once in the detail or merged view;
+  persisted (`speaker_names` migration), rewrites the transcript text, and stays
+  re-renamable afterwards.
+- [x] **Saved searches & favorites** — saved searches capture the *full* filter
+  state and get a manager (Settings → Managers, `g S`); recordings can be starred
+  (list column + a Library "Favorites" filter, persisted in the catalog).
+- [x] **Queue panel polish** — inverted order with the active item pinned,
+  skip-current-stage (`SkipCurrentStage` IPC), failed badge + clear, and the list
+  pinned to the bottom on load/additions.
+- [x] **Transcript version diff** — side-by-side compare of original Whisper vs
+  cleaned vs current edit (`TranscriptDiff.ts`).
+- [x] **Summary errors carry the real reason** — a failed summary names the
+  provider/endpoint actually used (including a per-step override), instead of a
+  generic "check the AI provider".
+- [x] **Docs overhaul** — the developer guide is now a code wiki (internals,
+  onboarding, how-to-extend, frontend + backend guides) and every user-facing
+  feature and CLI command is documented; CI green throughout, with the release
+  workflow gated on the same checks.
+
+## ✅ Recently shipped (previous cycle)
+
 - [x] **Chunked hybrid semantic search** — sentence-aware chunking (`chunk.rs`) +
   per-chunk embeddings (`embedding_chunks`) fused with FTS5 via RRF
   (`fusion.rs`, `catalog.rs::hybrid_search`) and a calibrated 0–100% relevance.
@@ -164,8 +207,9 @@ same-user malware or a malicious IPC client. Ordered by priority.*
 ## 📋 v1.9 — Completeness & Recall
 
 **Theme: close the promise-vs-reality gaps and finish the attic.** Most of this is
-wiring features the backend already supports. Meetings-first, because the docs
-already advertise a merged timeline we don't ship yet (the biggest trust gap).
+wiring features the backend already supports. Meetings-first: the coarse merged
+view shipped, but the *chronological* interleaved timeline — the thing the
+persona actually wants — still needs the alignment + timestamp substrate below.
 
 ### ⚠️ Prerequisites / shared infrastructure (do these first)
 
@@ -224,7 +268,11 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
   - [ ] **Speaker embeddings for named speakers** *(refined)*. `DiarizationResult` does expose `embeddings: ChunkEmbeddings(pub Array3<f32>)` and `hard_clusters: ChunkSpeakerClusters(pub Array2<i32>)` (`pipeline/types/data.rs:154`), so per-name centroids are computable. Caveat: `run_local_diarization` currently throws the whole result away except segments, and speakrs computes centroids internally (`pipeline/clustering.rs`) without a public accessor — we'd aggregate chunk embeddings per cluster ourselves, persist centroids per name, and cosine-match on later recordings. Real but non-trivial; lands after the scaling + caching fixes. *(diarization.rs:159–169)*
   - [ ] **Cloud diarization toggles** *(confirmed — already wired)*. Deepgram passes `diarize=true` and reassembles `[Speaker N]` from word speaker tags (transcription.rs:469, 521–553); AssemblyAI passes `speaker_labels=true` and reassembles from utterances (transcription.rs:702, 730–756). Both are gated on `DiarizationBackend::Deepgram` / `::Assemblyai` (transcription.rs:114, 122; config.rs:83). Remaining work is just the **Settings UI** to pick the backend, not backend plumbing.
   - [ ] **DER eval harness** *(refined)*. speakrs ships DER utilities — `compute_der`, `DerResult`, `parse_rttm` (`metrics.rs`), and `to_rttm` (`segment.rs`) — **but they are behind the `_metrics` feature**, which Phoneme does not enable (`speakrs = "0.4.2"`, default features in `phoneme-core/Cargo.toml:26`). Add a small RTTM fixture set + a dev-only harness that enables `speakrs/_metrics` (or reimplements collar-0 DER), wired as an optional nightly CI job rather than a release gate.
-- [ ] **Named speakers** — rename "Speaker 1" → "Sarah" once, persisted across exports. *(After diarization quality lands — and after the `to_segments` scaling fix, or names attach to scrambled turns.)*
+- [x] **Named speakers** — rename "Speaker 1" → "Sarah" once, persisted
+  (`speaker_names` table) and rewritten into the transcript text itself, so exports
+  and the merged view both carry the name; re-renamable after the fact. *(Manual
+  rename shipped; automatic recognition via speaker embeddings is the separate
+  item above.)*
 - [ ] **Meeting capture profiles** — one click "Standup" (tag + summarize preset + Obsidian hook) vs "Interview" (diarize on, different prompt). Config profiles exist; tie them to capture intent.
 - [ ] **Post-meeting digest** — meeting ends → optional "Summarize now?" with a one-click LLM preset.
 
@@ -234,7 +282,10 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
   calibrated 0–100% relevance per hit (`fusion.rs::calibrate_cosine`) and the
   recordings list renders it as a chip during a semantic query.
 - [ ] **"More like this"** — open a recording → find semantically similar ones. Nearly free: search by an existing recording's stored vector instead of a fresh query embedding. (Promoted from "medium" — embeddings already exist.)
-- [ ] **Saved searches / smart filters** — persist "meeting-tagged, last 30 days, contains 'action items'."
+- [x] **Saved searches / smart filters** — saves capture the *complete* filter
+  state (query, kind, tags, dates, favorites, semantic mode), applied from the
+  header dropdown and managed in Settings → Managers (also `g S`).
+  (`SavedSearches.ts`, `SectionSavedSearches.ts`, `state/savedSearches.ts`)
 
 ### ✨ Small wins
 
@@ -262,15 +313,19 @@ already advertise a merged timeline we don't ship yet (the biggest trust gap).
   retrieval; needs a chat UI + citation UX. The headline differentiated feature.
 - [ ] **Transcript ↔ waveform sync** — click a paragraph → seek playback. *(Needs
   word-level timestamps from v1.9.)*
-- [ ] **Compare transcript versions** — side-by-side diff: original Whisper vs LLM
-  cleanup vs manual edit. (`original_transcript` is already preserved.)
+- [x] **Compare transcript versions** — side-by-side diff of original Whisper vs
+  cleaned vs the current edit (`TranscriptDiff.ts`); audited clean.
 - [ ] **Custom vocabulary / glossary** — names like "Phoneme", "pyannote", client
   acronyms transcribed correctly via Whisper's `initial_prompt`. (Dictator persona,
   Whisper-native.)
-- [ ] **Smart title + auto-tag suggestions** — after transcription, "Suggested tags:
-  #meeting #design." (The LLM pipeline already runs optionally.)
-- [ ] **Transcription queue dashboard** — pending / processing / failed with per-file
-  error + retry, in the GUI.
+- [x] **Auto-tag suggestions** — *shipped* as a full pipeline stage with
+  approve/dismiss UX, its own `[auto_tag]` provider config, and auto-accept for
+  tags the library already has. Smart **titles** are the remaining half — tracked
+  as the v1.9 auto-generated-titles item.
+- [x] **Transcription queue dashboard** — the queue panel now shows pending /
+  processing / failed (badge + clear), supports reorder, pause, cancel, and
+  skip-current-stage, and pins the active item. *Still open:* per-file error
+  detail + one-click retry on failed entries.
 - [ ] **Per-recording hook override** — this one goes to Discord, that one stays
   local. (Today hook config is global; re-fire is manual.)
 - [ ] **Confidence highlighting** — low-confidence words underlined; click to fix.
@@ -349,7 +404,6 @@ graduate someday live in the [Idea Parking Lot](docs/IDEAS.md) instead.)
 
 | Idea | Reason |
 |------|--------|
-| Favorites / starring | Tags already do this — make a "⭐ Favorite" tag |
 | Duration filter | Niche; nobody asked; search + tags already narrow the list |
 | Backup/restore ZIP | Manual export covers it; the SQLite DB is a single copyable file |
 | Azure Speech / AWS Transcribe | Enterprise pricing; not the target user; add only on demand |
@@ -372,7 +426,7 @@ fill + scroll-extend, the detail-pane overhaul. The transcript-diff,
 saved-searches, and curated-models features audited **clean**.
 
 **Wave 1 — High (correctness & security)**
-- [ ] whisper-server stdout/stderr never drained → pipe fills (~64 KB) → hung transcription / false timeout (`whisper_supervisor.rs`) *(A2-H1)*
+- [x] whisper-server stdout/stderr never drained → pipe fills (~64 KB) → hung transcription / false timeout — both spawn sites now use `Stdio::null()` (`whisper_supervisor.rs`) *(A2-H1)*
 - [ ] `native-whisper` won't compile — `model_path` (a `String`) used as an `Option` (`transcription.rs:78`) *(A2-H2)*
 - [ ] tray `Bridge` stays `None` after a down-at-launch daemon; no real reconnect (`commands.rs` / `lib.rs`) *(A2-H3)*
 - [ ] `wizard_download_model` / `wizard_run_installer` lack a URL allowlist + canonicalize (`commands.rs`) *(A2-H4/H5)*
@@ -384,7 +438,7 @@ saved-searches, and curated-models features audited **clean**.
 
 **Wave 2 — Perf & UX correctness** — embed read-lock contention + `spawn_blocking` + diarizer pipeline cache (A2-M8), cancel → distinct status (not `TranscribeFailed`), meeting-stop best-effort per track (A2-M6), poisoned model download (A2-M1), per-request retranscribe override (A2-M21), server-side `kind` filter for sparse pages.
 
-**Wave 3 — CLI / doctor / config** — `config set` atomicity + validate + resolved path (A2-M3), `status` without auto-spawn (A2-M4), doctor resolved-path + per-provider probes (A2-M5/M15), preview-config validate/expand (A2-M13/M14), pipe-busy connect deadline (A2-M9), fix stale `ActionRow.test.ts` (A2-M22).
+**Wave 3 — CLI / doctor / config** — `config set` atomicity + validate + resolved path (A2-M3), `status` without auto-spawn (A2-M4), doctor resolved-path + per-provider probes (A2-M5/M15), preview-config validate/expand (A2-M13/M14), pipe-busy connect deadline (A2-M9). ~~Fix stale `ActionRow.test.ts` (A2-M22)~~ — done (rewritten against the merged Re-run form).
 
 **Wave 4 — Hardening & data integrity** — queue crash-dup window (A2-M12), retention in a transaction (A2-M20), U16 capture path (A2-M10), import OOM cap (A2-M11), bounded LLM/webhook error bodies (A2-M16/M17), profile-switch re-registers all hotkeys (A2-M18), overlay capability split (A2-M19), webhook SSRF guard + queue-IPC integration tests.
 
@@ -404,7 +458,10 @@ alongside the feature releases above.*
 - [ ] Integration tests for daemon components; a synthetic-audio E2E covering the single-recording path.
 
 **Doctor**
-- [ ] Disk-space + model-integrity checks; check categories (Critical/Warning/Info); per-check explanations + fix guidance; "Fix All"; Doctor in main nav (not just tray).
+- [x] Restart/fix for the local whisper servers (`RestartWhisper` sweeps strays +
+  bounces both supervisors), a header health pill + failure banner, `phoneme
+  doctor --fix` on the CLI, and Doctor in the main nav (`g D`).
+- [ ] Disk-space + model-integrity checks; check categories (Critical/Warning/Info); per-check explanations + fix guidance; "Fix All".
 
 **Code organization**
 - [ ] Split the large files (`config.rs`, `catalog.rs`, `recorder.rs`, `commands.rs`) into modules; dedupe `auto_spawn.rs` (CLI + Tauri); move `grouping.ts`/`form.ts` to `utils/`.
