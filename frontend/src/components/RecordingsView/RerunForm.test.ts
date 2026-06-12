@@ -17,6 +17,24 @@ vi.mock("../../services/llmModels", () => ({
 vi.mock("../../data/curatedModels", () => ({
   curatedTranscriptionModels: () => [],
   curatedCleanupModelIds: () => [],
+  modelHint: () => "",
+}));
+
+// The cleanup/summary model fields are the shared `mountModelField` control.
+// Stub it with a plain free-text input that keeps the legacy `.rerun-*-model`
+// class and writes back through `setModel`, so these payload-pinning tests keep
+// driving the model value exactly as before (the live dropdown is exercised in
+// modelField.test.ts and manual QA). `host.className` tells the two apart.
+vi.mock("../SettingsView/modelField", () => ({
+  mountModelField: (host: HTMLElement, opts: { getModel: () => string; setModel: (m: string) => void }) => {
+    const cls = host.classList.contains("rerun-summary-model-host")
+      ? "rerun-summary-model"
+      : "rerun-cleanup-model";
+    host.innerHTML = `<input type="text" class="${cls}" />`;
+    const input = host.querySelector("input")!;
+    input.value = opts.getModel();
+    input.addEventListener("input", () => opts.setModel(input.value));
+  },
 }));
 
 import * as tauriCore from "@tauri-apps/api/core";

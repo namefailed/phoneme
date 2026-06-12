@@ -5,10 +5,10 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 
 import { invoke } from '@tauri-apps/api/core';
 import { showToast } from '../utils/toast';
-import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset } from '../services/llmProviders';
-import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModels } from '../services/sttProviders';
-import { fetchLlmModels } from '../services/llmModels';
-import { curatedCleanupModelIds } from '../data/curatedModels';
+import { LOCAL_LLM_PRESETS, CLOUD_LLM_PRESETS, findLlmPreset, type LlmPreset } from '../services/llmProviders';
+import { STT_PROVIDERS, STT_CUSTOM_PRESETS, findSttCustomPreset, curatedSttModels, type SttCustomPreset } from '../services/sttProviders';
+import { mountModelField, type ModelFieldOpts } from './SettingsView/modelField';
+import { curatedTranscriptionModels } from '../data/curatedModels';
 import { applyRerun, rerunToastMessage, type RerunPayload } from './RecordingsView/rerunActions';
 import { getOpenRecordingId } from '../state/openRecording';
 
@@ -36,6 +36,11 @@ function whisperRank(path: string): number {
   if (f.includes("turbo")) return 4;
   if (f.includes("large")) return 5;
   return 6;
+}
+
+/** Trim + drop trailing slashes so endpoint comparisons ignore cosmetic differences. */
+function normalizeUrl(u: string): string {
+  return (u || "").trim().replace(/\/+$/, "");
 }
 
 function localModelLabel(path: string): string {
@@ -89,10 +94,6 @@ export class ModelPickerElement extends LitElement {
   @state() private llmModel = "";
   @state() private llmKey = "";
   @state() private diarizationEnabled = false;
-  @state() private llmModels: string[] = [];
-  @state() private fetchingLlm = false;
-  @state() private llmModelOther = false;
-  @state() private sttModelOther = false;
 
   // Summary model (config.summary). Empty provider = inherit the post-processing
   // (cleanup) connection.
@@ -100,9 +101,6 @@ export class ModelPickerElement extends LitElement {
   @state() private sumUrl = "";
   @state() private sumModel = "";
   @state() private sumKey = "";
-  @state() private sumModels: string[] = [];
-  @state() private fetchingSum = false;
-  @state() private sumModelOther = false;
 
   // Auto-tag model (config.auto_tag). Empty provider = inherit the cleanup
   // connection, like the summary.
@@ -110,9 +108,6 @@ export class ModelPickerElement extends LitElement {
   @state() private atUrl = "";
   @state() private atModel = "";
   @state() private atKey = "";
-  @state() private atModels: string[] = [];
-  @state() private fetchingAt = false;
-  @state() private atModelOther = false;
 
   // Semantic-search embedding model (config.semantic_search.model_dir) — a
   // local ONNX model directory, not a provider/model pair.
@@ -126,7 +121,6 @@ export class ModelPickerElement extends LitElement {
   @state() private prevModel = "";
   @state() private prevKey = "";
   @state() private prevLocalModel = "";
-  @state() private prevModelOther = false;
 
   @query('.mp-dialog') dialog!: HTMLElement;
   @query('#mp-stt-provider') sttProviderSelect!: HTMLSelectElement;
@@ -169,6 +163,92 @@ export class ModelPickerElement extends LitElement {
     
     const cancelBtn = this.querySelector('#mp-cancel') as HTMLButtonElement | null;
     cancelBtn?.focus();
+  }
+
+  /** Connection key each slot's shared model field was last mounted with. Not
+   *  reactive state — mounting happens after renders that already ran. */
+  private mfKeys = new Map<string, string>();
+
+  /**
+   * Mount the shared model field (`mountModelField`) into every slot's host div
+   * after each render. The hosts are empty, binding-free divs in the template,
+   * so Lit never touches what the field puts inside them.
+   *
+   * Each slot re-mounts only when its connection changes — provider for the
+   * curated STT-style slots, provider|url|key for the live-fetch LLM slots
+   * (a remount there kicks a fresh fetch with the new credentials). The key
+   * check makes every other re-render of this modal leave the mounted field
+   * alone, so picking a model (which writes @state and re-renders) or typing
+   * in an unrelated input never resets an open dropdown or its "Other…" text.
+   */
+  protected updated(_changedProperties: PropertyValues) {
+    const mount = (slot: string, key: string, opts: ModelFieldOpts) => {
+      const host = this.querySelector<HTMLElement>(`#mp-${slot}-model-host`);
+      if (!host) return;
+      if (this.mfKeys.get(slot) === key && host.firstElementChild) return;
+      this.mfKeys.set(slot, key);
+      mountModelField(host, opts);
+    };
+
+    // Cleanup LLM — its model list is live-fetched from the provider.
+    mount("llm", `${this.llmRealProvider}|${this.llmUrl}|${this.llmKey}`, {
+      mode: "llm",
+      blankLabel: "(provider default)",
+      getProvider: () => this.llmRealProvider,
+      getApiUrl: () => this.llmUrl,
+      getApiKey: () => this.llmKey,
+      getModel: () => this.llmModel,
+      setModel: (m) => { this.llmModel = m; },
+    });
+
+    // Summary — only shown when a dedicated provider is chosen (a blank
+    // provider inherits the whole cleanup connection, model included).
+    mount("sum", `${this.sumProvider}|${this.sumUrl}|${this.sumKey}`, {
+      mode: "llm",
+      blankLabel: "(provider default)",
+      getProvider: () => this.sumProvider,
+      getApiUrl: () => this.sumUrl,
+      getApiKey: () => this.sumKey,
+      getModel: () => this.sumModel,
+      setModel: (m) => { this.sumModel = m; },
+    });
+
+    // Auto-tag — mirrors summary; a blank model falls back to the cleanup model.
+    mount("at", `${this.atProvider}|${this.atUrl}|${this.atKey}`, {
+      mode: "llm",
+      blankLabel: "(cleanup model)",
+      getProvider: () => this.atProvider,
+      getApiUrl: () => this.atUrl,
+      getApiKey: () => this.atKey,
+      getModel: () => this.atModel,
+      setModel: (m) => { this.atModel = m; },
+    });
+
+    // Transcription + live preview — curated per-provider lists (most STT APIs
+    // have no list endpoint), so only the provider matters for the mount.
+    mount("stt", this.sttRealProvider, {
+      mode: "curated",
+      blankLabel: "(provider default)",
+      getProvider: () => this.sttRealProvider,
+      getApiUrl: () => this.sttUrl,
+      getApiKey: () => this.sttKey,
+      getModel: () => this.sttModel,
+      setModel: (m) => { this.sttModel = m; },
+      curated: () => curatedSttModels(this.sttRealProvider),
+      curatedRich: () => curatedTranscriptionModels(this.sttRealProvider),
+    });
+
+    mount("prev", this.prevProvider, {
+      mode: "curated",
+      blankLabel: "(provider default)",
+      getProvider: () => this.prevProvider,
+      getApiUrl: () => this.prevUrl,
+      getApiKey: () => this.prevKey,
+      getModel: () => this.prevModel,
+      setModel: (m) => { this.prevModel = m; },
+      curated: () => curatedSttModels(this.prevProvider),
+      curatedRich: () => curatedTranscriptionModels(this.prevProvider),
+    });
   }
 
   private initFromConfig() {
@@ -217,75 +297,6 @@ export class ModelPickerElement extends LitElement {
       // from sensible values.
       this.prevProvider = this.sttRealProvider;
       this.prevLocalModel = this.sttLocalModel;
-    }
-
-    if (this.llmRealProvider !== "none") {
-      void this.fetchLlmModelList();
-    }
-    if (this.sumProvider && this.sumProvider !== "none") {
-      void this.fetchSumModelList();
-    }
-    if (this.atProvider && this.atProvider !== "none") {
-      void this.fetchAtModelList();
-    }
-  }
-
-  /** Fetch the model list for the current auto-tag provider. */
-  private async fetchAtModelList() {
-    const provider = this.atProvider;
-    if (!provider || provider === "none") {
-      this.atModels = [];
-      return;
-    }
-    this.fetchingAt = true;
-    try {
-      const fetched = await fetchLlmModels(provider, this.atUrl, this.atKey);
-      this.atModels = fetched.length ? fetched : curatedCleanupModelIds(provider);
-    } catch (e) {
-      console.warn("Failed to fetch auto-tag models:", e);
-      this.atModels = curatedCleanupModelIds(provider);
-    } finally {
-      this.fetchingAt = false;
-    }
-  }
-
-  /** Fetch the model list for the current summary provider (Ollama or cloud). */
-  private async fetchSumModelList() {
-    const provider = this.sumProvider;
-    if (!provider || provider === "none") {
-      this.sumModels = [];
-      return;
-    }
-    this.fetchingSum = true;
-    try {
-      const fetched = await fetchLlmModels(provider, this.sumUrl, this.sumKey);
-      // Fall back to curated suggestions when the live list is empty (no/masked key).
-      this.sumModels = fetched.length ? fetched : curatedCleanupModelIds(provider);
-    } catch (e) {
-      console.warn("Failed to fetch summary models:", e);
-      this.sumModels = curatedCleanupModelIds(provider);
-    } finally {
-      this.fetchingSum = false;
-    }
-  }
-
-  /** Fetch the model list for the current LLM provider (Ollama or any cloud). */
-  private async fetchLlmModelList() {
-    const provider = this.llmRealProvider;
-    if (!provider || provider === "none") {
-      this.llmModels = [];
-      return;
-    }
-    this.fetchingLlm = true;
-    try {
-      const fetched = await fetchLlmModels(provider, this.llmUrl, this.llmKey);
-      // Fall back to curated suggestions when the live list is empty (no/masked key).
-      this.llmModels = fetched.length ? fetched : curatedCleanupModelIds(provider);
-    } catch (e) {
-      console.warn("Failed to fetch models:", e);
-      this.llmModels = curatedCleanupModelIds(provider);
-    } finally {
-      this.fetchingLlm = false;
     }
   }
 
@@ -445,145 +456,34 @@ export class ModelPickerElement extends LitElement {
     } else {
       this.llmRealProvider = v;
     }
-    this.llmModelOther = false;
-    if (this.llmRealProvider !== "none") {
-      void this.fetchLlmModelList();
-    }
   }
 
   private onSumProviderChange(e: Event) {
     this.sumProvider = (e.target as HTMLSelectElement).value;
-    this.sumModelOther = false;
-    if (this.sumProvider && this.sumProvider !== "none") void this.fetchSumModelList();
-    else this.sumModels = [];
-  }
-
-  /** Summary model control: live-fetched dropdown + Refresh + "Other…". */
-  private renderSumModel() {
-    const cur = this.sumModel;
-    const known = new Set(this.sumModels);
-    if (cur) known.add(cur);
-    if (this.sumModelOther) {
-      return html`
-        <div style="display:flex; gap:8px;">
-          <input class="mp-input" type="text" .value=${cur} placeholder="Model id"
-            @input=${(e: Event) => this.sumModel = (e.target as HTMLInputElement).value} />
-          <button class="modal-btn" @click=${() => { this.sumModelOther = false; }}>List</button>
-        </div>`;
-    }
-    return html`
-      <div style="display:flex; gap:8px;">
-        <select class="mp-input" @change=${(e: Event) => {
-          const v = (e.target as HTMLSelectElement).value;
-          if (v === "__other__") this.sumModelOther = true; else this.sumModel = v;
-        }}>
-          <option value="" ?selected=${!cur}>(provider default)</option>
-          ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
-          <option value="__other__">Other… (type a model id)</option>
-        </select>
-        <button class="modal-btn" ?disabled=${this.fetchingSum} title="Fetch available models"
-          @click=${() => void this.fetchSumModelList()}>↻</button>
-      </div>
-      ${this.fetchingSum ? html`<p class="mp-hint">Loading models…</p>` : ""}`;
   }
 
   private onPrevProviderChange(e: Event) {
     this.prevProvider = (e.target as HTMLSelectElement).value;
-    this.prevModelOther = false;
   }
 
   private onAtProviderChange(e: Event) {
     this.atProvider = (e.target as HTMLSelectElement).value;
-    this.atModelOther = false;
-    if (this.atProvider && this.atProvider !== "none") void this.fetchAtModelList();
-    else this.atModels = [];
   }
 
-  /** Auto-tag model control: live-fetched dropdown + Refresh + "Other…". */
-  private renderAtModel() {
-    const cur = this.atModel;
-    const known = new Set(this.atModels);
-    if (cur) known.add(cur);
-    if (this.atModelOther) {
-      return html`
-        <div style="display:flex; gap:8px;">
-          <input class="mp-input" type="text" .value=${cur} placeholder="Model id"
-            @input=${(e: Event) => this.atModel = (e.target as HTMLInputElement).value} />
-          <button class="modal-btn" @click=${() => { this.atModelOther = false; }}>List</button>
-        </div>`;
-    }
-    return html`
-      <div style="display:flex; gap:8px;">
-        <select class="mp-input" @change=${(e: Event) => {
-          const v = (e.target as HTMLSelectElement).value;
-          if (v === "__other__") this.atModelOther = true; else this.atModel = v;
-        }}>
-          <option value="" ?selected=${!cur}>(cleanup model)</option>
-          ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
-          <option value="__other__">Other… (type a model id)</option>
-        </select>
-        <button class="modal-btn" ?disabled=${this.fetchingAt} title="Fetch available models"
-          @click=${() => void this.fetchAtModelList()}>↻</button>
-      </div>
-      ${this.fetchingAt ? html`<p class="mp-hint">Loading models…</p>` : ""}`;
+  /** True when an LLM quick preset's connection (protocol kind + endpoint)
+   *  equals the cleanup slot's current values, so the entry gets a ✓ marker.
+   *  A blank URL means "the kind's default endpoint", which is exactly what
+   *  the canonical preset for that kind (id === kind) configures. */
+  private llmPresetIsCurrent(p: LlmPreset): boolean {
+    if (p.kind !== this.llmRealProvider) return false;
+    const url = normalizeUrl(this.llmUrl);
+    return url ? url === normalizeUrl(p.apiUrl) : p.id === p.kind;
   }
 
-  /** LLM model control: live-fetched dropdown + Refresh + "Other…" free-text. */
-  private renderLlmModel() {
-    const cur = this.llmModel;
-    const known = new Set(this.llmModels);
-    if (cur) known.add(cur);
-    if (this.llmModelOther) {
-      return html`
-        <div style="display:flex; gap:8px;">
-          <input id="mp-llm-model" class="mp-input" type="text" .value=${cur} placeholder="Model id"
-            @input=${(e: Event) => this.llmModel = (e.target as HTMLInputElement).value} />
-          <button class="modal-btn" @click=${() => { this.llmModelOther = false; }}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg> List</button>
-        </div>`;
-    }
-    return html`
-      <div style="display:flex; gap:8px;">
-        <select id="mp-llm-model" class="mp-input" @change=${(e: Event) => {
-          const v = (e.target as HTMLSelectElement).value;
-          if (v === "__other__") this.llmModelOther = true; else this.llmModel = v;
-        }}>
-          <option value="" ?selected=${!cur}>(provider default)</option>
-          ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
-          <option value="__other__">Other… (type a model id)</option>
-        </select>
-        <button class="modal-btn" ?disabled=${this.fetchingLlm} title="Fetch available models"
-          @click=${() => void this.fetchLlmModelList()}>↻</button>
-      </div>
-      ${this.fetchingLlm
-        ? html`<p class="mp-hint">Loading models…</p>`
-        : this.llmModels.length === 0
-          ? html`<p class="mp-hint">Click ↻ to list models, or choose Other to type one.</p>`
-          : ""}`;
-  }
-
-  /** STT model control: curated per-provider dropdown + "Other…" free-text. */
-  private renderSttModel() {
-    const cur = this.sttModel;
-    const list = curatedSttModels(this.sttRealProvider);
-    if (this.sttModelOther || list.length === 0) {
-      return html`
-        <div style="display:flex; gap:8px;">
-          <input id="mp-stt-model" class="mp-input" type="text" .value=${cur} placeholder="Leave blank for provider default"
-            @input=${(e: Event) => this.sttModel = (e.target as HTMLInputElement).value} />
-          ${list.length ? html`<button class="modal-btn" @click=${() => { this.sttModelOther = false; }}><svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg> List</button>` : ""}
-        </div>`;
-    }
-    const known = new Set(list);
-    if (cur) known.add(cur);
-    return html`
-      <select id="mp-stt-model" class="mp-input" @change=${(e: Event) => {
-        const v = (e.target as HTMLSelectElement).value;
-        if (v === "__other__") this.sttModelOther = true; else this.sttModel = v;
-      }}>
-        <option value="" ?selected=${!cur}>(provider default)</option>
-        ${Array.from(known).map((m) => html`<option value=${m} ?selected=${m === cur}>${m}</option>`)}
-        <option value="__other__">Other… (type a model id)</option>
-      </select>`;
+  /** True when an STT custom preset matches the transcription slot's current
+   *  provider + endpoint (presets always map onto the `custom` provider). */
+  private sttPresetIsCurrent(p: SttCustomPreset): boolean {
+    return this.sttRealProvider === "custom" && normalizeUrl(this.sttUrl) === normalizeUrl(p.apiUrl);
   }
 
   /** "Run once" — applies the chosen models to the target recording(s) as a
@@ -613,11 +513,14 @@ export class ModelPickerElement extends LitElement {
     const prevNeedsCurrent = this.prevLocalModel && !this.downloadedModels.includes(this.prevLocalModel);
 
     const sttRealOpts = STT_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.sttRealProvider}>${p.label}</option>`);
-    const sttPresetOpts = STT_CUSTOM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`);
+    // "✓" marks the preset whose provider + endpoint the slot is currently on,
+    // so re-opening the picker shows which quick preset is in effect.
+    const sttPresetOpts = STT_CUSTOM_PRESETS.map(p => html`<option value="preset:${p.id}">${this.sttPresetIsCurrent(p) ? "✓ " : ""}${p.label}</option>`);
     const llmRealOpts = LLM_PROVIDERS.map(p => html`<option value=${p.value} ?selected=${p.value === this.llmRealProvider}>${p.label}</option>`);
+    const llmPresetOpt = (p: LlmPreset) => html`<option value="preset:${p.id}">${this.llmPresetIsCurrent(p) ? "✓ " : ""}${p.label}</option>`;
     const llmPresetOpts = html`
-      <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`)}</optgroup>
-      <optgroup label="Cloud (API key)">${CLOUD_LLM_PRESETS.map(p => html`<option value="preset:${p.id}">${p.label}</option>`)}</optgroup>`;
+      <optgroup label="Local / offline">${LOCAL_LLM_PRESETS.map(llmPresetOpt)}</optgroup>
+      <optgroup label="Cloud (API key)">${CLOUD_LLM_PRESETS.map(llmPresetOpt)}</optgroup>`;
 
     const hasDownloaded = this.downloadedModels.length > 0;
     const currentDownloadedOpts = hasDownloaded ? this.downloadedModels.map(p => html`<option value=${p} ?selected=${p === this.sttLocalModel}>${localModelLabel(p)}</option>`) : html`<option value="">No models downloaded — get one in Settings → Whisper</option>`;
@@ -668,8 +571,8 @@ export class ModelPickerElement extends LitElement {
               <label class="mp-label" for="mp-stt-url">API URL (optional)</label>
               <input id="mp-stt-url" class="mp-input" type="text" .value=${this.sttUrl} @input=${(e: Event) => this.sttUrl = (e.target as HTMLInputElement).value} />
 
-              <label class="mp-label" for="mp-stt-model">Model</label>
-              ${this.renderSttModel()}
+              <label class="mp-label">Model</label>
+              <div class="mp-model-host" id="mp-stt-model-host"></div>
             </div>
 
             <div class="mp-row">
@@ -700,11 +603,11 @@ export class ModelPickerElement extends LitElement {
 
             <div class="mp-row" style="display:${isLlmOllama ? '' : 'none'}">
               <label class="mp-label" for="mp-llm-url">Ollama API URL</label>
-              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} placeholder="http://127.0.0.1:11434/api/generate" @input=${(e: Event) => { this.llmUrl = (e.target as HTMLInputElement).value; void this.fetchLlmModelList(); }} />
+              <input id="mp-llm-url" class="mp-input" type="text" .value=${this.llmUrl} placeholder="http://127.0.0.1:11434/api/generate" @input=${(e: Event) => this.llmUrl = (e.target as HTMLInputElement).value} />
             </div>
 
-            <label class="mp-label" for="mp-llm-model" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}">Model</label>
-            <div style="display:${this.llmRealProvider === 'none' ? 'none' : ''}">${this.renderLlmModel()}</div>
+            <label class="mp-label" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}">Model</label>
+            <div class="mp-model-host" id="mp-llm-model-host" style="display:${this.llmRealProvider === 'none' ? 'none' : ''}"></div>
             <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Local Ollama</b> keeps everything offline.</p>
           </div>
 
@@ -727,7 +630,7 @@ export class ModelPickerElement extends LitElement {
 
             <div style="display:${this.sumProvider ? '' : 'none'}">
               <label class="mp-label">Model</label>
-              ${this.renderSumModel()}
+              <div class="mp-model-host" id="mp-sum-model-host"></div>
             </div>
             <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
@@ -751,7 +654,7 @@ export class ModelPickerElement extends LitElement {
 
             <div style="display:${this.atProvider ? '' : 'none'}">
               <label class="mp-label">Model</label>
-              ${this.renderAtModel()}
+              <div class="mp-model-host" id="mp-at-model-host"></div>
             </div>
             <p class="mp-hint">Model used to <b>suggest tags</b> for each transcript (you approve before they apply). <b>Same as post-processing</b> reuses your cleanup connection. Turn auto-tagging on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
@@ -782,8 +685,8 @@ export class ModelPickerElement extends LitElement {
                 <input id="mp-prev-key" class="mp-input" type="password" .value=${this.prevKey} @input=${(e: Event) => this.prevKey = (e.target as HTMLInputElement).value} />
                 <label class="mp-label" for="mp-prev-url">API URL (optional)</label>
                 <input id="mp-prev-url" class="mp-input" type="text" .value=${this.prevUrl} @input=${(e: Event) => this.prevUrl = (e.target as HTMLInputElement).value} />
-                <label class="mp-label" for="mp-prev-model">Model</label>
-                <input id="mp-prev-model" class="mp-input" type="text" .value=${this.prevModel} placeholder="Leave blank for provider default" @input=${(e: Event) => this.prevModel = (e.target as HTMLInputElement).value} />
+                <label class="mp-label">Model</label>
+                <div class="mp-model-host" id="mp-prev-model-host"></div>
               </div>
             </div>
           </div>

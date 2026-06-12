@@ -16,6 +16,31 @@ Claude — all at once. Each is optional except transcription.
 
 ---
 
+## The unified model field
+
+Every model picker in Phoneme — Transcription, Live Preview, Cleanup, Summary,
+Auto-Tag, the Re-run overrides, and the header Models modal — is the same
+control, so once you know one you know them all. Each picker:
+
+- **Shows ⭐ curated picks for the selected provider.** Switch the provider and
+  the suggestions switch with it — you always see good, current models for the
+  provider you actually chose, labelled with a short tier · use-case hint
+  (e.g. `low · fast`) so you can pick without memorising model ids.
+- **Has a ↻ Refresh** that fetches the provider's live model list and merges it
+  *underneath* the curated picks (we never throw the good defaults away). For
+  cloud STT providers, which mostly don't publish a list endpoint, the curated
+  list is the list.
+- **Has an Other… option** for typing any model id by hand — your current model
+  is always shown even when it isn't in the list, so nothing you've configured
+  ever disappears.
+
+Leave a model field blank and it falls back to the default. For the
+post-processing steps that inherit from Cleanup, the blank option is spelled out
+for you: **Summary** and **Auto-Tag** default to **"Same as cleanup model"**, so
+they ride along with your Cleanup choice until you pick something of their own.
+
+---
+
 ## Speech-to-text (transcription) providers
 
 Set in **Settings → Transcription**. Stored in `whisper.provider`.

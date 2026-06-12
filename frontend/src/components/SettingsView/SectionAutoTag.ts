@@ -1,4 +1,4 @@
-import { curatedCleanupModelIds } from "../../data/curatedModels";
+import { mountModelField } from "./modelField";
 
 /**
  * Auto-tagging settings (Post-Processing tab). The LLM proposes tags for each
@@ -33,7 +33,6 @@ export class SectionAutoTag {
   private render() {
     const t = this.config.auto_tag;
     const isCloud = ["openai", "groq", "anthropic"].includes(t.provider);
-    const curated = t.provider ? curatedCleanupModelIds(t.provider) : [];
 
     this.container.innerHTML = `
       <div class="settings-section">
@@ -84,15 +83,10 @@ export class SectionAutoTag {
           </div>
         ` : ""}
 
-        ${t.provider ? `
-          <div class="settings-field">
-            <label>Model <span style="color:var(--fg-faded); font-weight:normal;">(blank = cleanup model)</span></label>
-            <div>
-              <input type="text" id="at-model" data-key="auto_tag.model" list="at-model-list" value="${escapeAttr(t.model ?? "")}" placeholder="Cleanup model" style="width:100%; max-width:400px;" />
-              <datalist id="at-model-list">${curated.map((m) => `<option value="${escapeAttr(m)}"></option>`).join("")}</datalist>
-            </div>
-          </div>
-        ` : ""}
+        <div class="settings-field">
+          <label>Model</label>
+          <div id="at-model-host"></div>
+        </div>
 
         <div class="settings-field">
           <label>Max suggestions</label>
@@ -120,6 +114,30 @@ export class SectionAutoTag {
         </div>
       </div>
     `;
+
+    // Model — the shared model field, fed the EFFECTIVE connection: auto-tag's
+    // own provider/key/URL when set, else the inherited cleanup connection
+    // (blank auto_tag fields fall back to [llm_post_process] in the daemon, so
+    // the dropdown must list models for whatever will actually run). The field
+    // owns the host's DOM and writes the model straight into the config — no
+    // re-render here. Provider changes re-run render() (handler below), which
+    // re-mounts it into the fresh host.
+    const eff = (which: "provider" | "api_url" | "api_key") => {
+      const own = (t[which] ?? "").toString().trim();
+      return own || (this.config.llm_post_process?.[which] ?? "").toString();
+    };
+    const modelHost = this.container.querySelector<HTMLElement>("#at-model-host");
+    if (modelHost) {
+      mountModelField(modelHost, {
+        mode: "llm",
+        blankLabel: "Same as cleanup model",
+        getProvider: () => eff("provider"),
+        getApiUrl: () => eff("api_url"),
+        getApiKey: () => eff("api_key"),
+        getModel: () => t.model || "",
+        setModel: (m) => { t.model = m; },
+      });
+    }
 
     this.container.querySelector<HTMLButtonElement>("#at-clear-all")?.addEventListener("click", async () => {
       const { confirmDialog } = await import("../confirmDialog");
@@ -162,9 +180,6 @@ export class SectionAutoTag {
     });
     this.container.querySelector<HTMLInputElement>("#at-url")?.addEventListener("input", (e) => {
       t.api_url = (e.target as HTMLInputElement).value;
-    });
-    this.container.querySelector<HTMLInputElement>("#at-model")?.addEventListener("input", (e) => {
-      t.model = (e.target as HTMLInputElement).value;
     });
     this.container.querySelector<HTMLInputElement>("#at-max")?.addEventListener("input", (e) => {
       const n = Number((e.target as HTMLInputElement).value);
