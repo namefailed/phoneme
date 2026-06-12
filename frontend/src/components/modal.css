@@ -206,6 +206,31 @@
 .doctor-detail { font-size: 11px; color: var(--fg-muted); word-break: break-word; }
 .doctor-fix { flex: 0 0 auto; }
 
+/* Category badge on failing rows — the house status-pill idiom. */
+.doctor-cat {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+}
+.doctor-cat.critical { color: var(--err); background: color-mix(in srgb, var(--err) 15%, transparent); }
+.doctor-cat.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.doctor-cat.info { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 15%, transparent); }
+
+/* What the check verifies (always shown) and how to fix it (on failure). */
+.doctor-explain { font-size: 11px; color: var(--fg-faded); margin-top: 2px; }
+.doctor-hint { font-size: 11px; color: var(--warn); margin-top: 2px; }
+.doctor-hint::before { content: "fix: "; font-weight: 700; }
+
+/* Fix All sits left of Re-run/Close, away from the dismiss actions. */
+.doctor-fix-all { margin-right: auto; }
+
 /* ── Keyboard shortcuts cheat-sheet ("?") ─────────────────────────────────── */
 .kbd-help-dialog {
   width: 640px;

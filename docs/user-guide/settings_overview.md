@@ -159,7 +159,19 @@ problems three ways:
   **🩺 Open Doctor**. Dismissing it re-arms automatically once health returns
   to ok.
 
+The Doctor covers config presence, the audio folder, **free disk space** on
+the volumes holding your recordings and the app data (a warning under ~2 GB,
+critical under ~500 MB), the hook command, **model-file integrity** (a
+missing, 0-byte or truncated model download is flagged before it bites), and
+the Whisper / live-preview / Ollama servers.
+
+Each check shows a category badge when it fails — **Critical** (red: recording
+or transcription is broken), **Warning** (amber: something is degraded but
+capture still works) — plus a plain-English line on what the check verifies
+and a `fix:` hint with the next step.
+
 The Doctor itself can **restart the bundled whisper-server(s)** with one click
 when the Whisper or live-preview probe fails — it sweeps hung or orphaned
 server processes and respawns them from your config (CLI:
-`phoneme doctor --fix`).
+`phoneme doctor --fix`). When several checks fail at once, **🔧 Fix All** runs
+every available fix top-down in one go and re-checks when done.

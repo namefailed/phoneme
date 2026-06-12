@@ -365,11 +365,29 @@ phoneme profile use work_mode
 
 ### 🩺 `phoneme doctor`
 
-Run a health check on your system. Checks Whisper status, Diarization status, and hook executability.
+Run a health check on your system.
 
-Checks: config file presence, audio-directory writability, hook command
-resolvability, Whisper model file, Whisper server reachability, the dedicated
-live-preview server (when configured on its own port), and Ollama (optional).
+Checks: config file presence, audio-directory writability, free disk space on
+the volumes holding the recordings and the app data (catalog/queue/models),
+hook command resolvability, model-file integrity (the Whisper model — plus the
+live-preview, semantic-search and diarization models when those features are
+on: missing, 0-byte and implausibly small files are all caught), Whisper
+server reachability, the dedicated live-preview server (when configured on its
+own port), and Ollama (optional).
+
+Every check carries a category describing how severe a failure is:
+
+- **critical** — recording or transcription is broken (unwritable audio dir,
+  missing/corrupt Whisper model, unreachable Whisper server, under ~500 MB of
+  free disk);
+- **warning** — something is degraded but capture + transcription still work
+  (hook not resolvable, optional model missing, under ~2 GB of free disk);
+- **info** — informational only; never fails the run.
+
+Passing checks print as one line. Failing checks get a colored category badge
+plus two indented lines: what the check verifies, and a `fix:` hint with the
+next step. The exit code is non-zero when any warning- or critical-category
+check fails.
 
 ```bash
 phoneme doctor
@@ -382,6 +400,11 @@ phoneme doctor --fix
 # Force the catalog to rebuild itself from orphan files on disk
 phoneme doctor --rebuild-catalog
 ```
+
+With `--json`, each check object keeps the original `name`/`ok`/`detail` keys
+and additionally carries `category` (`"critical" | "warning" | "info"`),
+`explanation`, and `fix_hint` (string or null) — additive only, so existing
+consumers keep working.
 
 ### ⚙️ `phoneme config`
 

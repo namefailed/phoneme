@@ -29,11 +29,13 @@ whisper-rs = { version = "0.11", optional = true }
 regex.workspace = true
 which = "6"
 
-# DPAPI (CryptProtectData/CryptUnprotectData) for at-rest API-key encryption.
+# DPAPI (CryptProtectData/CryptUnprotectData) for at-rest API-key encryption,
+# plus GetDiskFreeSpaceExW for the Doctor's disk-space checks.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
 ] }
 
 [features]
