@@ -93,12 +93,8 @@
 .rec-row.active .rec-preview {
   color: var(--fg-default);
 }
-/* Keyboard cursor row. Scoped to `.rec-table:focus-within` so it shows ONLY
-   while the list actually holds focus — it clears the instant you move to
-   another pane (vim h/l) or click away, instead of lingering and making it
-   ambiguous which pane is active. A left accent bar + ring + tint make the
-   cursor unmistakable while you're in the list. Rows that are the SELECTED one
-   keep their full selected look (`:not(.active)` never overrides it). */
+/* Keyboard cursor row. Rows that are the SELECTED one keep their full
+   selected look (`:not(.active)` never overrides it). */
 /* While the list owns the keyboard, rows must not TRANSITION: with the default
    0.2s all-transition, holding j/k leaves a trail of half-faded highlights (the
    cursor appears to flicker). Snapping makes the cursor crisp at any speed. */
@@ -106,6 +102,18 @@
 .rec-table:focus-within .rec-group-head {
   transition: none;
 }
+/* With vim nav on (.vim-on), the cursor row is ALWAYS visible — a reload or a
+   stray click can't blank it. Dimmed while another pane owns the keyboard, so
+   it still reads where j/k will resume without competing with the active pane… */
+.rec-table.vim-on .rec-row.kbd-focused:not(.active),
+.rec-table.vim-on .rec-group-head.kbd-focused:not(.active) {
+  outline: none;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 45%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+/* …and full-strength while the list itself holds focus. (Without vim nav this
+   focus-scoped rule is the only one, so non-vim behavior is unchanged.) */
 .rec-table:focus-within .rec-row.kbd-focused:not(.active),
 .rec-table:focus-within .rec-group-head.kbd-focused:not(.active) {
   outline: none;

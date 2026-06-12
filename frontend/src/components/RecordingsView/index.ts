@@ -207,6 +207,17 @@ export class RecordingsView {
     // only if nothing is selected yet and the stored id is still in the list.
     if (!this.restoredSelection) {
       this.restoredSelection = true;
+      // With vim nav on, the list takes keyboard ownership as soon as it has
+      // content — the cursor exists from the first frame (landing on the
+      // restored row via ensureCursor) instead of waiting for a click or a
+      // priming keypress.
+      void import("@tauri-apps/api/core").then(({ invoke }) =>
+        invoke<any>("read_config")
+          .then((cfg) => {
+            if (cfg?.interface?.vim_nav) this.focusPane("list");
+          })
+          .catch(() => { /* config unreadable — keep the old behavior */ }),
+      );
       const stored = (() => { try { return localStorage.getItem(LS_SELECTED); } catch { return null; } })();
       if (stored && this.state.get().selectedId == null) {
         const recs = this.state.get().recordings;
