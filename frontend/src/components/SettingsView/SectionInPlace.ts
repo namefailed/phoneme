@@ -1,10 +1,10 @@
-import { PREVIEW_STT_PROVIDERS, curatedSttModels } from "../../services/sttProviders";
+import { curatedSttModels } from "../../services/sttProviders";
 import { curatedTranscriptionModels } from "../../data/curatedModels";
+import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
 import { bindFieldEvents, renderField } from "./form";
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const escAttr = (s: string) => escHtml(s).replace(/"/g, "&quot;");
 
 /** How `[in_place].stt` is being edited: absent = Automatic (the daemon falls
  *  back preview → main `[whisper]`), present = a pinned custom provider. */
@@ -264,19 +264,6 @@ export class SectionInPlace {
     }
 
     const isLocal = (stt.provider ?? "local") === "local";
-    // Same cloud lineup the Live Preview offers, plus the local-server entry
-    // (the preview handles "local" in its source select instead).
-    const providerOptions = [
-      `<option value="local" ${isLocal ? "selected" : ""}>Local — an already-running whisper server</option>`,
-      ...PREVIEW_STT_PROVIDERS.map(
-        (p) => `<option value="${p.value}" ${stt.provider === p.value ? "selected" : ""}>${p.label}</option>`,
-      ),
-    ].join("");
-    const providerField = `
-      <div class="settings-field">
-        <label>Provider</label>
-        <div><select id="ip-stt-provider">${providerOptions}</select></div>
-      </div>`;
 
     if (isLocal) {
       const server = this.sttServer();
@@ -286,7 +273,7 @@ export class SectionInPlace {
         !!this.config.recording?.streaming_preview &&
         this.config.preview_whisper?.provider === "local";
       host.innerHTML = `
-        ${providerField}
+        <div id="ip-stt-conn"></div>
         <div class="settings-field">
           <label>Local server</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
@@ -309,38 +296,55 @@ export class SectionInPlace {
         </div>`;
     } else {
       host.innerHTML = `
-        ${providerField}
-        <div class="settings-field">
-          <label>API key</label>
-          <div><input type="password" id="ip-stt-key" value="${escAttr(stt.api_key ?? "")}" style="width:100%;" /></div>
-        </div>
+        <div id="ip-stt-conn"></div>
         <div class="settings-field">
           <label>Model <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
           <div id="ip-stt-model-host"></div>
-        </div>
-        <div class="settings-field">
-          <label>API URL <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
-          <div><input type="text" id="ip-stt-url" value="${escAttr(stt.api_url ?? "")}" placeholder="provider default" style="width:100%;" /></div>
         </div>`;
     }
 
-    host.querySelector<HTMLSelectElement>("#ip-stt-provider")?.addEventListener("change", (e) => {
-      const v = (e.target as HTMLSelectElement).value;
-      if (v === "local") this.setSttLocal("main");
-      else this.setSttApi(v);
-      this.render();
-    });
+    // The provider/key/endpoint rows are the shared connection block. Its
+    // writes go through the same setters the old hand-rolled inputs used:
+    // switching to local pins the safest choice (the main server — the one
+    // the daemon always supervises), cloud providers go through setSttApi so
+    // any key/model/url already typed survives the switch. Key/URL edits
+    // write straight through with no re-render, so typing never resets the
+    // mounted model field below.
+    const connHost = host.querySelector<HTMLElement>("#ip-stt-conn");
+    if (connHost) {
+      mountConnectionField(connHost, {
+        catalog: "stt",
+        getKind: () => this.config.in_place?.stt?.provider ?? "local",
+        setKind: (k: string) => {
+          if (k === "local") this.setSttLocal("main");
+          else this.setSttApi(k);
+        },
+        getApiUrl: () => this.config.in_place?.stt?.api_url ?? "",
+        setApiUrl: (u: string) => {
+          if (this.config.in_place?.stt) this.config.in_place.stt.api_url = u;
+        },
+        getApiKey: () => this.config.in_place?.stt?.api_key ?? "",
+        setApiKey: (key: string) => {
+          if (this.config.in_place?.stt) this.config.in_place.stt.api_key = key;
+        },
+        // Local↔cloud flips the rows below the block, so rebuild the section
+        // (exactly what the old provider select's change handler did).
+        onProviderChanged: () => this.render(),
+        // Local resolves to the already-running server the config points at
+        // (the daemon's server_base_url()); custom probes its endpoint.
+        resolveTestUrl: () => {
+          const cur = this.config.in_place?.stt;
+          if (!cur) return "";
+          return (cur.provider ?? "local") === "local"
+            ? this.sttLocalUrl(cur)
+            : String(cur.api_url ?? "").trim();
+        },
+      });
+    }
+
     host.querySelector<HTMLSelectElement>("#ip-stt-server")?.addEventListener("change", (e) => {
       this.setSttLocal((e.target as HTMLSelectElement).value as LocalServer);
       this.render();
-    });
-    // Key/URL write straight through with no re-render, so typing never
-    // resets the mounted model field next to them.
-    host.querySelector<HTMLInputElement>("#ip-stt-key")?.addEventListener("input", (e) => {
-      if (this.config.in_place?.stt) this.config.in_place.stt.api_key = (e.target as HTMLInputElement).value;
-    });
-    host.querySelector<HTMLInputElement>("#ip-stt-url")?.addEventListener("input", (e) => {
-      if (this.config.in_place?.stt) this.config.in_place.stt.api_url = (e.target as HTMLInputElement).value;
     });
 
     const modelHost = host.querySelector<HTMLElement>("#ip-stt-model-host");

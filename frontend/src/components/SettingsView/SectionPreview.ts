@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { PREVIEW_STT_PROVIDERS, curatedSttModels } from "../../services/sttProviders";
+import { curatedSttModels } from "../../services/sttProviders";
+import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
 import { curatedTranscriptionModels } from "../../data/curatedModels";
 import { showToast } from "../../utils/toast";
@@ -75,6 +76,18 @@ export class SectionPreview {
 
   private mainPort(): number {
     return (this.config.whisper?.bundled_server_port ?? 5809) as number;
+  }
+
+  /** The small downloaded model the local branch starts on: prefer a preview-
+   *  sized one (Tiny/Base/Small), else any downloaded model, else blank (the
+   *  daemon waits until one is picked — downloads happen in the Whisper
+   *  section). */
+  private firstLocalModel(): string {
+    return (
+      PREVIEW_MODELS.map((m) => this.downloadedPath(m.filename)).find(Boolean)
+      ?? this.downloaded[0]
+      ?? ""
+    );
   }
 
   /** Build a preview WhisperConfig from the main one + overrides (so every
@@ -201,19 +214,29 @@ export class SectionPreview {
     this.container.querySelector<HTMLSelectElement>("#prev-source")?.addEventListener("change", (e) => {
       const v = (e.target as HTMLSelectElement).value as PreviewSource;
       if (v === "same") this.setSame();
-      else if (v === "local") {
-        // Prefer a small downloaded model (Tiny/Base/Small) for a snappy preview;
-        // else fall back to any downloaded model; else leave blank (the daemon
-        // waits until one is picked — downloads happen in the Whisper section).
-        const first = PREVIEW_MODELS.map((m) => this.downloadedPath(m.filename)).find(Boolean)
-          ?? this.downloaded[0]
-          ?? "";
-        this.setLocal(first);
-      } else this.setApi("groq");
+      else if (v === "local") this.setLocal(this.firstLocalModel());
+      else this.setApi("groq");
       this.render();
     });
 
     this.renderDetail(src);
+  }
+
+  /** Shared model field for the api branch — re-mounted when the provider
+   *  changes so the suggestions follow it. */
+  private mountApiModel() {
+    const modelHost = this.container.querySelector<HTMLElement>("#prev-api-model-host");
+    if (!modelHost) return;
+    mountModelField(modelHost, {
+      mode: "curated",
+      getProvider: () => this.config.preview_whisper?.provider ?? "",
+      getApiUrl: () => this.config.preview_whisper?.api_url ?? "",
+      getApiKey: () => this.config.preview_whisper?.api_key ?? "",
+      getModel: () => this.config.preview_whisper?.model ?? "",
+      setModel: (m) => { if (this.config.preview_whisper) this.config.preview_whisper.model = m; },
+      curated: () => curatedSttModels(this.config.preview_whisper?.provider ?? ""),
+      curatedRich: () => curatedTranscriptionModels(this.config.preview_whisper?.provider ?? ""),
+    });
   }
 
   private renderDetail(src: PreviewSource) {
@@ -267,52 +290,41 @@ export class SectionPreview {
       return;
     }
 
-    // Cloud API
-    const pv = this.config.preview_whisper ?? {};
+    // Cloud API — the shared connection block (provider/key/Test/endpoint
+    // override) + the shared model field. The block writes through setApi(),
+    // which keeps the create semantics: a full WhisperConfig copy in external
+    // mode, preserving any key/model/url already typed. Picking the local
+    // provider in the block is the same as choosing "Dedicated local model"
+    // in the source select — the section re-renders into that branch.
     host.innerHTML = `
-      <div class="settings-field">
-        <label>API provider</label>
-        <div><select id="prev-api-provider">
-          ${PREVIEW_STT_PROVIDERS.map(
-            (p) => `<option value="${p.value}" ${pv.provider === p.value ? "selected" : ""}>${p.label}</option>`,
-          ).join("")}
-        </select></div>
-      </div>
-      <div class="settings-field">
-        <label>API key</label>
-        <div><input type="password" id="prev-api-key" value="${pv.api_key ?? ""}" style="width:100%;" /></div>
-      </div>
+      <div id="prev-api-conn"></div>
       <div class="settings-field">
         <label>Model <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
         <div id="prev-api-model-host"></div>
-      </div>
-      <div class="settings-field">
-        <label>API URL <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
-        <div><input type="text" id="prev-api-url" value="${pv.api_url ?? ""}" placeholder="provider default" style="width:100%;" /></div>
       </div>`;
 
-    host.querySelector<HTMLSelectElement>("#prev-api-provider")?.addEventListener("change", (e) => {
-      this.setApi((e.target as HTMLSelectElement).value);
-      this.render();
-    });
-    host.querySelector<HTMLInputElement>("#prev-api-key")?.addEventListener("input", (e) => {
-      if (this.config.preview_whisper) this.config.preview_whisper.api_key = (e.target as HTMLInputElement).value;
-    });
-    const modelHost = host.querySelector<HTMLElement>("#prev-api-model-host");
-    if (modelHost) {
-      mountModelField(modelHost, {
-        mode: "curated",
-        getProvider: () => this.config.preview_whisper?.provider ?? "",
+    const connHost = host.querySelector<HTMLElement>("#prev-api-conn");
+    if (connHost) {
+      mountConnectionField(connHost, {
+        catalog: "stt",
+        getKind: () => this.config.preview_whisper?.provider ?? "",
+        setKind: (k: string) => {
+          if (k === "local") this.setLocal(this.firstLocalModel());
+          else this.setApi(k);
+        },
         getApiUrl: () => this.config.preview_whisper?.api_url ?? "",
+        setApiUrl: (u: string) => { if (this.config.preview_whisper) this.config.preview_whisper.api_url = u; },
         getApiKey: () => this.config.preview_whisper?.api_key ?? "",
-        getModel: () => this.config.preview_whisper?.model ?? "",
-        setModel: (m) => { if (this.config.preview_whisper) this.config.preview_whisper.model = m; },
-        curated: () => curatedSttModels(this.config.preview_whisper?.provider ?? ""),
-        curatedRich: () => curatedTranscriptionModels(this.config.preview_whisper?.provider ?? ""),
+        setApiKey: (key: string) => { if (this.config.preview_whisper) this.config.preview_whisper.api_key = key; },
+        onProviderChanged: () => {
+          // A switch to the local provider changes the whole branch layout;
+          // a cloud→cloud switch only needs the model suggestions to follow.
+          if (this.source() !== "api") this.render();
+          else this.mountApiModel();
+        },
+        resolveTestUrl: () => String(this.config.preview_whisper?.api_url ?? "").trim(),
       });
     }
-    host.querySelector<HTMLInputElement>("#prev-api-url")?.addEventListener("input", (e) => {
-      if (this.config.preview_whisper) this.config.preview_whisper.api_url = (e.target as HTMLInputElement).value;
-    });
+    this.mountApiModel();
   }
 }

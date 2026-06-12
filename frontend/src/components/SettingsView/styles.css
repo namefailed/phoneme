@@ -916,3 +916,65 @@ select[data-key="daemon.log_level"] {
   background: var(--accent);
   color: var(--accent-fg);
 }
+
+/* ── Shared connection block (connectionField.ts) ──────────────────────────
+   Self-contained styling so the block reads the same inside a settings-field
+   row and in the Models modal (this sheet is in the boot bundle). */
+.cf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 580px;
+  align-items: stretch;
+}
+.cf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cf-mini-label {
+  flex: 0 0 92px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.cf select,
+.cf input[type="text"],
+.cf input[type="password"] {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--fg-default);
+}
+.cf select:focus,
+.cf input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.cf-hint {
+  font-size: 11px;
+  color: var(--fg-faded);
+  line-height: 1.5;
+}
+.cf-key-link {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.cf-key-link:hover {
+  text-decoration: underline;
+}
+/* Inline Test outcome — .test-result supplies the ok/err chrome; flatten its
+   block spacing so it sits beside the button. */
+.cf .cf-test-result {
+  margin-top: 0;
+  font-size: 12px;
+  min-width: 0;
+}
