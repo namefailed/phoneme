@@ -998,7 +998,7 @@ export class FirstRunWizardElement extends LitElement {
 
     return html`
       <div class="wizard-body">
-        <h2 class="wizard-title">Live Preview</h2>
+        <h2 class="wizard-title">Live Preview <span class="beta-pill">BETA</span></h2>
         <p class="wizard-subtitle">
           Watch words appear as you speak. Give the preview its own fast model or
           API so it never slows down your final transcription. You can change all

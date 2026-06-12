@@ -2,6 +2,13 @@
 
 Two recording-quality features that address opposite ends of a capture: **pre-roll** saves the *start* of your speech; **streaming preview** shows progress *while* you are still talking.
 
+> [!IMPORTANT]
+> Streaming preview is a **beta** feature and ships **off by default**. It
+> works, but it isn't as smooth as the rest of the app yet (live partial
+> transcription is genuinely hard), and a dedicated overhaul is planned on the
+> [roadmap](../../ROADMAP.md). Turn it on in **Settings → Transcription →
+> Live Preview** if you want it today.
+
 ## Pre-roll buffer
 
 ### Problem

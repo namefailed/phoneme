@@ -546,19 +546,34 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
                 let have: Vec<String> = rec.tags.iter().map(|t| t.name.to_lowercase()).collect();
                 names.retain(|n| !have.contains(&n.to_lowercase()));
             }
+            // Canonicalize against the EXISTING tag set, case-insensitively:
+            // a suggested "Code" when the library already has "code" becomes
+            // "code" — so a chip can never read as a new tag when it isn't,
+            // and approving can never mint a casing-duplicate. The same model
+            // emitting "Code" AND "code" collapses to one suggestion.
+            let canonical: std::collections::HashMap<String, String> =
+                match state.catalog.list_all_tags().await {
+                    Ok(tags) => tags
+                        .into_iter()
+                        .map(|t| (t.name.to_lowercase(), t.name))
+                        .collect(),
+                    Err(_) => std::collections::HashMap::new(),
+                };
+            let mut seen = std::collections::HashSet::new();
+            names = names
+                .into_iter()
+                .map(|n| canonical.get(&n.to_lowercase()).cloned().unwrap_or(n))
+                .filter(|n| seen.insert(n.to_lowercase()))
+                .collect();
             // Auto-accept matches of EXISTING tags when enabled: a suggestion
             // whose tag already exists (any tag, attached anywhere or not) is
             // attached right away; only names that would CREATE a new tag stay
             // behind as approve/dismiss chips.
             let mut accepted = 0usize;
             if cfg.auto_tag.auto_accept_existing && !names.is_empty() {
-                let all_lc: Vec<String> = match state.catalog.list_all_tags().await {
-                    Ok(tags) => tags.into_iter().map(|t| t.name.to_lowercase()).collect(),
-                    Err(_) => vec![],
-                };
                 let (accept, keep): (Vec<String>, Vec<String>) = names
                     .into_iter()
-                    .partition(|n| all_lc.contains(&n.to_lowercase()));
+                    .partition(|n| canonical.contains_key(&n.to_lowercase()));
                 names = keep;
                 for name in accept {
                     match state.catalog.add_tag(&name, None).await {

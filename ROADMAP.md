@@ -287,6 +287,23 @@ persona actually wants — still needs the alignment + timestamp substrate below
   header dropdown and managed in Settings → Managers (also `g S`).
   (`SavedSearches.ts`, `SectionSavedSearches.ts`, `state/savedSearches.ts`)
 
+### 🎙️ Dictation & capture feel
+
+- [ ] **Live preview overhaul (a whole phase)** — the current streaming
+  preview works but doesn't feel good: caption pacing is uneven, the stitch
+  point jumps, and meetings double the cost. It ships **off by default,
+  labelled Beta** until this lands. Scope: smoother partial-text pacing
+  (token-bucket reveal instead of replace-per-tick), stable stitch at the
+  window boundary, smarter idle behavior, and a real perf budget per tick.
+  Wispr Flow ships NO live preview at all — that's how hard this is; ours has
+  to feel right or stay off.
+- [ ] **Waveform capture overlay** — a small bottom-center pill while
+  dictating/recording showing the LIVE waveform of your own speech (plus
+  state: listening / transcribing / ✍ typed). The interactive "it hears me"
+  feedback Wispr Flow nails. Builds on the existing overlay window; do this
+  AFTER the live-preview overhaul (or independent of it — the waveform needs
+  only audio levels, not transcription).
+
 ### ✨ Small wins
 
 - [ ] **Auto-generated titles** — timestamped names don't scan. Ship the **first-line/keyword heuristic first** (no dependency); LLM-generated titles as an *optional* enhancement (requires a configured LLM + adds latency).
