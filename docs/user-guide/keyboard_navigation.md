@@ -62,7 +62,7 @@ The list zoom is clamped to 60–200% and remembered per device.
 | `c` | Copy the transcript |
 | `e` | Export the transcript |
 | `r` | Re-run with chosen models (opens the Models modal on "Run once") |
-| `f` | Full-screen focus mode |
+| `f` | Zen toggle: a full-window recording — or, with nothing open, a full-window list (sidebar + top bar slide away; `Esc` steps back; `/` peeks the search bar) |
 | `t` | Focus the add-tag box (`j`/`k` browse suggestions · `Enter` adds) |
 | `Shift + T` | Open the Tag Manager |
 | `i` (vim nav) | Edit the transcript directly |
