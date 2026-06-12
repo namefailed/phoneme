@@ -20,6 +20,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { setHeaderHidden } from "./headerBar";
 
 type HelpItem = { combo: string; label: string };
 type HelpGroup = { title: string; items: HelpItem[] };
@@ -159,12 +160,13 @@ function navigate(view: string, section?: string) {
 /** Per-device "top bar hidden" preference (Ctrl+/). */
 const LS_HEADER_HIDDEN = "phoneme.layout.headerHidden";
 
-/** Hide/show the header (search/top) bar. The class lives on <body> so the
- *  rule applies regardless of which view is mounted; the preference persists
- *  per device and is re-applied at startup by initKeyboard. */
+/** Hide/show the header (search/top) bar, animated via the shared pane curve
+ *  (see services/headerBar). The class lives on <body> so the rule applies
+ *  regardless of which view is mounted; the preference persists per device
+ *  and is re-applied at startup by initKeyboard. */
 function toggleHeaderBar(force?: boolean) {
   const hide = force ?? !document.body.classList.contains("phoneme-hide-header");
-  document.body.classList.toggle("phoneme-hide-header", hide);
+  setHeaderHidden(hide);
   try { localStorage.setItem(LS_HEADER_HIDDEN, String(hide)); } catch { /* private mode */ }
 }
 
