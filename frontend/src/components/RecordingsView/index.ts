@@ -16,7 +16,7 @@ import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
 import { showActionToast } from "../../utils/toast";
-import { setHeaderHidden } from "../../services/headerBar";
+import { setHeaderHidden, isHeaderHidden } from "../../services/headerBar";
 import "./Sidebar";
 import "./ThinkingPopout";
 import "./styles.css";
@@ -92,6 +92,15 @@ export class RecordingsView {
   private detailCol = 0;
   /** Zoom factor for the list pane (1 = 100%). Clamped 0.6–2, persisted. */
   private listZoom = 1;
+  /** List zen (`f` with nothing open): sidebar + top bar hidden, list
+   *  full-window. Session-only — never persisted. */
+  private listZen = false;
+  /** Chrome visibility captured when ENTERING any zen state, restored on full
+   *  exit — so zen never clobbers the user's own sidebar/top-bar choices. */
+  private zenSnapshot: { sidebar: boolean; header: boolean } | null = null;
+  /** Set when recording focus mode was entered FROM list zen (Enter on a row):
+   *  Esc then steps back to list zen instead of the normal layout. */
+  private zenChained = false;
   private vimHandler: ((e: Event) => void) | null = null;
   /** Any component can request an undoable recording delete by dispatching
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
@@ -303,16 +312,55 @@ export class RecordingsView {
     this.applyLayout();
   }
 
-  /** Focus mode: hide the recordings list (+ sidebar/splitter) so the detail
-   *  pane fills the view for full-width editing. Toggled from the detail
-   *  header's ⛶ button and exited with Escape. */
+  /** What the chrome looked like before zen, so exiting restores it exactly. */
+  private captureChrome() {
+    return { sidebar: this.sidebarVisible, header: isHeaderHidden() };
+  }
+
+  /** Restore the pre-zen chrome snapshot (a no-op fallback shows everything). */
+  private restoreChrome() {
+    const snap = this.zenSnapshot;
+    this.zenSnapshot = null;
+    // Restoring sidebarVisible directly (no localStorage write) keeps the
+    // user's persisted preference untouched by the zen round-trip.
+    this.sidebarVisible = snap ? snap.sidebar : true;
+    setHeaderHidden(snap ? snap.header : false);
+  }
+
+  /** `f` is contextual: with a recording open it's recording focus mode; with
+   *  nothing open it's LIST ZEN — sidebar and top bar slide away and the list
+   *  takes the whole window. Both snapshot the chrome and restore it on exit. */
   toggleFocusMode() {
+    if (!this.detailVisible && !this.focusMode) {
+      this.toggleListZen();
+      return;
+    }
     this.focusMode = !this.focusMode;
     const shell = this.container.querySelector<HTMLElement>("#rv-shell");
     shell?.classList.toggle("rv-focus", this.focusMode);
-    // Full-screen focus mode also hides the top header bar (same as Settings),
-    // with the same height animation Ctrl+/ gets.
-    setHeaderHidden(this.focusMode);
+    if (this.focusMode) {
+      if (!this.zenSnapshot) this.zenSnapshot = this.captureChrome();
+      setHeaderHidden(true);
+    } else {
+      // f fully exits zen — even a chain that began in list zen.
+      this.zenChained = false;
+      this.restoreChrome();
+    }
+    this.animateLayout();
+    this.applyLayout();
+  }
+
+  /** Full-window recordings list: hide the sidebar + top bar (snapshotted),
+   *  keep the list and all its navigation. `f` or Esc exits. */
+  private toggleListZen() {
+    this.listZen = !this.listZen;
+    if (this.listZen) {
+      if (!this.zenSnapshot) this.zenSnapshot = this.captureChrome();
+      this.sidebarVisible = false; // session-only — no localStorage write
+      setHeaderHidden(true);
+    } else {
+      this.restoreChrome();
+    }
     this.animateLayout();
     this.applyLayout();
   }
@@ -916,6 +964,16 @@ export class RecordingsView {
     // when nothing is selected, giving the list the full width).
     if (!this.detailVisible) {
       this.detailVisible = true;
+      // Opening from LIST ZEN zooms straight into recording focus mode — one
+      // coherent transition, chrome stays hidden (the zen snapshot carries
+      // over) and Esc steps back to list zen.
+      if (this.listZen) {
+        this.listZen = false;
+        this.zenChained = true;
+        this.focusMode = true;
+        this.container.querySelector<HTMLElement>("#rv-shell")?.classList.add("rv-focus");
+        this.animateLayout();
+      }
       this.applyLayout();
     }
   }
@@ -1016,7 +1074,25 @@ export class RecordingsView {
     if (e.key === "Escape" && !target.isContentEditable) {
       if (this.focusMode) {
         e.preventDefault();
-        this.toggleFocusMode();
+        if (this.zenChained) {
+          // This focus mode began in LIST ZEN — Esc steps back there: close
+          // the recording, keep the full-window list (snapshot stays armed).
+          this.zenChained = false;
+          this.focusMode = false;
+          this.container.querySelector<HTMLElement>("#rv-shell")?.classList.remove("rv-focus");
+          this.deselect();
+          this.listZen = true;
+          this.animateLayout();
+          this.applyLayout();
+        } else {
+          this.toggleFocusMode();
+        }
+        return;
+      }
+      // Esc in list zen → back to the normal layout (snapshot restored).
+      if (this.listZen) {
+        e.preventDefault();
+        this.toggleListZen();
         return;
       }
       // Vim step-out ladder: from the detail pane, Esc returns to the list

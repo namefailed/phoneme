@@ -77,7 +77,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "c", label: "Copy transcript" },
       { combo: "e", label: "Export transcript" },
       { combo: "r", label: "Re-run with chosen models (Models modal)" },
-      { combo: "f", label: "Full-screen (focus mode)" },
+      { combo: "f", label: "Zen: full-window recording — or the list when nothing's open" },
       { combo: "t", label: "Add a tag (j/k browse · Enter adds)" },
       { combo: "Shift + t", label: "Open the Tag Manager" },
       { combo: "Ctrl + S", label: "Save the focused editor" },
@@ -143,10 +143,20 @@ function isTypingTarget(el: Element | null): boolean {
 
 function focusSearch() {
   const el = document.querySelector<HTMLInputElement>(".headerbar input.search");
-  if (el) {
-    el.focus();
-    el.select();
+  if (!el) return;
+  // With the top bar hidden (Ctrl+/ or a zen mode), `/` PEEKS it: reveal just
+  // long enough to type, re-hide when the search box loses focus. The stored
+  // preference and zen state are untouched — this is a transient reveal.
+  if (document.body.classList.contains("phoneme-hide-header")) {
+    setHeaderHidden(false);
+    const reHide = () => {
+      el.removeEventListener("blur", reHide);
+      setHeaderHidden(true);
+    };
+    el.addEventListener("blur", reHide);
   }
+  el.focus();
+  el.select();
 }
 
 function focusList() {
