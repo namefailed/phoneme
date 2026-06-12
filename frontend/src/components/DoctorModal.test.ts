@@ -92,23 +92,128 @@ afterEach(() => {
   document.querySelectorAll("ph-doctor-modal").forEach((el) => el.remove());
 });
 
-describe("DoctorModal category rendering", () => {
+describe("DoctorModal health strip", () => {
+  it("shows count chips per failing category", async () => {
+    await mount(CHECKS);
+    const chips = qa(".doctor-strip .doctor-chip");
+    expect(chips.map((c) => c.textContent?.trim())).toEqual(["1 critical", "2 warning"]);
+    expect(chips[0].classList.contains("critical")).toBe(true);
+    expect(chips[1].classList.contains("warning")).toBe(true);
+  });
+
+  it("shows the all-good state when everything passes", async () => {
+    await mount([CHECKS[0]]);
+    expect(q(".doctor-strip .doctor-chip.ok")?.textContent).toContain("All systems good");
+    expect(qa(".doctor-row")).toHaveLength(0);
+  });
+
+  it("updates the counts after a re-check", async () => {
+    await mount(CHECKS);
+    runDoctorMock.mockResolvedValue(CHECKS.map((c) => ({ ...c, ok: true })));
+    q<HTMLButtonElement>(".doctor-rerun")!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await modal()!.updateComplete;
+    expect(q(".doctor-strip .doctor-chip.ok")?.textContent).toContain("All systems good");
+    expect(q(".doctor-passing > summary")?.textContent).toContain("4 checks passing");
+  });
+
+  it("keeps the current rows on screen while re-running (no layout jump)", async () => {
+    await mount(CHECKS);
+    let settle!: (v: DoctorCheckInfo[]) => void;
+    runDoctorMock.mockImplementation(() => new Promise<DoctorCheckInfo[]>((r) => { settle = r; }));
+    q<HTMLButtonElement>(".doctor-rerun")!.click();
+    await modal()!.updateComplete;
+    // The failing rows stay rendered — no blank-out — with controls disabled.
+    expect(qa(".doctor-row")).toHaveLength(3);
+    expect(q(".doctor-empty")).toBeNull();
+    expect(q<HTMLButtonElement>(".doctor-rerun")!.disabled).toBe(true);
+    expect(q<HTMLButtonElement>(".doctor-fix-all")!.disabled).toBe(true);
+    settle(CHECKS);
+    await new Promise((r) => setTimeout(r, 0));
+    await modal()!.updateComplete;
+    expect(q<HTMLButtonElement>(".doctor-rerun")!.disabled).toBe(false);
+  });
+
+  it("shows the daemon-unreachable state when the check run fails", async () => {
+    runDoctorMock.mockRejectedValue(new Error("ipc down"));
+    const el = document.createElement("ph-doctor-modal");
+    document.body.appendChild(el);
+    await new Promise((r) => setTimeout(r, 0));
+    await (el as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete;
+    expect(q(".doctor-strip-note.err")?.textContent).toContain("Couldn't reach the daemon");
+    expect(q(".doctor-empty.err")?.textContent).toContain("ipc down");
+  });
+});
+
+describe("DoctorModal layout: failures first, passing collapsed", () => {
+  it("renders failing checks first as detailed rows, passing behind a collapsed fold", async () => {
+    await mount(CHECKS);
+    // Only the failures get full rows, in backend order.
+    const rows = qa(".doctor-row");
+    const names = rows.map((r) => r.querySelector(".doctor-name")?.textContent ?? "");
+    expect(names).toHaveLength(3);
+    expect(names[0]).toContain("Whisper server");
+    expect(names[1]).toContain("Live-preview server");
+    expect(names[2]).toContain("Hook command");
+    // The passing fold comes after every failing row and starts collapsed.
+    const fold = q<HTMLDetailsElement>(".doctor-passing")!;
+    expect(fold.open).toBe(false);
+    expect(fold.querySelector("summary")?.textContent).toContain("1 check passing");
+    for (const row of rows) {
+      expect(row.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
   it("shows a category badge on failing rows only", async () => {
     await mount(CHECKS);
     const badges = qa(".doctor-cat");
     expect(badges.map((b) => b.textContent?.trim())).toEqual(["Critical", "Warning", "Warning"]);
     expect(badges[0].classList.contains("critical")).toBe(true);
-    // The passing row renders no badge.
-    const okRow = qa(".doctor-row.ok")[0];
-    expect(okRow.querySelector(".doctor-cat")).toBeNull();
+    // The passing check renders as a compact row with no badge.
+    expect(q(".doctor-pass-row .doctor-cat")).toBeNull();
   });
 
-  it("shows the explanation under every check and the hint only on failures", async () => {
+  it("shows the explanation and hint on failing rows; passing rows stay one-line", async () => {
     await mount(CHECKS);
-    expect(qa(".doctor-explain")).toHaveLength(4);
+    expect(qa(".doctor-explain")).toHaveLength(3);
     const hints = qa(".doctor-hint");
     expect(hints).toHaveLength(3);
     expect(hints[2].textContent).toContain("hook.commands");
+    // Compact passing row: name + detail, explanation tucked into the tooltip.
+    const passRow = q(".doctor-pass-row")!;
+    expect(passRow.querySelector(".doctor-pass-name")?.textContent).toBe("Audio directory");
+    expect(passRow.querySelector(".doctor-pass-detail")?.textContent).toContain("C:/audio");
+    expect(passRow.getAttribute("title")).toContain("recording folder");
+    expect(passRow.querySelector(".doctor-explain")).toBeNull();
+  });
+
+  it("groups expanded passing checks by subsystem with a fallback header", async () => {
+    await mount([
+      { name: "Whisper server", ok: true, detail: "HTTP 200" },
+      { name: "Audio directory", ok: true, detail: "writable" },
+      { name: "Mystery probe", ok: true, detail: "fine" },
+    ]);
+    expect(qa(".doctor-group-title").map((t) => t.textContent?.trim())).toEqual([
+      "Servers",
+      "Storage",
+      "Other",
+    ]);
+    expect(qa(".doctor-pass-name").map((n) => n.textContent)).toEqual([
+      "Whisper server",
+      "Audio directory",
+      "Mystery probe",
+    ]);
+  });
+
+  it("toggles the passing fold via its summary", async () => {
+    await mount(CHECKS);
+    const fold = q<HTMLDetailsElement>(".doctor-passing")!;
+    const sum = fold.querySelector("summary")!;
+    expect(fold.open).toBe(false);
+    sum.click();
+    expect(fold.open).toBe(true);
+    sum.click();
+    expect(fold.open).toBe(false);
   });
 });
 

@@ -30,12 +30,15 @@ regex.workspace = true
 which = "6"
 
 # DPAPI (CryptProtectData/CryptUnprotectData) for at-rest API-key encryption,
-# plus GetDiskFreeSpaceExW for the Doctor's disk-space checks.
+# GetDiskFreeSpaceExW for the Doctor's disk-space checks, and Job Objects for
+# the kill-on-close process lifetime chain (tray → daemon → spawned children).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
 ] }
 
 [features]

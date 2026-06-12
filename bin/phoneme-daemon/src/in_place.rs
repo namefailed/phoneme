@@ -154,10 +154,14 @@ async fn transcribe_polish_type(
     let permit = state.whisper_sem.acquire().await;
     // Diarization is never run for dictation — speaker labels in typed text
     // would be noise, and the model pass costs more than the transcription.
-    let provider = state.transcription.provider(
-        cfg.in_place_provider_config(),
-        &DiarizationConfig::default(),
-    );
+    // Dictation's STT pick may point at the main or the preview bundled
+    // server; `apply` follows either to the port it actually listens on.
+    let stt_cfg = state
+        .whisper_ports
+        .apply(&cfg, cfg.in_place_provider_config());
+    let provider = state
+        .transcription
+        .provider(&stt_cfg, &DiarizationConfig::default());
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
     let transcription = provider
         .transcribe_with_segments(audio_path, language.as_deref())
@@ -169,7 +173,9 @@ async fn transcribe_polish_type(
         "off" => raw.clone(),
         // A full LLM round-trip through the configured post-processing
         // provider — the user explicitly chose polish over latency.
-        "llm" => match state.llm.provider(&cfg.llm_post_process) {
+        // `llm_provider_for_run` also launches the local Ollama when the
+        // connection needs it (same as every queued LLM stage).
+        "llm" => match crate::pipeline::llm_provider_for_run(state, &cfg.llm_post_process).await {
             Some(llm) => match llm.process(&cfg.llm_post_process.prompt, &raw).await {
                 Ok(out) => out,
                 Err(e) => {

@@ -23,6 +23,15 @@ trust boundary. Verified against current code.*
   settings section exposes them, plus a **Re-embed all recordings** action
   (`ReembedAll` IPC) that re-indexes the library after a model change.
 - [x] **Semantic relevance chip** in the recordings list during a semantic query.
+- [x] **"More like this"** — open a recording → find semantically similar ones,
+  for free: the recording's already-stored chunk vectors are averaged into the
+  query (no fresh embedding; `catalog::more_like_this`, `MoreLikeThis` IPC) and
+  the library is ranked by best-matching chunk, excluding the source and its own
+  meeting's other track. **✨ Similar** button in the detail action row and the
+  merged meeting view fills the list with the results (same relevance chips; a
+  `~similar:` pill in the search box returns to the normal list); CLI parity via
+  `phoneme search --like <RECORDING_ID>`. A not-yet-indexed recording reports it
+  clearly instead of returning nothing.
 
 ### Meetings
 
@@ -67,6 +76,17 @@ trust boundary. Verified against current code.*
   into a config-keyed cache (speakrs' queued worker thread), serialize
   overlapping runs, invalidate on `[diarization]` changes, and never cache a
   failed load - a mid-session model download just works on the next run.
+- [x] **Doctor: provider-aware + triage layout** — checks now follow your
+  actual providers: cloud STT swaps the local model/server checks for
+  "API key configured" + "endpoint reachable" (a 401 still proves the wire;
+  explanations say that's the most Doctor can verify without billing a
+  request), per-step LLM connections are resolved (inheritance included),
+  deduped per endpoint, and probed via free model-list routes. The
+  diarization check now probes the Hugging Face cache the loader actually
+  reads instead of the unwired local_model_path key. Both Doctor surfaces
+  got a triage layout: sticky health strip with category count chips,
+  failures first in full detail, passing checks folded into a grouped
+  "<check> N passing" disclosure; re-runs no longer blank the list.
 - [x] **Webhook SSRF guard + hook-test redaction** — webhooks classify their
   target before any bytes leave: loopback always allowed (local n8n/Home
   Assistant stay zero-config), private ranges need `[webhook]
@@ -74,6 +94,14 @@ trust boundary. Verified against current code.*
   hostnames resolve and the most restrictive class wins; redirects are no
   longer followed. Hook-test output is scrubbed of credential shapes
   (sk-/ghp_/AKIA/Bearer/key= and friends) before it reaches the UI.
+- [x] **Bundled whisper-server ports fall back automatically** — 5809/5810 are
+  now *preferred* ports: when another app already holds one, the daemon starts
+  whisper-server on a free OS-assigned port instead (logged at warn), publishes
+  the live value (`daemon_status` reports preferred + effective per server),
+  and every consumer — final transcription, live preview, dictation, the
+  Settings/wizard "Test" probe — dials the effective port. The preview's
+  choice can never collide with the main server's
+  (`whisper_supervisor.rs`, `app_state.rs`).
 - [x] **Pinned download checksums (S-H7)** — every wizard artifact (whisper GGML
   weights, the semantic model + tokenizer, the whisper-server zip) is verified
   against a pinned SHA-256 before use; the zip is checked before extraction,
@@ -84,10 +112,46 @@ trust boundary. Verified against current code.*
   fakes; plus tests for the wizard URL allowlist, `path_within`, and the
   notification contract.
 
+### Lifecycle — full shutdown chain + Ollama auto-launch
+
+- [x] **Quit stops everything Phoneme started** — tray Quit (default
+  `interface.quit_stops_daemon = true`) sends the daemon a graceful Shutdown
+  and waits for it to vanish: an in-flight recording is stopped and queued
+  through the normal recorder path first (transcribed on the next start),
+  then the whisper-server(s) and a Phoneme-launched Ollama go down with the
+  daemon. Set the knob to `false` for the old headless behavior — the daemon
+  outlives the tray (`tray.rs`, `lib.rs`).
+- [x] **End-process robustness via Job Objects** — the daemon holds a
+  kill-on-close job every child it spawns joins (whisper main + preview, an
+  Owned Ollama), and the tray (when `quit_stops_daemon` is on, decided at
+  spawn time) holds one for the daemon — so even Task Manager's End task
+  reaps the whole tree (`phoneme-core::job`, `whisper_supervisor.rs`,
+  `auto_spawn.rs`).
+- [x] **Ollama auto-launch with an ownership ledger** — when an LLM step
+  (cleanup, summary, tags, titles, in-place polish) resolves to a **local**
+  Ollama that isn't running, the daemon launches `ollama serve` on demand
+  (`[llm_post_process] autostart_ollama`, default on), waits for readiness,
+  and logs the server to `logs/ollama.log`. The ledger makes ownership
+  sticky: an Ollama that was already running at first probe is NotOurs
+  forever — never killed, never restarted, never job-assigned; only a
+  daemon-launched one is Owned and reaped at shutdown. Single-flight, so
+  concurrent steps can't double-spawn (`ollama_launcher.rs`).
+- [x] **Shutdown acknowledges before exiting** — the `shutdown` IPC writes its
+  Ok response, then tears down after a short grace, so `phoneme daemon stop`
+  and the tray never hang on a dead pipe; `daemon stop` now waits for the
+  pipe to actually vanish and reports `daemon stopped` (and stopping a
+  stopped daemon is a clean no-op instead of auto-spawning one).
+
 ### UX wiring
 
-- [x] **Queue failed-items count + clear** — the queue panel surfaces the `failed/`
-  count and lets you dismiss it (`QueuePanel.ts`).
+- [x] **Queue failed-items badge + failure details** — the queue panel surfaces the
+  `failed/` count; clicking the badge opens a details panel: one row per failed
+  recording with the step that broke (Transcription / Hook), the error text
+  (captured live off the failure events; selectable), and when — per-row **Retry**
+  (re-runs the whole pipeline) and **Open**, a sequential **Retry all** with a
+  progress count, and the quarantine **Clear failed** moved into the footer (the
+  recordings keep their Failed status and stay in the library)
+  (`QueuePanel.ts`, `FailedPanel.ts`).
 - [x] **Import audio** button in Settings → Storage (`SectionStorage.ts`).
 
 ### Dictation (transcribe in place)

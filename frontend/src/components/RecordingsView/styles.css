@@ -1494,7 +1494,8 @@ ph-sidebar {
 }
 .queue-count.idle { background: transparent; color: var(--fg-faded); font-weight: 500; }
 .queue-count.paused { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
-/* Failed-items badge: a clickable chip that dismisses the inbox failed/ quarantine. */
+/* Failed-items badge: a clickable chip that opens the failure-details panel
+   (per-recording reason + retry; clearing the quarantine lives in its footer). */
 .queue-failed {
   font-size: 10px;
   font-weight: 700;

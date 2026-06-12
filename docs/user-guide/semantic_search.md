@@ -61,6 +61,18 @@ In the main search bar, switch the search mode to **Semantic**. Type a natural-l
 
 Results include a calibrated relevance chip (e.g. "87% match"). Combine with **tag** and **date** filters to narrow further.
 
+## "More like this"
+
+Open a recording and you can jump straight from it to everything else you've said on the topic — no query to type:
+
+- **Where:** the **✨ Similar** button in the recording detail's action row (next to Copy/Export), and in the merged meeting view's header. The CLI equivalent is `phoneme search --like <RECORDING_ID>`.
+- **What happens:** the recordings list fills with the semantically closest recordings, ranked with the same relevance chips as a semantic query. The search box becomes a **`~similar: <title>`** pill — click its **✕** to return to the normal list.
+- **How it's ranked:** the recording's *already-stored* chunk vectors are averaged into one query vector, and the library is scored by each recording's best-matching chunk — the same retrieval path a typed semantic query uses. Nothing is re-embedded, so the lookup is instant and works even while the embedding model isn't loaded.
+- **What's excluded:** the source recording itself — and, for a meeting track, the *other* track of the same meeting (its transcript is near-identical, so it would always uselessly rank first).
+- **Not indexed yet?** A recording that has no embeddings (recorded before semantic search was enabled, or still in the pipeline) reports *"isn't indexed for semantic search yet — re-embed the library or wait for the pipeline to index it"*. Run **Re-embed all recordings** (above) to backfill.
+
+Because the source's stored vectors are the query, "More like this" only requires that the **source** recording is indexed; candidates are whatever else has vectors.
+
 ## Comparing FTS5 vs semantic
 
 | | Keyword (FTS5) | Semantic (hybrid) |

@@ -88,12 +88,28 @@ async fn apply_model_override(
             // server over HTTP and ignores model_path itself).
             whisper_cfg.model_path = model;
             // Only the bundled server is ours to wait on; External is a
-            // user-managed endpoint we never restart.
+            // user-managed endpoint we never restart. The URL is re-resolved
+            // on every poll because the override restart re-runs the
+            // supervisor's port probe — the server can come back on a
+            // different port than the one it left (its preferred port freed
+            // up, or a fresh fallback was assigned).
             if matches!(
                 configured.mode,
                 WhisperMode::BundledModel | WhisperMode::BundledDownload
             ) {
-                wait_for_whisper_ready(&whisper_cfg.server_base_url(), WHISPER_READY_TIMEOUT).await;
+                let poll_state = state.clone();
+                let poll_cfg = whisper_cfg.clone();
+                wait_for_whisper_ready(
+                    move || {
+                        let cfg = poll_state.config.load();
+                        poll_state
+                            .whisper_ports
+                            .apply(&cfg, &poll_cfg)
+                            .server_base_url()
+                    },
+                    WHISPER_READY_TIMEOUT,
+                )
+                .await;
             }
             (
                 whisper_cfg,
@@ -114,11 +130,12 @@ async fn apply_model_override(
 /// Best-effort wait until the bundled whisper-server answers `GET {base}/health`
 /// with success, or `timeout` elapses. Used right after a one-job model-override
 /// restart so the transcription doesn't fire at a server that's still loading
-/// the model. Never errors: on timeout it logs and returns, letting the normal
-/// transcribe attempt (and the queue worker's `WhisperUnreachable` retry) take
-/// over.
-async fn wait_for_whisper_ready(base_url: &str, timeout: Duration) {
-    let health = format!("{}/health", base_url.trim_end_matches('/'));
+/// the model. `base_url` is a closure, evaluated fresh each poll, because the
+/// restart can move the server to a different port (the supervisor re-runs its
+/// port probe on every spawn). Never errors: on timeout it logs and returns,
+/// letting the normal transcribe attempt (and the queue worker's
+/// `WhisperUnreachable` retry) take over.
+async fn wait_for_whisper_ready(base_url: impl Fn() -> String, timeout: Duration) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .build()
@@ -132,6 +149,7 @@ async fn wait_for_whisper_ready(base_url: &str, timeout: Duration) {
     let deadline = std::time::Instant::now() + timeout;
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     loop {
+        let health = format!("{}/health", base_url().trim_end_matches('/'));
         if let Ok(resp) = client.get(&health).send().await {
             if resp.status().is_success() {
                 return;
@@ -271,6 +289,23 @@ pub(crate) async fn embed_and_store(
     }
 }
 
+/// Mint the LLM provider for a step that is about to RUN, launching the local
+/// Ollama first when the effective connection needs it (`ollama_launcher`).
+/// Every actual LLM execution path (cleanup, summary, tags, titles, in-place
+/// polish, the cleanup re-run) resolves its provider through this; validation
+/// and "is this configured?" checks keep calling `LlmPostProcessor::provider`
+/// directly so a mere settings probe can never spawn a process.
+pub(crate) async fn llm_provider_for_run(
+    state: &AppState,
+    llm_cfg: &LlmPostProcessConfig,
+) -> Option<Box<dyn phoneme_core::LlmProvider>> {
+    // Resolve first: a disabled/unrecognized provider must short-circuit
+    // before any probe or launch happens.
+    let provider = state.llm.provider(llm_cfg)?;
+    crate::ollama_launcher::ensure_ready(state, llm_cfg).await;
+    Some(provider)
+}
+
 /// Build the effective LLM config for summaries: start from `[llm_post_process]`
 /// and overlay any summary-specific provider / URL / key / model the user set.
 /// Each blank summary field inherits the cleanup value, so summaries can run on
@@ -322,7 +357,7 @@ pub async fn generate_summary(
     }
     let llm_cfg = summary_llm_config(cfg);
     let model = llm_cfg.model.clone();
-    let llm = match state.llm.provider(&llm_cfg) {
+    let llm = match llm_provider_for_run(state, &llm_cfg).await {
         Some(llm) => llm,
         None => {
             tracing::warn!(
@@ -512,7 +547,7 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
         return;
     }
     let llm_cfg = auto_tag_llm_config(cfg);
-    let llm = match state.llm.provider(&llm_cfg) {
+    let llm = match llm_provider_for_run(state, &llm_cfg).await {
         Some(llm) => llm,
         None => {
             tracing::warn!(
@@ -706,7 +741,8 @@ async fn maybe_auto_title(
         .or_else(|| phoneme_core::title::heuristic_title(raw_transcript));
     let mut title = heuristic;
     if cfg.title.use_llm && !transcript.trim().is_empty() {
-        if let Some(llm) = state.llm.provider(&title_llm_config(cfg)) {
+        let title_cfg = title_llm_config(cfg);
+        if let Some(llm) = llm_provider_for_run(state, &title_cfg).await {
             match llm.process(&cfg.title.prompt, transcript).await {
                 Ok(reply) => match sanitize_llm_title(&reply) {
                     Some(t) => title = Some(t),
@@ -817,6 +853,10 @@ pub async fn run(
     let requested_override = state.pending_overrides.lock().unwrap().remove(&id);
     let (whisper_cfg, override_guard) =
         apply_model_override(state, &cfg.whisper, requested_override).await;
+    // Dial the port the bundled server is ACTUALLY listening on: the
+    // supervisor falls back to a free port when the configured one is held by
+    // another app, and publishes the live value in `whisper_ports`.
+    let whisper_cfg = state.whisper_ports.apply(&cfg, &whisper_cfg);
     let provider = state.transcription.provider(&whisper_cfg, &cfg.diarization);
 
     // Report transcription to the unified AI-activity ("brain") popout via the
@@ -962,7 +1002,7 @@ pub async fn run(
     // transcript. `provider()` returns None when disabled or provider = none.
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
-    if let Some(llm) = state.llm.provider(&cfg.llm_post_process) {
+    if let Some(llm) = llm_provider_for_run(state, &cfg.llm_post_process).await {
         // The list/detail/activity views read the DB status, so it tracks the
         // stage events step for step — "transcribing" no longer covers the
         // whole pipeline. Best-effort: a status write failing must not kill

@@ -1,9 +1,10 @@
 /**
  * Shared bits for the two Doctor surfaces (DoctorModal + DoctorView): the
  * check shape with the category fields the backend emits, badge metadata,
- * and the "Fix All" plan. Kept local to the Doctor components on purpose —
- * the shared ipc.ts DoctorCheck type stays minimal, and these fields are
- * additive (older daemons simply don't send them).
+ * the "Fix All" plan, the health-strip tallies and the subsystem grouping
+ * for the collapsed passing section. Kept local to the Doctor components on
+ * purpose — the shared ipc.ts DoctorCheck type stays minimal, and these
+ * fields are additive (older daemons simply don't send them).
  */
 
 export type DoctorCategory = "critical" | "warning" | "info";
@@ -51,4 +52,92 @@ export function fixAllPlan(checks: DoctorCheckInfo[]): string[] {
     plan.push(c.fix_action);
   }
   return plan;
+}
+
+/** Display order of the subsystem groups in the collapsed passing section. */
+export const CHECK_GROUPS = ["Servers", "Models", "Storage", "Configuration", "Other"] as const;
+export type CheckGroup = (typeof CHECK_GROUPS)[number];
+
+/**
+ * Subsystem for each check, by the exact name the backend emits
+ * (crates/phoneme-core/src/doctor.rs, plus the GUI-side "Daemon" check).
+ * Names not listed here land in "Other", so a new backend check shows up
+ * ungrouped instead of vanishing.
+ */
+const GROUP_BY_NAME: Record<string, CheckGroup> = {
+  Daemon: "Servers",
+  "Whisper server": "Servers",
+  "Live-preview server": "Servers",
+  "Ollama (optional)": "Servers",
+  "Transcription API key": "Servers",
+  "Transcription endpoint": "Servers",
+  "Live-preview API key": "Servers",
+  "Live-preview endpoint": "Servers",
+  "Dictation STT key": "Servers",
+  "Dictation STT endpoint": "Servers",
+  "Whisper model file": "Models",
+  "Live-preview model": "Models",
+  "Semantic search model": "Models",
+  "Diarization models": "Models",
+  "Audio directory": "Storage",
+  "Disk space (recordings)": "Storage",
+  "Disk space (app data)": "Storage",
+  "Config file": "Configuration",
+  "Hook command": "Configuration",
+};
+
+/** The subsystem group a check name belongs to; unknown names go to "Other". */
+export function checkGroup(name: string): CheckGroup {
+  // The per-connection LLM checks carry a dynamic step list in the name —
+  // "LLM endpoint (cleanup, summary)" — so they match by prefix.
+  if (name.startsWith("LLM API key (") || name.startsWith("LLM endpoint (")) {
+    return "Servers";
+  }
+  return GROUP_BY_NAME[name] ?? "Other";
+}
+
+/**
+ * Bucket checks by subsystem in `CHECK_GROUPS` order, preserving the checks'
+ * own order inside each bucket. Empty groups are dropped.
+ */
+export function groupChecks(
+  checks: DoctorCheckInfo[],
+): { group: CheckGroup; checks: DoctorCheckInfo[] }[] {
+  const buckets = new Map<CheckGroup, DoctorCheckInfo[]>();
+  for (const c of checks) {
+    const g = checkGroup(c.name);
+    const list = buckets.get(g);
+    if (list) list.push(c);
+    else buckets.set(g, [c]);
+  }
+  return CHECK_GROUPS.filter((g) => buckets.has(g)).map((g) => ({
+    group: g,
+    checks: buckets.get(g)!,
+  }));
+}
+
+/** What the health strip shows: failing counts per category, plus pass/total. */
+export type HealthCounts = {
+  total: number;
+  passing: number;
+  /** Failing checks per category (uncategorized failures count as warning). */
+  critical: number;
+  warning: number;
+  info: number;
+};
+
+/** Tally checks for the health strip's chips. */
+export function healthCounts(checks: DoctorCheckInfo[]): HealthCounts {
+  const counts: HealthCounts = {
+    total: checks.length,
+    passing: 0,
+    critical: 0,
+    warning: 0,
+    info: 0,
+  };
+  for (const c of checks) {
+    if (c.ok) counts.passing += 1;
+    else counts[categoryMeta(c).cls] += 1;
+  }
+  return counts;
 }

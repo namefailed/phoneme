@@ -4,6 +4,7 @@ import {
   listSession,
   recordStart,
   deleteRecording,
+  moreLikeThis,
   listTags,
   listAllTags,
   addTag,
@@ -74,6 +75,30 @@ describe('IPC Services', () => {
     expect(tauriCore.invoke).toHaveBeenCalledWith('delete_recording', {
       id: '20260519T143500823',
       keepAudio: true,
+    });
+  });
+
+  it('moreLikeThis pins the more_like_this payload (id + default limit)', async () => {
+    const results = [{ recording: { id: '20260519T150000000' }, score: 0.8 }];
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(results);
+
+    const res = await moreLikeThis('20260519T143500823');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('more_like_this', {
+      id: '20260519T143500823',
+      limit: 20,
+    });
+    expect(res).toEqual(results);
+  });
+
+  it('moreLikeThis passes a custom limit through', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce([]);
+
+    await moreLikeThis('20260519T143500823', 5);
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('more_like_this', {
+      id: '20260519T143500823',
+      limit: 5,
     });
   });
 });

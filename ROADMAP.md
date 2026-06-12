@@ -230,6 +230,36 @@ persona actually wants — still needs the alignment + timestamp substrate below
 
 ### 🏚️ Finish the attic (backend exists, GUI doesn't)
 
+### 🔁 GUI ⇄ CLI parity gaps (audited 2026-06-12 against the live Request enum)
+
+The CLI-parity pass predates several newer features. CLI is missing:
+
+- [ ] **Title set/clear** — `SetRecordingTitle` has no CLI verb (titles are
+  brand new); `phoneme edit --title` / `--clear-title` or similar.
+- [ ] **Favorites** — `SetFavorite` unreachable from the CLI (star/unstar).
+- [ ] **Speaker rename** — `SetSpeakerName` unreachable (named speakers are
+  GUI-only).
+- [ ] **Tag-suggestion review** — approve/dismiss per suggestion
+  (`ApproveTagSuggestion` / `DismissTagSuggestion`); only clear-all exists.
+- [ ] **Record pause/resume** — `RecordPause` / `RecordResume` have no CLI
+  verbs (start/stop/toggle/cancel do).
+- [ ] **Queue skip** — `SkipCurrentStage` missing from `phoneme queue`.
+- [ ] **Re-run tag suggestions** — `SuggestTags` missing beside the existing
+  rerun cleanup/summary verbs.
+
+GUI is missing:
+
+- [ ] **Caption export button** — SRT/VTT export is CLI-only; the detail
+  pane (and bulk bar?) should offer it for transcribed recordings.
+- [ ] **Webhook safety knobs** — `[webhook] allow_private_network` /
+  `allow_http` ship without Settings toggles (TOML-only); surface them in
+  the hooks/webhook section with plain-language warning copy.
+- [ ] **Whole-library export** — verify the GUI can produce the same backup
+  zip as `phoneme export <file>`; wire it into Settings → Storage if not.
+
+House rule going forward: a new Request lands with BOTH surfaces (or an
+explicit roadmap line here saying why not).
+
 - [x] **Webhook URL field in Settings** — the Hooks section now exposes the
   `hook.webhook_url` field (with empty-value guarding); the pipeline POSTs to it. (`SectionHook.ts`)
 - [x] **Failed-queue visibility + clear** — the queue panel now surfaces the
@@ -280,6 +310,17 @@ persona actually wants — still needs the alignment + timestamp substrate below
   - [ ] **Track-aware Meeting Mode** *(confirmed)*. `diarize_transcript` runs speakrs identically for every recording; there is no branch on `MeetingTrack::Mic` vs `System` (transcription.rs only sees a path + segments, never the track; the track lives in the catalog row, recorder.rs:854–857). For meetings, label the mic track **"You"** without running speakrs at all, and only diarize the system/loopback track — halves diarizer work and avoids spurious multi-speaker labels on a single-mic track. *(transcription.rs:352; recorder.rs `MeetingTrack::Mic/System`)*
   - [ ] **Word-level alignment instead of 1 s segments** *(confirmed)*. Today's path is whisper **segments** × diarization turns: the local provider requests `timestamp_granularities[]=segment` (transcription.rs:285) and `assign_speakers` attributes each whole segment by its midpoint (diarization.rs:90). Request `timestamp_granularities[]=word` from whisper-server and assign each *word* to a speaker via the per-frame activation matrix — `DiscreteDiarization` derefs to a public `Array2<f32>` of frame activations (`pipeline/types/data.rs:76`). Pairs with the v1.9 word-timestamp substrate above. *(transcription.rs:283–339, diarization.rs:77–115)*
   - [ ] **Expose `PipelineConfig` tunables in Settings** *(refined)*. speakrs exposes `merge_gap`, `speaker_keep_threshold`, `reconstruct_method`, and nested `binarize` / `ahc` / `vbx` configs (`pipeline/config.rs`). Caveat: `OwnedDiarizationPipeline::run` uses the pipeline's `default_config`; applying custom values needs `run_with_config` / `into_queued_with_config` / `new_with_config`. **ExecutionMode has no `CpuFast`** — the only `*-fast` modes are `CoreMlFast` / `CudaFast` (`inference.rs:47`), neither available on Windows/CPU — so ship the `merge_gap`/threshold knobs, not a Cpu/CpuFast toggle. *(pipeline/config.rs, inference.rs:47)*
+  - [ ] **Selectable local diarization models** — speakrs ships
+    `PipelineBuilder::from_dir(models_dir, mode)` beside the `from_pretrained`
+    we call today, so custom/alternative model bundles are fully supported by
+    the dependency. Ship in two steps: (1) `diarization.models_dir` directory
+    override (replaces the dead `local_model_path` key — it was never wired to
+    anything; Settings field + Doctor check follow the same resolution), so
+    power users can drop in any compatible segmentation/embedding/PLDA bundle;
+    (2) curated alternative bundles in the wizard (which wespeaker/pyannote
+    ONNX exports actually match speakrs' shapes needs testing first), pinned
+    SHA-256 like every other download. The diarizer cache invalidates on the
+    new key like any `[diarization]` change.
   - [ ] **Speaker embeddings for named speakers** *(refined)*. `DiarizationResult` does expose `embeddings: ChunkEmbeddings(pub Array3<f32>)` and `hard_clusters: ChunkSpeakerClusters(pub Array2<i32>)` (`pipeline/types/data.rs:154`), so per-name centroids are computable. Caveat: `run_local_diarization` currently throws the whole result away except segments, and speakrs computes centroids internally (`pipeline/clustering.rs`) without a public accessor — we'd aggregate chunk embeddings per cluster ourselves, persist centroids per name, and cosine-match on later recordings. Real but non-trivial; lands after the scaling + caching fixes. *(diarization.rs:159–169)*
   - [ ] **Cloud diarization toggles** *(confirmed — already wired)*. Deepgram passes `diarize=true` and reassembles `[Speaker N]` from word speaker tags (transcription.rs:469, 521–553); AssemblyAI passes `speaker_labels=true` and reassembles from utterances (transcription.rs:702, 730–756). Both are gated on `DiarizationBackend::Deepgram` / `::Assemblyai` (transcription.rs:114, 122; config.rs:83). Remaining work is just the **Settings UI** to pick the backend, not backend plumbing.
   - [ ] **DER eval harness** *(refined)*. speakrs ships DER utilities — `compute_der`, `DerResult`, `parse_rttm` (`metrics.rs`), and `to_rttm` (`segment.rs`) — **but they are behind the `_metrics` feature**, which Phoneme does not enable (`speakrs = "0.4.2"`, default features in `phoneme-core/Cargo.toml:26`). Add a small RTTM fixture set + a dev-only harness that enables `speakrs/_metrics` (or reimplements collar-0 DER), wired as an optional nightly CI job rather than a release gate.
@@ -313,7 +354,15 @@ persona actually wants — still needs the alignment + timestamp substrate below
   lands: immediately from a type-only fast pass (cleanup/summary/tags catch up
   in the library), or only after the full pipeline finishes. `[in_place]` in
   the config reference; user guide: `transcribe_in_place.md`.
-- [ ] **Live preview overhaul (a whole phase)** — the current streaming
+- [ ] **Live preview overhaul (a whole phase)** — execution scope, concrete:
+  **(a)** token-bucket reveal — words stream in at a steady cadence instead of
+  replace-per-tick jumps; **(b)** stable stitch — committed text is append-only
+  (provisional tail styled lighter, never rewriting what's already shown);
+  **(c)** idle behavior — hold + gentle decay when the speaker pauses, a
+  "listening" state instead of flicker; **(d)** per-tick perf budget with
+  adaptive window (skip a tick under load rather than stutter); **(e)** exit
+  criteria for dropping the Beta label: measured stitch stability + pacing on
+  a 10-minute dictation. Original framing: the current streaming
   preview works but doesn't feel good: caption pacing is uneven, the stitch
   point jumps, and meetings double the cost. It ships **off by default,
   labelled Beta** until this lands. Scope: smoother partial-text pacing
@@ -327,6 +376,20 @@ persona actually wants — still needs the alignment + timestamp substrate below
   feedback Wispr Flow nails. Builds on the existing overlay window; do this
   AFTER the live-preview overhaul (or independent of it — the waveform needs
   only audio levels, not transcription).
+
+- [ ] **In-place dictation, phase 2** — the fast lane shipped; now the feel:
+  **(a)** voice commands in the polish pass — "new line", "new paragraph",
+  "scratch that" handled rule-based in `fast_polish` (and as prompt directives
+  in LLM mode); **(b)** per-app overrides — type vs paste vs off per process
+  name (some apps reject synthetic keystrokes; the fast lane should know);
+  **(c)** app-aware context, tier 1 — opt-in (OFF by default), the focused
+  window's title feeds the polish prompt so jargon resolves correctly, with a
+  process denylist; fully open source, toggleable — our answer to Wispr Flow's
+  screenshots without the trust problem (tier 2, screenshot→vision-LLM, stays
+  a separate later opt-in); **(d)** streaming-type experiment — type words as
+  they finalize instead of all-at-end (spike: corrections vs cursor churn;
+  may not survive contact with reality); **(e)** the waveform capture overlay
+  above doubles as the dictation "it hears me" signal — build them together.
 
 ### ✨ Small wins
 
@@ -351,7 +414,40 @@ persona actually wants — still needs the alignment + timestamp substrate below
   and a CI job that can run the ONNX model.
 - [ ] **"Ask my archive" (local RAG chat)** — "What did we decide about the API
   redesign?" → answer with citations/links to recordings. Builds on chunking +
-  retrieval; needs a chat UI + citation UX. The headline differentiated feature.
+  retrieval; needs a chat UI + citation UX. The headline differentiated feature
+  *and the retrieval foundation for the Phoneme Agent below — ship this first,
+  then the agent turns its retrieval into one tool among many.*
+- [ ] **Phoneme Agent** — a fully phoneme-aware agent living right inside the
+  app: a chat panel that doesn't just *answer* from the archive but *acts* on
+  it. "Find every standup from this week, tag them `standup`, and give me the
+  open action items" — it searches (hybrid/semantic), reads transcripts, then
+  tags, titles, summarizes, re-runs steps, exports captions, starts/stops
+  recordings, and adjusts filters, chaining steps until the job is done.
+  - **Don't write the harness from scratch.** Adapt an existing open-source
+    agent harness instead: **opencode** (free, open source) is the named
+    candidate — take its agent loop (provider abstraction, tool-calling loop,
+    permission gating, session/replay) and bend it to Phoneme. Evaluate at
+    build time against two lighter alternatives: the Vercel AI SDK's
+    tool-loop (TS, fits the Lit frontend) and **Rig** (Rust-native, fits the
+    daemon if the brain lives backend-side). License + maintenance check is
+    part of the pick; the decision record lands in docs/design/.
+  - **Tool layer = the IPC surface we already have.** Tools are typed wrappers
+    over the existing `Request` enum via the `Transport` trait — the same thin
+    layer the v2.0 MCP server and REST API translate. Write the tool registry
+    once; the in-app agent, MCP (external agents), and REST all consume it.
+  - **Trust model, local-first:** runs on any configured LLM with tool calling
+    (local Ollama models included — curated "agent-capable" picks in the model
+    field); every tool call renders in the chat as a visible step; destructive
+    ops (delete, bulk edits) require an in-chat confirm and route through the
+    existing undo paths; a per-session action log makes everything auditable.
+    No screen access, no shell — its hands are the app's own IPC, nothing else.
+  - **UI:** a right-side companion panel (g-chord + header button), streaming
+    responses, citations linking into recordings like Ask-my-archive, tool
+    steps collapsible like the Doctor's passing checks.
+  - Sequencing: needs Ask-my-archive's retrieval + citation UX, the unified
+    provider/model picker (shipped), and the granular status/event plumbing
+    (shipped). Pairs naturally with the v2.0 MCP server — same tool registry,
+    opposite direction.
 - [ ] **Transcript ↔ waveform sync** — click a paragraph → seek playback. *(Needs
   word-level timestamps from v1.9.)*
 - [x] **Compare transcript versions** — side-by-side diff of original Whisper vs
@@ -389,7 +485,7 @@ persona actually wants — still needs the alignment + timestamp substrate below
 > **Architecture decision (locked):** the daemon already speaks newline-delimited JSON over a named pipe behind the `phoneme-ipc` `Transport` trait. v2.0 adds an **HTTP front-end, not a new eventing model**: an `axum` server maps one-off `Request`s to REST endpoints (`POST /api/record/start`, `GET /api/recordings`) and streams `DaemonEvent`s as **Server-Sent Events** (`GET /api/events`, an `EventSource` in the frontend). REST API, browser extension, Raycast scripts, and the MCP server then all share one `fetch()`/`EventSource` surface.
 
 - [ ] **Local REST API** — `localhost:3737` `axum` server (off by default): REST endpoints over the existing `Request`/`Response` enums + an SSE `/api/events` stream over `DaemonEvent`. Add an `HttpTransport` impl of the `Transport` trait so clients reuse the same typed surface.
-- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). A **thin translator over the existing `Transport` trait**: `CallTool("start_recording")` maps to `Request::RecordStart` — near-zero business logic. Tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`.
+- [ ] **MCP server** — `phoneme-mcp` binary (MCP = JSON-RPC over stdio). A **thin translator over the existing `Transport` trait**: `CallTool("start_recording")` maps to `Request::RecordStart` — near-zero business logic. Tools: `start_recording`, `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`. Shares the tool registry with the v1.10 **Phoneme Agent** — same typed wrappers, opposite direction (external agents in, instead of the in-app agent out).
 - [ ] **Webhook improvements** — HMAC-SHA256 signing; configurable trigger point (before hook, after hook, or independent); custom headers.
 - [ ] **Browser extension** — toolbar icon; one click starts a recording and pastes the finished transcript into the focused field or clipboard. Requires the v2.0 REST API as the bridge.
 
@@ -509,6 +605,21 @@ alongside the feature releases above.*
 - [x] Frontend: ESLint + Prettier (*shipped — flat config, 0-error baseline, lint in CI*); still open: stricter TS (`noUnusedLocals`/`noUnusedParameters`); `types/` + `constants/` dirs.
 
 **Performance**
+- [ ] Persist `error_kind`/`error_message` onto the catalog row at failure
+  time — the columns exist but no daemon path writes them; real error text
+  only travels in events + the failed/ quarantine JSON. Writing them makes
+  failure reasons survive restarts and retires the queue panel's session
+  cache.
+- [ ] Per-item failed-quarantine dismiss — the inbox failed/ store only
+  supports all-or-nothing ClearFailed; the failure panel wants per-recording
+  dismiss IPC.
+- [ ] Settings/wizard URL hints should show the EFFECTIVE whisper port —
+  after a port fallback the text still names the configured port; read
+  daemon_status in SectionWhisper/SectionInPlace/the wizard.
+- [ ] Doctor probes should follow effective whisper ports — the daemon-side
+  RunDoctor handler and tray-side backend checks still build URLs from
+  config; rewrite via the published effective ports and say "running on
+  51234 (fallback from 5809)" when they differ.
 - [ ] Record the request model id for cloud STT — the catalog/webhook `model` field is the file-stem of `whisper.model_path`, so cloud transcriptions record "unknown" (pinned by the pipeline integration test).
 - [ ] Doctor: decide whether local whisper model/server checks should skip (or downgrade) when a cloud STT provider is configured — today they run regardless (behavior parity kept on purpose).
 - [ ] Trim redundant `http.clone()` (transcription.rs ×7, llm.rs ×4); avoid the `attention_mask` clone in `embed.rs`.

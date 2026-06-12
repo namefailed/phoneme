@@ -163,12 +163,25 @@ The Doctor covers config presence, the audio folder, **free disk space** on
 the volumes holding your recordings and the app data (a warning under ~2 GB,
 critical under ~500 MB), the hook command, **model-file integrity** (a
 missing, 0-byte or truncated model download is flagged before it bites), and
-the Whisper / live-preview / Ollama servers.
+the Whisper / live-preview / Ollama servers. The checks **follow your
+providers**: run transcription, the live preview, dictation, or an AI step on
+a cloud provider and its local model/server checks make way for what can
+still be verified — the API key is set and the endpoint answers — without
+ever sending a billable request.
 
 Each check shows a category badge when it fails — **Critical** (red: recording
 or transcription is broken), **Warning** (amber: something is degraded but
 capture still works) — plus a plain-English line on what the check verifies
 and a `fix:` hint with the next step.
+
+The Doctor triages instead of listing: a **health strip** stays pinned at the
+top with the one-glance state — "All systems good ✓", or count chips per
+category — alongside **Fix All** and **Re-run**. Failing checks come first as
+full rows (badge, explanation, fix hint, per-check Fix), while everything
+healthy folds into a single collapsed **"✓ N checks passing"** line — expand
+it for a compact list grouped by subsystem (Servers / Models / Storage /
+Configuration). Both the quick modal and the Settings Doctor tab use the same
+layout.
 
 The Doctor itself can **restart the bundled whisper-server(s)** with one click
 when the Whisper or live-preview probe fails — it sweeps hung or orphaned

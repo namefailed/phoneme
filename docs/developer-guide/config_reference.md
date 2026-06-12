@@ -16,7 +16,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 | `provider` | `local` \| `openai` \| `groq` \| `deepgram` \| `assemblyai` \| `elevenlabs` \| `custom` | `local` | Transcription backend |
 | `external_url` | string | `http://127.0.0.1:5809` | OpenAI-compatible server base URL |
 | `model_path` | path | `""` | GGML model path (`.bin`) when `mode = bundled_model` |
-| `bundled_server_port` | u16 | `5809` | Local server port |
+| `bundled_server_port` | u16 | `5809` | **Preferred** local server port — when another app already holds it, the daemon starts whisper-server on a free port instead and every consumer follows automatically (see [troubleshooting](../user-guide/troubleshooting.md#-something-else-is-using-port-5809)) |
 | `bundled_server_args` | string[] | `[]` | Extra whisper-server CLI args |
 | `timeout_secs` | u64 | `60` | Transcription HTTP timeout |
 | `language` | string? | `null` | BCP-47 hint; omit for auto-detect |
@@ -28,7 +28,7 @@ Schema source: `crates/phoneme-core/src/config.rs`.
 
 ## `[preview_whisper]` (optional)
 
-An optional, **independent** transcription provider used only for the live preview, so it never contends with the final transcription. It has the **same keys as `[whisper]`**. Omit the section entirely (the default) to make the preview reuse the main `[whisper]` provider. The final transcript always uses `[whisper]` regardless. Set a distinct `bundled_server_port` if you point it at a second local bundled model. See [Live Preview & Pre-Roll](../user-guide/streaming_preview_and_preroll.md).
+An optional, **independent** transcription provider used only for the live preview, so it never contends with the final transcription. It has the **same keys as `[whisper]`**. Omit the section entirely (the default) to make the preview reuse the main `[whisper]` provider. The final transcript always uses `[whisper]` regardless. Set a distinct `bundled_server_port` if you point it at a second local bundled model — like the main server's, it is a preference: a taken port makes the daemon fall back to a free one, and the preview never picks the main server's port. See [Live Preview & Pre-Roll](../user-guide/streaming_preview_and_preroll.md).
 
 ---
 
@@ -108,6 +108,7 @@ followed.
 | `visible_columns` | day, time, duration, status, transcript | List columns |
 | `column_widths` | px/fr strings | Resizable column layout |
 | `preview_overlay` | `false` | Float the live preview in a system-wide, always-on-top overlay window (requires `recording.streaming_preview`) |
+| `quit_stops_daemon` | `true` | Tray **Quit** also shuts the daemon down: an in-flight recording is stopped and queued first, then the whisper-server(s) and a Phoneme-launched Ollama go with it. `false` = the daemon outlives the tray (headless setups). Also read at daemon **spawn** time to decide whether the tray ties the daemon's lifetime to its own at the OS level (kill-on-close job) — that part of a change applies on the next spawn. |
 
 ---
 
@@ -152,6 +153,7 @@ followed.
 | `model` | `llama3.2:3b` | Model id |
 | `prompt` | clean-up instruction | System prompt |
 | `timeout_secs` | `30` | LLM HTTP timeout |
+| `autostart_ollama` | `true` | Launch `ollama serve` on demand when an LLM step's effective connection is a **local** Ollama and nothing answers there. Applies to every step that inherits this connection (cleanup, summary, tags, titles, in-place polish). An Ollama that was already running when the daemon first probed it is never managed; one the daemon launched is stopped again at daemon shutdown. Remote URLs and non-Ollama providers never launch anything. |
 
 The cleanup provider speaks one of four wire protocols: `ollama`, `openai` (OpenAI-compatible chat completions — used by most cloud providers), `groq`, or `anthropic`. See [Providers & Models](../user-guide/providers_and_models.md).
 

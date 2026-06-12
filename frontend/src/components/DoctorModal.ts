@@ -1,8 +1,14 @@
-import { LitElement, html } from "lit";
+import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { invoke } from "@tauri-apps/api/core";
 import { runDoctor } from "../services/ipc";
-import { categoryMeta, fixAllPlan, type DoctorCheckInfo } from "./doctorChecks";
+import {
+  categoryMeta,
+  fixAllPlan,
+  groupChecks,
+  healthCounts,
+  type DoctorCheckInfo,
+} from "./doctorChecks";
 import { showToast } from "../utils/toast";
 import { errText } from "../utils/error";
 import "./modal.css";
@@ -22,8 +28,11 @@ const FIX_ALL = "__all__";
 /**
  * GUI Doctor: runs the daemon's health checks (config, audio dir, disk
  * space, hooks, model integrity, whisper + ollama reachability) and shows
- * them with pass/fail, a severity badge (Critical/Warning/Info), what each
- * check means, and a one-click "Fix" where the backend offers a remediation.
+ * them triage-style: a sticky health strip with per-category counts and the
+ * Fix All / Re-run actions, failing checks first as full rows (severity
+ * badge, what the check means, fix hint, one-click "Fix" where the backend
+ * offers a remediation), and the passing checks folded into one collapsed
+ * "✓ N checks passing" section, grouped by subsystem when expanded.
  * "Fix All" walks every available fix top-down in one go.
  */
 @customElement("ph-doctor-modal")
@@ -127,72 +136,122 @@ export class DoctorModalElement extends LitElement {
     void this.refresh();
   }
 
+  /** One failing check, fully detailed: badge, detail, explanation, hint, Fix. */
+  private renderFailing(c: DoctorCheckInfo) {
+    const meta = categoryMeta(c);
+    return html`
+      <div class="doctor-row bad">
+        <span class="doctor-icon">✕</span>
+        <div class="doctor-main">
+          <div class="doctor-name">
+            ${c.name}
+            <span class="doctor-cat ${meta.cls}">${meta.label}</span>
+          </div>
+          <div class="doctor-detail">${c.detail}</div>
+          ${c.explanation ? html`<div class="doctor-explain">${c.explanation}</div>` : ""}
+          ${c.fix_hint ? html`<div class="doctor-hint">${c.fix_hint}</div>` : ""}
+        </div>
+        ${c.fix_action
+          ? html`<button class="modal-btn doctor-fix"
+              ?disabled=${this.loading || this.fixing !== null}
+              @click=${() => void this.runFix(c.fix_action!)}>
+              ${this.fixing === c.fix_action ? "Working…" : FIX_LABELS[c.fix_action] ?? "Fix"}
+            </button>`
+          : ""}
+      </div>
+    `;
+  }
+
+  /**
+   * The passing checks, folded behind a native <details> (closed by default,
+   * the house disclosure idiom — see .settings-advanced). Expanded, they're
+   * compact one-liners grouped by subsystem; the explanation rides along as
+   * a hover title instead of a visible line.
+   */
+  private renderPassing(passing: DoctorCheckInfo[]) {
+    return html`
+      <details class="doctor-passing">
+        <summary class="doctor-passing-sum">
+          <svg class="doctor-passing-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+            <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="doctor-passing-mark" aria-hidden="true">✓</span>
+          ${passing.length} check${passing.length === 1 ? "" : "s"} passing
+        </summary>
+        ${groupChecks(passing).map(
+          (g) => html`
+            <div class="doctor-group">
+              <div class="doctor-group-title">${g.group}</div>
+              ${g.checks.map(
+                (c) => html`
+                  <div class="doctor-pass-row" title=${c.explanation ?? nothing}>
+                    <span class="doctor-pass-mark" aria-hidden="true">✓</span>
+                    <span class="doctor-pass-name">${c.name}</span>
+                    <span class="doctor-pass-detail">${c.detail}</span>
+                  </div>
+                `,
+              )}
+            </div>
+          `,
+        )}
+      </details>
+    `;
+  }
+
   render() {
-    const failing = this.checks.filter((c) => !c.ok).length;
-    const summary = this.loading
-      ? "Running checks…"
-      : this.error
-        ? "Couldn't reach the daemon."
-        : failing === 0
-          ? "All systems healthy"
-          : `${failing} issue${failing === 1 ? "" : "s"} found`;
+    const failing = this.checks.filter((c) => !c.ok);
+    const passing = this.checks.filter((c) => c.ok);
+    const counts = healthCounts(this.checks);
     const fixable = fixAllPlan(this.checks);
+    const busy = this.loading || this.fixing !== null;
+    // Keep the rows on screen during a re-check (controls disabled) so the
+    // layout doesn't jump; the bare loading state is for the first run only.
+    const firstLoad = this.loading && this.checks.length === 0;
 
     return html`
       <div class="modal-overlay" @click=${(e: MouseEvent) => { if (e.target === e.currentTarget) this.close(); }}>
         <div class="modal-dialog doctor-dialog" role="dialog" aria-modal="true" aria-labelledby="doctor-title">
           <div class="modal-header">
             <h3 class="modal-title" id="doctor-title">🩺 Doctor</h3>
-            <span class="doctor-summary ${failing === 0 && !this.error ? "ok" : "bad"}">${summary}</span>
           </div>
 
           <div class="doctor-body">
-            ${this.loading
+            <div class="doctor-strip">
+              <div class="doctor-strip-state" role="status">
+                ${firstLoad
+                  ? html`<span class="doctor-strip-note">Running checks…</span>`
+                  : this.error
+                    ? html`<span class="doctor-strip-note err">Couldn't reach the daemon.</span>`
+                    : failing.length === 0
+                      ? html`<span class="doctor-chip ok">All systems good ✓</span>`
+                      : html`
+                          ${counts.critical ? html`<span class="doctor-chip critical">${counts.critical} critical</span>` : ""}
+                          ${counts.warning ? html`<span class="doctor-chip warning">${counts.warning} warning</span>` : ""}
+                          ${counts.info ? html`<span class="doctor-chip info">${counts.info} info</span>` : ""}
+                        `}
+              </div>
+              <div class="doctor-strip-actions">
+                ${fixable.length
+                  ? html`<button class="modal-btn doctor-fix-all" ?disabled=${busy}
+                      @click=${() => void this.runFixAll()}>
+                      ${this.fixing === FIX_ALL ? "Fixing…" : `🔧 Fix All (${fixable.length})`}
+                    </button>`
+                  : ""}
+                <button class="modal-btn doctor-rerun" ?disabled=${busy} @click=${() => void this.refresh()}>↻ Re-run</button>
+              </div>
+            </div>
+
+            ${firstLoad
               ? html`<div class="doctor-empty">Running health checks…</div>`
               : this.error
                 ? html`<div class="doctor-empty err">${this.error}</div>`
-                : this.checks.map(
-                    (c) => {
-                      const meta = categoryMeta(c);
-                      return html`
-                      <div class="doctor-row ${c.ok ? "ok" : "bad"}">
-                        <span class="doctor-icon">${c.ok ? "✓" : "✕"}</span>
-                        <div class="doctor-main">
-                          <div class="doctor-name">
-                            ${c.name}
-                            ${!c.ok
-                              ? html`<span class="doctor-cat ${meta.cls}">${meta.label}</span>`
-                              : ""}
-                          </div>
-                          <div class="doctor-detail">${c.detail}</div>
-                          ${c.explanation
-                            ? html`<div class="doctor-explain">${c.explanation}</div>`
-                            : ""}
-                          ${!c.ok && c.fix_hint
-                            ? html`<div class="doctor-hint">${c.fix_hint}</div>`
-                            : ""}
-                        </div>
-                        ${!c.ok && c.fix_action
-                          ? html`<button class="modal-btn doctor-fix"
-                              ?disabled=${this.fixing !== null}
-                              @click=${() => void this.runFix(c.fix_action!)}>
-                              ${this.fixing === c.fix_action ? "Working…" : FIX_LABELS[c.fix_action] ?? "Fix"}
-                            </button>`
-                          : ""}
-                      </div>
-                    `;
-                    },
-                  )}
+                : html`
+                    ${failing.map((c) => this.renderFailing(c))}
+                    ${passing.length ? this.renderPassing(passing) : ""}
+                  `}
           </div>
 
           <div class="modal-actions">
-            ${fixable.length
-              ? html`<button class="modal-btn doctor-fix-all" ?disabled=${this.fixing !== null}
-                  @click=${() => void this.runFixAll()}>
-                  ${this.fixing === FIX_ALL ? "Fixing…" : `🔧 Fix All (${fixable.length})`}
-                </button>`
-              : ""}
-            <button class="modal-btn" ?disabled=${this.loading || this.fixing !== null} @click=${() => void this.refresh()}>↻ Re-run</button>
             <button class="modal-btn modal-btn-primary" @click=${() => this.close()}>Close</button>
           </div>
         </div>

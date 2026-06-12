@@ -23,6 +23,30 @@ const SPAWN_SETTLE: Duration = Duration::from_millis(400);
 /// Bounded request: never let a wedged/non-responding daemon hang startup.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// The tray's kill-on-close Job Object for the daemon, created once and held
+/// for the tray's whole lifetime. A daemon assigned to it dies with the tray
+/// — even on Task Manager's End task — and the daemon's own children follow
+/// (they inherit job membership, plus the daemon holds its own job).
+///
+/// Membership is decided AT SPAWN TIME because Windows cannot remove a
+/// process from a kill-on-close job afterwards: when the user flips
+/// `interface.quit_stops_daemon`, the new value applies to the NEXT daemon
+/// spawn, not the one already running. `None` when job creation failed — the
+/// graceful Quit chain still works, only the end-process safety net is lost.
+#[cfg(windows)]
+fn tray_daemon_job() -> Option<&'static phoneme_core::job::KillOnCloseJob> {
+    use std::sync::OnceLock;
+    static JOB: OnceLock<Option<phoneme_core::job::KillOnCloseJob>> = OnceLock::new();
+    JOB.get_or_init(|| match phoneme_core::job::KillOnCloseJob::new() {
+        Ok(j) => Some(j),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not create the tray's daemon job object; the daemon won't be tied to the tray's death");
+            None
+        }
+    })
+    .as_ref()
+}
+
 /// Whether the daemon reachable on `t` reports the same version as this build.
 /// A daemon that doesn't return a `version` (older than 1.6.1) — or that doesn't
 /// answer within `PROBE_TIMEOUT` — counts as a mismatch and should be restarted.
@@ -92,7 +116,7 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        std::process::Command::new(&exe)
+        let child = std::process::Command::new(&exe)
             .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -101,6 +125,19 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
             .map_err(|e| {
                 anyhow::anyhow!("failed to spawn phoneme-daemon at {}: {e}", exe.display())
             })?;
+        // Tie the daemon's lifetime to the tray's when the user wants Quit /
+        // end-process to take everything down (the default). Decided here, at
+        // spawn time — see `tray_daemon_job`. With the knob off the daemon is
+        // spawned outside any tray-held job, preserving the headless contract
+        // where it survives the tray byte-for-byte.
+        if cfg.interface.quit_stops_daemon {
+            if let Some(job) = tray_daemon_job() {
+                use std::os::windows::io::AsRawHandle;
+                if let Err(e) = job.assign_raw(child.as_raw_handle()) {
+                    tracing::warn!(error = %e, "could not add the daemon to the tray job; it may outlive an unclean tray death");
+                }
+            }
+        }
     }
 
     #[cfg(not(windows))]

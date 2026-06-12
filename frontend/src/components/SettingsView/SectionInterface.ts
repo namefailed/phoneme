@@ -40,6 +40,7 @@ export class SectionInterface {
         format_24h: false,
         strip_titlebar: false,
         visible_columns: ["day", "time", "duration", "status", "source", "transcript"],
+        quit_stops_daemon: true,
       };
     }
 
@@ -243,6 +244,23 @@ export class SectionInterface {
               Show a toast as each processing step finishes (transcribed, cleaned up, summarized,
               tags suggested) and when a recording is fully ready. Errors always notify, even
               with this off.
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label>Quit stops the engine</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "interface.quit_stops_daemon", label: "", kind: "checkbox" },
+              config.interface.quit_stops_daemon ?? true,
+            )}</div>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              Quitting the tray also shuts down the background engine: an in-flight recording is
+              finalized and queued first, and everything Phoneme started (whisper-server, an
+              auto-launched Ollama) stops with it. Turn off to keep the engine running after the
+              tray quits — hotkeyless/headless use. The OS-level tie to the tray's own death
+              applies from the next engine start.
             </span>
           </div>
         </div>

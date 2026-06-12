@@ -8,15 +8,24 @@
 //!
 //! `run_local_checks` is synchronous (config presence, audio-dir writability,
 //! disk space, hook resolvability, model integrity). `run_backend_checks` is
-//! async and probes remote HTTP endpoints (Whisper, Ollama) with short timeouts
-//! so callers don't hang on an unreachable service.
+//! async and probes remote HTTP endpoints with short timeouts so callers don't
+//! hang on an unreachable service.
+//!
+//! Both are **provider-aware**: every check follows the EFFECTIVE connection a
+//! feature will actually use (main STT, live preview, dictation override, each
+//! enabled LLM step). Local providers keep the model-file and supervised-server
+//! checks; cloud providers swap them for what can still be verified — the API
+//! key is set and the endpoint answers — without ever sending a billable
+//! request. A check that doesn't apply is simply absent.
 //!
 //! Every result carries a [`CheckCategory`] (how severe the *current* state
 //! is), a one-sentence `explanation` of what the check verifies, and — when
 //! failing — an actionable `fix_hint`. All three are additive serde fields, so
 //! readers built before categories existed keep deserializing fine.
 
-use crate::config::{DiarizationBackend, WhisperMode};
+use crate::config::{
+    DiarizationBackend, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
+};
 use crate::Config;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -389,10 +398,14 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
             .then(|| "Fix the command path in hook.commands (Settings → Post-Processing), or clear it if you no longer use a hook.".into()),
     });
 
-    // Main transcription model (only relevant in bundled Whisper modes —
-    // the same trigger the check always had: the supervisor runs a local
-    // server whenever the mode isn't External, so the model file matters).
-    if xcfg.whisper.mode != WhisperMode::External {
+    // Main transcription model (only relevant when the LOCAL provider runs a
+    // bundled server — the supervisor spawns one whenever the mode isn't
+    // External). Cloud and custom-endpoint providers never read a local model
+    // file, so for them the check is absent rather than failing noise; their
+    // key/endpoint checks live in `run_backend_checks`.
+    if xcfg.whisper.provider == TranscriptionBackend::Local
+        && xcfg.whisper.mode != WhisperMode::External
+    {
         if xcfg.whisper.model_path.is_empty() {
             out.push(CheckResult {
                 name: "Whisper model file".into(),
@@ -466,23 +479,367 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
         out.push(check);
     }
 
-    // Local diarization model (when the local provider is selected).
+    // Local diarization model (when the local provider is selected). speakrs
+    // manages its own weights in the Hugging Face hub cache — config's
+    // `local_model_path` is not part of the load path — so the check probes
+    // the cache the loader actually reads.
     if cfg.diarization.provider == DiarizationBackend::Local {
-        out.push(model_integrity_check(
-            "Diarization model",
-            Path::new(&cfg.diarization.local_model_path),
-            CheckCategory::Warning,
-            "Verifies the local speaker-diarization model is present and intact — recordings transcribe without speaker labels while it's broken.",
-            "Download the diarization model (Settings → Transcription → Diarization), or fix diarization.local_model_path.",
-        ));
+        out.push(diarization_cache_check());
     }
 
     out
 }
 
-/// Async backend-reachability checks. Probes the Whisper endpoint and, if
-/// LLM post-processing is enabled, also probes Ollama. Each probe uses a
-/// 3-second timeout so callers don't hang on unreachable services.
+/// The two ONNX files speakrs' local pipeline needs. Resolution mirrors the
+/// loader exactly: `from_pretrained` pulls `avencera/speakrs-models` through
+/// the Hugging Face hub cache (`HF_HOME`, else `~/.cache/huggingface`) — the
+/// `diarization.local_model_path` config key is NOT part of the load path,
+/// which is why this check doesn't read it.
+const SPEAKRS_MODEL_FILES: [&str; 2] =
+    ["segmentation-3.0.onnx", "wespeaker-voxceleb-resnet34.onnx"];
+
+/// Where the hub cache keeps speakrs' snapshot dirs.
+fn speakrs_snapshots_dir() -> Option<std::path::PathBuf> {
+    let hf_home = std::env::var_os("HF_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .or_else(|| std::env::var_os("HOME"))
+                .map(|h| {
+                    std::path::PathBuf::from(h)
+                        .join(".cache")
+                        .join("huggingface")
+                })
+        })?;
+    Some(
+        hf_home
+            .join("hub")
+            .join("models--avencera--speakrs-models")
+            .join("snapshots"),
+    )
+}
+
+/// Pass when ANY cached snapshot holds both model files non-empty; the models
+/// download automatically on the first diarized recording, so "not downloaded
+/// yet" is a Warning with that exact explanation, never a config hint.
+fn diarization_cache_check() -> CheckResult {
+    let explanation = "Verifies the speaker-diarization models are in the Hugging Face cache — recordings transcribe without speaker labels while they're missing.";
+    let snapshots = speakrs_snapshots_dir();
+    let found = snapshots.as_deref().is_some_and(|dir| {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|snap| {
+                SPEAKRS_MODEL_FILES
+                    .iter()
+                    .all(|f| std::fs::metadata(snap.path().join(f)).is_ok_and(|m| m.len() > 0))
+            })
+    });
+    if found {
+        CheckResult {
+            name: "Diarization models".into(),
+            ok: true,
+            detail: "cached".into(),
+            fix_action: None,
+            category: CheckCategory::Info,
+            explanation: explanation.into(),
+            fix_hint: None,
+        }
+    } else {
+        CheckResult {
+            name: "Diarization models".into(),
+            ok: false,
+            detail: match snapshots {
+                Some(d) => format!("not downloaded yet — {}", d.display()),
+                None => "cache location unresolvable (no HF_HOME or home dir)".into(),
+            },
+            fix_action: None,
+            category: CheckCategory::Warning,
+            explanation: explanation.into(),
+            fix_hint: Some(
+                "They download automatically the first time a recording runs with diarization on — record once with it enabled, or check your network if that keeps failing.".into(),
+            ),
+        }
+    }
+}
+
+// ── Provider classification ─────────────────────────────────────────────────
+
+/// How a [`WhisperConfig`] actually connects — decides which checks apply.
+/// Mirrors the provider dispatch in `transcription.rs`: `Local` runs through
+/// the bundled/external whisper server, `Custom` is a user-pointed
+/// OpenAI-compatible URL (key optional), everything else is a keyed cloud API
+/// whose base URL is the `api_url` override or the provider's default.
+enum SttConnection {
+    /// Local provider on a bundled server the daemon supervises.
+    LocalBundled,
+    /// Local provider pointed at the user's own server (`mode = external`).
+    LocalExternal,
+    /// `custom` provider: a self-hosted/gateway OpenAI-compatible endpoint.
+    SelfHosted { url: String },
+    /// Keyed cloud API (openai/groq/deepgram/assemblyai/elevenlabs).
+    Cloud {
+        label: &'static str,
+        base_url: String,
+        key_configured: bool,
+    },
+}
+
+fn classify_stt(w: &WhisperConfig) -> SttConnection {
+    // Cloud base URL: the configured override if non-empty, else the
+    // provider's default endpoint — the same resolution `transcription.rs`
+    // applies when minting the real provider.
+    let cloud = |label: &'static str, default: &str| {
+        let o = w.api_url.trim();
+        SttConnection::Cloud {
+            label,
+            base_url: if o.is_empty() {
+                default.into()
+            } else {
+                o.into()
+            },
+            key_configured: !w.api_key_str().trim().is_empty(),
+        }
+    };
+    match w.provider {
+        TranscriptionBackend::Local => match w.mode {
+            WhisperMode::External => SttConnection::LocalExternal,
+            WhisperMode::BundledModel | WhisperMode::BundledDownload => SttConnection::LocalBundled,
+        },
+        TranscriptionBackend::Custom => SttConnection::SelfHosted {
+            url: w.api_url.trim().to_string(),
+        },
+        TranscriptionBackend::Openai => cloud("openai", "https://api.openai.com"),
+        TranscriptionBackend::Groq => cloud("groq", "https://api.groq.com/openai"),
+        TranscriptionBackend::Deepgram => cloud("deepgram", "https://api.deepgram.com"),
+        TranscriptionBackend::Assemblyai => cloud("assemblyai", "https://api.assemblyai.com"),
+        TranscriptionBackend::Elevenlabs => cloud("elevenlabs", "https://api.elevenlabs.io"),
+    }
+}
+
+// ── LLM step connections ─────────────────────────────────────────────────────
+
+/// One enabled LLM pipeline step and the connection it will actually use.
+struct LlmStep {
+    /// Short step label for check names ("cleanup", "summary", "tags", "titles").
+    label: &'static str,
+    /// The step's EFFECTIVE connection after own-or-inherit resolution.
+    conn: LlmPostProcessConfig,
+}
+
+/// Overlay a step's own non-blank provider/URL/key/model over the cleanup
+/// connection. This is the SAME per-field inheritance `summary_llm_config`,
+/// `auto_tag_llm_config` and `title_llm_config` perform in the daemon's
+/// pipeline (bin/phoneme-daemon/src/pipeline.rs) — core can't link against
+/// the daemon binary, so keep the two in lockstep.
+fn step_llm_connection(
+    base: &LlmPostProcessConfig,
+    provider: &str,
+    api_url: &str,
+    api_key: &str,
+    model: &str,
+) -> LlmPostProcessConfig {
+    let mut llm = base.clone();
+    llm.enabled = true;
+    if !provider.trim().is_empty() {
+        llm.provider = provider.to_string();
+    }
+    if !api_url.trim().is_empty() {
+        llm.api_url = api_url.to_string();
+    }
+    if !api_key.trim().is_empty() {
+        llm.set_api_key(api_key.to_string());
+    }
+    if !model.trim().is_empty() {
+        llm.model = model.to_string();
+    }
+    llm
+}
+
+/// The LLM steps that will actually run, with their effective connections, in
+/// pipeline order. Each step appears only when its own feature gate is on —
+/// the house rule: a check that doesn't apply is absent, but every enabled
+/// feature yields something checkable.
+fn enabled_llm_steps(cfg: &Config) -> Vec<LlmStep> {
+    let base = &cfg.llm_post_process;
+    let mut steps = Vec::new();
+    if base.enabled {
+        steps.push(LlmStep {
+            label: "cleanup",
+            conn: base.clone(),
+        });
+    }
+    if cfg.summary.auto {
+        steps.push(LlmStep {
+            label: "summary",
+            conn: step_llm_connection(
+                base,
+                &cfg.summary.provider,
+                &cfg.summary.api_url,
+                cfg.summary.api_key_str(),
+                &cfg.summary.model,
+            ),
+        });
+    }
+    if cfg.auto_tag.auto {
+        steps.push(LlmStep {
+            label: "tags",
+            conn: step_llm_connection(
+                base,
+                &cfg.auto_tag.provider,
+                &cfg.auto_tag.api_url,
+                cfg.auto_tag.api_key_str(),
+                &cfg.auto_tag.model,
+            ),
+        });
+    }
+    if cfg.title.enabled && cfg.title.use_llm {
+        steps.push(LlmStep {
+            label: "titles",
+            conn: step_llm_connection(
+                base,
+                &cfg.title.provider,
+                &cfg.title.api_url,
+                cfg.title.api_key_str(),
+                &cfg.title.model,
+            ),
+        });
+    }
+    steps
+}
+
+/// LLM provider families the doctor knows how to probe. Mirrors the dispatch
+/// in `LlmPostProcessor::provider` (llm.rs): anything that factory would
+/// return `None` for is `Unusable` — the step is enabled but cannot run.
+#[derive(Clone, Copy, PartialEq)]
+enum LlmKind {
+    Ollama,
+    OpenAiCompat,
+    Anthropic,
+    Unusable,
+}
+
+fn llm_kind(provider: &str) -> LlmKind {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "ollama" => LlmKind::Ollama,
+        "openai" | "groq" => LlmKind::OpenAiCompat,
+        "anthropic" => LlmKind::Anthropic,
+        _ => LlmKind::Unusable,
+    }
+}
+
+/// The endpoint an LLM connection will actually hit: the `api_url` override,
+/// else the same default `LlmPostProcessor::provider` fills in (llm.rs).
+fn resolved_llm_url(conn: &LlmPostProcessConfig) -> String {
+    let url = conn.api_url.trim();
+    if !url.is_empty() {
+        return url.to_string();
+    }
+    match conn.provider.trim().to_ascii_lowercase().as_str() {
+        "ollama" => "http://127.0.0.1:11434/api/generate".into(),
+        "openai" => "https://api.openai.com/v1/chat/completions".into(),
+        "groq" => "https://api.groq.com/openai/v1/chat/completions".into(),
+        "anthropic" => "https://api.anthropic.com/v1/messages".into(),
+        _ => String::new(),
+    }
+}
+
+/// A free, GET-able probe target for a chat endpoint: the sibling model-list
+/// route when the URL has the standard shape (`…/chat/completions`,
+/// `…/messages`), else the URL itself. Never a completion route — the probe
+/// must not be able to bill anything.
+fn llm_probe_url(kind: LlmKind, url: &str) -> String {
+    let models = |suffix: &str| {
+        url.strip_suffix(suffix)
+            .map(|base| format!("{base}/models"))
+    };
+    match kind {
+        LlmKind::OpenAiCompat => models("/chat/completions"),
+        LlmKind::Anthropic => models("/messages"),
+        _ => None,
+    }
+    .unwrap_or_else(|| url.to_string())
+}
+
+// ── Probe + check builders ───────────────────────────────────────────────────
+
+/// Send a prepared GET and report `(reachable, detail)`. ANY HTTP response —
+/// including 401/403 — counts as reachable: it proves DNS, TCP, TLS and
+/// routing all work and the service answered; only what a real (billable)
+/// request would prove is left unverified.
+async fn probe_any_response(req: reqwest::RequestBuilder, url: &str) -> (bool, String) {
+    match req.send().await {
+        Ok(resp) => (
+            true,
+            format!("{url} — reachable (HTTP {})", resp.status().as_u16()),
+        ),
+        Err(e) if e.is_timeout() => (false, format!("{url} — timed out")),
+        Err(_) => (false, format!("{url} — not reachable")),
+    }
+}
+
+/// Build a reachability check for one remote endpoint (cloud base URL,
+/// custom/self-hosted server, dictation target). An empty URL fails without
+/// probing — there is nothing to probe yet.
+async fn endpoint_check(
+    client: &reqwest::Client,
+    name: &str,
+    url: &str,
+    severity_if_down: CheckCategory,
+    explanation: &str,
+    down_hint: &str,
+) -> CheckResult {
+    let (ok, detail) = if url.is_empty() {
+        (false, "no endpoint URL configured".to_string())
+    } else {
+        probe_any_response(client.get(url), url).await
+    };
+    CheckResult {
+        name: name.into(),
+        ok,
+        detail,
+        fix_action: None,
+        category: category_for(ok, severity_if_down),
+        explanation: explanation.into(),
+        fix_hint: (!ok).then(|| down_hint.to_owned()),
+    }
+}
+
+/// Build a key-presence check. Presence only, verified AFTER own-or-inherit
+/// resolution — the key value itself must never appear in any detail, log, or
+/// explanation.
+fn api_key_check(
+    name: &str,
+    configured: bool,
+    provider_label: &str,
+    severity_if_missing: CheckCategory,
+    explanation: &str,
+    missing_hint: &str,
+) -> CheckResult {
+    CheckResult {
+        name: name.into(),
+        ok: configured,
+        detail: if configured {
+            format!("configured ({provider_label})")
+        } else {
+            format!("not set ({provider_label})")
+        },
+        fix_action: None,
+        category: category_for(configured, severity_if_missing),
+        explanation: explanation.into(),
+        fix_hint: (!configured).then(|| missing_hint.to_owned()),
+    }
+}
+
+/// Async backend-reachability checks, provider-aware: each configured
+/// connection (main STT, live preview, dictation override, every enabled LLM
+/// step) gets the strongest probe its provider kind allows. Local servers get
+/// the full health probe; self-hosted URLs get a reachability probe; cloud
+/// APIs get a key-presence check plus an any-HTTP-response reachability probe
+/// (401/403 counts — only what a real request would bill is left unverified).
+/// Each probe uses a 3-second timeout so callers don't hang on unreachable
+/// services.
 pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
     let mut out = Vec::new();
     let client = reqwest::Client::builder()
@@ -490,117 +847,437 @@ pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
         .build()
         .unwrap_or_default();
 
-    // Whisper server reachability.
-    let whisper_url = cfg.whisper.server_base_url();
-    let probe_url = format!("{whisper_url}/health");
-    let (whisper_ok, whisper_detail) = match client.get(&probe_url).send().await {
-        Ok(resp) => (
-            resp.status().is_success() || resp.status().as_u16() == 404,
-            format!("{whisper_url} — HTTP {}", resp.status().as_u16()),
-        ),
-        Err(e) if e.is_timeout() => (false, format!("{whisper_url} — timed out")),
-        Err(_) => (false, format!("{whisper_url} — not reachable")),
-    };
-    let external = cfg.whisper.mode == WhisperMode::External;
-    out.push(CheckResult {
-        name: "Whisper server".into(),
-        ok: whisper_ok,
-        detail: whisper_detail,
-        // Bundled modes: the daemon supervises the server, so "Fix" can sweep
-        // hung/orphaned processes and respawn it. External servers are the
-        // user's own — nothing for us to restart.
-        fix_action: if external {
-            None
-        } else {
-            Some("restart_whisper".into())
-        },
-        category: category_for(whisper_ok, CheckCategory::Critical),
-        explanation: "Probes the transcription server — recordings queue up but nothing transcribes while it's down.".into(),
-        fix_hint: (!whisper_ok).then(|| {
-            if external {
-                "Start your external Whisper server, or fix whisper.external_url.".into()
-            } else {
-                "Use Fix here (or `phoneme doctor --fix`) to sweep and respawn the bundled server.".into()
-            }
-        }),
-    });
-
-    // Dedicated live-preview server (only when configured on its own port).
-    if cfg.preview_needs_own_server() {
-        if let Some(pv) = cfg.preview_whisper.as_ref() {
-            let url = format!("http://127.0.0.1:{}", pv.bundled_server_port);
-            let probe = format!("{url}/health");
-            let (ok, detail) = match client.get(&probe).send().await {
+    // ── Main transcription connection ───────────────────────────────────────
+    match classify_stt(&cfg.whisper) {
+        // Local provider: the whisper-server health probe, exactly as it
+        // always was (bundled = supervised + fixable; external = the user's).
+        SttConnection::LocalBundled | SttConnection::LocalExternal => {
+            let whisper_url = cfg.whisper.server_base_url();
+            let probe_url = format!("{whisper_url}/health");
+            let (whisper_ok, whisper_detail) = match client.get(&probe_url).send().await {
                 Ok(resp) => (
                     resp.status().is_success() || resp.status().as_u16() == 404,
-                    format!("{url} — HTTP {}", resp.status().as_u16()),
+                    format!("{whisper_url} — HTTP {}", resp.status().as_u16()),
                 ),
-                Err(e) if e.is_timeout() => (false, format!("{url} — timed out")),
-                Err(_) => (false, format!("{url} — not reachable")),
+                Err(e) if e.is_timeout() => (false, format!("{whisper_url} — timed out")),
+                Err(_) => (false, format!("{whisper_url} — not reachable")),
             };
+            let external = cfg.whisper.mode == WhisperMode::External;
             out.push(CheckResult {
-                name: "Live-preview server".into(),
-                ok,
-                detail,
-                fix_action: Some("restart_whisper".into()),
-                category: category_for(ok, CheckCategory::Warning),
-                explanation: "Probes the dedicated live-preview server — the live transcript stays blank while it's down.".into(),
-                fix_hint: (!ok).then(|| {
-                    "Use Fix here (or `phoneme doctor --fix`) to sweep and respawn the bundled server(s).".into()
+                name: "Whisper server".into(),
+                ok: whisper_ok,
+                detail: whisper_detail,
+                // Bundled modes: the daemon supervises the server, so "Fix" can sweep
+                // hung/orphaned processes and respawn it. External servers are the
+                // user's own — nothing for us to restart.
+                fix_action: if external {
+                    None
+                } else {
+                    Some("restart_whisper".into())
+                },
+                category: category_for(whisper_ok, CheckCategory::Critical),
+                explanation: "Probes the transcription server — recordings queue up but nothing transcribes while it's down.".into(),
+                fix_hint: (!whisper_ok).then(|| {
+                    if external {
+                        "Start your external Whisper server, or fix whisper.external_url.".into()
+                    } else {
+                        "Use Fix here (or `phoneme doctor --fix`) to sweep and respawn the bundled server.".into()
+                    }
                 }),
             });
         }
+        // Custom OpenAI-compatible endpoint: no local model or server to
+        // check — reachability of the configured URL is what matters.
+        SttConnection::SelfHosted { url } => {
+            out.push(
+                endpoint_check(
+                    &client,
+                    "Transcription endpoint",
+                    &url,
+                    CheckCategory::Critical,
+                    "Probes your custom transcription endpoint — recordings queue up but nothing transcribes while it's unreachable.",
+                    "Start the server, or fix the endpoint URL (Settings → Transcription).",
+                )
+                .await,
+            );
+        }
+        // Cloud API: verify the key is set and the endpoint answers — the
+        // most that can be checked without billing a real request.
+        SttConnection::Cloud {
+            label,
+            base_url,
+            key_configured,
+        } => {
+            out.push(api_key_check(
+                "Transcription API key",
+                key_configured,
+                label,
+                CheckCategory::Critical,
+                "Verifies an API key is set for the cloud transcription provider — every request is rejected without one, so nothing transcribes.",
+                "Paste your provider's API key (Settings → Transcription), or switch to a local model.",
+            ));
+            out.push(
+                endpoint_check(
+                    &client,
+                    "Transcription endpoint",
+                    &base_url,
+                    CheckCategory::Critical,
+                    "Probes the transcription endpoint for any HTTP response — a reachable endpoint plus a configured key is as much as Doctor can verify without billing a real request.",
+                    "Check your network/VPN/proxy, or the endpoint override if you set one (Settings → Transcription).",
+                )
+                .await,
+            );
+        }
     }
 
-    // Ollama (check if LLM post-processing uses Ollama, or if Ollama default
-    // port is open regardless, so users know it's available).
-    let ollama_url =
-        if cfg.llm_post_process.provider == "ollama" && !cfg.llm_post_process.api_url.is_empty() {
+    // ── Live-preview connection ─────────────────────────────────────────────
+    // Only when the preview is enabled AND has its own provider; a preview
+    // that inherits the main connection is already covered by the checks
+    // above. Everything here is a Warning — the final transcript still runs
+    // through the main provider.
+    if cfg.recording.streaming_preview {
+        if let Some(pv) = cfg.preview_whisper.as_ref() {
+            match classify_stt(pv) {
+                // Dedicated bundled server on its own port — supervised, fixable.
+                SttConnection::LocalBundled => {
+                    let url = format!("http://127.0.0.1:{}", pv.bundled_server_port);
+                    let probe = format!("{url}/health");
+                    let (ok, detail) = match client.get(&probe).send().await {
+                        Ok(resp) => (
+                            resp.status().is_success() || resp.status().as_u16() == 404,
+                            format!("{url} — HTTP {}", resp.status().as_u16()),
+                        ),
+                        Err(e) if e.is_timeout() => (false, format!("{url} — timed out")),
+                        Err(_) => (false, format!("{url} — not reachable")),
+                    };
+                    out.push(CheckResult {
+                        name: "Live-preview server".into(),
+                        ok,
+                        detail,
+                        fix_action: Some("restart_whisper".into()),
+                        category: category_for(ok, CheckCategory::Warning),
+                        explanation: "Probes the dedicated live-preview server — the live transcript stays blank while it's down.".into(),
+                        fix_hint: (!ok).then(|| {
+                            "Use Fix here (or `phoneme doctor --fix`) to sweep and respawn the bundled server(s).".into()
+                        }),
+                    });
+                }
+                // The preview's own self-hosted server (external mode or a
+                // custom OpenAI-compatible URL).
+                SttConnection::LocalExternal => {
+                    let url = pv.server_base_url();
+                    out.push(
+                        endpoint_check(
+                            &client,
+                            "Live-preview endpoint",
+                            &url,
+                            CheckCategory::Warning,
+                            "Probes the live preview's own transcription endpoint — the live transcript stays blank while it's unreachable; the final transcript still uses the main provider.",
+                            "Start the preview's server, or fix its connection (Settings → Transcription → Live Preview).",
+                        )
+                        .await,
+                    );
+                }
+                SttConnection::SelfHosted { url } => {
+                    out.push(
+                        endpoint_check(
+                            &client,
+                            "Live-preview endpoint",
+                            &url,
+                            CheckCategory::Warning,
+                            "Probes the live preview's own transcription endpoint — the live transcript stays blank while it's unreachable; the final transcript still uses the main provider.",
+                            "Start the preview's server, or fix its connection (Settings → Transcription → Live Preview).",
+                        )
+                        .await,
+                    );
+                }
+                // Cloud preview: key set + endpoint answers is all that can be
+                // verified without billing a request.
+                SttConnection::Cloud {
+                    label,
+                    base_url,
+                    key_configured,
+                } => {
+                    out.push(api_key_check(
+                        "Live-preview API key",
+                        key_configured,
+                        label,
+                        CheckCategory::Warning,
+                        "Verifies an API key is set for the live preview's cloud provider — the live transcript stays blank without one.",
+                        "Paste the preview provider's API key (Settings → Transcription → Live Preview).",
+                    ));
+                    out.push(
+                        endpoint_check(
+                            &client,
+                            "Live-preview endpoint",
+                            &base_url,
+                            CheckCategory::Warning,
+                            "Probes the live preview's transcription endpoint — the live transcript stays blank while it's unreachable; the final transcript still uses the main provider.",
+                            "Check the preview connection (Settings → Transcription → Live Preview).",
+                        )
+                        .await,
+                    );
+                }
+            }
+        }
+    }
+
+    // ── Dictation STT override ──────────────────────────────────────────────
+    // Only when `[in_place].stt` is set — when blank, dictation rides the
+    // preview or main connection, which the checks above already cover. All
+    // Warnings: a broken dictation lane types nothing, but capture and normal
+    // transcription keep working.
+    if let Some(stt) = cfg.in_place.stt.as_ref() {
+        match classify_stt(stt) {
+            // Dictation never gets its own supervised server — a local
+            // connection must point at an ALREADY-RUNNING one, so the check
+            // is reachability of that URL, not a model file.
+            SttConnection::LocalBundled | SttConnection::LocalExternal => {
+                let url = stt.server_base_url();
+                out.push(
+                    endpoint_check(
+                        &client,
+                        "Dictation STT endpoint",
+                        &url,
+                        CheckCategory::Warning,
+                        "Probes the STT endpoint dictation is pointed at — in-place dictation types nothing while it's unreachable.",
+                        "Dictation expects an already-running server here — point it at the main or preview server, or fix the URL (Settings → Capture → Dictation).",
+                    )
+                    .await,
+                );
+            }
+            SttConnection::SelfHosted { url } => {
+                out.push(
+                    endpoint_check(
+                        &client,
+                        "Dictation STT endpoint",
+                        &url,
+                        CheckCategory::Warning,
+                        "Probes the STT endpoint dictation is pointed at — in-place dictation types nothing while it's unreachable.",
+                        "Check the dictation connection (Settings → Capture → Dictation).",
+                    )
+                    .await,
+                );
+            }
+            SttConnection::Cloud {
+                label,
+                base_url,
+                key_configured,
+            } => {
+                out.push(api_key_check(
+                    "Dictation STT key",
+                    key_configured,
+                    label,
+                    CheckCategory::Warning,
+                    "Verifies an API key is set for dictation's own cloud STT — in-place dictation types nothing without one.",
+                    "Paste the dictation provider's API key (Settings → Capture → Dictation).",
+                ));
+                out.push(
+                    endpoint_check(
+                        &client,
+                        "Dictation STT endpoint",
+                        &base_url,
+                        CheckCategory::Warning,
+                        "Probes dictation's own STT endpoint — in-place dictation types nothing while it's unreachable.",
+                        "Check the dictation connection (Settings → Capture → Dictation).",
+                    )
+                    .await,
+                );
+            }
+        }
+    }
+
+    // ── LLM steps (cleanup / summary / tags / titles) ───────────────────────
+    // Each enabled step resolves its EFFECTIVE connection (own fields, or
+    // inherited from the cleanup connection), then identical endpoints are
+    // deduped so one shared connection yields one check naming every step on
+    // it. All Warnings — these steps degrade to the raw transcript; capture
+    // and transcription keep working.
+    let steps = enabled_llm_steps(cfg);
+    let mut groups: Vec<(String, Vec<&LlmStep>)> = Vec::new();
+    for step in &steps {
+        let key = format!(
+            "{}|{}",
+            step.conn.provider.trim().to_ascii_lowercase(),
+            resolved_llm_url(&step.conn)
+        );
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, members)) => members.push(step),
+            None => groups.push((key, vec![step])),
+        }
+    }
+    let mut any_step_on_ollama = false;
+    for (_, members) in &groups {
+        let conn = &members[0].conn;
+        let steps_list = members
+            .iter()
+            .map(|s| s.label)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let url = resolved_llm_url(conn);
+        let kind = llm_kind(&conn.provider);
+        match kind {
+            // Local Ollama: the same /api/tags probe the standalone check has
+            // always used — but REQUIRED here, because enabled steps run on it.
+            LlmKind::Ollama => {
+                any_step_on_ollama = true;
+                let base = url
+                    .split("/api/")
+                    .next()
+                    .unwrap_or("http://127.0.0.1:11434")
+                    .to_string();
+                let probe = format!("{base}/api/tags");
+                let (probe_ok, detail) = match client.get(&probe).send().await {
+                    Ok(resp) => (
+                        resp.status().is_success(),
+                        format!("{base} — running (HTTP {})", resp.status().as_u16()),
+                    ),
+                    Err(e) if e.is_timeout() => (false, format!("{base} — timed out")),
+                    Err(_) => (false, format!("{base} — not running")),
+                };
+                out.push(CheckResult {
+                    name: format!("LLM endpoint ({steps_list})"),
+                    ok: probe_ok,
+                    detail,
+                    fix_action: None,
+                    category: category_for(probe_ok, CheckCategory::Warning),
+                    explanation: "Probes the local Ollama these AI steps run on — they fall back to the raw transcript while it's down.".into(),
+                    fix_hint: (!probe_ok).then(|| {
+                        "Start Ollama (`ollama serve`), or switch the step's connection (Settings → Post-Processing → Connection).".into()
+                    }),
+                });
+            }
+            // Cloud chat API: key resolves + endpoint answers. The probe GETs
+            // the provider's free model-list route with the key when the URL
+            // has the standard shape — a stronger signal than a bare poke,
+            // never a billable completion.
+            LlmKind::OpenAiCompat | LlmKind::Anthropic => {
+                let provider_label = conn.provider.trim().to_ascii_lowercase();
+                // Each step resolves its own key, so one endpoint can mix
+                // configured and missing.
+                let missing: Vec<&str> = members
+                    .iter()
+                    .filter(|s| s.conn.api_key_str().trim().is_empty())
+                    .map(|s| s.label)
+                    .collect();
+                let key_ok = missing.is_empty();
+                let key_detail = if key_ok {
+                    format!("configured ({provider_label})")
+                } else if missing.len() == members.len() {
+                    format!("not set ({provider_label})")
+                } else {
+                    format!("missing for: {}", missing.join(", "))
+                };
+                out.push(CheckResult {
+                    name: format!("LLM API key ({steps_list})"),
+                    ok: key_ok,
+                    detail: key_detail,
+                    fix_action: None,
+                    category: category_for(key_ok, CheckCategory::Warning),
+                    explanation: "Verifies an API key resolves for these AI steps (their own, or inherited from the cleanup connection) — without one each step falls back to the raw transcript.".into(),
+                    fix_hint: (!key_ok).then(|| {
+                        "Paste a key on the step's connection, or on the cleanup connection for steps to inherit (Settings → Post-Processing → Connection).".into()
+                    }),
+                });
+
+                let probe_url = llm_probe_url(kind, &url);
+                let key = members
+                    .iter()
+                    .map(|s| s.conn.api_key_str().trim().to_string())
+                    .find(|k| !k.is_empty());
+                let mut req = client.get(&probe_url);
+                if let Some(k) = &key {
+                    req = match kind {
+                        LlmKind::Anthropic => req
+                            .header("x-api-key", k)
+                            .header("anthropic-version", "2023-06-01"),
+                        _ => req.bearer_auth(k),
+                    };
+                }
+                let (ok, detail) = probe_any_response(req, &probe_url).await;
+                out.push(CheckResult {
+                    name: format!("LLM endpoint ({steps_list})"),
+                    ok,
+                    detail,
+                    fix_action: None,
+                    category: category_for(ok, CheckCategory::Warning),
+                    explanation: "Probes the provider's free model-list route — a reachable endpoint plus a configured key is as much as Doctor can verify without a billable request.".into(),
+                    fix_hint: (!ok).then(|| {
+                        "Check your network/proxy, or the connection's base URL (Settings → Post-Processing → Connection).".into()
+                    }),
+                });
+            }
+            // Enabled steps whose connection resolves to nothing runnable —
+            // the pipeline silently skips them, so say so instead of probing.
+            LlmKind::Unusable => {
+                let p = conn.provider.trim().to_string();
+                let detail = if p.is_empty() || p.eq_ignore_ascii_case("none") {
+                    "no LLM provider selected".to_string()
+                } else {
+                    format!(
+                        "provider '{p}' is not one Phoneme can run (ollama/openai/groq/anthropic)"
+                    )
+                };
+                out.push(CheckResult {
+                    name: format!("LLM endpoint ({steps_list})"),
+                    ok: false,
+                    detail,
+                    fix_action: None,
+                    category: CheckCategory::Warning,
+                    explanation: "These AI steps are enabled but resolve to no runnable LLM connection, so they are skipped at run time.".into(),
+                    fix_hint: Some(
+                        "Pick a provider for the step (Settings → Post-Processing → Connection).".into(),
+                    ),
+                });
+            }
+        }
+    }
+
+    // ── Ollama availability (informational) ─────────────────────────────────
+    // No enabled AI step runs on Ollama right now — a step that does gets a
+    // required per-connection check above instead — but knowing whether the
+    // local service is up helps users about to turn a step on.
+    if !any_step_on_ollama {
+        let ollama_url = if cfg.llm_post_process.provider == "ollama"
+            && !cfg.llm_post_process.api_url.is_empty()
+        {
             cfg.llm_post_process.api_url.clone()
         } else if cfg.llm_post_process.provider == "ollama" {
             "http://127.0.0.1:11434/api/generate".into()
         } else {
             "http://127.0.0.1:11434".into()
         };
-    let ollama_base = ollama_url
-        .split("/api/")
-        .next()
-        .unwrap_or("http://127.0.0.1:11434");
-    let ollama_probe = format!("{ollama_base}/api/tags");
-    let ollama_required = cfg.llm_post_process.enabled && cfg.llm_post_process.provider == "ollama";
-    let (probe_ok, ollama_detail) = match client.get(&ollama_probe).send().await {
-        Ok(resp) => (
-            resp.status().is_success(),
-            format!("{ollama_base} — running (HTTP {})", resp.status().as_u16()),
-        ),
-        Err(e) if e.is_timeout() => (false, format!("{ollama_base} — timed out")),
-        Err(_) => (false, format!("{ollama_base} — not running")),
-    };
-    let ollama_ok = if ollama_required {
-        probe_ok
-    } else {
-        true // informational only when Smart Cleanup does not use Ollama
-    };
-    let ollama_detail = if ollama_required {
-        ollama_detail
-    } else if probe_ok {
-        format!("{ollama_detail} (optional)")
-    } else {
-        format!("{ollama_detail} — optional; enable Smart Cleanup + Ollama to use")
-    };
-    out.push(CheckResult {
-        name: "Ollama (optional)".into(),
-        ok: ollama_ok,
-        detail: ollama_detail,
-        // Not a fix_action because Ollama is optional; user installs it separately.
-        fix_action: None,
-        // Degrades cleanup/summaries only — recording and transcription keep
-        // working — so even a required-but-down Ollama is a Warning, not Critical.
-        category: category_for(ollama_ok, CheckCategory::Warning),
-        explanation: "Probes the local Ollama service used for LLM post-processing (cleanup, summaries, tags).".into(),
-        fix_hint: (!ollama_ok)
-            .then(|| "Start Ollama (`ollama serve`), or switch llm_post_process.provider.".into()),
-    });
+        let ollama_base = ollama_url
+            .split("/api/")
+            .next()
+            .unwrap_or("http://127.0.0.1:11434");
+        let ollama_probe = format!("{ollama_base}/api/tags");
+        let (probe_ok, ollama_detail) = match client.get(&ollama_probe).send().await {
+            Ok(resp) => (
+                resp.status().is_success(),
+                format!("{ollama_base} — running (HTTP {})", resp.status().as_u16()),
+            ),
+            Err(e) if e.is_timeout() => (false, format!("{ollama_base} — timed out")),
+            Err(_) => (false, format!("{ollama_base} — not running")),
+        };
+        let ollama_detail = if probe_ok {
+            format!("{ollama_detail} (optional)")
+        } else {
+            format!("{ollama_detail} — optional; enable Smart Cleanup + Ollama to use")
+        };
+        out.push(CheckResult {
+            name: "Ollama (optional)".into(),
+            // Informational: nothing configured runs on it, so a down Ollama
+            // never fails a doctor run.
+            ok: true,
+            detail: ollama_detail,
+            // Not a fix_action because Ollama is optional; user installs it separately.
+            fix_action: None,
+            category: CheckCategory::Info,
+            explanation: "Probes the local Ollama service used for LLM post-processing (cleanup, summaries, tags).".into(),
+            fix_hint: None,
+        });
+    }
 
     out
 }
@@ -908,21 +1585,52 @@ mod tests {
     }
 
     #[test]
-    fn diarization_model_checked_only_for_local_provider() {
+    fn diarization_models_checked_only_for_local_provider() {
+        // The suite runs single-threaded, so scoping HF_HOME to the test is safe.
+        let prev = std::env::var_os("HF_HOME");
+        let empty = tempfile::tempdir().unwrap();
+        std::env::set_var("HF_HOME", empty.path());
+
         let mut cfg = Config::default();
         cfg.diarization.provider = DiarizationBackend::None;
         let results = run_local_checks(&cfg);
-        assert!(!results.iter().any(|r| r.name == "Diarization model"));
+        assert!(!results.iter().any(|r| r.name == "Diarization models"));
 
+        // Local provider + empty cache: a Warning that explains the automatic
+        // download — never a pointer at the unwired local_model_path key.
         cfg.diarization.provider = DiarizationBackend::Local;
-        cfg.diarization.local_model_path = "C:/definitely/not/here.onnx".into();
         let results = run_local_checks(&cfg);
         let d = results
             .iter()
-            .find(|r| r.name == "Diarization model")
-            .expect("diarization model check present for local provider");
+            .find(|r| r.name == "Diarization models")
+            .expect("diarization check present for local provider");
         assert!(!d.ok);
         assert_eq!(d.category, CheckCategory::Warning);
+        assert!(d.fix_hint.as_deref().unwrap().contains("automatically"));
+        assert!(!format!("{:?}", d).contains("local_model_path"));
+
+        // Both files cached in a snapshot dir => pass.
+        let snap = empty
+            .path()
+            .join("hub")
+            .join("models--avencera--speakrs-models")
+            .join("snapshots")
+            .join("abc123");
+        std::fs::create_dir_all(&snap).unwrap();
+        for f in super::SPEAKRS_MODEL_FILES {
+            std::fs::write(snap.join(f), b"onnx-bytes").unwrap();
+        }
+        let results = run_local_checks(&cfg);
+        let d = results
+            .iter()
+            .find(|r| r.name == "Diarization models")
+            .unwrap();
+        assert!(d.ok, "cached models must pass: {d:?}");
+
+        match prev {
+            Some(v) => std::env::set_var("HF_HOME", v),
+            None => std::env::remove_var("HF_HOME"),
+        }
     }
 
     // ── Serde compatibility ────────────────────────────────────────────────
@@ -1027,5 +1735,360 @@ mod tests {
             .find(|r| r.name == "Ollama (optional)")
             .unwrap();
         assert!(o.ok, "expected ollama ok, got: {}", o.detail);
+    }
+
+    // ── Provider-aware checks ──────────────────────────────────────────────
+
+    /// A wiremock server answering every request with the given status —
+    /// 401/403 from a cloud API still PROVES the endpoint is reachable.
+    async fn any_request_server(status: u16) -> wiremock::MockServer {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn cloud_stt_swaps_local_checks_for_key_and_endpoint() {
+        let server = any_request_server(401).await;
+
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Openai;
+        cfg.whisper.set_api_key("sk-TEST-NEVER-PRINT");
+        cfg.whisper.api_url = server.uri();
+
+        // Local checks: the whisper model file is a local-provider concern.
+        let local = run_local_checks(&cfg);
+        assert!(!local.iter().any(|r| r.name == "Whisper model file"));
+
+        // Backend checks: the local server probe makes way for key + endpoint.
+        let backend = run_backend_checks(&cfg).await;
+        assert!(!backend.iter().any(|r| r.name == "Whisper server"));
+        let key = backend
+            .iter()
+            .find(|r| r.name == "Transcription API key")
+            .expect("key check present for cloud STT");
+        assert!(key.ok);
+        assert_eq!(key.category, CheckCategory::Info);
+        assert!(key.detail.contains("openai"));
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "Transcription endpoint")
+            .expect("endpoint check present for cloud STT");
+        assert!(ep.ok, "any HTTP response counts, even 401: {}", ep.detail);
+        assert!(ep.detail.contains("HTTP 401"));
+        // The key value itself must never surface anywhere in the results.
+        assert!(!format!("{backend:?}").contains("sk-TEST-NEVER-PRINT"));
+    }
+
+    #[tokio::test]
+    async fn cloud_stt_missing_key_is_critical_and_dead_endpoint_too() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Groq;
+        // No key; endpoint override points at a port nothing listens on (and
+        // keeps the probe off the real network).
+        cfg.whisper.api_url = "http://127.0.0.1:19996".into();
+
+        let backend = run_backend_checks(&cfg).await;
+        let key = backend
+            .iter()
+            .find(|r| r.name == "Transcription API key")
+            .unwrap();
+        assert!(!key.ok);
+        assert_eq!(key.category, CheckCategory::Critical);
+        assert!(key.fix_hint.as_deref().unwrap().contains("Transcription"));
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "Transcription endpoint")
+            .unwrap();
+        assert!(!ep.ok);
+        assert_eq!(ep.category, CheckCategory::Critical);
+        assert!(ep.detail.contains("not reachable"), "detail: {}", ep.detail);
+    }
+
+    #[test]
+    fn local_stt_keeps_existing_local_check_set() {
+        let base = tempfile::TempDir::new().unwrap();
+        let mut cfg = Config::default();
+        cfg.recording.audio_dir = base.path().join("audio").to_str().unwrap().to_owned();
+
+        std::env::set_var("PHONEME_DATA_LOCAL", base.path().to_str().unwrap());
+        let names: Vec<String> = run_local_checks(&cfg)
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
+        std::env::remove_var("PHONEME_DATA_LOCAL");
+
+        // Pinned exactly: a regression that drops or renames a local-provider
+        // check must fail here.
+        assert_eq!(
+            names,
+            [
+                "Config file",
+                "Audio directory",
+                "Disk space (recordings)",
+                "Disk space (app data)",
+                "Hook command",
+                "Whisper model file",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn local_stt_keeps_existing_backend_check_set() {
+        // Default config: local provider, no preview, no dictation override,
+        // no LLM steps — exactly the pre-provider-aware backend set.
+        let cfg = Config::default();
+        let names: Vec<String> = run_backend_checks(&cfg)
+            .await
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
+        assert_eq!(names, ["Whisper server", "Ollama (optional)"]);
+    }
+
+    #[tokio::test]
+    async fn custom_stt_probes_configured_url_without_model_or_key_checks() {
+        // No mock mounted: wiremock answers unmatched requests with 404 —
+        // still an HTTP response, still reachable.
+        let server = wiremock::MockServer::start().await;
+
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Custom;
+        cfg.whisper.api_url = server.uri();
+
+        let local = run_local_checks(&cfg);
+        assert!(!local.iter().any(|r| r.name == "Whisper model file"));
+
+        let backend = run_backend_checks(&cfg).await;
+        assert!(!backend.iter().any(|r| r.name == "Whisper server"));
+        // Key optional for custom endpoints — no key check to fail.
+        assert!(!backend.iter().any(|r| r.name == "Transcription API key"));
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "Transcription endpoint")
+            .unwrap();
+        assert!(ep.ok, "custom endpoint should be reachable: {}", ep.detail);
+        assert!(ep.detail.contains(&server.uri()));
+    }
+
+    #[tokio::test]
+    async fn preview_cloud_checks_only_when_preview_enabled() {
+        let server = any_request_server(403).await;
+
+        let mut cfg = Config::default();
+        let mut pv = cfg.whisper.clone();
+        pv.provider = TranscriptionBackend::Groq;
+        pv.api_url = server.uri();
+        // Key left empty → Warning (the preview is optional).
+        cfg.preview_whisper = Some(pv);
+
+        // Preview disabled: its connection is dormant — checks are absent.
+        let backend = run_backend_checks(&cfg).await;
+        assert!(!backend.iter().any(|r| r.name.starts_with("Live-preview")));
+
+        cfg.recording.streaming_preview = true;
+        let backend = run_backend_checks(&cfg).await;
+        assert!(!backend.iter().any(|r| r.name == "Live-preview server"));
+        let key = backend
+            .iter()
+            .find(|r| r.name == "Live-preview API key")
+            .expect("preview key check present");
+        assert!(!key.ok);
+        assert_eq!(key.category, CheckCategory::Warning);
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "Live-preview endpoint")
+            .expect("preview endpoint check present");
+        assert!(ep.ok, "403 still counts as reachable: {}", ep.detail);
+    }
+
+    #[tokio::test]
+    async fn dictation_override_gets_named_checks() {
+        let mut cfg = Config::default();
+        // No override → dictation rides the main connection; nothing extra.
+        let backend = run_backend_checks(&cfg).await;
+        assert!(!backend.iter().any(|r| r.name.starts_with("Dictation")));
+
+        // Cloud override, key missing, endpoint dead.
+        let mut stt = cfg.whisper.clone();
+        stt.provider = TranscriptionBackend::Openai;
+        stt.api_url = "http://127.0.0.1:19993".into();
+        cfg.in_place.stt = Some(stt);
+        let backend = run_backend_checks(&cfg).await;
+        let key = backend
+            .iter()
+            .find(|r| r.name == "Dictation STT key")
+            .expect("dictation key check present");
+        assert!(!key.ok);
+        assert_eq!(key.category, CheckCategory::Warning);
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "Dictation STT endpoint")
+            .expect("dictation endpoint check present");
+        assert!(!ep.ok);
+        assert_eq!(ep.category, CheckCategory::Warning);
+
+        // Local override pointed at an already-running server: reachability
+        // of that URL, no key check.
+        let server = any_request_server(200).await;
+        let mut local_stt = cfg.whisper.clone();
+        local_stt.mode = WhisperMode::External;
+        local_stt.external_url = server.uri();
+        cfg.in_place.stt = Some(local_stt);
+        let backend = run_backend_checks(&cfg).await;
+        assert!(!backend.iter().any(|r| r.name == "Dictation STT key"));
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "Dictation STT endpoint")
+            .unwrap();
+        assert!(ep.ok, "local dictation server reachable: {}", ep.detail);
+    }
+
+    #[tokio::test]
+    async fn llm_key_missing_for_optional_step_is_warning() {
+        let mut cfg = Config::default();
+        // Only the summary step is enabled; it inherits the cleanup provider
+        // (openai) and finds no key anywhere. The URL override keeps the
+        // probe off the real network.
+        cfg.summary.auto = true;
+        cfg.llm_post_process.provider = "openai".into();
+        cfg.llm_post_process.api_url = "http://127.0.0.1:19995/v1/chat/completions".into();
+
+        let backend = run_backend_checks(&cfg).await;
+        let key = backend
+            .iter()
+            .find(|r| r.name == "LLM API key (summary)")
+            .expect("llm key check present");
+        assert!(!key.ok);
+        assert_eq!(key.category, CheckCategory::Warning);
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "LLM endpoint (summary)")
+            .expect("llm endpoint check present");
+        assert!(!ep.ok);
+        assert_eq!(ep.category, CheckCategory::Warning);
+        // The probe targets the free model-list route, never the chat route.
+        assert!(ep.detail.contains("/v1/models"), "detail: {}", ep.detail);
+    }
+
+    #[tokio::test]
+    async fn llm_inherited_key_resolves_as_configured() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let mut cfg = Config::default();
+        cfg.summary.auto = true; // summary's own fields all blank…
+        cfg.llm_post_process.provider = "openai".into();
+        cfg.llm_post_process.set_api_key("sk-TEST-INHERIT"); // …so it inherits this
+        cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+
+        let backend = run_backend_checks(&cfg).await;
+        let key = backend
+            .iter()
+            .find(|r| r.name == "LLM API key (summary)")
+            .unwrap();
+        assert!(key.ok, "inherited cleanup key counts as configured");
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "LLM endpoint (summary)")
+            .unwrap();
+        assert!(ep.ok, "models-list probe should succeed: {}", ep.detail);
+        assert!(ep.detail.contains("/v1/models"));
+        assert!(!format!("{backend:?}").contains("sk-TEST-INHERIT"));
+    }
+
+    #[tokio::test]
+    async fn llm_endpoint_dedupes_steps_on_one_connection() {
+        let server = any_request_server(200).await;
+
+        let mut cfg = Config::default();
+        cfg.llm_post_process.enabled = true;
+        cfg.llm_post_process.provider = "openai".into();
+        cfg.llm_post_process.set_api_key("k");
+        cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+        cfg.summary.auto = true; // inherits the cleanup connection
+        cfg.title.use_llm = true; // title.enabled defaults to true
+
+        let backend = run_backend_checks(&cfg).await;
+        let endpoints: Vec<&CheckResult> = backend
+            .iter()
+            .filter(|r| r.name.starts_with("LLM endpoint"))
+            .collect();
+        assert_eq!(endpoints.len(), 1, "one shared connection → one check");
+        assert_eq!(endpoints[0].name, "LLM endpoint (cleanup, summary, titles)");
+        let keys: Vec<&CheckResult> = backend
+            .iter()
+            .filter(|r| r.name.starts_with("LLM API key"))
+            .collect();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].name, "LLM API key (cleanup, summary, titles)");
+    }
+
+    #[tokio::test]
+    async fn llm_step_on_ollama_uses_required_probe_and_suppresses_optional() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/tags"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"models": []})),
+            )
+            .mount(&server)
+            .await;
+
+        let mut cfg = Config::default();
+        cfg.auto_tag.auto = true;
+        cfg.auto_tag.provider = "ollama".into();
+        cfg.auto_tag.api_url = format!("{}/api/generate", server.uri());
+
+        let backend = run_backend_checks(&cfg).await;
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "LLM endpoint (tags)")
+            .expect("per-step ollama check present");
+        assert!(ep.ok, "ollama probe should pass: {}", ep.detail);
+        // The per-connection check replaces the informational one.
+        assert!(!backend.iter().any(|r| r.name == "Ollama (optional)"));
+
+        // Unreachable Ollama: the step degrades, so it's a Warning.
+        cfg.auto_tag.api_url = "http://127.0.0.1:19994/api/generate".into();
+        let backend = run_backend_checks(&cfg).await;
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "LLM endpoint (tags)")
+            .unwrap();
+        assert!(!ep.ok);
+        assert_eq!(ep.category, CheckCategory::Warning);
+        assert!(ep.detail.contains("not running"), "detail: {}", ep.detail);
+    }
+
+    #[tokio::test]
+    async fn llm_step_with_no_provider_is_flagged() {
+        let mut cfg = Config::default();
+        cfg.llm_post_process.enabled = true; // provider stays "none"
+
+        let backend = run_backend_checks(&cfg).await;
+        let ep = backend
+            .iter()
+            .find(|r| r.name == "LLM endpoint (cleanup)")
+            .expect("unusable connection still yields a check");
+        assert!(!ep.ok);
+        assert_eq!(ep.category, CheckCategory::Warning);
+        assert!(ep.detail.contains("no LLM provider selected"));
+        assert!(ep.fix_hint.is_some());
     }
 }

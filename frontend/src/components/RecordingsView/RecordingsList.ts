@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listRecordings, semanticSearch, updateMeetingName, setFavorite, type Recording } from "../../services/ipc";
+import { listRecordings, semanticSearch, moreLikeThis, updateMeetingName, setFavorite, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
 import { filterStore, type RecordingKind } from "../../state/filter";
@@ -213,7 +213,16 @@ export class RecordingsListElement extends LitElement {
       }
       let rows: Recording[] = [];
       this.relevanceById.clear();
-      if (f.search && f.semantic) {
+      if (f.like_id) {
+        // "More like this": the list becomes the similarity ranking seeded by
+        // that recording's stored vectors. Same result shape as a semantic
+        // query, so the relevance chips render identically; the header shows
+        // a `~similar:` pill whose ✕ clears like_id back to the normal list.
+        const results = await moreLikeThis(f.like_id, this.pageSize);
+        rows = results.map((r) => r.recording);
+        for (const r of results) this.relevanceById.set(r.recording.id, r.score);
+        this.reachedEnd = true;
+      } else if (f.search && f.semantic) {
         const results = await semanticSearch(f.search, this.pageSize);
         rows = results.map((r) => r.recording);
         // Stash the calibrated relevance per recording so the row can show a

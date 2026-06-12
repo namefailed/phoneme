@@ -6,6 +6,7 @@ import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { applySpeakerNames } from "./mergeMeeting";
 import { getOpenRecordingId } from "../../state/openRecording";
+import { applyMoreLikeThis } from "../../state/filter";
 
 export type ActionRowCallbacks = {
   onTogglePlay: () => void;
@@ -16,6 +17,9 @@ export type ActionRowCallbacks = {
    *  renamed speakers carry through. Optional — omitted/empty leaves the raw
    *  `[Speaker N]` markers in place. */
   getSpeakerNames?: () => SpeakerName[];
+  /** The recording's display title, used to label the "More like this" pill in
+   *  the header. Optional — the pill falls back to the recording id. */
+  getTitle?: () => string | null;
 };
 
 @customElement('ph-action-row')
@@ -118,6 +122,15 @@ export class ActionRowElement extends LitElement {
     window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids: [this.recordingId] } }));
   }
 
+  /** "More like this": flip the recordings list into similarity mode seeded by
+   *  this recording — the list re-queries by its stored vectors and the header
+   *  search box becomes a `~similar:` pill (its ✕ restores the normal list).
+   *  The detail pane stays on this recording so source and neighbours sit side
+   *  by side. */
+  private handleMoreLikeThis() {
+    applyMoreLikeThis(this.recordingId, this.cbs.getTitle?.() ?? null);
+  }
+
   render() {
     return html`
       <div class="action-row">
@@ -125,6 +138,7 @@ export class ActionRowElement extends LitElement {
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <button @click=${this.handleCopy}>${this.copyText}</button>
         <button @click=${this.handleExport}>⬇ Export</button>
+        <button class="similar-trigger" title="More like this — fill the list with recordings about similar things, found from this recording's semantic index" @click=${this.handleMoreLikeThis}>✨ Similar</button>
         <button @click=${this.handleReveal}>📂 Reveal</button>
         <button class="danger" @click=${this.handleDelete}>🗑 Delete</button>
       </div>

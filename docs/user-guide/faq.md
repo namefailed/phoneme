@@ -82,6 +82,28 @@ Set `hook.run_on_transcribe = false` and use **Re-fire hook** per recording.
 
 ---
 
+## Quitting & the background engine
+
+### What happens when I quit the tray?
+
+By default (`interface.quit_stops_daemon = true`) Quit shuts everything down
+in order: an in-flight recording is stopped and saved to the queue first (it
+transcribes on the next start), then the engine exits, taking its
+whisper-server(s) and any Ollama *it* auto-launched with it. An Ollama you
+started yourself always keeps running. Even killing Phoneme from Task Manager
+takes the engine and its helpers down — the OS reaps them.
+
+### Can I keep the engine running headless, without the tray?
+
+Yes — set `interface.quit_stops_daemon = false` (Settings → Interface → "Quit
+stops the engine"). Quit then only closes the tray; the daemon keeps recording
+hotkeyless via the CLI (`phoneme record`, `phoneme watch`, hooks, webhooks).
+Stop it explicitly with `phoneme daemon stop` when you want it gone. Flip the
+setting **before** the daemon is (re)started — the OS-level tie between tray
+and engine is decided when the tray spawns the engine.
+
+---
+
 ## Troubleshooting quick hits
 
 | Problem | Doc section |
@@ -89,6 +111,7 @@ Set `hook.run_on_transcribe = false` and use **Re-fire hook** per recording.
 | Daemon not reachable | [Troubleshooting → Daemon](troubleshooting.md) |
 | Whisper unreachable | [Troubleshooting → Whisper](troubleshooting.md) |
 | Tray icon missing | [Troubleshooting → Tray](troubleshooting.md) |
+| Ollama didn't auto-start | [Troubleshooting → Ollama](troubleshooting.md) |
 | Corrupt model download | [Troubleshooting → Model wizard](troubleshooting.md) |
 | Empty recordings list | `phoneme doctor --rebuild-catalog` |
 

@@ -244,7 +244,12 @@ pub struct EditArgs {
 #[derive(Debug, clap::Args)]
 pub struct SearchArgs {
     /// The semantic search query.
-    pub query: String,
+    #[arg(required_unless_present = "like", conflicts_with = "like")]
+    pub query: Option<String>,
+    /// "More like this": find recordings similar to this stored recording
+    /// instead of embedding a text query (uses its already-stored vectors).
+    #[arg(long, value_name = "RECORDING_ID")]
+    pub like: Option<String>,
     /// Maximum number of results.
     #[arg(long, value_name = "N", default_value_t = 20)]
     pub limit: usize,

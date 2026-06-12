@@ -1,7 +1,13 @@
-import { LitElement, html } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
-import { categoryMeta, fixAllPlan, type DoctorCheckInfo } from "../doctorChecks";
+import {
+  categoryMeta,
+  fixAllPlan,
+  groupChecks,
+  healthCounts,
+  type DoctorCheckInfo,
+} from "../doctorChecks";
 
 // Import styles
 import "../SettingsView/styles.css";
@@ -17,6 +23,7 @@ export class DoctorViewElement extends LitElement {
   @property({ type: Object }) onClose!: () => void;
 
   @state() private checks: DoctorCheckInfo[] | null = null;
+  @state() private loading = false;
   @state() private runningFix: string | null = null;
 
   connectedCallback() {
@@ -25,7 +32,10 @@ export class DoctorViewElement extends LitElement {
   }
 
   private async runChecks() {
-    this.checks = null;
+    // Keep the previous results on screen while re-checking (controls
+    // disabled via `loading`) so the layout doesn't jump; `checks` stays
+    // null only until the very first run lands.
+    this.loading = true;
 
     const [daemonChecks, localChecks, backendChecks] = await Promise.all([
       this.daemonChecks(),
@@ -34,6 +44,7 @@ export class DoctorViewElement extends LitElement {
     ]);
 
     this.checks = [...daemonChecks, ...localChecks, ...backendChecks];
+    this.loading = false;
   }
 
   private async daemonChecks(): Promise<DoctorCheckInfo[]> {
@@ -135,51 +146,111 @@ export class DoctorViewElement extends LitElement {
     await this.runChecks();
   }
 
+  /** One failing check, fully detailed: badge, detail, explanation, hint, Fix. */
+  private renderFailing(c: DoctorCheckInfo) {
+    const meta = categoryMeta(c);
+    return html`
+      <div class="doctor-row fail">
+        <span class="doctor-mark">✗</span>
+        <div class="doctor-name">
+          ${c.name}
+          <span class="doctor-cat ${meta.cls}">${meta.label}</span>
+        </div>
+        <div class="doctor-text">
+          <div class="doctor-detail">${c.detail}</div>
+          ${c.explanation ? html`<div class="doctor-explain">${c.explanation}</div>` : ""}
+          ${c.fix_hint ? html`<div class="doctor-hint">${c.fix_hint}</div>` : ""}
+        </div>
+        ${c.fix_action
+          ? html`<button class="doctor-fix"
+                  ?disabled=${this.loading || this.runningFix !== null}
+                  @click=${() => this.handleFix(c.fix_action!)}>
+                  ${this.runningFix === c.fix_action ? "Working…" : "Fix"}
+                </button>`
+          : ""}
+      </div>
+    `;
+  }
+
+  /**
+   * The passing checks, folded behind a native <details> (closed by default,
+   * the house disclosure idiom — see .settings-advanced). Expanded, they're
+   * compact one-liners grouped by subsystem; the explanation rides along as
+   * a hover title instead of a visible line.
+   */
+  private renderPassing(passing: DoctorCheckInfo[]) {
+    return html`
+      <details class="doctor-passing">
+        <summary class="doctor-passing-sum">
+          <svg class="doctor-passing-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+            <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="doctor-passing-mark" aria-hidden="true">✓</span>
+          ${passing.length} check${passing.length === 1 ? "" : "s"} passing
+        </summary>
+        ${groupChecks(passing).map(
+          (g) => html`
+            <div class="doctor-group">
+              <div class="doctor-group-title">${g.group}</div>
+              ${g.checks.map(
+                (c) => html`
+                  <div class="doctor-pass-row" title=${c.explanation ?? nothing}>
+                    <span class="doctor-pass-mark" aria-hidden="true">✓</span>
+                    <span class="doctor-pass-name">${c.name}</span>
+                    <span class="doctor-pass-detail">${c.detail}</span>
+                  </div>
+                `,
+              )}
+            </div>
+          `,
+        )}
+      </details>
+    `;
+  }
+
   render() {
-    const fixable = fixAllPlan(this.checks ?? []);
+    const checks = this.checks ?? [];
+    const failing = checks.filter((c) => !c.ok);
+    const passing = checks.filter((c) => c.ok);
+    const counts = healthCounts(checks);
+    const fixable = fixAllPlan(checks);
+    const busy = this.loading || this.runningFix !== null;
+
     return html`
       <div class="doctor-view">
         <div class="settings-toolbar">
           <h2>Doctor</h2>
           <span class="spacer"></span>
-          ${fixable.length
-            ? html`<button id="doctor-fix-all" ?disabled=${this.runningFix !== null}
-                @click=${this.handleFixAll}>
-                ${this.runningFix === FIX_ALL ? "Fixing…" : `🔧 Fix All (${fixable.length})`}
-              </button>`
-            : ""}
-          <button id="doctor-refresh" ?disabled=${this.runningFix !== null} @click=${this.runChecks}>Re-run all</button>
           <button id="doctor-close" @click=${this.onClose}>Close</button>
         </div>
         <div class="settings-body" id="doctor-body">
-          ${this.checks === null ? html`Loading…` : html`
-            <div class="doctor-list">
-              ${this.checks.map((c) => {
-                const meta = categoryMeta(c);
-                return html`
-                <div class="doctor-row ${c.ok ? "ok" : "fail"}">
-                  <span class="doctor-mark">${c.ok ? "✓" : "✗"}</span>
-                  <div class="doctor-name">
-                    ${c.name}
-                    ${!c.ok ? html`<span class="doctor-cat ${meta.cls}">${meta.label}</span>` : ""}
-                  </div>
-                  <div class="doctor-text">
-                    <div class="doctor-detail">${c.detail}</div>
-                    ${c.explanation ? html`<div class="doctor-explain">${c.explanation}</div>` : ""}
-                    ${!c.ok && c.fix_hint ? html`<div class="doctor-hint">${c.fix_hint}</div>` : ""}
-                  </div>
-                  ${c.fix_action
-                    ? html`<button class="doctor-fix"
-                            ?disabled=${this.runningFix !== null}
-                            @click=${() => this.handleFix(c.fix_action!)}>
-                            ${this.runningFix === c.fix_action ? "Working…" : "Fix"}
-                          </button>`
-                    : ""}
-                </div>
-              `;
-              })}
+          <div class="doctor-strip">
+            <div class="doctor-strip-state" role="status">
+              ${this.checks === null
+                ? html`<span class="doctor-strip-note">Running checks…</span>`
+                : failing.length === 0
+                  ? html`<span class="doctor-chip ok">All systems good ✓</span>`
+                  : html`
+                      ${counts.critical ? html`<span class="doctor-chip critical">${counts.critical} critical</span>` : ""}
+                      ${counts.warning ? html`<span class="doctor-chip warning">${counts.warning} warning</span>` : ""}
+                      ${counts.info ? html`<span class="doctor-chip info">${counts.info} info</span>` : ""}
+                    `}
             </div>
-          `}
+            <div class="doctor-strip-actions">
+              ${fixable.length
+                ? html`<button id="doctor-fix-all" ?disabled=${busy} @click=${this.handleFixAll}>
+                    ${this.runningFix === FIX_ALL ? "Fixing…" : `🔧 Fix All (${fixable.length})`}
+                  </button>`
+                : ""}
+              <button id="doctor-refresh" ?disabled=${busy} @click=${this.runChecks}>Re-run all</button>
+            </div>
+          </div>
+          ${this.checks === null
+            ? html`<div class="doctor-loading">Running health checks…</div>`
+            : html`
+                ${failing.length ? html`<div class="doctor-list">${failing.map((c) => this.renderFailing(c))}</div>` : ""}
+                ${passing.length ? this.renderPassing(passing) : ""}
+              `}
         </div>
       </div>
     `;

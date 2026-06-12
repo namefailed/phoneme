@@ -8,6 +8,7 @@ mod config_io;
 mod doctor;
 mod events;
 mod overlay;
+mod similar;
 mod tray;
 mod wizard;
 
@@ -286,6 +287,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_recordings,
             commands::semantic_search,
+            similar::more_like_this,
             commands::reembed_all,
             commands::get_recording,
             commands::list_meeting,
@@ -384,22 +386,29 @@ pub fn run() {
 
     builder.run(move |_app, event| {
         if let tauri::RunEvent::Exit = event {
-            // Send a clean Shutdown to the daemon before the process exits.
-            // This tells the daemon to stop whisper-server and flush any
-            // in-flight queue work before it exits. We give it 3 seconds;
-            // if it doesn't respond in time we exit anyway.
-            // Peek without connecting — there is no point dialing a daemon
-            // just to tell it to shut down.
-            if let Some(b) = exit_bridge.current() {
-                let b = b.clone();
-                let _ = runtime.block_on(async move {
-                    tokio::time::timeout(
-                        std::time::Duration::from_secs(3),
-                        b.request(phoneme_ipc::Request::Shutdown),
-                    )
-                    .await
-                    .ok()
-                });
+            // Last-resort daemon stop for exits that bypass the tray menu's
+            // Quit chain (which already sent Shutdown and waited — see
+            // `tray::stop_daemon_for_exit`). Gated on the same
+            // `interface.quit_stops_daemon` knob: when it's off, the daemon
+            // deliberately outlives every tray exit (headless setups). Peek
+            // without connecting — there is no point dialing a daemon just to
+            // tell it to shut down.
+            let cfg = phoneme_core::Config::read_or_default();
+            if tray::should_stop_daemon_on_exit(
+                cfg.interface.quit_stops_daemon,
+                tray::daemon_stop_done(),
+            ) {
+                if let Some(b) = exit_bridge.current() {
+                    let b = b.clone();
+                    let _ = runtime.block_on(async move {
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(3),
+                            b.request(phoneme_ipc::Request::Shutdown),
+                        )
+                        .await
+                        .ok()
+                    });
+                }
             }
         }
     });
