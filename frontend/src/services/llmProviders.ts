@@ -16,6 +16,9 @@
 
 export type LlmProviderKind = "ollama" | "openai" | "anthropic" | "groq";
 
+/** Which optgroup a provider sits under in the shared connection picker. */
+export type ProviderGroup = "local" | "cloud" | "advanced";
+
 export interface LlmPreset {
   /** Stable id used as the <option> value. */
   id: string;
@@ -29,6 +32,14 @@ export interface LlmPreset {
   defaultModel: string;
   /** Whether this provider needs an API key. */
   needsKey: boolean;
+  /** Picker optgroup: runs on this computer / cloud / advanced escape hatch. */
+  group: ProviderGroup;
+  /** Whether `fetchLlmModels` can list its models (almost all can; the Test
+   *  button and the model field's live fetch are skipped when it can't). */
+  modelsListable: boolean;
+  /** One plain-English sentence shown under the provider select. No protocol
+   *  jargon — say where it runs and what the user needs, nothing else. */
+  hint: string;
   /** Runs locally / offline (no data leaves the machine). */
   local?: boolean;
   /** One-line hint shown under the picker. */
@@ -51,6 +62,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     defaultModel: "llama3.2:3b",
     needsKey: false,
     local: true,
+    group: "local",
+    modelsListable: true,
+    hint: "Runs on your computer — free and private. Needs Ollama running.",
     note: "Fully offline. Install from ollama.com, then `ollama pull <model>`.",
   },
   {
@@ -61,6 +75,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     defaultModel: "",
     needsKey: false,
     local: true,
+    group: "local",
+    modelsListable: true,
+    hint: "Runs on your computer — start LM Studio's local server first.",
     note: "Start LM Studio's local server, then pick the loaded model.",
   },
   {
@@ -71,6 +88,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     defaultModel: "",
     needsKey: false,
     local: true,
+    group: "local",
+    modelsListable: true,
+    hint: "Runs on your computer — turn on Jan's local API server first.",
     note: "Jan's built-in local API server.",
   },
   {
@@ -81,6 +101,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     defaultModel: "",
     needsKey: false,
     local: true,
+    group: "local",
+    modelsListable: true,
+    hint: "Runs on your computer — works with llama.cpp, llamafile, vLLM and similar servers.",
     note: "Any OpenAI-compatible local server (llama.cpp, llamafile, vLLM…).",
   },
 
@@ -92,6 +115,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.openai.com/v1/chat/completions",
     defaultModel: "gpt-4o-mini",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; usage is billed by OpenAI.",
     keyUrl: "https://platform.openai.com/api-keys",
   },
   {
@@ -101,6 +127,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.anthropic.com/v1/messages",
     defaultModel: "claude-3-5-haiku-latest",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; usage is billed by Anthropic.",
     keyUrl: "https://console.anthropic.com/settings/keys",
   },
   {
@@ -110,6 +139,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.groq.com/openai/v1/chat/completions",
     defaultModel: "llama-3.1-8b-instant",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — very fast, with a generous free tier; needs an API key.",
     keyUrl: "https://console.groq.com/keys",
   },
   {
@@ -119,6 +151,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     defaultModel: "gemini-flash-latest",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; free tier available from Google AI Studio.",
     keyUrl: "https://aistudio.google.com/apikey",
   },
   {
@@ -128,6 +163,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.mistral.ai/v1/chat/completions",
     defaultModel: "mistral-small-latest",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; usage is billed by Mistral.",
     keyUrl: "https://console.mistral.ai/api-keys",
   },
   {
@@ -137,6 +175,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.deepseek.com/v1/chat/completions",
     defaultModel: "deepseek-chat",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; usage is billed by DeepSeek.",
     keyUrl: "https://platform.deepseek.com/api_keys",
   },
   {
@@ -146,6 +187,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://openrouter.ai/api/v1/chat/completions",
     defaultModel: "meta-llama/llama-3.3-70b-instruct:free",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — one API key for models from many different makers.",
     keyUrl: "https://openrouter.ai/keys",
   },
   {
@@ -155,7 +199,10 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.together.xyz/v1/chat/completions",
     defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     needsKey: true,
-    keyUrl: "https://api.together.xyz/settings/api-keys",
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — hosts many open models; needs an API key.",
+    keyUrl: "https://api.together.ai/settings/api-keys",
   },
   {
     id: "xai",
@@ -164,6 +211,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.x.ai/v1/chat/completions",
     defaultModel: "grok-2-latest",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; usage is billed by xAI.",
     keyUrl: "https://console.x.ai",
   },
   {
@@ -173,6 +223,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.cerebras.ai/v1/chat/completions",
     defaultModel: "llama-3.3-70b",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — very fast inference of open models; needs an API key.",
     keyUrl: "https://cloud.cerebras.ai",
   },
   {
@@ -182,6 +235,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.fireworks.ai/inference/v1/chat/completions",
     defaultModel: "accounts/fireworks/models/llama-v3p1-8b-instruct",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — hosts many open models; needs an API key.",
     keyUrl: "https://fireworks.ai/account/api-keys",
   },
   {
@@ -191,6 +247,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.deepinfra.com/v1/openai/chat/completions",
     defaultModel: "meta-llama/Meta-Llama-3.1-8B-Instruct",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — hosts many open models cheaply; needs an API key.",
     keyUrl: "https://deepinfra.com/dash/api_keys",
   },
   {
@@ -200,6 +259,10 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.perplexity.ai/chat/completions",
     defaultModel: "sonar",
     needsKey: true,
+    group: "cloud",
+    // Perplexity has no model-listing endpoint, so no live fetch / quick test.
+    modelsListable: false,
+    hint: "Cloud — needs an API key; usage is billed by Perplexity.",
     keyUrl: "https://www.perplexity.ai/settings/api",
   },
   {
@@ -209,6 +272,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.studio.nebius.ai/v1/chat/completions",
     defaultModel: "meta-llama/Meta-Llama-3.1-8B-Instruct",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — hosts many open models; needs an API key.",
     keyUrl: "https://studio.nebius.ai",
   },
   {
@@ -218,6 +284,9 @@ export const LLM_PRESETS: LlmPreset[] = [
     apiUrl: "https://api.hyperbolic.xyz/v1/chat/completions",
     defaultModel: "meta-llama/Meta-Llama-3.1-8B-Instruct",
     needsKey: true,
+    group: "cloud",
+    modelsListable: true,
+    hint: "Cloud — hosts many open models; needs an API key.",
     keyUrl: "https://app.hyperbolic.xyz/settings",
   },
 ];

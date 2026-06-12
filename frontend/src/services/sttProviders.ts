@@ -99,6 +99,148 @@ export function findSttProvider(value: string): SttProvider | undefined {
   return STT_PROVIDERS.find((p) => p.value === value);
 }
 
+/* ── Named providers (the shared connection block) ──────────────────────────
+ *
+ * The provider select in the shared connection block
+ * (`SettingsView/connectionField.ts`) lists NAMED providers — the brand the
+ * user knows — grouped "On this computer" / "Cloud" / "Advanced". Selecting
+ * one writes the existing config shape (the wire `provider` kind + that
+ * provider's default `api_url`), and the current selection is derived back
+ * from (kind, api_url) via `matchNamedSttProvider`, so saved configs
+ * round-trip with zero migration. STT is the simple case: every named
+ * provider maps 1:1 onto a daemon kind, and `api_url` is only an optional
+ * override (proxies/gateways), so it never breaks the match.
+ */
+
+export type SttProviderGroup = "local" | "cloud" | "advanced";
+
+export interface NamedSttProvider {
+  /** Stable id — the <option> value in the grouped provider select. */
+  id: string;
+  /** Plain display name (the brand, no protocol talk). */
+  label: string;
+  /** Select grouping: "On this computer" / "Cloud" / "Advanced". */
+  group: SttProviderGroup;
+  /** Wire value written to `config.whisper.provider` on selection. */
+  kind: string;
+  /** `api_url` written on selection. Blank = the daemon's built-in default
+   *  endpoint for the kind (every STT kind has one baked in). */
+  defaultUrl: string;
+  /** Whether the key row is shown for this provider. */
+  needsKey: boolean;
+  /** Where to get an API key — the "Get a key ↗" link target. */
+  keyUrl?: string;
+  /** Has a cheap model-list endpoint: Test = fetch models. Providers without
+   *  one get no Test button — just the "key saved" hint. */
+  modelsListable: boolean;
+  /** One-sentence, plain-language hint shown under the select. */
+  hint: string;
+  /** Default model id, for "provider default" help copy (blank = none). */
+  defaultModel: string;
+}
+
+export const STT_NAMED_PROVIDERS: NamedSttProvider[] = [
+  {
+    id: "local",
+    label: "Local whisper server",
+    group: "local",
+    kind: "local",
+    defaultUrl: "",
+    needsKey: false,
+    modelsListable: false,
+    hint: "Runs on your computer — free and private; audio never leaves your machine.",
+    defaultModel: "",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    group: "cloud",
+    kind: "openai",
+    defaultUrl: "",
+    needsKey: true,
+    keyUrl: "https://platform.openai.com/api-keys",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; audio is sent to OpenAI and billed to your account.",
+    defaultModel: "whisper-1",
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    group: "cloud",
+    kind: "groq",
+    defaultUrl: "",
+    needsKey: true,
+    keyUrl: "https://console.groq.com/keys",
+    modelsListable: true,
+    hint: "Cloud — needs an API key; very fast hosted Whisper, audio is sent to Groq.",
+    defaultModel: "whisper-large-v3",
+  },
+  {
+    id: "deepgram",
+    label: "Deepgram",
+    group: "cloud",
+    kind: "deepgram",
+    defaultUrl: "",
+    needsKey: true,
+    keyUrl: "https://console.deepgram.com",
+    modelsListable: false,
+    hint: "Cloud — needs an API key; audio is sent to Deepgram and billed to your account.",
+    defaultModel: "nova-2",
+  },
+  {
+    id: "assemblyai",
+    label: "AssemblyAI",
+    group: "cloud",
+    kind: "assemblyai",
+    defaultUrl: "",
+    needsKey: true,
+    keyUrl: "https://www.assemblyai.com/app/account",
+    modelsListable: false,
+    hint: "Cloud — needs an API key; audio is sent to AssemblyAI and billed to your account.",
+    defaultModel: "best",
+  },
+  {
+    id: "elevenlabs",
+    label: "ElevenLabs",
+    group: "cloud",
+    kind: "elevenlabs",
+    defaultUrl: "",
+    needsKey: true,
+    keyUrl: "https://elevenlabs.io/app/settings/api-keys",
+    modelsListable: false,
+    hint: "Cloud — needs an API key; audio is sent to ElevenLabs and billed to your account.",
+    defaultModel: "scribe_v1",
+  },
+  {
+    id: "custom",
+    label: "Custom (OpenAI-compatible endpoint)",
+    group: "advanced",
+    kind: "custom",
+    defaultUrl: "",
+    needsKey: true,
+    modelsListable: false,
+    hint: "Any OpenAI-compatible transcription endpoint — your own server or a gateway; key and model only if yours need them.",
+    defaultModel: "",
+  },
+];
+
+export function findNamedSttProvider(id: string): NamedSttProvider | undefined {
+  return STT_NAMED_PROVIDERS.find((p) => p.id === id);
+}
+
+/**
+ * Derive the named entry a saved config displays as, from the stored
+ * (provider kind, api_url) — the STT counterpart of `matchLlmPreset`. Kinds
+ * map 1:1 onto named providers here, and `api_url` is only an override, so it
+ * can't break the match; anything unrecognized (hand-edited TOML) displays as
+ * the Custom escape hatch rather than blanking the select.
+ */
+export function matchNamedSttProvider(kind: string, _apiUrl: string): NamedSttProvider | undefined {
+  const k = (kind || "").trim();
+  if (!k) return undefined;
+  return STT_NAMED_PROVIDERS.find((p) => p.kind === k) ?? findNamedSttProvider("custom");
+}
+
 /** Provider metadata keyed by value, for cloud warnings + default-model help. */
 export function sttMeta(value: string): { name: string; host: string; model: string } {
   const p = findSttProvider(value);
