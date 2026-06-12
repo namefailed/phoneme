@@ -742,9 +742,24 @@ pub struct InPlaceConfig {
     pub cleanup: String,
     /// Route in-place recordings through the FULL normal pipeline instead of
     /// the fast lane (the pre-overhaul behavior): inbox queue, configured
-    /// cleanup, summary, auto-tags, and hooks all run BEFORE the text is
-    /// typed. Default false.
+    /// cleanup, summary, auto-tags, and hooks all run. `type_first` below
+    /// picks whether the text is typed before or after those steps. Default
+    /// false.
     pub full_pipeline: bool,
+    /// Only meaningful when `full_pipeline` is true — WHEN the typed text
+    /// lands relative to the pipeline:
+    /// * `true` — the text lands immediately: a type-only fast pass
+    ///   transcribes and types the moment the recording stops, while cleanup,
+    ///   summary, auto-tags, and hooks continue in the background for the
+    ///   library copy. The typed text is the fast pass's polish, NOT the
+    ///   pipeline's LLM cleanup.
+    /// * `false` (default) — the typed text waits for, and includes, every
+    ///   configured step: nothing lands at the cursor until the pipeline
+    ///   finishes.
+    ///
+    /// Ignored on the fast lane (`full_pipeline = false`), which always types
+    /// immediately.
+    pub type_first: bool,
     /// Keep the dictation in the library: after typing, the transcript,
     /// segments, and embeddings persist like any recording (default true).
     /// False = ephemeral — the row and audio are deleted once typed.
@@ -761,6 +776,7 @@ impl Default for InPlaceConfig {
             stt: None,
             cleanup: "fast".into(),
             full_pipeline: false,
+            type_first: false,
             save_to_library: true,
             type_mode: "type".into(),
         }

@@ -42,6 +42,17 @@ hotkey, the recording takes a **dedicated fast lane**:
    off for fully ephemeral dictation.
 
 Summaries, auto-tags, and hooks do **not** run for dictations on the fast
-lane. If you want dictations to behave exactly like normal recordings (every
-configured step, typed only at the very end), enable **Run the full pipeline**
-in Settings → Capture → Dictation.
+lane. If you want dictations to behave exactly like normal recordings, enable
+**Run the full pipeline** in Settings → Capture → Dictation. With it on,
+**When to type** picks between two flavors:
+
+- **Type the text immediately** — the fast transcription is typed the moment
+  you stop speaking, while the pipeline (cleanup, summary, auto-tags, hooks)
+  keeps running in the background for the library copy. Fast-lane feel *and*
+  the full automation; the trade-off is that the typed text is the quick
+  polish, not the AI cleanup — the cleaned-up version lands in your library.
+- **Type only after every step finishes** — the classic behavior: nothing is
+  typed until the whole pipeline is done, so the typed text includes the AI
+  cleanup. Slow (the dictation waits in the queue behind anything already
+  processing), but what lands at the cursor is exactly what lands in the
+  library.

@@ -133,6 +133,7 @@ export class SectionInPlace {
       this.config.in_place = {
         cleanup: "fast",
         full_pipeline: false,
+        type_first: false,
         save_to_library: true,
         type_mode: "type",
       };
@@ -221,11 +222,33 @@ export class SectionInPlace {
             )}</div>
             <span style="font-size: 11px; color: var(--fg-faded); display: block;">
               Route dictations through the normal queue and every configured step (cleanup,
-              summary, auto-tags, hooks) <b>before</b> typing — the pre-fast-lane behavior. Slow;
+              summary, auto-tags, hooks) — the pre-fast-lane behavior. Slow;
               only useful when dictations must trigger the same automation as recordings.
+              <b>When to type</b> below picks whether the text waits for those steps.
             </span>
           </div>
         </div>
+        ${
+          ip.full_pipeline
+            ? `
+        <div class="settings-field">
+          <label>When to type</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <select id="ip-type-first">
+              <option value="immediate" ${ip.type_first ? "selected" : ""}>Type the text immediately — the pipeline keeps running in the background</option>
+              <option value="after" ${!ip.type_first ? "selected" : ""}>Type only after every step finishes — the typed text includes cleanup</option>
+            </select>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              <b>Immediately</b> types the fast transcription the moment you stop speaking,
+              while cleanup, summary, auto-tags, and hooks keep running in the background for
+              the library copy — the typed text does <b>not</b> include the AI cleanup.
+              <b>After every step</b> is the classic behavior: nothing lands at the cursor
+              until the whole pipeline has finished, so the typed text includes cleanup.
+            </span>
+          </div>
+        </div>`
+            : ""
+        }
       </div>
     `;
 
@@ -235,6 +258,18 @@ export class SectionInPlace {
       ?.addEventListener("change", (e) => {
         this.config.in_place.cleanup = (e.target as HTMLSelectElement).value;
       });
+    this.container
+      .querySelector<HTMLSelectElement>("#ip-type-first")
+      ?.addEventListener("change", (e) => {
+        this.config.in_place.type_first = (e.target as HTMLSelectElement).value === "immediate";
+      });
+    // The "When to type" field only exists while the full-pipeline toggle is
+    // on, so rebuild the section when it flips. bindFieldEvents (above) has
+    // already written the new value by the time this fires — listeners run in
+    // registration order — so the re-render sees the updated config.
+    this.container
+      .querySelector<HTMLInputElement>('input[data-key="in_place.full_pipeline"]')
+      ?.addEventListener("change", () => this.render());
     this.container
       .querySelector<HTMLSelectElement>("#ip-type-mode")
       ?.addEventListener("change", (e) => {

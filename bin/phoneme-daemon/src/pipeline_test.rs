@@ -379,3 +379,50 @@ async fn permanent_whisper_failure_still_fails_the_recording() {
     let rec = state.catalog.get(&id).await.unwrap().expect("row exists");
     assert_eq!(rec.status, RecordingStatus::TranscribeFailed);
 }
+
+/// The pipeline's end-of-run typing decision for in-place dictations. Tested
+/// on the pure helper rather than through `pipeline::run` because "no
+/// keystrokes were injected" can't be asserted from the outside — and a run
+/// with a broken gate would type into whatever window has focus on the
+/// machine running the tests.
+#[test]
+fn pipeline_types_only_when_the_fast_pass_did_not() {
+    use crate::pipeline::pipeline_should_type;
+    use phoneme_core::config::InPlaceConfig;
+
+    let base = InPlaceConfig::default();
+
+    // Not an in-place recording: the pipeline never types, whatever the config.
+    assert!(!pipeline_should_type(&base, false, "words"));
+
+    // An in-place recording that reached the pipeline types at the end — both
+    // on the default config (e.g. a retranscribed dictation) and with
+    // full_pipeline on but type_first off (the classic type-at-the-end mode).
+    assert!(pipeline_should_type(&base, true, "words"));
+    let full = InPlaceConfig {
+        full_pipeline: true,
+        ..base.clone()
+    };
+    assert!(pipeline_should_type(&full, true, "words"));
+
+    // full_pipeline + type_first: the recorder's type-only pass already typed
+    // the text the moment transcription finished — the pipeline run must NOT
+    // land it a second time.
+    let type_first = InPlaceConfig {
+        full_pipeline: true,
+        type_first: true,
+        ..base.clone()
+    };
+    assert!(!pipeline_should_type(&type_first, true, "words"));
+
+    // type_first without full_pipeline is inert (the flag is only meaningful
+    // under full_pipeline): pipeline typing is unaffected.
+    let dangling = InPlaceConfig {
+        type_first: true,
+        ..base.clone()
+    };
+    assert!(pipeline_should_type(&dangling, true, "words"));
+
+    // Nothing to type, nothing typed.
+    assert!(!pipeline_should_type(&full, true, ""));
+}

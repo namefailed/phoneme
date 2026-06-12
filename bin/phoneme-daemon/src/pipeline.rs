@@ -4,7 +4,7 @@
 
 use crate::app_state::{AppState, WhisperModelOverride};
 use phoneme_core::config::{
-    Config, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
+    Config, InPlaceConfig, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
 };
 use phoneme_core::error::Result;
 use phoneme_core::{
@@ -379,6 +379,18 @@ fn summary_enabled(cfg: &Config) -> bool {
 /// Whether the auto-tag step will run (same contract as [`summary_enabled`]).
 fn auto_tag_enabled(cfg: &Config) -> bool {
     cfg.auto_tag.auto
+}
+
+/// Whether this pipeline run should type the transcript at the cursor.
+///
+/// Only in-place dictations type, and only when the text hasn't already
+/// landed: with `[in_place].full_pipeline` + `[in_place].type_first` the
+/// recorder spawned a type-only pass that typed the quick transcription the
+/// moment it was ready, so this run owns everything else (cleanup, summary,
+/// tags, hooks, the library copy) but must NOT type again — the text would
+/// land twice. Pure so the decision is testable without an input simulator.
+fn pipeline_should_type(in_place: &InPlaceConfig, rec_in_place: bool, transcript: &str) -> bool {
+    rec_in_place && !transcript.is_empty() && !(in_place.full_pipeline && in_place.type_first)
 }
 
 async fn maybe_auto_summarize(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
@@ -922,14 +934,17 @@ pub async fn run(
 
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {
-        if rec.in_place && !transcript.is_empty() {
+        if pipeline_should_type(&cfg.in_place, rec.in_place, &transcript) {
             tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
             // This is the FULL-PIPELINE dictation path ([in_place].full_pipeline
-            // = true): the text lands only after every configured step. The
-            // insertion itself (typing vs clipboard-paste, input-simulator
-            // failure modes) lives in `in_place::type_at_cursor`, shared with
-            // the fast lane. Best-effort — a failure is logged loudly but
-            // never fails the recording.
+            // = true) without `type_first`: the text lands only after every
+            // configured step. (With `type_first` the recorder's type-only
+            // pass already typed it, so `pipeline_should_type` keeps this run
+            // from landing the text twice.) The insertion itself (typing vs
+            // clipboard-paste, input-simulator failure modes) lives in
+            // `in_place::type_at_cursor`, shared with the fast lane.
+            // Best-effort — a failure is logged loudly but never fails the
+            // recording.
             if let Err(e) =
                 crate::in_place::type_at_cursor(&transcript, &cfg.in_place.type_mode).await
             {

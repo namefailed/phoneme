@@ -195,7 +195,8 @@ Settings → Capture → Dictation, including the `stt` picker (Automatic ↔ Cu
 | `cleanup` | `"fast"` | Text polish before typing: `"fast"` (rule-based, instant: fillers, non-speech tags, stutters, caps, punctuation), `"off"` (raw), `"llm"` (full pass through `[llm_post_process]` — slow). |
 | `type_mode` | `"type"` | `"type"` = simulated keystrokes; `"paste"` = clipboard + Ctrl+V with the previous clipboard restored (near-instant for long text). |
 | `save_to_library` | `true` | Persist the dictation (transcript, segments, audio) after typing. `false` = ephemeral — row and WAV deleted once typed. |
-| `full_pipeline` | `false` | Route dictations through the normal queue and every configured step (cleanup, summary, tags, hooks) before typing — the legacy behavior. |
+| `full_pipeline` | `false` | Route dictations through the normal queue and every configured step (cleanup, summary, tags, hooks) — the legacy behavior. `type_first` picks when the text is typed. |
+| `type_first` | `false` | Only meaningful with `full_pipeline`. `true` = a type-only fast pass types the quick transcription immediately while the pipeline continues in the background for the library copy (the typed text is the fast polish, not the LLM cleanup, and the pipeline skips its own end-of-run typing). `false` = the typed text waits for, and includes, every configured step. |
 | `stt` | *(unset)* | Optional dedicated STT provider table shaped like `[whisper]`. Unset: dictation follows the Live Preview's provider when the preview is enabled, else `[whisper]`. For a local model, point it at an already-running server — the daemon does not supervise a third server. |
 
 

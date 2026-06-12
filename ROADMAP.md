@@ -289,6 +289,15 @@ persona actually wants — still needs the alignment + timestamp substrate below
 
 ### 🎙️ Dictation & capture feel
 
+- [x] **Dictation fast lane** — *shipped*. In-place dictation runs its own
+  minimal pipeline: skips the inbox queue entirely, transcribes with its own
+  (optional) STT override, polishes with instant rule-based cleanup / an LLM /
+  nothing, and types or pastes at the cursor — library bookkeeping happens
+  after the text lands. Optional `full_pipeline` routes the dictation through
+  the normal pipeline instead, and **`type_first`** picks *when* the text
+  lands: immediately from a type-only fast pass (cleanup/summary/tags catch up
+  in the library), or only after the full pipeline finishes. `[in_place]` in
+  the config reference; user guide: `transcribe_in_place.md`.
 - [ ] **Live preview overhaul (a whole phase)** — the current streaming
   preview works but doesn't feel good: caption pacing is uneven, the stitch
   point jumps, and meetings double the cost. It ships **off by default,
