@@ -185,6 +185,19 @@ Suggestions land on the recording (`tag_suggestions`) and are surfaced in the
 GUI as approve/dismiss chips; approving creates-or-fetches the tag and attaches
 it.
 
+## `[in_place]`
+
+Dictation (transcription-in-place) behavior — the fast lane.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `cleanup` | `"fast"` | Text polish before typing: `"fast"` (rule-based, instant: fillers, non-speech tags, stutters, caps, punctuation), `"off"` (raw), `"llm"` (full pass through `[llm_post_process]` — slow). |
+| `type_mode` | `"type"` | `"type"` = simulated keystrokes; `"paste"` = clipboard + Ctrl+V with the previous clipboard restored (near-instant for long text). |
+| `save_to_library` | `true` | Persist the dictation (transcript, segments, audio) after typing. `false` = ephemeral — row and WAV deleted once typed. |
+| `full_pipeline` | `false` | Route dictations through the normal queue and every configured step (cleanup, summary, tags, hooks) before typing — the legacy behavior. |
+| `stt` | *(unset)* | Optional dedicated STT provider table shaped like `[whisper]`. Unset: dictation follows the Live Preview's provider when the preview is enabled, else `[whisper]`. For a local model, point it at an already-running server — the daemon does not supervise a third server. |
+
+
 ## `[semantic_search]`
 
 | Key | Default | Description |

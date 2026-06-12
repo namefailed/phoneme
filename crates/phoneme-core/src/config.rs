@@ -63,6 +63,10 @@ pub struct Config {
     /// [`whisper`](Self::whisper).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_whisper: Option<WhisperConfig>,
+    /// Dictation (transcription-in-place) behavior — the fast lane. See
+    /// [`InPlaceConfig`].
+    #[serde(default)]
+    pub in_place: InPlaceConfig,
     /// Hardware and threshold settings for the audio recording stream.
     pub recording: RecordingConfig,
     /// Settings governing external script execution (hooks) upon transcription success.
@@ -707,6 +711,62 @@ fn default_meeting_preview() -> String {
     "toggle".into()
 }
 
+/// Dictation (transcription-in-place) behavior.
+///
+/// **The fast lane is the point**: by default an in-place recording skips the
+/// inbox queue and the full pipeline entirely — transcribe with a fast
+/// provider, polish locally, type at the cursor — and only THEN persists to
+/// the library in the background. A dictation never waits behind a meeting
+/// that's mid-transcription, never runs diarization, and never pays for an
+/// LLM round-trip unless explicitly asked to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InPlaceConfig {
+    /// Dedicated STT for dictation, shaped like
+    /// [`preview_whisper`](Config::preview_whisper). `None` (default) falls
+    /// back to the live preview's provider when the preview is enabled (it
+    /// already runs a fast model), else the main `[whisper]` provider. For a
+    /// local model this should point at an ALREADY-RUNNING server (the main
+    /// or preview one, or an external URL) — the daemon does not supervise a
+    /// third server for dictation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stt: Option<WhisperConfig>,
+    /// Text polish applied before typing:
+    /// * `"fast"` (default) — rule-based and instant: strips filler words and
+    ///   whisper's non-speech annotations, collapses stutter-doubled words,
+    ///   fixes capitalization and terminal punctuation.
+    /// * `"off"` — the raw whisper text.
+    /// * `"llm"` — a round-trip through the `[llm_post_process]` provider
+    ///   (the same cleanup the main pipeline runs). Slowest; only choose this
+    ///   when polish matters more than latency.
+    pub cleanup: String,
+    /// Route in-place recordings through the FULL normal pipeline instead of
+    /// the fast lane (the pre-overhaul behavior): inbox queue, configured
+    /// cleanup, summary, auto-tags, and hooks all run BEFORE the text is
+    /// typed. Default false.
+    pub full_pipeline: bool,
+    /// Keep the dictation in the library: after typing, the transcript,
+    /// segments, and embeddings persist like any recording (default true).
+    /// False = ephemeral — the row and audio are deleted once typed.
+    pub save_to_library: bool,
+    /// How the text lands at the cursor: `"type"` (default — simulated
+    /// keystrokes, works everywhere) or `"paste"` (clipboard + Ctrl+V with
+    /// the previous clipboard restored — near-instant for long text).
+    pub type_mode: String,
+}
+
+impl Default for InPlaceConfig {
+    fn default() -> Self {
+        Self {
+            stt: None,
+            cleanup: "fast".into(),
+            full_pipeline: false,
+            save_to_library: true,
+            type_mode: "type".into(),
+        }
+    }
+}
+
 /// A conditional hook: when a transcript matches `pattern`, `command` is run in
 /// addition to the always-on `HookConfig::commands`. Enables workflows like
 /// "if the note contains 'Action Item:', send it to my task manager".
@@ -982,6 +1042,23 @@ impl Config {
         self.preview_whisper.as_ref().unwrap_or(&self.whisper)
     }
 
+    /// The STT provider for in-place dictation's fast lane:
+    /// `[in_place].stt` when set, else the live preview's provider when the
+    /// preview is enabled (it already runs a fast model — and when it's a
+    /// local bundled one, its server is only alive while the preview is on),
+    /// else the main `[whisper]` provider.
+    pub fn in_place_provider_config(&self) -> &WhisperConfig {
+        if let Some(stt) = &self.in_place.stt {
+            return stt;
+        }
+        if self.recording.streaming_preview {
+            if let Some(p) = &self.preview_whisper {
+                return p;
+            }
+        }
+        &self.whisper
+    }
+
     /// True when the daemon must supervise a SECOND whisper-server for the live
     /// preview: live preview is enabled AND `preview_whisper` is a local bundled
     /// model on its own port. False when preview is off, reuses the main
@@ -1056,6 +1133,7 @@ impl Default for Config {
                 mode: HotkeyMode::Hold,
             },
             in_place_hotkey: default_in_place_hotkey(),
+            in_place: InPlaceConfig::default(),
             meeting_hotkey: default_meeting_hotkey(),
             tray: TrayConfig {
                 show_on_startup: true,

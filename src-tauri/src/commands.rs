@@ -566,6 +566,16 @@ fn mask_config_secrets(v: &mut Value) {
             }
         }
     }
+    // The dictation STT lives one level deeper (`in_place.stt.api_key`).
+    if let Some(key) = v
+        .get_mut("in_place")
+        .and_then(|s| s.get_mut("stt"))
+        .and_then(|s| s.get_mut("api_key"))
+    {
+        if key.as_str().is_some_and(|k| !k.is_empty()) {
+            *key = Value::String(MASKED_SECRET.to_string());
+        }
+    }
 }
 
 /// Restore any masked key in an incoming config from the current on-disk config,
@@ -599,6 +609,17 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
                 .map(|c| c.api_key_str().to_owned())
                 .unwrap_or_default();
             pw.set_api_key(cur);
+        }
+    }
+    if let Some(stt) = incoming.in_place.stt.as_mut() {
+        if stt.api_key_str() == MASKED_SECRET {
+            let cur = current
+                .in_place
+                .stt
+                .as_ref()
+                .map(|c| c.api_key_str().to_owned())
+                .unwrap_or_default();
+            stt.set_api_key(cur);
         }
     }
 }
