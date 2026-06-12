@@ -16,6 +16,7 @@ import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
 import { showActionToast } from "../../utils/toast";
+import { setHeaderHidden } from "../../services/headerBar";
 import "./Sidebar";
 import "./ThinkingPopout";
 import "./styles.css";
@@ -267,7 +268,33 @@ export class RecordingsView {
     const dur = parseFloat(getComputedStyle(shell).getPropertyValue("--pane-anim")) || 0;
     if (dur <= 0) return; // animations off — keep toggles instant
     shell.classList.add("rv-animate");
-    window.setTimeout(() => shell.classList.remove("rv-animate"), dur + 60);
+    // Clip, don't reflow: pin the detail pane's content at the width it will
+    // END at, so the slide reveals/conceals fully-laid-out content instead of
+    // re-wrapping it every frame. (The sidebar is pinned permanently via
+    // --sidebar-w; the detail's width is %-based so it's pinned per toggle.)
+    const detail = this.container.querySelector<HTMLElement>("#rv-detail");
+    if (detail) {
+      const shellW = shell.clientWidth;
+      const target =
+        this.detailVisible && this.focusMode
+          ? shellW
+          : this.detailVisible
+            ? Math.round((shellW * (100 - this.splitPercent)) / 100)
+            : detail.clientWidth; // closing: keep the current width while sliding out
+      detail.style.overflow = "hidden";
+      detail.querySelectorAll<HTMLElement>(":scope > *").forEach((el) => {
+        el.style.width = target > 0 ? `${target}px` : "";
+      });
+    }
+    window.setTimeout(() => {
+      shell.classList.remove("rv-animate");
+      if (detail) {
+        detail.style.overflow = "";
+        detail.querySelectorAll<HTMLElement>(":scope > *").forEach((el) => {
+          el.style.width = "";
+        });
+      }
+    }, dur + 60);
   }
 
   toggleDetail() {
@@ -283,8 +310,9 @@ export class RecordingsView {
     this.focusMode = !this.focusMode;
     const shell = this.container.querySelector<HTMLElement>("#rv-shell");
     shell?.classList.toggle("rv-focus", this.focusMode);
-    // Full-screen focus mode also hides the top header bar (same as Settings).
-    document.body.classList.toggle("phoneme-hide-header", this.focusMode);
+    // Full-screen focus mode also hides the top header bar (same as Settings),
+    // with the same height animation Ctrl+/ gets.
+    setHeaderHidden(this.focusMode);
     this.animateLayout();
     this.applyLayout();
   }
@@ -772,6 +800,9 @@ export class RecordingsView {
 
     const sidebarWidth = this.sidebarVisible ? `${this.sidebarWidth}px` : "0px";
     const resizerWidth = this.sidebarVisible ? "6px" : "0px";
+    // The sidebar CONTENT stays laid out at this width even while its grid
+    // column animates to/from 0 — the slide clips it instead of squishing it.
+    shell.style.setProperty("--sidebar-w", `${this.sidebarWidth}px`);
     const resizer = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
     // IMPORTANT: never `display:none` the resizer. The grid has five explicit
     // column tracks (sidebar, resizer, list, splitter, detail); removing the

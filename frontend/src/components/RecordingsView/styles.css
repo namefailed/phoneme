@@ -1023,10 +1023,31 @@ ph-sidebar:focus-visible,
   background: color-mix(in srgb, var(--accent) 17%, transparent);
 }
 
-/* Ctrl+/ hides the top (search/header) bar app-wide — body-scoped so it works
-   regardless of which view is mounted. Ctrl+/ again brings it back. */
+/* The top (search/header) bar collapses with a height animation on the shared
+   pane curve (Ctrl+/, zen, and focus mode all route through setHeaderHidden).
+   Clipping applies only while hidden or mid-animation — a permanent
+   overflow:hidden would clip the bar's own dropdown menus, which hang below
+   its box. The 160px bound comfortably exceeds the bar's real height. */
+ph-header-bar {
+  display: block;
+  max-height: 160px;
+  transition: max-height var(--pane-anim, 200ms) cubic-bezier(0.22, 1, 0.36, 1);
+}
+body.phoneme-header-anim ph-header-bar {
+  overflow: hidden;
+}
 body.phoneme-hide-header ph-header-bar {
-  display: none;
+  max-height: 0;
+  overflow: hidden;
+}
+
+/* Accessibility: a reduced-motion OS preference forces every pane/bar
+   animation off, regardless of the in-app Animation speed setting (the
+   stylesheet !important outranks the inline --pane-anim the app sets). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --pane-anim: 0ms !important;
+  }
 }
 
 /* AI tag suggestions — dashed "ghost" chips awaiting approval. ✓ applies (the
@@ -1397,6 +1418,10 @@ ph-sidebar {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Clip, don't reflow: the content keeps its full laid-out width (set from
+     the sidebar-width pref by applyLayout) while the grid column animates, so
+     a slide reveals/conceals it instead of squishing and re-wrapping text. */
+  width: var(--sidebar-w, 200px);
 }
 /* Library + Tags scroll; the queue panel below stays pinned to the bottom.
    flex-basis:0 lets this area absorb all leftover height so the (content-sized)
