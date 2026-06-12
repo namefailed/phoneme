@@ -115,7 +115,7 @@ export class SectionPreview {
 
     this.container.innerHTML = `
       <div class="settings-section">
-        <h3>Live Preview</h3>
+        <h3>Live Preview <span class="beta-pill" title="Live preview works but isn't smooth yet — a dedicated overhaul phase is on the roadmap. Off by default.">BETA</span></h3>
         <p style="font-size:12px; color:var(--fg-muted); margin:0 0 4px;">
           Shows transcription as you speak. Give it its own fast model or API so it
           never slows down your final transcription.

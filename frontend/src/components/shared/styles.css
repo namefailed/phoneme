@@ -363,3 +363,19 @@ option {
   scroll-behavior: smooth;
   transition: opacity 0.18s ease;
 }
+
+/* Small "BETA" pill for features that ship default-off while they mature
+   (currently: Live Preview). Sits inline after a section/wizard heading. */
+.beta-pill {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
