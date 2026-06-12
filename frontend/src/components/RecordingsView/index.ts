@@ -370,6 +370,9 @@ export class RecordingsView {
     this.detailVisible = !this.detailVisible;
     this.animateLayout();
     this.applyLayout();
+    if (!this.detailVisible) {
+      this.list.clearSelection();
+    }
   }
 
   /** What the chrome looked like before zen, so exiting restores it exactly. */
@@ -405,6 +408,7 @@ export class RecordingsView {
       // f fully exits zen — even a chain that began in list zen.
       this.zenChained = false;
       this.restoreChrome();
+      this.list.clearSelection();
     }
     this.animateLayout();
     this.applyLayout();
@@ -457,6 +461,7 @@ export class RecordingsView {
     this.container.querySelector(".rv-detail")?.classList.remove("rv-pane-focused");
     if (this.focusedPane === "detail") this.focusedPane = "list";
     this.applyLayout();
+    this.list.clearSelection();
   }
 
   // ── Vim navigation (active only when `interface.vim_nav` is on; keyboard.ts
@@ -997,6 +1002,7 @@ export class RecordingsView {
     this.animateLayout();
     this.applyLayout();
     this.focusPane("detail2");
+    this.list.clearSelection();
   }
 
   /** Leave split mode: close the second pane (guarding unsaved edits there)
@@ -1019,6 +1025,7 @@ export class RecordingsView {
     this.animateLayout();
     this.applyLayout();
     if (this.focusedPane === "detail2") this.focusPane("detail");
+    this.list.clearSelection();
   }
 
   /** Drag-to-resize the left sidebar; width persists per device. */
