@@ -104,27 +104,64 @@ describe("showToast", () => {
     expect(toast.classList.contains("toast-out")).toBe(true);
   });
 
-  it("warning toast starts the auto-dismiss timer after 5000ms", () => {
+  it("warning toast starts the auto-dismiss timer after 6000ms", () => {
     vi.useFakeTimers();
     showToast("warn msg", "warning");
     const toast = document.querySelector(".toast")!;
-    vi.advanceTimersByTime(4999);
+    vi.advanceTimersByTime(5999);
     expect(toast.classList.contains("toast-out")).toBe(false);
     vi.advanceTimersByTime(1);
     expect(toast.classList.contains("toast-out")).toBe(true);
   });
 
-  it("error toast never auto-dismisses", () => {
+  it("error toast auto-dismisses after its long window (10s)", () => {
+    // Errors used to persist forever; now they time out like everything else
+    // (hover pausing the clock is what protects "I was reading it").
     vi.useFakeTimers();
-    showToast("persists", "error");
+    showToast("expires", "error");
     const toast = document.querySelector(".toast")!;
+    vi.advanceTimersByTime(9_999);
+    expect(toast.classList.contains("toast-out")).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(toast.classList.contains("toast-out")).toBe(true);
+  });
+
+  it("hovering pauses the auto-dismiss clock; leaving resumes it", () => {
+    vi.useFakeTimers();
+    showToast("hover me", "success"); // 3000ms window
+    const toast = document.querySelector<HTMLElement>(".toast")!;
+    vi.advanceTimersByTime(2000);
+    toast.dispatchEvent(new MouseEvent("mouseenter"));
+    // The clock is paused — far past the original deadline, still alive.
     vi.advanceTimersByTime(60_000);
     expect(toast.classList.contains("toast-out")).toBe(false);
+    toast.dispatchEvent(new MouseEvent("mouseleave"));
+    // ~1000ms remained when paused; the resume grace floor is 800ms.
+    vi.advanceTimersByTime(999);
+    expect(toast.classList.contains("toast-out")).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(toast.classList.contains("toast-out")).toBe(true);
+  });
+
+  it("renders a countdown bar on timed toasts but not sticky ones", () => {
+    showToast("timed", "info");
+    showToast("sticky", "warning", 0);
+    const toasts = document.querySelectorAll(".toast");
+    expect(toasts[0].querySelector(".toast-countdown")).not.toBeNull();
+    expect(toasts[1].querySelector(".toast-countdown")).toBeNull();
+  });
+
+  it("caps the stack: a burst drops the oldest toast", () => {
+    for (let i = 0; i < 8; i++) showToast(`msg ${i}`, "info", 0);
+    const msgs = [...document.querySelectorAll(".toast-msg")].map((el) => el.textContent);
+    expect(msgs.length).toBe(6);
+    expect(msgs[0]).toBe("msg 2"); // 0 and 1 were dropped
+    expect(msgs[5]).toBe("msg 7");
   });
 
   it("custom duration overrides the type default", () => {
     vi.useFakeTimers();
-    showToast("custom", "error", 1000); // error normally persists; custom overrides to 1 s
+    showToast("custom", "error", 1000); // shorter than the error default
     const toast = document.querySelector(".toast")!;
     vi.advanceTimersByTime(999);
     expect(toast.classList.contains("toast-out")).toBe(false);
