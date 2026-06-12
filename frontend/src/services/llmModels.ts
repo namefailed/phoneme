@@ -93,7 +93,7 @@ export async function fetchLlmModels(
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
 
-  let ids: string[] = [];
+  let ids: string[];
   if (provider === "ollama") {
     ids = (data.models || []).map((m: any) => m.name);
   } else {

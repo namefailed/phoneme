@@ -13,8 +13,6 @@ const PREVIEW_MODELS = [
   { filename: "ggml-base.en.bin", name: "Base (English)", size: "142 MB", desc: "A little more accurate live text, still light." },
   { filename: "ggml-small.en.bin", name: "Small (English)", size: "466 MB", desc: "Better live text; needs a bit more CPU." },
 ];
-const HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
-
 /** Friendly label for a downloaded whisper model filename. */
 function prettyModel(path: string): string {
   const name = path.replace(/\\/g, "/").split("/").pop() ?? path;

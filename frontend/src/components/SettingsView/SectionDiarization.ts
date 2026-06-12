@@ -29,7 +29,7 @@ export function diarizationMismatch(diar: string, stt: string): string | null {
 }
 
 export class SectionDiarization {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     private container: HTMLElement,
     private config: any,

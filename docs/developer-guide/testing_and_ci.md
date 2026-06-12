@@ -7,7 +7,7 @@ Phoneme CI runs on **windows-latest** for all jobs. Local parity commands match 
 | Job | Commands |
 |-----|----------|
 | **Rust** | `cargo fmt --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace -- --test-threads=1` |
-| **Frontend** | `pnpm install --frozen-lockfile` · `pnpm exec vitest run` · `pnpm type-check` · `pnpm build` |
+| **Frontend** | `pnpm install --frozen-lockfile` · `pnpm lint` · `pnpm exec vitest run` · `pnpm type-check` · `pnpm build` |
 | **Tauri build** | Debug MSI/build after Rust + frontend pass |
 
 Tauri build needs `frontend/dist` — CI creates an empty `frontend/dist` before clippy so the Tauri macro succeeds.
@@ -22,6 +22,7 @@ cargo test --workspace -- --test-threads=1
 
 cd frontend
 pnpm install
+pnpm lint
 pnpm exec vitest run
 pnpm type-check
 pnpm build
@@ -56,7 +57,30 @@ cd frontend
 pnpm exec vitest run src/utils/import.test.ts
 ```
 
-No ESLint job in CI — repo has no ESLint config.
+### Lint & format
+
+ESLint (flat config, `frontend/eslint.config.js`) and Prettier (`frontend/.prettierrc`) cover the frontend:
+
+```powershell
+cd frontend
+pnpm lint           # eslint src — CI runs this; must exit 0
+pnpm lint:fix       # apply safe autofixes
+pnpm format         # prettier --write src
+pnpm format:check   # prettier --check src
+```
+
+Errors vs warnings: anything that is a likely bug or dead code (unused vars, useless
+escapes/assignments, malformed lit templates) is an **error** and fails `pnpm lint` — fix it.
+Style-of-the-moment rules we are knowingly living with are **warnings**; today that is only
+`@typescript-eslint/no-explicit-any` (the daemon config object is passed as `any` by design —
+its shape is owned by the Rust side). Prefix intentionally-unused params with `_`.
+
+Lint is deliberately not type-aware — `pnpm type-check` already runs `tsc`, so the
+type-checked typescript-eslint variants would only slow CI down for no extra coverage.
+
+Prettier matches the existing style (100 cols, double quotes, trailing commas, LF); it is for
+new code and editor integration. Don't reformat whole files you aren't otherwise touching —
+that buries real changes in noise.
 
 ## Manual smoke test
 

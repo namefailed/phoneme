@@ -171,7 +171,6 @@ export class RecordingsView {
     `;
 
     const listRoot = this.container.querySelector<HTMLElement>("#rv-list-inner")!;
-    const detailRoot = this.container.querySelector<HTMLElement>("#rv-detail")!;
     const splitRoot = this.container.querySelector<HTMLElement>("#rv-split")!;
     this.bulkBarRoot = this.container.querySelector<HTMLElement>("#rv-bulk-bar");
 

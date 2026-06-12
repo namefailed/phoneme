@@ -6,7 +6,7 @@ import { escapeAttr } from "../../utils/format";
 type KeywordRule = { pattern: string; command: string; case_sensitive: boolean };
 
 export class SectionHook {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     container: HTMLElement,
     private config: any,
@@ -58,10 +58,10 @@ export class SectionHook {
                   <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
                 </optgroup>
                 <optgroup label="Files &amp; Notes">
-                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\VoiceNotes.md') -Value $d.transcript&quot;">Append to VoiceNotes.md</option>
-                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $ts=(Get-Date -Format 'yyyy-MM-dd HH:mm'); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\phoneme.log') -Value &quot;&quot;&quot;[$ts] $($d.transcript)&quot;&quot;&quot;&quot;">Append to timestamped log</option>
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\VoiceNotes.md') -Value $d.transcript&quot;">Append to VoiceNotes.md</option>
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $ts=(Get-Date -Format 'yyyy-MM-dd HH:mm'); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\phoneme.log') -Value &quot;&quot;&quot;[$ts] $($d.transcript)&quot;&quot;&quot;&quot;">Append to timestamped log</option>
                   <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\todo.txt') -Value &quot;&quot;&quot;[ ] $($d.transcript)&quot;&quot;&quot;&quot;">Add to todo.txt</option>
-                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $date=(Get-Date -Format 'yyyy-MM-dd'); $obsidian=Join-Path $env:USERPROFILE 'Documents\Obsidian\Daily\'+$date+'.md'; Add-Content -Path $obsidian -Value &quot;&quot;&quot;\`n## Voice Note\`n$($d.transcript)&quot;&quot;&quot;&quot;">Append to Obsidian daily note</option>
+                  <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); $date=(Get-Date -Format 'yyyy-MM-dd'); $obsidian=Join-Path $env:USERPROFILE 'Documents\\Obsidian\\Daily\\'+$date+'.md'; Add-Content -Path $obsidian -Value &quot;&quot;&quot;\`n## Voice Note\`n$($d.transcript)&quot;&quot;&quot;&quot;">Append to Obsidian daily note</option>
                 </optgroup>
                 <optgroup label="Web &amp; Webhooks">
                   <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Invoke-RestMethod -Uri 'YOUR_DISCORD_WEBHOOK_URL' -Method Post -Body (@{content=$d.transcript}|ConvertTo-Json) -ContentType 'application/json'&quot;">Discord webhook</option>

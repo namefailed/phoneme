@@ -21,7 +21,7 @@ const MODELS = [
 ];
 
 export class SectionWhisper {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     private container: HTMLElement,
     private config: any,

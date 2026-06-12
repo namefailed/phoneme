@@ -274,7 +274,9 @@ export class HeaderBarElement extends LitElement {
       // here (a per-track `recording_stopped` re-syncs status), so without this
       // the ticker would keep the final partial on screen after the meeting ends.
       if (!this.isMeeting && !this.isRecording) this.clearPreview();
-    } catch {}
+    } catch {
+      // Best-effort sync — the daemon may simply not be up yet.
+    }
   }
 
   /**
@@ -685,8 +687,8 @@ export class HeaderBarElement extends LitElement {
           </style>
           <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
             style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
-          <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings & actions" aria-haspopup="menu"
-            aria-expanded=${this.settingsMenuOpen} title="Quick settings & actions"
+          <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings &amp; actions" aria-haspopup="menu"
+            aria-expanded=${this.settingsMenuOpen} title="Quick settings &amp; actions"
             style="padding:6px 7px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
             @click=${this.toggleSettingsMenu}><svg class="ph-caret-ico ${this.settingsMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
           <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}

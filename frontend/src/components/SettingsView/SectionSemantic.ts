@@ -11,7 +11,7 @@ import { showToast } from "../../utils/toast";
  * everything with the current model — run it after switching models.
  */
 export class SectionSemantic {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     container: HTMLElement,
     private config: any,

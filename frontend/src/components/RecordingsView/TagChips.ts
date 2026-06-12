@@ -1,5 +1,5 @@
 import { errText } from "../../utils/error";
-import { LitElement, html, css, PropertyValues } from 'lit';
+import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { addTag, attachTag, detachTag, listAllTags, tagsFor, updateTag, getRecording, suggestTags, approveTagSuggestion, dismissTagSuggestion, type Tag } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
