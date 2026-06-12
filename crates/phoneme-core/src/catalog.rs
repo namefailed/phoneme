@@ -877,7 +877,7 @@ impl Catalog {
     /// The query vector is the **mean of the source's chunk vectors**,
     /// L2-renormalized. The centroid captures what the whole note is about,
     /// while candidates are still scored by their own best-matching chunk via
-    /// [`Self::vector_ranking`] — the exact retrieval path a typed semantic
+    /// `vector_ranking` — the exact retrieval path a typed semantic
     /// query takes — so a long candidate ranks on its closest idea instead of
     /// an averaged blur. A source that only has a legacy whole-recording
     /// vector uses that vector directly (it *is* that recording's mean).
