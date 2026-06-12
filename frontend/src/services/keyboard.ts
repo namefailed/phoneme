@@ -32,7 +32,8 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "?", label: "Show this help" },
       { combo: "g then l", label: "Go to Library" },
       { combo: "g then s", label: "Go to Settings" },
-      { combo: "g then d", label: "Go to Doctor" },
+      { combo: "g then d", label: "Keyboard into the open recording" },
+      { combo: "g then D", label: "Go to Doctor" },
       { combo: "g then /", label: "Highlight the search bar (h/l roam the header)" },
       { combo: "g then T", label: "Open the Tag Manager" },
       { combo: "g then P", label: "Managers → Profiles" },
@@ -97,6 +98,7 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "j  k (in menu)", label: "Choose an option — Enter selects, Esc closes" },
     { combo: "g g", label: "Jump to the first recording" },
     { combo: "G", label: "Jump to the last recording" },
+    { combo: "z z", label: "Center the list on the cursor row" },
     { combo: "Enter", label: "Open recording · apply sidebar filter" },
     { combo: "j  k (sidebar)", label: "Filters · section headers · the queue's items" },
     { combo: "h  l (sidebar)", label: "Across a queue row's buttons (l past the end → list)" },
@@ -125,6 +127,8 @@ let pendingG = false;
 let pendingGTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingD = false;
 let pendingDTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingZ = false;
+let pendingZTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Whether the system-wide vim navigation layer is active (`interface.vim_nav`). */
 let vimNav = false;
@@ -278,6 +282,14 @@ function clearPendingD() {
   }
 }
 
+function clearPendingZ() {
+  pendingZ = false;
+  if (pendingZTimer) {
+    clearTimeout(pendingZTimer);
+    pendingZTimer = null;
+  }
+}
+
 function openHelp() {
   if (helpOpen) return;
   helpOpen = true;
@@ -390,7 +402,9 @@ function onKeyDown(e: KeyboardEvent) {
     clearPendingG();
     if (e.key === "l") { e.preventDefault(); navigate("recordings"); return; }
     if (e.key === "s") { e.preventDefault(); navigate("settings"); return; }
-    if (e.key === "d") { e.preventDefault(); navigate("doctor"); return; }
+    // g d — keyboard into the open recording's detail pane; g D — the Doctor.
+    if (e.key === "d") { e.preventDefault(); dispatchVim("focus-detail"); return; }
+    if (e.key === "D") { e.preventDefault(); navigate("doctor"); return; }
     // Capital chords jump to the managers: g T = quick Tag Manager popup,
     // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches.
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
@@ -414,6 +428,16 @@ function onKeyDown(e: KeyboardEvent) {
     if (vimNav && e.key === "d") {
       e.preventDefault();
       dispatchVim("delete");
+      return;
+    }
+  }
+
+  // "z" prefix (vim): zz centers the list viewport on the cursor row.
+  if (pendingZ) {
+    clearPendingZ();
+    if (vimNav && e.key === "z") {
+      e.preventDefault();
+      dispatchVim("list-center");
       return;
     }
   }
@@ -645,6 +669,15 @@ function onKeyDown(e: KeyboardEvent) {
           e.preventDefault();
           pendingD = true;
           pendingDTimer = setTimeout(clearPendingD, 1000);
+          return;
+        }
+        break;
+      case "z":
+        // zz (center on cursor) — armed only while the list drives the keys.
+        if (activeWithin(".rv-list")) {
+          e.preventDefault();
+          pendingZ = true;
+          pendingZTimer = setTimeout(clearPendingZ, 1000);
           return;
         }
         break;

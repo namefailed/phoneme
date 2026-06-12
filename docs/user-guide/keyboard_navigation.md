@@ -13,7 +13,8 @@ vim-style pane navigation is opt-in: **Settings → Appearance → Vim navigatio
 | `?` | Open the shortcut cheat sheet |
 | `g` then `l` | Go to the Library |
 | `g` then `s` | Go to Settings |
-| `g` then `d` | Go to the Doctor |
+| `g` then `d` | Put the keyboard in the open recording's pane |
+| `g` then `D` | Go to the Doctor |
 | `g` then `/` | Highlight the search bar (`h`/`l` then roam the header) |
 | `g` then `T` | Open the Tag Manager (quick popup) |
 | `g` then `P` | Settings → Managers → Profiles |
@@ -40,6 +41,7 @@ The list zoom is clamped to 60–200% and remembered per device.
 | `\` | With exactly **two** recordings selected: open them **side by side** |
 | `d` `d` (vim nav) | Delete the focused recording (with Undo) |
 | `g g` / `G` (vim nav) | Jump to the first / last row |
+| `z z` (vim nav) | Center the list on the cursor row |
 | `Esc` | Clear the multi-selection |
 
 ## Bulk actions bar (shown while recordings are selected)
