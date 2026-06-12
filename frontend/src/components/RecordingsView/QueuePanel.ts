@@ -1,7 +1,8 @@
 import { LitElement, html, PropertyValues } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, getQueueCounts, clearFailed, skipCurrentStage, type QueueEntry } from "../../services/ipc";
+import { listQueue, cancelQueued, reorderQueue, setQueuePaused, queuePaused, cancelAllQueued, cancelProcessing, getRecording, getQueueCounts, skipCurrentStage, type QueueEntry } from "../../services/ipc";
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
+import { openFailedPanel, recordFailureDetail } from "./FailedPanel";
 import { formatTime, formatDuration } from "../../utils/format";
 import { showToast } from "../../utils/toast";
 import { errText } from "../../utils/error";
@@ -26,8 +27,6 @@ export class QueuePanelElement extends LitElement {
   /** Count of payloads quarantined in the inbox `failed/` folder (permanent
    *  transcription/hook errors, corrupt payloads, cancels). 0 hides the badge. */
   @state() private failed = 0;
-  /** True while a clear-failed request is in flight (disables the badge). */
-  @state() private clearingFailed = false;
   private unsub: (() => void) | null = null;
   private pollTimer: number | null = null;
   /** Snapshot of the last-rendered queue, to skip no-op re-renders (see load). */
@@ -68,6 +67,14 @@ export class QueuePanelElement extends LitElement {
       if (event.event === "pipeline_stage_changed") {
         void this.onStageChanged(event.id, event.stage);
         return;
+      }
+      // Capture the error text while it's on the wire — the catalog doesn't
+      // store it, and the failure-details panel shows it for this session.
+      if (event.event === "transcription_failed") {
+        recordFailureDetail(event.id, "transcribe", event.error);
+      }
+      if (event.event === "hook_failed") {
+        recordFailureDetail(event.id, "hook", event.error);
       }
       // A re-run's stage tracking ends when its completion event fires (these
       // don't all go through the inbox, so the stage map is how re-runs clear).
@@ -158,24 +165,11 @@ export class QueuePanelElement extends LitElement {
     }
   }
 
-  /** Clear the inbox `failed/` quarantine after confirmation. */
-  private async clearFailedItems(e: Event) {
-    e.stopPropagation();
-    if (this.failed === 0 || this.clearingFailed) return;
-    const n = this.failed;
-    if (!window.confirm(`Dismiss ${n} failed item${n === 1 ? "" : "s"} from the queue? This clears the failed marker only — the recordings and their transcripts are untouched.`)) {
-      return;
-    }
-    this.clearingFailed = true;
-    try {
-      const removed = await clearFailed();
-      this.failed = 0;
-      showToast(`Cleared ${removed} failed item${removed === 1 ? "" : "s"}`, "info");
-    } catch (err) {
-      showToast(`Couldn't clear failed: ${errText(err)}`, "error");
-    } finally {
-      this.clearingFailed = false;
-    }
+  /** Open the failure-details panel (what failed, why, retry/open per row).
+   *  Clearing the quarantine lives in the panel's footer now. */
+  private showFailedDetails(e: Event) {
+    e.stopPropagation(); // don't fold the panel
+    void openFailedPanel();
   }
 
   /** Handle a live pipeline-stage event: update the stage label and, for an
@@ -347,9 +341,9 @@ export class QueuePanelElement extends LitElement {
             ? html`<span class="queue-count">${pending.length}${active ? ` +${active}⟳` : ""}</span>`
             : html`<span class="queue-count ${this.paused ? "paused" : "idle"}">${this.paused ? "paused" : "idle"}</span>`}
           ${this.failed > 0
-            ? html`<button class="queue-failed" ?disabled=${this.clearingFailed}
-                title=${`${this.failed} item${this.failed === 1 ? "" : "s"} failed to transcribe — click to dismiss (transcripts are kept)`}
-                @click=${(e: Event) => this.clearFailedItems(e)}>⚠ ${this.failed} failed</button>`
+            ? html`<button class="queue-failed"
+                title=${`${this.failed} item${this.failed === 1 ? "" : "s"} failed — click for details (what failed, why, retry)`}
+                @click=${(e: Event) => this.showFailedDetails(e)}>⚠ ${this.failed} failed</button>`
             : null}
           ${!this.collapsed
             ? html`
