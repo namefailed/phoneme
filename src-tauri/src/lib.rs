@@ -8,6 +8,7 @@ mod config_io;
 mod doctor;
 mod events;
 mod overlay;
+mod similar;
 mod tray;
 mod wizard;
 
@@ -286,6 +287,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_recordings,
             commands::semantic_search,
+            similar::more_like_this,
             commands::reembed_all,
             commands::get_recording,
             commands::list_meeting,

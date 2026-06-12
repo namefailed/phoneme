@@ -12,6 +12,7 @@ import {
   type MergedBlock,
   type ChronoBlock,
 } from "./mergeMeeting";
+import { applyMoreLikeThis } from "../../state/filter";
 
 /** Distinct, theme-agnostic colors so each speaker is easy to follow at a glance.
  *  Indexed by the 1-based speaker label; wraps for meetings with many speakers. */
@@ -206,6 +207,17 @@ export class MergedConversationDetail extends LitElement {
     }
   }
 
+  /** "More like this" for the whole meeting: seed the similarity search from
+   *  one transcribed track. Track choice barely matters — the daemon excludes
+   *  the meeting by its dedupe key (so neither of THIS meeting's tracks comes
+   *  back) and the tracks' transcripts are near-identical — so take the first
+   *  track that has a transcript. The pill is labelled with the meeting name. */
+  private handleMoreLikeThis() {
+    const seed = this.recordings.find((r) => (r.transcript ?? "").trim()) ?? this.recordings[0];
+    if (!seed) return;
+    applyMoreLikeThis(seed.id, this.recordings[0]?.meeting_name || null);
+  }
+
   private async handleExport() {
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
@@ -275,6 +287,7 @@ export class MergedConversationDetail extends LitElement {
                 : nothing}
               <button class="inline-button" @click=${this.handleCopy}>${this.copyLabel}</button>
               <button class="inline-button" @click=${this.handleExport}>⬇ Export</button>
+              <button class="inline-button" title="More like this — fill the list with recordings about similar things, found from this meeting's semantic index" @click=${this.handleMoreLikeThis}>✨ Similar</button>
             </div>
           </div>
           <div class="merged-meta">

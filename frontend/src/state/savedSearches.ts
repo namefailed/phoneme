@@ -104,7 +104,8 @@ export function updateSavedSearchFilter(id: string, filter: UiFilter): SavedSear
 /** A short, human description of what a saved filter matches, for the menu. */
 export function describeFilter(f: UiFilter): string {
   const parts: string[] = [];
-  if (f.search) parts.push(`"${f.search}"${f.semantic ? " ✨" : ""}`);
+  if (f.like_id) parts.push(`~similar: ${f.like_label || f.like_id}`);
+  else if (f.search) parts.push(`"${f.search}"${f.semantic ? " ✨" : ""}`);
   else if (f.semantic) parts.push("✨ semantic");
   if (f.kind && f.kind !== "all") {
     parts.push(f.kind === "meeting" ? "meetings" : f.kind === "favorite" ? "favorites" : "single-track");
