@@ -230,14 +230,13 @@ export class BulkActionBarElement extends LitElement {
     this.callbacks.onRefresh();
   }
 
-  /** Open the two selected recordings side by side (vim editors). Only
+  /** Open the two selected recordings in SPLIT mode (two full panes). Only
    *  meaningful with exactly two selected — the button only shows then, and the
-   *  `\` shortcut is gated the same way. */
+   *  `\` shortcut is gated the same way. RecordingsView owns the panes. */
   private async openSideBySide() {
     if (this.selected.size !== 2) return;
     const [a, b] = [...this.selected];
-    const { openSideBySide } = await import("./SideBySide");
-    await openSideBySide(a, b);
+    window.dispatchEvent(new CustomEvent("phoneme:open-split", { detail: { a, b } }));
   }
 
   /** Open the unified Models modal in one-shot mode for the whole selection —

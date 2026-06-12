@@ -38,7 +38,7 @@ The list zoom is clamped to 60–200% and remembered per device.
 | `Shift + Enter` | On a meeting title: open the **merged conversation view** |
 | `Space` | Toggle multi-select (on a meeting title: all of its tracks) |
 | `Shift + ↑/↓` | Extend the multi-selection |
-| `\` | With exactly **two** recordings selected: open them **side by side** |
+| `\` | **Split mode**: with a recording open, splits with the cursor row; with exactly two selected, opens both — two full panes (independent editing, draggable divider, double-click = 50/50). `Esc` closes the second pane |
 | `d` `d` (vim nav) | Delete the focused recording (with Undo) |
 | `g g` / `G` (vim nav) | Jump to the first / last row |
 | `z z` (vim nav) | Center the list on the cursor row |

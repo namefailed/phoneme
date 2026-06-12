@@ -56,7 +56,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "Shift + Enter", label: "Meeting title → open the merged view" },
       { combo: "Space", label: "Multi-select (on a meeting title: all tracks)" },
       { combo: "Shift + ↑ / ↓", label: "Extend the selection" },
-      { combo: "\\", label: "Two selected → open them side by side" },
+      { combo: "\\", label: "Split: cursor row (or two selected) beside the open one" },
       { combo: "Esc", label: "Clear the multi-selection" },
     ],
   },
