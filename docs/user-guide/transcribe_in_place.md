@@ -15,13 +15,30 @@ Transcribe-in-Place allows you to use Phoneme as a system-wide dictation engine.
 
 Phoneme will silently record your voice, pass it to your active transcription engine (e.g. the blazing fast Native Whisper engine), and instantly type the result into your active window.
 
-## ⚙️ How it works under the hood
+## ⚡ The fast lane
 
-When the `Transcribe-in-Place` hotkey is released:
-1. The daemon tags the recording with an `in_place: true` flag in the SQLite catalog.
-2. The transcript pipeline finishes.
-3. Because the `in_place` flag is set, the daemon triggers a simulated OS-level keyboard event sequence. It essentially "pastes" the text by emitting keydown/keyup events for every character in the transcript.
-4. The recording is saved to your history just like a normal recording, meaning if you dictated something into a chat window but accidentally closed it, you can always open the Phoneme UI to retrieve your text!
+Dictations don't go through the normal processing pipeline. When you release the
+hotkey, the recording takes a **dedicated fast lane**:
 
-> [!TIP]
-> Combine Transcribe-in-Place with the LLM Post-Processing feature to automatically clean up stutters before it gets typed into your window!
+1. It **skips the queue** — even if a meeting is mid-transcription, your
+   dictation transcribes immediately.
+2. It uses the **fastest available model**: the Live Preview's dedicated fast
+   model when that's enabled, else the main transcription provider (or a
+   dedicated `[in_place].stt` provider in the config).
+3. A **zero-latency polish** cleans the text before it lands: filler words
+   ("um", "uh") and whisper's non-speech tags are stripped, stutter-doubled
+   words collapsed, capitalization and end punctuation fixed. No AI round-trip
+   — it's instant. (Settings → Capture → Dictation can switch this to raw
+   output, or to a full **AI cleanup** pass if you prefer polish over speed.)
+4. The text is **typed** at your cursor — or **pasted** via the clipboard
+   (near-instant for long text, with your previous clipboard restored) when
+   "Insert text by" is set to Pasting.
+5. Only **after** the text has landed does the recording save to your library
+   (searchable, with audio) — so if you dictated into a chat you accidentally
+   closed, the text is still in Phoneme. Turn "Keep dictations in the library"
+   off for fully ephemeral dictation.
+
+Summaries, auto-tags, and hooks do **not** run for dictations on the fast
+lane. If you want dictations to behave exactly like normal recordings (every
+configured step, typed only at the very end), enable **Run the full pipeline**
+in Settings → Capture → Dictation.

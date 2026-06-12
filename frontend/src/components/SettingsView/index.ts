@@ -24,6 +24,7 @@ import { SectionTags } from "./SectionTags";
 import { SectionProfiles } from "./SectionProfiles";
 import { SectionSavedSearches } from "./SectionSavedSearches";
 import { SectionAutoTag } from "./SectionAutoTag";
+import { SectionInPlace } from "./SectionInPlace";
 import "./styles.css";
 
 // ── Settings-search helpers ────────────────────────────────────────────────
@@ -237,6 +238,7 @@ export class SettingsViewElement extends LitElement {
       { tab: "transcription", label: "Transcription", mount: (h) => { new SectionPreview(h, this.config); } },
       { tab: "transcription", label: "Transcription", mount: (h) => { new SectionDiarization(h, this.config); } },
       { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, this.config); } },
+      { tab: "capture", label: "Capture", mount: (h) => { new SectionInPlace(h, this.config); } },
       { tab: "capture", label: "Capture", mount: (h) => { new SectionHotkey(h, this.config); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, this.config); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, this.config); } },
@@ -280,6 +282,7 @@ export class SettingsViewElement extends LitElement {
           break;
         case "capture":
           new SectionRecording(createSubHost(), this.config);
+          new SectionInPlace(createSubHost(), this.config);
           new SectionHotkey(createSubHost(), this.config);
           break;
         case "appearance":
