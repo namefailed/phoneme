@@ -23,8 +23,11 @@ hotkey, the recording takes a **dedicated fast lane**:
 1. It **skips the queue** — even if a meeting is mid-transcription, your
    dictation transcribes immediately.
 2. It uses the **fastest available model**: the Live Preview's dedicated fast
-   model when that's enabled, else the main transcription provider (or a
-   dedicated `[in_place].stt` provider in the config).
+   model when that's enabled, else the main transcription provider. Want
+   dictation on its own engine? **Settings → Capture → Dictation → Dictation
+   model** switches from Automatic to a dedicated provider — a fast cloud API
+   like Groq, or a local whisper server that's already running (the main one
+   or the preview's — dictation never starts a third).
 3. A **zero-latency polish** cleans the text before it lands: filler words
    ("um", "uh") and whisper's non-speech tags are stripped, stutter-doubled
    words collapsed, capitalization and end punctuation fixed. No AI round-trip
