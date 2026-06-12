@@ -216,6 +216,22 @@ export class SectionInterface {
           </div>
         </div>
 
+        <div class="settings-field">
+          <label>Animation speed</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <select id="anim-speed">
+              <option value="off" ${config.interface.animation_speed === "off" ? "selected" : ""}>Off — instant</option>
+              <option value="fast" ${config.interface.animation_speed === "fast" ? "selected" : ""}>Fast</option>
+              <option value="normal" ${(config.interface.animation_speed ?? "normal") === "normal" ? "selected" : ""}>Normal</option>
+              <option value="slow" ${config.interface.animation_speed === "slow" ? "selected" : ""}>Slow</option>
+            </select>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              How fast panes slide when shown/hidden (the sidebar <kbd>Ctrl+B</kbd>, the detail pane
+              <kbd>Ctrl+\\</kbd>, and focus mode <kbd>f</kbd>). "Off" makes every toggle instant.
+            </span>
+          </div>
+        </div>
+
         <div class="settings-field" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Visible Columns</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
@@ -239,6 +255,12 @@ export class SectionInterface {
       </div>
     `;
     bindFieldEvents(this.container, config);
+
+    this.container
+      .querySelector<HTMLSelectElement>("#anim-speed")
+      ?.addEventListener("change", (e) => {
+        config.interface.animation_speed = (e.target as HTMLSelectElement).value;
+      });
 
     this.container
       .querySelector<HTMLButtonElement>("#reset-ui-prefs")

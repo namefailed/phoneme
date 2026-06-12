@@ -14,6 +14,7 @@ vim-style pane navigation is opt-in: **Settings → Appearance → Vim navigatio
 | `g` then `l` | Go to the Library |
 | `g` then `s` | Go to Settings |
 | `g` then `d` | Go to the Doctor |
+| `g` then `/` | Highlight the search bar (`h`/`l` then roam the header) |
 | `g` then `T` | Open the Tag Manager (quick popup) |
 | `g` then `P` | Settings → Managers → Profiles |
 | `g` then `S` | Settings → Managers → Saved searches |

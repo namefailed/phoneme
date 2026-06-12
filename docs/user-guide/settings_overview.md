@@ -63,7 +63,7 @@ Enable and configure global combos for record, transcribe-in-place, and meeting 
 
 ![Interface settings](../screenshots/settings-interface.png)
 
-Theme (Catppuccin Mocha default), 24-hour time, visible list columns (reorderable / toggleable), column widths, and title-bar stripping.
+Theme (Catppuccin Mocha default), 24-hour time, visible list columns (reorderable / toggleable), column widths, title-bar stripping, vim navigation, and **animation speed** for pane show/hide (Off / Fast / Normal / Slow — Off makes the sidebar, detail-pane, and focus-mode toggles instant).
 
 ![Editor settings](../screenshots/settings-editor.png)
 
