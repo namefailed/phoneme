@@ -59,7 +59,7 @@ flowchart LR
     MG --> V[Meeting View]
 ```
 
-In the recordings list, a meeting's two tracks are grouped under one entry. Click the meeting's **group header** to open the **merged conversation** view: a single, read-only reading of the whole meeting, with each track rendered as a labelled section — **🎤 Microphone** (you) and **🔊 System audio** (everyone else) — and the diarizer's `[Speaker N]` turns surfaced inside. A toolbar offers **Copy** and **Export** of the merged text. To edit a single track (full editor, waveform, notes, re-transcribe), expand the group and click that track's row instead.
+In the recordings list, a meeting's two tracks are grouped under one entry. Click the meeting's **group header** to open the **merged conversation** view: a single, read-only reading of the whole meeting. When both tracks carry segment timing (anything transcribed since segment capture landed), the view is a **chronological chat timeline** — your mic turns on the left, the meeting's on the right, every turn stamped with its clock offset, in the real order people spoke. Older meetings without timing fall back to the by-source layout (each track as a labelled section — **🎤 Microphone**, then **🔊 System audio**). A toolbar offers **Copy** and **Export** of the merged text (timestamped lines in chronological mode). To edit a single track (full editor, waveform, notes, re-transcribe), expand the group and click that track's row instead.
 
 ### 🕒 Dual timeline (side-by-side, synced)
 
@@ -79,10 +79,9 @@ button in the detail pane's transcript box.
 
 > [!NOTE]
 > Segment timing is captured at transcription time, so recordings transcribed
-> before this feature have no timeline yet — hit **Re-run → Transcribe** on a
-> track to backfill it. The merged view still orders tracks by source (mic,
-> then system); a single chronologically interleaved transcript is the next
-> step on the [roadmap](../../ROADMAP.md).
+> before this feature have no timeline yet — hit **Re-run → Transcribe** on
+> each track to backfill it; the merged view then upgrades itself from the
+> by-source layout to the chronological timeline automatically.
 
 
 ### 🗣️ Adding Speaker Diarization

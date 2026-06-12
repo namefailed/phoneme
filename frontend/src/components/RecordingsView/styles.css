@@ -2358,3 +2358,50 @@ ph-sidebar .queue-item-main.kbd-cursor {
   line-height: 1.6;
   padding: 10px 12px;
 }
+
+/* ── Chronological merged timeline (chat-style) ─────────────────────────────
+   Used when every track has persisted segment timing: mic ("you") turns sit
+   left, the meeting's turns sit right, each stamped with its clock offset. */
+.chrono-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chrono-row {
+  display: flex;
+  justify-content: flex-start;
+}
+.chrono-row--right { justify-content: flex-end; }
+.chrono-bubble {
+  max-width: 78%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--spk, var(--border-subtle));
+}
+.chrono-row--right .chrono-bubble {
+  border-left: 1px solid var(--border-subtle);
+  border-right: 3px solid var(--spk, var(--border-subtle));
+  background: var(--bg-raised);
+}
+.chrono-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.chrono-time {
+  font-family: var(--font-mono, monospace);
+  color: var(--fg-faded);
+}
+.chrono-source { font-size: 12px; }
+.chrono-text {
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.merged-meta-pill--chrono { color: var(--accent); }

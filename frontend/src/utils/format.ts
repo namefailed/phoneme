@@ -1,5 +1,18 @@
 /** Shared formatting utilities used across RecordingsList, RecordingDetail, and TagChips. */
 
+/** A timeline offset in milliseconds as a clock position: `m:ss`, or
+ *  `h:mm:ss` past an hour. Used by the timeline views' time gutters (distinct
+ *  from `formatDuration`, which renders lengths like "5m03s"). */
+export function fmtClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+}
+
 /** Format a duration in milliseconds as a human-readable string. */
 export function formatDuration(ms: number): string {
   // Under a minute: precise seconds (e.g. "46.2s").
