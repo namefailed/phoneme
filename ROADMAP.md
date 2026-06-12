@@ -196,9 +196,9 @@ same-user malware or a malicious IPC client. Ordered by priority.*
   unless `[webhook] allow_private_network = true`, public targets HTTPS-only
   unless `[webhook] allow_http = true`; hostnames resolve-and-classify, redirects
   never followed (`phoneme-core::webhook`). HMAC signing still later. *(S-H1)*
-- [ ] **Baseline CSP + narrowed asset/fs scopes** (`tauri.conf.json` is `csp:null`,
+- [x] **Baseline CSP + narrowed asset/fs scopes** — *shipped*: real prod CSP + devCsp, asset scope narrowed to the audio + app-data dirs, unused window capabilities dropped. Was: (`tauri.conf.json` is `csp:null`,
   `$HOME/**`). *(S-H4 — also tracked under Long Term → Security)*
-- [ ] **Model-download checksums** — pin SHA-256 before extracting the whisper zip. *(S-H7)*
+- [x] **Model-download checksums** — *shipped*: every wizard artifact pinned (HF lfs.oid / release digest), zip verified before extraction, unpinned allowed-host URLs fail closed. *(S-H7)*
 
 **Hygiene**
 - [x] **`cargo audit` + `pnpm audit` in CI** (non-blocking advisory job; gate core crates later). *(also in tech-debt backlog)*
@@ -276,7 +276,7 @@ persona actually wants — still needs the alignment + timestamp substrate below
   the alignment + word-timestamp prerequisites above.
 - [ ] **Diarization quality** *(prereq for named speakers — don't build naming UX on wrong labels)*. Each item below was verified against `diarization.rs` / `transcription.rs` and the `speakrs 0.4.2` source; verdicts noted inline.
   - [x] **Fix the `to_segments` frame scaling, then coalesce the turns** ✓ *(shipped)*. #23 first dropped the old manual `result.discrete_diarization.to_segments(1.0, 1.0)`, whose `(1.0, 1.0)` `frame_step`/`frame_duration` (vs speakrs' real `FRAME_STEP_SECONDS = 0.016875` / `FRAME_DURATION_SECONDS = 0.0619375`) inflated every turn ~59× and scrambled `assign_speakers`. But `result.segments` is **not** usable raw: speakrs builds it via `to_segments(…) + merge_segments(merge_gap)` with `PipelineConfig::default().merge_gap == 0.0` — a no-op merge — and emits **per-speaker** spans sorted only by start, so one speaker's speech fragments on every micro-pause and different speakers' spans interleave → flickering `[Speaker N]` labels. Now `clean_speaker_spans` sorts, drops zero-length spans, and merges adjacent same-speaker turns under 0.25 s, and `speaker_for_segment` attributes each transcript line by **max temporal overlap** (the old midpoint-first-covering-match could collapse an overlapped line onto whichever turn merely started first). *(diarization.rs; 7 new unit tests, one verified to fail under the old logic.)*
-  - [ ] **Cache the pipeline in `AppState`** *(confirmed)*. `run_local_diarization` calls `OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)` on *every* transcription (`diarization.rs:157`), reloading the ~500 MB seg+emb ONNX models each time; `AppState` (`app_state.rs`) holds no diarizer. Hold one long-lived pipeline fed via speakrs' background queue — `OwnedDiarizationPipeline::into_queued()` returns a `(QueueSender, QueueReceiver)` (`pipeline.rs:179`) — so model load happens once at startup. *(transcription.rs:352 `diarize_transcript` → diarization.rs:154)*
+  - [x] **Cache the pipeline in `AppState`** — *shipped* (lazily, config-keyed, inside `Transcriber`; loads once on first diarized run instead of at startup). Was: `run_local_diarization` calls `OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)` on *every* transcription (`diarization.rs:157`), reloading the ~500 MB seg+emb ONNX models each time; `AppState` (`app_state.rs`) holds no diarizer. Hold one long-lived pipeline fed via speakrs' background queue — `OwnedDiarizationPipeline::into_queued()` returns a `(QueueSender, QueueReceiver)` (`pipeline.rs:179`) — so model load happens once at startup. *(transcription.rs:352 `diarize_transcript` → diarization.rs:154)*
   - [ ] **Track-aware Meeting Mode** *(confirmed)*. `diarize_transcript` runs speakrs identically for every recording; there is no branch on `MeetingTrack::Mic` vs `System` (transcription.rs only sees a path + segments, never the track; the track lives in the catalog row, recorder.rs:854–857). For meetings, label the mic track **"You"** without running speakrs at all, and only diarize the system/loopback track — halves diarizer work and avoids spurious multi-speaker labels on a single-mic track. *(transcription.rs:352; recorder.rs `MeetingTrack::Mic/System`)*
   - [ ] **Word-level alignment instead of 1 s segments** *(confirmed)*. Today's path is whisper **segments** × diarization turns: the local provider requests `timestamp_granularities[]=segment` (transcription.rs:285) and `assign_speakers` attributes each whole segment by its midpoint (diarization.rs:90). Request `timestamp_granularities[]=word` from whisper-server and assign each *word* to a speaker via the per-frame activation matrix — `DiscreteDiarization` derefs to a public `Array2<f32>` of frame activations (`pipeline/types/data.rs:76`). Pairs with the v1.9 word-timestamp substrate above. *(transcription.rs:283–339, diarization.rs:77–115)*
   - [ ] **Expose `PipelineConfig` tunables in Settings** *(refined)*. speakrs exposes `merge_gap`, `speaker_keep_threshold`, `reconstruct_method`, and nested `binarize` / `ahc` / `vbx` configs (`pipeline/config.rs`). Caveat: `OwnedDiarizationPipeline::run` uses the pipeline's `default_config`; applying custom values needs `run_with_config` / `into_queued_with_config` / `new_with_config`. **ExecutionMode has no `CpuFast`** — the only `*-fast` modes are `CoreMlFast` / `CudaFast` (`inference.rs:47`), neither available on Windows/CPU — so ship the `merge_gap`/threshold knobs, not a Cpu/CpuFast toggle. *(pipeline/config.rs, inference.rs:47)*
@@ -330,8 +330,8 @@ persona actually wants — still needs the alignment + timestamp substrate below
 
 ### ✨ Small wins
 
-- [ ] **Auto-generated titles** — timestamped names don't scan. Ship the **first-line/keyword heuristic first** (no dependency); LLM-generated titles as an *optional* enhancement (requires a configured LLM + adds latency).
-- [ ] **SRT / VTT export** — captions for a Loom/YouTube clip from an imported file.
+- [x] **Auto-generated titles** — *shipped* (heuristic on by default, optional LLM, user titles always win, click-to-edit). Was: timestamped names don't scan. Ship the **first-line/keyword heuristic first** (no dependency); LLM-generated titles as an *optional* enhancement (requires a configured LLM + adds latency).
+- [x] **SRT / VTT export** — *shipped* (`phoneme export --captions <id> --format srt|vtt`). Was: captions for a Loom/YouTube clip from an imported file.
 
 ---
 
@@ -423,7 +423,7 @@ persona actually wants — still needs the alignment + timestamp substrate below
 - [ ] **DB maintenance** (vacuum strategy), **indexing strategy** for 100k+ catalogs, **phrase search** (quoted FTS5).
 
 ### Security
-- [ ] **Content Security Policy** (tauri.conf.json), **scoped permissions** (capabilities/default.json).
+- [x] **Content Security Policy** + **scoped permissions** — *shipped with the v1.8.x CSP/scopes hardening above.*
 
 ---
 
@@ -502,13 +502,15 @@ alongside the feature releases above.*
 - [x] Restart/fix for the local whisper servers (`RestartWhisper` sweeps strays +
   bounces both supervisors), a header health pill + failure banner, `phoneme
   doctor --fix` on the CLI, and Doctor in the main nav (`g D`).
-- [ ] Disk-space + model-integrity checks; check categories (Critical/Warning/Info); per-check explanations + fix guidance; "Fix All".
+- [x] Disk-space + model-integrity checks; check categories (Critical/Warning/Info); per-check explanations + fix guidance; "Fix All". — *shipped.*
 
 **Code organization**
 - [ ] Split the large files (`config.rs`, `catalog.rs`, `recorder.rs`, `commands.rs`) into modules; dedupe `auto_spawn.rs` (CLI + Tauri); move `grouping.ts`/`form.ts` to `utils/`.
-- [ ] Frontend: ESLint + Prettier; stricter TS (`noUnusedLocals`/`noUnusedParameters`); `types/` + `constants/` dirs.
+- [x] Frontend: ESLint + Prettier (*shipped — flat config, 0-error baseline, lint in CI*); still open: stricter TS (`noUnusedLocals`/`noUnusedParameters`); `types/` + `constants/` dirs.
 
 **Performance**
+- [ ] Record the request model id for cloud STT — the catalog/webhook `model` field is the file-stem of `whisper.model_path`, so cloud transcriptions record "unknown" (pinned by the pipeline integration test).
+- [ ] Doctor: decide whether local whisper model/server checks should skip (or downgrade) when a cloud STT provider is configured — today they run regardless (behavior parity kept on purpose).
 - [ ] Trim redundant `http.clone()` (transcription.rs ×7, llm.rs ×4); avoid the `attention_mask` clone in `embed.rs`.
 
 **Docs / DX**
