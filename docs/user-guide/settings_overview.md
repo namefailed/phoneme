@@ -110,7 +110,7 @@ See [Smart Cleanup](smart_cleanup.md), [Providers & Models](providers_and_models
 
 ![Storage settings](../screenshots/settings-storage.png)
 
-Audio directory, auto-delete by age or count, optional audio-only deletion (keep searchable metadata), an **Import audio** button (bring a `.wav`/`.mp3`/`.m4a` into the pipeline), and export. See [Storage, Paths & Retention](storage_paths_and_retention.md) and [Importing Audio](importing_audio.md).
+Audio directory, auto-delete by age or count, optional audio-only deletion (keep searchable metadata), an **Import audio** button (bring a `.wav`/`.mp3`/`.m4a`/`.flac` into the pipeline), and export. See [Storage, Paths & Retention](storage_paths_and_retention.md) and [Importing Audio](importing_audio.md).
 
 ### Profiles
 

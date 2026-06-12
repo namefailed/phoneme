@@ -16,8 +16,8 @@ hound.workspace = true
 rubato.workspace = true
 async-trait = "0.1"
 # Pure-Rust demux/decode for imported audio files. Enable only the codecs and
-# container formats Phoneme accepts on import: WAV/PCM, MP3, and MP4/M4A
-# (which carries AAC or ALAC).
+# container formats Phoneme accepts on import: WAV/PCM, MP3, MP4/M4A
+# (which carries AAC or ALAC), and FLAC.
 symphonia = { version = "0.5", default-features = false, features = [
     "wav",
     "pcm",
@@ -25,6 +25,7 @@ symphonia = { version = "0.5", default-features = false, features = [
     "isomp4",
     "aac",
     "alac",
+    "flac",
 ] }
 
 [dev-dependencies]

@@ -143,7 +143,7 @@ The current LLM settings are blank text boxes. Most users abandon them because t
 - [x] **Pre-roll audio buffer** — rolling ring buffer so the first syllable isn't clipped when reacting to the hotkey (tunable; off by default)
 - [x] **Notes field** — free-form text area in the detail pane, separate from the transcript; never overwritten by re-transcription or post-processing
 - [x] **Multiple config profiles** — switch between named TOML profiles (e.g., work vs. personal) from the tray menu without editing files
-- [x] **Import audio file** — bring a `.wav`/`.mp3`/`.m4a` into the catalog (or `phoneme import <file>`) to queue it through the same transcription + hook pipeline as a live recording
+- [x] **Import audio file** — bring a `.wav`/`.mp3`/`.m4a`/`.flac` into the catalog (or `phoneme import <file>`) to queue it through the same transcription + hook pipeline as a live recording
 
 ---
 

@@ -69,7 +69,7 @@ phoneme meeting rename 20260519T143500823 "Q3 Planning Sync"
 
 ### 📥 `phoneme import <FILE>`
 
-Import an existing audio file (wav/mp3/m4a) and transcribe it.
+Import an existing audio file (wav/mp3/m4a/flac) and transcribe it.
 
 ```bash
 phoneme import my_meeting.mp3

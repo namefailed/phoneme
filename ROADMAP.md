@@ -246,7 +246,7 @@ persona actually wants — still needs the alignment + timestamp substrate below
 - [ ] **In-app hook log tail** — hook debugging means opening `%LOCALAPPDATA%\phoneme\logs\hook.log` by hand.
 - [x] **Import file picker** — wired as an **Import audio** button in Settings →
   Storage (`SectionStorage.ts` → `pickAndImportAudio`), alongside drag-drop.
-- [ ] **FLAC import** — docs mention FLAC; the decoder only accepts wav/mp3/m4a.
+- [x] **FLAC import** — symphonia `flac` feature enabled; wav/mp3/m4a/flac all accepted.
 - [ ] **Recording mode on the main button** — hotkeys support hold/toggle/duration; the header Record button is always one-shot.
 
 ### 🎙️ Meetings

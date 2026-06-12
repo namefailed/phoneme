@@ -27,7 +27,7 @@ pub enum Command {
     Record(RecordArgs),
     /// Meeting Mode: record mic + system audio as two linked recordings.
     Meeting(MeetingArgs),
-    /// Import an existing audio file (wav/mp3/m4a) and transcribe it.
+    /// Import an existing audio file (wav/mp3/m4a/flac) and transcribe it.
     Import(ImportArgs),
     /// List recordings.
     List(ListArgs),
@@ -252,7 +252,7 @@ pub struct SearchArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct ImportArgs {
-    /// Path to an audio file to import (wav/mp3/m4a).
+    /// Path to an audio file to import (wav/mp3/m4a/flac).
     pub file: String,
 }
 

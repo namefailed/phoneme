@@ -72,6 +72,44 @@ update this file in the same PR.
 | Logging | `Debug` for config redacts API keys | `phoneme-core::config` | — |
 | Files on disk | API keys are encrypted at rest with Windows DPAPI (`CryptProtectData`, per-user, `dpapi:v1:` prefix); decrypted only in-process on config load, and legacy plaintext migrates on the next save | `phoneme-core::secret_crypto` + `config.rs` | S-H2 |
 
+## Content Security Policy
+
+The WebView ships a strict CSP (`app.security.csp` in `tauri.conf.json`) so a
+content-injection bug in the UI can't load remote scripts or exfiltrate to an
+arbitrary origin. A looser `devCsp` applies only under `tauri dev`, where Vite
+serves the bundle from `http://localhost:5173` and pushes hot-reload updates over
+a websocket. Each production directive and why it's there:
+
+| Directive | Value | Why |
+|-----------|-------|-----|
+| `default-src` | `'self'` | Deny by default; only the bundled app origin is trusted unless a directive below widens it. |
+| `script-src` | `'self'` | Only bundled JS runs — no inline scripts, no `eval`. Lit and wavesurfer ship as compiled modules, so nothing inline is needed. |
+| `style-src` | `'self' 'unsafe-inline'` | Lit renders into the light DOM and injects `<style>` tags at runtime, and wavesurfer's timeline/hover plugins set inline styles, so inline CSS must be allowed. |
+| `img-src` | `'self' data: asset: http://asset.localhost` | `data:` covers the inline SVG icons in CSS `background-image`; the asset scheme covers any image served from disk through `convertFileSrc`. |
+| `font-src` | `'self'` | Fonts are bundled or system; nothing is fetched remotely or via `data:`. |
+| `media-src` | `'self' asset: http://asset.localhost` | The waveform player streams recording audio through `convertFileSrc`, which resolves to the Tauri asset protocol (`asset:` / `http://asset.localhost` on Windows). |
+| `connect-src` | `'self' ipc: http://ipc.localhost asset: http://asset.localhost http: https:` | `ipc:` / `http://ipc.localhost` is Tauri's command channel; the asset entries let wavesurfer fetch the audio it plays; `http:`/`https:` is required because the model-list picker (`fetchLlmModels`) runs **in the WebView** and calls whatever provider endpoint the user configured — a local Ollama, OpenAI, Anthropic, Groq, Gemini, or any OpenAI-compatible URL. Transcription and post-processing requests themselves go out from the daemon, not the WebView. |
+| `object-src` | `'none'` | No `<object>`/`<embed>`/plugins. |
+| `frame-src` | `'none'` | No iframes are embedded. |
+| `worker-src` | `'none'` | No web workers are spawned. |
+| `base-uri` | `'self'` | Stops an injected `<base>` tag from re-pointing relative URLs at an attacker origin. |
+| `form-action` | `'none'` | The UI never submits HTML forms; navigation is JS-driven. |
+| `frame-ancestors` | `'none'` | The app window can't be embedded in another frame. |
+
+`connect-src` is the one directive that can't be locked to a fixed allowlist:
+because the live model-list fetch targets user-configured provider URLs, it has to
+permit `http:`/`https:`. `script-src`, `object-src`, `frame-src`, and `base-uri`
+stay tight, so this does not open a script-execution path.
+
+**Asset-protocol scope.** `app.security.assetProtocol.scope` is what the asset
+scheme (and therefore `convertFileSrc`) may read. It was `["$DOCUMENT/**",
+"$HOME/**"]` — the whole home directory. It's now narrowed to
+`["$DOCUMENT/phoneme/**", "$APPLOCALDATA/**"]`, which still covers the default
+audio directory (`~/Documents/phoneme/audio`) and the app-local data dir while no
+longer exposing unrelated files. A user who relocates `recording.audio_dir`
+outside these roots would need a matching scope entry; the default install and the
+documented data location both work as-is.
+
 ## Open items (prioritized)
 
 - **Same-user auth token on the IPC pipe** — defense-in-depth beyond the owner
@@ -85,8 +123,10 @@ update this file in the same PR.
 - **Webhook SSRF guard** — the webhook POST target is user-configured; enforce
   HTTPS and consider blocking non-loopback private ranges (loopback is allowed on
   purpose for local automation), plus optional HMAC signing. *(S-H1.)*
-- **Baseline CSP + narrowed Tauri asset/fs scope** — `tauri.conf.json` ships
-  `csp: null` and a broad `$HOME/**` fs scope. *(S-H4.)*
+- ~~**Baseline CSP + narrowed Tauri asset scope**~~ *Done — `tauri.conf.json`
+  ships a real production `csp` (plus a `devCsp` for the Vite dev server), and the
+  asset-protocol scope is narrowed from `$HOME/**` to the Phoneme audio subtree.
+  See the **Content Security Policy** section below. (S-H4.)*
 - **Model/binary download checksums** — pin and verify SHA-256 before extracting
   the whisper-server zip and model files. *(S-H7.)*
 - **Redact hook test stderr** — `HookTest` output may echo secrets from the
