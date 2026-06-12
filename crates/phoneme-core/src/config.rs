@@ -468,7 +468,11 @@ impl Default for AutoTagConfig {
 }
 
 fn default_auto_tag_prompt() -> String {
-    "You tag voice-note transcripts. Suggest concise topical tags (1-3 words each) for the transcript. Strongly prefer reusing tags from the EXISTING TAGS list when they fit; only invent a new tag when nothing existing applies. Reply with ONLY a JSON array of tag-name strings — no preamble, no explanations.".into()
+    // Balance matters here: the original "only invent a new tag when nothing
+    // existing applies" wording made models fill every slot with existing tags
+    // and never propose anything new — useless once auto-accept attaches the
+    // existing matches silently and there's nothing left to show.
+    "You tag voice-note transcripts. Suggest concise topical tags (1-3 words each). Reuse tags from the EXISTING TAGS list when they genuinely fit, AND coin new tags for topics no existing tag covers — a good answer usually mixes both. Reply with ONLY a JSON array of tag-name strings — no preamble, no explanations.".into()
 }
 
 fn default_auto_tag_max() -> u32 {

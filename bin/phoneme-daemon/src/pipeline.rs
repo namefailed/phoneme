@@ -481,15 +481,17 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
             return;
         }
     };
-    // EVERY existing tag (attached or not) — the model is told to prefer these
-    // over inventing new ones, so the user's tag vocabulary stays canonical.
+    // EVERY existing tag (attached or not) — the model reuses these where they
+    // fit, so the user's tag vocabulary stays canonical.
     let existing: Vec<String> = match state.catalog.list_all_tags().await {
         Ok(tags) => tags.into_iter().map(|t| t.name).collect(),
         Err(_) => vec![],
     };
     let max = cfg.auto_tag.max_tags.clamp(1, 12) as usize;
+    // The mix guidance is appended at run time (not stored), so it holds even
+    // for configs that saved an older prompt that over-favored existing tags.
     let prompt = format!(
-        "{}\n\nEXISTING TAGS: {}\nSuggest at most {} tags.",
+        "{}\n\nEXISTING TAGS: {}\nSuggest at most {} tags. Reuse existing tags that fit, and add NEW tags for topics the existing ones don't cover.",
         cfg.auto_tag.prompt,
         if existing.is_empty() {
             "(none yet)".to_string()
