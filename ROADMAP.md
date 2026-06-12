@@ -427,12 +427,12 @@ saved-searches, and curated-models features audited **clean**.
 
 **Wave 1 — High (correctness & security)**
 - [x] whisper-server stdout/stderr never drained → pipe fills (~64 KB) → hung transcription / false timeout — both spawn sites now use `Stdio::null()` (`whisper_supervisor.rs`) *(A2-H1)*
-- [ ] `native-whisper` won't compile — `model_path` (a `String`) used as an `Option` (`transcription.rs:78`) *(A2-H2)*
-- [ ] tray `Bridge` stays `None` after a down-at-launch daemon; no real reconnect (`commands.rs` / `lib.rs`) *(A2-H3)*
-- [ ] `wizard_download_model` / `wizard_run_installer` lack a URL allowlist + canonicalize (`commands.rs`) *(A2-H4/H5)*
+- [x] `native-whisper` won't compile — the Option pattern-match on the String `model_path` is fixed (cfg'd-out code is never type-checked, which hid it). Building the feature still needs LLVM locally (see building_from_source), so it stays out of CI. *(A2-H2)*
+- [x] tray `Bridge` stays `None` after a down-at-launch daemon — replaced by a lazily-reconnecting `BridgeSlot`: the first action retries the auto-spawn + connect, the event stream attaches in the background the moment the daemon appears, and the startup chrome (titlebar, hotkeys, overlay) no longer depends on the bridge at all. *(A2-H3)*
+- [x] `wizard_download_model` now uses the same https host allowlist as `wizard_download_file`; `wizard_run_installer` canonicalizes both sides of the temp-dir check (lexical starts_with let `..` through) and only runs `.exe`. *(A2-H4/H5)*
 - [x] Delete key sends `session:<id>` to `deleteRecording` — fixed by the undoable-delete flow (`requestUndoableDelete` filters session ids) *(A1-H1)*
 - [x] PostProcessing cloud `/models` fetch sends the masked sentinel key — `fetchLlmModels` guards the sentinel (cloud → manual entry, local → blank key) *(A1-H2)*
-- [ ] `open_file` has no path allowlist (`commands.rs`) *(A1-H3)*
+- [x] `open_file` is restricted to the audio library, phoneme's data dir, and its config dir (canonicalized), mirroring `reveal_file`. *(A1-H3)*
 - [x] Import enqueue failure orphans a catalog row — the row and canonical WAV roll back so a failed import is simply retryable *(A1-H4)*
 - [x] Whisper transient failure never requeues — unreachable/timeout now skip failed/, the worker requeues the same item with backoff (capped at 5 attempts) *(A1-H5)*. *Model-override readiness race (A2-M7) still open — Wave 2.*
 

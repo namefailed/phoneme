@@ -1,6 +1,6 @@
 //! Tauri commands — frontend invokes these via `invoke("…")`.
 
-use crate::bridge::Bridge;
+use crate::bridge::BridgeSlot;
 use crate::config_io;
 use crate::doctor::CheckResult;
 use crate::wizard::TestConnectResult;
@@ -10,7 +10,7 @@ use phoneme_ipc::{Request, Response};
 use serde_json::Value;
 use tauri::{Emitter, State};
 
-type Br<'r> = State<'r, Option<Bridge>>;
+type Br<'r> = State<'r, BridgeSlot>;
 
 /// Structured error returned by Tauri commands. Serializes to `{ kind, message }`
 /// so the WebView can branch on `kind` (e.g. tell `whisper_timeout` apart from
@@ -52,8 +52,11 @@ impl From<&str> for CommandError {
     }
 }
 
-async fn forward(bridge: &Option<Bridge>, req: Request) -> Result<Value, CommandError> {
-    let bridge = bridge.as_ref().ok_or_else(|| {
+async fn forward(slot: &BridgeSlot, req: Request) -> Result<Value, CommandError> {
+    // An empty slot retries the connect (auto-spawning the daemon) before
+    // giving up — the "down at launch" case heals on the first action instead
+    // of requiring an app restart (A2-H3).
+    let bridge = slot.get_or_connect().await.ok_or_else(|| {
         CommandError::new(
             "daemon_not_running",
             "daemon not reachable; start it with `phoneme daemon --start`",
@@ -757,7 +760,7 @@ pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
 /// `config.toml`: refresh the "start at login" registry key, tell the daemon
 /// to reload, and re-register the global hotkey. Shared by `write_config` and
 /// `switch_profile` so switching a profile behaves identically to a manual save.
-async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &Config) {
+async fn apply_config(app: &tauri::AppHandle, slot: &BridgeSlot, config: &Config) {
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
     {
@@ -805,7 +808,7 @@ async fn apply_config(app: &tauri::AppHandle, bridge: &Option<Bridge>, config: &
     }
 
     // Tell daemon to reload
-    if let Err(e) = forward(bridge, Request::ReloadConfig).await {
+    if let Err(e) = forward(slot, Request::ReloadConfig).await {
         tracing::warn!("failed to reload daemon config: {e:?}");
     }
 
@@ -923,8 +926,9 @@ pub async fn start_daemon(bridge: Br<'_>) -> Result<(), CommandError> {
         .await
         .map_err(|e| CommandError::from(e.to_string()))?;
     // If a bridge connection already existed, force a reconnect so the
-    // existing transport is fresh after the daemon restart.
-    if let Some(b) = bridge.as_ref() {
+    // existing transport is fresh after the daemon restart. (An empty slot
+    // connects lazily on the next command — nothing to refresh here.)
+    if let Some(b) = bridge.current() {
         let _ = b.reconnect().await;
     }
     Ok(())
@@ -940,7 +944,8 @@ pub async fn wizard_test_hook(
     bridge: Br<'_>,
     custom_command: Option<String>,
 ) -> Result<TestConnectResult, CommandError> {
-    Ok(crate::wizard::test_hook(bridge.as_ref(), custom_command).await)
+    let b = bridge.get_or_connect().await;
+    Ok(crate::wizard::test_hook(b.as_ref(), custom_command).await)
 }
 
 #[tauri::command]
@@ -1056,6 +1061,13 @@ pub async fn wizard_download_model(
 ) -> Result<String, CommandError> {
     if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
         return Err(CommandError::from("Invalid filename"));
+    }
+    // Same gate as wizard_download_file (A2-H4): a compromised WebView must
+    // not be able to pull arbitrary bytes into the models dir.
+    if !is_allowed_download_url(&url) {
+        return Err(CommandError::from(
+            "Download URL is not from an allowed host",
+        ));
     }
 
     let dirs = directories::ProjectDirs::from("", "", "phoneme")
@@ -1476,8 +1488,10 @@ mod tests {
     // ── forward() with no bridge ───────────────────────────────────────────
 
     #[tokio::test]
-    async fn forward_none_bridge_returns_descriptive_error() {
-        let result = forward(&None, Request::DaemonStatus).await;
+    async fn forward_disconnected_bridge_returns_descriptive_error() {
+        // An offline slot never dials, so this exercises exactly the
+        // "daemon unreachable and the retry failed" error path.
+        let result = forward(&BridgeSlot::offline(), Request::DaemonStatus).await;
         let err = result.unwrap_err();
         assert_eq!(err.kind, "daemon_not_running");
         assert!(
@@ -1763,13 +1777,25 @@ pub async fn wizard_download_file(
 #[tauri::command]
 pub fn wizard_run_installer(path: String) -> Result<(), CommandError> {
     let p = std::path::Path::new(&path);
-    if !p.starts_with(std::env::temp_dir()) {
+    if !p.exists() {
+        return Err(CommandError::from("Installer file does not exist"));
+    }
+    // Canonicalize BOTH sides before comparing (A2-H5): the old lexical
+    // starts_with let "…\Temp\..\evil.exe" through (".." survives
+    // Path::starts_with), and 8.3 short names / junctions could dodge a
+    // prefix check entirely. path_within canonicalizes child and root.
+    if !path_within(p, &std::env::temp_dir()) {
         return Err(CommandError::from(
             "Execution is restricted to the temporary directory",
         ));
     }
-    if !p.exists() {
-        return Err(CommandError::from("Installer file does not exist"));
+    // The wizard only ever downloads-and-runs .exe installers.
+    let is_exe = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+    if !is_exe {
+        return Err(CommandError::from("Only .exe installers can be run"));
     }
 
     #[cfg(target_os = "windows")]
@@ -1783,8 +1809,26 @@ pub fn wizard_run_installer(path: String) -> Result<(), CommandError> {
 
 #[tauri::command]
 pub fn open_file(path: String) -> Result<(), CommandError> {
-    if !std::path::Path::new(&path).exists() {
+    let requested = std::path::Path::new(&path);
+    if !requested.exists() {
         return Err(format!("File does not exist: {}", path).into());
+    }
+    // Security: same contract as reveal_file (A1-H3) — the renderer can pass
+    // any string and we hand it to the OS. Restrict to the places the UI
+    // actually opens: the audio library, phoneme's data dir (logs, models,
+    // hooks), and its config dir.
+    let cfg = config_io::read().map_err(|e| format!("config error: {e}"))?;
+    let audio_dir_raw = cfg
+        .expanded()
+        .map(|c| c.recording.audio_dir)
+        .unwrap_or_else(|_| cfg.recording.audio_dir.clone());
+    let mut roots = vec![std::path::PathBuf::from(audio_dir_raw)];
+    if let Some(dirs) = directories::ProjectDirs::from("", "", "phoneme") {
+        roots.push(dirs.data_local_dir().to_path_buf());
+        roots.push(dirs.config_dir().to_path_buf());
+    }
+    if !roots.iter().any(|r| path_within(requested, r)) {
+        return Err("path not permitted".into());
     }
     #[cfg(target_os = "windows")]
     {

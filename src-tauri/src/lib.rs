@@ -10,7 +10,7 @@ mod overlay;
 mod tray;
 mod wizard;
 
-use bridge::Bridge;
+use bridge::{Bridge, BridgeSlot};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -39,6 +39,9 @@ pub fn run() {
         }
     });
 
+    // The slot is what commands talk to: it retries the connect lazily, so a
+    // daemon that was down at launch heals on the first action (A2-H3).
+    let bridge = BridgeSlot::new(bridge);
     // Clone before builder chain — setup closure takes ownership of `bridge`.
     let exit_bridge = bridge.clone();
 
@@ -77,8 +80,17 @@ pub fn run() {
                     use tauri::Manager;
                     use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
-                    let bridge = app.state::<Option<Bridge>>().inner().clone();
-                    if let Some(bridge) = bridge {
+                    let slot = app.state::<BridgeSlot>().inner().clone();
+                    if slot.current().is_none() {
+                        // Daemon was down at launch — kick a background connect
+                        // so the NEXT hotkey press has a bridge to talk to
+                        // (this handler is sync; it can't await the connect).
+                        let retry = slot.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = retry.get_or_connect().await;
+                        });
+                    }
+                    if let Some(bridge) = slot.current() {
                         // Read live config so toggle/combo changes apply immediately.
                         let current_config = phoneme_core::Config::read_or_default();
 
@@ -216,34 +228,57 @@ pub fn run() {
         .manage(bridge.clone())
         .setup(move |app| {
             let _tray = tray::install(app.handle())?;
-            if let Some(bridge) = bridge.clone() {
-                events::spawn(app.handle().clone(), bridge.clone());
+            // None of the startup chrome below actually needs the daemon —
+            // it only needs CONFIG. It used to live inside the bridge if-let,
+            // so a down-at-launch daemon also cost the titlebar pref, the
+            // startup window, every global hotkey, and the overlay (A2-H3's
+            // wider blast radius). Read config directly instead.
+            let startup_cfg = phoneme_core::Config::read_or_default();
 
-                if bridge.config.interface.strip_titlebar {
-                    use tauri::Manager;
-                    if let Some(window) = app.handle().get_webview_window("main") {
-                        let _ = window.set_decorations(false);
-                    }
+            if startup_cfg.interface.strip_titlebar {
+                use tauri::Manager;
+                if let Some(window) = app.handle().get_webview_window("main") {
+                    let _ = window.set_decorations(false);
                 }
+            }
 
-                if bridge.config.tray.show_on_startup {
-                    use tauri::Manager;
-                    if let Some(window) = app.handle().get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+            if startup_cfg.tray.show_on_startup {
+                use tauri::Manager;
+                if let Some(window) = app.handle().get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
+            }
 
-                // Register all enabled global hotkeys via the shared helper, so
-                // startup and config-save/profile-switch stay in lockstep.
-                commands::register_hotkeys(app.handle(), &bridge.config);
+            // Register all enabled global hotkeys via the shared helper, so
+            // startup and config-save/profile-switch stay in lockstep.
+            commands::register_hotkeys(app.handle(), &startup_cfg);
 
-                // Pre-create the system-wide live-preview overlay (hidden) when
-                // the setting is on, so the first recording can reveal it with no
-                // cold-start lag. No-op when the setting is off — the window is
-                // only built when the user opts in. `overlay.ts` then drives its
-                // visibility from the daemon event stream.
-                overlay::sync(app.handle(), bridge.config.interface.preview_overlay);
+            // Pre-create the system-wide live-preview overlay (hidden) when
+            // the setting is on, so the first recording can reveal it with no
+            // cold-start lag. No-op when the setting is off — the window is
+            // only built when the user opts in. `overlay.ts` then drives its
+            // visibility from the daemon event stream.
+            overlay::sync(app.handle(), startup_cfg.interface.preview_overlay);
+
+            // The daemon event stream needs a live bridge. Attach now when we
+            // have one; otherwise keep retrying in the background and attach
+            // the moment the daemon comes up, so the UI doesn't stay
+            // event-dead until an app restart.
+            if let Some(b) = bridge.current() {
+                events::spawn(app.handle().clone(), b);
+            } else {
+                let slot = bridge.clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        if let Some(b) = slot.get_or_connect().await {
+                            events::spawn(handle, b);
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                });
             }
             Ok(())
         })
@@ -350,7 +385,9 @@ pub fn run() {
             // This tells the daemon to stop whisper-server and flush any
             // in-flight queue work before it exits. We give it 3 seconds;
             // if it doesn't respond in time we exit anyway.
-            if let Some(ref b) = exit_bridge {
+            // Peek without connecting — there is no point dialing a daemon
+            // just to tell it to shut down.
+            if let Some(b) = exit_bridge.current() {
                 let b = b.clone();
                 let _ = runtime.block_on(async move {
                     tokio::time::timeout(
