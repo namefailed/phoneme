@@ -381,6 +381,13 @@ export async function approveTagSuggestion(id: string, name: string): Promise<Ta
 }
 
 /** Dismiss one suggested tag (drops it from the suggestion list). */
+/** Drop every pending tag suggestion across the whole library. Returns how
+ *  many recordings had suggestions to clear. */
+export async function clearAllTagSuggestions(): Promise<number> {
+  const res = await tauriInvoke<{ cleared: number }>("clear_all_tag_suggestions");
+  return res?.cleared ?? 0;
+}
+
 export async function dismissTagSuggestion(id: string, name: string): Promise<void> {
   await tauriInvoke("dismiss_tag_suggestion", { id, name });
 }

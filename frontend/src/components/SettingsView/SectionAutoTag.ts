@@ -106,8 +106,46 @@ export class SectionAutoTag {
               placeholder="How the AI should pick tags (your tag list and the transcript are appended automatically)">${escapeHtml(t.prompt ?? "")}</textarea>
           </div>
         </div>
+
+        <div class="settings-field">
+          <label>Pending suggestions</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <button class="inline-button" id="at-clear-all" title="Remove every pending ✨ suggestion chip from every recording in the library">🧹 Clear all suggestions</button>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              Removes every pending suggestion chip across the whole library in one sweep.
+              Tags that were already approved stay attached — this only discards the
+              not-yet-decided proposals.
+            </span>
+          </div>
+        </div>
       </div>
     `;
+
+    this.container.querySelector<HTMLButtonElement>("#at-clear-all")?.addEventListener("click", async () => {
+      const { confirmDialog } = await import("../confirmDialog");
+      const ok = await confirmDialog({
+        title: "Clear all suggestions?",
+        body: "Every pending tag suggestion on every recording will be discarded. Approved tags are not touched.",
+        confirmLabel: "Clear all",
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        const { clearAllTagSuggestions } = await import("../../services/ipc");
+        const n = await clearAllTagSuggestions();
+        const { showToast } = await import("../../utils/toast");
+        showToast(
+          n === 0
+            ? "No pending suggestions to clear"
+            : `Cleared suggestions on ${n} recording${n === 1 ? "" : "s"}`,
+          "success",
+        );
+      } catch (e) {
+        const { showToast } = await import("../../utils/toast");
+        const { errText } = await import("../../utils/error");
+        showToast(`Couldn't clear suggestions: ${errText(e)}`, "error");
+      }
+    });
 
     this.container.querySelector<HTMLInputElement>("#at-auto")?.addEventListener("change", (e) => {
       t.auto = (e.target as HTMLInputElement).checked;

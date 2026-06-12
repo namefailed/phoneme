@@ -406,6 +406,9 @@ pub enum TagAction {
     For {
         recording_id: String,
     },
+    /// Drop every pending auto-tag suggestion across the whole library.
+    /// Approved tags are untouched; only not-yet-decided proposals go.
+    ClearSuggestions,
     /// Show how many recordings each tag is attached to.
     Usage,
     /// Merge one tag into another: re-point all recordings, then delete the

@@ -325,6 +325,7 @@ pub fn run() {
             commands::skip_current_stage,
             commands::suggest_tags,
             commands::approve_tag_suggestion,
+            commands::clear_all_tag_suggestions,
             commands::dismiss_tag_suggestion,
             commands::set_speaker_name,
             commands::daemon_status,

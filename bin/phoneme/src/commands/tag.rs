@@ -125,6 +125,20 @@ pub async fn run(args: TagArgs, cfg: &Config, is_json: bool) -> ExitCode {
                 Err(e) => e,
             }
         }
+        TagAction::ClearSuggestions => match conn.send(Request::ClearAllTagSuggestions).await {
+            Ok(v) => {
+                let n = v.get("cleared").and_then(|c| c.as_u64()).unwrap_or(0);
+                if is_json {
+                    output::print_json(&v);
+                } else if n == 0 {
+                    println!("no pending suggestions to clear");
+                } else {
+                    println!("cleared suggestions on {n} recording(s)");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(code) => code,
+        },
         TagAction::Usage => match conn.send(Request::TagUsageCounts).await {
             Ok(val) => {
                 if is_json {
