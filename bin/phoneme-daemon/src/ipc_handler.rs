@@ -1537,7 +1537,7 @@ async fn rerun_summary(
             stage: PipelineStage::Summarizing,
         });
         match crate::pipeline::generate_summary(&task_state, &cfg, &id, &transcript).await {
-            Some((summary, model)) => {
+            Ok((summary, model)) => {
                 if let Err(e) = task_state
                     .catalog
                     .update_summary(&id, &summary, Some(&model))
@@ -1552,11 +1552,10 @@ async fn rerun_summary(
                 }
                 task_state.events.emit(DaemonEvent::SummaryUpdated { id });
             }
-            None => {
-                task_state.events.emit(DaemonEvent::SummaryFailed {
-                    id,
-                    error: "summary generation failed (check the AI provider)".into(),
-                });
+            Err(reason) => {
+                task_state
+                    .events
+                    .emit(DaemonEvent::SummaryFailed { id, error: reason });
             }
         }
     });
