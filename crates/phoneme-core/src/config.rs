@@ -855,6 +855,12 @@ pub struct InterfaceConfig {
     /// `"off"` makes every pane toggle instant.
     #[serde(default = "default_animation_speed")]
     pub animation_speed: String,
+    /// Toast a note as each pipeline step finishes (transcribed, cleaned up,
+    /// summarized, tags suggested) and when a recording is fully ready.
+    /// **Default true.** Failure toasts always show regardless of this — a
+    /// silently lost transcription is never the right default.
+    #[serde(default = "default_true")]
+    pub step_notifications: bool,
 }
 
 fn default_animation_speed() -> String {
@@ -1071,6 +1077,7 @@ impl Default for Config {
                 preview_overlay: false,
                 vim_nav: false,
                 animation_speed: default_animation_speed(),
+                step_notifications: true,
             },
             editor: EditorConfig {
                 vim_mode: false,

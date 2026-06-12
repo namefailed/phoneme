@@ -6,6 +6,7 @@ import { FirstRunWizard } from "./components/FirstRunWizard";
 import { Router, type ViewName } from "./router";
 import { onNav } from "./services/events";
 import { initKeyboard } from "./services/keyboard";
+import { initStepNotifications } from "./services/notifications";
 import { setSettingsAnchor } from "./components/shared/settingsAnchor";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -76,6 +77,8 @@ export class App {
 
     // Global keyboard shortcuts (focus search, navigate, "?" cheat-sheet).
     initKeyboard();
+    // Pipeline progress + error toasts (lifetime subscription).
+    void initStepNotifications();
 
     // Tray menu recording commands.
     void listen("menu:record", async () => {
