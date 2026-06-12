@@ -230,6 +230,36 @@ persona actually wants — still needs the alignment + timestamp substrate below
 
 ### 🏚️ Finish the attic (backend exists, GUI doesn't)
 
+### 🔁 GUI ⇄ CLI parity gaps (audited 2026-06-12 against the live Request enum)
+
+The CLI-parity pass predates several newer features. CLI is missing:
+
+- [ ] **Title set/clear** — `SetRecordingTitle` has no CLI verb (titles are
+  brand new); `phoneme edit --title` / `--clear-title` or similar.
+- [ ] **Favorites** — `SetFavorite` unreachable from the CLI (star/unstar).
+- [ ] **Speaker rename** — `SetSpeakerName` unreachable (named speakers are
+  GUI-only).
+- [ ] **Tag-suggestion review** — approve/dismiss per suggestion
+  (`ApproveTagSuggestion` / `DismissTagSuggestion`); only clear-all exists.
+- [ ] **Record pause/resume** — `RecordPause` / `RecordResume` have no CLI
+  verbs (start/stop/toggle/cancel do).
+- [ ] **Queue skip** — `SkipCurrentStage` missing from `phoneme queue`.
+- [ ] **Re-run tag suggestions** — `SuggestTags` missing beside the existing
+  rerun cleanup/summary verbs.
+
+GUI is missing:
+
+- [ ] **Caption export button** — SRT/VTT export is CLI-only; the detail
+  pane (and bulk bar?) should offer it for transcribed recordings.
+- [ ] **Webhook safety knobs** — `[webhook] allow_private_network` /
+  `allow_http` ship without Settings toggles (TOML-only); surface them in
+  the hooks/webhook section with plain-language warning copy.
+- [ ] **Whole-library export** — verify the GUI can produce the same backup
+  zip as `phoneme export <file>`; wire it into Settings → Storage if not.
+
+House rule going forward: a new Request lands with BOTH surfaces (or an
+explicit roadmap line here saying why not).
+
 - [x] **Webhook URL field in Settings** — the Hooks section now exposes the
   `hook.webhook_url` field (with empty-value guarding); the pipeline POSTs to it. (`SectionHook.ts`)
 - [x] **Failed-queue visibility + clear** — the queue panel now surfaces the
@@ -360,6 +390,14 @@ persona actually wants — still needs the alignment + timestamp substrate below
   open action items" — it searches (hybrid/semantic), reads transcripts, then
   tags, titles, summarizes, re-runs steps, exports captions, starts/stops
   recordings, and adjusts filters, chaining steps until the job is done.
+  - **Don't write the harness from scratch.** Adapt an existing open-source
+    agent harness instead: **opencode** (free, open source) is the named
+    candidate — take its agent loop (provider abstraction, tool-calling loop,
+    permission gating, session/replay) and bend it to Phoneme. Evaluate at
+    build time against two lighter alternatives: the Vercel AI SDK's
+    tool-loop (TS, fits the Lit frontend) and **Rig** (Rust-native, fits the
+    daemon if the brain lives backend-side). License + maintenance check is
+    part of the pick; the decision record lands in docs/design/.
   - **Tool layer = the IPC surface we already have.** Tools are typed wrappers
     over the existing `Request` enum via the `Transport` trait — the same thin
     layer the v2.0 MCP server and REST API translate. Write the tool registry
