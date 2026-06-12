@@ -52,12 +52,21 @@ pub struct FailedPayload {
     pub error_message: String,
 }
 
-/// Filesystem-backed work queue.
+/// Filesystem-backed work queue for transcribing and processing recordings.
 ///
-/// Each payload lives as a single JSON file under one of four subdirectories
-/// (`pending/`, `processing/`, `done/`, `failed/`). State transitions are
-/// atomic file renames, which on the same filesystem are crash-safe — either
-/// the rename happened or it didn't.
+/// State transitions are implemented as atomic file renames across the following
+/// subdirectories (created automatically under the `root` path):
+/// - `pending/`: Payload JSON files awaiting processing. Ordered chronologically
+///   by filename unless overridden by the user-defined order manifest.
+/// - `processing/`: The single payload currently undergoing transcription or post-processing.
+/// - `done/`: Completed payloads, retained temporarily before deletion or archival.
+/// - `failed/`: Payloads that failed due to an error, accompanied by error logs.
+///
+/// ### Metadata & Control Files:
+/// - `pending/.queue-order`: A JSON array of recording IDs representing the user's
+///   custom drag-and-drop sequencing. Any ID not listed here falls back to chronological.
+/// - `.queue-paused`: A zero-byte sentinel file. When present, the daemon's queue worker
+///   is blocked from claiming new pending tasks (the active processing task is unaffected).
 #[derive(Debug, Clone)]
 pub struct InboxQueue {
     root: PathBuf,

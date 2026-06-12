@@ -1,100 +1,120 @@
-# 🏗️ Architecture
+# 🏗️ Architecture Wiki
 
 Phoneme is built as a highly modular, decoupled system. It is composed of three main parts: a headless background daemon, a GUI system tray application, and a command-line interface.
-
-## The Triad
 
 ```text
                             ┌──────────────────────────────────┐
                             │          phoneme-daemon          │
                             │ (Headless: audio, queue, catalog)│
                             └───────────────▲──────────────────┘
-                                            │
-                      named pipe (\\.\pipe\phoneme-daemon)
-                                            │
-             ┌──────────────────────────────┴──────────────────────────────┐
-             │                                                             │
-             ▼                                                             ▼
-    ┌─────────────────┐                                           ┌─────────────────┐
-    │     phoneme     │                                           │  phoneme-tray   │
-    │      (CLI)      │                                           │   (Tauri GUI)   │
-    └─────────────────┘                                           └─────────────────┘
+                                             │
+                       named pipe (\\.\pipe\phoneme-daemon)
+                                             │
+              ┌──────────────────────────────┴──────────────────────────────┐
+              │                                                             │
+              ▼                                                             ▼
+     ┌─────────────────┐                                           ┌─────────────────┐
+     │     phoneme     │                                           │  phoneme-tray   │
+     │      (CLI)      │                                           │   (Tauri GUI)   │
+     └─────────────────┘                                           └─────────────────┘
 ```
 
-### 👻 The Daemon (`phoneme-daemon`)
-The core engine of Phoneme. It runs in the background (completely headless) and is responsible for:
-- Managing audio capture (`cpal`) from the microphone or, on Windows, the system-audio loopback device.
-- Dual-track **Meeting Mode** — capturing the microphone and system audio simultaneously as two recordings linked by a shared `meeting_id`.
-- The **pre-roll** ring buffer (idle pre-capture) so the first syllable isn't clipped, and the optional **streaming preview** loop that periodically re-transcribes the in-progress recording.
-- **Importing** existing audio files (`.wav`/`.mp3`/`.m4a`) by decoding them to the canonical format and running them through the same pipeline.
-- Maintaining the SQLite database catalog.
-- Running transcription jobs through the configured provider (local whisper.cpp or a cloud backend).
-- Executing Smart Cleanup (LLM post-processing).
-- Firing webhook and command scripts (hooks).
-- Enforcing the auto-delete retention policy.
-- Broadcasting state changes over named pipes.
+---
 
-### 🖥️ The CLI (`phoneme`)
-A lightweight, fast Rust binary that sends JSON commands to the Daemon over the named pipe. Since the Daemon manages all state, you can invoke the CLI from any external script or hotkey daemon to immediately control the app (e.g. `phoneme record --start`).
+## 📂 Workspace Layout & Crate Reference
 
-### 🎨 The GUI (`phoneme-tray`)
-A Tauri 2 application (Rust + TypeScript/Vite) that acts as a polished interface over the CLI. It communicates directly with the Daemon over the same named pipe, allowing it to instantly reflect state changes (like when you start a recording via the CLI).
+To enforce boundaries, the repository is split into several workspaces and directories. Each module below is linked to its primary entry point:
 
-## 📂 Crates & Directories
+| Crate / Directory | Primary Purpose | Key Code Entry Points |
+| :--- | :--- | :--- |
+| **`phoneme-core`** | Shared models, configurations, SQLite catalog, and LLM providers. | - [`lib.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/lib.rs)<br>- [`catalog.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/catalog.rs) (SQLite & FTS5 search)<br>- [`config.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/config.rs) (TOML parsing & validation)<br>- [`doctor.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/doctor.rs) (system diagnostic checks) |
+| **`phoneme-ipc`** | Named pipe transport protocols, JSON codecs, and types. | - [`lib.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-ipc/src/lib.rs)<br>- [`schema.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-ipc/src/schema.rs) (IPC Request/Response/Event enums)<br>- [`named_pipe.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-ipc/src/named_pipe.rs) (Client/Server named pipe transport) |
+| **`phoneme-audio`** | Low-level audio capture via `cpal`, resampling, and timeline alignment. | - [`lib.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-audio/src/lib.rs)<br>- [`recorder.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-audio/src/recorder.rs) (main audio capture thread)<br>- [`meeting_align.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-audio/src/meeting_align.rs) (dual-track alignment mathematics) |
+| **`phoneme-daemon`** | Background service runner: IPC server, queue worker, and pipeline. | - [`main.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/main.rs)<br>- [`pipeline.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/pipeline.rs) (transcribe, LLM cleanup, and hook dispatch)<br>- [`whisper_supervisor.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/whisper_supervisor.rs) (bundled Whisper process lifecycle) |
+| **`phoneme` (CLI)** | Command-line client. Translates CLI commands into IPC requests. | - [`main.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme/src/main.rs)<br>- [`args.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme/src/args.rs) (clap command parsing)<br>- [`commands/`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme/src/commands) (individual subcommand actions) |
+| **`src-tauri`** | The Tauri 2 GUI host wrapper. Spawns the daemon and proxies system tray/hotkeys. | - [`lib.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/src-tauri/src/lib.rs)<br>- [`commands.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/src-tauri/src/commands.rs) (IPC command bridges to daemon)<br>- [`overlay.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/src-tauri/src/overlay.rs) (always-on-top preview overlays) |
+| **`frontend`** | Single-page app built with Lit, vanilla CSS, and TypeScript. | - [`App.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/App.ts)<br>- [`services/ipc.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/services/ipc.ts) (frontend-Tauri IPC bridge)<br>- [`services/keyboard.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/services/keyboard.ts) (2D grid & Vim shortcut chords) |
 
-To enforce boundaries, the repository is split into several workspaces and directories:
-- `phoneme-core`: Shared models, settings, configurations, and database migrations.
-- `phoneme-ipc`: The IPC protocol (`Request`, `Response`, and `Event` enums) shared across all binaries.
-- `phoneme-audio`: Utilities for interacting with `cpal` and generating WAV files.
-- `phoneme-daemon`: The background daemon logic.
-- `phoneme`: The CLI frontend.
-- `src-tauri`: The GUI backend.
-- `frontend`: The GUI frontend (TypeScript/Vite/HTML/CSS).
+---
+
+## 🛠️ Feature Architectures & Data Flows
+
+### 1. Split Pane Layout (`\`)
+The split pane layout replaces the legacy side-by-side modal. It allows a developer to compare two recordings or read notes and transcripts in two full-width side-by-side editors.
+
+- **Keyboard Dispatch:** Pressing `\` on the list or detail pane dispatches a `"list-center"` or `"focus-detail"` event. The key handler in [`keyboard.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/services/keyboard.ts) triggers a CustomEvent `phoneme:vim` with action `split`.
+- **UI Coordination:** The `RecordingsView` layout component catches this event and toggles its reactive state:
+  - If a single recording is open: Splits the screen and loads the recording under the list cursor into the second pane.
+  - If exactly two recordings are multi-selected: Opens both side-by-side.
+  - The splitter itself is draggable, rendering as a thin divider. A double-click resets it to a 50/50 ratio.
+
+### 2. Zen Mode (`f`)
+A keyboard-driven visual layout toggle that hides all surrounding UI "chrome" (header search bar, sidebars, active queue columns) to allow distraction-free reading or editing.
+
+- **State Management:** Zen mode is toggled using the `f` hotkey when a recording is focused, or when browsing the recordings list with no recording open.
+- **Chrome Slide-out:** The toggled class `.phoneme-zen-active` is applied to `<body>`. Layout animations are driven by CSS variables under `document.documentElement` (configured dynamically via `interface.animation_speed` in settings).
+- **Escape Path:** Pressing `Esc` leaves Zen mode first, restoring the sidebar and header before subsequently closing any open details.
+
+### 3. Doctor & Self-Healing (`phoneme doctor --fix`)
+A critical system watchdog that validates config files, checks database integrity, and supervises local servers.
+
+- **Dual interfaces:** The CLI run (`phoneme doctor`) and the GUI's Doctor dashboard query the exact same probes in the backend ([`doctor.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/doctor.rs)).
+- **Bundled Server Supervisor:** In bundled Whisper mode, the daemon supervises the lifetime of the `whisper-server.exe` child process ([`whisper_supervisor.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/whisper_supervisor.rs)).
+- **Fix Remediation:** When a probe fails (e.g. HTTP timeout on a local port), clicking **Fix** or invoking `phoneme doctor --fix` pings the daemon to sweep orphaned port processes, terminate frozen child handles, and respawn the server with correct arguments.
+
+### 4. Auto-Tagging & Approval Pipeline
+Automatically suggests metadata tags based on transcript content without auto-applying them (preventing tag clutter).
+
+- **LLM Prompting:** Post-transcription, the daemon reads existing catalog tags ([`tags.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/tags.rs)) and formats a prompt directing the LLM to choose from existing tags first, only inventing new ones if necessary.
+- **Deferred Approval:** Tag suggestions are stored as a JSON array in the database (`tag_suggestions` column). They appear in the UI as dashed tag chips.
+- **Approval Actions:** Clicking **✓** or **✓ All** promotes a suggestion to a permanent tag relationship (`recording_tags` table), creating the tag entity if it doesn't already exist. Dismissing (**✕**) clears the suggestions.
+- **Auto-Apply Existing:** If `auto_apply` is enabled in config, suggestions that match existing tag labels bypass the approval queue and attach immediately.
+
+### 5. Meeting Live Preview & Overlay
+Provides a floating, always-on-top desktop overlay showing transcription previews of both call participants in real-time.
+
+```mermaid
+flowchart TD
+    WASAPI[WASAPI Loopback Source] -->|System Audio| Q_Sys[Queue / Buffer]
+    Mic[Mic Source] -->|Mic Audio| Q_Mic[Queue / Buffer]
+    
+    Q_Sys -->|15s Rolling Window| P_Sys{Preview Loop 1}
+    Q_Mic -->|15s Rolling Window| P_Mic{Preview Loop 2}
+    
+    P_Sys -->|Transcription request| STT{STT Server}
+    P_Mic -->|Transcription request| STT
+    
+    STT -->|Partial Text| Overlay[Tauri Floating Overlay]
+```
+
+- **Dual loops:** Meeting mode captures a dense microphone track and a sparse WASAPI system loopback track. While active, two separate preview loops query transcription segments concurrently.
+- **Resource Gating:** Both loops take turns requesting access to the shared local STT model semaphore (`whisper_sem` in [`AppState`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/app_state.rs)), ensuring they don't bottleneck each other.
+- **Overlay Rendering:** In `recording.meeting_preview = "both"` mode, the Tauri overlay ([`overlay.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/src-tauri/src/overlay.rs)) floats two stacked caption lines (mic on top, system loopback below). In `"toggle"` mode, a single caption line is shown, with a manual button to cycle focus.
+
+---
 
 ## ⏱️ Lifecycle of a Recording
 
-Understanding one recording's journey explains most of the daemon:
+1. **Trigger:** An IPC request `RecordStart` or `StartMeeting` is accepted by the daemon over the named pipe.
+2. **Capture:** The daemon starts a `cpal` stream resampling to **16 kHz mono `i16`** ([`recorder.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-audio/src/recorder.rs)). If pre-roll is active, the microphone buffer is pre-seeded. An initial record entry (`status = recording`) is placed in the catalog.
+3. **Partial Preview:** A repeating loop captures the tail of the stream and pushes partial transcripts back to subscribers via `TranscriptionPartial`.
+4. **Finalize & Align:** On stop, wav files are written. For meetings, System WASAPI loopback silence alignment calculations are computed ([`meeting_align.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-audio/src/meeting_align.rs)). A task payload is dropped into the filesystem `pending/` inbox queue.
+5. **Transcribe & Clean:** The `queue_worker` drains the queue, runs the configured transcription provider ([`transcription.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/transcription.rs)), and routes the text through LLM post-processing.
+6. **Hooks & Summary:** User-defined action commands, webhooks, and AI summarization are executed serially ([`pipeline.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/pipeline.rs)). Status updates to `done` and the inbox payload is cleaned.
 
-1. **Trigger.** A `RecordStart` (or `RecordToggle`) request arrives over the named pipe — from the CLI, the GUI, or any external hotkey daemon. Meeting Mode instead sends `StartMeeting`, which opens two capture sources at once.
-2. **Capture.** The daemon opens a `cpal` stream on the selected device (microphone, or the system-audio loopback device on Windows). Audio is resampled to the canonical **16 kHz mono `i16`** format. If pre-roll is enabled, the buffered idle audio is prepended so the first syllable survives. A catalog row is inserted immediately at `status = recording`.
-3. **Live feedback.** While capturing, the daemon emits `RecordingStarted`; if the streaming preview is enabled, a periodic loop snapshots the in-progress buffer, transcribes it, and emits `TranscriptionPartial` events.
-4. **Finalize.** On `RecordStop` the capture task drains its tail, writes a `.wav` to the audio directory, and updates the row's duration.
-5. **Transcribe.** The recording is handed to the configured `TranscriptionProvider`. The daemon emits `TranscriptionStarted`, then `TranscriptionDone` (or `TranscriptionFailed`). The raw provider output is preserved as `original_transcript`.
-6. **Post-process (optional).** If LLM post-processing is configured, the transcript is cleaned/formatted/translated; the cleaned text becomes the live `transcript` and is also preserved as `clean_transcript`, while the raw text stays in `original_transcript`.
-7. **Hooks.** The final transcript is delivered to the user's hook scripts as JSON on stdin (and optionally POSTed to a webhook). The daemon emits `HookStarted` / `HookDone` / `HookFailed`.
-8. **Summary (optional).** If `summary.auto` is enabled, an LLM summary is generated as the final step and stored in `summary` / `summary_model` (`SummaryUpdated`).
-9. **Retention.** An hourly sweep enforces the optional auto-delete policy, emitting a `RetentionWarning` before anything is removed.
-
-Imported files skip steps 1–4: the file is decoded to the canonical format, copied into the audio directory, and enters the pipeline at step 5.
+---
 
 ## 🌐 Communication Protocols
 
-All three binaries speak the same protocol defined in `phoneme-ipc`:
+- **Named Pipe:** Local NDJSON IPC server mapped to `\\.\pipe\phoneme-daemon` ([`named_pipe.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-ipc/src/named_pipe.rs)).
+- **Event Bus:** Event notifications (e.g. `recording_started`, `transcription_partial`, `queue_depth_changed`) are broadcasted using `tokio::sync::broadcast` so all open GUI clients and CLI watchers stay dynamically in sync.
 
-- **Transport:** a Windows named pipe (`\\.\pipe\phoneme-daemon`), framed as **newline-delimited JSON** (`JsonLineCodec`). Each line is one complete message.
-- **`Request`** — client → daemon, serde-tagged on `"type"` (snake_case), e.g. `{"type":"record_start", ...}`. Covers recording control, meeting control, catalog queries (`list_recordings`, `get_recording`, `list_meeting`), editing (`update_transcript`, `update_notes`), import, tags, and lifecycle (`reload_config`, `shutdown`).
-- **`Response`** — daemon → client, tagged on `"status"` with a `value` payload: either `Ok(value)` or `Err(IpcError)`. `IpcError` carries a machine-readable `kind` (`already_recording`, `not_found`, `whisper_unreachable`, …) plus a human message.
-- **`DaemonEvent`** — daemon → all subscribers, tagged on `"event"`. Clients send `subscribe_events` and then receive the one-way stream (`recording_started`, `transcription_partial`, `queue_depth_changed`, `notes_updated`, …). This is how the GUI stays in sync when the CLI drives the daemon, and vice versa.
+---
 
-Because the schema lives in one shared crate, the CLI, GUI backend, and daemon can never drift out of sync — adding a request variant is a compile error until every match arm handles it.
+## 🗄️ Database Catalog Schema
 
-## 🔄 Data Model
+SQLite database (`catalog.db`) configured in **WAL mode** with an FTS5 virtual table for lightning-fast full-text indexing.
 
-The catalog is a single SQLite database (WAL mode, with an FTS5 full-text index over transcripts), managed through `sqlx` with versioned migrations in `phoneme-core/migrations`.
-
-- **`recordings`** — the central table: `id`, `started_at`, `duration_ms`, `audio_path`, `model`, `status`, hook result columns, `notes`, plus the three transcript layers (`original_transcript`, `clean_transcript`, `transcript`), the summary (`summary`, `summary_model`), and the meeting-link columns (`meeting_id`, `meeting_name`, `track`). Standalone recordings have a null `meeting_id`; the two tracks of a meeting share one non-null `meeting_id` and differ by `track` (`mic` / `system`).
-- **`tags`** and **`recording_tags`** — colour-coded tags and their many-to-many attachments.
-- **`embedding_chunks`** — per-chunk semantic-search vectors (many per recording, one per sentence-aware transcript chunk); the legacy per-recording `embeddings` table is kept only as a fallback. Search is hybrid: best-chunk cosine fused with FTS5 via RRF (`phoneme-core::fusion`, `catalog::hybrid_search`).
-- **FTS5 mirror** — kept in sync via triggers so `list_recordings` can do prefix search safely (the query string is sanitised into a robust `term* AND term*` form before it ever reaches SQLite).
-
-Audio is stored on disk under a date-foldered directory, not in the database — the SQLite file stays small and copyable.
-
-### 🎨 The Frontend (Vite + Lit)
-
-The frontend is intentionally built for performance and maintainability, leveraging web standards through **Lit**.
-
-1. **Lit Components (`LitElement`)**: Instead of heavy virtual DOM frameworks like React, Phoneme uses Lit for reactive, lightweight web components. All UI elements (e.g., `RecordingDetail`, `ModelPicker`, `FirstRunWizard`) extend `LitElement`. 
-   > **Note**: To ensure global CSS styling works (like `.record-btn` classes), most components override `createRenderRoot() { return this; }` to render into the Light DOM rather than the Shadow DOM.
-2. **📦 The Store (State Management) (`Store<T>`)**: A custom reactive store implementation in `src/state/Store.ts` allows components to subscribe to state changes (e.g., config updates, recording lists) and trigger minimal DOM updates via Lit's `@state()` decorators.
-3. **🗺️ Routing**: A simple hash-based router handles navigation between the main views (`RecordingsView`, `SettingsView`, `DoctorView`, etc.).
-4. **🔌 IPC / Tauri API**: The frontend uses Tauri's `@tauri-apps/api/core` (`invoke`) to communicate with the Rust backend, and listens to event streams for real-time UI updates (like live transcription streaming!).
+- **`recordings`:** Primary records: `id`, `started_at`, `duration_ms`, `audio_path`, `transcript`, `notes`, `meeting_id`, `track`.
+- **`tags` & `recording_tags`:** M-to-N relationships tracking categorizations.
+- **`embedding_chunks`:** Sentence-aware ONNX embedding vectors (~80 word chunks) supporting high-performance semantic search ([`embed.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/embed.rs)).

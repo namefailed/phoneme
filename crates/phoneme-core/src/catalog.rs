@@ -707,11 +707,30 @@ impl Catalog {
     ///    cosine. Lexical-only hits (no vector signal) get a small floor relevance
     ///    so they still surface with an honest "weak semantic match" reading.
     ///
-    /// `min_relevance` drops fused results whose calibrated relevance is below the
-    /// floor *only when they are not also a lexical hit* — a recording the user
-    /// clearly named by an exact term is never filtered out for weak cosine. This
-    /// replaces the old hard cosine floor that silently dropped good paraphrase
-    /// matches.
+    /// Performs a hybrid search over the recording catalog, combining semantic
+    /// (vector) search and lexical (FTS5) search results.
+    ///
+    /// This function implements Reciprocal Rank Fusion (RRF) to merge the ordered
+    /// listings from two distinct retrievers:
+    /// 1. A vector-based semantic retriever that scores using cosine similarity
+    ///    over ONNX embedding chunks (see [`Embedder`]).
+    /// 2. A lexical prefix query over the FTS5 full-text search virtual table.
+    ///
+    /// ### Meeting Collapsing
+    /// In Meeting Mode, a single meeting has two separate tracks (microphone and
+    /// system loopback). Returning both tracks as separate search results would
+    /// clutter the UI. To prevent this, results are grouped by a stable deduplication
+    /// key (the `meeting_id` for meetings, or the `id` for standalone voice notes).
+    /// If both retrievers match different tracks of the same meeting, the results
+    /// collapse, and we return a single representative `RecordingId` (preferring
+    /// the track with the strongest semantic match).
+    ///
+    /// ### Relevance Calibration & Flooring
+    /// The `min_relevance` parameter filters out weak semantic hits (whose calibrated
+    /// cosine score falls below the floor). Crucially, exact term matches from the
+    /// lexical retriever are exempt from this threshold — if a user searches for an
+    /// exact word that is present in the transcript, it is returned even if the
+    /// semantic similarity score is low.
     pub async fn hybrid_search(
         &self,
         query: &str,
