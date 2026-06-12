@@ -774,7 +774,7 @@ export class RecordingsListElement extends LitElement {
     );
 
     return html`
-      <div class="rec-table" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, navRows)}>
+      <div class="rec-table ${this.config?.interface?.vim_nav ? "vim-on" : ""}" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, navRows)}>
         <div class="rec-table-inner${transcriptIsLast ? " transcript-tail" : ""}" style="${transcriptIsLast ? "" : `min-width: ${gridMinWidth}px;`}">
           ${head}
           ${body}
