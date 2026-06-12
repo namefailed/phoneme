@@ -131,6 +131,18 @@ pub struct AppState {
     /// the pipeline then continues with the next step, exactly as if that one
     /// stage had failed non-fatally.
     pub skip_stage: Arc<tokio::sync::Notify>,
+    /// The daemon's kill-on-close Job Object. Every child this daemon spawns
+    /// (whisper-server main + preview, an Owned Ollama) is assigned to it, so
+    /// the kernel reaps them all even when the daemon dies uncleanly (panic,
+    /// Task Manager). `None` when creation failed — children then rely on the
+    /// graceful shutdown paths alone.
+    #[cfg(windows)]
+    pub job: Option<Arc<phoneme_core::job::KillOnCloseJob>>,
+    /// On-demand local Ollama launcher + ownership ledger. LLM steps call
+    /// `ollama_launcher::ensure_ready` through it right before they run; the
+    /// shutdown path calls `shutdown()` to stop an Owned (daemon-launched)
+    /// Ollama while leaving a user-started one untouched.
+    pub ollama: Arc<crate::ollama_launcher::OllamaLauncher>,
 }
 
 /// Coordination cell between a model-override re-transcription (in the pipeline)
@@ -193,6 +205,22 @@ impl AppState {
             None
         };
 
+        // The OS-level child reaper. Children are assigned at spawn time
+        // (whisper supervisors, the Ollama launcher); failing to create it
+        // only loses the unclean-death safety net, never normal operation.
+        #[cfg(windows)]
+        let job = match phoneme_core::job::KillOnCloseJob::new() {
+            Ok(j) => Some(Arc::new(j)),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not create the daemon job object; children may outlive an unclean daemon death");
+                None
+            }
+        };
+        #[cfg(windows)]
+        let ollama = Arc::new(crate::ollama_launcher::OllamaLauncher::new(job.clone()));
+        #[cfg(not(windows))]
+        let ollama = Arc::new(crate::ollama_launcher::OllamaLauncher::new());
+
         Ok(Self {
             config: Arc::new(ArcSwap::from_pointee(config)),
             paths: Arc::new(paths),
@@ -211,6 +239,9 @@ impl AppState {
             pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             whisper_restart: Arc::new(tokio::sync::Notify::new()),
             skip_stage: Arc::new(tokio::sync::Notify::new()),
+            #[cfg(windows)]
+            job,
+            ollama,
         })
     }
 }

@@ -10,6 +10,7 @@ mod in_place;
 mod ipc_handler;
 mod ipc_server;
 mod logging;
+mod ollama_launcher;
 mod pipeline;
 mod queue_worker;
 mod reconcile;
@@ -165,11 +166,34 @@ async fn main() -> Result<()> {
     // Make sure background tasks see the shutdown even if we got here via
     // a server failure rather than the Ctrl+C handler or an IPC Shutdown.
     state.shutdown.trigger();
+
+    // Finalize any in-flight recording FIRST, through the normal stop paths,
+    // so a quit mid-recording never leaves a corrupt WAV: the file is closed
+    // properly and enqueued in the durable inbox — the next daemon run picks
+    // it up and transcribes it. (The queue worker is already winding down, so
+    // the item simply waits.) A NotRecording error here is the common case.
+    if state.recorder.meeting_active().await {
+        match state.recorder.stop_meeting(&state).await {
+            Ok(meeting_id) => {
+                tracing::info!(%meeting_id, "shutdown: finalized the in-flight meeting recording")
+            }
+            Err(e) => tracing::warn!(error = %e, "shutdown: could not stop the active meeting"),
+        }
+    } else if state.recorder.current().await.is_some() {
+        match state.recorder.stop(&state).await {
+            Ok(id) => tracing::info!(id = %id, "shutdown: finalized the in-flight recording"),
+            Err(e) => tracing::warn!(error = %e, "shutdown: could not stop the active recording"),
+        }
+    }
+
     let _ = worker_handle.await;
     let _ = supervisor_handle.await;
     // Wait for the preview supervisor too, so its dedicated whisper-server (if
     // any) is killed before we exit — same cleanup guarantee as the main server.
     let _ = preview_supervisor_handle.await;
+    // Stop the Ollama this daemon launched, if any — a user-started one is
+    // NotOurs and stays untouched (see `ollama_launcher`).
+    state.ollama.shutdown().await;
 
     server_result
 }

@@ -1,6 +1,7 @@
 //! Tray icon — visual state + menu.
 
 use anyhow::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     image::Image,
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
@@ -11,6 +12,75 @@ use tauri::{
 /// Menu-item id prefix for "switch to profile <name>" entries in the tray
 /// Profiles submenu. The suffix after the colon is the profile name.
 const PROFILE_PREFIX: &str = "profile:";
+
+/// Set once the Quit chain has already asked the daemon to shut down (and
+/// waited for it), so the process-wide exit hook doesn't send a second
+/// Shutdown — and doesn't block exit for its timeout when the daemon is
+/// already gone.
+static DAEMON_STOP_DONE: AtomicBool = AtomicBool::new(false);
+
+/// Whether the exit hook should still send the daemon a Shutdown. Pure so the
+/// quit policy is unit-testable: the knob gates everything (false = the
+/// headless contract — the daemon always outlives the tray), and a completed
+/// Quit chain must not double-send.
+pub(crate) fn should_stop_daemon_on_exit(quit_stops_daemon: bool, already_done: bool) -> bool {
+    quit_stops_daemon && !already_done
+}
+
+/// `true` once the menu Quit chain has already stopped the daemon.
+pub(crate) fn daemon_stop_done() -> bool {
+    DAEMON_STOP_DONE.load(Ordering::SeqCst)
+}
+
+/// How long Quit waits in total for the daemon to acknowledge and vanish.
+const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Ask the daemon to shut down and wait (bounded) until its pipe is gone.
+/// Peeks the existing bridge only — there is no point dialing (or spawning!)
+/// a daemon just to stop it. The daemon finalizes an in-flight recording on
+/// its way out, which is why waiting briefly matters.
+pub(crate) async fn stop_daemon_for_exit(app: &AppHandle) {
+    DAEMON_STOP_DONE.store(true, Ordering::SeqCst);
+    let slot = app.state::<crate::bridge::BridgeSlot>().inner().clone();
+    let Some(bridge) = slot.current() else {
+        return; // never connected — nothing to stop
+    };
+    let _ = tokio::time::timeout(QUIT_WAIT, bridge.request(phoneme_ipc::Request::Shutdown)).await;
+
+    // The Shutdown reply arrives just before the daemon exits; poll until the
+    // pipe actually disappears so we don't quit out from under a daemon that
+    // is still finalizing a recording.
+    let pipe_name = phoneme_core::Config::read_or_default().daemon.pipe_name;
+    let deadline = std::time::Instant::now() + QUIT_WAIT;
+    while std::time::Instant::now() < deadline {
+        if phoneme_ipc::NamedPipeTransport::connect(&pipe_name)
+            .await
+            .is_err()
+        {
+            return; // daemon gone
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    }
+    tracing::warn!("daemon still reachable after the quit wait; exiting anyway");
+}
+
+/// The tray Quit chain. With `interface.quit_stops_daemon` (default on):
+/// stop the daemon first — it finalizes any in-flight recording, kills its
+/// whisper-server(s) and a Phoneme-launched Ollama — then exit the tray.
+/// With the knob off, exit immediately and leave the daemon running, exactly
+/// the old behavior (headless setups).
+fn quit(app: &AppHandle) {
+    let cfg = phoneme_core::Config::read_or_default();
+    if !cfg.interface.quit_stops_daemon {
+        app.exit(0);
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        stop_daemon_for_exit(&app).await;
+        app.exit(0);
+    });
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayState {
@@ -191,7 +261,7 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
             }
         }
         "quit" => {
-            app.exit(0);
+            quit(app);
         }
         _ => {}
     }
@@ -222,4 +292,25 @@ pub fn update_state(tray: &TrayIcon, state: TrayState) -> Result<()> {
     tray.set_icon(Some(Image::from_bytes(state.icon_bytes())?))?;
     tray.set_tooltip(Some(state.tooltip()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_stop_daemon_on_exit;
+
+    /// The exit-hook policy table: the knob gates everything, and a completed
+    /// Quit chain suppresses the second send.
+    #[test]
+    fn exit_hook_stops_daemon_only_when_knob_on_and_not_already_done() {
+        // Default behavior: knob on, quit chain hasn't run (e.g. the exit came
+        // from somewhere other than the tray menu) — send the Shutdown.
+        assert!(should_stop_daemon_on_exit(true, false));
+        // The menu Quit already stopped (and waited for) the daemon — don't
+        // send again, and don't block exit on a dead pipe.
+        assert!(!should_stop_daemon_on_exit(true, true));
+        // Headless contract: with the knob off the daemon is NEVER stopped by
+        // a tray exit, no matter how the exit happened.
+        assert!(!should_stop_daemon_on_exit(false, false));
+        assert!(!should_stop_daemon_on_exit(false, true));
+    }
 }

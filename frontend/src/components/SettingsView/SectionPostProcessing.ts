@@ -14,7 +14,8 @@ export class SectionPostProcessing {
         api_url: "",
         model: "llama3.2:3b",
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
-        timeout_secs: 30
+        timeout_secs: 30,
+        autostart_ollama: true
       };
     }
 
@@ -92,6 +93,22 @@ export class SectionPostProcessing {
 
         <div id="llm-cloud-note" style="display:none; border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin:4px 0 12px; font-size:12px; line-height:1.45;">
           ⚠️ <b>Cloud post-processing.</b> Your transcript text is sent to this provider's servers for processing. Use <b>Ollama</b> to keep everything offline.
+        </div>
+
+        <div class="settings-field">
+          <label>Start Ollama automatically</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "llm_post_process.autostart_ollama", label: "", kind: "checkbox" },
+              lp.autostart_ollama ?? true,
+            )}</div>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              When an AI step (cleanup, summary, tags, titles) points at a local Ollama that isn't
+              running, launch <code>ollama serve</code> on demand and stop it again when the engine
+              shuts down. An Ollama you started yourself is detected and never touched. Only ever
+              applies to local Ollama connections.
+            </span>
+          </div>
         </div>
 
         <div class="settings-field" id="llm-timeout-field" style="display:none;">

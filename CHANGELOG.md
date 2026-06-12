@@ -84,6 +84,36 @@ trust boundary. Verified against current code.*
   fakes; plus tests for the wizard URL allowlist, `path_within`, and the
   notification contract.
 
+### Lifecycle — full shutdown chain + Ollama auto-launch
+
+- [x] **Quit stops everything Phoneme started** — tray Quit (default
+  `interface.quit_stops_daemon = true`) sends the daemon a graceful Shutdown
+  and waits for it to vanish: an in-flight recording is stopped and queued
+  through the normal recorder path first (transcribed on the next start),
+  then the whisper-server(s) and a Phoneme-launched Ollama go down with the
+  daemon. Set the knob to `false` for the old headless behavior — the daemon
+  outlives the tray (`tray.rs`, `lib.rs`).
+- [x] **End-process robustness via Job Objects** — the daemon holds a
+  kill-on-close job every child it spawns joins (whisper main + preview, an
+  Owned Ollama), and the tray (when `quit_stops_daemon` is on, decided at
+  spawn time) holds one for the daemon — so even Task Manager's End task
+  reaps the whole tree (`phoneme-core::job`, `whisper_supervisor.rs`,
+  `auto_spawn.rs`).
+- [x] **Ollama auto-launch with an ownership ledger** — when an LLM step
+  (cleanup, summary, tags, titles, in-place polish) resolves to a **local**
+  Ollama that isn't running, the daemon launches `ollama serve` on demand
+  (`[llm_post_process] autostart_ollama`, default on), waits for readiness,
+  and logs the server to `logs/ollama.log`. The ledger makes ownership
+  sticky: an Ollama that was already running at first probe is NotOurs
+  forever — never killed, never restarted, never job-assigned; only a
+  daemon-launched one is Owned and reaped at shutdown. Single-flight, so
+  concurrent steps can't double-spawn (`ollama_launcher.rs`).
+- [x] **Shutdown acknowledges before exiting** — the `shutdown` IPC writes its
+  Ok response, then tears down after a short grace, so `phoneme daemon stop`
+  and the tray never hang on a dead pipe; `daemon stop` now waits for the
+  pipe to actually vanish and reports `daemon stopped` (and stopping a
+  stopped daemon is a clean no-op instead of auto-spawning one).
+
 ### UX wiring
 
 - [x] **Queue failed-items count + clear** — the queue panel surfaces the `failed/`

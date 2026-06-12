@@ -17,6 +17,12 @@ use phoneme_ipc::{
     ServerRequest,
 };
 
+/// How long the `Shutdown` handler waits after returning its Ok response
+/// before actually triggering the shutdown. The response write itself takes
+/// microseconds — this just guarantees the reply is on the pipe before the
+/// process begins to exit, so the caller always sees the acknowledgement.
+const SHUTDOWN_REPLY_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
+
 pub async fn handle_connection(mut conn: NamedPipeConnection, state: AppState) {
     loop {
         // Read one request. An unrecognized-but-well-formed request (a client
@@ -1122,9 +1128,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::Shutdown => {
             tracing::info!("shutdown requested via IPC");
-            // Trigger the shared coordinator `main` waits on, so
-            // `phoneme daemon stop` actually stops the daemon.
-            state.shutdown.trigger();
+            // Reply first, exit second: the trigger is delayed so the Ok
+            // response (written by `handle_connection` the moment this arm
+            // returns) reaches the pipe before the process starts tearing
+            // down — the caller (`phoneme daemon stop`, the tray's Quit) must
+            // never be left waiting on a reply that died with the daemon.
+            let coordinator = state.shutdown.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(SHUTDOWN_REPLY_GRACE).await;
+                // Trigger the shared coordinator `main` waits on: it stops
+                // the recorder, the workers, and every Owned child, then exits.
+                coordinator.trigger();
+            });
             Response::Ok(serde_json::Value::Null)
         }
         Request::ListTags => match state.catalog.list_tags().await {
@@ -1459,8 +1474,11 @@ async fn rerun_cleanup(
         // config so the heavy work — the network call to the LLM — happens off
         // the IPC connection. We re-check `provider()` only to obtain the boxed
         // provider; the None branch is unreachable in practice but handled
-        // defensively rather than unwrapped.
-        let Some(provider) = task_state.llm.provider(&llm_cfg) else {
+        // defensively rather than unwrapped. Going through the run-resolver
+        // here (not at validation above) keeps the Ollama auto-launch off the
+        // IPC connection too.
+        let Some(provider) = crate::pipeline::llm_provider_for_run(&task_state, &llm_cfg).await
+        else {
             return;
         };
 
@@ -2009,6 +2027,29 @@ mod tests {
         // And the recording was put back into the transcribing state + enqueued.
         let rec = state.catalog.get(&id).await.unwrap().unwrap();
         assert_eq!(rec.status, RecordingStatus::Transcribing);
+    }
+
+    /// The Shutdown handler must REPLY before the daemon exits: the Ok is
+    /// produced immediately while the coordinator trigger lags by the grace
+    /// delay, so the caller (`phoneme daemon stop`, the tray's Quit) always
+    /// reads its acknowledgement off the pipe before teardown begins.
+    #[tokio::test]
+    async fn shutdown_replies_before_triggering_the_coordinator() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = override_test_state(tmp.path(), Config::default()).await;
+
+        let resp = handle_request(Request::Shutdown, &state).await;
+        assert!(matches!(resp, Response::Ok(_)), "shutdown must ACK");
+        assert!(
+            !state.shutdown.signal.is_shutting_down(),
+            "the trigger must lag the reply (grace delay), not race it"
+        );
+
+        // ...and the trigger must actually arrive shortly after the grace.
+        let mut signal = state.shutdown.signal.clone();
+        tokio::time::timeout(std::time::Duration::from_secs(5), signal.wait())
+            .await
+            .expect("shutdown must trigger after the grace delay");
     }
 
     /// A retranscribe WITHOUT a model override must not create a phantom override

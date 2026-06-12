@@ -75,6 +75,14 @@ list is the `Request` enum in `crates/phoneme-ipc/src/schema.rs`.
 **Daemon control:** `daemon_status`, `reload_config`, `shutdown`, `hook_test`,
 `subscribe_events` (see Event Streaming below).
 
+`shutdown` acknowledges **before** the daemon exits: the `{"status":"ok"}`
+response is written to the pipe first, and the actual teardown begins a
+fraction of a second later — so a client always gets its reply instead of a
+broken pipe. The teardown then stops and queues any in-flight recording, kills
+the daemon-spawned whisper-server(s) and a daemon-launched Ollama, and exits.
+Expect the pipe to disappear shortly after the reply; reconnect attempts
+should treat that as success, the way `phoneme daemon stop` does.
+
 ## 🌊 Real-Time Event Streaming
 
 The most powerful feature of the IPC layer is real-time event streaming. By sending the `subscribe_events` request, the daemon will hold the connection open and push live events to your application as they happen.

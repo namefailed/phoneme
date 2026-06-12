@@ -46,6 +46,14 @@ For the ultimate privacy-respecting, local-first experience, run the LLM locally
 
 The model field has a **Refresh** button that fetches your installed Ollama models.
 
+You don't have to keep Ollama running yourself: when an AI step needs your
+local Ollama and it isn't up, Phoneme launches `ollama serve` on demand and
+stops it again when the engine shuts down (**Start Ollama automatically** in
+Settings → Post-Processing, on by default). If Ollama was already running —
+say it starts with Windows — Phoneme detects that and never touches it: no
+restarts, no shutdowns, it stays entirely yours. Auto-launch only ever applies
+to local (`127.0.0.1`/`localhost`) Ollama connections.
+
 ### 🌩️ Cloud Providers
 
 If you don't have the hardware to run a local model, or want the best reasoning quality, plug in your own API key:

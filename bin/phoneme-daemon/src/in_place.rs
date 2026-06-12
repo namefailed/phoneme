@@ -169,7 +169,9 @@ async fn transcribe_polish_type(
         "off" => raw.clone(),
         // A full LLM round-trip through the configured post-processing
         // provider — the user explicitly chose polish over latency.
-        "llm" => match state.llm.provider(&cfg.llm_post_process) {
+        // `llm_provider_for_run` also launches the local Ollama when the
+        // connection needs it (same as every queued LLM stage).
+        "llm" => match crate::pipeline::llm_provider_for_run(state, &cfg.llm_post_process).await {
             Some(llm) => match llm.process(&cfg.llm_post_process.prompt, &raw).await {
                 Ok(out) => out,
                 Err(e) => {

@@ -74,6 +74,31 @@ Common causes:
 - Script needs `-ExecutionPolicy Bypass` (we set this for `.ps1` automatically)
 - Script does network I/O exceeding `hook.timeout_secs` — bump the timeout
 
+## 🦙 Ollama didn't start automatically
+
+When an AI step (cleanup, summary, tags, titles) points at a **local** Ollama
+that isn't running, the daemon launches `ollama serve` for you (the
+`[llm_post_process] autostart_ollama` knob, on by default). If the step still
+fails with "couldn't reach":
+
+- **Is `ollama` on PATH?** The daemon launches it from PATH. Run `ollama
+  --version` in a fresh terminal; if that fails, reinstall Ollama or add it to
+  PATH, then restart the daemon (PATH changes don't reach a running process).
+- **Is the URL actually local?** Auto-launch only fires for
+  `127.0.0.1`/`localhost`/`::1` endpoints (or an empty `api_url`, which means
+  the local default). A remote Ollama is yours to run.
+- **Check the launch log** — the launched server's output lands in
+  `%LOCALAPPDATA%\phoneme\logs\ollama.log` (port already taken, missing
+  models, etc.).
+- **Was Ollama already running when the daemon started it up?** Then Phoneme
+  treats it as *yours* for the daemon's whole lifetime: it is never restarted,
+  never stopped, and if you later stop it yourself, Phoneme won't launch a
+  replacement until the daemon restarts. That is deliberate — Phoneme never
+  manages an Ollama it didn't start.
+- A model can take a while to load on first use; the launcher waits ~15 s for
+  the server itself, but the first generation may still need a model pull
+  (`ollama pull <model>` once, manually).
+
 ## 🛑 Model Download Wizard Fails Mid-Stream
 
 If you were downloading the default model inside the First Run Wizard and the application crashed or the network dropped, you might be left with a corrupted, partially downloaded `.gguf` file.

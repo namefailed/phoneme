@@ -233,6 +233,15 @@ pub struct LlmPostProcessConfig {
     /// falling back to the raw transcript.
     #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
+    /// Launch `ollama serve` automatically when an LLM step is about to run
+    /// against a **local** Ollama endpoint and nothing is listening there yet.
+    /// Applies to every step that resolves an Ollama connection through this
+    /// section (cleanup, summary, tags, titles, in-place polish). An Ollama
+    /// that was already running when the daemon first probed it is never
+    /// managed — only one the daemon launched itself is stopped at shutdown.
+    /// Remote endpoints and non-Ollama providers never auto-launch.
+    #[serde(default = "default_true")]
+    pub autostart_ollama: bool,
 }
 
 impl std::fmt::Debug for LlmPostProcessConfig {
@@ -245,6 +254,7 @@ impl std::fmt::Debug for LlmPostProcessConfig {
             .field("model", &self.model)
             .field("prompt", &self.prompt)
             .field("timeout_secs", &self.timeout_secs)
+            .field("autostart_ollama", &self.autostart_ollama)
             .finish()
     }
 }
@@ -258,6 +268,7 @@ impl PartialEq for LlmPostProcessConfig {
             && self.model == other.model
             && self.prompt == other.prompt
             && self.timeout_secs == other.timeout_secs
+            && self.autostart_ollama == other.autostart_ollama
     }
 }
 
@@ -286,6 +297,7 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         model: "llama3.2:3b".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
         timeout_secs: 30,
+        autostart_ollama: true,
     }
 }
 
@@ -1062,6 +1074,16 @@ pub struct InterfaceConfig {
     /// silently lost transcription is never the right default.
     #[serde(default = "default_true")]
     pub step_notifications: bool,
+    /// Quitting the tray also shuts the daemon down: the daemon finalizes any
+    /// in-flight recording through the normal stop path, kills the
+    /// whisper-server(s) and a Phoneme-launched Ollama, and exits. **Default
+    /// true.** Set false to keep the daemon running after the tray quits
+    /// (headless setups — recordings via hotkeyless CLI keep working). This
+    /// flag is also read when the tray *spawns* the daemon, to decide whether
+    /// the daemon's lifetime is tied to the tray's at the OS level — that part
+    /// of a change applies the next time the daemon is spawned.
+    #[serde(default = "default_true")]
+    pub quit_stops_daemon: bool,
 }
 
 fn default_animation_speed() -> String {
@@ -1301,6 +1323,7 @@ impl Default for Config {
                 vim_nav: false,
                 animation_speed: default_animation_speed(),
                 step_notifications: true,
+                quit_stops_daemon: true,
             },
             editor: EditorConfig {
                 vim_mode: false,
@@ -1322,6 +1345,7 @@ impl Default for Config {
                 model: "llama3.2:3b".into(),
                 prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
                 timeout_secs: 30,
+                autostart_ollama: true,
             },
             summary: SummaryConfig::default(),
             auto_tag: AutoTagConfig::default(),
@@ -1905,6 +1929,45 @@ mod tests {
         assert_eq!(parsed.interface.theme, "tokyo-night");
         assert!(parsed.interface.strip_titlebar);
         assert_eq!(parsed.interface.column_widths.first().unwrap(), "150px");
+    }
+
+    /// The lifecycle knobs default ON, and a config written before they
+    /// existed parses with both on — existing users get the full shutdown
+    /// chain and Ollama auto-launch without touching their config.
+    #[test]
+    fn lifecycle_knobs_default_on_and_survive_older_configs() {
+        let defaults = Config::default();
+        assert!(defaults.interface.quit_stops_daemon);
+        assert!(defaults.llm_post_process.autostart_ollama);
+
+        let dir = TempDir::new().unwrap();
+        let mut toml_val: toml::Value = toml::Value::try_from(defaults).unwrap();
+        if let Some(t) = toml_val.get_mut("interface").and_then(|v| v.as_table_mut()) {
+            t.remove("quit_stops_daemon");
+        }
+        if let Some(t) = toml_val
+            .get_mut("llm_post_process")
+            .and_then(|v| v.as_table_mut())
+        {
+            t.remove("autostart_ollama");
+        }
+        let path = write_config(&dir, &toml::to_string(&toml_val).unwrap());
+        let parsed = Config::load(&path).expect("loads config without the lifecycle knobs");
+        assert!(parsed.interface.quit_stops_daemon);
+        assert!(parsed.llm_post_process.autostart_ollama);
+    }
+
+    /// An explicit opt-out round-trips: `false` written to disk stays `false`.
+    #[test]
+    fn lifecycle_knobs_round_trip_when_disabled() {
+        let dir = TempDir::new().unwrap();
+        let mut cfg = Config::default();
+        cfg.interface.quit_stops_daemon = false;
+        cfg.llm_post_process.autostart_ollama = false;
+        let path = write_config(&dir, &toml::to_string(&cfg).unwrap());
+        let parsed = Config::load(&path).unwrap();
+        assert!(!parsed.interface.quit_stops_daemon);
+        assert!(!parsed.llm_post_process.autostart_ollama);
     }
 
     /// Regression: a hook command that contains PowerShell `$variables` (e.g.

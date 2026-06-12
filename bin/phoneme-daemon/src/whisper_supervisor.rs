@@ -11,6 +11,26 @@ use tokio::process::{Child, Command};
 const RESTART_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
 const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(60);
 
+/// Put a freshly-spawned whisper-server into the daemon's kill-on-close job,
+/// so the kernel reaps it even when the daemon dies without running its
+/// graceful shutdown (panic, Task Manager). Best-effort: a failure costs the
+/// unclean-death safety net, never the spawn itself.
+#[cfg(windows)]
+fn assign_to_daemon_job(state: &AppState, child: &Child) {
+    let Some(job) = &state.job else { return };
+    match child.raw_handle() {
+        Some(handle) => {
+            if let Err(e) = job.assign_raw(handle) {
+                tracing::warn!(error = %e, "could not add whisper-server to the daemon job");
+            }
+        }
+        None => tracing::warn!("whisper-server child has no handle to job-assign"),
+    }
+}
+
+#[cfg(not(windows))]
+fn assign_to_daemon_job(_state: &AppState, _child: &Child) {}
+
 /// The model file the bundled whisper-server should be running right now: a
 /// one-job-scoped override (from a model-override re-transcription) when present,
 /// otherwise the configured `whisper.model_path`. Centralizing this is what lets
@@ -134,6 +154,7 @@ pub async fn run_with(
                 continue;
             }
         };
+        assign_to_daemon_job(&state, &child);
         tracing::info!(pid = child.id().unwrap_or(0), "whisper-server spawned");
         let spawned_at = Instant::now();
         let mut check_interval = tokio::time::interval(Duration::from_secs(1));
@@ -316,6 +337,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
                 continue;
             }
         };
+        assign_to_daemon_job(&state, &child);
         tracing::info!(
             pid = child.id().unwrap_or(0),
             port = pv.bundled_server_port,

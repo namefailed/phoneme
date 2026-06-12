@@ -12,6 +12,8 @@ pub mod export;
 pub mod fusion;
 pub mod hook;
 pub mod id;
+#[cfg(windows)]
+pub mod job;
 pub mod llm;
 #[cfg(feature = "native-whisper")]
 pub mod native_whisper;

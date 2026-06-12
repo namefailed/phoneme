@@ -19,6 +19,7 @@ fn cfg(provider: &str, api_url: &str, api_key: &str, model: &str) -> LlmPostProc
         model: model.to_string(),
         prompt: "Clean this up".to_string(),
         timeout_secs: 5,
+        autostart_ollama: true,
     }
 }
 

@@ -446,9 +446,18 @@ phoneme daemon start
 # Print the daemon's status
 phoneme daemon status
 
-# Send shutdown IPC to politely kill the daemon
+# Graceful shutdown: sends the Shutdown IPC and waits (up to ~5s) for the
+# daemon to actually exit
 phoneme daemon stop
 ```
+
+`daemon stop` is the full shutdown chain: the daemon acknowledges the request
+**before** exiting, stops and queues any in-flight recording (nothing is
+corrupted mid-write; the next daemon run transcribes it), kills the
+whisper-server(s) it spawned, and stops an Ollama it auto-launched — an Ollama
+you started yourself is never touched. Stopping an already-stopped daemon
+prints `daemon is not running` and succeeds (it never spawns one just to stop
+it).
 
 ### 🏷️ `phoneme version`
 
