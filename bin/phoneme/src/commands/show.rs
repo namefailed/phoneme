@@ -2,9 +2,20 @@ use crate::args::ShowArgs;
 use crate::client::Client;
 use crate::exit;
 use crate::output;
-use phoneme_core::{Config, Recording, RecordingId};
+use phoneme_core::{Config, Recording, RecordingId, TranscriptSegment};
 use phoneme_ipc::Request;
 use std::process::ExitCode;
+
+/// `start_ms` → `m:ss` (or `h:mm:ss` past an hour) for the timeline output.
+fn fmt_ms(ms: i64) -> String {
+    let total_secs = ms / 1000;
+    let (h, m, s) = (total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
 
 pub async fn run(args: ShowArgs, cfg: &Config, json: bool) -> ExitCode {
     let id = match RecordingId::parse(args.id.as_str()) {
@@ -18,6 +29,45 @@ pub async fn run(args: ShowArgs, cfg: &Config, json: bool) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
+
+    if args.segments {
+        let value = match client.send(Request::GetSegments { id }).await {
+            Ok(v) => v,
+            Err(code) => return code,
+        };
+        if json {
+            output::print_json(&value);
+            return ExitCode::SUCCESS;
+        }
+        let segments: Vec<TranscriptSegment> = match serde_json::from_value(value) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: parsing segments response: {e}");
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
+        };
+        if segments.is_empty() {
+            // Normal for recordings transcribed before segment capture, or for
+            // providers that return no timing data — say so instead of printing
+            // nothing.
+            eprintln!("no segments stored for this recording (retranscribe to capture them)");
+            return ExitCode::from(exit::NOT_FOUND);
+        }
+        for seg in segments {
+            let speaker = seg
+                .speaker
+                .map(|s| format!(" [Speaker {s}]"))
+                .unwrap_or_default();
+            println!(
+                "{:>8}–{:<8}{} {}",
+                fmt_ms(seg.start_ms),
+                fmt_ms(seg.end_ms),
+                speaker,
+                seg.text
+            );
+        }
+        return ExitCode::SUCCESS;
+    }
 
     // Transcript variants fetch a single string from a dedicated request.
     if args.original || args.unedited {

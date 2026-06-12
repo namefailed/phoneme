@@ -68,10 +68,13 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
     // Whisper (Custom OpenAI-compatible) returns the raw transcript.
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({ "text": "raw words from whisper" })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "raw words from whisper",
+            "segments": [
+                {"start": 0.0, "end": 1.1, "text": " raw words"},
+                {"start": 1.1, "end": 2.0, "text": " from whisper"}
+            ]
+        })))
         .mount(&server)
         .await;
     // The LLM (cleanup + auto-summary) returns processed text.
@@ -198,6 +201,20 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         Some("raw words from whisper"),
         "original transcript should be the raw whisper output"
     );
+
+    // The machine segment timeline is persisted alongside the transcript
+    // (ms-converted, trimmed, unlabeled — diarization is off here). Like
+    // `original_transcript` it describes the raw whisper output, not the
+    // LLM-cleaned text.
+    let segments = state.catalog.segments_for(&id).await.unwrap();
+    assert_eq!(segments.len(), 2, "both whisper segments should persist");
+    assert_eq!(segments[0].start_ms, 0);
+    assert_eq!(segments[0].end_ms, 1100);
+    assert_eq!(segments[0].text, "raw words");
+    assert_eq!(segments[0].speaker, None);
+    assert_eq!(segments[1].start_ms, 1100);
+    assert_eq!(segments[1].end_ms, 2000);
+    assert_eq!(segments[1].text, "from whisper");
 }
 
 /// A queued per-recording model override is applied to JUST that job: the

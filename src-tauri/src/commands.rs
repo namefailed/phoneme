@@ -139,6 +139,16 @@ pub async fn list_meeting(bridge: Br<'_>, meeting_id: String) -> Result<Value, C
     forward(&bridge, Request::ListMeeting { meeting_id }).await
 }
 
+/// Fetch one recording's machine transcript segments in timeline order
+/// (start/end ms into the track's audio, text, optional speaker label). An
+/// empty list is normal — older recordings predate segment capture and some
+/// providers return no timing data. Powers the timeline views.
+#[tauri::command]
+pub async fn get_segments(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetSegments { id }).await
+}
+
 /// Delete a recording from the catalog.
 /// If `keep_audio` is false, the `.wav` file on disk will also be permanently deleted.
 #[tauri::command]

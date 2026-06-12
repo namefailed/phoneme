@@ -154,6 +154,29 @@ pub struct SpeakerName {
     pub name: String,
 }
 
+/// One machine transcript segment with its audio-relative timing.
+///
+/// Captured from the transcription provider (whisper `verbose_json` segments,
+/// Deepgram word groups, AssemblyAI utterances) and persisted per recording in
+/// `transcript_segments`. Times are **milliseconds from the start of the
+/// track's audio file** — meeting tracks are wall-clock synced at capture
+/// time (the loopback fills real silence), so the same offset is comparable
+/// across a meeting's tracks.
+///
+/// `speaker` is the label text exactly as it appears in the transcript's
+/// `[Speaker …]` marker ("1", "0", "A" — providers differ; numeric labels
+/// join against [`SpeakerName::speaker_label`]); `None` for undiarized
+/// segments. Segments are machine truth like `original_transcript`: user
+/// edits to the live transcript never rewrite them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranscriptSegment {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+    #[serde(default)]
+    pub speaker: Option<String>,
+}
+
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListFilter {

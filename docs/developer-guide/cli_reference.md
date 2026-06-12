@@ -116,6 +116,11 @@ phoneme show 20260519T143500823 --original
 # Print the unedited pipeline transcript (transcribed + cleaned, before your
 # hand edits)
 phoneme show 20260519T143500823 --unedited
+
+# Print the machine transcript segments as a timeline: start-end offsets,
+# speaker label (when diarized), and text per line. Empty for recordings
+# transcribed before segment capture existed -- retranscribe to backfill.
+phoneme show 20260519T143500823 --segments
 ```
 
 ### 🔁 `phoneme retranscribe <ID>` (alias: `phoneme replay`)
