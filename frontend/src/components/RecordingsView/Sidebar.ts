@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { listTags, type Tag } from "../../services/ipc";
+import { listTags, tagUsageCounts, type Tag } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, type UiFilter, type RecordingKind } from "../../state/filter";
 import "./QueuePanel";
@@ -12,6 +12,9 @@ export class SidebarElement extends LitElement {
   }
 
   @state() private tags: Tag[] = [];
+  /** Recordings-per-tag, keyed by tag id (stringified over IPC). Drives the
+   *  right-anchored count beside each tag row. */
+  @state() private counts: Record<string, number> = {};
   @state() private filterState: UiFilter = filterStore.get();
   @state() private libraryOpen = localStorage.getItem("phoneme.sidebar.libraryOpen") !== "false";
   @state() private tagsOpen = localStorage.getItem("phoneme.sidebar.tagsOpen") !== "false";
@@ -49,6 +52,12 @@ export class SidebarElement extends LitElement {
     } catch (e) {
       console.error("Failed to load tags for sidebar:", e);
       this.tags = [];
+    }
+    // Counts ride along on the same refresh triggers (attach/detach included).
+    try {
+      this.counts = await tagUsageCounts();
+    } catch {
+      this.counts = {};
     }
   }
 
@@ -123,8 +132,9 @@ export class SidebarElement extends LitElement {
               ` : this.tags.map(t => html`
                 <div class="sidebar-item ${f.tag_id === t.id ? 'active' : ''}" @click=${() => this.setTagFilter(t.id)}>
                   <span class="sidebar-icon" style="color: var(--accent);">#</span>
-                  <span>${t.name}</span>
+                  <span class="sidebar-label">${t.name}</span>
                   <span class="sidebar-dot" style="background: ${t.color || 'var(--accent)'}"></span>
+                  <span class="sidebar-count" title="${this.counts[String(t.id)] ?? 0} recordings with this tag">${this.counts[String(t.id)] ?? 0}</span>
                 </div>
               `)}
             </div>
