@@ -310,6 +310,17 @@ explicit roadmap line here saying why not).
   - [ ] **Track-aware Meeting Mode** *(confirmed)*. `diarize_transcript` runs speakrs identically for every recording; there is no branch on `MeetingTrack::Mic` vs `System` (transcription.rs only sees a path + segments, never the track; the track lives in the catalog row, recorder.rs:854–857). For meetings, label the mic track **"You"** without running speakrs at all, and only diarize the system/loopback track — halves diarizer work and avoids spurious multi-speaker labels on a single-mic track. *(transcription.rs:352; recorder.rs `MeetingTrack::Mic/System`)*
   - [ ] **Word-level alignment instead of 1 s segments** *(confirmed)*. Today's path is whisper **segments** × diarization turns: the local provider requests `timestamp_granularities[]=segment` (transcription.rs:285) and `assign_speakers` attributes each whole segment by its midpoint (diarization.rs:90). Request `timestamp_granularities[]=word` from whisper-server and assign each *word* to a speaker via the per-frame activation matrix — `DiscreteDiarization` derefs to a public `Array2<f32>` of frame activations (`pipeline/types/data.rs:76`). Pairs with the v1.9 word-timestamp substrate above. *(transcription.rs:283–339, diarization.rs:77–115)*
   - [ ] **Expose `PipelineConfig` tunables in Settings** *(refined)*. speakrs exposes `merge_gap`, `speaker_keep_threshold`, `reconstruct_method`, and nested `binarize` / `ahc` / `vbx` configs (`pipeline/config.rs`). Caveat: `OwnedDiarizationPipeline::run` uses the pipeline's `default_config`; applying custom values needs `run_with_config` / `into_queued_with_config` / `new_with_config`. **ExecutionMode has no `CpuFast`** — the only `*-fast` modes are `CoreMlFast` / `CudaFast` (`inference.rs:47`), neither available on Windows/CPU — so ship the `merge_gap`/threshold knobs, not a Cpu/CpuFast toggle. *(pipeline/config.rs, inference.rs:47)*
+  - [ ] **Selectable local diarization models** — speakrs ships
+    `PipelineBuilder::from_dir(models_dir, mode)` beside the `from_pretrained`
+    we call today, so custom/alternative model bundles are fully supported by
+    the dependency. Ship in two steps: (1) `diarization.models_dir` directory
+    override (replaces the dead `local_model_path` key — it was never wired to
+    anything; Settings field + Doctor check follow the same resolution), so
+    power users can drop in any compatible segmentation/embedding/PLDA bundle;
+    (2) curated alternative bundles in the wizard (which wespeaker/pyannote
+    ONNX exports actually match speakrs' shapes needs testing first), pinned
+    SHA-256 like every other download. The diarizer cache invalidates on the
+    new key like any `[diarization]` change.
   - [ ] **Speaker embeddings for named speakers** *(refined)*. `DiarizationResult` does expose `embeddings: ChunkEmbeddings(pub Array3<f32>)` and `hard_clusters: ChunkSpeakerClusters(pub Array2<i32>)` (`pipeline/types/data.rs:154`), so per-name centroids are computable. Caveat: `run_local_diarization` currently throws the whole result away except segments, and speakrs computes centroids internally (`pipeline/clustering.rs`) without a public accessor — we'd aggregate chunk embeddings per cluster ourselves, persist centroids per name, and cosine-match on later recordings. Real but non-trivial; lands after the scaling + caching fixes. *(diarization.rs:159–169)*
   - [ ] **Cloud diarization toggles** *(confirmed — already wired)*. Deepgram passes `diarize=true` and reassembles `[Speaker N]` from word speaker tags (transcription.rs:469, 521–553); AssemblyAI passes `speaker_labels=true` and reassembles from utterances (transcription.rs:702, 730–756). Both are gated on `DiarizationBackend::Deepgram` / `::Assemblyai` (transcription.rs:114, 122; config.rs:83). Remaining work is just the **Settings UI** to pick the backend, not backend plumbing.
   - [ ] **DER eval harness** *(refined)*. speakrs ships DER utilities — `compute_der`, `DerResult`, `parse_rttm` (`metrics.rs`), and `to_rttm` (`segment.rs`) — **but they are behind the `_metrics` feature**, which Phoneme does not enable (`speakrs = "0.4.2"`, default features in `phoneme-core/Cargo.toml:26`). Add a small RTTM fixture set + a dev-only harness that enables `speakrs/_metrics` (or reimplements collar-0 DER), wired as an optional nightly CI job rather than a release gate.
@@ -343,7 +354,15 @@ explicit roadmap line here saying why not).
   lands: immediately from a type-only fast pass (cleanup/summary/tags catch up
   in the library), or only after the full pipeline finishes. `[in_place]` in
   the config reference; user guide: `transcribe_in_place.md`.
-- [ ] **Live preview overhaul (a whole phase)** — the current streaming
+- [ ] **Live preview overhaul (a whole phase)** — execution scope, concrete:
+  **(a)** token-bucket reveal — words stream in at a steady cadence instead of
+  replace-per-tick jumps; **(b)** stable stitch — committed text is append-only
+  (provisional tail styled lighter, never rewriting what's already shown);
+  **(c)** idle behavior — hold + gentle decay when the speaker pauses, a
+  "listening" state instead of flicker; **(d)** per-tick perf budget with
+  adaptive window (skip a tick under load rather than stutter); **(e)** exit
+  criteria for dropping the Beta label: measured stitch stability + pacing on
+  a 10-minute dictation. Original framing: the current streaming
   preview works but doesn't feel good: caption pacing is uneven, the stitch
   point jumps, and meetings double the cost. It ships **off by default,
   labelled Beta** until this lands. Scope: smoother partial-text pacing
@@ -357,6 +376,20 @@ explicit roadmap line here saying why not).
   feedback Wispr Flow nails. Builds on the existing overlay window; do this
   AFTER the live-preview overhaul (or independent of it — the waveform needs
   only audio levels, not transcription).
+
+- [ ] **In-place dictation, phase 2** — the fast lane shipped; now the feel:
+  **(a)** voice commands in the polish pass — "new line", "new paragraph",
+  "scratch that" handled rule-based in `fast_polish` (and as prompt directives
+  in LLM mode); **(b)** per-app overrides — type vs paste vs off per process
+  name (some apps reject synthetic keystrokes; the fast lane should know);
+  **(c)** app-aware context, tier 1 — opt-in (OFF by default), the focused
+  window's title feeds the polish prompt so jargon resolves correctly, with a
+  process denylist; fully open source, toggleable — our answer to Wispr Flow's
+  screenshots without the trust problem (tier 2, screenshot→vision-LLM, stays
+  a separate later opt-in); **(d)** streaming-type experiment — type words as
+  they finalize instead of all-at-end (spike: corrections vs cursor churn;
+  may not survive contact with reality); **(e)** the waveform capture overlay
+  above doubles as the dictation "it hears me" signal — build them together.
 
 ### ✨ Small wins
 
