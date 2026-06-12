@@ -61,11 +61,28 @@ flowchart LR
 
 In the recordings list, a meeting's two tracks are grouped under one entry. Click the meeting's **group header** to open the **merged conversation** view: a single, read-only reading of the whole meeting, with each track rendered as a labelled section — **🎤 Microphone** (you) and **🔊 System audio** (everyone else) — and the diarizer's `[Speaker N]` turns surfaced inside. A toolbar offers **Copy** and **Export** of the merged text. To edit a single track (full editor, waveform, notes, re-transcribe), expand the group and click that track's row instead.
 
+### 🕒 Dual timeline (side-by-side, synced)
+
+From the merged view, click **🕒 Dual timeline** (or press `\`) to explode the
+meeting into two side-by-side panes — one per track — each showing its
+transcript as a clickable, time-coded **timeline**. The two tracks share a
+wall-clock at capture time, so the panes stay in lock-step:
+
+- **Click any line** to jump *both* waveforms to that moment — hear what the
+  meeting said and what you said at the same point in time.
+- **Scrolling one timeline scrolls the other** to the same time offset.
+- The line under the playhead stays highlighted as audio plays.
+- **Esc** (or a pane's ✕) collapses the split and returns to the merged view.
+
+The same timeline is available for any single recording via the **🕒 Timeline**
+button in the detail pane's transcript box.
+
 > [!NOTE]
-> The merged view orders the tracks by source (mic, then system); it does **not**
-> yet interleave them line-by-line on one chronological timeline, because
-> per-segment timestamps are not persisted. A true "You / Meeting" interleaved
-> chronological transcript is on the [roadmap](../../ROADMAP.md).
+> Segment timing is captured at transcription time, so recordings transcribed
+> before this feature have no timeline yet — hit **Re-run → Transcribe** on a
+> track to backfill it. The merged view still orders tracks by source (mic,
+> then system); a single chronologically interleaved transcript is the next
+> step on the [roadmap](../../ROADMAP.md).
 
 
 ### 🗣️ Adding Speaker Diarization

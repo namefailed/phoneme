@@ -112,6 +112,10 @@ export class RecordingsView {
   /** Split mode: the recording open in the SECOND pane (null = no split).
    *  The first pane keeps showing the normal selection. */
   private splitId: string | null = null;
+  /** Where Esc/✕ should land after leaving split mode: the merged meeting view
+   *  ("session:<id>") when the split was opened from its Dual-timeline button,
+   *  else null (stay on the first pane's recording as usual). */
+  private splitReturnTo: string | null = null;
   /** Second full recording pane (split mode). */
   private detail2: RecordingDetail;
   private splitter2: Splitter;
@@ -255,12 +259,15 @@ export class RecordingsView {
       this.deselect();
     };
     window.addEventListener("phoneme:close-detail", this.closeDetailHandler);
-    // Split requests from outside the view (the bulk bar's button / its \ key).
+    // Split requests from outside the view (the bulk bar's button / its \ key,
+    // and the merged meeting view's "Dual timeline" button — which adds
+    // `timeline: true` so both panes open straight into synced timelines, and
+    // `returnTo` so closing the split lands back on the merged view).
     this.openSplitHandler = (e: Event) => {
-      const d = (e as CustomEvent<{ a?: string; b?: string }>).detail;
+      const d = (e as CustomEvent<{ a?: string; b?: string; timeline?: boolean; returnTo?: string }>).detail;
       if (!d?.a || !d?.b) return;
       this.onSelect(d.a);
-      this.openSplit(d.b);
+      this.openSplit(d.b, { timeline: d.timeline, returnTo: d.returnTo ?? null });
     };
     window.addEventListener("phoneme:open-split", this.openSplitHandler);
   }
@@ -978,7 +985,7 @@ export class RecordingsView {
   /** Open `id` in the SECOND pane (split mode). The current selection stays in
    *  the first pane; sidebar + top bar hide via the zen snapshot so both panes
    *  get the whole window. Refuses sessions and duplicate ids with a toast. */
-  openSplit(id: string) {
+  openSplit(id: string, opts: { timeline?: boolean; returnTo?: string | null } = {}) {
     if (id.startsWith("session:")) {
       showToast("Split works with single recordings (open a meeting's tracks individually).", "info");
       return;
@@ -998,11 +1005,25 @@ export class RecordingsView {
     setHeaderHidden(true);
     this.listZen = false;
     this.splitId = id;
+    this.splitReturnTo = opts.returnTo ?? null;
     void this.detail2.show(id);
     this.animateLayout();
     this.applyLayout();
     this.focusPane("detail2");
     this.list.clearSelection();
+    if (opts.timeline) {
+      // Dual-timeline mode: both panes are tracks of one meeting. The tracks
+      // are wall-clock synced at capture, so the timelines share a sync group
+      // (the meeting id) — clicks seek both waveforms, scrolling mirrors.
+      const recs = this.state.get().recordings;
+      const a = recs.find((r) => r.id === current);
+      const b = recs.find((r) => r.id === id);
+      const group = a?.meeting_id && a.meeting_id === b?.meeting_id ? a.meeting_id : null;
+      this.detail.setSyncGroup(group);
+      this.detail2.setSyncGroup(group);
+      this.detail.showTimeline();
+      this.detail2.showTimeline();
+    }
   }
 
   /** Leave split mode: close the second pane (guarding unsaved edits there)
@@ -1020,12 +1041,18 @@ export class RecordingsView {
 
   private applyCloseSplit() {
     this.splitId = null;
+    this.detail.setSyncGroup(null);
+    this.detail2.setSyncGroup(null);
     this.detail2.clear();
     if (!this.focusMode && !this.listZen) this.restoreChrome();
     this.animateLayout();
     this.applyLayout();
     if (this.focusedPane === "detail2") this.focusPane("detail");
     this.list.clearSelection();
+    // A split opened from the merged meeting view returns there on close.
+    const returnTo = this.splitReturnTo;
+    this.splitReturnTo = null;
+    if (returnTo) this.onSelect(returnTo);
   }
 
   /** Drag-to-resize the left sidebar; width persists per device. */
@@ -1269,11 +1296,31 @@ export class RecordingsView {
     }
 
     if (e.key === "\\" && !e.ctrlKey && !target.isContentEditable) {
+      // \ on an open MERGED MEETING view → explode it into the dual-timeline
+      // split (both tracks side by side as synced timelines; Esc returns to
+      // the merged view). Keyboard twin of the view's Dual-timeline button.
+      const sel = this.state.get().selectedId;
+      if (!this.splitId && sel?.startsWith("session:")) {
+        const mid = sel.slice("session:".length);
+        const tracks = this.state
+          .get()
+          .recordings.filter((r) => r.meeting_id === mid)
+          .sort((a, b) => (a.track ?? "").localeCompare(b.track ?? ""));
+        if (tracks.length >= 2) {
+          e.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent("phoneme:open-split", {
+              detail: { a: tracks[0].id, b: tracks[1].id, timeline: true, returnTo: sel },
+            }),
+          );
+          return;
+        }
+      }
       // \ with a recording open and the list cursor on another row → split.
       // (With exactly two multi-selected, the bulk bar's capture-phase handler
       // owns \ and never lets it reach here.)
       const focused = this.list.getFocusedId();
-      if (!this.splitId && this.state.get().selectedId && focused) {
+      if (!this.splitId && sel && focused) {
         e.preventDefault();
         this.openSplit(focused);
         return;

@@ -76,10 +76,22 @@ export class WaveformPlayerElement extends LitElement {
     this.wavesurfer.on("pause", () => {
       this.dispatchEvent(new CustomEvent('play-state-change', { detail: false }));
     });
+    // Continuous playhead position (seconds) — drives the timeline view's
+    // active-segment highlight. Also fires on seeks, so a click-to-seek
+    // updates the highlight without playing.
+    this.wavesurfer.on("timeupdate", (t: number) => {
+      this.dispatchEvent(new CustomEvent('time-update', { detail: t }));
+    });
   }
 
   togglePlay() {
     this.wavesurfer?.playPause();
+  }
+
+  /** Move the playhead to `seconds` (clamped by wavesurfer); playback state is
+   *  preserved — seeking while paused stays paused. */
+  seekTo(seconds: number) {
+    this.wavesurfer?.setTime(seconds);
   }
 
   render() {
@@ -109,6 +121,16 @@ export class WaveformPlayer {
     this.element.addEventListener('play-state-change', (e: Event) => {
       cb((e as CustomEvent<boolean>).detail);
     });
+  }
+
+  setOnTimeUpdate(cb: (seconds: number) => void) {
+    this.element.addEventListener('time-update', (e: Event) => {
+      cb((e as CustomEvent<number>).detail);
+    });
+  }
+
+  seekTo(seconds: number) {
+    this.element.seekTo(seconds);
   }
 
   mount(container: HTMLElement, audioPath: string) {

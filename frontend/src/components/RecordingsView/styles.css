@@ -2302,3 +2302,59 @@ ph-sidebar .queue-item-main.kbd-cursor {
   color: var(--fg-muted);
   font-size: 13px;
 }
+
+/* ── Timeline peek (clickable, time-coded segment list) ─────────────────────
+   Hosted in the detail pane's transcript box; in the dual-timeline split two
+   of these mirror each other (shared playhead + scroll sync). */
+.tl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  height: 100%;
+  overflow: auto;
+}
+.tl-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg-default);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+.tl-row:hover { background: var(--bg-raised); }
+.tl-row.tl-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.tl-time {
+  flex: 0 0 auto;
+  min-width: 42px;
+  color: var(--fg-faded);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+.tl-speaker {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+}
+.tl-text {
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tl-empty,
+.tl-loading {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 10px 12px;
+}

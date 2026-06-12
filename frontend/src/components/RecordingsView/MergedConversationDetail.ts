@@ -144,6 +144,23 @@ export class MergedConversationDetail extends LitElement {
     }
   }
 
+  /** Explode this meeting into the dual-timeline split: both tracks side by
+   *  side as synced, clickable timelines (a click seeks both waveforms; the
+   *  tracks are wall-clock synced at capture, so equal offsets line up).
+   *  Closing the split (Esc/✕) returns to this merged view. */
+  private openDualTimeline() {
+    const ordered = [...this.recordings].sort((a, b) =>
+      (a.track ?? "").localeCompare(b.track ?? ""),
+    ); // "mic" before "system"
+    const [a, b] = ordered;
+    if (!a || !b) return;
+    window.dispatchEvent(
+      new CustomEvent("phoneme:open-split", {
+        detail: { a: a.id, b: b.id, timeline: true, returnTo: `session:${this.meetingId}` },
+      }),
+    );
+  }
+
   private async handleCopy() {
     try {
       await navigator.clipboard.writeText(mergedPlainText(this.blocks));
@@ -214,6 +231,13 @@ export class MergedConversationDetail extends LitElement {
               >
             </h2>
             <div class="merged-actions">
+              ${this.recordings.length >= 2
+                ? html`<button
+                    class="inline-button"
+                    title="Open both tracks side by side as synced timelines — click a line to seek both"
+                    @click=${this.openDualTimeline}
+                  >🕒 Dual timeline</button>`
+                : nothing}
               <button class="inline-button" @click=${this.handleCopy}>${this.copyLabel}</button>
               <button class="inline-button" @click=${this.handleExport}>⬇ Export</button>
             </div>

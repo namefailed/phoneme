@@ -24,6 +24,7 @@ import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
+import { TimelineView } from "./TimelineView";
 
 export class RecordingDetail {
   private container: HTMLElement;
@@ -34,6 +35,18 @@ export class RecordingDetail {
   private onRefresh: () => void;
   private dirty = false;
   private notesDirty = false;
+  /** The mounted Timeline peek (segment list), when open. */
+  private timeline: TimelineView | null = null;
+  /** Meeting id when this pane is half of a dual-timeline split — the timeline
+   *  views with the same group mirror seeks and scrolling across panes. */
+  private syncGroup: string | null = null;
+  /** Set when showTimeline() is called before the detail has rendered (the
+   *  dual-timeline split opens both panes and immediately asks for timelines);
+   *  consumed at the end of renderRecording. */
+  private pendingTimeline = false;
+  /** Opens the timeline peek for the currently rendered recording; assigned in
+   *  renderRecording where the peek wiring lives. */
+  private openTimelinePeek: (() => void) | null = null;
   /** Identity of what is currently rendered, so refreshes that don't change the
    *  recording or its audio file can update text in place instead of tearing
    *  down and remounting the waveform (which caused it to flicker/clear). */
@@ -125,10 +138,29 @@ export class RecordingDetail {
     this.editor = null;
     this.notesEditor?.dispose();
     this.notesEditor = null;
+    this.timeline?.dispose();
+    this.timeline = null;
+    this.openTimelinePeek = null;
+    this.pendingTimeline = false;
+    this.syncGroup = null;
     this.dirty = false;
     this.notesDirty = false;
     this.player.destroy();
     this.renderEmpty();
+  }
+
+  /** Mark this pane as half of a dual-timeline split (group = the meeting id),
+   *  or detach it with `null`. Applied to the live timeline view if one is open. */
+  setSyncGroup(group: string | null) {
+    this.syncGroup = group;
+    this.timeline?.setSyncGroup(group);
+  }
+
+  /** Open the Timeline peek (the clickable segment list). Safe to call before
+   *  the recording has rendered — the request is honored once it has. */
+  showTimeline() {
+    if (this.openTimelinePeek) this.openTimelinePeek();
+    else this.pendingTimeline = true;
   }
 
   /** Commit any pending transcript + notes edits (the "Save" choice on the
@@ -147,6 +179,12 @@ export class RecordingDetail {
 
   private renderRecording() {
     if (!this.recording) return;
+    // The previous render's timeline (if any) lives in DOM this rewrite is
+    // about to replace — drop its window listeners. `pendingTimeline` is left
+    // alone: it may have been set for THIS render.
+    this.timeline?.dispose();
+    this.timeline = null;
+    this.openTimelinePeek = null;
     const r = this.recording;
     const stats = wordCountSummary(r.transcript ?? "");
     // Crisp corner-bracket icons (maximize / minimize) for the focus toggle —
@@ -180,10 +218,12 @@ export class RecordingDetail {
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
+          <div id="timeline-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 4px;"></div>
           <div class="transcript-history">
             <div class="th-group th-left">
               <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
               <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
+              <button class="view-btn" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
             </div>
             <div class="th-group th-right">
               <button class="view-btn" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
@@ -237,7 +277,7 @@ export class RecordingDetail {
     //   • summary    — AI summary (generated on demand if absent)
     // Exactly one of {editor, original, unedited, summary} is visible at a time.
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
-    type PeekKind = "original" | "unedited" | "summary";
+    type PeekKind = "original" | "unedited" | "summary" | "timeline";
     const peeks: Record<PeekKind, { btn: HTMLButtonElement | null; el: HTMLElement | null; idle: string }> = {
       original: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
@@ -253,6 +293,11 @@ export class RecordingDetail {
         btn: this.container.querySelector<HTMLButtonElement>("#view-summary"),
         el: this.container.querySelector<HTMLElement>("#summary-peek"),
         idle: "✨ Summary",
+      },
+      timeline: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-timeline"),
+        el: this.container.querySelector<HTMLElement>("#timeline-peek"),
+        idle: "🕒 Timeline",
       },
     };
 
@@ -332,6 +377,31 @@ export class RecordingDetail {
       }
       openPeek("summary");
     });
+
+    // Timeline peek: the machine segments as a clickable, time-coded list.
+    // Click a line → seek THIS pane's waveform; in a dual-timeline split the
+    // views share a sync group and mirror seeks/scrolling across panes.
+    const mountTimeline = () => {
+      if (!this.timeline) {
+        this.timeline = new TimelineView(peeks.timeline.el!, r.id, {
+          speakerNames: r.speaker_names ?? [],
+          syncGroup: this.syncGroup,
+          onSeek: (seconds) => this.player.seekTo(seconds),
+        });
+      }
+      openPeek("timeline");
+    };
+    peeks.timeline.btn?.addEventListener("click", () => {
+      if (activePeek === "timeline") return resetPeek();
+      mountTimeline();
+    });
+    this.openTimelinePeek = mountTimeline;
+    // The waveform playhead drives the timeline's active-segment highlight.
+    this.player.setOnTimeUpdate((t) => this.timeline?.setPlaybackTime(t));
+    if (this.pendingTimeline) {
+      this.pendingTimeline = false;
+      mountTimeline();
+    }
 
     // Compare versions: opens a roomy, full-feature diff modal (a peek box was
     // far too cramped for a real side-by-side diff).
