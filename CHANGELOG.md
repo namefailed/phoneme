@@ -62,6 +62,11 @@ trust boundary. Verified against current code.*
   attempts instead of failing recordings, retention honors delete_audio,
   wizard downloads are URL-allowlisted and only create files on success,
   open-file paths allowlisted, daily logs pruned to `log_max_files`.
+- [x] **Diarization pipeline cached** — the ~500 MB speaker-diarization models
+  used to reload on every diarized transcription; they now load once, lazily,
+  into a config-keyed cache (speakrs' queued worker thread), serialize
+  overlapping runs, invalidate on `[diarization]` changes, and never cache a
+  failed load - a mid-session model download just works on the next run.
 - [x] **Webhook SSRF guard + hook-test redaction** — webhooks classify their
   target before any bytes leave: loopback always allowed (local n8n/Home
   Assistant stay zero-config), private ranges need `[webhook]

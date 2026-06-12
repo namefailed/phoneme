@@ -1,13 +1,17 @@
 //! Local speaker diarization (pyannote-style segmentation via `speakrs`) and the
 //! provider-agnostic logic that attaches speaker labels to a transcript.
 //!
-//! The actual model inference lives in [`run_local_diarization`]; the pure
-//! [`assign_speakers`] function (which maps speaker turns onto ASR segments) is
-//! deliberately model-free so it can be unit-tested without the ~500 MB ONNX
-//! model present.
+//! The actual model inference lives in [`run_local_diarization`], which feeds
+//! jobs through the process-wide [`DiarizerCache`] so the ~500 MB pipeline is
+//! loaded once per daemon lifetime instead of once per transcription. The pure
+//! [`assign_speakers`] function (which maps speaker turns onto ASR segments)
+//! and the cache's lazy-init/invalidation logic are deliberately model-free so
+//! they can be unit-tested without the ONNX models present.
 
+use crate::config::DiarizationConfig;
 use anyhow::Result;
 use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// A speaker turn produced by the diarizer: `[start, end)` in **seconds** and an
 /// opaque speaker label. We do NOT assume the label is a bare integer — pyannote
@@ -243,15 +247,287 @@ fn clean_speaker_spans(mut spans: Vec<SpeakerSpan>, merge_gap: f64) -> Vec<Speak
     merged
 }
 
-/// Run local diarization on a 16 kHz mono WAV, returning speaker turns. The
-/// model is loaded on each call (CPU execution for portability); callers should
-/// run this off the async runtime (e.g. `spawn_blocking`).
-pub fn run_local_diarization(audio_path: &Path) -> Result<Vec<SpeakerSpan>> {
-    use speakrs::{ExecutionMode, OwnedDiarizationPipeline};
+// ── Pipeline cache ───────────────────────────────────────────────────────────
 
-    let mut pipeline = OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?;
+/// Process-wide lazy cache for the local diarization pipeline.
+///
+/// Loading the speakrs pipeline pulls the ~500 MB segmentation + embedding
+/// ONNX models off disk and takes seconds; doing that per transcription (the
+/// old behavior) dominated diarization cost. The cache loads the pipeline
+/// once, on the first recording that actually needs it — never at daemon
+/// startup, since most users keep diarization off and shouldn't pay the RAM.
+///
+/// Lifecycle policy:
+/// - **Lazy:** nothing is loaded until [`get_or_load`](Self::get_or_load).
+/// - **Config-keyed:** the cache remembers the `[diarization]` config it was
+///   built under; `get_or_load` under a different config drops and reloads,
+///   so a stale pipeline can never serve a run even if every external
+///   invalidation hook were missed.
+/// - **Load errors are never cached:** a failed load leaves the slot empty
+///   and the next run retries. Worst case (models missing, diarization left
+///   on) equals the pre-cache behavior — one load attempt per transcription —
+///   and it self-heals the moment the cause clears (e.g. the setup wizard
+///   downloads the models mid-session) without requiring a config touch.
+/// - **Invalidation points:** the daemon drops the cache wherever it applies
+///   config — the `ReloadConfig` IPC handler and the queue worker's post-run
+///   reload — via [`invalidate_if_stale`](Self::invalidate_if_stale), and
+///   [`run_local_diarization`] calls [`invalidate`](Self::invalidate) when
+///   the queue worker dies so the next run reloads fresh.
+///
+/// Generic over the handle type `H` purely so the lazy-init / invalidation /
+/// no-double-load logic is unit-testable with a fake loader (the real loader
+/// needs the models, which aren't available in CI); production code uses
+/// [`LocalDiarizerCache`].
+pub struct DiarizerCache<H> {
+    slot: Mutex<CacheSlot<H>>,
+}
+
+struct CacheSlot<H> {
+    handle: Option<Arc<H>>,
+    /// The `[diarization]` config snapshot the cached handle was built under.
+    /// Meaningless while `handle` is `None`.
+    cfg: DiarizationConfig,
+}
+
+/// The concrete cache the daemon holds (via `Transcriber`): speakrs pipelines
+/// behind their background-queue handle.
+pub type LocalDiarizerCache = DiarizerCache<QueuedDiarizer>;
+
+impl<H> DiarizerCache<H> {
+    /// An empty cache. Costs nothing until the first `get_or_load`.
+    pub fn new() -> Self {
+        Self {
+            slot: Mutex::new(CacheSlot {
+                handle: None,
+                cfg: DiarizationConfig::default(),
+            }),
+        }
+    }
+
+    /// Lock the slot, recovering from poison. Recovery is sound because the
+    /// slot invariant — `handle` is `None` or a fully-built `Some` — holds at
+    /// every panic point (a loader panic happens before the slot is written),
+    /// so one crashed job can't disable diarization for the rest of the
+    /// daemon's life.
+    fn lock(&self) -> std::sync::MutexGuard<'_, CacheSlot<H>> {
+        self.slot.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The cached handle, or build one with `load` and cache it.
+    ///
+    /// The load runs while the slot lock is held — that is the entire
+    /// double-load guard: a second caller racing the first blocks on the lock
+    /// and then takes the cache-hit branch instead of loading again. A cached
+    /// handle built under a *different* `[diarization]` config is dropped and
+    /// rebuilt here, so config staleness is impossible at the point of use.
+    pub fn get_or_load<F>(&self, cfg: &DiarizationConfig, load: F) -> Result<Arc<H>>
+    where
+        F: FnOnce() -> Result<H>,
+    {
+        let mut slot = self.lock();
+        if slot.handle.is_some() && slot.cfg != *cfg {
+            tracing::info!(
+                reason = "[diarization] config changed",
+                "dropping cached local diarization pipeline"
+            );
+            slot.handle = None;
+        }
+        if let Some(handle) = &slot.handle {
+            tracing::debug!("local diarization pipeline cache hit");
+            return Ok(handle.clone());
+        }
+        // Errors are deliberately not cached (the slot stays empty on `?`):
+        // see the type-level policy note.
+        let handle = Arc::new(load()?);
+        slot.handle = Some(handle.clone());
+        slot.cfg = cfg.clone();
+        Ok(handle)
+    }
+
+    /// Drop the cached handle unconditionally; returns whether one was
+    /// dropped. An in-flight run keeps its own `Arc` clone and finishes on
+    /// the old pipeline — only after that clone drops does the queue close
+    /// and the worker release the model memory.
+    pub fn invalidate(&self, reason: &str) -> bool {
+        let dropped = self.lock().handle.take().is_some();
+        if dropped {
+            tracing::info!(reason, "dropping cached local diarization pipeline");
+        }
+        dropped
+    }
+
+    /// Drop the cached handle only if it was built under a different
+    /// `[diarization]` config than `cfg`; returns whether it was dropped.
+    /// Called from the daemon's config-apply points so a backend switch or
+    /// model-path change takes effect — and switching away from `local`
+    /// releases the model RAM — without waiting for the next run.
+    pub fn invalidate_if_stale(&self, cfg: &DiarizationConfig) -> bool {
+        let mut slot = self.lock();
+        if slot.handle.is_some() && slot.cfg != *cfg {
+            slot.handle = None;
+            drop(slot);
+            tracing::info!(
+                reason = "[diarization] config changed",
+                "dropping cached local diarization pipeline"
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Whether a pipeline is currently cached (observability/tests only —
+    /// the answer can be stale by the time the caller acts on it).
+    pub fn is_loaded(&self) -> bool {
+        self.lock().handle.is_some()
+    }
+}
+
+impl<H> Default for DiarizerCache<H> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Manual impl so `H` needn't be `Debug` (the speakrs queue handles aren't).
+impl<H> std::fmt::Debug for DiarizerCache<H> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiarizerCache")
+            .field("loaded", &self.is_loaded())
+            .finish()
+    }
+}
+
+/// A loaded local diarization pipeline running on speakrs's background queue
+/// worker thread. The worker owns the models; this handle just feeds it jobs.
+pub struct QueuedDiarizer {
+    /// Sender and receiver under ONE lock: a job is pushed and its result
+    /// received under the same guard, so exactly one job is ever in flight
+    /// and the next result always belongs to the lock holder. This is the
+    /// serialization point for overlapping transcriptions (the queue worker
+    /// is serial, but retranscribe/in-place runs can race the queue) — they
+    /// line up here instead of each loading a private pipeline.
+    queue: Mutex<(speakrs::QueueSender, speakrs::QueueReceiver)>,
+}
+
+/// Why a queued diarization job failed — the split decides whether the cached
+/// pipeline survives the failure.
+enum QueueRunError {
+    /// The job itself failed (inference error on this audio). The worker is
+    /// still healthy, so the cache stays warm.
+    Job(speakrs::PipelineError),
+    /// The queue/worker is gone (panicked or shut down). The handle is
+    /// permanently useless — the caller must invalidate the cache so the next
+    /// run loads a fresh pipeline.
+    QueueDead(anyhow::Error),
+}
+
+impl QueuedDiarizer {
+    /// Load the speakrs pipeline (CPU execution for portability) and move it
+    /// onto its background queue worker. Multi-second and allocation-heavy —
+    /// only ever called through [`DiarizerCache::get_or_load`].
+    fn load() -> Result<Self> {
+        use speakrs::{ExecutionMode, OwnedDiarizationPipeline};
+
+        tracing::info!("loading local diarization pipeline (segmentation + embedding models)");
+        let started = std::time::Instant::now();
+        let pipeline = OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?;
+        let (sender, receiver) = pipeline.into_queued()?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "local diarization pipeline loaded"
+        );
+        Ok(Self {
+            queue: Mutex::new((sender, receiver)),
+        })
+    }
+
+    /// Run one diarization job to completion on the shared worker. Blocks for
+    /// the whole inference (callers are already on blocking threads).
+    fn diarize(
+        &self,
+        file_id: &str,
+        audio: Vec<f32>,
+    ) -> std::result::Result<speakrs::DiarizationResult, QueueRunError> {
+        // Poison recovery is safe here too: the only state a panicked holder
+        // can leave behind is an unclaimed result, which the job-id loop below
+        // drains.
+        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        let (sender, receiver) = &mut *queue;
+        let job_id = sender
+            .push(speakrs::QueuedDiarizationRequest::new(file_id, audio))
+            .map_err(|e| QueueRunError::QueueDead(e.into()))?;
+        loop {
+            let next = receiver
+                .recv()
+                .map_err(|e| QueueRunError::QueueDead(e.into()))?;
+            if next.job_id == job_id {
+                return next.result.map_err(QueueRunError::Job);
+            }
+            // Unreachable while push+recv share one lock; drained defensively
+            // rather than handing a stale result to the wrong recording.
+            tracing::warn!(file_id = %next.file_id, "discarding unclaimed diarization result");
+        }
+    }
+}
+
+/// The pipeline cache plus the `[diarization]` config snapshot a run should be
+/// keyed under — everything a transcription provider needs to diarize one
+/// recording. Minted per provider by `Transcriber::provider`, so every minted
+/// provider shares the one process-wide cache.
+#[derive(Debug, Clone)]
+pub struct LocalDiarizer {
+    cache: Arc<LocalDiarizerCache>,
+    config: DiarizationConfig,
+}
+
+impl LocalDiarizer {
+    /// Bind the shared cache to the live `[diarization]` config.
+    pub fn new(cache: Arc<LocalDiarizerCache>, config: DiarizationConfig) -> Self {
+        Self { cache, config }
+    }
+
+    /// Diarize one audio file through the shared pipeline. Blocking — run via
+    /// `spawn_blocking` from async contexts.
+    pub fn run(&self, audio_path: &Path) -> Result<Vec<SpeakerSpan>> {
+        run_local_diarization(audio_path, &self.cache, &self.config)
+    }
+}
+
+/// Run local diarization on a 16 kHz mono WAV, returning speaker turns. The
+/// pipeline comes from `cache` — loaded on first use, then reused across
+/// recordings (the per-call `from_pretrained` reload this replaced cost
+/// seconds and ~500 MB of churn per transcription). Blocking for the whole
+/// inference; callers run it off the async runtime (e.g. `spawn_blocking`).
+pub fn run_local_diarization(
+    audio_path: &Path,
+    cache: &LocalDiarizerCache,
+    cfg: &DiarizationConfig,
+) -> Result<Vec<SpeakerSpan>> {
+    // Decode the audio before touching the cache so a bad WAV fails fast
+    // without costing (or being blamed on) a model load.
     let audio = load_audio_mono_16khz(audio_path)?;
-    let result = pipeline.run(&audio)?;
+    let pipeline = cache.get_or_load(cfg, QueuedDiarizer::load)?;
+
+    // The file id is only a label (speakrs uses it for RTTM/log output).
+    let file_id = audio_path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "audio".to_string());
+
+    let result = match pipeline.diarize(&file_id, audio) {
+        Ok(result) => result,
+        Err(QueueRunError::Job(e)) => return Err(e.into()),
+        Err(QueueRunError::QueueDead(e)) => {
+            // This run fails (the caller falls back to an unlabeled
+            // transcript), but the dead handle must not stay cached — drop it
+            // so the next run loads a fresh pipeline instead of failing
+            // forever.
+            cache.invalidate("diarization queue worker died");
+            return Err(e.context("diarization queue worker died"));
+        }
+    };
+
     // `result.segments` carries correctly-scaled (seconds) turns — that part of
     // the prior fix was right; the old `to_segments(1.0, 1.0)` had passed a frame
     // STEP/DURATION of 1.0 s against the model's real ~16.9 ms / ~61.9 ms geometry
@@ -485,5 +761,181 @@ mod tests {
         let (text, n) = assign_speakers(&segments, &speakers);
         assert_eq!(n, 2, "exactly two speakers, got: {text}");
         assert_eq!(text, "[Speaker 1]: a one a two\n\n[Speaker 2]: b one b two");
+    }
+
+    // ── Pipeline cache: lazy init / invalidation / no double load ────────────
+    //
+    // Exercised through `DiarizerCache<&str>` with counting fake loaders. The
+    // real loader (speakrs `from_pretrained` + the queue plumbing in
+    // `QueuedDiarizer`) needs the ~500 MB models and stays untested here —
+    // these tests pin the lifecycle logic everything else hangs off.
+
+    use crate::config::DiarizationBackend;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn diar_cfg(provider: DiarizationBackend, model_path: &str) -> DiarizationConfig {
+        DiarizationConfig {
+            provider,
+            local_model_path: model_path.to_string(),
+        }
+    }
+
+    #[test]
+    fn cache_is_lazy_until_first_use() {
+        let cache: DiarizerCache<&str> = DiarizerCache::new();
+        assert!(!cache.is_loaded(), "a fresh cache must hold nothing");
+
+        let cfg = diar_cfg(DiarizationBackend::Local, "");
+        let handle = cache.get_or_load(&cfg, || Ok("pipeline")).unwrap();
+        assert_eq!(*handle, "pipeline");
+        assert!(cache.is_loaded());
+    }
+
+    #[test]
+    fn second_use_is_a_cache_hit() {
+        let cache: DiarizerCache<&str> = DiarizerCache::new();
+        let cfg = diar_cfg(DiarizationBackend::Local, "");
+        let loads = AtomicUsize::new(0);
+        let load = || {
+            loads.fetch_add(1, Ordering::SeqCst);
+            Ok("pipeline")
+        };
+
+        let first = cache.get_or_load(&cfg, load).unwrap();
+        let second = cache.get_or_load(&cfg, load).unwrap();
+        assert_eq!(loads.load(Ordering::SeqCst), 1, "one load serves both runs");
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "both runs must share the same pipeline"
+        );
+    }
+
+    #[test]
+    fn changed_config_reloads_at_point_of_use() {
+        // The use-time config check is the correctness backbone: even if every
+        // daemon invalidation hook were missed, a run under a new
+        // `[diarization]` config must never reuse a pipeline built under the
+        // old one.
+        let cache: DiarizerCache<&str> = DiarizerCache::new();
+        let old = cache
+            .get_or_load(&diar_cfg(DiarizationBackend::Local, ""), || Ok("old"))
+            .unwrap();
+        let new = cache
+            .get_or_load(
+                &diar_cfg(DiarizationBackend::Local, "C:/models/x.onnx"),
+                || Ok("new"),
+            )
+            .unwrap();
+        assert!(!Arc::ptr_eq(&old, &new), "stale pipeline must be dropped");
+        assert_eq!(*new, "new");
+    }
+
+    #[test]
+    fn load_errors_are_not_cached() {
+        // Policy: a failed load must not poison the cache. The slot stays
+        // empty so the next run retries — which is what lets a mid-session
+        // model download (the setup wizard) start working without a config
+        // change or daemon restart.
+        let cache: DiarizerCache<&str> = DiarizerCache::new();
+        let cfg = diar_cfg(DiarizationBackend::Local, "");
+
+        let err = cache.get_or_load(&cfg, || anyhow::bail!("models missing"));
+        assert!(err.is_err());
+        assert!(
+            !cache.is_loaded(),
+            "a failed load must leave the slot empty"
+        );
+
+        let ok = cache.get_or_load(&cfg, || Ok("healed")).unwrap();
+        assert_eq!(*ok, "healed");
+    }
+
+    #[test]
+    fn invalidate_drops_and_reports() {
+        let cache: DiarizerCache<&str> = DiarizerCache::new();
+        assert!(!cache.invalidate("nothing cached"), "empty cache: no-op");
+
+        let cfg = diar_cfg(DiarizationBackend::Local, "");
+        cache.get_or_load(&cfg, || Ok("pipeline")).unwrap();
+        assert!(cache.invalidate("worker died"));
+        assert!(!cache.is_loaded());
+    }
+
+    #[test]
+    fn invalidate_if_stale_only_drops_on_config_change() {
+        let cache: DiarizerCache<&str> = DiarizerCache::new();
+        let cfg = diar_cfg(DiarizationBackend::Local, "");
+        assert!(
+            !cache.invalidate_if_stale(&cfg),
+            "empty cache is never stale"
+        );
+
+        let handle = cache.get_or_load(&cfg, || Ok("pipeline")).unwrap();
+
+        // Same config reapplied (the queue worker reloads config after every
+        // run): the warm pipeline must survive.
+        assert!(!cache.invalidate_if_stale(&cfg));
+        let again = cache.get_or_load(&cfg, || Ok("reloaded")).unwrap();
+        assert!(Arc::ptr_eq(&handle, &again));
+
+        // Backend switched away from Local: drop (this is what releases the
+        // model RAM when the user turns diarization off).
+        assert!(cache.invalidate_if_stale(&diar_cfg(DiarizationBackend::None, "")));
+        assert!(!cache.is_loaded());
+    }
+
+    #[test]
+    fn concurrent_first_use_loads_exactly_once() {
+        // Two transcriptions hitting a cold cache at the same time (queue
+        // worker + a retranscribe) must not both pay the load: the loser
+        // blocks on the slot lock, then takes the cache-hit branch.
+        let cache = Arc::new(DiarizerCache::<usize>::new());
+        let loads = Arc::new(AtomicUsize::new(0));
+        let cfg = diar_cfg(DiarizationBackend::Local, "");
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let cache = cache.clone();
+                let loads = loads.clone();
+                let cfg = cfg.clone();
+                std::thread::spawn(move || {
+                    cache
+                        .get_or_load(&cfg, || {
+                            loads.fetch_add(1, Ordering::SeqCst);
+                            // Hold the load long enough that the other threads
+                            // pile up on the lock while it is in progress.
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            Ok(42usize)
+                        })
+                        .unwrap()
+                })
+            })
+            .collect();
+
+        let results: Vec<Arc<usize>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(loads.load(Ordering::SeqCst), 1, "exactly one load");
+        assert!(results.windows(2).all(|w| Arc::ptr_eq(&w[0], &w[1])));
+    }
+
+    #[test]
+    fn loader_panic_does_not_wedge_the_cache() {
+        // A loader panic poisons the slot mutex mid-load; the lock recovery is
+        // sound because the slot is still empty at that point. The next run
+        // must be able to load normally instead of hitting PoisonError panics
+        // forever.
+        let cache = Arc::new(DiarizerCache::<&str>::new());
+        let cfg = diar_cfg(DiarizationBackend::Local, "");
+
+        let crashing = {
+            let cache = cache.clone();
+            let cfg = cfg.clone();
+            std::thread::spawn(move || {
+                let _ = cache.get_or_load(&cfg, || panic!("loader exploded"));
+            })
+        };
+        assert!(crashing.join().is_err(), "loader panic propagates");
+
+        let healed = cache.get_or_load(&cfg, || Ok("healed")).unwrap();
+        assert_eq!(*healed, "healed");
     }
 }

@@ -1244,6 +1244,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     } else {
                         *embedder_guard = None;
                     }
+
+                    // Drop the cached local diarization pipeline when
+                    // `[diarization]` changed (backend switch / model path) —
+                    // the next run reloads under the new config, and switching
+                    // away from Local frees the model RAM immediately.
+                    state
+                        .transcription
+                        .diarizer_cache()
+                        .invalidate_if_stale(&cfg_arc.diarization);
+
                     drop(cfg_arc);
                     drop(embedder_guard);
 
