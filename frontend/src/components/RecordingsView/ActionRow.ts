@@ -5,6 +5,7 @@ import { type SpeakerName } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { applySpeakerNames } from "./mergeMeeting";
+import { getOpenRecordingId } from "../../state/openRecording";
 
 export type ActionRowCallbacks = {
   onTogglePlay: () => void;
@@ -31,6 +32,10 @@ export class ActionRowElement extends LitElement {
 
   /** Global keyboard-shortcut bridge (keyboard.ts dispatches phoneme:action). */
   private actionHandler = (e: Event) => {
+    // In split mode TWO action rows are mounted — only the one whose recording
+    // the keyboard is in (the shared "open recording") may act, or p/c/e/r
+    // would fire on both panes at once.
+    if (getOpenRecordingId() !== this.recordingId) return;
     const action = (e as CustomEvent).detail?.action;
     switch (action) {
       case "play": this.handlePlay(); break;

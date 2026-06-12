@@ -10,10 +10,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../ModelPicker", () => ({ openModelPicker: vi.fn().mockResolvedValue(undefined) }));
 
 import { openModelPicker } from "../ModelPicker";
+import { setOpenRecordingId } from "../../state/openRecording";
 import { ActionRow } from "./ActionRow";
 
 beforeEach(() => {
   vi.mocked(openModelPicker).mockClear();
+  // Global shortcuts only act on the row whose recording is the "open" one
+  // (split mode mounts two rows) — mark ours as it.
+  setOpenRecordingId("rec-1");
   document.body.innerHTML = "";
 });
 

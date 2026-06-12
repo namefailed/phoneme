@@ -15,7 +15,7 @@ import "./MergedConversationDetail";
 import type { MergedConversationDetail } from "./MergedConversationDetail";
 import { BulkActionBar } from "./BulkActionBar";
 import { Splitter } from "./Splitter";
-import { showActionToast } from "../../utils/toast";
+import { showActionToast, showToast } from "../../utils/toast";
 import { setHeaderHidden, isHeaderHidden } from "../../services/headerBar";
 import "./Sidebar";
 import "./ThinkingPopout";
@@ -31,6 +31,14 @@ const LS_SIDEBAR_WIDTH = "phoneme.layout.sidebarWidth";
 const LS_SELECTED = "phoneme.layout.selectedId";
 /** List-pane zoom factor (Ctrl+scroll / Ctrl+= / Ctrl+-), per device. */
 const LS_LIST_ZOOM = "phoneme.layout.listZoom";
+/** Split-mode pane ratio (left pane %, 20–80), per device. */
+const LS_SPLIT_RATIO = "phoneme.layout.splitRatio";
+
+/** Persisted split-mode ratio, clamped (default 50/50). */
+function readStoredSplitRatio(): number {
+  const n = Number(localStorage.getItem(LS_SPLIT_RATIO));
+  return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 50;
+}
 const SIDEBAR_MIN = 160;
 const SIDEBAR_MAX = 480;
 
@@ -79,7 +87,7 @@ export class RecordingsView {
   /** Pane that the vim navigation layer is focused on (null = not driven yet).
    *  Only ever set while `interface.vim_nav` is on, so the focus ring never
    *  appears for non-vim users. */
-  private focusedPane: "sidebar" | "list" | "detail" | null = null;
+  private focusedPane: "sidebar" | "list" | "detail" | "detail2" | null = null;
   /** Keyboard cursor in the sidebar's 2D grid (vim): row into sidebarGrid()
    *  (section headers · filter items · queue rows), col = cell within the row
    *  (queue rows have several buttons). row -1 = not in sidebar nav. */
@@ -101,6 +109,15 @@ export class RecordingsView {
   /** Set when recording focus mode was entered FROM list zen (Enter on a row):
    *  Esc then steps back to list zen instead of the normal layout. */
   private zenChained = false;
+  /** Split mode: the recording open in the SECOND pane (null = no split).
+   *  The first pane keeps showing the normal selection. */
+  private splitId: string | null = null;
+  /** Second full recording pane (split mode). */
+  private detail2: RecordingDetail;
+  private splitter2: Splitter;
+  /** Left pane's share of the split, % (persisted; double-click = 50). */
+  private splitRatio = readStoredSplitRatio();
+  private openSplitHandler: ((e: Event) => void) | null = null;
   private vimHandler: ((e: Event) => void) | null = null;
   /** Any component can request an undoable recording delete by dispatching
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
@@ -135,6 +152,13 @@ export class RecordingsView {
           <div id="rv-single-detail" style="height: 100%;"></div>
           <ph-merged-conversation-detail id="rv-merged-detail" style="display:none; height: 100%;"></ph-merged-conversation-detail>
         </div>
+        <!-- Split mode (\\): a SECOND full recording pane + its divider. Always
+             in the grid as 0-width tracks when unused (never display:none —
+             removing a track shifts every later column, see the resizer note). -->
+        <div class="rv-splitter" id="rv-split2"></div>
+        <div class="rv-detail" id="rv-detail2">
+          <div id="rv-single-detail2" style="height: 100%;"></div>
+        </div>
       </div>
       <!-- Bulk bar lives OUTSIDE the shell/list so the list↔detail splitter
            (a grid item with its own stacking context) can't paint over it. -->
@@ -159,9 +183,26 @@ export class RecordingsView {
     this.mergedDetail.onRefresh = () => {
       void this.refresh();
     };
+    // The split-mode second pane: a complete, independent recording view.
+    const singleDetailRoot2 = this.container.querySelector<HTMLElement>("#rv-single-detail2")!;
+    this.detail2 = new RecordingDetail(singleDetailRoot2, () => {
+      void this.refresh();
+    });
     this.splitter = new Splitter(splitRoot, this.splitPercent, (pct) => {
       this.splitPercent = pct;
       try { localStorage.setItem(LS_SPLIT, String(pct)); } catch { /* private mode */ }
+      this.applyLayout();
+    });
+    const split2Root = this.container.querySelector<HTMLElement>("#rv-split2")!;
+    this.splitter2 = new Splitter(split2Root, this.splitRatio, (pct) => {
+      this.splitRatio = pct;
+      try { localStorage.setItem(LS_SPLIT_RATIO, String(pct)); } catch { /* private mode */ }
+      this.applyLayout();
+    });
+    // Double-click the split divider → back to an even 50/50.
+    split2Root.addEventListener("dblclick", () => {
+      this.splitRatio = 50;
+      try { localStorage.setItem(LS_SPLIT_RATIO, "50"); } catch { /* private mode */ }
       this.applyLayout();
     });
 
@@ -204,10 +245,24 @@ export class RecordingsView {
     };
     window.addEventListener("phoneme:request-delete", this.deleteReqHandler);
     this.closeDetailHandler = () => {
+      // In split mode a pane's ✕ first collapses the split; the next ✕ (or
+      // Esc) closes the remaining recording as usual.
+      if (this.splitId) {
+        this.closeSplit();
+        return;
+      }
       if (this.focusMode) this.toggleFocusMode();
       this.deselect();
     };
     window.addEventListener("phoneme:close-detail", this.closeDetailHandler);
+    // Split requests from outside the view (the bulk bar's button / its \ key).
+    this.openSplitHandler = (e: Event) => {
+      const d = (e as CustomEvent<{ a?: string; b?: string }>).detail;
+      if (!d?.a || !d?.b) return;
+      this.onSelect(d.a);
+      this.openSplit(d.b);
+    };
+    window.addEventListener("phoneme:open-split", this.openSplitHandler);
   }
 
   async refresh() {
@@ -239,6 +294,11 @@ export class RecordingsView {
           return;
         }
       }
+    }
+
+    // If the split pane's recording vanished (deleted elsewhere), fold the split.
+    if (this.splitId && !this.state.get().recordings.some(r => r.id === this.splitId)) {
+      this.applyCloseSplit();
     }
 
     const s = this.state.get();
@@ -404,35 +464,61 @@ export class RecordingsView {
 
   /** Panes that currently exist, left-to-right. Hidden panes are skipped so
    *  h/l never lands focus on a collapsed sidebar or an absent detail pane. */
-  private panesInOrder(): Array<"sidebar" | "list" | "detail"> {
-    const panes: Array<"sidebar" | "list" | "detail"> = [];
+  private panesInOrder(): Array<"sidebar" | "list" | "detail" | "detail2"> {
+    // Split mode: the two recording panes ARE the layout (list + sidebar are
+    // collapsed), so h/l walks pane A <-> pane B.
+    if (this.splitId) return ["detail", "detail2"];
+    const panes: Array<"sidebar" | "list" | "detail" | "detail2"> = [];
     if (this.sidebarVisible && !this.focusMode) panes.push("sidebar");
     panes.push("list");
     if (this.detailVisible) panes.push("detail");
     return panes;
   }
 
-  private paneEl(pane: "sidebar" | "list" | "detail"): HTMLElement | null {
-    const sel = pane === "sidebar" ? "ph-sidebar" : pane === "list" ? "#rv-list" : "#rv-detail";
+  private paneEl(pane: "sidebar" | "list" | "detail" | "detail2"): HTMLElement | null {
+    const sel =
+      pane === "sidebar" ? "ph-sidebar"
+      : pane === "list" ? "#rv-list"
+      : pane === "detail2" ? "#rv-detail2"
+      : "#rv-detail";
     return this.container.querySelector<HTMLElement>(sel);
   }
 
+  /** The recording pane the keyboard is (or was last) in — split-aware. */
+  private activeDetail(): "detail" | "detail2" {
+    return this.focusedPane === "detail2" ? "detail2" : "detail";
+  }
+
+  /** Root selector for the active recording pane's grid helpers. */
+  private detailRootSel(): string {
+    return this.activeDetail() === "detail2" ? "#rv-detail2" : "#rv-detail";
+  }
+
   /** Move the focus ring + DOM focus onto a pane (clamped to a visible one). */
-  private focusPane(pane: "sidebar" | "list" | "detail") {
+  private focusPane(pane: "sidebar" | "list" | "detail" | "detail2") {
     const panes = this.panesInOrder();
     if (!panes.includes(pane)) pane = panes[0];
+    const isDetail = pane === "detail" || pane === "detail2";
     // Re-home the per-pane keyboard cursors whenever pane focus changes: clear
     // both highlights, drop the cursor of any pane being LEFT (re-entering
     // lands fresh), and let the entered pane re-land below.
     this.clearSidebarCursorHighlight();
     if (pane !== "sidebar") { this.sidebarRow = -1; this.sidebarCol = 0; }
-    this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
-    // Leaving the detail pane drops its grid cursor; coming back lands fresh on
-    // the transcript (see enterDetailNav below).
-    if (pane !== "detail") { this.detailRow = -1; this.detailCol = 0; }
+    this.container.querySelectorAll(".rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
+    // Leaving (or switching) recording panes drops the grid cursor; arriving
+    // lands fresh on the transcript (see enterDetailNav below).
+    if (this.focusedPane !== pane) { this.detailRow = -1; this.detailCol = 0; }
     this.focusedPane = pane;
-    for (const p of ["sidebar", "list", "detail"] as const) {
+    for (const p of ["sidebar", "list", "detail", "detail2"] as const) {
       this.paneEl(p)?.classList.toggle("rv-pane-focused", p === pane);
+    }
+    // Keep the shared "open recording" pointing at the pane the keyboard is
+    // in, so global shortcuts (p/c/e/r) and Run-once target THIS pane.
+    if (pane === "detail2" && this.splitId) {
+      setOpenRecordingId(this.splitId);
+    } else if (pane === "detail") {
+      const sel = this.state.get().selectedId;
+      setOpenRecordingId(sel && !sel.startsWith("session:") ? sel : null);
     }
     const el = this.paneEl(pane);
     if (!el) return;
@@ -445,9 +531,9 @@ export class RecordingsView {
       // Focus the pane container itself (not the editor) so h/l/j/k keep working.
       el.setAttribute("tabindex", "-1");
       el.focus({ preventScroll: true });
-      // Detail pane: enter the grid nav (on the transcript when arriving fresh,
-      // else re-highlight where the cursor was — e.g. after leaving the editor).
-      if (pane === "detail") {
+      // Recording panes: enter the grid nav (on the transcript when arriving
+      // fresh, else re-highlight where the cursor was).
+      if (isDetail) {
         if (this.detailRow < 0) this.enterDetailNav();
         else this.highlightDetail();
       }
@@ -497,7 +583,7 @@ export class RecordingsView {
       case "detail-enter": this.activateDetail(false); break;
       case "detail-enter-shift": this.activateDetail(true); break;
       // Shift+Esc out of the transcript editor → back to the detail pane nav.
-      case "exit-editor": this.focusPane("detail"); break;
+      case "exit-editor": this.focusPane(this.activeDetail()); break;
       // ArrowDown from the header search box → drop into the list.
       case "focus-list": this.focusPane("list"); break;
       // k at the top of the list → up into the header search box.
@@ -512,7 +598,7 @@ export class RecordingsView {
    *  or the detail pane has no tag box (e.g. a merged meeting view). */
   private focusTags() {
     const chips = this.container.querySelector<HTMLElement & { focusTagInput?: () => void }>(
-      "#rv-detail ph-tag-chips",
+      `${this.detailRootSel()} ph-tag-chips`,
     );
     chips?.focusTagInput?.();
   }
@@ -654,26 +740,27 @@ export class RecordingsView {
       return el && el.offsetParent !== null ? el : null;
     };
     const rows: DetailCell[][] = [];
-    const top = qa("#rv-detail .detail-header button");
+    const root = this.detailRootSel();
+    const top = qa(`${root} .detail-header button`);
     if (top.length) rows.push(top.map((el) => ({ el, kind: "button" as const })));
-    const action = qa("#rv-detail #actions button");
+    const action = qa(`${root} #actions button`);
     if (action.length) rows.push(action.map((el) => ({ el, kind: "button" as const })));
-    const tags = q1("#rv-detail #tags .tag-add");
+    const tags = q1(`${root} #tags .tag-add`);
     if (tags) rows.push([{ el: tags, kind: "tags" }]);
-    const transcript = q1("#rv-detail .transcript-block");
+    const transcript = q1(`${root} .transcript-block`);
     if (transcript) rows.push([{ el: transcript, kind: "editor" }]);
     // The buttons INSIDE the transcript box (Speakers · Summary · Compare ·
     // Original · Unedited) get their own row, between the transcript and notes.
-    const tbtns = qa("#rv-detail .transcript-history button");
+    const tbtns = qa(`${root} .transcript-history button`);
     if (tbtns.length) rows.push(tbtns.map((el) => ({ el, kind: "button" as const })));
-    const notes = q1("#rv-detail .notes-block");
+    const notes = q1(`${root} .notes-block`);
     if (notes) rows.push([{ el: notes, kind: "editor" }]);
     return rows;
   }
 
   /** Paint the grid cursor on the current (row, col) cell. */
   private highlightDetail() {
-    this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+    this.container.querySelectorAll(".rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
     const cell = this.detailGrid()[this.detailRow]?.[this.detailCol];
     if (cell) {
       cell.el.classList.add("kbd-cursor");
@@ -704,7 +791,7 @@ export class RecordingsView {
       // Up past the top row → the header search bar in ROVING (highlight) mode —
       // exactly like k at the top of the list, NOT focused for typing. Release
       // the detail pane first.
-      this.container.querySelectorAll("#rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+      this.container.querySelectorAll(".rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
       this.paneEl("detail")?.classList.remove("rv-pane-focused");
       this.detailRow = -1;
       this.detailCol = 0;
@@ -754,9 +841,9 @@ export class RecordingsView {
   /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */
   private focusEditor() {
     const ed =
-      this.container.querySelector<HTMLElement>("#rv-detail .cm-content") ??
-      this.container.querySelector<HTMLElement>("#rv-detail textarea") ??
-      this.container.querySelector<HTMLElement>('#rv-detail [contenteditable="true"]');
+      this.container.querySelector<HTMLElement>(`${this.detailRootSel()} .cm-content`) ??
+      this.container.querySelector<HTMLElement>(`${this.detailRootSel()} textarea`) ??
+      this.container.querySelector<HTMLElement>(`${this.detailRootSel()} [contenteditable="true"]`);
     ed?.focus();
   }
 
@@ -860,19 +947,78 @@ export class RecordingsView {
     // hidden. Keep it in the grid and just give it a 0px-wide track instead.
     if (resizer) resizer.style.display = "";
 
-    if (this.detailVisible && this.focusMode) {
+    // Seven tracks: sidebar · resizer · list · splitter · detail · splitter2 ·
+    // detail2. The split tracks are 0 except in split mode (never removed from
+    // the grid — see the resizer note above).
+    if (this.splitId) {
+      // Split mode: the two recording panes share the whole window (fr-based,
+      // ratio persisted); list and sidebar collapse, chrome is hidden by
+      // openSplit via the zen snapshot.
+      shell.style.gridTemplateColumns = `0px 0px 0 0 ${this.splitRatio}fr 6px ${100 - this.splitRatio}fr`;
+    } else if (this.detailVisible && this.focusMode) {
       // Focus mode: collapse the sidebar, resizer, list, and splitter so the
       // detail pane fills the whole view for distraction-free, full-width editing.
-      shell.style.gridTemplateColumns = `0px 0px 0 0 1fr`;
+      shell.style.gridTemplateColumns = `0px 0px 0 0 1fr 0 0`;
     } else if (this.detailVisible) {
       // The detail (right) pane is the percentage track and the list is the
       // flexible 1fr track, so collapsing the sidebar grows the LIST and leaves
       // the detail pane's width unchanged (detail% is of the constant shell
       // width). The splitter drag is delta-based, so this stays consistent.
-      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} minmax(0, 1fr) 6px ${100 - this.splitPercent}%`;
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} minmax(0, 1fr) 6px ${100 - this.splitPercent}% 0 0`;
     } else {
-      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} 1fr 0 0`;
+      shell.style.gridTemplateColumns = `${sidebarWidth} ${resizerWidth} 1fr 0 0 0 0`;
     }
+  }
+
+  /** Open `id` in the SECOND pane (split mode). The current selection stays in
+   *  the first pane; sidebar + top bar hide via the zen snapshot so both panes
+   *  get the whole window. Refuses sessions and duplicate ids with a toast. */
+  openSplit(id: string) {
+    if (id.startsWith("session:")) {
+      showToast("Split works with single recordings (open a meeting's tracks individually).", "info");
+      return;
+    }
+    const current = this.state.get().selectedId;
+    if (!current) {
+      // Nothing open yet — just open it normally instead of a half-split.
+      this.onSelect(id);
+      return;
+    }
+    if (current === id || this.splitId === id) {
+      showToast("That recording is already open.", "info");
+      return;
+    }
+    if (!this.zenSnapshot) this.zenSnapshot = this.captureChrome();
+    this.sidebarVisible = false; // session-only — no localStorage write
+    setHeaderHidden(true);
+    this.listZen = false;
+    this.splitId = id;
+    void this.detail2.show(id);
+    this.animateLayout();
+    this.applyLayout();
+    this.focusPane("detail2");
+  }
+
+  /** Leave split mode: close the second pane (guarding unsaved edits there)
+   *  and restore the pre-split chrome unless another zen state still owns it. */
+  closeSplit() {
+    if (!this.splitId) return;
+    if (this.detail2.hasDirtyEdits()) {
+      void this.confirmLeaveUnsaved().then((discard) => {
+        if (discard) this.applyCloseSplit();
+      });
+      return;
+    }
+    this.applyCloseSplit();
+  }
+
+  private applyCloseSplit() {
+    this.splitId = null;
+    this.detail2.clear();
+    if (!this.focusMode && !this.listZen) this.restoreChrome();
+    this.animateLayout();
+    this.applyLayout();
+    if (this.focusedPane === "detail2") this.focusPane("detail");
   }
 
   /** Drag-to-resize the left sidebar; width persists per device. */
@@ -1089,6 +1235,12 @@ export class RecordingsView {
         }
         return;
       }
+      // Esc in split mode → close the second pane (back to the single view).
+      if (this.splitId) {
+        e.preventDefault();
+        this.closeSplit();
+        return;
+      }
       // Esc in list zen → back to the normal layout (snapshot restored).
       if (this.listZen) {
         e.preventDefault();
@@ -1105,6 +1257,18 @@ export class RecordingsView {
       if (this.state.get().selectedId) {
         e.preventDefault();
         this.deselect();
+        return;
+      }
+    }
+
+    if (e.key === "\\" && !e.ctrlKey && !target.isContentEditable) {
+      // \ with a recording open and the list cursor on another row → split.
+      // (With exactly two multi-selected, the bulk bar's capture-phase handler
+      // owns \ and never lets it reach here.)
+      const focused = this.list.getFocusedId();
+      if (!this.splitId && this.state.get().selectedId && focused) {
+        e.preventDefault();
+        this.openSplit(focused);
         return;
       }
     }
