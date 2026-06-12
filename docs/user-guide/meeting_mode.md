@@ -64,10 +64,9 @@ In the recordings list, a meeting's two tracks are grouped under one entry. Clic
 > [!NOTE]
 > The merged view orders the tracks by source (mic, then system); it does **not**
 > yet interleave them line-by-line on one chronological timeline, because
-> per-line timestamps aren't persisted. A true "You / Meeting" interleaved
-> transcript is on the [roadmap](../../ROADMAP.md). See
-> [docs/design/merged-meeting-view.md](../design/merged-meeting-view.md) for the
-> rationale and the follow-up that would unlock it.
+> per-segment timestamps are not persisted. A true "You / Meeting" interleaved
+> chronological transcript is on the [roadmap](../../ROADMAP.md).
+
 
 ### 🗣️ Adding Speaker Diarization
 

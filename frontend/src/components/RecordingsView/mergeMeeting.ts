@@ -3,11 +3,10 @@
  *
  * A meeting is several `recordings` rows sharing a `meeting_id`, each with a
  * `track` ("mic" / "system"). The catalog stores only one whole-transcript
- * string per track — per-segment timestamps are NOT persisted (see
- * docs/design/merged-meeting-view.md) — so we cannot interleave the tracks by
- * time. Instead we order whole tracks by start time and, within each track,
- * recover the speaker structure the pipeline already embedded as `[Speaker N]:`
- * markers.
+ * string per track — per-segment timestamps are NOT persisted — so we cannot
+ * interleave the tracks by time. Instead we order whole tracks by start time and,
+ * within each track, recover the speaker structure the pipeline already embedded
+ * as `[Speaker N]:` markers.
  *
  * The output is a flat, ordered list of `MergedBlock`s — one per speaker turn
  * (or one per track when a track has no speaker markers). The renderer iterates
