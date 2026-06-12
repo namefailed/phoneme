@@ -1239,7 +1239,14 @@ pub async fn run(
     {
         if let Err(e) = state
             .webhook
-            .post(url, Duration::from_secs(cfg.hook.timeout_secs), &payload)
+            .post(
+                url,
+                Duration::from_secs(cfg.hook.timeout_secs),
+                &payload,
+                // The [webhook] policy (SSRF guard) is read per-run so a
+                // config reload takes effect without restarting the daemon.
+                &cfg.webhook,
+            )
             .await
         {
             tracing::warn!(error = %e, "webhook failed");

@@ -71,6 +71,8 @@ update this file in the same PR.
 | WebView | API keys are **masked** before `read_config` crosses to the renderer and restored from disk on `write_config`, so secrets never reach the WebView | `phoneme-tray::commands` (`mask_config_secrets`/`unmask_config_secrets`) | S-H2 (in part) |
 | Logging | `Debug` for config redacts API keys | `phoneme-core::config` | — |
 | Files on disk | API keys are encrypted at rest with Windows DPAPI (`CryptProtectData`, per-user, `dpapi:v1:` prefix); decrypted only in-process on config load, and legacy plaintext migrates on the next save | `phoneme-core::secret_crypto` + `config.rs` | S-H2 |
+| Outbound network | Webhook SSRF guard: loopback targets always allowed (local-first); non-loopback private ranges (RFC1918, link-local, IPv6 ULA) blocked unless `[webhook] allow_private_network = true`; public targets must be HTTPS unless `[webhook] allow_http = true`. Hostnames are resolved and every address classified (most restrictive wins), and the webhook client never follows redirects, so an allowed endpoint can't bounce the POST somewhere blocked | `phoneme-core::webhook` | S-H1 |
+| IPC pipe | `HookTest` output is redacted before it crosses the pipe: credential-shaped tokens (`sk-`/`ghp_`/`AKIA`-style prefixes, `Bearer` values, `key=`-style assignments) are masked and the text is length-capped — on the failure path too, since `HookFailed` embeds the command's stderr in its message | `phoneme-core::hook::redact_secrets` + `phoneme-daemon::ipc_handler` | — |
 
 ## Content Security Policy
 
@@ -120,17 +122,22 @@ documented data location both work as-is.
   load; legacy plaintext migrates on the next save, and an undecryptable blob reads
   as unset. Both S-H2 halves (masked DTO + at-rest) are now in place. See the
   mitigations table above.*
-- **Webhook SSRF guard** — the webhook POST target is user-configured; enforce
-  HTTPS and consider blocking non-loopback private ranges (loopback is allowed on
-  purpose for local automation), plus optional HMAC signing. *(S-H1.)*
+- ~~**Webhook SSRF guard**~~ *Done — the webhook client classifies every target
+  before POSTing: loopback always allowed (local automation is the point),
+  non-loopback private ranges blocked unless `[webhook] allow_private_network =
+  true`, public targets HTTPS-only unless `[webhook] allow_http = true`;
+  hostnames resolve-and-classify, redirects are never followed. Optional HMAC
+  signing remains open. (S-H1 — see the mitigations table above.)*
 - ~~**Baseline CSP + narrowed Tauri asset scope**~~ *Done — `tauri.conf.json`
   ships a real production `csp` (plus a `devCsp` for the Vite dev server), and the
   asset-protocol scope is narrowed from `$HOME/**` to the Phoneme audio subtree.
   See the **Content Security Policy** section below. (S-H4.)*
 - **Model/binary download checksums** — pin and verify SHA-256 before extracting
   the whisper-server zip and model files. *(S-H7.)*
-- **Redact hook test stderr** — `HookTest` output may echo secrets from the
-  command's environment; redact before returning to the UI.
+- ~~**Redact hook test stderr**~~ *Done — `phoneme-core::hook::redact_secrets`
+  masks credential-shaped tokens, `Bearer` values, and `key=`-style assignments
+  (and caps the length) before `HookTest` output returns over IPC; the failure
+  path is covered too, since `HookFailed` embeds stderr in its message.*
 - ~~**`cargo audit` + `pnpm audit` in CI** — dependency-vulnerability gate.~~ *Done — non-blocking advisory job added in PR #66.*
 
 See [ROADMAP.md](../../ROADMAP.md) → *Security & privacy hardening* for status.

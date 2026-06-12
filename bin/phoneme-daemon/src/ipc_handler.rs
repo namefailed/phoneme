@@ -10,6 +10,7 @@
 //! its life and streams DaemonEvents (wired up in Task 10).
 
 use crate::app_state::AppState;
+use phoneme_core::hook::redact_secrets;
 use phoneme_core::{HookMetadata, HookPayload, HookRunner, RecordingStatus};
 use phoneme_ipc::{
     DaemonEvent, IpcError, IpcErrorKind, NamedPipeConnection, PipelineStage, Request, Response,
@@ -1095,15 +1096,21 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 model: "test".into(),
                 metadata: HookMetadata::current(),
             };
+            // The test command is caller-supplied and its output is shown in
+            // the UI/CLI verbatim — a script that echoes its environment or a
+            // config file would hand any key it prints to the renderer. Mask
+            // credential-shaped values on BOTH outcomes before the text
+            // crosses the pipe: the Ok path carries stderr directly, and the
+            // HookFailed error embeds the stderr tail in its message.
             match runner.run(&sample).await {
                 Ok(result) => Response::Ok(serde_json::json!({
                     "exit_code": result.exit_code,
                     "duration_ms": result.duration_ms,
-                    "stderr_tail": result.stderr_tail,
+                    "stderr_tail": redact_secrets(&result.stderr_tail),
                 })),
                 Err(e) => Response::Err(IpcError {
                     kind: error_to_kind(&e),
-                    message: e.to_string(),
+                    message: redact_secrets(&e.to_string()),
                 }),
             }
         }
@@ -2016,5 +2023,75 @@ mod tests {
             state.pending_overrides.lock().unwrap().get(&id).is_none(),
             "no model override should be recorded when none was requested"
         );
+    }
+
+    /// HookTest output crosses the pipe to the tray/CLI, and the test command
+    /// is caller-supplied — a script that dumps its environment must not hand
+    /// credentials to the renderer. Both outcomes are redacted: the Ok path's
+    /// `stderr_tail` and the `HookFailed` message (which embeds stderr).
+    #[tokio::test]
+    async fn hook_test_redacts_secrets_on_both_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "C:/models/ggml-base.en.bin".into();
+        let state = override_test_state(tmp.path(), cfg).await;
+
+        // Ok path: the command succeeds but echoes a credential to stderr.
+        #[cfg(windows)]
+        let ok_cmd = "cmd /c \"echo password=hunter2secret 1>&2\"";
+        #[cfg(not(windows))]
+        let ok_cmd = "sh -c \"echo password=hunter2secret 1>&2\"";
+        let resp = handle_request(
+            Request::HookTest {
+                custom_command: Some(ok_cmd.to_string()),
+            },
+            &state,
+        )
+        .await;
+        match resp {
+            Response::Ok(v) => {
+                let tail = v["stderr_tail"].as_str().unwrap_or_default();
+                assert!(
+                    !tail.contains("hunter2secret"),
+                    "secret leaked through HookTest stderr: {tail}"
+                );
+                assert!(
+                    tail.contains("password=<redacted>"),
+                    "mask expected in stderr_tail, got: {tail}"
+                );
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+
+        // Err path: a failing command's stderr rides inside the HookFailed
+        // message — the same redaction must apply there.
+        #[cfg(windows)]
+        let fail_cmd = "cmd /c \"echo token=topsecret123 1>&2 & exit 3\"";
+        #[cfg(not(windows))]
+        let fail_cmd = "sh -c \"echo token=topsecret123 1>&2; exit 3\"";
+        let resp = handle_request(
+            Request::HookTest {
+                custom_command: Some(fail_cmd.to_string()),
+            },
+            &state,
+        )
+        .await;
+        match resp {
+            Response::Err(e) => {
+                assert!(
+                    !e.message.contains("topsecret123"),
+                    "secret leaked through the HookTest failure message: {}",
+                    e.message
+                );
+                assert!(
+                    e.message.contains("token=<redacted>"),
+                    "mask expected in the failure message, got: {}",
+                    e.message
+                );
+            }
+            other => panic!("expected Err, got {other:?}"),
+        }
     }
 }

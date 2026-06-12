@@ -191,15 +191,20 @@ same-user malware or a malicious IPC client. Ordered by priority.*
   reads as unset rather than leaking. Composes with the S-H2 masking (the mask sees
   the encrypted value, still replaces it with the sentinel). *(S-H2 — both halves now
   done. `phoneme-core::secret_crypto`, `config.rs` serde.)*
-- [ ] **Webhook SSRF guard** — HTTPS-only, block private/loopback ranges; HMAC
-  signing later. *(S-H1)*
+- [x] **Webhook SSRF guard** — the webhook client classifies every target before
+  POSTing: loopback always allowed (local-first), other private ranges blocked
+  unless `[webhook] allow_private_network = true`, public targets HTTPS-only
+  unless `[webhook] allow_http = true`; hostnames resolve-and-classify, redirects
+  never followed (`phoneme-core::webhook`). HMAC signing still later. *(S-H1)*
 - [ ] **Baseline CSP + narrowed asset/fs scopes** (`tauri.conf.json` is `csp:null`,
   `$HOME/**`). *(S-H4 — also tracked under Long Term → Security)*
 - [ ] **Model-download checksums** — pin SHA-256 before extracting the whisper zip. *(S-H7)*
 
 **Hygiene**
 - [x] **`cargo audit` + `pnpm audit` in CI** (non-blocking advisory job; gate core crates later). *(also in tech-debt backlog)*
-- [ ] Hook `HookTest` stderr may contain secrets — redact before returning.
+- [x] Hook `HookTest` stderr may contain secrets — now redacted before returning:
+  `phoneme-core::hook::redact_secrets` masks credential-shaped tokens (and caps
+  length) on both the success and failure paths of the daemon's `HookTest`.
 - [x] A short **threat-model doc** capturing these boundaries. → [docs/developer-guide/threat_model.md](docs/developer-guide/threat_model.md)
 
 ---

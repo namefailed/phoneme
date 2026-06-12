@@ -62,6 +62,22 @@ An optional, **independent** transcription provider used only for the live previ
 
 ---
 
+## `[webhook]`
+
+Network policy (SSRF guard) for the `hook.webhook_url` POST. Loopback targets
+(`127.0.0.1`, `[::1]`, `localhost`) are always allowed, any scheme — webhooks
+into n8n / Home Assistant on this machine are the primary use case and no knob
+can break that. A hostname is resolved and judged by every address it points
+at, so a DNS name aimed at a private IP counts as private; redirects are never
+followed.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `allow_private_network` | bool | `false` | Allow non-loopback private targets — RFC1918, link-local, IPv6 ULA (e.g. n8n on a NAS) |
+| `allow_http` | bool | `false` | Allow plain `http://` for **public** targets; otherwise public targets must be `https://` |
+
+---
+
 ## `[hotkey]` · `[in_place_hotkey]` · `[meeting_hotkey]`
 
 | Key | Type | Record default | In-place default | Meeting default |

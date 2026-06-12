@@ -62,6 +62,13 @@ trust boundary. Verified against current code.*
   attempts instead of failing recordings, retention honors delete_audio,
   wizard downloads are URL-allowlisted and only create files on success,
   open-file paths allowlisted, daily logs pruned to `log_max_files`.
+- [x] **Webhook SSRF guard + hook-test redaction** — webhooks classify their
+  target before any bytes leave: loopback always allowed (local n8n/Home
+  Assistant stay zero-config), private ranges need `[webhook]
+  allow_private_network`, public hosts need https unless `allow_http`;
+  hostnames resolve and the most restrictive class wins; redirects are no
+  longer followed. Hook-test output is scrubbed of credential shapes
+  (sk-/ghp_/AKIA/Bearer/key= and friends) before it reaches the UI.
 - [x] **Pinned download checksums (S-H7)** — every wizard artifact (whisper GGML
   weights, the semantic model + tokenizer, the whisper-server zip) is verified
   against a pinned SHA-256 before use; the zip is checked before extraction,

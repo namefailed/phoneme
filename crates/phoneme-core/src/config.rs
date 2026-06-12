@@ -71,6 +71,9 @@ pub struct Config {
     pub recording: RecordingConfig,
     /// Settings governing external script execution (hooks) upon transcription success.
     pub hook: HookConfig,
+    /// Network policy for the outbound webhook POST (`hook.webhook_url`).
+    #[serde(default)]
+    pub webhook: WebhookConfig,
     /// The global keyboard shortcut for triggering standard recordings.
     pub hotkey: HotkeyConfig,
     /// The global keyboard shortcut for triggering "In-place" transcriptions
@@ -938,6 +941,30 @@ pub struct HookConfig {
     pub keyword_rules: Vec<KeywordRule>,
 }
 
+/// Network policy for the outbound webhook POST (`[webhook]` in config.toml).
+///
+/// Phoneme is local-first: a webhook into THIS machine (n8n, Home Assistant, a
+/// local script server on loopback) is the primary use case and is always
+/// allowed, any scheme, regardless of these knobs. They govern everything
+/// beyond loopback, so a mistyped or hostile `hook.webhook_url` can't quietly
+/// point transcripts at an internal service or send them over the internet in
+/// the clear (S-H1). Both default to off — the safe posture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct WebhookConfig {
+    /// Allow webhook targets on non-loopback PRIVATE ranges — RFC1918 (10/8,
+    /// 172.16/12, 192.168/16), link-local 169.254/16, IPv6 ULA fc00::/7 and
+    /// link-local fe80::/10. Off by default: such targets fail with an error
+    /// naming this knob. Turn on to webhook into a LAN box (e.g. n8n on a NAS).
+    #[serde(default)]
+    pub allow_private_network: bool,
+    /// Allow plain `http://` for PUBLIC webhook targets. Off by default —
+    /// public targets must be `https://`. Loopback is exempt, and private
+    /// targets are governed by
+    /// [`allow_private_network`](Self::allow_private_network) instead.
+    #[serde(default)]
+    pub allow_http: bool,
+}
+
 /// Global keyboard shortcut bindings for triggering push-to-talk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HotkeyConfig {
@@ -1244,6 +1271,7 @@ impl Default for Config {
                 run_on_transcribe: true,
                 keyword_rules: Vec::new(),
             },
+            webhook: WebhookConfig::default(),
             hotkey: HotkeyConfig {
                 enabled: false,
                 combo: "Ctrl+Alt+Space".into(),
