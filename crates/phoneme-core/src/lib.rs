@@ -41,6 +41,6 @@ pub use transcription::{
     AssemblyAiProvider, DeepgramProvider, OpenAiCompatProvider, Transcriber, TranscriptionProvider,
 };
 pub use types::{
-    HookMetadata, HookPayload, ListFilter, MeetingTrack, RecordMode, Recording, RecordingStatus,
-    SpeakerName, TranscriptSegment,
+    HookMetadata, HookPayload, ListFilter, ListKind, MeetingTrack, RecordMode, Recording,
+    RecordingStatus, SpeakerName, TranscriptSegment,
 };

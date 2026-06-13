@@ -94,12 +94,143 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
         }
     }
 
-    // Write the updated config back to file
-    let config_path = phoneme_core::config::default_config_path()
-        .ok_or_else(|| "could not resolve config path".to_string())?;
+    // Validate the FULL updated config before anything touches the disk: a
+    // value that doesn't parse back (wrong type for the field) or that fails
+    // `Config::validate()` would otherwise be written out and then rejected by
+    // the daemon on its next load — bricking every later `phoneme` invocation
+    // until the file is hand-repaired.
+    let updated: Config = toml::from_str(&doc.to_string())
+        .map_err(|e| format!("'{value}' is not valid for {key}: {e}"))?;
+    updated
+        .validate()
+        .map_err(|e| format!("rejected: the change makes the config invalid: {e}"))?;
 
-    std::fs::write(&config_path, doc.to_string())
+    // Write to the SAME file the daemon reads: the PHONEME_CONFIG override
+    // when set, else the per-user default. Writing default_config_path
+    // unconditionally (the old behavior) silently edited a file the daemon
+    // never looks at whenever the override was active.
+    let config_path = phoneme_core::config::resolved_config_path()
+        .ok_or_else(|| "could not resolve config path".to_string())?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("failed to create config directory: {e}"))?;
+    }
+
+    // Atomic replace: write a sibling tmp file, then rename over the target.
+    // A crash mid-write leaves the old config intact instead of a truncated
+    // half-file the daemon can no longer parse.
+    let tmp_path = config_path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, doc.to_string())
         .map_err(|e| format!("failed to write config: {e}"))?;
+    if let Err(e) = std::fs::rename(&tmp_path, &config_path) {
+        // Windows rename can fail if the target is momentarily locked; don't
+        // leave the tmp file behind in that case.
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("failed to replace config file: {e}"));
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Point `PHONEME_CONFIG` at a temp file for the duration of one test,
+    /// restoring the previous value on drop so tests can't leak into each
+    /// other (the suite runs with --test-threads=1).
+    struct ConfigEnvOverride {
+        prev: Option<String>,
+    }
+
+    impl ConfigEnvOverride {
+        fn set(path: &std::path::Path) -> Self {
+            let prev = std::env::var("PHONEME_CONFIG").ok();
+            std::env::set_var("PHONEME_CONFIG", path);
+            Self { prev }
+        }
+    }
+
+    impl Drop for ConfigEnvOverride {
+        fn drop(&mut self) {
+            match self.prev.take() {
+                Some(v) => std::env::set_var("PHONEME_CONFIG", v),
+                None => std::env::remove_var("PHONEME_CONFIG"),
+            }
+        }
+    }
+
+    #[test]
+    fn set_value_writes_to_the_phoneme_config_override_path() {
+        // Regression: `config set` wrote default_config_path unconditionally,
+        // so with PHONEME_CONFIG active it edited a file the daemon never reads.
+        let tmp = tempfile::tempdir().unwrap();
+        let override_path = tmp.path().join("override.toml");
+        let _env = ConfigEnvOverride::set(&override_path);
+
+        let cfg = Config::default();
+        set_value(&cfg, "recording.sample_rate", "32000").expect("set succeeds");
+
+        let written =
+            std::fs::read_to_string(&override_path).expect("the override file is the one written");
+        assert!(
+            written.contains("sample_rate = 32000"),
+            "the new value must land in the override file: {written}"
+        );
+        // And the result is a loadable config.
+        let reloaded: Config = toml::from_str(&written).unwrap();
+        assert_eq!(reloaded.recording.sample_rate, 32000);
+    }
+
+    #[test]
+    fn set_value_rejects_values_that_fail_validation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let override_path = tmp.path().join("override.toml");
+        let _env = ConfigEnvOverride::set(&override_path);
+
+        let cfg = Config::default();
+        // validate() bounds sample_rate to 8000..=96000.
+        let err = set_value(&cfg, "recording.sample_rate", "4000")
+            .expect_err("an out-of-range value must be rejected");
+        assert!(
+            err.contains("invalid"),
+            "the error should say the config became invalid: {err}"
+        );
+        assert!(
+            !override_path.exists(),
+            "nothing may be written when validation fails"
+        );
+    }
+
+    #[test]
+    fn set_value_rejects_type_mismatches_before_writing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let override_path = tmp.path().join("override.toml");
+        let _env = ConfigEnvOverride::set(&override_path);
+
+        let cfg = Config::default();
+        // A string where an integer field lives fails the parse-back check.
+        let err = set_value(&cfg, "recording.sample_rate", "very-fast")
+            .expect_err("a type mismatch must be rejected");
+        assert!(err.contains("not valid for recording.sample_rate"), "{err}");
+        assert!(!override_path.exists());
+    }
+
+    #[test]
+    fn set_value_leaves_no_tmp_file_behind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let override_path = tmp.path().join("override.toml");
+        let _env = ConfigEnvOverride::set(&override_path);
+
+        let cfg = Config::default();
+        set_value(&cfg, "daemon.log_level", "debug").expect("set succeeds");
+
+        assert!(override_path.exists(), "the real file exists");
+        assert!(
+            !override_path.with_extension("toml.tmp").exists(),
+            "the tmp sibling must be renamed away, not left behind"
+        );
+        let written = std::fs::read_to_string(&override_path).unwrap();
+        assert!(written.contains("log_level = \"debug\""));
+    }
 }

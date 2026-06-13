@@ -148,25 +148,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::RecordStart { mode, in_place } => {
             match state.recorder.start(state, mode, in_place).await {
                 Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::StartMeeting => match state.recorder.start_meeting(state).await {
             Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::StopMeeting => match state.recorder.stop_meeting(state).await {
             Ok(meeting_id) => Response::Ok(serde_json::json!({ "meeting_id": meeting_id })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::MeetingToggle => {
             // Atomic toggle: the recorder holds a guard across the read+act so a
@@ -174,27 +165,18 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             // `DaemonRecorder::toggle_meeting`.
             match state.recorder.toggle_meeting(state).await {
                 Ok(started) => Response::Ok(serde_json::json!({ "started": started })),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::RecordStop => match state.recorder.stop(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::RecordToggle { in_place } => {
             if state.recorder.current().await.is_some() {
                 match state.recorder.stop(state).await {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-                    Err(e) => Response::Err(IpcError {
-                        kind: error_to_kind(&e),
-                        message: e.to_string(),
-                    }),
+                    Err(e) => err_response(&e),
                 }
             } else {
                 match state
@@ -203,59 +185,35 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     .await
                 {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-                    Err(e) => Response::Err(IpcError {
-                        kind: error_to_kind(&e),
-                        message: e.to_string(),
-                    }),
+                    Err(e) => err_response(&e),
                 }
             }
         }
         Request::RecordPause => match state.recorder.pause(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::RecordResume => match state.recorder.resume(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::RecordCancel => match state.recorder.cancel(state).await {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::ListRecordings { filter } => match state.catalog.list(&filter).await {
             Ok(rows) => serialize_response(rows),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::GetRecording { id } => match state.catalog.get(&id).await {
             Ok(Some(r)) => serialize_response(r),
-            Ok(None) => Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("recording {id} not found"),
-            }),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Ok(None) => not_found(format!("recording {id} not found")),
+            Err(e) => err_response(&e),
         },
         Request::ListMeeting { meeting_id } => {
             match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         // An unknown id yields an empty list, not NotFound — "no segments" is
@@ -263,10 +221,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         // and callers treat the two identically.
         Request::GetSegments { id } => match state.catalog.segments_for(&id).await {
             Ok(segments) => serialize_response(segments),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::SemanticSearch { query, limit } => {
             let embedder_guard = state.embedder.read().await;
@@ -289,10 +244,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             }
                             Response::Ok(serde_json::Value::Array(full_results))
                         }
-                        Err(e) => Response::Err(IpcError {
-                            kind: error_to_kind(&e),
-                            message: e.to_string(),
-                        }),
+                        Err(e) => err_response(&e),
                     },
                     Err(e) => Response::Err(IpcError {
                         kind: IpcErrorKind::Internal,
@@ -331,10 +283,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     }
                     Response::Ok(serde_json::Value::Array(full_results))
                 }
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::ReembedAll => {
@@ -356,10 +305,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     Ok(()) => {
                         let bg = state.clone();
                         tokio::spawn(async move {
-                            let guard = bg.embedder.read().await;
-                            let Some(embedder) = guard.as_ref() else {
+                            if bg.embedder.read().await.is_none() {
                                 return;
-                            };
+                            }
                             match bg.catalog.list_recordings_without_chunk_embeddings().await {
                                 Ok(records) => {
                                     let n = records.len();
@@ -367,15 +315,31 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                         "re-embedding {n} recordings with the current model"
                                     );
                                     for r in records {
-                                        if let Some(t) = r.transcript.as_ref() {
-                                            crate::pipeline::embed_and_store(
-                                                embedder,
-                                                &bg.catalog,
-                                                &r.id,
-                                                t,
-                                            )
-                                            .await;
-                                        }
+                                        let Some(t) = r.transcript.as_ref() else {
+                                            continue;
+                                        };
+                                        // Re-acquire the embedder PER ITEM: this
+                                        // loop runs for minutes on a big library,
+                                        // and holding the read guard across it
+                                        // blocks every config-reload write. Clone
+                                        // the Arc, drop the guard, then embed —
+                                        // writers interleave between items. Gone
+                                        // mid-run (semantic search turned off) =
+                                        // stop, matching the old early exit.
+                                        let embedder = bg.embedder.read().await.as_ref().cloned();
+                                        let Some(embedder) = embedder else {
+                                            tracing::info!(
+                                                "re-embed stopped: embedding model unloaded"
+                                            );
+                                            return;
+                                        };
+                                        crate::pipeline::embed_and_store(
+                                            &embedder,
+                                            &bg.catalog,
+                                            &r.id,
+                                            t,
+                                        )
+                                        .await;
                                     }
                                     tracing::info!("re-embed complete ({n} recordings)");
                                 }
@@ -384,7 +348,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                 }
                             }
                         });
-                        Response::Ok(serde_json::Value::Null)
+                        ok_null()
                     }
                     Err(e) => Response::Err(IpcError {
                         kind: error_to_kind(&e),
@@ -426,16 +390,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     }
                 }
                 state.events.emit(DaemonEvent::RecordingDeleted { id });
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
-            Ok(None) => Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("recording {id} not found"),
-            }),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Ok(None) => not_found(format!("recording {id} not found")),
+            Err(e) => err_response(&e),
         },
         Request::UpdateTranscript { id, text } => {
             match state.catalog.update_user_transcript(&id, &text).await {
@@ -448,12 +406,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     drop(embedder_guard);
 
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
-                    Response::Ok(serde_json::Value::Null)
+                    ok_null()
                 }
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::UpdateMeetingName { meeting_id, name } => {
@@ -466,37 +421,25 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     state
                         .events
                         .emit(DaemonEvent::MeetingNameUpdated { meeting_id });
-                    Response::Ok(serde_json::Value::Null)
+                    ok_null()
                 }
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::GetOriginalTranscript { id } => {
             match state.catalog.get_original_transcript(&id).await {
                 Ok(original) => serialize_response(original),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::GetCleanTranscript { id } => match state.catalog.get_clean_transcript(&id).await {
             Ok(clean) => serialize_response(clean),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::SetFavorite { id, favorite } => {
             match state.catalog.set_favorite(&id, favorite).await {
-                Ok(()) => Response::Ok(serde_json::Value::Null),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Ok(()) => ok_null(),
+                Err(e) => err_response(&e),
             }
         }
         Request::SetRecordingTitle { id, title } => {
@@ -516,16 +459,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     // Same event a transcript edit emits — open views re-fetch
                     // the recording and pick the new title up.
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
-                    Response::Ok(serde_json::Value::Null)
+                    ok_null()
                 }
-                Ok(false) => Response::Err(IpcError {
-                    kind: IpcErrorKind::NotFound,
-                    message: format!("no recording {}", id.as_str()),
-                }),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Ok(false) => not_found(format!("no recording {}", id.as_str())),
+                Err(e) => err_response(&e),
             }
         }
         Request::SuggestTags { id } => {
@@ -542,17 +479,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         })
                     } else {
                         crate::pipeline::suggest_tags(state, &cfg, &id, &transcript).await;
-                        Response::Ok(serde_json::Value::Null)
+                        ok_null()
                     }
                 }
-                Ok(None) => Response::Err(IpcError {
-                    kind: IpcErrorKind::NotFound,
-                    message: format!("no recording {}", id.as_str()),
-                }),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Ok(None) => not_found(format!("no recording {}", id.as_str())),
+                Err(e) => err_response(&e),
             }
         }
         Request::ApproveTagSuggestion { id, name } => {
@@ -576,15 +507,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         state.events.emit(DaemonEvent::TagSuggestionsUpdated { id });
                         Response::Ok(serde_json::to_value(tag).unwrap_or_default())
                     }
-                    Err(e) => Response::Err(IpcError {
-                        kind: error_to_kind(&e),
-                        message: e.to_string(),
-                    }),
+                    Err(e) => err_response(&e),
                 },
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::ClearAllTagSuggestions => match state.catalog.clear_all_tag_suggestions().await {
@@ -594,10 +519,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     .emit(DaemonEvent::AllTagSuggestionsCleared { cleared });
                 Response::Ok(serde_json::json!({ "cleared": cleared }))
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::DismissTagSuggestion { id, name } => match state.catalog.get(&id).await {
             Ok(Some(rec)) => {
@@ -609,32 +531,20 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 match state.catalog.set_tag_suggestions(&id, &rest).await {
                     Ok(()) => {
                         state.events.emit(DaemonEvent::TagSuggestionsUpdated { id });
-                        Response::Ok(serde_json::Value::Null)
+                        ok_null()
                     }
-                    Err(e) => Response::Err(IpcError {
-                        kind: error_to_kind(&e),
-                        message: e.to_string(),
-                    }),
+                    Err(e) => err_response(&e),
                 }
             }
-            Ok(None) => Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("no recording {}", id.as_str()),
-            }),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Ok(None) => not_found(format!("no recording {}", id.as_str())),
+            Err(e) => err_response(&e),
         },
         Request::UpdateNotes { id, notes } => match state.catalog.update_notes(&id, &notes).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::NotesUpdated { id });
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::SetSpeakerName {
             id,
@@ -656,12 +566,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             {
                 Ok(()) => {
                     state.events.emit(DaemonEvent::SpeakerNameUpdated { id });
-                    Response::Ok(serde_json::Value::Null)
+                    ok_null()
                 }
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::ImportRecording { path } => import_recording(state, path).await,
@@ -763,22 +670,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         {
                             tracing::error!("failed to update status to transcribing: {e}");
                         }
-                        Response::Ok(serde_json::Value::Null)
+                        ok_null()
                     }
-                    Err(e) => Response::Err(IpcError {
-                        kind: error_to_kind(&e),
-                        message: e.to_string(),
-                    }),
+                    Err(e) => err_response(&e),
                 }
             }
-            Ok(None) => Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("recording {id} not found"),
-            }),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Ok(None) => not_found(format!("recording {id} not found")),
+            Err(e) => err_response(&e),
         },
         Request::RefireHook { id, command } => match state.catalog.get(&id).await {
             Ok(Some(r)) if r.transcript.is_some() => {
@@ -902,20 +800,14 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         });
                     }
                 });
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
             Ok(Some(_)) => Response::Err(IpcError {
                 kind: IpcErrorKind::Internal,
                 message: "no transcript to fire hook against".into(),
             }),
-            Ok(None) => Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("recording {id} not found"),
-            }),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Ok(None) => not_found(format!("recording {id} not found")),
+            Err(e) => err_response(&e),
         },
         Request::RerunCleanup {
             id,
@@ -960,11 +852,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::SetPreviewSource { track } => {
             match state.recorder.set_preview_source(state, &track).await {
-                Ok(()) => Response::Ok(serde_json::Value::Null),
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Ok(()) => ok_null(),
+                Err(e) => err_response(&e),
             }
         }
         Request::SkipCurrentStage => {
@@ -972,7 +861,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             // is — the notify has no waiter then and stores nothing).
             state.skip_stage.notify_waiters();
             tracing::info!("skip-current-stage requested via IPC");
-            Response::Ok(serde_json::Value::Null)
+            ok_null()
         }
         Request::ListQueue => {
             let pending = state.inbox.list_pending().await;
@@ -995,45 +884,37 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     items.extend(pending.iter().map(|p| entry(p, "pending")));
                     Response::Ok(serde_json::Value::Array(items))
                 }
-                (Err(e), _) | (_, Err(e)) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                (Err(e), _) | (_, Err(e)) => err_response(&e),
             }
         }
         Request::ReorderQueue { ids } => match state.inbox.set_order(&ids).await {
             Ok(()) => {
                 crate::queue_worker::emit_queue_depth(state).await;
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::CancelQueued { id } => match state.inbox.cancel_pending(&id).await {
             Ok(true) => {
-                // Leave the recording in a terminal state so it isn't stuck
-                // showing "transcribing"; the user can re-run it later.
+                // Mark the recording Cancelled — terminal, so it isn't stuck
+                // showing "transcribing", but distinct from the failed states:
+                // the user chose this, nothing broke. Re-runnable later.
                 let _ = state
                     .catalog
-                    .update_status(&id, RecordingStatus::TranscribeFailed)
+                    .update_status(&id, RecordingStatus::Cancelled)
                     .await;
                 state
                     .events
                     .emit(DaemonEvent::RecordingCancelled { id: id.clone() });
                 crate::queue_worker::emit_queue_depth(state).await;
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
             Ok(false) => Response::Err(IpcError {
                 kind: IpcErrorKind::NotFound,
                 message: "recording is not in the pending queue (already processing or finished)"
                     .into(),
             }),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::SetQueuePaused { paused } => match state.inbox.set_paused(paused).await {
             Ok(()) => {
@@ -1041,10 +922,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 crate::queue_worker::emit_queue_depth(state).await;
                 Response::Ok(serde_json::json!({ "paused": paused }))
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::QueuePaused => {
             Response::Ok(serde_json::json!({ "paused": state.inbox.is_paused().await }))
@@ -1056,10 +934,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 "done": c.done,
                 "failed": c.failed,
             })),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::ClearFailed => match state.inbox.clear_failed().await {
             Ok(removed) => {
@@ -1067,10 +942,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 crate::queue_worker::emit_queue_depth(state).await;
                 Response::Ok(serde_json::json!({ "removed": removed }))
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::CancelProcessing { id } => {
             // Signal the in-flight cancellation token only if `id` is the item
@@ -1088,7 +960,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 }
             };
             if canceled {
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             } else {
                 Response::Err(IpcError {
                     kind: IpcErrorKind::NotFound,
@@ -1098,12 +970,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::CancelAllQueued => match state.inbox.cancel_all_pending().await {
             Ok(ids) => {
-                // Mark each cancelled recording terminal so it isn't stuck
-                // showing "transcribing", mirroring single-item CancelQueued.
+                // Mark each recording Cancelled (terminal, but not a failure)
+                // so it isn't stuck showing "transcribing", mirroring
+                // single-item CancelQueued.
                 for id in &ids {
                     let _ = state
                         .catalog
-                        .update_status(id, RecordingStatus::TranscribeFailed)
+                        .update_status(id, RecordingStatus::Cancelled)
                         .await;
                     state
                         .events
@@ -1112,10 +985,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 crate::queue_worker::emit_queue_depth(state).await;
                 Response::Ok(serde_json::json!({ "removed": ids.len() }))
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         // Unlike RefireHook, HookTest intentionally runs a caller-supplied
         // command: it is the Hook Manager's "test this command" affordance, used
@@ -1188,21 +1058,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 // the recorder, the workers, and every Owned child, then exits.
                 coordinator.trigger();
             });
-            Response::Ok(serde_json::Value::Null)
+            ok_null()
         }
         Request::ListTags => match state.catalog.list_tags().await {
             Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::ListAllTags => match state.catalog.list_all_tags().await {
             Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::AddTag { name, color } => {
             match state.catalog.add_tag(&name, color.as_deref()).await {
@@ -1210,10 +1074,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     state.events.emit(DaemonEvent::TagCreated { id: tag.id });
                     Response::Ok(serde_json::to_value(tag).unwrap_or_default())
                 }
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::UpdateTag { id, name, color } => {
@@ -1222,21 +1083,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     state.events.emit(DaemonEvent::TagUpdated { id });
                     Response::Ok(serde_json::to_value(tag).unwrap_or_default())
                 }
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::DeleteTag { id } => match state.catalog.delete_tag(id).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::TagDeleted { id });
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::AttachTag {
             recording_id,
@@ -1244,12 +1099,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         } => match state.catalog.attach_tag(&recording_id, tag_id).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::TagAttached { tag_id });
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::DetachTag {
             recording_id,
@@ -1257,38 +1109,26 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         } => match state.catalog.detach_tag(&recording_id, tag_id).await {
             Ok(()) => {
                 state.events.emit(DaemonEvent::TagDetached { tag_id });
-                Response::Ok(serde_json::Value::Null)
+                ok_null()
             }
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::TagsFor { recording_id } => match state.catalog.tags_for(&recording_id).await {
             Ok(tags) => Response::Ok(serde_json::to_value(tags).unwrap_or_default()),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::TagUsageCounts => match state.catalog.tag_usage_counts().await {
             Ok(counts) => Response::Ok(serde_json::to_value(counts).unwrap_or_default()),
-            Err(e) => Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            }),
+            Err(e) => err_response(&e),
         },
         Request::MergeTags { from_id, into_id } => {
             match state.catalog.merge_tags(from_id, into_id).await {
                 Ok(()) => {
                     // The source tag is gone; consumers refresh on TagDeleted.
                     state.events.emit(DaemonEvent::TagDeleted { id: from_id });
-                    Response::Ok(serde_json::Value::Null)
+                    ok_null()
                 }
-                Err(e) => Response::Err(IpcError {
-                    kind: error_to_kind(&e),
-                    message: e.to_string(),
-                }),
+                Err(e) => err_response(&e),
             }
         }
         Request::ReloadConfig => {
@@ -1329,7 +1169,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     // Start/stop idle pre-roll pre-capture to match the new
                     // config (e.g. user just toggled pre_roll_ms).
                     state.recorder.sync_preroll(state).await;
-                    Response::Ok(serde_json::Value::Null)
+                    ok_null()
                 }
                 Err(e) => Response::Err(IpcError {
                     kind: IpcErrorKind::InvalidConfig,
@@ -1428,16 +1268,10 @@ async fn rerun_cleanup(
     let recording = match state.catalog.get(&id).await {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("recording {id} not found"),
-            });
+            return not_found(format!("recording {id} not found"));
         }
         Err(e) => {
-            return Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            });
+            return err_response(&e);
         }
     };
 
@@ -1597,7 +1431,7 @@ async fn rerun_cleanup(
         }
     });
 
-    Response::Ok(serde_json::Value::Null)
+    ok_null()
 }
 
 /// Generate (or regenerate) an LLM summary of a recording's current transcript
@@ -1614,16 +1448,10 @@ async fn rerun_summary(
     let recording = match state.catalog.get(&id).await {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("recording {id} not found"),
-            });
+            return not_found(format!("recording {id} not found"));
         }
         Err(e) => {
-            return Response::Err(IpcError {
-                kind: error_to_kind(&e),
-                message: e.to_string(),
-            });
+            return err_response(&e);
         }
     };
 
@@ -1694,7 +1522,7 @@ async fn rerun_summary(
         }
     });
 
-    Response::Ok(serde_json::Value::Null)
+    ok_null()
 }
 
 /// Import an existing audio file: decode it to a canonical WAV under the audio
@@ -1713,10 +1541,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
     let input = match std::fs::canonicalize(&requested) {
         Ok(p) => p,
         Err(e) => {
-            return Response::Err(IpcError {
-                kind: IpcErrorKind::NotFound,
-                message: format!("could not resolve path {path}: {e}"),
-            });
+            return not_found(format!("could not resolve path {path}: {e}"));
         }
     };
 
@@ -1826,10 +1651,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
     if let Err(e) = state.catalog.insert(&row).await {
         // Clean up the WAV we just wrote — no row means it's orphaned.
         let _ = tokio::fs::remove_file(&audio_path).await;
-        return Response::Err(IpcError {
-            kind: error_to_kind(&e),
-            message: e.to_string(),
-        });
+        return err_response(&e);
     }
 
     let payload = HookPayload {
@@ -1847,10 +1669,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         // stuck on Transcribing forever. The caller can simply retry.
         let _ = state.catalog.delete(&id).await;
         let _ = tokio::fs::remove_file(&audio_path).await;
-        return Response::Err(IpcError {
-            kind: error_to_kind(&e),
-            message: e.to_string(),
-        });
+        return err_response(&e);
     }
 
     state.events.emit(DaemonEvent::RecordingStopped {
@@ -1879,6 +1698,30 @@ fn error_to_kind(e: &phoneme_core::Error) -> IpcErrorKind {
         Io(_) => IpcErrorKind::Io,
         _ => IpcErrorKind::Internal,
     }
+}
+
+/// The error arm shared by nearly every handler: a core error answered as
+/// `Response::Err` with the standard kind mapping and the error's own text.
+/// Wire-identical to spelling the `IpcError` out at the call site.
+fn err_response(e: &phoneme_core::Error) -> Response {
+    Response::Err(IpcError {
+        kind: error_to_kind(e),
+        message: e.to_string(),
+    })
+}
+
+/// A `NotFound` error response. Callers format the message (the wording
+/// varies per request and is part of the wire contract); this pins the kind.
+fn not_found(message: String) -> Response {
+    Response::Err(IpcError {
+        kind: IpcErrorKind::NotFound,
+        message,
+    })
+}
+
+/// The bare `Ok(null)` acknowledgement most mutating requests answer with.
+fn ok_null() -> Response {
+    Response::Ok(serde_json::Value::Null)
 }
 
 fn serialize_response<T: serde::Serialize>(val: T) -> Response {
@@ -2157,6 +2000,84 @@ mod tests {
             state.pending_overrides.lock().unwrap().get(&id).is_none(),
             "no model override should be recorded when none was requested"
         );
+    }
+
+    /// Cancelling a queued item must mark the recording `Cancelled` — NOT
+    /// `TranscribeFailed`. A user removing their own item from the queue is not
+    /// a failure: the old status lit the failed badge and listed the recording
+    /// in the failure panel for something the user did on purpose.
+    #[tokio::test]
+    async fn cancel_queued_marks_recording_cancelled_not_failed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = override_test_state(tmp.path(), Config::default()).await;
+
+        // A recording waiting in the queue: catalog row at Transcribing plus a
+        // pending inbox payload (what RecordStop / import leave behind).
+        let id = insert_done_recording(&state).await;
+        state
+            .catalog
+            .update_status(&id, RecordingStatus::Transcribing)
+            .await
+            .unwrap();
+        let payload = phoneme_core::HookPayload {
+            id: id.clone(),
+            timestamp: chrono::Local::now(),
+            transcript: String::new(),
+            audio_path: "C:/phoneme/audio/x.wav".into(),
+            duration_ms: 1000,
+            model: String::new(),
+            metadata: HookMetadata::current(),
+        };
+        state.inbox.enqueue(&payload).await.unwrap();
+
+        let resp = handle_request(Request::CancelQueued { id: id.clone() }, &state).await;
+        assert!(matches!(resp, Response::Ok(_)), "cancel should succeed");
+
+        let rec = state.catalog.get(&id).await.unwrap().unwrap();
+        assert_eq!(
+            rec.status,
+            RecordingStatus::Cancelled,
+            "a user cancel is Cancelled, never a failed status"
+        );
+    }
+
+    /// CancelAllQueued ("clear queue") marks every removed item `Cancelled`,
+    /// mirroring the single-item path.
+    #[tokio::test]
+    async fn cancel_all_queued_marks_recordings_cancelled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = override_test_state(tmp.path(), Config::default()).await;
+
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let id = insert_done_recording(&state).await;
+            state
+                .catalog
+                .update_status(&id, RecordingStatus::Transcribing)
+                .await
+                .unwrap();
+            let payload = phoneme_core::HookPayload {
+                id: id.clone(),
+                timestamp: chrono::Local::now(),
+                transcript: String::new(),
+                audio_path: "C:/phoneme/audio/x.wav".into(),
+                duration_ms: 1000,
+                model: String::new(),
+                metadata: HookMetadata::current(),
+            };
+            state.inbox.enqueue(&payload).await.unwrap();
+            ids.push(id);
+        }
+
+        let resp = handle_request(Request::CancelAllQueued, &state).await;
+        let Response::Ok(v) = resp else {
+            panic!("cancel-all should succeed");
+        };
+        assert_eq!(v["removed"], 2);
+        for id in &ids {
+            let rec = state.catalog.get(id).await.unwrap().unwrap();
+            assert_eq!(rec.status, RecordingStatus::Cancelled);
+        }
     }
 
     /// HookTest output crosses the pipe to the tray/CLI, and the test command

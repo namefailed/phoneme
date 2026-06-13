@@ -71,6 +71,13 @@ export type ListFilter = {
   tag_id?: number | null;
   /** `true` (default) = newest first; `false` = oldest first. */
   sort_desc?: boolean | null;
+  /** Server-side recording-type filter: only single voice notes, or only
+   *  meeting tracks. Applied in SQL before pagination, so pages stay full.
+   *  Omit for all kinds (the UI's "favorite" choice maps to `favorite`). */
+  kind?: "single" | "meeting" | null;
+  /** Server-side favorites flag: `true` = starred only, `false` = unstarred
+   *  only, omit = no filter. Applied in SQL before pagination. */
+  favorite?: boolean | null;
 };
 
 /**

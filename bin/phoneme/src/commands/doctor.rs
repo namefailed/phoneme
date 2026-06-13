@@ -7,12 +7,41 @@ use phoneme_core::Config;
 use phoneme_ipc::Request;
 use std::process::ExitCode;
 
+/// How long `--rebuild-catalog` waits for the daemon to actually exit after
+/// the Shutdown ACK before touching the database files. More generous than
+/// `daemon stop`'s wait: a daemon mid-transcription finalizes the in-flight
+/// recording on the way out, and rushing it here corrupts the very file we
+/// are trying to rebuild.
+const REBUILD_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
 pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     if args.rebuild_catalog {
-        // Stop the daemon first to ensure clean catalog deletion
-        let mut client_result = Client::connect(cfg).await;
+        // Stop the daemon first to ensure clean catalog deletion. Use the
+        // observe-only path — we want to stop a running daemon if one is up,
+        // but there is no point spawning a new one just to shut it down.
+        let mut client_result = Client::connect_observe(cfg).await;
         if let Ok(ref mut c) = client_result {
             let _ = c.send(phoneme_ipc::Request::Shutdown).await;
+            // Shutdown only ACKNOWLEDGES — the daemon finalizes recordings and
+            // reaps children before it actually exits, holding the SQLite
+            // handles the whole time. Deleting the DB the moment the ACK
+            // arrives raced that teardown (the dying daemon could checkpoint
+            // the WAL back into a half-deleted file). Wait, bounded, for the
+            // pipe to vanish — the same liveness signal `daemon stop` uses —
+            // and refuse to touch the files if it never does.
+            if !crate::commands::daemon_cmd::wait_for_pipe_death(
+                &cfg.daemon.pipe_name,
+                REBUILD_STOP_WAIT,
+            )
+            .await
+            {
+                eprintln!(
+                    "error: the daemon did not exit within {}s — leaving the catalog \
+                     untouched. Stop it first (phoneme daemon stop) and re-run.",
+                    REBUILD_STOP_WAIT.as_secs()
+                );
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
         }
 
         // Delete the catalog database
@@ -24,6 +53,13 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 if let Err(e) = std::fs::remove_file(&catalog_path) {
                     eprintln!("error: failed to delete catalog.db: {e}");
                     return ExitCode::from(exit::GENERIC_FAIL);
+                }
+                // Take the WAL sidecars with it (best-effort): a leftover
+                // catalog.db-wal next to a brand-new database is at best dead
+                // weight and at worst a confusing recovery candidate.
+                for ext in ["db-wal", "db-shm"] {
+                    let sidecar = dirs.data_local_dir().join(format!("catalog.{ext}"));
+                    let _ = std::fs::remove_file(sidecar);
                 }
                 println!("deleted catalog.db");
             } else {
@@ -42,7 +78,9 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
 
     // Daemon reachability (CLI-specific — the GUI doesn't talk to itself over
     // IPC). The remaining checks are shared with the GUI via `phoneme_core::doctor`.
-    let mut client_result = Client::connect(cfg).await;
+    // Use the observe-only path: whether the daemon is running is the first
+    // thing doctor reports, and silently starting one would hide that.
+    let mut client_result = Client::connect_observe(cfg).await;
     let daemon_ok = client_result.is_ok();
     checks.push(CheckResult {
         name: "daemon".into(),

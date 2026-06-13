@@ -1014,6 +1014,23 @@ impl Catalog {
         if filter.status.is_some() {
             sql.push_str(" AND recordings.status = ?");
         }
+        // Kind + favorites are filtered HERE, not client-side: they must apply
+        // before LIMIT/OFFSET or pages of the chosen kind come back mostly
+        // empty (post-pagination filtering only ever thins the fetched page).
+        match filter.kind {
+            Some(crate::types::ListKind::Single) => {
+                sql.push_str(" AND recordings.meeting_id IS NULL");
+            }
+            Some(crate::types::ListKind::Meeting) => {
+                sql.push_str(" AND recordings.meeting_id IS NOT NULL");
+            }
+            None => {}
+        }
+        match filter.favorite {
+            Some(true) => sql.push_str(" AND recordings.favorite = 1"),
+            Some(false) => sql.push_str(" AND recordings.favorite = 0"),
+            None => {}
+        }
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
@@ -1285,8 +1302,8 @@ impl Catalog {
     /// the catalog and returning their `audio_path` values so the caller can
     /// delete the files from disk.
     ///
-    /// Only terminal-state recordings (done / failed) are eligible — in-progress
-    /// recordings are always preserved regardless of age or count.
+    /// Only terminal-state recordings (done / failed / cancelled) are eligible —
+    /// in-progress recordings are always preserved regardless of age or count.
     pub async fn apply_retention(
         &self,
         cfg: &crate::config::RetentionConfig,
@@ -1308,7 +1325,8 @@ impl Catalog {
             let cutoff_str = cutoff.to_rfc3339();
             let rows = sqlx::query(
                 "SELECT id, audio_path FROM recordings \
-                 WHERE started_at < ? AND status IN ('done','transcribe_failed','hook_failed') \
+                 WHERE started_at < ? \
+                 AND status IN ('done','transcribe_failed','hook_failed','cancelled') \
                  AND audio_path != ''",
             )
             .bind(&cutoff_str)
@@ -1343,7 +1361,7 @@ impl Catalog {
         if let Some(max_count) = cfg.max_count {
             let rows = sqlx::query(
                 "SELECT id, audio_path FROM recordings \
-                 WHERE status IN ('done','transcribe_failed','hook_failed') \
+                 WHERE status IN ('done','transcribe_failed','hook_failed','cancelled') \
                  ORDER BY started_at DESC, id DESC \
                  LIMIT -1 OFFSET ?",
             )
@@ -1399,7 +1417,7 @@ impl Catalog {
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM recordings \
              WHERE started_at >= ? AND started_at < ? \
-             AND status IN ('done','transcribe_failed','hook_failed')",
+             AND status IN ('done','transcribe_failed','hook_failed','cancelled')",
         )
         .bind(cutoff_now.to_rfc3339())
         .bind(cutoff_future.to_rfc3339())
@@ -1621,6 +1639,7 @@ fn parse_status(s: &str) -> Result<RecordingStatus> {
         "done" => RecordingStatus::Done,
         "transcribe_failed" => RecordingStatus::TranscribeFailed,
         "hook_failed" => RecordingStatus::HookFailed,
+        "cancelled" => RecordingStatus::Cancelled,
         other => {
             return Err(crate::error::Error::Internal(format!(
                 "unknown recording status: {other}"
@@ -1650,6 +1669,7 @@ mod tests {
             "done",
             "transcribe_failed",
             "hook_failed",
+            "cancelled",
         ] {
             assert_eq!(
                 parse_status(s).unwrap().as_str(),
@@ -1657,6 +1677,97 @@ mod tests {
                 "status {s} did not round-trip through parse_status/as_str"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn list_filters_kind_and_favorites_in_sql_before_pagination() {
+        // Regression for the client-side Library type-filter: filtering kind /
+        // favorites AFTER pagination meant a page could contain almost none of
+        // the chosen kind, and favorites past the first page were unreachable.
+        // Both predicates must be applied in the SQL, before LIMIT/OFFSET.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        // 30 single voice notes, the first 25 of them starred…
+        let mut singles = Vec::new();
+        for i in 0..30 {
+            let r = embedded_recording(None);
+            db.insert(&r).await.unwrap();
+            if i < 25 {
+                db.set_favorite(&r.id, true).await.unwrap();
+            }
+            singles.push(r.id);
+        }
+        // …plus 5 meeting tracks (never starred).
+        for _ in 0..5 {
+            db.insert(&embedded_recording(Some("meeting-1")))
+                .await
+                .unwrap();
+        }
+
+        // Kind filters match on meeting_id presence, across the whole set.
+        let single_only = db
+            .list(&ListFilter {
+                kind: Some(crate::types::ListKind::Single),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(single_only.len(), 30);
+        assert!(single_only.iter().all(|r| r.meeting_id.is_none()));
+
+        let meeting_only = db
+            .list(&ListFilter {
+                kind: Some(crate::types::ListKind::Meeting),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(meeting_only.len(), 5);
+        assert!(meeting_only.iter().all(|r| r.meeting_id.is_some()));
+
+        // THE crux: page 3 of the favorites view (limit 10, offset 20) must
+        // hold the remaining 5 starred recordings — with post-pagination
+        // filtering this page was empty or full of unstarred rows.
+        let fav_page3 = db
+            .list(&ListFilter {
+                favorite: Some(true),
+                limit: Some(10),
+                offset: Some(20),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            fav_page3.len(),
+            5,
+            "favorites beyond page 1 must be reachable (25 favorites → 5 on page 3)"
+        );
+        assert!(fav_page3.iter().all(|r| r.favorite));
+
+        // Some(false) is the complement: only unstarred rows.
+        let unstarred = db
+            .list(&ListFilter {
+                favorite: Some(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            unstarred.len(),
+            10,
+            "5 unstarred singles + 5 meeting tracks"
+        );
+        assert!(unstarred.iter().all(|r| !r.favorite));
+
+        // Kind + favorites compose.
+        let fav_singles = db
+            .list(&ListFilter {
+                kind: Some(crate::types::ListKind::Single),
+                favorite: Some(true),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(fav_singles.len(), 25);
     }
 
     #[test]
@@ -2280,13 +2391,7 @@ mod tests {
         // Test list
         let filter = ListFilter {
             limit: Some(10),
-            offset: None,
-            since: None,
-            until: None,
-            status: None,
-            search: None,
-            tag_id: None,
-            sort_desc: None,
+            ..Default::default()
         };
         let list = db.list(&filter).await.expect("list");
         assert_eq!(list.len(), 1);

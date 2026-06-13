@@ -1,4 +1,4 @@
-use phoneme_core::{ListFilter, RecordMode, RecordingId, RecordingStatus};
+use phoneme_core::{ListFilter, ListKind, RecordMode, RecordingId, RecordingStatus};
 use phoneme_ipc::schema::{DaemonEvent, IpcError, IpcErrorKind, Request, Response};
 
 fn roundtrip<T>(value: &T)
@@ -37,8 +37,25 @@ fn list_recordings_request_roundtrips() {
         search: Some("sarah".into()),
         tag_id: None,
         sort_desc: None,
+        kind: Some(ListKind::Single),
+        favorite: Some(true),
     };
     roundtrip(&Request::ListRecordings { filter });
+}
+
+#[test]
+fn list_filter_without_kind_or_favorite_still_deserializes() {
+    // Older clients omit the kind/favorite fields entirely — serde defaults
+    // must absorb that, or every pre-existing caller breaks on upgrade.
+    let legacy = r#"{"type":"list_recordings","filter":{"limit":10,"offset":null,
+        "since":null,"until":null,"status":null,"search":null,"tag_id":null}}"#;
+    let parsed: Request = serde_json::from_str(legacy).unwrap();
+    let Request::ListRecordings { filter } = parsed else {
+        panic!("expected list_recordings");
+    };
+    assert_eq!(filter.kind, None);
+    assert_eq!(filter.favorite, None);
+    assert_eq!(filter.limit, Some(10));
 }
 
 #[test]

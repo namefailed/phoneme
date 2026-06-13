@@ -184,6 +184,18 @@ struct ActiveMeeting {
     wall_started: Instant,
 }
 
+/// One meeting track that stopped cleanly and has been aligned to the shared
+/// wall-clock timeline — everything [`DaemonRecorder::finalize_meeting_track`]
+/// needs to write its WAV and hand it to the pipeline.
+struct FinalizedTrack {
+    id: RecordingId,
+    audio_path: PathBuf,
+    started_at: chrono::DateTime<Local>,
+    track: MeetingTrack,
+    samples: Vec<i16>,
+    duration_ms: i64,
+}
+
 #[derive(Clone, Default)]
 pub struct DaemonRecorder {
     active: Arc<Mutex<Option<ActiveRecording>>>,
@@ -722,12 +734,25 @@ impl DaemonRecorder {
     /// `type_first`, a type-only pass runs in addition to the enqueue so the
     /// text lands before the pipeline finishes. See `in_place.rs`.
     pub async fn stop(&self, state: &AppState) -> Result<RecordingId> {
-        let mut active_lock = self.active.lock().await;
-        let active = active_lock.take().ok_or(Error::NotRecording)?;
-        // Stop the streaming-preview loop first so it isn't mid-snapshot when we
-        // take the recorder handle. No-op when no preview is running.
+        // Take the active slot and the recorder handle in one short critical
+        // section, then drop both guards BEFORE any slow await. The preview
+        // teardown below can block on an in-flight transcription tick (up to
+        // the provider timeout), and holding `active` through it would stall
+        // every status/control IPC (RecordStatus, pause, cancel, …) for that
+        // long. Taking the recorder together with the slot keeps stop/start
+        // ordering sound: a concurrent start sees the slot free only after the
+        // old recorder handle is already ours, so a freshly-started recorder
+        // can never be grabbed and finalized to the old recording's path.
+        let (active, recorder) = {
+            let mut active_lock = self.active.lock().await;
+            let active = active_lock.take().ok_or(Error::NotRecording)?;
+            let recorder = self.handle.lock().await.take().ok_or(Error::NotRecording)?;
+            (active, recorder)
+        };
+        // Stop the streaming-preview loop before finalizing so it isn't
+        // mid-snapshot of a recorder being consumed. No-op when no preview is
+        // running.
         self.stop_preview().await;
-        let recorder = self.handle.lock().await.take().ok_or(Error::NotRecording)?;
         let result = recorder.stop_and_finalize(&active.audio_path).await?;
 
         state
@@ -785,10 +810,9 @@ impl DaemonRecorder {
         });
         tracing::info!(id = %active.id, ms = result.duration_ms, "recording stopped");
 
-        // Release the active lock before resuming idle pre-capture
-        // (`ensure_preroll` re-acquires it). No-op when pre-roll is disabled.
+        // Resume idle pre-capture (`ensure_preroll` re-acquires the active
+        // lock, which was released above). No-op when pre-roll is disabled.
         let id = active.id;
-        drop(active_lock);
         self.ensure_preroll(state).await;
         Ok(id)
     }
@@ -796,10 +820,32 @@ impl DaemonRecorder {
     /// Cancel the current recording: discard samples, delete catalog row, no
     /// WAV, no inbox.
     pub async fn cancel(&self, state: &AppState) -> Result<RecordingId> {
-        let mut active_lock = self.active.lock().await;
-        if active_lock.is_none() {
-            let mut meeting_lock = self.meeting.lock().await;
-            if let Some(meeting) = meeting_lock.take() {
+        // What cancel found to tear down, moved OUT of the state mutexes so
+        // the slow awaits below (preview teardown, recorder cancel) run with
+        // no lock held — same reasoning as `stop`.
+        enum Taken {
+            Single(ActiveRecording, Option<Recorder>),
+            Meeting(Box<ActiveMeeting>),
+        }
+        let taken = {
+            let mut active_lock = self.active.lock().await;
+            match active_lock.take() {
+                Some(active) => {
+                    let recorder = self.handle.lock().await.take();
+                    Taken::Single(active, recorder)
+                }
+                None => {
+                    let mut meeting_lock = self.meeting.lock().await;
+                    match meeting_lock.take() {
+                        Some(meeting) => Taken::Meeting(Box::new(meeting)),
+                        None => return Err(Error::NotRecording),
+                    }
+                }
+            }
+        };
+        match taken {
+            Taken::Meeting(meeting) => {
+                let meeting = *meeting;
                 // Tear down the live-preview loop before cancelling the track
                 // recorders. No-op when no preview is running.
                 self.stop_preview().await;
@@ -818,33 +864,30 @@ impl DaemonRecorder {
                 }
                 tracing::info!(session = %meeting.meeting_id, "meeting cancelled");
 
-                drop(meeting_lock);
-                drop(active_lock);
                 self.ensure_preroll(state).await;
-                return Ok(id);
+                Ok(id)
             }
-            return Err(Error::NotRecording);
-        }
-        let active = active_lock.take().unwrap();
-        // Stop the preview loop before tearing down the recorder. No-op when off.
-        self.stop_preview().await;
-        if let Some(recorder) = self.handle.lock().await.take() {
-            if let Err(e) = recorder.cancel().await {
-                tracing::warn!("failed to cancel recorder: {e}");
-            }
-        }
-        state.catalog.delete(&active.id).await?;
-        state.events.emit(DaemonEvent::RecordingCancelled {
-            id: active.id.clone(),
-        });
-        tracing::info!(id = %active.id, "recording cancelled");
+            Taken::Single(active, recorder) => {
+                // Stop the preview loop before tearing down the recorder. No-op
+                // when off.
+                self.stop_preview().await;
+                if let Some(recorder) = recorder {
+                    if let Err(e) = recorder.cancel().await {
+                        tracing::warn!("failed to cancel recorder: {e}");
+                    }
+                }
+                state.catalog.delete(&active.id).await?;
+                state.events.emit(DaemonEvent::RecordingCancelled {
+                    id: active.id.clone(),
+                });
+                tracing::info!(id = %active.id, "recording cancelled");
 
-        // Resume idle pre-capture after releasing the active lock. No-op when
-        // pre-roll is disabled.
-        let id = active.id;
-        drop(active_lock);
-        self.ensure_preroll(state).await;
-        Ok(id)
+                // Resume idle pre-capture. No-op when pre-roll is disabled.
+                let id = active.id;
+                self.ensure_preroll(state).await;
+                Ok(id)
+            }
+        }
     }
 
     /// Pause the active recording.
@@ -1301,6 +1344,9 @@ impl DaemonRecorder {
 
         let mut stopped: Vec<StoppedTrack> = Vec::new();
 
+        // Every track the meeting had — including ones that fail below. Only
+        // when NONE of them reaches the pipeline does stop_meeting error.
+        let track_total = stop_results.len();
         for (id, audio_path, started_at, track, track_late_by_ms, stop_result) in stop_results {
             match stop_result {
                 Ok((raw_samples, _duration_ms, first_non_silent_at)) => {
@@ -1342,15 +1388,6 @@ impl DaemonRecorder {
             .collect();
         let aligned = align_meeting_tracks(&align_inputs, target_duration_ms, sample_rate);
 
-        struct FinalizedTrack {
-            id: RecordingId,
-            audio_path: std::path::PathBuf,
-            started_at: chrono::DateTime<Local>,
-            track: MeetingTrack,
-            samples: Vec<i16>,
-            duration_ms: i64,
-        }
-
         let mut track_data: Vec<FinalizedTrack> = Vec::new();
 
         for (meta, aligned_track) in stopped.into_iter().zip(aligned) {
@@ -1381,62 +1418,100 @@ impl DaemonRecorder {
             });
         }
 
-        for FinalizedTrack {
+        // Finalize every track independently. One track's failure must not
+        // abandon its siblings mid-loop — the other track is a complete,
+        // healthy recording that deserves to reach the pipeline. A failed
+        // track takes the normal failure path (TranscribeFailed, visible in
+        // the library) and the rest proceed; only when EVERY track of the
+        // meeting failed does stop_meeting itself report an error.
+        let mut finalized = 0usize;
+        for track in track_data {
+            let (id, track_label) = (track.id.clone(), track.track);
+            match Self::finalize_meeting_track(state, &meeting_id, track).await {
+                Ok(()) => finalized += 1,
+                Err(e) => {
+                    tracing::error!(
+                        id = %id,
+                        track = track_label.as_str(),
+                        error = %e,
+                        "meeting track finalize failed; continuing with the remaining tracks"
+                    );
+                    if let Err(err) = state
+                        .catalog
+                        .update_status(&id, RecordingStatus::TranscribeFailed)
+                        .await
+                    {
+                        tracing::warn!(id = %id, error = %err, "failed to mark track as failed");
+                    }
+                }
+            }
+        }
+
+        tracing::info!(session = %meeting_id, "meeting stopped");
+
+        // Resume idle pre-capture now the meeting released the microphone.
+        // No-op when pre-roll is disabled. Runs even when every track failed,
+        // so a fully-failed stop still restores the idle state.
+        self.ensure_preroll(state).await;
+
+        if track_total > 0 && finalized == 0 {
+            return Err(Error::Internal(format!(
+                "meeting {meeting_id}: every track failed to finalize — see the daemon log"
+            )));
+        }
+        Ok(meeting_id)
+    }
+
+    /// Finalize one cleanly-stopped meeting track: write its aligned samples
+    /// to WAV, flip the catalog row to `Transcribing` with the shared
+    /// wall-clock duration, enqueue it for the normal pipeline, and emit
+    /// `RecordingStopped`. Any step failing aborts THIS track only — the
+    /// caller (`stop_meeting`) isolates tracks from each other and routes a
+    /// failure to the normal TranscribeFailed path.
+    async fn finalize_meeting_track(
+        state: &AppState,
+        meeting_id: &str,
+        track: FinalizedTrack,
+    ) -> Result<()> {
+        let FinalizedTrack {
             id,
             audio_path,
             started_at,
             track,
             samples,
             duration_ms: final_duration_ms,
-        } in track_data
-        {
-            // Write the timeline-aligned samples to WAV.
-            let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
-            if let Err(e) = phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg) {
-                tracing::error!(id = %id, track = track.as_str(), error = %e, "failed to write WAV");
-                if let Err(err) = state
-                    .catalog
-                    .update_status(&id, RecordingStatus::TranscribeFailed)
-                    .await
-                {
-                    tracing::warn!(id = %id, error = %err, "failed to mark track as failed");
-                }
-                continue;
-            }
+        } = track;
 
-            // Update catalog with the (possibly padded) duration
-            state
-                .catalog
-                .update_status_and_duration(&id, RecordingStatus::Transcribing, final_duration_ms)
-                .await?;
+        // Write the timeline-aligned samples to WAV.
+        let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
+        phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg)?;
 
-            let payload = HookPayload {
-                id: id.clone(),
-                timestamp: started_at,
-                transcript: String::new(),
-                audio_path: audio_path.to_string_lossy().into_owned(),
-                duration_ms: final_duration_ms,
-                model: String::new(),
-                metadata: HookMetadata::current(),
-            };
-            state.inbox.enqueue(&payload).await?;
-            crate::queue_worker::emit_queue_depth(state).await;
+        // Update catalog with the (possibly padded) duration
+        state
+            .catalog
+            .update_status_and_duration(&id, RecordingStatus::Transcribing, final_duration_ms)
+            .await?;
 
-            state.events.emit(DaemonEvent::RecordingStopped {
-                id: id.clone(),
-                duration_ms: final_duration_ms,
-                audio_path: audio_path.to_string_lossy().into_owned(),
-                meeting_id: Some(meeting_id.clone()),
-            });
-            tracing::info!(id = %id, track = track.as_str(), ms = final_duration_ms, "meeting track stopped");
-        }
+        let payload = HookPayload {
+            id: id.clone(),
+            timestamp: started_at,
+            transcript: String::new(),
+            audio_path: audio_path.to_string_lossy().into_owned(),
+            duration_ms: final_duration_ms,
+            model: String::new(),
+            metadata: HookMetadata::current(),
+        };
+        state.inbox.enqueue(&payload).await?;
+        crate::queue_worker::emit_queue_depth(state).await;
 
-        tracing::info!(session = %meeting_id, "meeting stopped");
-
-        // Resume idle pre-capture now the meeting released the microphone.
-        // No-op when pre-roll is disabled.
-        self.ensure_preroll(state).await;
-        Ok(meeting_id)
+        state.events.emit(DaemonEvent::RecordingStopped {
+            id: id.clone(),
+            duration_ms: final_duration_ms,
+            audio_path: audio_path.to_string_lossy().into_owned(),
+            meeting_id: Some(meeting_id.to_string()),
+        });
+        tracing::info!(id = %id, track = track.as_str(), ms = final_duration_ms, "meeting track stopped");
+        Ok(())
     }
 }
 
@@ -1865,5 +1940,189 @@ mod tests {
             sample_counts[0], sample_counts[1],
             "WAV sample counts must match"
         );
+    }
+
+    /// The two synthetic sinks feeding a test meeting's mic + system tracks.
+    type TwoSinks = (
+        phoneme_audio::source::SyntheticSink,
+        phoneme_audio::source::SyntheticSink,
+    );
+
+    /// Start a two-track synthetic meeting and return `(meeting_id, sinks)`
+    /// ready for the stop-path tests.
+    async fn start_two_track_meeting(state: &AppState) -> (String, TwoSinks) {
+        let audio_cfg = AudioConfig::phoneme_default();
+        let (mic_src, mic_sink) = SyntheticSource::new(audio_cfg);
+        let (sys_src, sys_sink) = SyntheticSource::new(audio_cfg);
+        let meeting_id = state
+            .recorder
+            .start_meeting_with_sources(
+                state,
+                vec![
+                    (MeetingTrack::Mic, Box::new(mic_src)),
+                    (MeetingTrack::System, Box::new(sys_src)),
+                ],
+            )
+            .await
+            .expect("start meeting");
+        (meeting_id, (mic_sink, sys_sink))
+    }
+
+    /// Block a WAV write at `path` by occupying the destination with a
+    /// directory: `write_wav`'s tmp-then-replace cannot remove a directory, so
+    /// finalizing that track fails while every other path stays healthy.
+    fn block_wav_path(path: &str) {
+        std::fs::create_dir_all(path).expect("create blocking directory");
+    }
+
+    #[tokio::test]
+    async fn stop_meeting_partial_failure_keeps_healthy_track() {
+        // Audit M2: one track failing to finalize must not abandon the other.
+        // The system track's WAV write is sabotaged; the mic track must still
+        // be written, flipped to Transcribing, and enqueued — and stop_meeting
+        // reports success for the partial result.
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (meeting_id, (mic_sink, sys_sink)) = start_two_track_meeting(&state).await;
+
+        let rows = state.catalog.list(&ListFilter::default()).await.unwrap();
+        let sys_path = rows
+            .iter()
+            .find(|r| r.track.as_deref() == Some("system"))
+            .expect("system track row")
+            .audio_path
+            .clone();
+        block_wav_path(&sys_path);
+
+        mic_sink.push(vec![100i16; 8_000]).await.unwrap();
+        sys_sink.push(vec![200i16; 8_000]).await.unwrap();
+        mic_sink.close();
+        sys_sink.close();
+
+        state
+            .recorder
+            .stop_meeting(&state)
+            .await
+            .expect("a partial failure is still a successful stop");
+
+        let rows = state.catalog.list(&ListFilter::default()).await.unwrap();
+        let by_track = |t: &str| {
+            rows.iter()
+                .find(|r| {
+                    r.meeting_id.as_deref() == Some(meeting_id.as_str())
+                        && r.track.as_deref() == Some(t)
+                })
+                .unwrap_or_else(|| panic!("missing {t} track row"))
+        };
+        let mic = by_track("mic");
+        assert_eq!(
+            mic.status,
+            RecordingStatus::Transcribing,
+            "the healthy track must still reach the pipeline"
+        );
+        assert!(
+            std::path::Path::new(&mic.audio_path).is_file(),
+            "the healthy track's WAV must be written"
+        );
+        assert_eq!(
+            by_track("system").status,
+            RecordingStatus::TranscribeFailed,
+            "the failed track takes the normal failure path"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_meeting_errors_only_when_every_track_fails() {
+        // Audit M2, the flip side: when NO track reaches the pipeline the stop
+        // must surface an error (the caller would otherwise report a clean
+        // stop for a meeting that produced nothing) — and the meeting state
+        // must still be fully cleared.
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+        let (meeting_id, (mic_sink, sys_sink)) = start_two_track_meeting(&state).await;
+
+        let rows = state.catalog.list(&ListFilter::default()).await.unwrap();
+        for r in rows
+            .iter()
+            .filter(|r| r.meeting_id.as_deref() == Some(meeting_id.as_str()))
+        {
+            block_wav_path(&r.audio_path);
+        }
+
+        mic_sink.push(vec![100i16; 8_000]).await.unwrap();
+        sys_sink.push(vec![200i16; 8_000]).await.unwrap();
+        mic_sink.close();
+        sys_sink.close();
+
+        let err = state
+            .recorder
+            .stop_meeting(&state)
+            .await
+            .expect_err("all tracks failing must surface an error");
+        assert!(matches!(err, Error::Internal(_)), "got {err:?}");
+        assert!(
+            !state.recorder.meeting_active().await,
+            "a fully-failed stop must still clear the meeting"
+        );
+
+        let rows = state.catalog.list(&ListFilter::default()).await.unwrap();
+        for r in rows
+            .iter()
+            .filter(|r| r.meeting_id.as_deref() == Some(meeting_id.as_str()))
+        {
+            assert_eq!(
+                r.status,
+                RecordingStatus::TranscribeFailed,
+                "every track must land on the failure path"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_keeps_status_queries_responsive_during_preview_teardown() {
+        // Audit M3: `stop` must not hold the active-recording lock across the
+        // preview teardown — a slow in-flight preview tick (here a stand-in
+        // task that takes 1.5 s to wind down) used to block every status and
+        // control IPC for its whole duration.
+        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+
+        state
+            .recorder
+            .start(&state, RecordMode::Hold, false)
+            .await
+            .expect("start synthetic recording");
+
+        // Inject a preview task that ignores its stop signal for 1.5 s — the
+        // shape of a preview loop stuck inside a slow transcription tick.
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let _ = stop_rx.await;
+            tokio::time::sleep(Duration::from_millis(1_500)).await;
+        });
+        state
+            .recorder
+            .preview
+            .lock()
+            .await
+            .push(PreviewTask { stop_tx, task });
+
+        let recorder = state.recorder.clone();
+        let stop_state = state.clone();
+        let stop_task = tokio::spawn(async move { recorder.stop(&stop_state).await });
+
+        // Let the stop reach the preview teardown, then prove the active slot
+        // is already free: a status query must answer immediately instead of
+        // queueing behind the teardown.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let status = tokio::time::timeout(Duration::from_millis(500), state.recorder.current())
+            .await
+            .expect("status query must not block behind the preview teardown");
+        assert!(status.is_none(), "the active slot must already be cleared");
+
+        let stopped = stop_task.await.expect("join stop task");
+        assert!(stopped.is_ok(), "stop must still succeed: {stopped:?}");
+        std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 }

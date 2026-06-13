@@ -83,7 +83,8 @@ per device.
 
 You can drill down into your catalog using the Filter pills above the recordings list.
 
-- **Library filter**: switch between **All**, **Voice Notes** (single recordings), and **Meetings** (multi-track meeting recordings). This mirrors the CLI `phoneme list --kind all|single|meeting`.
+- **Library filter**: switch between **All**, **Voice Notes** (single recordings), **Meetings** (multi-track meeting recordings), and **Favorites** (starred). This mirrors the CLI `phoneme list --kind all|single|meeting`. The filter is applied by the daemon before pagination, so every page is full of the chosen kind — including Favorites pages deep into a large library.
+- **Status filter**: the header's status dropdown narrows the list to one processing state — **Recording**, **Transcribing**, **Cleaning Up**, **Summarizing**, **Tagging**, **Hook Running**, **Done**, **Transcription Failed**, **Hook Failed**, or **Cancelled** (a run you cancelled yourself — terminal like the failed states, but never treated as a failure).
 - **Tag Filters**: Click "Filter by Tag" to only show recordings that have specific tags attached. You can select multiple tags to narrow your view.
 - **Date Filters**: Click the Date pill to restrict your view to "Today", "This Week", or select a custom date range from the calendar.
 

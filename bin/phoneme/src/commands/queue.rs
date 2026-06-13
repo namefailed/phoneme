@@ -16,9 +16,24 @@ use phoneme_ipc::Request;
 use std::process::ExitCode;
 
 pub async fn run(args: QueueArgs, cfg: &Config, json: bool) -> ExitCode {
-    let mut client = match Client::connect(cfg).await {
-        Ok(c) => c,
-        Err(code) => return code,
+    // Read-only inspection actions (list, counts, status) use the observe-only
+    // path — if the daemon is down that is itself the answer. Mutating actions
+    // (pause, resume, cancel, reorder, clear-failed) use the spawning path
+    // because they require an active daemon to make the change.
+    let observe_only = matches!(
+        args.action,
+        None | Some(QueueAction::List) | Some(QueueAction::Counts) | Some(QueueAction::Status)
+    );
+    let mut client = if observe_only {
+        match Client::connect_observe(cfg).await {
+            Ok(c) => c,
+            Err(code) => return code,
+        }
+    } else {
+        match Client::connect(cfg).await {
+            Ok(c) => c,
+            Err(code) => return code,
+        }
     };
 
     match args.action.unwrap_or(QueueAction::List) {

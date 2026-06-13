@@ -19,6 +19,11 @@ pub enum RecordingStatus {
     Done,
     TranscribeFailed,
     HookFailed,
+    /// The user cancelled the recording's pipeline run (a queued item removed
+    /// from the queue, or an in-flight transcription aborted). Terminal, like
+    /// the failed states — but nothing *broke*, so it is never surfaced as a
+    /// failure and never appears in failed-recordings views.
+    Cancelled,
 }
 
 impl RecordingStatus {
@@ -34,11 +39,15 @@ impl RecordingStatus {
             Self::Done => "done",
             Self::TranscribeFailed => "transcribe_failed",
             Self::HookFailed => "hook_failed",
+            Self::Cancelled => "cancelled",
         }
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Done | Self::TranscribeFailed | Self::HookFailed)
+        matches!(
+            self,
+            Self::Done | Self::TranscribeFailed | Self::HookFailed | Self::Cancelled
+        )
     }
 }
 
@@ -202,6 +211,19 @@ pub struct TranscriptSegment {
     pub speaker: Option<String>,
 }
 
+/// Recording-type filter for [`ListFilter::kind`]: single voice notes (no
+/// `meeting_id`) vs. meeting tracks (a `meeting_id` set). Mirrors the GUI
+/// Library filter and the CLI `phoneme list --kind` values; "all" is simply
+/// `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListKind {
+    /// Only single-track voice notes (`meeting_id IS NULL`).
+    Single,
+    /// Only meeting tracks (`meeting_id IS NOT NULL`).
+    Meeting,
+}
+
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListFilter {
@@ -219,6 +241,16 @@ pub struct ListFilter {
     /// `true` (default) = newest first; `false` = oldest first.
     #[serde(default)]
     pub sort_desc: Option<bool>,
+    /// Recording-type filter (single voice notes / meeting tracks), applied in
+    /// SQL so it composes with `limit`/`offset` — a client filtering after
+    /// pagination gets mostly-empty pages instead. `None` = all kinds.
+    /// Serde-defaulted: older clients that omit it still deserialize.
+    #[serde(default)]
+    pub kind: Option<ListKind>,
+    /// Favorites flag, applied in SQL like `kind`: `Some(true)` = only starred
+    /// recordings, `Some(false)` = only unstarred, `None` = no filter.
+    #[serde(default)]
+    pub favorite: Option<bool>,
 }
 
 /// The payload sent to hook scripts on stdin (and stored verbatim in inbox JSON).
@@ -271,6 +303,7 @@ mod tests {
             RecordingStatus::Done,
             RecordingStatus::TranscribeFailed,
             RecordingStatus::HookFailed,
+            RecordingStatus::Cancelled,
         ] {
             let s = serde_json::to_string(&v).unwrap();
             let parsed: RecordingStatus = serde_json::from_str(&s).unwrap();
@@ -279,10 +312,20 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_serializes_as_plain_cancelled() {
+        // The wire/DB string is "cancelled" (double L) — clients and the
+        // catalog's string column both key on it.
+        let s = serde_json::to_string(&RecordingStatus::Cancelled).unwrap();
+        assert_eq!(s, "\"cancelled\"");
+        assert_eq!(RecordingStatus::Cancelled.as_str(), "cancelled");
+    }
+
+    #[test]
     fn terminal_statuses_identified_correctly() {
         assert!(RecordingStatus::Done.is_terminal());
         assert!(RecordingStatus::TranscribeFailed.is_terminal());
         assert!(RecordingStatus::HookFailed.is_terminal());
+        assert!(RecordingStatus::Cancelled.is_terminal());
         assert!(!RecordingStatus::Recording.is_terminal());
         assert!(!RecordingStatus::Paused.is_terminal());
         assert!(!RecordingStatus::Transcribing.is_terminal());

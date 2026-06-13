@@ -422,6 +422,55 @@ async fn permanent_whisper_failure_still_fails_the_recording() {
     assert_eq!(rec.status, RecordingStatus::TranscribeFailed);
 }
 
+/// A user cancel mid-pipeline settles the recording as `Cancelled` — never
+/// `TranscribeFailed`. (Regression: the cancel path borrowed the failed status
+/// "until a dedicated status lands", so every cancel looked like a failure in
+/// the list and the failed panel.) The inbox item must still leave
+/// `processing/` so the queue can't wedge on it.
+#[tokio::test]
+async fn user_cancel_marks_recording_cancelled_not_failed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    // Never reached: the token below is cancelled before transcription starts.
+    cfg.whisper.api_url = "http://127.0.0.1:9".into();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+    seed_processing_inbox(&state, &id, &audio_path, chrono::Local::now()).await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    // The user hit Cancel: the token is already cancelled when the pipeline
+    // checks it (the biased select), exactly like a cancel landing mid-flight.
+    let token = CancellationToken::new();
+    token.cancel();
+    let result = crate::pipeline::run(&state, payload, token).await;
+    assert!(result.is_ok(), "a cancel settles cleanly, not as an error");
+
+    let rec = state.catalog.get(&id).await.unwrap().expect("row exists");
+    assert_eq!(
+        rec.status,
+        RecordingStatus::Cancelled,
+        "a user cancel must read Cancelled, not a failed status"
+    );
+
+    // The inbox item left processing/ (a cancel always settles the queue).
+    let counts = state.inbox.counts().await.unwrap();
+    assert_eq!(counts.processing, 0, "cancel must clear processing/");
+}
+
 /// The auto-title step end to end: a fresh run sets a heuristic title from
 /// the transcript (no LLM configured); a re-run refreshes that auto title;
 /// and once the user has set their own title, re-runs leave it alone forever.

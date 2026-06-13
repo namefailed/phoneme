@@ -27,7 +27,7 @@ pub async fn run(args: SearchArgs, cfg: &Config, json: bool) -> ExitCode {
         }
     };
 
-    let mut client = match Client::connect(cfg).await {
+    let mut client = match Client::connect_observe(cfg).await {
         Ok(c) => c,
         Err(code) => return code,
     };
