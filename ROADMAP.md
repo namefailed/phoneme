@@ -423,6 +423,12 @@ explicit roadmap line here saying why not).
   open action items" — it searches (hybrid/semantic), reads transcripts, then
   tags, titles, summarizes, re-runs steps, exports captions, starts/stops
   recordings, and adjusts filters, chaining steps until the job is done.
+  - **Repo decision (made):** built IN THIS WORKSPACE — `crates/
+    phoneme-agent-core` (the loop + tool registry, reusing the existing LLM
+    provider stack) + a Lit chat panel. The tool layer tracks the Request
+    enum compiler-enforced; a separate repo would version-skew against a
+    wire contract that changes weekly. A standalone TUI agent (opencode's
+    form factor) can become its own repo LATER as a thin MCP/REST client.
   - **Don't write the harness from scratch.** Adapt an existing open-source
     agent harness instead: **opencode** (free, open source) is the named
     candidate — take its agent loop (provider abstraction, tool-calling loop,
