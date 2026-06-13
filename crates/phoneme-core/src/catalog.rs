@@ -1032,6 +1032,45 @@ impl Catalog {
         Ok(out)
     }
 
+    /// Recordings whose TAG name matches `query` (case-insensitive substring),
+    /// meeting-deduped, in the same `(dedupe_key, RecordingId)` shape as
+    /// [`Self::lexical_ranking`]. Feeds the hybrid search's lexical (exact-intent)
+    /// side so a tag-name query surfaces its tagged recordings even in semantic
+    /// mode — mirroring the tag clause the plain [`Self::list`] already applies.
+    async fn tag_ranking(&self, query: &str) -> Result<Vec<(String, RecordingId)>> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let like = format!("%{q}%");
+        let rows = sqlx::query(
+            "SELECT r.id AS id, r.meeting_id AS meeting_id \
+             FROM recordings r \
+             JOIN recording_tags rt ON rt.recording_id = r.id \
+             JOIN tags t ON t.id = rt.tag_id \
+             WHERE t.name LIKE ? \
+             ORDER BY r.started_at DESC, r.id DESC",
+        )
+        .bind(&like)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let meeting_id: Option<String> = row.try_get("meeting_id")?;
+            let key = meeting_id.unwrap_or_else(|| id.clone());
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            if let Some(rec_id) = RecordingId::parse(id) {
+                out.push((key, rec_id));
+            }
+        }
+        Ok(out)
+    }
+
     /// Hybrid semantic + lexical search with Reciprocal Rank Fusion.
     ///
     /// This is the search the daemon now uses. It:
@@ -1075,7 +1114,20 @@ impl Catalog {
         min_relevance: f32,
     ) -> Result<Vec<(RecordingId, f32)>> {
         let vec_rank = self.vector_ranking(query_vec).await?;
-        let lex_rank = self.lexical_ranking(query).await?;
+        let mut lex_rank = self.lexical_ranking(query).await?;
+        // Fold tag-name matches into the lexical (exact-intent) set so searching
+        // a tag surfaces its recordings in semantic mode too — the plain `list()`
+        // already does this for non-semantic search. Deduped by key and appended
+        // after the FTS hits, so true transcript matches keep their stronger rank.
+        {
+            let mut seen: std::collections::HashSet<String> =
+                lex_rank.iter().map(|(k, _)| k.clone()).collect();
+            for (key, id) in self.tag_ranking(query).await? {
+                if seen.insert(key.clone()) {
+                    lex_rank.push((key, id));
+                }
+            }
+        }
 
         // Everything below is keyed by the meeting-stable DEDUPE KEY (meeting_id
         // or recording id), not the raw recording id, so a meeting collapses to a

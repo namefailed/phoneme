@@ -169,6 +169,11 @@ trust boundary. Verified against current code.*
   that shows the title (em-dash + muted for untitled rows). Off by default (the
   snippet already shows it). The per-step model columns it sits beside
   (Transcription / Post-Processing / Summary Model) were already present.
+- [x] **Searching a tag returns its recordings in semantic mode too.** Plain
+  (FTS) search already matched tag names; the semantic/hybrid path fused only
+  vector + transcript-FTS, so a tag query missed tagged recordings there. A new
+  `tag_ranking` folds tag-name matches into the hybrid search's exact-intent
+  (lexical) set, so it works in both modes.
 - [x] **Favorites star is a ⭐ emoji** in the list column (and its header) instead
   of the flat `★`/`☆` glyphs — bright when starred, a faded ghost (dimmed +
   grayscaled) when not, brightening on hover.
