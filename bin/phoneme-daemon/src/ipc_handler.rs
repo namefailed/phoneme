@@ -496,9 +496,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 .map(|t| t.trim().to_string())
                 .filter(|t| !t.is_empty());
             let is_auto = title.is_none();
+            // A user/CLI title write carries no model — pass `None`, which also
+            // clears any stale auto-title model so a user title never shows one.
             match state
                 .catalog
-                .set_title(&id, title.as_deref(), is_auto)
+                .set_title(&id, title.as_deref(), is_auto, None)
                 .await
             {
                 Ok(true) => {
@@ -1451,10 +1453,16 @@ async fn rerun_cleanup(
                     return;
                 }
                 // Record which cleanup model ran (diarization state is unchanged
-                // by a text-only re-clean, so preserve whatever was stored).
+                // by a text-only re-clean, so preserve whatever was stored —
+                // both the flag and the diarizer model).
                 if let Err(e) = task_state
                     .catalog
-                    .update_processing_meta(&id, Some(&llm_cfg.model), recording.diarized)
+                    .update_processing_meta(
+                        &id,
+                        Some(&llm_cfg.model),
+                        recording.diarized,
+                        recording.diarization_model.as_deref(),
+                    )
                     .await
                 {
                     tracing::warn!(error = %e, "rerun_cleanup: failed to update processing meta");
@@ -1699,6 +1707,9 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         summary_model: None,
         title: None,
         title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -1928,6 +1939,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };

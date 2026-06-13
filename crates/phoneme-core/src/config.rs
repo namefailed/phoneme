@@ -169,6 +169,20 @@ pub struct DiarizationConfig {
     pub local_model_path: String,
 }
 
+impl DiarizationConfig {
+    /// A display label for the diarizer, recorded per-recording so the detail
+    /// provenance line can name it. Cloud diarizers identify their service; the
+    /// local speakrs/Pyannote ONNX diarizer and "off" have no model name
+    /// (`None`), so the line shows a plain "diarized" instead.
+    pub fn model_label(&self) -> Option<String> {
+        match self.provider {
+            DiarizationBackend::Deepgram => Some("Deepgram".to_string()),
+            DiarizationBackend::Assemblyai => Some("AssemblyAI".to_string()),
+            DiarizationBackend::None | DiarizationBackend::Local => None,
+        }
+    }
+}
+
 /// How an embedding model reduces per-token hidden states to one sentence
 /// vector. `Mean` (attention-mask-weighted average) fits MiniLM/MPNet/E5/BGE;
 /// `Cls` takes the `[CLS]` token, which some models are trained to use instead.

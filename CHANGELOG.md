@@ -212,7 +212,11 @@ trust boundary. Verified against current code.*
   provenance**: every stage that actually touched this file, in the order the
   daemon ran them — capture → transcription (+ diarization) → cleanup →
   auto-title → hook → summary → auto-tags — naming each step's model where it's
-  recorded per-recording and omitting steps that didn't run.
+  recorded per-recording and omitting steps that didn't run. The daemon now also
+  records the **auto-title** and **auto-tag** LLM models and a **cloud diarizer's**
+  model per recording (new `title_model` / `tag_model` / `diarization_model`
+  columns), so those steps name their model too once a recording is (re)processed;
+  the local speakrs diarizer has no model name, so it still reads "diarized".
 - [x] **Auto-tag suggestion chips tidied.** Dropped the redundant ✨ from each
   suggested-tag pill (the row already reads as suggestions), and the bulk buttons
   now read **Check all** / **✕ Clear** instead of ✓ All / ✕ All.

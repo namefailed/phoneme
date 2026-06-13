@@ -51,6 +51,9 @@ async fn seed_recording(
         summary_model: None,
         title: None,
         title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -179,6 +182,9 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
         summary_model: None,
         title: None,
         title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -300,6 +306,9 @@ async fn seed_meeting_track(
         summary_model: None,
         title: None,
         title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
         tags: vec![],
         speaker_names: vec![],
     };
@@ -848,10 +857,10 @@ async fn pipeline_sets_heuristic_title_and_never_clobbers_a_user_title() {
     );
     assert!(rec.title_is_auto);
 
-    // The user takes ownership of the title…
+    // The user takes ownership of the title… (a user write carries no model)
     state
         .catalog
-        .set_title(&id, Some("Trip planning"), false)
+        .set_title(&id, Some("Trip planning"), false, None)
         .await
         .unwrap();
 
@@ -1147,6 +1156,9 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         summary_model: None,
         title: None,
         title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
         tags: vec![],
         speaker_names: vec![],
     };

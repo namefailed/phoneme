@@ -671,6 +671,9 @@ impl DaemonRecorder {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -1210,6 +1213,9 @@ impl DaemonRecorder {
                 summary_model: None,
                 title: None,
                 title_is_auto: true,
+                title_model: None,
+                tag_model: None,
+                diarization_model: None,
                 tags: vec![],
                 speaker_names: vec![],
             };
@@ -1892,6 +1898,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };

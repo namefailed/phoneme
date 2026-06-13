@@ -653,6 +653,13 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
     .await
     {
         Ok(reply) => {
+            // Record which model ran the auto-tagger (the detail provenance line
+            // names it), once per run and BEFORE the suggest-vs-auto-accept
+            // branch — so it sticks even when every suggestion was auto-accepted
+            // and nothing is left to approve.
+            if let Err(e) = state.catalog.set_tag_model(id, &llm_cfg.model).await {
+                tracing::warn!(error = %e, "failed to persist tag model");
+            }
             let mut names = parse_tag_names(&reply, max);
             // Don't suggest tags the recording already has.
             if let Ok(Some(rec)) = state.catalog.get(id).await {
@@ -806,12 +813,18 @@ async fn maybe_auto_title(
     let heuristic = phoneme_core::title::heuristic_title(transcript)
         .or_else(|| phoneme_core::title::heuristic_title(raw_transcript));
     let mut title = heuristic;
+    // The model that produced the title, recorded for the provenance line — only
+    // set when an LLM title is actually accepted; a heuristic title has none.
+    let mut title_model: Option<String> = None;
     if cfg.title.use_llm && !transcript.trim().is_empty() {
         let title_cfg = title_llm_config(cfg);
         if let Some(llm) = llm_provider_for_run(state, &title_cfg).await {
             match llm.process(&cfg.title.prompt, transcript).await {
                 Ok(reply) => match sanitize_llm_title(&reply) {
-                    Some(t) => title = Some(t),
+                    Some(t) => {
+                        title = Some(t);
+                        title_model = Some(title_cfg.model.clone());
+                    }
                     None => {
                         tracing::warn!("title LLM returned nothing usable; keeping the heuristic")
                     }
@@ -826,7 +839,11 @@ async fn maybe_auto_title(
         // Nothing usable in the transcript either — leave any stored title be.
         return;
     };
-    match state.catalog.set_title(id, Some(&title), true).await {
+    match state
+        .catalog
+        .set_title(id, Some(&title), true, title_model.as_deref())
+        .await
+    {
         Ok(true) => tracing::info!(id = %id.as_str(), title = %title, "auto title saved"),
         Ok(false) => {
             tracing::debug!(id = %id.as_str(), "auto title skipped — the user owns this title")
@@ -1229,9 +1246,21 @@ pub async fn run(
     // those labels — not merely because the setting is enabled. (Check the raw
     // transcript: LLM cleanup may strip the labels from the live version.)
     let diarized = raw_transcript.contains("[Speaker ");
+    // Name a cloud diarizer's model for the provenance line; the local speakrs
+    // diarizer (and "off") has none, so the line shows a plain "diarized".
+    let diarization_model = if diarized {
+        cfg.diarization.model_label()
+    } else {
+        None
+    };
     state
         .catalog
-        .update_processing_meta(&id, cleanup_model.as_deref(), diarized)
+        .update_processing_meta(
+            &id,
+            cleanup_model.as_deref(),
+            diarized,
+            diarization_model.as_deref(),
+        )
         .await?;
 
     // Auto title, right after the transcript settles (cleanup included) and

@@ -451,22 +451,43 @@ impl Catalog {
         Ok(())
     }
 
-    /// Record which post-processing LLM model ran (if any) and whether speaker
-    /// diarization was applied. Called by the pipeline after transcription so
-    /// the list view can surface these as columns.
+    /// Record which post-processing LLM model ran (if any), whether speaker
+    /// diarization was applied, and the diarizer's model when a cloud diarizer
+    /// produced it (`None` for the local speakrs diarizer or none at all).
+    /// Called by the pipeline after transcription so the list view and the
+    /// detail provenance line can surface these.
     pub async fn update_processing_meta(
         &self,
         id: &RecordingId,
         cleanup_model: Option<&str>,
         diarized: bool,
+        diarization_model: Option<&str>,
     ) -> Result<()> {
         sqlx::query(
             r#"UPDATE recordings
-               SET cleanup_model = ?, diarized = ?, updated_at = datetime('now')
+               SET cleanup_model = ?, diarized = ?, diarization_model = ?, updated_at = datetime('now')
                WHERE id = ?"#,
         )
         .bind(cleanup_model)
         .bind(diarized)
+        .bind(diarization_model)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Record the LLM model the auto-tagger used for this recording (the detail
+    /// provenance line names it). Written once per auto-tag run, independent of
+    /// whether the run produced approve/dismiss suggestions or auto-accepted
+    /// existing tags — so the step shows even when nothing was left to approve.
+    pub async fn set_tag_model(&self, id: &RecordingId, model: &str) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE recordings
+               SET tag_model = ?, updated_at = datetime('now')
+               WHERE id = ?"#,
+        )
+        .bind(model)
         .bind(id.as_str())
         .execute(&self.pool)
         .await?;
@@ -558,11 +579,17 @@ impl Catalog {
     ///
     /// Returns whether a row was actually updated (`false` = unknown id, or
     /// an auto write skipped because the user owns the title).
+    ///
+    /// `model` records which LLM produced an auto title for the provenance line:
+    /// the auto-title step passes `Some(model)` when an LLM made the title and
+    /// `None` for a heuristic one; user/CLI title writes pass `None`, which also
+    /// clears any stale model so a user-owned title never shows one.
     pub async fn set_title(
         &self,
         id: &RecordingId,
         title: Option<&str>,
         is_auto: bool,
+        model: Option<&str>,
     ) -> Result<bool> {
         // A cleared title is always auto-owned — `None` means "no title,
         // generate one next run", never "user-owned empty title".
@@ -570,21 +597,23 @@ impl Catalog {
         let result = if is_auto && title.is_some() {
             sqlx::query(
                 r#"UPDATE recordings
-                   SET title = ?, title_is_auto = 1, updated_at = datetime('now')
+                   SET title = ?, title_is_auto = 1, title_model = ?, updated_at = datetime('now')
                    WHERE id = ? AND title_is_auto = 1"#,
             )
             .bind(title)
+            .bind(model)
             .bind(id.as_str())
             .execute(&self.pool)
             .await?
         } else {
             sqlx::query(
                 r#"UPDATE recordings
-                   SET title = ?, title_is_auto = ?, updated_at = datetime('now')
+                   SET title = ?, title_is_auto = ?, title_model = ?, updated_at = datetime('now')
                    WHERE id = ?"#,
             )
             .bind(title)
             .bind(is_auto)
+            .bind(model)
             .bind(id.as_str())
             .execute(&self.pool)
             .await?
@@ -2103,6 +2132,9 @@ fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
         summary_model: row.try_get("summary_model").unwrap_or(None),
         title: row.try_get("title").unwrap_or(None),
         title_is_auto: row.try_get("title_is_auto").unwrap_or(true),
+        title_model: row.try_get("title_model").unwrap_or(None),
+        tag_model: row.try_get("tag_model").unwrap_or(None),
+        diarization_model: row.try_get("diarization_model").unwrap_or(None),
         tags: Vec::new(),
         // Populated separately (joined from `speaker_names`) by list/get/list_by_meeting.
         speaker_names: Vec::new(),
@@ -2340,6 +2372,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         }
@@ -3212,6 +3247,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -3271,6 +3309,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -3338,6 +3379,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -3393,33 +3437,51 @@ mod tests {
         assert!(got.title_is_auto, "fresh rows must be auto-owned");
 
         // An auto write lands while the title is auto-owned (and a later auto
-        // write — e.g. a retranscribe — refreshes it).
-        assert!(db.set_title(&r.id, Some("first pass"), true).await.unwrap());
+        // write — e.g. a retranscribe — refreshes it AND its recorded model).
         assert!(db
-            .set_title(&r.id, Some("second pass"), true)
+            .set_title(&r.id, Some("first pass"), true, Some("gemma3"))
+            .await
+            .unwrap());
+        assert!(db
+            .set_title(&r.id, Some("second pass"), true, Some("gemma3:4b"))
             .await
             .unwrap());
         let got = db.get(&r.id).await.unwrap().unwrap();
         assert_eq!(got.title.as_deref(), Some("second pass"));
         assert!(got.title_is_auto);
+        assert_eq!(
+            got.title_model.as_deref(),
+            Some("gemma3:4b"),
+            "an auto refresh records the new title model"
+        );
 
-        // The user takes ownership; from now on auto writes are no-ops.
-        assert!(db.set_title(&r.id, Some("My title"), false).await.unwrap());
+        // The user takes ownership; from now on auto writes are no-ops, and the
+        // stale auto-title model is cleared (a user title never shows one).
+        assert!(db
+            .set_title(&r.id, Some("My title"), false, None)
+            .await
+            .unwrap());
         assert!(
-            !db.set_title(&r.id, Some("auto again"), true).await.unwrap(),
+            !db.set_title(&r.id, Some("auto again"), true, Some("x"))
+                .await
+                .unwrap(),
             "an auto write must be skipped once the user owns the title"
         );
         let got = db.get(&r.id).await.unwrap().unwrap();
         assert_eq!(got.title.as_deref(), Some("My title"));
         assert!(!got.title_is_auto, "title_is_auto = 0 wins forever");
+        assert_eq!(got.title_model, None, "a user title carries no model");
 
         // Clearing (None) empties the title and reverts ownership to auto, so
         // the next pipeline run may fill it again.
-        assert!(db.set_title(&r.id, None, true).await.unwrap());
+        assert!(db.set_title(&r.id, None, true, None).await.unwrap());
         let got = db.get(&r.id).await.unwrap().unwrap();
         assert_eq!(got.title, None);
         assert!(got.title_is_auto, "a cleared title reverts to auto-owned");
-        assert!(db.set_title(&r.id, Some("fresh auto"), true).await.unwrap());
+        assert!(db
+            .set_title(&r.id, Some("fresh auto"), true, Some("llama3"))
+            .await
+            .unwrap());
         assert_eq!(
             db.get(&r.id).await.unwrap().unwrap().title.as_deref(),
             Some("fresh auto")
@@ -3427,7 +3489,7 @@ mod tests {
 
         // Unknown ids report no update.
         assert!(!db
-            .set_title(&RecordingId::new(), Some("x"), false)
+            .set_title(&RecordingId::new(), Some("x"), false, None)
             .await
             .unwrap());
     }
@@ -3472,6 +3534,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };
@@ -3521,6 +3586,9 @@ mod tests {
             summary_model: None,
             title: None,
             title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
             tags: vec![],
             speaker_names: vec![],
         };

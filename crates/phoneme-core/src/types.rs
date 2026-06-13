@@ -227,6 +227,20 @@ pub struct Recording {
     /// on retranscribe) or user-set (`false` — auto writes never overwrite it).
     #[serde(default = "default_title_is_auto")]
     pub title_is_auto: bool,
+    /// The LLM model that produced the auto `title`, when the title step used an
+    /// LLM. `None` for a heuristic title, a user-set title, or older rows — the
+    /// provenance line then shows a plain "auto-title".
+    #[serde(default)]
+    pub title_model: Option<String>,
+    /// The LLM model the auto-tagger used for this recording, if it ran. `None`
+    /// for older rows or recordings that were never auto-tagged.
+    #[serde(default)]
+    pub tag_model: Option<String>,
+    /// The diarizer's model when a CLOUD diarizer ran (Deepgram/AssemblyAI). The
+    /// local speakrs diarizer has no model name, so this stays `None` even when
+    /// `diarized` is true and the UI shows a plain "diarized".
+    #[serde(default)]
+    pub diarization_model: Option<String>,
     /// Tags attached to this recording. Populated by `Catalog::list`/`get`;
     /// not a column on the recordings table (joined from `recording_tags`).
     #[serde(default)]
