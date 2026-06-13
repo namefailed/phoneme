@@ -188,6 +188,54 @@ pub fn label_segments<'a>(
     (out, next_idx - 1)
 }
 
+/// Label every transcript segment as one fixed speaker, producing the same
+/// `[Speaker N]: …` text and the matching persisted timeline that
+/// [`assign_speakers`] / [`label_segments`] produce — but without running the
+/// diarizer at all.
+///
+/// This is the track-aware Meeting-Mode short-circuit: a meeting's mic track is
+/// a single voice (the user's), so there is nothing to diarize. Reusing the
+/// existing `[Speaker N]` machinery (rather than inventing a `[You]` marker)
+/// keeps the pipeline's `diarized` detection (`"[Speaker "`) and the
+/// merged-meeting view (`[Speaker N]:`) working unchanged; the daemon then
+/// renames label `speaker_label` to "You" via a `speaker_names` row, so the UI
+/// shows "You" and it stays user-renamable.
+///
+/// `speaker_label` is the 1-based index the segments are stamped with (1 for the
+/// mic track). Empty/whitespace segments are skipped, exactly as
+/// [`label_segments`] skips them. Returns the formatted text plus the timeline,
+/// every segment carrying `speaker = Some(speaker_label)` so the stored labels
+/// agree with the `[Speaker N]` markers in the text.
+pub fn label_all_as(
+    segments: &[TextSegment],
+    speaker_label: usize,
+) -> (String, Vec<crate::types::TranscriptSegment>) {
+    let mut text = String::new();
+    let mut out_segments = Vec::with_capacity(segments.len());
+    for seg in segments {
+        let trimmed = seg.text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // One turn for the whole track: the marker is emitted once, then each
+        // subsequent segment's text is space-joined onto it — mirroring the
+        // same-speaker join in `assign_speakers`.
+        if out_segments.is_empty() {
+            text.push_str(&format!("[Speaker {speaker_label}]: "));
+        } else {
+            text.push(' ');
+        }
+        text.push_str(trimmed);
+        out_segments.push(crate::types::TranscriptSegment {
+            start_ms: (seg.start * 1000.0).round() as i64,
+            end_ms: (seg.end * 1000.0).round() as i64,
+            text: trimmed.to_string(),
+            speaker: Some(speaker_label.to_string()),
+        });
+    }
+    (text, out_segments)
+}
+
 // ── Per-word speaker attribution (from the frame-activation matrix) ──────────
 
 /// The frame row whose window *covers* instant `t` seconds, using speakrs's own
@@ -854,6 +902,54 @@ mod tests {
         let (text, n) = assign_speakers(&segments, &speakers);
         assert_eq!(n, 1);
         assert_eq!(text, "[Speaker 1]: real");
+    }
+
+    // ── Track-aware Meeting Mode: fixed single-speaker labelling ──────────────
+
+    #[test]
+    fn label_all_as_wraps_every_segment_under_one_speaker() {
+        // A meeting mic track is one voice: no diarizer runs, every segment is
+        // stamped `[Speaker 1]` and the timeline carries speaker "1" so the
+        // stored labels agree with the text markers.
+        let segments = vec![
+            seg(0.0, 1.5, "hello everyone"),
+            seg(1.5, 3.25, "thanks for joining"),
+        ];
+        let (text, out) = label_all_as(&segments, 1);
+        assert_eq!(text, "[Speaker 1]: hello everyone thanks for joining");
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].start_ms, 0);
+        assert_eq!(out[0].end_ms, 1500);
+        assert_eq!(out[0].text, "hello everyone");
+        assert_eq!(out[0].speaker.as_deref(), Some("1"));
+        assert_eq!(out[1].start_ms, 1500);
+        assert_eq!(out[1].end_ms, 3250);
+        assert_eq!(out[1].text, "thanks for joining");
+        assert_eq!(out[1].speaker.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn label_all_as_skips_empty_segments() {
+        // Mirror `empty_segments_are_skipped`: blank/whitespace segments are
+        // dropped from both the text and the timeline, and the marker prefixes
+        // the first REAL segment (not a leading blank one).
+        let segments = vec![
+            seg(0.0, 1.0, "   "),
+            seg(1.0, 2.0, "real words"),
+            seg(2.0, 3.0, "\t"),
+        ];
+        let (text, out) = label_all_as(&segments, 1);
+        assert_eq!(text, "[Speaker 1]: real words");
+        assert_eq!(out.len(), 1, "blank segments dropped from the timeline");
+        assert_eq!(out[0].text, "real words");
+        assert_eq!(out[0].speaker.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn label_all_as_empty_input_yields_empty_output() {
+        let (text, out) = label_all_as(&[], 1);
+        assert!(text.is_empty());
+        assert!(out.is_empty());
     }
 
     // ── The `to_segments` bug: fragment coalescing ───────────────────────────

@@ -56,6 +56,30 @@ impl Transcription {
     }
 }
 
+/// How a transcription should handle speaker labelling for one recording —
+/// the daemon's per-recording track awareness, derived from the catalog row
+/// (Meeting Mode) and passed into [`TranscriptionProvider::transcribe_with_segments`].
+///
+/// The default is [`Diarize`](Self::Diarize), so a normal single recording (and
+/// a meeting's system/loopback track) behaves exactly as before. The mic track
+/// of a meeting captures a single voice — the user's — so running the diarizer
+/// on it only burns time and risks splitting one speaker into spurious
+/// `[Speaker N]` turns; [`FixedSpeaker`](Self::FixedSpeaker) skips diarization
+/// entirely and labels the whole track as that one speaker instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiarizationTrack {
+    /// Run the configured diarization pass (normal recordings and the meeting
+    /// system/loopback track). The default.
+    #[default]
+    Diarize,
+    /// Skip diarization and label every segment as this one fixed speaker (the
+    /// meeting mic track → `"You"`). The whisper segments are wrapped under a
+    /// single `[Speaker 1]` turn so the existing `[Speaker N]` machinery — the
+    /// `diarized` detection and the merged-meeting view — keeps working; the
+    /// daemon then writes a `speaker_names` row naming label 1 after `label`.
+    FixedSpeaker(&'static str),
+}
+
 /// A transcription backend: turns an audio file into text.
 #[async_trait]
 pub trait TranscriptionProvider: Send + Sync {
@@ -69,11 +93,20 @@ pub trait TranscriptionProvider: Send + Sync {
     /// segments, so simple providers — and the live-preview path, which only
     /// wants text — are unaffected; providers with real timing data override
     /// this and implement `transcribe` as its text projection.
+    ///
+    /// `track` carries the recording's Meeting-Mode track awareness (see
+    /// [`DiarizationTrack`]). Only the local OpenAI-compatible path acts on it
+    /// (its `FixedSpeaker` branch skips diarization and labels the whole track
+    /// as one speaker); every other provider ignores it and runs its normal
+    /// flow — a meeting mic track on a cloud STT backend is an edge case not
+    /// worth a per-API special case.
     async fn transcribe_with_segments(
         &self,
         audio_path: &Path,
         language: Option<&str>,
+        track: DiarizationTrack,
     ) -> Result<Transcription> {
+        let _ = track;
         Ok(Transcription::plain(
             self.transcribe(audio_path, language).await?,
         ))
@@ -380,7 +413,7 @@ impl OpenAiCompatProvider {
 impl TranscriptionProvider for OpenAiCompatProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
         Ok(self
-            .transcribe_with_segments(audio_path, language)
+            .transcribe_with_segments(audio_path, language, DiarizationTrack::Diarize)
             .await?
             .text)
     }
@@ -389,6 +422,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         &self,
         audio_path: &Path,
         language: Option<&str>,
+        track: DiarizationTrack,
     ) -> Result<Transcription> {
         let bytes = fs::read(audio_path).await?;
         let part = multipart::Part::bytes(bytes)
@@ -497,6 +531,32 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             })
             .filter(|w| !w.text.is_empty())
             .collect();
+
+        // Meeting mic track: this is a single voice (the user's), so skip the
+        // diarizer entirely and wrap the whole transcript under one fixed
+        // `[Speaker 1]` label. This is the track-aware short-circuit — it runs
+        // BEFORE the `local_diarize` branch, so the speakrs pass never loads or
+        // runs for a mic track even when local diarization is configured. The
+        // daemon names label 1 after `label` (a `speaker_names` "You" row) once
+        // the transcript is persisted, leaving the canonical `[Speaker N]`
+        // markers in the text so every downstream parser is unchanged.
+        if let DiarizationTrack::FixedSpeaker(_label) = track {
+            if !segs.is_empty() {
+                let (text, segments) = crate::diarization::label_all_as(&segs, 1);
+                let words = words
+                    .into_iter()
+                    .map(|w| TranscriptWord {
+                        speaker: Some("1".to_string()),
+                        ..w
+                    })
+                    .collect();
+                return Ok(Transcription {
+                    text,
+                    segments,
+                    words,
+                });
+            }
+        }
 
         if let Some(diarizer) = &self.local_diarize {
             if !segs.is_empty() {
@@ -896,7 +956,7 @@ struct DeepgramWord {
 impl TranscriptionProvider for DeepgramProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
         Ok(self
-            .transcribe_with_segments(audio_path, language)
+            .transcribe_with_segments(audio_path, language, DiarizationTrack::Diarize)
             .await?
             .text)
     }
@@ -905,6 +965,9 @@ impl TranscriptionProvider for DeepgramProvider {
         &self,
         audio_path: &Path,
         language: Option<&str>,
+        // Cloud diarization is intrinsic to Deepgram's API; the track hint
+        // (Meeting Mode) is a local-pass concept, so it is ignored here.
+        _track: DiarizationTrack,
     ) -> Result<Transcription> {
         let bytes = fs::read(audio_path).await?;
         let url = format!("{}/v1/listen", self.base_url.trim_end_matches('/'));
@@ -1204,7 +1267,7 @@ const ASSEMBLYAI_POLL_INTERVAL: Duration = Duration::from_secs(2);
 impl TranscriptionProvider for AssemblyAiProvider {
     async fn transcribe(&self, audio_path: &Path, language: Option<&str>) -> Result<String> {
         Ok(self
-            .transcribe_with_segments(audio_path, language)
+            .transcribe_with_segments(audio_path, language, DiarizationTrack::Diarize)
             .await?
             .text)
     }
@@ -1213,6 +1276,9 @@ impl TranscriptionProvider for AssemblyAiProvider {
         &self,
         audio_path: &Path,
         language: Option<&str>,
+        // Cloud diarization is intrinsic to AssemblyAI's API; the track hint
+        // (Meeting Mode) is a local-pass concept, so it is ignored here.
+        _track: DiarizationTrack,
     ) -> Result<Transcription> {
         let bytes = fs::read(audio_path).await?;
         let base = self.base_url.trim_end_matches('/').to_string();
@@ -1562,6 +1628,82 @@ mod tests {
         (dir, p)
     }
 
+    // ── Track-aware Meeting Mode: the FixedSpeaker mic-track short-circuit ───
+    //
+    // A meeting mic track must label the whole transcript as one fixed speaker
+    // WITHOUT running the diarizer. Proven two ways: the text carries the fixed
+    // `[Speaker 1]` label (which the diarized/merged-view parsers consume), and
+    // the diarization pipeline cache is never loaded — even though the provider
+    // was minted WITH local diarization enabled. A wrong fall-through to the
+    // diarizer would (a) fail on this dummy wav and produce plain fallback text,
+    // not the fixed label, and (b) touch the cache.
+
+    #[tokio::test]
+    async fn fixed_speaker_track_labels_without_invoking_the_diarizer() {
+        use crate::diarization::{LocalDiarizer, LocalDiarizerCache};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "text": "hello everyone thanks for joining",
+                "segments": [
+                    {"start": 0.0, "end": 1.5, "text": " hello everyone"},
+                    {"start": 1.5, "end": 3.0, "text": " thanks for joining"}
+                ],
+                "words": [
+                    {"word": "hello", "start": 0.0, "end": 0.5},
+                    {"word": "everyone", "start": 0.5, "end": 1.5}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        // Local diarization ENABLED on the provider — the FixedSpeaker hint must
+        // still skip it. The shared cache must stay empty (never loaded).
+        let cache = Arc::new(LocalDiarizerCache::new());
+        let diarizer = LocalDiarizer::new(
+            cache.clone(),
+            crate::config::DiarizationConfig {
+                provider: crate::config::DiarizationBackend::Local,
+                local_model_path: String::new(),
+            },
+        );
+        let provider = OpenAiCompatProvider::new(
+            client(),
+            server.uri(),
+            None,
+            None,
+            Duration::from_secs(30),
+            Some(diarizer),
+            true,
+        );
+        let (_dir, audio) = dummy_audio();
+
+        let t = provider
+            .transcribe_with_segments(&audio, None, DiarizationTrack::FixedSpeaker("You"))
+            .await
+            .unwrap();
+
+        // The whole track is one `[Speaker 1]` turn (the daemon renames label 1
+        // → "You" via a speaker_names row; the transcript keeps the canonical
+        // marker so every downstream parser is unchanged).
+        assert_eq!(t.text, "[Speaker 1]: hello everyone thanks for joining");
+        assert_eq!(t.segments.len(), 2);
+        assert!(
+            t.segments.iter().all(|s| s.speaker.as_deref() == Some("1")),
+            "every segment carries the fixed speaker label"
+        );
+        assert!(
+            t.words.iter().all(|w| w.speaker.as_deref() == Some("1")),
+            "every word carries the fixed speaker label"
+        );
+        assert!(
+            !cache.is_loaded(),
+            "the diarizer pipeline must never load for a fixed-speaker track"
+        );
+    }
+
     #[tokio::test]
     async fn openai_compat_decodes_word_timestamps_with_none_confidence() {
         let server = MockServer::start().await;
@@ -1592,7 +1734,7 @@ mod tests {
         );
         let (_dir, audio) = dummy_audio();
         let t = provider
-            .transcribe_with_segments(&audio, None)
+            .transcribe_with_segments(&audio, None, DiarizationTrack::Diarize)
             .await
             .unwrap();
 
@@ -1644,7 +1786,7 @@ mod tests {
         );
         let (_dir, audio) = dummy_audio();
         let t = provider
-            .transcribe_with_segments(&audio, None)
+            .transcribe_with_segments(&audio, None, DiarizationTrack::Diarize)
             .await
             .unwrap();
 
@@ -1708,7 +1850,7 @@ mod tests {
         );
         let (_dir, audio) = dummy_audio();
         let t = provider
-            .transcribe_with_segments(&audio, None)
+            .transcribe_with_segments(&audio, None, DiarizationTrack::Diarize)
             .await
             .unwrap();
 

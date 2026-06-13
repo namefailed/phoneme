@@ -259,6 +259,190 @@ async fn run_transcribes_cleans_summarizes_and_persists() {
     assert_eq!(segments[1].text, "from whisper");
 }
 
+/// Seed a meeting-track recording (one track of a meeting) ready for a pipeline
+/// run, returning the id + audio path. `track` is `"mic"` or `"system"`; both
+/// tracks share `meeting_id`.
+async fn seed_meeting_track(
+    state: &AppState,
+    tmp: &std::path::Path,
+    meeting_id: &str,
+    track: &str,
+) -> (RecordingId, std::path::PathBuf) {
+    let id = RecordingId::new();
+    let audio_path = tmp.join(format!("{}-{track}.wav", id.as_str()));
+    std::fs::write(&audio_path, b"RIFF....not-real-audio").unwrap();
+    let row = Recording {
+        id: id.clone(),
+        started_at: chrono::Local::now(),
+        duration_ms: 1000,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        transcript: None,
+        model: None,
+        status: RecordingStatus::Transcribing,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: Some(meeting_id.to_string()),
+        meeting_name: None,
+        track: Some(track.to_string()),
+        in_place: false,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        title: None,
+        title_is_auto: true,
+        tags: vec![],
+        speaker_names: vec![],
+    };
+    state.catalog.insert(&row).await.unwrap();
+    (id, audio_path)
+}
+
+/// A meeting MIC track is labelled as one fixed speaker "You" WITHOUT running
+/// the diarizer: the raw transcript carries the canonical `[Speaker 1]` marker,
+/// the recording is flagged diarized, every persisted segment carries speaker
+/// "1", and a `speaker_names` row maps label 1 → "You" (so the UI renders "You"
+/// and it stays user-renamable). Diarization is left at the default Local
+/// backend to prove the mic-track short-circuit skips speakrs entirely (no
+/// models are present in the test environment).
+#[tokio::test]
+async fn meeting_mic_track_is_labelled_you_without_diarizing() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "hello everyone thanks for joining",
+            "segments": [
+                {"start": 0.0, "end": 1.5, "text": " hello everyone"},
+                {"start": 1.5, "end": 3.0, "text": " thanks for joining"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    // Local diarization configured — the mic track must STILL skip it.
+    cfg.diarization.provider = DiarizationBackend::Local;
+    cfg.llm_post_process.enabled = false;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_meeting_track(&state, tmp.path(), "meeting-1", "mic").await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("mic-track pipeline run should succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::Done);
+    // The raw transcript carries the canonical `[Speaker 1]` marker (what the
+    // `diarized` detection and the merged-meeting view consume).
+    let original = state.catalog.get_original_transcript(&id).await.unwrap();
+    assert_eq!(
+        original.as_deref(),
+        Some("[Speaker 1]: hello everyone thanks for joining"),
+    );
+    assert!(rec.diarized, "a fixed-speaker mic track counts as diarized");
+
+    // Every persisted segment carries the fixed speaker label.
+    let segments = state.catalog.segments_for(&id).await.unwrap();
+    assert_eq!(segments.len(), 2);
+    assert!(segments.iter().all(|s| s.speaker.as_deref() == Some("1")));
+
+    // Label 1 is named "You" so the UI shows "You" (and stays renamable).
+    assert_eq!(
+        rec.speaker_names,
+        vec![phoneme_core::types::SpeakerName {
+            speaker_label: 1,
+            name: "You".to_string(),
+        }],
+    );
+}
+
+/// A meeting SYSTEM track is NOT short-circuited: it takes the normal
+/// diarization path (here with no models present, so it lands as plain
+/// unlabelled text), and crucially it gets no auto "You" speaker name. This is
+/// the negative case proving the fixed-speaker label is mic-track only.
+#[tokio::test]
+async fn meeting_system_track_takes_the_normal_path_and_is_not_named_you() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "raw system audio words",
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": " raw system"},
+                {"start": 1.0, "end": 2.0, "text": " audio words"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    // Diarization OFF keeps the system track on the normal path WITHOUT needing
+    // speakrs models — the point here is only that it is NOT force-labelled
+    // "You" the way the mic track is.
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.llm_post_process.enabled = false;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_meeting_track(&state, tmp.path(), "meeting-2", "system").await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("system-track pipeline run should succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::Done);
+    // Normal path with diarization off → plain, unlabelled text.
+    let original = state.catalog.get_original_transcript(&id).await.unwrap();
+    assert_eq!(original.as_deref(), Some("raw system audio words"));
+    assert!(!rec.diarized, "diarization was off → not diarized");
+    let segments = state.catalog.segments_for(&id).await.unwrap();
+    assert!(segments.iter().all(|s| s.speaker.is_none()));
+    // The crux: no auto "You" name on a system track.
+    assert!(
+        rec.speaker_names.is_empty(),
+        "system track must NOT be auto-named 'You'"
+    );
+}
+
 /// A queued per-recording model override is applied to JUST that job: the
 /// transcription provider uses the override model, the override is consumed
 /// (removed from the pending map), and the process-global config is left

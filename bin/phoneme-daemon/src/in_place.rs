@@ -21,7 +21,7 @@
 use crate::app_state::AppState;
 use phoneme_core::config::DiarizationConfig;
 use phoneme_core::id::RecordingId;
-use phoneme_core::transcription::Transcription;
+use phoneme_core::transcription::{DiarizationTrack, Transcription};
 use phoneme_core::types::RecordingStatus;
 use phoneme_core::Error;
 use phoneme_ipc::schema::{DaemonEvent, PipelineStage};
@@ -164,7 +164,9 @@ async fn transcribe_polish_type(
         .provider(&stt_cfg, &DiarizationConfig::default());
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
     let transcription = provider
-        .transcribe_with_segments(audio_path, language.as_deref())
+        // Dictation never diarizes (the provider above already disables it) and
+        // is never a meeting track, so the normal `Diarize` hint applies.
+        .transcribe_with_segments(audio_path, language.as_deref(), DiarizationTrack::Diarize)
         .await?;
     drop(permit);
 

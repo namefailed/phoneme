@@ -90,6 +90,9 @@ If you want to take this to the next level, you can enable **Speaker Diarization
 
 By default, the System Track is just one long transcript of everyone on the call. But with Diarization enabled, Phoneme uses a powerful AI model (speakrs) to analyze the System Track and separate the different voices.
 
+> [!NOTE]
+> **Your Mic Track is always you.** Phoneme knows the mic track is a single voice — yours — so it never runs the diarizer on it. The whole mic transcript is labelled **You** directly. That halves the diarizer's work per meeting (only the System Track is analyzed) and avoids the model accidentally splitting your own voice into several "speakers". The label is a normal speaker name, so you can rename **You** to anything you like, just like any other speaker.
+
 Your final transcript will look like this:
 
 - **[You]**: "What do we think about the new design?"

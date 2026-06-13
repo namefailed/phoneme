@@ -92,8 +92,10 @@ Pick the backend in **Settings → Transcription → Speaker Diarization**
 ### How local diarization works
 
 1. **Capture:** a meeting records `mic` and `system` as two linked tracks.
-2. **Segment:** the audio is run through the local ONNX segmentation model, which
-   emits timestamps of who spoke when.
+2. **Segment:** the **system** track is run through the local ONNX segmentation
+   model, which emits timestamps of who spoke when. The **mic** track is a single
+   voice — yours — so it is *not* diarized; it is labelled **You** directly,
+   which halves the diarizer's work per meeting.
 3. **Transcribe:** Whisper transcribes the time-slices.
 4. **Merge:** the transcript identifies the distinct speakers.
 

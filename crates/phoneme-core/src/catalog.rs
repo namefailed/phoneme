@@ -628,6 +628,28 @@ impl Catalog {
         Ok(())
     }
 
+    /// The recording's Meeting-Mode track and meeting link — `(track,
+    /// meeting_id)` — without the speaker-name join [`get`](Self::get) does.
+    ///
+    /// The pipeline needs only these two columns *before* transcribing to drive
+    /// track-aware Meeting Mode (a meeting's mic track is labelled as one fixed
+    /// speaker instead of diarized), so this narrow read keeps that off the hot
+    /// path from paying for the full row + join. Both columns are `None` for a
+    /// normal single-track recording; `(None, None)` when the id is unknown.
+    pub async fn track_and_meeting(
+        &self,
+        id: &RecordingId,
+    ) -> Result<(Option<String>, Option<String>)> {
+        let row = sqlx::query("SELECT track, meeting_id FROM recordings WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        match row {
+            Some(r) => Ok((r.try_get("track")?, r.try_get("meeting_id")?)),
+            None => Ok((None, None)),
+        }
+    }
+
     /// Fetch a single recording by id, with its custom speaker names populated
     /// (tags are loaded separately via [`Catalog::tags_for`]). `None` when the
     /// id is unknown.

@@ -46,6 +46,14 @@ trust boundary. Verified against current code.*
   same provider's transcription API, so the section shows a live warning when the chosen
   diarization provider can't run with the configured transcription backend (e.g. Deepgram
   diarization picked while Local transcribes) instead of silently doing nothing.
+- [x] **Track-aware Meeting Mode** — a meeting's **mic track** is now labelled as one
+  speaker, **You**, without running the diarizer at all; only the system/loopback track
+  is diarized. The mic track is a single voice (yours), so diarizing it only burned time
+  and produced spurious multi-speaker labels on one person. This halves a meeting's
+  diarizer work and gives the mic track a clean, single-speaker transcript. The label
+  reuses the canonical `[Speaker N]` machinery (a `speaker_names` row names label 1 → You),
+  so it stays user-renamable and the merged-meeting view is unchanged. Normal single
+  recordings and the system track are completely unaffected.
 
 ### Recording
 

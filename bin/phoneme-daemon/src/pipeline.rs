@@ -43,6 +43,7 @@ use phoneme_core::config::{
     Config, InPlaceConfig, LlmPostProcessConfig, TranscriptionBackend, WhisperConfig, WhisperMode,
 };
 use phoneme_core::error::Result;
+use phoneme_core::transcription::DiarizationTrack;
 use phoneme_core::{
     Catalog, Embedder, HookMetadata, HookPayload, HookRunner, RecordingId, RecordingStatus,
 };
@@ -920,6 +921,28 @@ pub async fn run(
     let whisper_cfg = state.whisper_ports.apply(&cfg, &whisper_cfg);
     let provider = state.transcription.provider(&whisper_cfg, &cfg.diarization);
 
+    // Track-aware Meeting Mode: read this recording's track + meeting link
+    // BEFORE transcribing (a narrow two-column read, not the full row + join).
+    // A meeting's mic track is a single voice — the user's — so we label it as
+    // one fixed speaker "You" instead of diarizing it: that halves a meeting's
+    // diarizer work (only the system track runs speakrs) and kills the spurious
+    // multi-speaker labels a single-mic track otherwise produces. The
+    // `FixedSpeaker` hint applies ONLY when the row is genuinely a meeting mic
+    // track (`meeting_id` set AND `track == "mic"`), so a stray `track` value on
+    // a non-meeting row can't change behavior; everything else diarizes as
+    // before. Best-effort: a read failure falls back to `Diarize`.
+    let (track, meeting_id) = state
+        .catalog
+        .track_and_meeting(&id)
+        .await
+        .unwrap_or((None, None));
+    let is_meeting_mic = meeting_id.is_some() && track.as_deref() == Some("mic");
+    let diar_track = if is_meeting_mic {
+        DiarizationTrack::FixedSpeaker("You")
+    } else {
+        DiarizationTrack::Diarize
+    };
+
     // Report transcription to the unified AI-activity ("brain") popout via the
     // Transcribing stage of LlmActivity: a start event naming the model/file,
     // then a done event with timing + size once it finishes. This lets the same
@@ -969,7 +992,7 @@ pub async fn run(
             finalize_canceled(state, &id).await;
             return Ok(());
         }
-        res = provider.transcribe_with_segments(&audio_path, language.as_deref()) => match res {
+        res = provider.transcribe_with_segments(&audio_path, language.as_deref(), diar_track) => match res {
             Ok(t) => t,
             Err(e) => {
                 let transient = matches!(
@@ -1165,6 +1188,18 @@ pub async fn run(
     // views (word seek, confidence highlighting), not the recording.
     if let Err(e) = state.catalog.replace_words(&id, &words).await {
         tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
+    }
+
+    // Track-aware Meeting Mode: the mic track was labelled `[Speaker 1]` in
+    // place of a diarizer pass (see `diar_track` above). Name that one speaker
+    // "You" via a `speaker_names` row so the UI renders "You" instead of
+    // "Speaker 1" — and, like any speaker name, it stays user-renamable and
+    // never rewrites the canonical `[Speaker 1]` markers in the transcript.
+    // Best-effort: a failure costs only the friendly label, not the recording.
+    if is_meeting_mic {
+        if let Err(e) = state.catalog.set_speaker_name(&id, 1, "You").await {
+            tracing::warn!(id = %id.as_str(), "failed to name meeting mic speaker 'You': {e}");
+        }
     }
 
     // Record which post-processing model was used and whether diarization was

@@ -1,4 +1,4 @@
-use phoneme_core::transcription::OpenAiCompatProvider;
+use phoneme_core::transcription::{DiarizationTrack, OpenAiCompatProvider};
 use phoneme_core::{Error, Transcriber, TranscriptionProvider};
 use std::path::Path;
 use std::time::Duration;
@@ -414,7 +414,10 @@ async fn local_provider_captures_segment_timeline() {
         true,
     );
 
-    let result = provider.transcribe_with_segments(&wav, None).await.unwrap();
+    let result = provider
+        .transcribe_with_segments(&wav, None, DiarizationTrack::Diarize)
+        .await
+        .unwrap();
     assert_eq!(result.text, "hello world again");
     assert_eq!(result.segments.len(), 2, "blank segments must be dropped");
     assert_eq!(result.segments[0].start_ms, 0);
@@ -454,7 +457,10 @@ async fn cloud_provider_without_diarize_requests_plain_json() {
         false,
     );
 
-    let result = provider.transcribe_with_segments(&wav, None).await.unwrap();
+    let result = provider
+        .transcribe_with_segments(&wav, None, DiarizationTrack::Diarize)
+        .await
+        .unwrap();
     assert_eq!(result.text, "plain");
     assert!(result.segments.is_empty());
 

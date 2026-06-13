@@ -47,7 +47,11 @@ Write the API client wrapper for the new provider:
   provider reads/uploads the file itself) and returns the transcript text. There
   are two methods: `transcribe` returns just the text, and the default-providing
   `transcribe_with_segments` returns timed segments for the timeline views —
-  override the latter when your API exposes word/segment timing:
+  override the latter when your API exposes word/segment timing. It also takes a
+  `DiarizationTrack` hint (the recording's Meeting-Mode track): only the local
+  OpenAI-compatible path acts on it, labelling a meeting mic track as one fixed
+  speaker instead of diarizing it. A new provider can simply ignore the hint and
+  run its normal flow:
   ```rust
   pub struct MyNewSttProvider {
       pub client: reqwest::Client,
