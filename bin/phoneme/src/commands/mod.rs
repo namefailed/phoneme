@@ -24,6 +24,11 @@ pub mod refire_hook;
 pub mod retranscribe;
 pub mod search;
 pub mod show;
+pub mod speaker;
+pub mod suggest_tags;
 pub mod summarize;
 pub mod tag;
 pub mod watch;
+
+#[cfg(test)]
+pub mod test_support;

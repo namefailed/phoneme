@@ -48,6 +48,15 @@ trust boundary. Verified against current code.*
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
 
+### CLI parity
+
+- [x] **CLI reaches the GUI's per-recording actions** — `phoneme edit <id>
+  --title/--clear-title/--favorite/--unfavorite`, `phoneme speaker
+  rename|clear <id> <label> [name]`, `phoneme tag suggestions <id>
+  [--approve|--dismiss <name>]`, `phoneme record --pause/--resume`, and
+  `phoneme suggest-tags <id>` — all sending IPC requests that already
+  existed, now reachable from the terminal.
+
 ### Security & reliability
 
 - [x] **Masked config at the WebView boundary (S-H2)** — API keys are masked before

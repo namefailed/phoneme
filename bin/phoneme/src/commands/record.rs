@@ -61,6 +61,12 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
     if args.cancel {
         return single_request(&mut client, Request::RecordCancel, json).await;
     }
+    if args.pause {
+        return single_request(&mut client, Request::RecordPause, json).await;
+    }
+    if args.resume {
+        return single_request(&mut client, Request::RecordResume, json).await;
+    }
 
     // Oneshot / Duration / Hold-via-stdin all block on the event stream.
     let mode = if args.oneshot {
@@ -289,6 +295,8 @@ mod tests {
             stop: false,
             toggle: false,
             cancel: false,
+            pause: false,
+            resume: false,
             in_place: false,
         };
 
@@ -308,5 +316,60 @@ mod tests {
             format!("{:?}", ExitCode::SUCCESS),
             "record must exit success after receiving TranscriptionDone"
         );
+    }
+
+    use crate::commands::test_support::MockDaemon;
+
+    fn args_with(pause: bool, resume: bool) -> RecordArgs {
+        RecordArgs {
+            oneshot: false,
+            duration: None,
+            start: false,
+            stop: false,
+            toggle: false,
+            cancel: false,
+            pause,
+            resume,
+            in_place: false,
+        }
+    }
+
+    /// `--pause` sends exactly `RecordPause` on the non-blocking path and exits
+    /// success — it must not subscribe or block on the event stream.
+    #[tokio::test]
+    async fn record_pause_sends_record_pause() {
+        let mock = MockDaemon::spawn("pause", |_req| {
+            Response::Ok(serde_json::json!({ "id": RecordingId::new().to_string() }))
+        });
+        let mut cfg = phoneme_core::Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            run(args_with(true, false), &cfg, false),
+        )
+        .await
+        .expect("--pause must return promptly without blocking");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(mock.received(), vec![Request::RecordPause]);
+    }
+
+    /// `--resume` sends exactly `RecordResume`.
+    #[tokio::test]
+    async fn record_resume_sends_record_resume() {
+        let mock = MockDaemon::spawn("resume", |_req| {
+            Response::Ok(serde_json::json!({ "id": RecordingId::new().to_string() }))
+        });
+        let mut cfg = phoneme_core::Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            run(args_with(false, true), &cfg, false),
+        )
+        .await
+        .expect("--resume must return promptly without blocking");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(mock.received(), vec![Request::RecordResume]);
     }
 }

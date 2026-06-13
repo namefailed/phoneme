@@ -75,9 +75,18 @@ phoneme record --start --in-place
 # Discard the active recording without saving.
 phoneme record --cancel
 
+# Non-blocking: pause / resume the active recording (or every track of the
+# active meeting). Exit 0.
+phoneme record --pause
+phoneme record --resume
+
 # Record exactly 10 seconds.
 phoneme record --duration 10
 ```
+
+`--pause` / `--resume` are non-blocking like `--start` / `--stop`: each sends a
+single request (`RecordPause` / `RecordResume`) and exits. They are mutually
+exclusive with each other and with the other mode flags.
 
 ### 👥 `phoneme meeting`
 
@@ -210,15 +219,50 @@ phoneme summarize 20260519T143500823
 phoneme summarize 20260519T143500823 --model llama3.1
 ```
 
-### ✏️ `phoneme edit <ID>`
+### ✨ `phoneme suggest-tags <ID>`
 
-Replace a recording's transcript with a hand edit. The new text comes from
-`--text`, or from stdin if `--text` is omitted.
+Re-run the LLM tag-suggestion step on a recording on demand (the CLI face of the
+GUI ✨ Suggest button), regardless of the `auto_tag.auto` gate. The command
+awaits the model, then returns; the suggestions land on the recording. Review
+them with `phoneme tag suggestions <ID>`. Errors when the recording has no
+transcript yet (exit 6) or the id is unknown (exit 7).
 
 ```bash
+phoneme suggest-tags 20260519T143500823
+```
+
+### ✏️ `phoneme edit <ID>`
+
+Edit a recording's transcript and/or metadata. Any combination of the edits
+below applies in one invocation:
+
+- **Transcript** — `--text "…"`, or from stdin when no metadata flag and no
+  `--text` is given.
+- **Title** — `--title "…"` sets a user-owned title (the pipeline never
+  overwrites it on a later retranscribe); `--clear-title` (or `--title ""`)
+  reverts to auto-generation (the title empties now and regenerates on the next
+  pipeline run).
+- **Favorite** — `--favorite` / `--unfavorite` star or unstar the recording
+  (the Favorites view).
+
+```bash
+# Transcript edit (the original behavior): --text or stdin
 phoneme edit 20260519T143500823 --text "Corrected transcript."
 echo "Corrected transcript." | phoneme edit 20260519T143500823
+
+# Set or clear the display title
+phoneme edit 20260519T143500823 --title "Q3 Planning Sync"
+phoneme edit 20260519T143500823 --clear-title
+
+# Star / unstar
+phoneme edit 20260519T143500823 --favorite
+phoneme edit 20260519T143500823 --unfavorite
+
+# Combine: fix the text and set a title in one call
+phoneme edit 20260519T143500823 --text "Fixed." --title "Standup notes"
 ```
+
+A metadata-only edit (e.g. just `--favorite`) never blocks reading stdin.
 
 ### 🗒️ `phoneme notes <ID>`
 
@@ -231,6 +275,23 @@ phoneme notes 20260519T143500823
 # Set the notes
 phoneme notes 20260519T143500823 --set "Follow up with Alex."
 ```
+
+### 🎭 `phoneme speaker`
+
+Name a recording's diarized speaker labels (the CLI face of the GUI speaker
+chips). The `<LABEL>` is the 1-based `[Speaker N]` index from the transcript.
+The stored transcript keeps its canonical `[Speaker N]` markers — names are
+applied at display/export time — so a rename is reversible.
+
+```bash
+# Give [Speaker 2] a display name
+phoneme speaker rename 20260519T143500823 2 "Sarah"
+
+# Clear a speaker label's custom name (revert to "Speaker N")
+phoneme speaker clear 20260519T143500823 2
+```
+
+A label below 1 is rejected locally (exit 1) before any request is sent.
 
 ### 🔎 `phoneme search <QUERY>`
 
@@ -407,6 +468,15 @@ phoneme tag for 20260519T143500823
 
 # Show how many recordings each tag is attached to
 phoneme tag usage
+
+# Review one recording's pending auto-tag suggestions
+phoneme tag suggestions 20260519T143500823
+
+# Approve a suggestion (creates + attaches the real tag, drops the proposal)
+phoneme tag suggestions 20260519T143500823 --approve work
+
+# Dismiss a suggestion (drops the proposal, attaches nothing)
+phoneme tag suggestions 20260519T143500823 --dismiss spam
 
 # Drop every pending auto-tag suggestion across the whole library (approved
 # tags stay attached; only not-yet-decided proposals are discarded)

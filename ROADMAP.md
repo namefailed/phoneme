@@ -234,17 +234,17 @@ persona actually wants — still needs the alignment + timestamp substrate below
 
 The CLI-parity pass predates several newer features. CLI is missing:
 
-- [ ] **Title set/clear** — `SetRecordingTitle` has no CLI verb (titles are
+- [x] **Title set/clear** — `SetRecordingTitle` has no CLI verb (titles are
   brand new); `phoneme edit --title` / `--clear-title` or similar.
-- [ ] **Favorites** — `SetFavorite` unreachable from the CLI (star/unstar).
-- [ ] **Speaker rename** — `SetSpeakerName` unreachable (named speakers are
+- [x] **Favorites** — `SetFavorite` unreachable from the CLI (star/unstar).
+- [x] **Speaker rename** — `SetSpeakerName` unreachable (named speakers are
   GUI-only).
-- [ ] **Tag-suggestion review** — approve/dismiss per suggestion
+- [x] **Tag-suggestion review** — approve/dismiss per suggestion
   (`ApproveTagSuggestion` / `DismissTagSuggestion`); only clear-all exists.
-- [ ] **Record pause/resume** — `RecordPause` / `RecordResume` have no CLI
+- [x] **Record pause/resume** — `RecordPause` / `RecordResume` have no CLI
   verbs (start/stop/toggle/cancel do).
 - [x] **Queue skip** — `phoneme queue skip` sends `SkipCurrentStage` (observe-only: never auto-spawns a daemon just to skip nothing).
-- [ ] **Re-run tag suggestions** — `SuggestTags` missing beside the existing
+- [x] **Re-run tag suggestions** — `SuggestTags` missing beside the existing
   rerun cleanup/summary verbs.
 
 GUI is missing:

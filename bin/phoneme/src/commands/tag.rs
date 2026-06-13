@@ -5,10 +5,13 @@
 //! `ListAllTags` with `--all` to include orphans), `add` (`AddTag`),
 //! `update` (`UpdateTag`), `delete` (`DeleteTag`), `attach`/`detach`
 //! (`AttachTag`/`DetachTag`), `for` (`TagsFor`), `usage` (`TagUsageCounts`),
-//! `merge` (`MergeTags`), and `clear-suggestions`
-//! (`ClearAllTagSuggestions`). Subcommands taking a tag accept an id or a
-//! name (names are resolved against the tag list first). Uses the spawning
-//! path throughout — tag edits need a daemon, and listing through the same
+//! `merge` (`MergeTags`), `clear-suggestions` (`ClearAllTagSuggestions`), and
+//! `suggestions <id>` — list one recording's pending auto-tag proposals (read
+//! from the recording DTO via `GetRecording`), or `--approve <name>` /
+//! `--dismiss <name>` to act on one (`ApproveTagSuggestion` /
+//! `DismissTagSuggestion`). Subcommands taking a tag accept an id or a name
+//! (names are resolved against the tag list first). Uses the spawning path
+//! throughout — tag edits need a daemon, and listing through the same
 //! connection keeps the command simple.
 
 use crate::args::{TagAction, TagArgs};
@@ -138,6 +141,77 @@ pub async fn run(args: TagArgs, cfg: &Config, is_json: bool) -> ExitCode {
                 Err(e) => e,
             }
         }
+        TagAction::Suggestions {
+            recording_id,
+            approve,
+            dismiss,
+        } => {
+            let Some(rid) = phoneme_core::id::RecordingId::parse(&recording_id) else {
+                eprintln!("error: invalid recording ID '{}'", recording_id);
+                return ExitCode::FAILURE;
+            };
+            // --approve / --dismiss act on one named suggestion; with neither,
+            // list the recording's current pending suggestions.
+            if let Some(name) = approve {
+                match conn
+                    .send(Request::ApproveTagSuggestion {
+                        id: rid,
+                        name: name.clone(),
+                    })
+                    .await
+                {
+                    Ok(val) => {
+                        if is_json {
+                            output::print_json(&val);
+                        } else {
+                            println!("approved '{name}'");
+                        }
+                        ExitCode::SUCCESS
+                    }
+                    Err(code) => code,
+                }
+            } else if let Some(name) = dismiss {
+                match conn
+                    .send(Request::DismissTagSuggestion {
+                        id: rid,
+                        name: name.clone(),
+                    })
+                    .await
+                {
+                    Ok(_) => {
+                        if !is_json {
+                            println!("dismissed '{name}'");
+                        }
+                        ExitCode::SUCCESS
+                    }
+                    Err(code) => code,
+                }
+            } else {
+                // List: the suggestions live on the recording DTO.
+                match conn.send(Request::GetRecording { id: rid }).await {
+                    Ok(val) => {
+                        let suggestions = val
+                            .get("tag_suggestions")
+                            .and_then(|v| v.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        if is_json {
+                            output::print_json(&serde_json::Value::Array(suggestions));
+                        } else if suggestions.is_empty() {
+                            println!("no pending tag suggestions");
+                        } else {
+                            for s in &suggestions {
+                                if let Some(name) = s.as_str() {
+                                    println!("{name}");
+                                }
+                            }
+                        }
+                        ExitCode::SUCCESS
+                    }
+                    Err(code) => code,
+                }
+            }
+        }
         TagAction::ClearSuggestions => match conn.send(Request::ClearAllTagSuggestions).await {
             Ok(v) => {
                 let n = v.get("cleared").and_then(|c| c.as_u64()).unwrap_or(0);
@@ -224,5 +298,88 @@ async fn tag_names(conn: &mut client::Client) -> std::collections::HashMap<i64, 
             .map(|tags| tags.into_iter().map(|t| (t.id, t.name)).collect())
             .unwrap_or_default(),
         Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::test_support::MockDaemon;
+    use phoneme_core::id::RecordingId;
+    use phoneme_ipc::Response;
+    use std::time::Duration;
+
+    async fn run_tag(
+        action: TagAction,
+        responder: impl Fn(&Request) -> Response + Send + Sync + 'static,
+    ) -> (ExitCode, Vec<Request>) {
+        let mock = MockDaemon::spawn("tag", responder);
+        let mut cfg = Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+        let code =
+            tokio::time::timeout(Duration::from_secs(5), run(TagArgs { action }, &cfg, false))
+                .await
+                .expect("tag must return promptly");
+        (code, mock.received())
+    }
+
+    #[tokio::test]
+    async fn suggestions_approve_sends_approve_request() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_tag(
+            TagAction::Suggestions {
+                recording_id: id.to_string(),
+                approve: Some("work".into()),
+                dismiss: None,
+            },
+            |_req| Response::Ok(serde_json::json!({ "id": 1, "name": "work", "color": null })),
+        )
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            reqs,
+            vec![Request::ApproveTagSuggestion {
+                id,
+                name: "work".into()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn suggestions_dismiss_sends_dismiss_request() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_tag(
+            TagAction::Suggestions {
+                recording_id: id.to_string(),
+                approve: None,
+                dismiss: Some("spam".into()),
+            },
+            |_req| Response::Ok(serde_json::Value::Null),
+        )
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            reqs,
+            vec![Request::DismissTagSuggestion {
+                id,
+                name: "spam".into()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn suggestions_list_fetches_the_recording() {
+        let id = RecordingId::new();
+        let (code, reqs) = run_tag(
+            TagAction::Suggestions {
+                recording_id: id.to_string(),
+                approve: None,
+                dismiss: None,
+            },
+            |_req| Response::Ok(serde_json::json!({ "tag_suggestions": ["work", "rust"] })),
+        )
+        .await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(reqs, vec![Request::GetRecording { id }]);
     }
 }
