@@ -28,8 +28,8 @@ export function getContrastColor(hexColor: string): string {
  * The detail pane's tag row: the recording's attached tags as colored chips
  * (× detaches; click opens an inline rename/recolor editor), a "+ add tag"
  * box with a fuzzy-filtered dropdown (Enter attaches the highlighted tag or
- * creates a new one from the typed text), and the ✨ auto-tag suggestions as
- * approve/dismiss pills (with ✓ All / ✕ All when several are pending).
+ * creates a new one from the typed text), and the auto-tag suggestions as
+ * approve/dismiss pills (with "Check all" / "✕ Clear" when several are pending).
  *
  * Loads its own data per `recordingId` (tagsFor + listAllTags) and reloads on
  * the `tag_*` / `tag_suggestions_updated` daemon events, so it stays correct
@@ -423,14 +423,14 @@ export class TagChipsElement extends LitElement {
           <span class="tag-suggestions" title="AI-suggested tags — ✓ applies one, ✕ dismisses it">
             ${this.suggestions.map((name) => html`
               <span class="tag-chip tag-chip--suggested">
-                ✨ ${name}
+                ${name}
                 <button class="tag-x tag-ok" title="Apply this tag" @click=${(e: Event) => { e.stopPropagation(); void this.approveSuggestion(name); }}>✓</button>
                 <button class="tag-x" title="Dismiss this suggestion" @click=${(e: Event) => { e.stopPropagation(); void this.dismissSuggestion(name); }}>×</button>
               </span>
             `)}
             ${this.suggestions.length > 1 ? html`
-              <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>✓ All</button>
-              <button class="tag-manage tag-suggest-all" title="Dismiss every suggested tag" @click=${() => void this.dismissAllSuggestions()}>✕ All</button>
+              <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>Check all</button>
+              <button class="tag-manage tag-suggest-all" title="Dismiss every suggested tag" @click=${() => void this.dismissAllSuggestions()}>✕ Clear</button>
             ` : null}
           </span>
         ` : null}
