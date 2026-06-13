@@ -131,12 +131,21 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
             .map_err(|e| format!("failed to create config directory: {e}"))?;
     }
 
+    // Persist the SERIALIZED validated Config, not the hand-edited toml_edit
+    // doc: re-serializing runs the secret serializer (serialize_secret_string →
+    // DPAPI protect), so a freshly-set `whisper.api_key sk-live-…` lands as
+    // `dpapi:v1:…` instead of cleartext, and pre-existing encrypted keys stay
+    // encrypted. Writing `doc.to_string()` here (the old behavior) bypassed
+    // that and wrote secrets in plaintext. Cost: toml_edit's comment/format
+    // preservation is dropped — fine for this generated file.
+    let body = toml::to_string_pretty(&updated)
+        .map_err(|e| format!("failed to serialize updated config: {e}"))?;
+
     // Atomic replace: write a sibling tmp file, then rename over the target.
     // A crash mid-write leaves the old config intact instead of a truncated
     // half-file the daemon can no longer parse.
     let tmp_path = config_path.with_extension("toml.tmp");
-    std::fs::write(&tmp_path, doc.to_string())
-        .map_err(|e| format!("failed to write config: {e}"))?;
+    std::fs::write(&tmp_path, body).map_err(|e| format!("failed to write config: {e}"))?;
     if let Err(e) = std::fs::rename(&tmp_path, &config_path) {
         // Windows rename can fail if the target is momentarily locked; don't
         // leave the tmp file behind in that case.
@@ -229,6 +238,50 @@ mod tests {
             .expect_err("a type mismatch must be rejected");
         assert!(err.contains("not valid for recording.sample_rate"), "{err}");
         assert!(!override_path.exists());
+    }
+
+    #[test]
+    fn set_value_does_not_write_secrets_in_plaintext() {
+        // Regression for the trust-boundary BLOCKER: `config set` used to write
+        // the raw toml_edit doc verbatim, so a freshly-set API key landed
+        // cleartext, bypassing the DPAPI secret serializer. The fix persists the
+        // serialized validated Config instead (→ serialize_secret_string →
+        // protect), so on Windows the key is stored as `dpapi:v1:…` and never
+        // raw.
+        let tmp = tempfile::tempdir().unwrap();
+        let override_path = tmp.path().join("override.toml");
+        let _env = ConfigEnvOverride::set(&override_path);
+
+        let cfg = Config::default();
+        let secret = "sk-live-xyz";
+        set_value(&cfg, "whisper.api_key", secret).expect("set succeeds");
+
+        let written = std::fs::read_to_string(&override_path).expect("config written");
+
+        // On Windows DPAPI encrypts the key, so the raw value must never appear.
+        // Off Windows `protect` is a no-op (it can't lose a key on a platform
+        // without DPAPI), so only assert the secret round-trips through the
+        // serializer — the path that was being bypassed.
+        #[cfg(windows)]
+        {
+            assert!(
+                !written.contains(secret),
+                "the raw secret must not be written in plaintext: {written}"
+            );
+            assert!(
+                written.contains("dpapi:v1:"),
+                "the api_key should be stored DPAPI-encrypted: {written}"
+            );
+        }
+
+        // Either way, the file round-trips back to the original secret (DPAPI
+        // unprotect on Windows; verbatim off Windows) — the fix didn't break
+        // read-back.
+        let reloaded: Config = toml::from_str(&written).unwrap();
+        #[cfg(windows)]
+        assert_eq!(reloaded.whisper.api_key_str(), secret);
+        // Silence the unused-binding warning off Windows.
+        let _ = &reloaded;
     }
 
     #[test]

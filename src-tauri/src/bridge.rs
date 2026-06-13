@@ -3,9 +3,13 @@
 //! [`Bridge`] wraps one `NamedPipeTransport` behind a mutex: every Tauri
 //! command serializes through it (which is exactly why slow daemon work runs
 //! detached on the daemon side — one stalled request would stall the whole
-//! invoke surface). A failed request triggers one transparent
+//! invoke surface). A failed *read-only* request triggers one transparent
 //! reconnect-and-retry, so an established bridge self-heals across daemon
-//! restarts without the WebView noticing.
+//! restarts without the WebView noticing. Mutating requests get the single
+//! attempt only: the transport error can't tell "never executed" from
+//! "executed, but the reply was lost when the pipe dropped", and silently
+//! re-sending a non-idempotent mutation (`ImportRecording` mints a fresh
+//! `RecordingId` per call) would duplicate it — see [`is_retry_safe`].
 //!
 //! [`BridgeSlot`] covers the other failure mode — never connected at all.
 //! It is the lazily-reconnecting holder the rest of the tray actually talks
@@ -60,7 +64,16 @@ impl Bridge {
         let mut guard = self.inner.lock().await;
         match guard.request(req.clone()).await {
             Ok(r) => Ok(r),
-            Err(_) => {
+            Err(e) => {
+                // Only read-only/idempotent requests are safe to silently
+                // re-send: a transport Err can't distinguish "the daemon never
+                // saw it" from "the daemon ran it but the reply was lost when
+                // the pipe dropped". Re-sending a mutation in the latter case
+                // double-executes it. For unsafe requests, surface the error
+                // and let the caller decide.
+                if !is_retry_safe(&req) {
+                    return Err(e.into());
+                }
                 drop(guard);
                 self.reconnect().await?;
                 let mut guard = self.inner.lock().await;
@@ -122,11 +135,108 @@ impl Backoff {
     }
 }
 
+/// Whether a failed [`Request`] may be silently reconnected-and-retried by
+/// [`Bridge::request`].
+///
+/// `true` only for pure reads and genuinely idempotent operations — re-sending
+/// one after a lost reply changes nothing. `false` for anything that
+/// creates/mutates state, because the first attempt may already have executed
+/// on the daemon before the connection dropped; a blind re-send would run it
+/// twice (`ImportRecording` would duplicate the recording). The match is
+/// exhaustive ON PURPOSE: a newly-added request variant fails to compile here
+/// until its retry-safety is classified deliberately, rather than defaulting to
+/// the dangerous side.
+fn is_retry_safe(req: &Request) -> bool {
+    use Request::*;
+    match req {
+        // ── Pure reads ───────────────────────────────────────────────────
+        DaemonStatus
+        | RecordStatus
+        | ListRecordings { .. }
+        | GetRecording { .. }
+        | ListMeeting { .. }
+        | GetSegments { .. }
+        | GetWords { .. }
+        | GetOriginalTranscript { .. }
+        | GetCleanTranscript { .. }
+        | ListQueue
+        | QueuePaused
+        | QueueCounts
+        | RunDoctor
+        | ListTags
+        | ListAllTags
+        | TagsFor { .. }
+        | TagUsageCounts
+        | SemanticSearch { .. }
+        | MoreLikeThis { .. } => true,
+
+        // ── State-changing / non-idempotent — single attempt only ────────
+        // Recording control: each toggles/creates recorder state.
+        RecordStart { .. }
+        | RecordStop
+        | RecordToggle { .. }
+        | RecordPause
+        | RecordResume
+        | RecordCancel
+        | StartMeeting
+        | StopMeeting
+        | MeetingToggle
+        // Library mutations — ImportRecording mints a fresh RecordingId per
+        // call, so a re-send duplicates the recording (the motivating bug).
+        | DeleteRecording { .. }
+        | ImportRecording { .. }
+        // Re-runs (re-enqueue work / fire hooks).
+        | RetranscribeRecording { .. }
+        | RefireHook { .. }
+        | RerunCleanup { .. }
+        | RerunSummary { .. }
+        // Transcript & metadata edits.
+        | UpdateTranscript { .. }
+        | UpdateMeetingName { .. }
+        | UpdateNotes { .. }
+        | SetFavorite { .. }
+        | SetRecordingTitle { .. }
+        // Tag suggestions.
+        | SuggestTags { .. }
+        | ApproveTagSuggestion { .. }
+        | DismissTagSuggestion { .. }
+        | ClearAllTagSuggestions
+        // Pipeline / preview / speakers.
+        | RestartWhisper
+        | SkipCurrentStage
+        | SetPreviewSource { .. }
+        | SetSpeakerName { .. }
+        // Queue management.
+        | CancelQueued { .. }
+        | ReorderQueue { .. }
+        | SetQueuePaused { .. }
+        | ClearFailed
+        | CancelAllQueued
+        | CancelProcessing { .. }
+        // Daemon lifecycle & config.
+        | Shutdown
+        | ReloadConfig
+        | HookTest { .. }
+        // Tag CRUD.
+        | AddTag { .. }
+        | UpdateTag { .. }
+        | DeleteTag { .. }
+        | AttachTag { .. }
+        | DetachTag { .. }
+        | MergeTags { .. }
+        // Re-embed kicks off a background job.
+        | ReembedAll
+        // Subscription handshake — the bridge never sends this (events open
+        // their own connection), and it returns no Response anyway.
+        | SubscribeEvents => false,
+    }
+}
+
 /// Shared, lazily-reconnecting holder for the daemon [`Bridge`].
 ///
 /// The tray can launch before the daemon accepts connections (cold boot,
 /// crash-restart): startup's connect then fails, and before this slot existed
-/// the managed `Option<Bridge>` stayed `None` for the tray's whole lifetime —
+/// the managed bridge stayed `None` for the tray's whole lifetime —
 /// every command failed until an app restart, even though the startup log
 /// promised "will retry on first action". The slot IS that retry: the first
 /// caller that finds it empty re-runs the auto-spawn + connect and caches the
@@ -291,5 +401,34 @@ mod tests {
         assert_eq!(b.current_delay, BACKOFF_CAP);
         assert!(!b.may_attempt(now + BACKOFF_CAP - Duration::from_millis(1)));
         assert!(b.may_attempt(now + BACKOFF_CAP));
+    }
+
+    /// The retry-safety classifier draws the line that prevents
+    /// double-execution: reads may be silently re-sent after a dropped reply,
+    /// mutations may not. `ImportRecording` is the motivating case — the daemon
+    /// mints a fresh `RecordingId` per call, so a blind re-send would duplicate
+    /// the imported recording.
+    #[test]
+    fn mutations_are_not_retried_but_reads_are() {
+        // Read: safe to silently reconnect-and-resend.
+        assert!(is_retry_safe(&Request::ListRecordings {
+            filter: Default::default(),
+        }));
+        assert!(is_retry_safe(&Request::DaemonStatus));
+
+        // Mutation: a re-send could double-execute it — single attempt only.
+        assert!(!is_retry_safe(&Request::ImportRecording {
+            path: "C:/audio/take1.wav".to_string(),
+        }));
+        // A few more non-idempotent guards so the boundary can't quietly drift.
+        assert!(!is_retry_safe(&Request::RecordStart {
+            mode: phoneme_core::RecordMode::Hold,
+            in_place: false,
+        }));
+        assert!(!is_retry_safe(&Request::ReloadConfig));
+        assert!(!is_retry_safe(&Request::DeleteRecording {
+            id: phoneme_core::RecordingId::new(),
+            keep_audio: false,
+        }));
     }
 }

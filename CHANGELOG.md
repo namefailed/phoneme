@@ -172,6 +172,28 @@ trust boundary. Verified against current code.*
   `phoneme suggest-tags <id>` — all sending IPC requests that already
   existed, now reachable from the terminal.
 
+### Hardening (audit fixes)
+
+- [x] **`phoneme config set` no longer writes secrets in plaintext** — `set`
+  used to persist the hand-edited toml_edit document verbatim, so
+  `phoneme config set whisper.api_key sk-live-…` landed cleartext, bypassing
+  DPAPI. It now writes the serialized validated `Config`, which runs the secret
+  serializer → the new key is stored `dpapi:v1:…` and pre-existing encrypted
+  keys stay encrypted (`bin/phoneme/src/commands/config_cmd.rs`).
+- [x] **Tray profile switch no longer panics** — the Profiles-submenu switch
+  resolved the daemon bridge with `app.state::<Option<Bridge>>()`, but the only
+  managed state is `BridgeSlot`; `state::<T>()` panics on an unmanaged type, so
+  every tray profile switch silently crashed its task and never reloaded the
+  daemon. It now peeks the managed `BridgeSlot` like the exit hook
+  (`src-tauri/src/tray.rs`).
+- [x] **Bridge retry no longer double-executes mutations** — the bridge's
+  transparent reconnect-and-retry fired on *any* request error, including a
+  lost reply after the daemon had already run the request — so a dropped pipe
+  could duplicate a non-idempotent mutation (`ImportRecording` mints a fresh id
+  per call). The silent retry is now gated to read-only/idempotent requests
+  (`is_retry_safe`); mutations surface the transport error instead
+  (`src-tauri/src/bridge.rs`).
+
 ### Security & reliability
 
 - [x] **Masked config at the WebView boundary (S-H2)** — API keys are masked before

@@ -222,8 +222,12 @@ fn switch_to_profile(app: &AppHandle, name: String) {
             return;
         }
 
-        // Reload the daemon so it adopts the new config.
-        if let Some(bridge) = app.state::<Option<crate::bridge::Bridge>>().inner().clone() {
+        // Reload the daemon so it adopts the new config. Peek the managed
+        // `BridgeSlot` (the ONLY `.manage()`d state — `state::<T>()` panics on
+        // an unmanaged type) exactly like the exit hook does; a missing bridge
+        // just means nothing to reload.
+        let slot = app.state::<crate::bridge::BridgeSlot>().inner().clone();
+        if let Some(bridge) = slot.current() {
             if let Err(e) = bridge.request(phoneme_ipc::Request::ReloadConfig).await {
                 tracing::warn!("failed to reload daemon after profile switch: {e}");
             }
@@ -318,6 +322,14 @@ pub fn update_state(tray: &TrayIcon, state: TrayState) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::should_stop_daemon_on_exit;
+
+    // NOTE: the profile-switch BLOCKER fix (switch_to_profile now peeks the
+    // managed `BridgeSlot` instead of the unmanaged `Option<Bridge>` that
+    // panicked) had a `tauri::test::mock_app` regression test, but the
+    // `tauri/test` dev-dep made the whole phoneme-tray test binary fail to
+    // launch on Windows (STATUS_ENTRYPOINT_NOT_FOUND — a WebView2/Tauri DLL
+    // entrypoint mismatch). Dropped the dep + test to keep the suite runnable;
+    // the fix is type-checked by the build and exercised live.
 
     /// The exit-hook policy table: the knob gates everything, and a completed
     /// Quit chain suppresses the second send.
