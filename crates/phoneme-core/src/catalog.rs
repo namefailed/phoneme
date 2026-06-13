@@ -1681,12 +1681,13 @@ impl Catalog {
             let cutoff =
                 chrono::Utc::now() - chrono::Duration::try_days(max_age as i64).unwrap_or_default();
             let cutoff_str = cutoff.to_rfc3339();
-            let rows = sqlx::query(
+            let rows = sqlx::query(&format!(
                 "SELECT id, audio_path FROM recordings \
                  WHERE started_at < ? \
-                 AND status IN ('done','transcribe_failed','hook_failed','cancelled') \
+                 AND status IN ({}) \
                  AND audio_path != ''",
-            )
+                RecordingStatus::terminal_sql_list()
+            ))
             .bind(&cutoff_str)
             .fetch_all(&self.pool)
             .await?;
@@ -1718,12 +1719,13 @@ impl Catalog {
         // the audio_path filter above/below only stops re-processing rows
         // whose audio is already gone.
         if let Some(max_count) = cfg.max_count {
-            let rows = sqlx::query(
+            let rows = sqlx::query(&format!(
                 "SELECT id, audio_path FROM recordings \
-                 WHERE status IN ('done','transcribe_failed','hook_failed','cancelled') \
+                 WHERE status IN ({}) \
                  ORDER BY started_at DESC, id DESC \
                  LIMIT -1 OFFSET ?",
-            )
+                RecordingStatus::terminal_sql_list()
+            ))
             .bind(max_count as i64)
             .fetch_all(&self.pool)
             .await?;
@@ -1781,11 +1783,12 @@ impl Catalog {
         let cutoff_future =
             cutoff_now + chrono::Duration::try_hours(hours_ahead as i64).unwrap_or_default();
 
-        let count: i64 = sqlx::query_scalar(
+        let count: i64 = sqlx::query_scalar(&format!(
             "SELECT count(*) FROM recordings \
              WHERE started_at >= ? AND started_at < ? \
-             AND status IN ('done','transcribe_failed','hook_failed','cancelled')",
-        )
+             AND status IN ({})",
+            RecordingStatus::terminal_sql_list()
+        ))
         .bind(cutoff_now.to_rfc3339())
         .bind(cutoff_future.to_rfc3339())
         .fetch_one(&self.pool)

@@ -203,10 +203,12 @@ fn build_profiles_submenu(app: &AppHandle) -> Result<Submenu<tauri::Wry>> {
     Ok(submenu)
 }
 
-/// Switch the live `config.toml` to a saved profile, then reload the daemon
-/// and re-register the global hotkey. Runs entirely in the tray process so it
-/// works whether or not the main window is open. Mirrors the side effects of
-/// the `switch_profile` Tauri command.
+/// Switch the live `config.toml` to a saved profile, then apply its side effects
+/// through the shared `commands::apply_config` — daemon reload, ALL global
+/// hotkeys (record + meeting + in-place), the live-preview overlay, and
+/// start-at-login. Runs entirely in the tray process so it works whether or not
+/// the main window is open, and behaves identically to the `switch_profile`
+/// Tauri command.
 fn switch_to_profile(app: &AppHandle, name: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -222,30 +224,14 @@ fn switch_to_profile(app: &AppHandle, name: String) {
             return;
         }
 
-        // Reload the daemon so it adopts the new config. Peek the managed
-        // `BridgeSlot` (the ONLY `.manage()`d state — `state::<T>()` panics on
-        // an unmanaged type) exactly like the exit hook does; a missing bridge
-        // just means nothing to reload.
+        // Apply the new config through the SAME path the GUI's `switch_profile`
+        // command uses, so a tray switch behaves identically: daemon reload,
+        // start-at-login, the live-preview overlay, and — the bug this fixes —
+        // ALL THREE global hotkeys (record + meeting + in-place), not just the
+        // main one. Peek the managed `BridgeSlot` (the ONLY `.manage()`d state —
+        // `state::<T>()` panics on an unmanaged type) exactly like the exit hook.
         let slot = app.state::<crate::bridge::BridgeSlot>().inner().clone();
-        if let Some(bridge) = slot.current() {
-            if let Err(e) = bridge.request(phoneme_ipc::Request::ReloadConfig).await {
-                tracing::warn!("failed to reload daemon after profile switch: {e}");
-            }
-        }
-
-        // Re-register the global hotkey to match the new config.
-        use std::str::FromStr;
-        use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-        if let Err(e) = app.global_shortcut().unregister_all() {
-            tracing::warn!("failed to unregister shortcuts: {e}");
-        }
-        if cfg.hotkey.enabled {
-            if let Ok(shortcut) = Shortcut::from_str(&cfg.hotkey.combo) {
-                if let Err(e) = app.global_shortcut().register(shortcut) {
-                    tracing::warn!("failed to register shortcut: {e}");
-                }
-            }
-        }
+        crate::commands::apply_config(&app, &slot, &cfg).await;
 
         // Notify any open window so the UI reflects the switch.
         let _ = app.emit("config:switched", &name);

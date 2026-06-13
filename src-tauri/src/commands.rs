@@ -1096,9 +1096,11 @@ pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
 
 /// Apply the side effects of a config that has just been written to
 /// `config.toml`: refresh the "start at login" registry key, tell the daemon
-/// to reload, and re-register the global hotkey. Shared by `write_config` and
-/// `switch_profile` so switching a profile behaves identically to a manual save.
-async fn apply_config(app: &tauri::AppHandle, slot: &BridgeSlot, config: &Config) {
+/// to reload, sync the live-preview overlay, and re-register ALL global hotkeys.
+/// Shared by `write_config`, `switch_profile`, and the tray's profile-switch
+/// (`tray::switch_to_profile`) so every path that adopts a new config behaves
+/// identically to a manual save.
+pub(crate) async fn apply_config(app: &tauri::AppHandle, slot: &BridgeSlot, config: &Config) {
     // Update start at login registry key dynamically
     #[cfg(target_os = "windows")]
     {
