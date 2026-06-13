@@ -12,13 +12,40 @@ These apply to any subcommand:
 | `--no-color` | Disable colored output (or set `NO_COLOR=1`) |
 | `-v`, `--verbose` | Verbose tracing to stderr |
 
-The CLI auto-spawns the daemon when needed. **Read-only or inspection commands
-(`list`, `show`, `search`, `doctor`, `queue list/counts/status/skip`,
-`daemon status`, `watch`)** never start a daemon automatically — if the daemon
-is not running, they report that clearly and exit non-zero (`queue skip` joins
-them because only a live daemon mid-stage has anything to skip). Commands that
-create work (`record`, `import`, `retranscribe`, `cleanup`, `summarize`,
-`export --captions`, …) do auto-spawn.
+## 🚦 Spawn vs observe
+
+The CLI auto-spawns the daemon when needed — but only for commands that
+**create work**. Read-only / inspection commands never start a daemon: a
+daemon-is-down state is itself the answer for them, so they print
+`daemon not reachable` and exit with code 3 instead of silently starting one.
+
+| Behavior | Commands |
+|----------|----------|
+| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `notes`, `edit`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
+| **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `tag list/for/usage`, `meeting tracks`, `profile list` |
+| **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `version` |
+
+\* `queue skip` mutates, but only a live daemon mid-LLM-stage has anything to
+skip — spawning one just to skip nothing would mask reality.
+
+`daemon stop` is its own special case: it stops a running daemon but never
+spawns one just to stop it (stopping an already-stopped daemon succeeds).
+
+## 🚪 Exit codes
+
+Exit codes are stable API — scripts can branch on them. Every command maps a
+daemon error to the same code via one shared table:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Generic failure (including internal daemon errors) |
+| `2` | Usage error (bad flags — clap's own) |
+| `3` | Daemon not reachable (also: pipe in use, daemon shutting down) |
+| `4` | Whisper backend unreachable or timed out |
+| `5` | Hook failed |
+| `6` | Invalid config (e.g. a rejected `config set` value) |
+| `7` | Recording / tag / path not found |
 
 ## ⚙️ Core Commands
 
@@ -89,8 +116,9 @@ Query the local SQLite recording catalog.
 # List all recordings
 phoneme list
 
-# List recordings since a specific date
+# List recordings in a date range (ISO 8601, both bounds inclusive)
 phoneme list --since 2026-05-19
+phoneme list --since 2026-05-01 --until 2026-05-31
 
 # Filter by status: recording, transcribing, cleaning_up, summarizing,
 # tagging, hook_running, done, transcribe_failed, hook_failed, or cancelled
@@ -102,8 +130,15 @@ phoneme list --status cancelled
 phoneme list --limit 10
 phoneme list --limit 10 --offset 20
 
+# Filter by tag (numeric id or tag name)
+phoneme list --tag work
+
 # Full-Text Search via FTS5
 phoneme list --search "rust migration"
+
+# Semantic (embedding) search instead of an FTS5/list query — same engine as
+# `phoneme search`, reusing --limit (default 20) as the result cap
+phoneme list --semantic "database migration plan"
 
 # Filter by recording type: all (default), single (voice notes), or meeting.
 # Applied by the daemon in SQL, before --limit/--offset, so pages stay full.
@@ -389,9 +424,17 @@ Manage config profiles (named full-config snapshots).
 # List saved profiles
 phoneme profile list
 
+# Save the current config as a named profile snapshot
+phoneme profile save work_mode
+
 # Switch the active config to a saved profile and reload the daemon
 phoneme profile use work_mode
 ```
+
+`save` and `list` are purely local (they copy/read files under
+`%APPDATA%\phoneme\profiles\`); `use` overwrites the live `config.toml` with
+the snapshot and sends the daemon a reload. The GUI equivalent is
+**Settings → Managers → Profiles**.
 
 ### 🩺 `phoneme doctor`
 
