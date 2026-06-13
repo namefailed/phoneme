@@ -1567,6 +1567,22 @@ impl Config {
                 ));
             }
         }
+        // Same check for auto-summaries: an enabled cloud summary step with no
+        // key anywhere would only fail at runtime — surface it at save/load.
+        if self.summary.auto {
+            let p = self.summary.provider.trim();
+            let cloud =
+                !p.is_empty() && !matches!(p, "ollama" | "lmstudio" | "jan" | "llamacpp" | "none");
+            let own = !self.summary.api_key_str().trim().is_empty();
+            let inherited = !self.llm_post_process.api_key_str().trim().is_empty();
+            if cloud && !own && !inherited {
+                return Err(Error::InvalidConfig(
+                    "summary uses a cloud provider but has no API key (set summary.api_key \
+                     or configure llm_post_process.api_key to inherit)"
+                        .into(),
+                ));
+            }
+        }
         if let Some(pw) = &self.preview_whisper {
             let needs_key = matches!(
                 pw.provider,
@@ -2226,6 +2242,31 @@ mod tests {
         // Local providers never need a key.
         cfg.title.set_api_key("");
         cfg.title.provider = "ollama".into();
+        cfg.validate().expect("local provider needs no key");
+    }
+
+    #[test]
+    fn summary_llm_cloud_provider_requires_a_key_somewhere() {
+        // Same contract as auto_tag/title: an auto-summary cloud step with no
+        // own key and nothing to inherit fails validation; a local one needs none.
+        let mut cfg = Config::default();
+        cfg.summary.auto = true;
+        cfg.summary.provider = "openai".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(format!("{err}").contains("summary"));
+
+        // An inherited cleanup key satisfies it.
+        cfg.llm_post_process.set_api_key("sk-cleanup");
+        cfg.validate().expect("inherited key is enough");
+
+        // So does the summary step's own key.
+        cfg.llm_post_process.set_api_key("");
+        cfg.summary.set_api_key("sk-summary");
+        cfg.validate().expect("own key is enough");
+
+        // Local providers never need a key.
+        cfg.summary.set_api_key("");
+        cfg.summary.provider = "ollama".into();
         cfg.validate().expect("local provider needs no key");
     }
 

@@ -72,11 +72,6 @@ impl ResolvedPaths {
 
 /// Central component holder. Cloning `AppState` clones the `Arc` —
 /// underlying components are shared.
-//
-// `catalog` and `inbox` aren't read yet — they're consumed by the IPC
-// handlers (Task 5+) and the transcription worker (Task 8). The allow
-// silences dead_code until those tasks land.
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<ArcSwap<Config>>,

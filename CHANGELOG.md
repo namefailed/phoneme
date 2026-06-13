@@ -337,6 +337,35 @@ trust boundary. Verified against current code.*
   fakes; plus tests for the wizard URL allowlist, `path_within`, and the
   notification contract.
 
+### Hardening (audit fixes)
+
+- [x] **Webhook SSRF guard covers CGNAT + NAT64** — the classifier now treats
+  carrier-grade NAT space `100.64.0.0/10` (RFC 6598) as private, and decodes the
+  NAT64 well-known prefix `64:ff9b::/96` (RFC 6052) to classify the embedded IPv4
+  — so neither can smuggle an internal host (e.g. the cloud metadata endpoint)
+  past the guard (`phoneme-core::webhook`).
+- [x] **`config validate` catches a keyless cloud summary** — an auto-summary
+  (`[summary] auto = true`) on a cloud provider with no API key anywhere (own
+  field empty and nothing to inherit from `[llm_post_process]`) now fails at
+  save/load, matching the existing auto-tag/title/preview guards, instead of only
+  falling back at runtime (`phoneme-core::config`).
+- [x] **Provider endpoints deduplicated** — every cloud provider's default
+  STT base URL and LLM chat/generate URL lives in one new
+  `phoneme-core::endpoints` module; the live transcription/LLM paths and the
+  `doctor` diagnostics now import the same consts instead of carrying their own
+  copies, so the doctor can never probe a different endpoint than a recording
+  hits. Pure refactor, no behavior change.
+- [x] **Crash-recovery sweeps stuck `Paused` rows** — a daemon that crashed while
+  a recording was paused left the catalog row spinning forever (no live recorder,
+  no inbox file); startup reconciliation now sweeps `Paused` alongside the other
+  in-progress statuses and flips an orphaned one to `transcribe_failed`
+  (`phoneme-daemon::reconcile`).
+- [x] **Dead-code cleanup** — removed the never-referenced
+  `WhisperSupervisorConfig` struct (the real injection seam is `run_with`),
+  dropped a stale struct-level `#[allow(dead_code)]` on `AppState` (all fields are
+  read now), and scoped the `ActiveRecording` allow to just its one unread field
+  (`mode`).
+
 ### Lifecycle — full shutdown chain + Ollama auto-launch
 
 - [x] **Quit stops everything Phoneme started** — tray Quit (default

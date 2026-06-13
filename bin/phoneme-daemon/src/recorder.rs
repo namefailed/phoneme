@@ -156,13 +156,12 @@ fn make_source(open_cpal: impl FnOnce() -> Result<CpalSource>) -> Result<Box<dyn
     Ok(Box::new(open_cpal()?))
 }
 
-// `mode` and `audio_path` aren't read directly off the snapshot yet, but the
-// daemon recorder threads them through start/stop/cancel flows and they'll be
-// consumed by the doctor / debug endpoints in later plans.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ActiveRecording {
     pub id: RecordingId,
+    // Threaded through the start/stop/cancel flows but not read off the snapshot
+    // yet; kept for the doctor / debug endpoints.
+    #[allow(dead_code)]
     pub mode: RecordMode,
     pub audio_path: PathBuf,
     pub started_at: chrono::DateTime<Local>,

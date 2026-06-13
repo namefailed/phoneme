@@ -79,30 +79,27 @@ impl LlmPostProcessor {
         match cfg.provider.trim().to_ascii_lowercase().as_str() {
             "ollama" => Some(Box::new(OllamaProvider {
                 http: self.http.clone(),
-                url: non_empty_or(&cfg.api_url, "http://127.0.0.1:11434/api/generate"),
+                url: non_empty_or(&cfg.api_url, crate::endpoints::OLLAMA_LLM_URL),
                 model: non_empty_or(&cfg.model, "llama3.2:3b"),
                 timeout,
             })),
             "openai" => Some(Box::new(OpenAiChatProvider {
                 http: self.http.clone(),
-                url: non_empty_or(&cfg.api_url, "https://api.openai.com/v1/chat/completions"),
+                url: non_empty_or(&cfg.api_url, crate::endpoints::OPENAI_LLM_URL),
                 api_key: cfg.api_key.expose_secret().trim().to_string(),
                 model: non_empty_or(&cfg.model, "gpt-4o-mini"),
                 timeout,
             })),
             "groq" => Some(Box::new(OpenAiChatProvider {
                 http: self.http.clone(),
-                url: non_empty_or(
-                    &cfg.api_url,
-                    "https://api.groq.com/openai/v1/chat/completions",
-                ),
+                url: non_empty_or(&cfg.api_url, crate::endpoints::GROQ_LLM_URL),
                 api_key: cfg.api_key.expose_secret().trim().to_string(),
                 model: non_empty_or(&cfg.model, "llama-3.1-8b-instant"),
                 timeout,
             })),
             "anthropic" => Some(Box::new(AnthropicProvider {
                 http: self.http.clone(),
-                url: non_empty_or(&cfg.api_url, "https://api.anthropic.com/v1/messages"),
+                url: non_empty_or(&cfg.api_url, crate::endpoints::ANTHROPIC_LLM_URL),
                 api_key: cfg.api_key.expose_secret().trim().to_string(),
                 model: non_empty_or(&cfg.model, "claude-3-5-haiku-latest"),
                 timeout,
@@ -428,7 +425,7 @@ mod tests {
     fn openai_chat_provider_debug_redacts_api_key() {
         let p = OpenAiChatProvider {
             http: reqwest::Client::new(),
-            url: "https://api.openai.com/v1/chat/completions".to_string(),
+            url: crate::endpoints::OPENAI_LLM_URL.to_string(),
             api_key: "sk-SUPER-SECRET-12345".to_string(),
             model: "gpt-4o".to_string(),
             timeout: Duration::from_secs(30),
@@ -445,7 +442,7 @@ mod tests {
     fn anthropic_provider_debug_redacts_api_key() {
         let p = AnthropicProvider {
             http: reqwest::Client::new(),
-            url: "https://api.anthropic.com/v1/messages".to_string(),
+            url: crate::endpoints::ANTHROPIC_LLM_URL.to_string(),
             api_key: "sk-ant-SUPER-SECRET-67890".to_string(),
             model: "claude-3-haiku".to_string(),
             timeout: Duration::from_secs(30),

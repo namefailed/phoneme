@@ -153,17 +153,6 @@ fn choose_listen_port(preferred: u16, exclude: &[u16]) -> u16 {
     preferred
 }
 
-/// Test-injection-friendly configuration. `binary_override` lets integration
-/// tests substitute a stub for the real `whisper-server.exe`.
-#[allow(dead_code)]
-pub struct WhisperSupervisorConfig {
-    pub mode: WhisperMode,
-    pub model_path: String,
-    pub port: u16,
-    pub bundled_server_args: Vec<String>,
-    pub binary_override: Option<PathBuf>,
-}
-
 pub async fn run(state: AppState, shutdown: ShutdownSignal) -> anyhow::Result<()> {
     run_with(state, None, shutdown).await
 }

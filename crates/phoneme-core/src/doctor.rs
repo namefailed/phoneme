@@ -693,11 +693,15 @@ fn classify_stt(w: &WhisperConfig) -> SttConnection {
         TranscriptionBackend::Custom => SttConnection::SelfHosted {
             url: w.api_url.trim().to_string(),
         },
-        TranscriptionBackend::Openai => cloud("openai", "https://api.openai.com"),
-        TranscriptionBackend::Groq => cloud("groq", "https://api.groq.com/openai"),
-        TranscriptionBackend::Deepgram => cloud("deepgram", "https://api.deepgram.com"),
-        TranscriptionBackend::Assemblyai => cloud("assemblyai", "https://api.assemblyai.com"),
-        TranscriptionBackend::Elevenlabs => cloud("elevenlabs", "https://api.elevenlabs.io"),
+        TranscriptionBackend::Openai => cloud("openai", crate::endpoints::OPENAI_STT_BASE),
+        TranscriptionBackend::Groq => cloud("groq", crate::endpoints::GROQ_STT_BASE),
+        TranscriptionBackend::Deepgram => cloud("deepgram", crate::endpoints::DEEPGRAM_STT_BASE),
+        TranscriptionBackend::Assemblyai => {
+            cloud("assemblyai", crate::endpoints::ASSEMBLYAI_STT_BASE)
+        }
+        TranscriptionBackend::Elevenlabs => {
+            cloud("elevenlabs", crate::endpoints::ELEVENLABS_STT_BASE)
+        }
     }
 }
 
@@ -820,10 +824,10 @@ fn resolved_llm_url(conn: &LlmPostProcessConfig) -> String {
         return url.to_string();
     }
     match conn.provider.trim().to_ascii_lowercase().as_str() {
-        "ollama" => "http://127.0.0.1:11434/api/generate".into(),
-        "openai" => "https://api.openai.com/v1/chat/completions".into(),
-        "groq" => "https://api.groq.com/openai/v1/chat/completions".into(),
-        "anthropic" => "https://api.anthropic.com/v1/messages".into(),
+        "ollama" => crate::endpoints::OLLAMA_LLM_URL.into(),
+        "openai" => crate::endpoints::OPENAI_LLM_URL.into(),
+        "groq" => crate::endpoints::GROQ_LLM_URL.into(),
+        "anthropic" => crate::endpoints::ANTHROPIC_LLM_URL.into(),
         _ => String::new(),
     }
 }
@@ -1359,7 +1363,7 @@ pub async fn run_backend_checks_with_ports(
         {
             cfg.llm_post_process.api_url.clone()
         } else if cfg.llm_post_process.provider == "ollama" {
-            "http://127.0.0.1:11434/api/generate".into()
+            crate::endpoints::OLLAMA_LLM_URL.into()
         } else {
             "http://127.0.0.1:11434".into()
         };

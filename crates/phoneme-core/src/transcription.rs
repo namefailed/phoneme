@@ -222,7 +222,7 @@ impl Transcriber {
             }
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
-                cloud_base_url(&whisper.api_url, "https://api.openai.com"),
+                cloud_base_url(&whisper.api_url, crate::endpoints::OPENAI_STT_BASE),
                 non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-1")),
                 timeout,
@@ -235,7 +235,7 @@ impl Transcriber {
             )),
             TranscriptionBackend::Groq => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
-                cloud_base_url(&whisper.api_url, "https://api.groq.com/openai"),
+                cloud_base_url(&whisper.api_url, crate::endpoints::GROQ_STT_BASE),
                 non_empty(whisper.api_key.expose_secret()),
                 Some(model_or(&whisper.model, "whisper-large-v3")),
                 timeout,
@@ -245,7 +245,7 @@ impl Transcriber {
 
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
                 self.http.clone(),
-                cloud_base_url(&whisper.api_url, "https://api.assemblyai.com"),
+                cloud_base_url(&whisper.api_url, crate::endpoints::ASSEMBLYAI_STT_BASE),
                 whisper.api_key.expose_secret().trim().to_string(),
                 whisper.model.trim().to_string(),
                 timeout,
@@ -253,7 +253,7 @@ impl Transcriber {
             )),
             TranscriptionBackend::Deepgram => Box::new(DeepgramProvider::new(
                 self.http.clone(),
-                cloud_base_url(&whisper.api_url, "https://api.deepgram.com"),
+                cloud_base_url(&whisper.api_url, crate::endpoints::DEEPGRAM_STT_BASE),
                 whisper.api_key.expose_secret().trim().to_string(),
                 model_or(&whisper.model, "nova-2"),
                 timeout,
@@ -261,7 +261,7 @@ impl Transcriber {
             )),
             TranscriptionBackend::Elevenlabs => Box::new(ElevenLabsProvider::new(
                 self.http.clone(),
-                cloud_base_url(&whisper.api_url, "https://api.elevenlabs.io"),
+                cloud_base_url(&whisper.api_url, crate::endpoints::ELEVENLABS_STT_BASE),
                 whisper.api_key.expose_secret().trim().to_string(),
                 model_or(&whisper.model, "scribe_v1"),
                 timeout,

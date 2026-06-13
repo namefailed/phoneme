@@ -85,6 +85,7 @@ pub mod diarization;
 pub mod dictation;
 pub mod doctor;
 pub mod embed;
+pub mod endpoints;
 pub mod error;
 pub mod export;
 pub mod fusion;

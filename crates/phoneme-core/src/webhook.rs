@@ -72,9 +72,13 @@ enum HostClass {
 }
 
 fn classify_v4(ip: Ipv4Addr) -> HostClass {
+    // CGNAT 100.64.0.0/10 (RFC 6598): carrier-grade NAT space that routes inside
+    // the operator's network, not the public internet — treat it as private so a
+    // webhook can't reach a neighbouring CGNAT host.
+    let is_cgnat = ip.octets()[0] == 100 && (ip.octets()[1] & 0xc0) == 64;
     if ip.is_loopback() {
         HostClass::Loopback
-    } else if ip.is_private() || ip.is_link_local() || ip.is_unspecified() {
+    } else if ip.is_private() || ip.is_link_local() || ip.is_unspecified() || is_cgnat {
         HostClass::Private
     } else {
         HostClass::Public
@@ -89,6 +93,15 @@ fn classify_ip(ip: IpAddr) -> HostClass {
             // wraps — classify the inner address so the mapping isn't a bypass.
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return classify_v4(v4);
+            }
+            // NAT64 well-known prefix 64:ff9b::/96 (RFC 6052) embeds a v4 address
+            // in the low 32 bits; a NAT64 gateway translates it to that v4 host.
+            // Classify by the embedded v4 so e.g. 64:ff9b::169.254.169.254 can't
+            // smuggle the cloud metadata endpoint past the guard.
+            let segs = v6.segments();
+            if segs[0] == 0x0064 && segs[1] == 0xff9b && segs[2..6].iter().all(|&s| s == 0) {
+                let o = v6.octets();
+                return classify_v4(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
             }
             if v6.is_loopback() {
                 HostClass::Loopback
@@ -452,17 +465,22 @@ mod tests {
             ("172.31.255.254", Private),
             ("192.168.1.1", Private),
             ("169.254.169.254", Private), // link-local (cloud metadata endpoint)
+            ("100.64.0.1", Private),      // CGNAT 100.64.0.0/10, low edge
+            ("100.127.255.254", Private), // CGNAT, high edge
             ("fc00::1", Private),         // ULA, low half
             ("fd12:3456::1", Private),    // ULA, high half
             ("fe80::1", Private),         // IPv6 link-local
             ("::ffff:192.168.0.1", Private), // v4-mapped must not bypass
+            ("64:ff9b::a9fe:a9fe", Private), // NAT64-embedded 169.254.169.254
             ("0.0.0.0", Private),         // unspecified is never a sane target
             ("::", Private),
             ("8.8.8.8", Public),
             ("1.1.1.1", Public),
-            ("172.32.0.1", Public),  // one past 172.16/12
-            ("192.169.0.1", Public), // one past 192.168/16
-            ("169.255.0.1", Public), // one past 169.254/16
+            ("172.32.0.1", Public),     // one past 172.16/12
+            ("192.169.0.1", Public),    // one past 192.168/16
+            ("169.255.0.1", Public),    // one past 169.254/16
+            ("100.63.255.255", Public), // one below CGNAT 100.64/10
+            ("100.128.0.0", Public),    // one past CGNAT 100.64/10
             ("2001:4860:4860::8888", Public),
         ];
         for (s, want) in table {
