@@ -40,6 +40,12 @@ trust boundary. Verified against current code.*
   diarizer's `[Speaker N]` turns surfaced, plus Copy / Export
   (`MergedConversationDetail.ts`, `mergeMeeting.ts`). Coarse/source-sectioned — not
   yet chronologically interleaved.
+- [x] **Speaker-diarization provider picker** — Settings → Transcription now exposes a
+  Speaker Diarization section to choose who-spoke-when: off, **Local** (speakrs ONNX),
+  **Deepgram**, or **AssemblyAI** (`SectionDiarization.ts`). Cloud diarization rides the
+  same provider's transcription API, so the section shows a live warning when the chosen
+  diarization provider can't run with the configured transcription backend (e.g. Deepgram
+  diarization picked while Local transcribes) instead of silently doing nothing.
 
 ### Recording
 
