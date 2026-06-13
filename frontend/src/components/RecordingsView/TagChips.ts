@@ -29,7 +29,7 @@ export function getContrastColor(hexColor: string): string {
  * (× detaches; click opens an inline rename/recolor editor), a "+ add tag"
  * box with a fuzzy-filtered dropdown (Enter attaches the highlighted tag or
  * creates a new one from the typed text), and the auto-tag suggestions as
- * approve/dismiss pills (with "Check all" / "✕ Clear" when several are pending).
+ * approve/dismiss pills (with "✓ All" / "✕ Clear" when several are pending).
  *
  * Loads its own data per `recordingId` (tagsFor + listAllTags) and reloads on
  * the `tag_*` / `tag_suggestions_updated` daemon events, so it stays correct
@@ -276,21 +276,10 @@ export class TagChipsElement extends LitElement {
 
   private onInputKeydown(e: KeyboardEvent) {
     const tags = this.filteredTags();
-    // Vim browse: while the box is empty, j / k step the suggestions (pick an
-    // existing tag right after `t`). Once you type a name they insert normally,
-    // so tags whose names contain j or k can still be created.
-    if (this.tagQuery === "" && (e.key === "j" || e.key === "k") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      this._showDropdown = true;
-      if (tags.length) {
-        this.activeIndex =
-          e.key === "j"
-            ? Math.min(this.activeIndex + 1, tags.length - 1)
-            : Math.max(this.activeIndex - 1, 0);
-        this.scrollActiveIntoView();
-      }
-      return;
-    }
+    // NOTE: no j/k vim-browse here. The input must always type literally — an
+    // earlier "j/k steps suggestions while the box is empty" shortcut ate the
+    // first letter of any tag starting with j or k (e.g. "javascript",
+    // "kubernetes"), so it's gone. Use ↑/↓ to browse suggestions instead.
     if (e.key === "ArrowDown") {
       e.preventDefault();
       this._showDropdown = true;
@@ -429,7 +418,7 @@ export class TagChipsElement extends LitElement {
               </span>
             `)}
             ${this.suggestions.length > 1 ? html`
-              <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>Check all</button>
+              <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>✓ All</button>
               <button class="tag-manage tag-suggest-all" title="Dismiss every suggested tag" @click=${() => void this.dismissAllSuggestions()}>✕ Clear</button>
             ` : null}
           </span>
