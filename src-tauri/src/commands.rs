@@ -573,6 +573,40 @@ fn render_captions(segments: &[TranscriptSegment], format: CaptionFormat) -> Str
     }
 }
 
+/// Write `contents` to `dest` (a path the WebView picked via the save dialog).
+///
+/// The single write path behind every per-recording export — transcript text,
+/// captions, and the full-data JSON. The content is produced in the WebView (or
+/// by [`export_captions`] / [`export_recording_json`]) and handed here so the
+/// daemon-side bridge process owns the actual file write, exactly like
+/// [`export_library_zip`]. That means the WebView never needs the `fs` plugin's
+/// write permission for an arbitrary save-dialog path (which `fs:default` denies).
+#[tauri::command]
+pub fn save_text_export(dest: String, contents: String) -> Result<(), CommandError> {
+    std::fs::write(&dest, contents)
+        .map_err(|e| CommandError::new("io", format!("writing {dest}: {e}")))
+}
+
+/// Bundle one recording's full data — the catalog row plus its machine
+/// segments — into a pretty-printed JSON string for the "Export → All data"
+/// action. Returns a string the WebView saves via [`save_text_export`]; segments
+/// are best-effort (a recording transcribed before segment capture has none).
+#[tauri::command]
+pub async fn export_recording_json(bridge: Br<'_>, id: String) -> Result<String, CommandError> {
+    let rid = parse_id(&id)?;
+    let recording = forward(&bridge, Request::GetRecording { id: rid.clone() }).await?;
+    let segments = forward(&bridge, Request::GetSegments { id: rid })
+        .await
+        .unwrap_or_else(|_| serde_json::json!([]));
+    let bundle = serde_json::json!({
+        "version": 1,
+        "recording": recording,
+        "segments": segments,
+    });
+    serde_json::to_string_pretty(&bundle)
+        .map_err(|e| CommandError::new("internal", format!("serializing recording: {e}")))
+}
+
 /// Write a portable backup of the whole library to `dest` (a `.zip` path the
 /// WebView picked via the save dialog). Mirrors `phoneme export <FILE>`: a
 /// `catalog.json` versioned envelope (recordings + tags fetched from the

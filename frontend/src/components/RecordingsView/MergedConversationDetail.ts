@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listSession, setSpeakerName, getSegments, type Recording, type TranscriptSegment } from "../../services/ipc";
+import { listSession, setSpeakerName, getSegments, saveTextExport, type Recording, type TranscriptSegment } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { formatDuration, fmtClock } from "../../utils/format";
 import {
@@ -221,7 +221,6 @@ export class MergedConversationDetail extends LitElement {
   private async handleExport() {
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       const meetingName = this.recordings[0]?.meeting_name || this.meetingId;
       const safeName = meetingName.replace(/[^\w.-]+/g, "_");
       const dest = await save({
@@ -230,7 +229,9 @@ export class MergedConversationDetail extends LitElement {
       });
       if (dest) {
         const chrono = this.chronoBlocks;
-        await writeTextFile(dest, chrono ? chronoPlainText(chrono) : mergedPlainText(this.blocks));
+        // Write server-side (the WebView can't write an arbitrary save-dialog
+        // path via the fs plugin — see saveTextExport).
+        await saveTextExport(dest, chrono ? chronoPlainText(chrono) : mergedPlainText(this.blocks));
         showToast("Merged transcript exported", "success");
       }
     } catch (e) {

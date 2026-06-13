@@ -357,6 +357,8 @@ pub fn run() {
             commands::set_favorite,
             commands::set_recording_title,
             commands::export_captions,
+            commands::export_recording_json,
+            commands::save_text_export,
             commands::export_library_zip,
             commands::restart_whisper,
             commands::save_window_state,

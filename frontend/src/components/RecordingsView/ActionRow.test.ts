@@ -8,14 +8,18 @@ vi.mock("../../utils/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 // The Re-run button lazy-imports the unified Models modal — intercept it.
 vi.mock("../ModelPicker", () => ({ openModelPicker: vi.fn().mockResolvedValue(undefined) }));
-// Caption export lazy-imports the dialog + fs plugins — intercept both.
+// Export lazy-imports the dialog plugin for the save path; the actual write +
+// content producers come from the ipc service (no fs plugin anymore).
 const saveMock = vi.fn();
-const writeTextFileMock = vi.fn();
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: (...a: unknown[]) => saveMock(...a) }));
-vi.mock("@tauri-apps/plugin-fs", () => ({ writeTextFile: (...a: unknown[]) => writeTextFileMock(...a) }));
-// The captions handler calls exportCaptions from the ipc service.
 const exportCaptionsMock = vi.fn();
-vi.mock("../../services/ipc", () => ({ exportCaptions: (...a: unknown[]) => exportCaptionsMock(...a) }));
+const exportRecordingJsonMock = vi.fn();
+const saveTextExportMock = vi.fn();
+vi.mock("../../services/ipc", () => ({
+  exportCaptions: (...a: unknown[]) => exportCaptionsMock(...a),
+  exportRecordingJson: (...a: unknown[]) => exportRecordingJsonMock(...a),
+  saveTextExport: (...a: unknown[]) => saveTextExportMock(...a),
+}));
 
 import { openModelPicker } from "../ModelPicker";
 import { showToast } from "../../utils/toast";
@@ -141,8 +145,9 @@ describe("ActionRow captions export wiring", () => {
 
   beforeEach(() => {
     exportCaptionsMock.mockReset();
+    exportRecordingJsonMock.mockReset();
+    saveTextExportMock.mockReset();
     saveMock.mockReset();
-    writeTextFileMock.mockReset();
     vi.mocked(showToast).mockClear();
   });
 
@@ -153,34 +158,65 @@ describe("ActionRow captions export wiring", () => {
     return element;
   }
 
-  it("the Captions button reveals an SRT/VTT menu", async () => {
-    const element = await mount();
-    expect(element.querySelector(".captions-menu")).toBeNull();
-
-    (element.querySelector(".captions-trigger") as HTMLButtonElement).click();
+  // The Export menu items, in DOM order.
+  const TXT = 0, SRT = 1, VTT = 2, ALL = 3;
+  const openExportMenu = async (element: any) => {
+    (element.querySelector(".export-trigger") as HTMLButtonElement).click();
     await element.updateComplete;
+    return element.querySelectorAll(".export-menu button");
+  };
 
-    const menu = element.querySelector(".captions-menu");
+  it("the Export button reveals transcript / captions / all-data options", async () => {
+    const element = await mount();
+    expect(element.querySelector(".export-menu")).toBeNull();
+
+    const items = await openExportMenu(element);
+    const menu = element.querySelector(".export-menu");
     expect(menu).toBeTruthy();
+    expect(items.length).toBe(4);
+    expect(menu!.textContent).toContain(".txt");
     expect(menu!.textContent).toContain(".srt");
     expect(menu!.textContent).toContain(".vtt");
+    expect(menu!.textContent).toContain(".json");
   });
 
-  it("picking VTT renders captions and writes the chosen file", async () => {
-    exportCaptionsMock.mockResolvedValueOnce("WEBVTT\n\n");
-    saveMock.mockResolvedValueOnce("C:\\caps\\out.vtt");
-    writeTextFileMock.mockResolvedValueOnce(undefined);
+  it("picking Transcript writes the on-screen transcript server-side", async () => {
+    saveMock.mockResolvedValueOnce("C:\\out\\t.txt");
+    saveTextExportMock.mockResolvedValueOnce(undefined);
 
     const element = await mount();
-    (element.querySelector(".captions-trigger") as HTMLButtonElement).click();
-    await element.updateComplete;
+    const items = await openExportMenu(element);
+    (items[TXT] as HTMLButtonElement).click();
 
-    const items = element.querySelectorAll(".captions-menu button");
-    // [0] = SRT, [1] = VTT
-    (items[1] as HTMLButtonElement).click();
+    // Routes through the server-side write (not the fs plugin) to the chosen dest.
+    await vi.waitFor(() => expect(saveTextExportMock).toHaveBeenCalled());
+    expect(saveTextExportMock.mock.calls[0][0]).toBe("C:\\out\\t.txt");
+  });
+
+  it("picking VTT renders captions and writes the chosen file server-side", async () => {
+    exportCaptionsMock.mockResolvedValueOnce("WEBVTT\n\n");
+    saveMock.mockResolvedValueOnce("C:\\caps\\out.vtt");
+    saveTextExportMock.mockResolvedValueOnce(undefined);
+
+    const element = await mount();
+    const items = await openExportMenu(element);
+    (items[VTT] as HTMLButtonElement).click();
 
     await vi.waitFor(() => expect(exportCaptionsMock).toHaveBeenCalledWith("rec-1", "vtt"));
-    await vi.waitFor(() => expect(writeTextFileMock).toHaveBeenCalledWith("C:\\caps\\out.vtt", "WEBVTT\n\n"));
+    await vi.waitFor(() => expect(saveTextExportMock).toHaveBeenCalledWith("C:\\caps\\out.vtt", "WEBVTT\n\n"));
+  });
+
+  it("picking All data exports the recording bundle JSON", async () => {
+    exportRecordingJsonMock.mockResolvedValueOnce('{"version":1}');
+    saveMock.mockResolvedValueOnce("C:\\out\\rec.json");
+    saveTextExportMock.mockResolvedValueOnce(undefined);
+
+    const element = await mount();
+    const items = await openExportMenu(element);
+    (items[ALL] as HTMLButtonElement).click();
+
+    await vi.waitFor(() => expect(exportRecordingJsonMock).toHaveBeenCalledWith("rec-1"));
+    await vi.waitFor(() => expect(saveTextExportMock).toHaveBeenCalledWith("C:\\out\\rec.json", '{"version":1}'));
   });
 
   it("a cancelled save dialog writes nothing", async () => {
@@ -188,12 +224,11 @@ describe("ActionRow captions export wiring", () => {
     saveMock.mockResolvedValueOnce(null); // user cancelled
 
     const element = await mount();
-    (element.querySelector(".captions-trigger") as HTMLButtonElement).click();
-    await element.updateComplete;
-    (element.querySelectorAll(".captions-menu button")[0] as HTMLButtonElement).click();
+    const items = await openExportMenu(element);
+    (items[SRT] as HTMLButtonElement).click();
 
     await vi.waitFor(() => expect(saveMock).toHaveBeenCalled());
-    expect(writeTextFileMock).not.toHaveBeenCalled();
+    expect(saveTextExportMock).not.toHaveBeenCalled();
   });
 
   it("a no-segments rejection surfaces the retranscribe hint as info", async () => {
@@ -203,9 +238,8 @@ describe("ActionRow captions export wiring", () => {
     });
 
     const element = await mount();
-    (element.querySelector(".captions-trigger") as HTMLButtonElement).click();
-    await element.updateComplete;
-    (element.querySelectorAll(".captions-menu button")[0] as HTMLButtonElement).click();
+    const items = await openExportMenu(element);
+    (items[SRT] as HTMLButtonElement).click();
 
     await vi.waitFor(() => expect(showToast).toHaveBeenCalled());
     const [msg, level] = vi.mocked(showToast).mock.calls.at(-1)!;

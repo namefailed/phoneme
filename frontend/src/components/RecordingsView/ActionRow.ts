@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { exportCaptions, type CaptionFormat, type SpeakerName } from "../../services/ipc";
+import { exportCaptions, exportRecordingJson, saveTextExport, type CaptionFormat, type SpeakerName } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { applySpeakerNames } from "./mergeMeeting";
@@ -65,12 +65,12 @@ export class ActionRowElement extends LitElement {
     }
   };
 
-  /** Close the captions format menu when the user clicks outside of it. */
+  /** Close the export menu when the user clicks outside of it. */
   private outsideClickHandler = (e: MouseEvent) => {
-    if (!this.captionsMenuOpen) return;
+    if (!this.exportMenuOpen) return;
     const target = e.target as Node | null;
-    if (target && !this.querySelector(".captions-trigger-wrap")?.contains(target)) {
-      this.captionsMenuOpen = false;
+    if (target && !this.querySelector(".export-trigger-wrap")?.contains(target)) {
+      this.exportMenuOpen = false;
     }
   };
 
@@ -114,31 +114,48 @@ export class ActionRowElement extends LitElement {
     }
   }
 
+  /** Whether the Export menu (transcript / captions / all-data) is open. */
+  @state() private exportMenuOpen = false;
+
+  private toggleExportMenu() {
+    this.exportMenuOpen = !this.exportMenuOpen;
+  }
+
+  /**
+   * The one save path for every export: open the save dialog with the right
+   * extension, then write `contents` server-side via `save_text_export` (the
+   * WebView can't write an arbitrary save-dialog path through the fs plugin —
+   * `fs:default` denies it — so the bridge process owns the write). A blank
+   * `contents` from a producer means "nothing to write" and is skipped quietly.
+   */
+  private async saveExport(opts: { defaultName: string; ext: string; extLabel: string; contents: string; successLabel: string }) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const dest = await save({
+      defaultPath: opts.defaultName,
+      filters: [
+        { name: opts.extLabel, extensions: [opts.ext] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    });
+    if (!dest) return; // user cancelled
+    await saveTextExport(dest, opts.contents);
+    showToast(`${opts.successLabel} exported`, "success");
+  }
+
+  /** Export the on-screen transcript (custom speaker names applied) as text. */
   private async handleExport() {
+    this.exportMenuOpen = false;
     try {
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-      const dest = await save({
-        defaultPath: `transcript-${this.recordingId}.txt`,
-        filters: [
-          { name: "Text", extensions: ["txt"] },
-          { name: "All files", extensions: ["*"] },
-        ],
+      await this.saveExport({
+        defaultName: `transcript-${this.recordingId}.txt`,
+        ext: "txt",
+        extLabel: "Text",
+        contents: this.transcriptForExport(),
+        successLabel: "Transcript",
       });
-      if (dest) {
-        await writeTextFile(dest, this.transcriptForExport());
-        showToast("Transcript exported", "success");
-      }
     } catch (e) {
       showToast(`Export failed: ${errText(e)}`, "error");
     }
-  }
-
-  /** Whether the captions format menu (SRT / VTT) is open. */
-  @state() private captionsMenuOpen = false;
-
-  private toggleCaptionsMenu() {
-    this.captionsMenuOpen = !this.captionsMenuOpen;
   }
 
   /** Export the recording's machine segments as a caption file. The backend
@@ -147,28 +164,40 @@ export class ActionRowElement extends LitElement {
    *  error whose message is the CLI's "retranscribe to generate them" hint,
    *  which we surface as an info toast instead of saving an empty file. */
   private async handleExportCaptions(format: CaptionFormat) {
-    this.captionsMenuOpen = false;
+    this.exportMenuOpen = false;
     try {
       const body = await exportCaptions(this.recordingId, format);
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-      const dest = await save({
-        defaultPath: `captions-${this.recordingId}.${format}`,
-        filters: [
-          { name: format.toUpperCase(), extensions: [format] },
-          { name: "All files", extensions: ["*"] },
-        ],
+      await this.saveExport({
+        defaultName: `captions-${this.recordingId}.${format}`,
+        ext: format,
+        extLabel: format.toUpperCase(),
+        contents: body,
+        successLabel: `Captions (${format.toUpperCase()})`,
       });
-      if (dest) {
-        await writeTextFile(dest, body);
-        showToast(`Captions exported (${format.toUpperCase()})`, "success");
-      }
     } catch (e) {
       // The "no segments" case rejects with not_found — show its (already
       // user-facing) message as info rather than a hard error.
       const msg = errText(e);
       const noSegments = /no segments|retranscribe/i.test(msg);
       showToast(noSegments ? msg : `Caption export failed: ${msg}`, noSegments ? "info" : "error");
+    }
+  }
+
+  /** Export the recording's full data (catalog row + machine segments) as a
+   *  pretty-printed JSON bundle. */
+  private async handleExportAllData() {
+    this.exportMenuOpen = false;
+    try {
+      const body = await exportRecordingJson(this.recordingId);
+      await this.saveExport({
+        defaultName: `recording-${this.recordingId}.json`,
+        ext: "json",
+        extLabel: "JSON",
+        contents: body,
+        successLabel: "All data",
+      });
+    } catch (e) {
+      showToast(`Export failed: ${errText(e)}`, "error");
     }
   }
 
@@ -202,13 +231,14 @@ export class ActionRowElement extends LitElement {
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <button @click=${this.handleCopy}>${this.copyText}</button>
-        <button @click=${this.handleExport}>⬇ Export</button>
-        <span class="captions-trigger-wrap" style="position: relative; display: inline-block;">
-          <button class="captions-trigger" title="Export timed captions (SRT or WebVTT) from this recording's segments" @click=${this.toggleCaptionsMenu}>💬 Captions ▾</button>
-          ${this.captionsMenuOpen
-            ? html`<div class="captions-menu" role="menu" style="position: absolute; top: 100%; left: 0; z-index: 20; margin-top: 4px; display: flex; flex-direction: column; min-width: 160px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); overflow: hidden;">
-                <button role="menuitem" style="text-align: left; background: none; border: none; padding: 7px 12px;" title="SubRip — the widest-supported subtitle format" @click=${() => this.handleExportCaptions("srt")}>SubRip (.srt)</button>
-                <button role="menuitem" style="text-align: left; background: none; border: none; padding: 7px 12px;" title="WebVTT — captions for HTML5 &lt;video&gt;/&lt;track&gt;" @click=${() => this.handleExportCaptions("vtt")}>WebVTT (.vtt)</button>
+        <span class="export-trigger-wrap" style="position: relative; display: inline-block;">
+          <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ▾</button>
+          ${this.exportMenuOpen
+            ? html`<div class="export-menu" role="menu" style="position: absolute; top: 100%; left: 0; z-index: 20; margin-top: 4px; display: flex; flex-direction: column; min-width: 210px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); overflow: hidden;">
+                <button role="menuitem" style="text-align: left; background: none; border: none; padding: 7px 12px;" title="The on-screen transcript as plain text" @click=${this.handleExport}>Transcript (.txt)</button>
+                <button role="menuitem" style="text-align: left; background: none; border: none; padding: 7px 12px;" title="SubRip — the widest-supported subtitle format" @click=${() => this.handleExportCaptions("srt")}>Captions — SubRip (.srt)</button>
+                <button role="menuitem" style="text-align: left; background: none; border: none; padding: 7px 12px;" title="WebVTT — captions for HTML5 &lt;video&gt;/&lt;track&gt;" @click=${() => this.handleExportCaptions("vtt")}>Captions — WebVTT (.vtt)</button>
+                <button role="menuitem" style="text-align: left; background: none; border: none; padding: 7px 12px; border-top: 1px solid var(--border-subtle);" title="Everything stored for this recording (metadata + transcript + segments) as JSON" @click=${this.handleExportAllData}>All data (.json)</button>
               </div>`
             : null}
         </span>

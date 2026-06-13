@@ -499,6 +499,27 @@ export async function exportCaptions(id: string, format: CaptionFormat): Promise
 }
 
 /**
+ * Bundle one recording's full data — its catalog row plus machine segments —
+ * into a pretty-printed JSON string for "Export → All data". Returns the body
+ * for {@link saveTextExport}; segments are best-effort (empty for recordings
+ * transcribed before segment capture existed).
+ */
+export async function exportRecordingJson(id: string): Promise<string> {
+  return await tauriInvoke<string>("export_recording_json", { id });
+}
+
+/**
+ * Write `contents` to `dest` (a save-dialog path) on the daemon-side bridge
+ * process — the single write path for every per-recording export. The WebView
+ * never needs the `fs` plugin's write permission for an arbitrary path (which
+ * `fs:default` denies). Produce the text (transcript / {@link exportCaptions} /
+ * {@link exportRecordingJson}), then hand it here with the chosen destination.
+ */
+export async function saveTextExport(dest: string, contents: string): Promise<void> {
+  await tauriInvoke("save_text_export", { dest, contents });
+}
+
+/**
  * Write a portable backup of the whole library to `dest` (a `.zip` path picked
  * via the save dialog). Mirrors `phoneme export <FILE>`: a `catalog.json`
  * envelope (recordings + tags) plus every `.wav` under the audio dir packed

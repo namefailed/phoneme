@@ -159,9 +159,14 @@ trust boundary. Verified against current code.*
 
 ### GUI parity
 
-- [x] **Caption export in the GUI** — a 💬 Captions button on a transcribed
-  recording's action row saves SubRip (.srt) or WebVTT (.vtt), matching
-  `phoneme export --captions`.
+- [x] **One Export ▾ menu per recording** — the separate Export and 💬 Captions
+  buttons are now a single dropdown: **Transcript** (.txt), **Captions** (SubRip
+  .srt / WebVTT .vtt, matching `phoneme export --captions`), and **All data**
+  (.json — the catalog row plus machine segments). Every export now writes
+  **server-side** via the bridge process, fixing "Caption export failed:
+  fs.write_text_file not allowed" — the WebView no longer needs the fs plugin's
+  write permission for an arbitrary save-dialog path. The merged-meeting Export
+  was on the same broken path and is fixed too.
 - [x] **Webhook safety toggles** — Settings now exposes
   `webhook.allow_private_network` and `webhook.allow_http` (previously
   TOML-only) with plain-language warnings.
