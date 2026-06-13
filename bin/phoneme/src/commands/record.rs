@@ -3,11 +3,13 @@
 //! Spawning path (`Client::connect`): recording is the daemon's reason to
 //! exist, so a missing daemon is started. Two shapes:
 //!
-//! - **Non-blocking** (`--start` / `--stop` / `--toggle` / `--cancel`): send
-//!   one request (`RecordStart` / `RecordStop` / `RecordToggle` /
-//!   `RecordCancel`) and exit 0 — hotkey/script bindings. `--toggle` is
-//!   atomic on the daemon side, and `--in-place` rides along so a binding
-//!   can start dictation.
+//! - **Non-blocking** (`record start` / `stop` / `toggle` / `cancel` /
+//!   `pause` / `resume`): send one request (`RecordStart` / `RecordStop` /
+//!   `RecordToggle` / `RecordCancel` / `RecordPause` / `RecordResume`) and
+//!   exit 0 — hotkey/script bindings. `toggle` is atomic on the daemon side,
+//!   and `start`/`toggle` take `--in-place` so a binding can start dictation.
+//!   The pre-1.8 flag spellings (`--start`, `--toggle`, …) still work as
+//!   hidden, deprecated aliases.
 //! - **Blocking** (default hold mode, `--oneshot`, `--duration N`): open an
 //!   event subscription FIRST (a fast transcription can finish in the gap
 //!   between stop and a late subscribe — events are never replayed), then
@@ -16,7 +18,7 @@
 //!   transcript, exit 0) or `TranscriptionFailed` (exit 4). Other
 //!   recordings' completions on the shared stream are ignored by id.
 
-use crate::args::RecordArgs;
+use crate::args::{RecordAction, RecordArgs};
 use crate::client::Client;
 use crate::exit;
 use futures::StreamExt;
@@ -30,42 +32,38 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Non-blocking variants first.
-    if args.start {
-        return single_request(
-            &mut client,
-            Request::RecordStart {
+    // Preferred form: the non-blocking control subcommand
+    // (`record start|stop|toggle|cancel|pause|resume`), consistent with
+    // `meeting`, `daemon`, and the rest of the CLI. `start`/`toggle` carry their
+    // own `--in-place` so a binding can start dictation.
+    if let Some(action) = &args.action {
+        let req = match action {
+            RecordAction::Start { in_place } => Request::RecordStart {
                 mode: RecordMode::Hold,
-                in_place: args.in_place,
+                in_place: *in_place,
             },
-            json,
-        )
-        .await;
-    }
-    if args.stop {
-        return single_request(&mut client, Request::RecordStop, json).await;
-    }
-    if args.toggle {
-        // Atomic start-if-idle / stop-if-active, mirroring the GUI record
-        // hotkey. Honors --in-place so a toggle binding can start an in-place
-        // recording the same way `record --start --in-place` does.
-        return single_request(
-            &mut client,
-            Request::RecordToggle {
-                in_place: args.in_place,
+            RecordAction::Stop => Request::RecordStop,
+            RecordAction::Toggle { in_place } => Request::RecordToggle {
+                in_place: *in_place,
             },
-            json,
-        )
-        .await;
+            RecordAction::Cancel => Request::RecordCancel,
+            RecordAction::Pause => Request::RecordPause,
+            RecordAction::Resume => Request::RecordResume,
+        };
+        return single_request(&mut client, req, json).await;
     }
-    if args.cancel {
-        return single_request(&mut client, Request::RecordCancel, json).await;
-    }
-    if args.pause {
-        return single_request(&mut client, Request::RecordPause, json).await;
-    }
-    if args.resume {
-        return single_request(&mut client, Request::RecordResume, json).await;
+
+    // Deprecated flag forms (`record --start` etc.), kept so existing hotkey
+    // bindings and scripts keep working. Each maps to the matching subcommand;
+    // a one-line stderr note nudges toward it (invisible to JSON consumers and
+    // to hotkey bindings, which don't read stderr).
+    if let Some(req) = deprecated_flag_request(&args) {
+        if !json {
+            eprintln!(
+                "note: `record --<action>` flags are deprecated; use `record <action>` (e.g. `record toggle`)"
+            );
+        }
+        return single_request(&mut client, req, json).await;
     }
 
     // Oneshot / Duration / Hold-via-stdin all block on the event stream.
@@ -165,6 +163,33 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
 
     eprintln!("timed out waiting for transcription");
     ExitCode::from(exit::GENERIC_FAIL)
+}
+
+/// Map a deprecated `record --start|--stop|--toggle|--cancel|--pause|--resume`
+/// action flag to its IPC request, or `None` when no action flag was set (the
+/// blocking default path runs then). `--in-place` rides along with start/toggle,
+/// matching the subcommand forms.
+fn deprecated_flag_request(args: &RecordArgs) -> Option<Request> {
+    if args.start {
+        Some(Request::RecordStart {
+            mode: RecordMode::Hold,
+            in_place: args.in_place,
+        })
+    } else if args.stop {
+        Some(Request::RecordStop)
+    } else if args.toggle {
+        Some(Request::RecordToggle {
+            in_place: args.in_place,
+        })
+    } else if args.cancel {
+        Some(Request::RecordCancel)
+    } else if args.pause {
+        Some(Request::RecordPause)
+    } else if args.resume {
+        Some(Request::RecordResume)
+    } else {
+        None
+    }
 }
 
 async fn single_request(client: &mut Client, req: Request, json: bool) -> ExitCode {
@@ -289,6 +314,7 @@ mod tests {
         cfg.daemon.pipe_name = name;
 
         let args = RecordArgs {
+            action: None,
             oneshot: true,
             duration: None,
             start: false,
@@ -322,6 +348,7 @@ mod tests {
 
     fn args_with(pause: bool, resume: bool) -> RecordArgs {
         RecordArgs {
+            action: None,
             oneshot: false,
             duration: None,
             start: false,
@@ -332,6 +359,118 @@ mod tests {
             resume,
             in_place: false,
         }
+    }
+
+    /// An otherwise-empty `RecordArgs` carrying just the given subcommand — the
+    /// preferred `record <action>` form.
+    fn args_action(action: RecordAction) -> RecordArgs {
+        RecordArgs {
+            action: Some(action),
+            oneshot: false,
+            duration: None,
+            start: false,
+            stop: false,
+            toggle: false,
+            cancel: false,
+            pause: false,
+            resume: false,
+            in_place: false,
+        }
+    }
+
+    /// Run `record <action>` against a mock daemon and assert the single request
+    /// it sends. Covers the new subcommand dispatch for every non-blocking verb.
+    async fn assert_action_sends(label: &str, action: RecordAction, expect: Request) {
+        let mock = MockDaemon::spawn(label, |_req| {
+            Response::Ok(serde_json::json!({ "id": RecordingId::new().to_string() }))
+        });
+        let mut cfg = phoneme_core::Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let code = tokio::time::timeout(
+            Duration::from_secs(5),
+            run(args_action(action), &cfg, false),
+        )
+        .await
+        .expect("a non-blocking record subcommand must return promptly");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(mock.received(), vec![expect]);
+    }
+
+    #[tokio::test]
+    async fn record_start_subcommand_sends_record_start() {
+        assert_action_sends(
+            "start",
+            RecordAction::Start { in_place: false },
+            Request::RecordStart {
+                mode: RecordMode::Hold,
+                in_place: false,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn record_start_subcommand_carries_in_place() {
+        assert_action_sends(
+            "start-ip",
+            RecordAction::Start { in_place: true },
+            Request::RecordStart {
+                mode: RecordMode::Hold,
+                in_place: true,
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn record_stop_subcommand_sends_record_stop() {
+        assert_action_sends("stop", RecordAction::Stop, Request::RecordStop).await;
+    }
+
+    #[tokio::test]
+    async fn record_toggle_subcommand_sends_record_toggle() {
+        assert_action_sends(
+            "toggle",
+            RecordAction::Toggle { in_place: false },
+            Request::RecordToggle { in_place: false },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn record_cancel_subcommand_sends_record_cancel() {
+        assert_action_sends("cancel", RecordAction::Cancel, Request::RecordCancel).await;
+    }
+
+    #[tokio::test]
+    async fn record_pause_subcommand_sends_record_pause() {
+        assert_action_sends("pause-sub", RecordAction::Pause, Request::RecordPause).await;
+    }
+
+    /// The deprecated `--start` flag still maps to `RecordStart` (back-compat for
+    /// existing hotkey bindings), even though the subcommand is now preferred.
+    #[tokio::test]
+    async fn deprecated_start_flag_still_sends_record_start() {
+        let mock = MockDaemon::spawn("dep-start", |_req| {
+            Response::Ok(serde_json::json!({ "id": RecordingId::new().to_string() }))
+        });
+        let mut cfg = phoneme_core::Config::default();
+        cfg.daemon.pipe_name = mock.pipe_name.clone();
+
+        let mut args = args_with(false, false);
+        args.start = true;
+        let code = tokio::time::timeout(Duration::from_secs(5), run(args, &cfg, false))
+            .await
+            .expect("--start must return promptly");
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+        assert_eq!(
+            mock.received(),
+            vec![Request::RecordStart {
+                mode: RecordMode::Hold,
+                in_place: false,
+            }]
+        );
     }
 
     /// `--pause` sends exactly `RecordPause` on the non-blocking path and exits

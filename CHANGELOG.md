@@ -174,9 +174,17 @@ trust boundary. Verified against current code.*
 - [x] **CLI reaches the GUI's per-recording actions** — `phoneme edit <id>
   --title/--clear-title/--favorite/--unfavorite`, `phoneme speaker
   rename|clear <id> <label> [name]`, `phoneme tag suggestions <id>
-  [--approve|--dismiss <name>]`, `phoneme record --pause/--resume`, and
+  [--approve|--dismiss <name>]`, `phoneme record pause/resume`, and
   `phoneme suggest-tags <id>` — all sending IPC requests that already
   existed, now reachable from the terminal.
+- [x] **`phoneme record` controls are now subcommands** — `record start`,
+  `record stop`, `record toggle`, `record cancel`, `record pause`,
+  `record resume` (with `--in-place` on start/toggle), matching `meeting`,
+  `daemon`, `queue`, and every other multi-action command. `record` was the
+  lone outlier that took these as flags. The old flag spellings (`record
+  --start`, …) still work as hidden, deprecated aliases so existing hotkey
+  bindings and scripts keep running; `--oneshot`/`--duration` remain modifiers
+  of the bare (blocking) `record`.
 
 ### Hardening (audit fixes)
 

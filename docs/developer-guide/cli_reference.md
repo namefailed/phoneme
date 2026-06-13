@@ -51,42 +51,51 @@ daemon error to the same code via one shared table:
 
 ### 🎤 `phoneme record`
 
-Start, stop, or run a one-shot recording.
+Start, stop, or run a one-shot recording. The non-blocking controls are
+**subcommands** (`record start`, `record stop`, …), matching `meeting` and the
+rest of the CLI; bare `phoneme record` (no subcommand) is the blocking
+push-to-talk mode.
 
 ```bash
 # Non-blocking: starts the recording and immediately returns.
-phoneme record --start
+phoneme record start
 
 # Non-blocking: stops the current recording and begins transcription/hooks.
-phoneme record --stop
+phoneme record stop
 
 # Non-blocking: start if idle, otherwise stop the active recording (atomic —
-# ideal for a single hotkey binding). Honors --in-place.
-phoneme record --toggle
+# ideal for a single hotkey binding). Takes --in-place.
+phoneme record toggle
 
-# Blocking: starts recording, waits for you to press Enter (or timeout), 
-# then stops, transcribes, and prints the result.
-phoneme record --oneshot
-
-# In-Place Mode: when used with --start, the transcript will be typed out
-# as simulated keystrokes into the currently focused application window.
-phoneme record --start --in-place
+# In-Place Mode: the transcript is typed out as simulated keystrokes into the
+# currently focused application window.
+phoneme record start --in-place
 
 # Discard the active recording without saving.
-phoneme record --cancel
+phoneme record cancel
 
 # Non-blocking: pause / resume the active recording (or every track of the
 # active meeting). Exit 0.
-phoneme record --pause
-phoneme record --resume
+phoneme record pause
+phoneme record resume
 
-# Record exactly 10 seconds.
+# Blocking: starts recording, waits for you to press Enter (or timeout),
+# then stops, transcribes, and prints the result.
+phoneme record --oneshot
+
+# Record exactly 10 seconds (blocking).
 phoneme record --duration 10
 ```
 
-`--pause` / `--resume` are non-blocking like `--start` / `--stop`: each sends a
-single request (`RecordPause` / `RecordResume`) and exits. They are mutually
-exclusive with each other and with the other mode flags.
+Each non-blocking subcommand sends a single request (`RecordStart`,
+`RecordStop`, `RecordToggle`, `RecordCancel`, `RecordPause`, `RecordResume`) and
+exits 0. `--oneshot` / `--duration` modify the blocking default and are mutually
+exclusive with the subcommands.
+
+> **Back-compat:** the pre-1.8 flag spellings — `record --start`, `--stop`,
+> `--toggle`, `--cancel`, `--pause`, `--resume` — still work as hidden,
+> deprecated aliases (so existing hotkey bindings keep running); they print a
+> one-line note nudging you to the subcommand. Prefer the subcommand form.
 
 ### 👥 `phoneme meeting`
 

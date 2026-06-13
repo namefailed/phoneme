@@ -32,7 +32,7 @@ Yes — **Pause** during an active recording, then **Resume**. Same catalog row.
 
 ### How do I cancel a recording I started by mistake?
 
-Use **Cancel** in the UI or `phoneme record --cancel`.
+Use **Cancel** in the UI or `phoneme record cancel`.
 
 ---
 

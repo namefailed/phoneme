@@ -94,35 +94,66 @@ pub struct CompletionsArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct RecordArgs {
-    /// One-shot: stop on silence.
-    #[arg(long, conflicts_with_all = ["start", "stop", "cancel", "duration"])]
+    /// Non-blocking recording control as a subcommand
+    /// (`start`/`stop`/`toggle`/`cancel`/`pause`/`resume`), matching `meeting`
+    /// and every other multi-action command. Omit it and `phoneme record` is
+    /// push-to-talk: blocking, stop on Enter/EOF, with the modifier flags below.
+    #[command(subcommand)]
+    pub action: Option<RecordAction>,
+
+    /// One-shot: stop on silence (modifies the blocking default; no subcommand).
+    #[arg(long, conflicts_with_all = ["duration", "start", "stop", "cancel"])]
     pub oneshot: bool,
-    /// Record exactly N seconds.
+    /// Record exactly N seconds (modifies the blocking default; no subcommand).
     #[arg(long, value_name = "SECS")]
     pub duration: Option<u32>,
-    /// Non-blocking: begin recording, exit 0.
-    #[arg(long, conflicts_with_all = ["stop", "cancel", "oneshot", "duration"])]
-    pub start: bool,
-    /// Non-blocking: stop the active recording, exit 0.
-    #[arg(long, conflicts_with_all = ["start", "cancel", "oneshot", "duration"])]
-    pub stop: bool,
-    /// Non-blocking: start recording if idle, otherwise stop the active one
-    /// (atomic — for hotkey-style bindings). Exit 0.
-    #[arg(long, conflicts_with_all = ["start", "stop", "cancel", "oneshot", "duration"])]
-    pub toggle: bool,
-    /// Discard the active recording without saving.
-    #[arg(long, conflicts_with_all = ["start", "stop", "oneshot", "duration"])]
-    pub cancel: bool,
-    /// Non-blocking: pause capture of the active recording (or every track of
-    /// the active meeting), exit 0.
-    #[arg(long, conflicts_with_all = ["start", "stop", "toggle", "cancel", "resume", "oneshot", "duration"])]
-    pub pause: bool,
-    /// Non-blocking: resume the paused recording/meeting, exit 0.
-    #[arg(long, conflicts_with_all = ["start", "stop", "toggle", "cancel", "pause", "oneshot", "duration"])]
-    pub resume: bool,
-    /// In-place transcription: type the transcript into the focused window using simulated keystrokes.
+    /// In-place transcription: type the transcript into the focused window using
+    /// simulated keystrokes (the blocking default, or `record start -i`).
     #[arg(long, short = 'i')]
     pub in_place: bool,
+
+    // ── Deprecated flag forms, superseded by the subcommands above. Hidden from
+    //    --help but still accepted so existing hotkey bindings and scripts keep
+    //    working unchanged. Each maps to the matching subcommand in `record::run`
+    //    (with a one-line stderr note). ──
+    #[arg(long, hide = true, conflicts_with_all = ["stop", "cancel", "oneshot", "duration"])]
+    pub start: bool,
+    #[arg(long, hide = true, conflicts_with_all = ["start", "cancel", "oneshot", "duration"])]
+    pub stop: bool,
+    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "cancel", "oneshot", "duration"])]
+    pub toggle: bool,
+    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "oneshot", "duration"])]
+    pub cancel: bool,
+    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "toggle", "cancel", "resume", "oneshot", "duration"])]
+    pub pause: bool,
+    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "toggle", "cancel", "pause", "oneshot", "duration"])]
+    pub resume: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RecordAction {
+    /// Non-blocking: begin recording, exit 0.
+    Start {
+        /// In-place dictation: type the transcript into the focused window.
+        #[arg(long, short = 'i')]
+        in_place: bool,
+    },
+    /// Non-blocking: stop the active recording, exit 0.
+    Stop,
+    /// Non-blocking: start recording if idle, otherwise stop the active one
+    /// (atomic — for hotkey-style bindings). Exit 0.
+    Toggle {
+        /// In-place dictation when this toggle starts a recording.
+        #[arg(long, short = 'i')]
+        in_place: bool,
+    },
+    /// Discard the active recording without saving.
+    Cancel,
+    /// Non-blocking: pause capture of the active recording (or every track of
+    /// the active meeting), exit 0.
+    Pause,
+    /// Non-blocking: resume the paused recording/meeting, exit 0.
+    Resume,
 }
 
 #[derive(Debug, clap::Args)]

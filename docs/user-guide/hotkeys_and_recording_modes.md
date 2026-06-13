@@ -24,8 +24,8 @@ Meeting Mode uses **toggle only** — a meeting can run for many minutes.
 You do not have to use Phoneme's built-in listener. Many users bind **AutoHotkey**, **Kanata**, or **PowerToys** to shell commands:
 
 ```powershell
-phoneme record --start
-phoneme record --stop
+phoneme record start
+phoneme record stop
 phoneme meeting start
 phoneme meeting stop
 ```
@@ -51,8 +51,8 @@ Click **Record** or use the record hotkey.
 
 While recording, click **Pause** to suspend capture without finalizing the
 recording; **Resume** continues the *same* catalog entry, so you never get
-duplicate rows. This works on the CLI too — `phoneme record --pause` and
-`phoneme record --resume` — and pausing a meeting pauses every track at once.
+duplicate rows. This works on the CLI too — `phoneme record pause` and
+`phoneme record resume` — and pausing a meeting pauses every track at once.
 
 ### Meeting Mode
 
@@ -80,18 +80,20 @@ A microphone left turned down captures the same words far quieter than the trans
 
 | UI action | CLI |
 |-----------|-----|
-| Start / stop mic | `phoneme record --start` / `--stop` |
-| Toggle (start if idle, else stop) | `phoneme record --toggle` |
-| In-place dictation | `phoneme record --start --in-place` |
+| Start / stop mic | `phoneme record start` / `stop` |
+| Toggle (start if idle, else stop) | `phoneme record toggle` |
+| In-place dictation | `phoneme record start --in-place` |
 | Oneshot (silence-stop) | `phoneme record --oneshot` |
 | Fixed duration | `phoneme record --duration 30` |
-| Pause / resume | `phoneme record --pause` / `--resume` |
+| Pause / resume | `phoneme record pause` / `resume` |
 | Start / stop meeting | `phoneme meeting start` / `stop` |
 | Toggle meeting | `phoneme meeting toggle` |
-| Cancel | `phoneme record --cancel` |
+| Cancel | `phoneme record cancel` |
 
-The `--toggle` / `meeting toggle` variants are atomic (start-or-stop in one
+The `record toggle` / `meeting toggle` variants are atomic (start-or-stop in one
 call), which makes them the cleanest thing to bind to a single external hotkey.
+(The pre-1.8 flag spellings — `record --start`, `--stop`, … — still work as
+deprecated aliases, so existing bindings don't break.)
 
 ## Tips
 

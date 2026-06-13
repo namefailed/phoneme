@@ -1,6 +1,6 @@
 # 📡 IPC Integration Guide (Advanced Automation)
 
-Phoneme provides a full CLI (`phoneme record --start`, `phoneme list`, etc.) that you can use to automate the application. However, under the hood, the CLI is just a thin wrapper that talks to the Phoneme Daemon.
+Phoneme provides a full CLI (`phoneme record start`, `phoneme list`, etc.) that you can use to automate the application. However, under the hood, the CLI is just a thin wrapper that talks to the Phoneme Daemon.
 
 For developers, hackers, and power users who want the lowest-latency automation possible—or who want to build their own custom user interfaces on top of Phoneme's engine—you can integrate directly with Phoneme's Inter-Process Communication (IPC) layer.
 

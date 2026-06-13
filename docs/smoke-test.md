@@ -39,8 +39,8 @@
 
 ## External hotkey
 
-- [ ] Kanata (or AHK) is configured to send `phoneme record --start` /
-      `--stop` on a key combo.
+- [ ] Kanata (or AHK) is configured to send `phoneme record start` /
+      `record stop` on a key combo.
 - [ ] Press the combo, speak, release. Recording appears in list.
 
 ## Tray
