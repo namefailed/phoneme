@@ -21,16 +21,18 @@ export type ActionRowCallbacks = {
 
 /**
  * The detail pane's action strip: Play/Pause · Re-run… (opens the Models modal
- * in "Run once" mode) · Copy · Export ▾ (transcript / captions / all-data, via a
- * save dialog). Copy/export apply custom speaker names before emitting text.
- * (✨ Similar and 🗑 Delete now live in the detail title bar, and Reveal is the
- * clickable footer path — all owned by RecordingDetail.)
+ * in "Run once" mode) · 🗑 Delete · Export ▾ (transcript / captions / all-data,
+ * via a save dialog). Export applies custom speaker names before emitting text.
+ * (Copy lives on the transcript box now — it copies the transcript, so it sits
+ * there; ✨ Similar lives in the detail title bar, and Reveal is the clickable
+ * footer path — all owned by RecordingDetail.)
  *
- * Stateless beyond the transient "Copied!" label — everything it acts on
- * comes through {@link ActionRowCallbacks}. Keyboard: implements the global
- * p/c/e/r shortcuts by listening for `phoneme:action` (keyboard.ts dispatches
- * them), acting only when ITS recording is the open one so split mode never
- * double-fires. Failures toast; nothing throws to the caller.
+ * Stateless — everything it acts on comes through {@link ActionRowCallbacks}.
+ * Keyboard: implements the global p/c/e/r shortcuts by listening for
+ * `phoneme:action` (keyboard.ts dispatches them), acting only when ITS recording
+ * is the open one so split mode never double-fires. The `c` (copy) shortcut still
+ * lives here even though the button moved, so it works without the transcript box
+ * focused. Failures toast; nothing throws to the caller.
  */
 @customElement('ph-action-row')
 export class ActionRowElement extends LitElement {
@@ -41,8 +43,6 @@ export class ActionRowElement extends LitElement {
   @property({ type: String }) recordingId = "";
   @property({ type: Boolean }) playing = false;
   @property({ type: Object }) cbs!: ActionRowCallbacks;
-
-  @state() private copyText = "📋 Copy";
 
   /** Global keyboard-shortcut bridge (keyboard.ts dispatches phoneme:action). */
   private actionHandler = (e: Event) => {
@@ -98,14 +98,25 @@ export class ActionRowElement extends LitElement {
     return applySpeakerNames(this.cbs.getTranscript(), this.cbs.getSpeakerNames?.());
   }
 
+  /** Copy the on-screen transcript (custom speaker names applied). The visible
+   *  Copy button moved to the transcript box, so the keyboard path toasts its
+   *  own confirmation instead of flashing an inline "Copied!" label. */
   private async handleCopy() {
     try {
       await navigator.clipboard.writeText(this.transcriptForExport());
-      this.copyText = "✅ Copied!";
-      setTimeout(() => { this.copyText = "📋 Copy"; }, 2000);
+      showToast("Transcript copied", "success");
     } catch (e) {
       showToast(`Clipboard copy failed: ${errText(e)}`, "error");
     }
+  }
+
+  /** Delete this recording — defers to RecordingsView's shared delete flow (the
+   *  same `phoneme:request-delete` the title bar used before this button moved
+   *  back here) so it gets the confirm + undo path. */
+  private handleDelete() {
+    window.dispatchEvent(
+      new CustomEvent("phoneme:request-delete", { detail: { ids: [this.recordingId] } }),
+    );
   }
 
   /** Whether the Export menu (transcript / captions / all-data) is open. */
@@ -200,7 +211,7 @@ export class ActionRowElement extends LitElement {
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
-        <button @click=${this.handleCopy}>${this.copyText}</button>
+        <button class="danger" title="Delete this recording" @click=${this.handleDelete}>🗑 Delete</button>
         <span class="export-trigger-wrap" style="position: relative; display: inline-block;">
           <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ▾</button>
           ${this.exportMenuOpen

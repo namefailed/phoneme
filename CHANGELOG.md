@@ -194,13 +194,20 @@ trust boundary. Verified against current code.*
   fs.write_text_file not allowed" — the WebView no longer needs the fs plugin's
   write permission for an arbitrary save-dialog path. The merged-meeting Export
   was on the same broken path and is fixed too.
-- [x] **Detail-pane action row tidied.** ✨ Similar and 🗑 Delete moved up into
-  the recording's title bar (beside fullscreen/close; Delete hovers red); the
+- [x] **Detail-pane action row tidied.** ✨ Similar moved up into the recording's
+  title bar (beside fullscreen/close); **Copy** became a small button tucked into
+  the transcript box's top-right corner (it copies the transcript, so it lives on
+  it — faint until you hover the box, with a ✓ flash on copy); 🗑 **Delete** sits
+  in the action row (where Copy used to be, styled as the destructive action). The
   Reveal button is gone — the file path in the footer is now clickable to reveal
   it in the OS explorer. The footer's model line became real **pipeline
-  provenance**: what actually happened to this file, in order (capture →
-  transcription + diarization → LLM steps → hook), omitting steps that didn't run
-  and grouping LLM steps that share one model.
+  provenance**: every stage that actually touched this file, in the order the
+  daemon ran them — capture → transcription (+ diarization) → cleanup →
+  auto-title → hook → summary → auto-tags — naming each step's model where it's
+  recorded per-recording and omitting steps that didn't run.
+- [x] **Auto-tag suggestion chips tidied.** Dropped the redundant ✨ from each
+  suggested-tag pill (the row already reads as suggestions), and the bulk buttons
+  now read **Check all** / **✕ Clear** instead of ✓ All / ✕ All.
 - [x] **Webhook safety toggles** — Settings now exposes
   `webhook.allow_private_network` and `webhook.allow_http` (previously
   TOML-only) with plain-language warnings.

@@ -84,9 +84,10 @@ describe("ActionRow Re-run wiring", () => {
   });
 });
 
-// ✨ Similar and 🗑 Delete moved from the action row into the detail-pane title
-// bar (RecordingDetail), and Reveal is now the clickable footer path — so their
-// wiring is no longer tested here.
+// ✨ Similar lives in the detail-pane title bar (RecordingDetail) and Reveal is
+// now the clickable footer path, so neither is tested here. 🗑 Delete sits in
+// the action row and just dispatches `phoneme:request-delete` (covered by the
+// RecordingsView delete-flow tests), and Copy moved onto the transcript box.
 
 describe("ActionRow captions export wiring", () => {
   const cbs = {

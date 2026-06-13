@@ -20,7 +20,7 @@ import {
 import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { applyMoreLikeThis } from "../../state/filter";
-import { speakerDisplayName, speakersForRename, renameSpeakerInTranscript } from "./mergeMeeting";
+import { speakerDisplayName, speakersForRename, renameSpeakerInTranscript, applySpeakerNames } from "./mergeMeeting";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptDiff } from "./TranscriptDiff";
@@ -205,6 +205,25 @@ export class RecordingDetail {
     await Promise.all([this.editor?.save(), this.notesEditor?.save()]);
   }
 
+  /** Copy the current transcript (custom speaker names applied) to the clipboard
+   *  and flash a ✓ on the transcript-box Copy button. The keyboard `c` shortcut
+   *  copies via the ActionRow (which toasts); this is the mouse path. */
+  private async copyTranscript(btn: HTMLButtonElement) {
+    const r = this.recording;
+    if (!r) return;
+    try {
+      await navigator.clipboard.writeText(applySpeakerNames(r.transcript ?? "", r.speaker_names));
+      btn.textContent = "✅";
+      btn.classList.add("copied");
+      window.setTimeout(() => {
+        btn.textContent = "📋";
+        btn.classList.remove("copied");
+      }, 1500);
+    } catch (e) {
+      showToast(`Clipboard copy failed: ${errText(e)}`, "error");
+    }
+  }
+
   private renderEmpty() {
     this.container.innerHTML = `
       <div class="empty">
@@ -246,7 +265,6 @@ export class RecordingDetail {
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
             <button class="detail-focus-btn" id="detail-similar" aria-label="More like this" title="More like this — fill the list with recordings about similar things">✨</button>
-            <button class="detail-focus-btn detail-focus-btn--danger" id="detail-delete" aria-label="Delete recording" title="Delete this recording">🗑</button>
             <span aria-hidden="true" style="width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border-subtle);"></span>
             <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>
             <button class="detail-focus-btn" id="detail-close" aria-label="Close recording" title="Close — back to the recordings list">${CLOSE_SVG}</button>
@@ -256,6 +274,7 @@ export class RecordingDetail {
         <div id="actions"></div>
         <div id="tags"></div>
         <div class="transcript-block">
+          <button class="transcript-copy" id="transcript-copy" type="button" aria-label="Copy transcript" title="Copy the transcript to the clipboard">📋</button>
           <div id="editor" style="flex: 1; display: flex; flex-direction: column; min-height: 0;"></div>
           <div id="original-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
@@ -513,15 +532,16 @@ export class RecordingDetail {
       closeBtn.onclick = () => window.dispatchEvent(new CustomEvent("phoneme:close-detail"));
     }
 
-    // ✨ Similar / 🗑 Delete — moved up from the action row into the title bar.
+    // ✨ Similar — in the title bar (Delete moved back to the action row).
     this.container
       .querySelector<HTMLButtonElement>("#detail-similar")
       ?.addEventListener("click", () => applyMoreLikeThis(r.id, r.title ?? null));
-    this.container
-      .querySelector<HTMLButtonElement>("#detail-delete")
-      ?.addEventListener("click", () =>
-        window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids: [r.id] } })),
-      );
+
+    // 📋 Copy — the cute button floating at the transcript box's top-right.
+    // Copies the live transcript with custom speaker names applied (matching the
+    // old action-row Copy), with a brief ✓ on the button itself.
+    const copyBtn = this.container.querySelector<HTMLButtonElement>("#transcript-copy");
+    copyBtn?.addEventListener("click", () => void this.copyTranscript(copyBtn));
 
     // The footer file path is clickable — reveal it in the OS file explorer
     // (replaces the old Reveal action-row button).
@@ -875,11 +895,13 @@ function formatDate(iso: string): string {
   return `${dateObj} at ${timeObj}`;
 }
 
-/** Per-file pipeline provenance for the detail footer: what actually happened to
- *  THIS recording, in pipeline order — capture → transcription (+ diarization)
- *  → LLM post-processing → hook. Steps that didn't run are omitted, and
- *  consecutive LLM steps sharing one model are grouped ("cleanup + summary:
- *  gemma3"), so a single-model setup reads as one entry instead of repeating. */
+/** Per-file pipeline provenance for the detail footer: every stage that actually
+ *  touched THIS recording, in the order the daemon ran them (see pipeline.rs):
+ *  capture → transcription (+ diarization) → LLM cleanup → auto-title → hook →
+ *  auto-summary → auto-tags. Steps that didn't run are omitted. Each step names
+ *  its model when the daemon recorded one per-recording — transcription,
+ *  cleanup, and summary always do; diarization/title/tag models fill in once the
+ *  daemon persists them (until then those steps show the bare action). */
 function modelsLine(r: Recording): string {
   const steps: string[] = [];
 
@@ -887,28 +909,37 @@ function modelsLine(r: Recording): string {
   if (r.in_place) steps.push("⌨️ In-place");
   else steps.push(r.track === "system" ? "🔊 System audio" : "🎤 Mic");
 
-  // 2. Transcription, with diarization noted when it ran.
+  // 2. Transcription, with diarization noted (its model when recorded).
   if (r.model) {
-    steps.push(`🗣 ${escapeHtml(r.model)}${r.diarized ? " · 🧑‍🤝‍🧑 diarized" : ""}`);
+    let t = `🗣 ${escapeHtml(r.model)}`;
+    if (r.diarized) {
+      t += r.diarization_model
+        ? ` · 🧑‍🤝‍🧑 ${escapeHtml(r.diarization_model)}`
+        : " · 🧑‍🤝‍🧑 diarized";
+    }
+    steps.push(t);
   }
 
-  // 3. LLM post-processing (cleanup, then summary) in order, grouping adjacent
-  //    steps that used the same model so it shows once.
-  const llm: { label: string; model: string }[] = [];
-  if (r.cleanup_model) llm.push({ label: "cleanup", model: r.cleanup_model });
-  if (r.summary_model) llm.push({ label: "summary", model: r.summary_model });
-  for (let i = 0; i < llm.length; ) {
-    let j = i;
-    while (j + 1 < llm.length && llm[j + 1].model === llm[i].model) j++;
-    const labels = llm.slice(i, j + 1).map((s) => s.label).join(" + ");
-    steps.push(`✨ ${labels}: ${escapeHtml(llm[i].model)}`);
-    i = j + 1;
-  }
+  // 3. LLM cleanup.
+  if (r.cleanup_model) steps.push(`✨ cleanup: ${escapeHtml(r.cleanup_model)}`);
 
-  // 4. Hook, when it ran (exit code recorded).
+  // 4. Auto-title — only a pipeline-generated title is a step (a user-set title
+  //    isn't). Names the model once persisted; otherwise the bare action.
+  if (r.title_model) steps.push(`🔖 title: ${escapeHtml(r.title_model)}`);
+  else if (r.title_is_auto && r.title) steps.push("🔖 auto-title");
+
+  // 5. Hook, when it ran (exit code recorded).
   if (r.hook_exit_code != null) {
     steps.push(r.hook_exit_code === 0 ? "🪝 hook ✓" : `🪝 hook ✗ (exit ${r.hook_exit_code})`);
   }
+
+  // 6. Auto-summary.
+  if (r.summary_model) steps.push(`✨ summary: ${escapeHtml(r.summary_model)}`);
+
+  // 7. Auto-tagging — names the model once persisted; until then infer the step
+  //    from pending suggestions (the only per-recording signal the tagger ran).
+  if (r.tag_model) steps.push(`🏷 tags: ${escapeHtml(r.tag_model)}`);
+  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push("🏷 auto-tag");
 
   return steps.join("  →  ");
 }

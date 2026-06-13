@@ -53,6 +53,10 @@ export type Recording = {
   cleanup_model?: string | null;
   /** Whether speaker diarization was applied */
   diarized?: boolean;
+  /** The model/engine that produced the diarization, when the daemon recorded
+   *  it per-recording (e.g. a cloud diarizer). Null for the built-in local
+   *  diarizer or older rows; the provenance line falls back to "diarized". */
+  diarization_model?: string | null;
   /** Whether this recording was captured via in-place dictation (typed into the
    *  focused window) rather than the normal record→transcribe flow. */
   in_place?: boolean;
@@ -72,6 +76,14 @@ export type Recording = {
   /** Whether `title` is auto-generated (true — the pipeline may refresh it)
    *  or user-set (false — auto writes never overwrite it). */
   title_is_auto?: boolean;
+  /** The LLM model used to auto-generate `title`, when the daemon recorded it
+   *  per-recording. Null for a heuristic title or older rows; the provenance
+   *  line falls back to "auto-title". */
+  title_model?: string | null;
+  /** The LLM model used by the auto-tagger for this recording, when recorded.
+   *  Null for older rows or recordings that weren't auto-tagged; the provenance
+   *  line falls back to inferring the step from pending `tag_suggestions`. */
+  tag_model?: string | null;
   /** Tags associated with this recording */
   tags?: Array<{ id: number; name: string; color?: string | null }>;
   /** Custom display names for this recording's diarized speaker labels, e.g.
