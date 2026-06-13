@@ -1084,15 +1084,18 @@ body.phoneme-hide-header ph-header-bar {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   padding: 2px 4px;
-  color: var(--fg-faded);
   border-radius: 4px;
-  transition: color 0.12s ease, transform 0.1s ease;
+  /* The ⭐ emoji is a colored glyph, so `color` can't tint it — use opacity +
+     grayscale for the off state: a faded ghost star inviting a click. */
+  opacity: 0.4;
+  filter: grayscale(0.7);
+  transition: opacity 0.12s ease, filter 0.12s ease, transform 0.1s ease;
 }
-.rec-fav-btn:hover { color: var(--accent); transform: scale(1.15); }
-.rec-fav-btn.on { color: #f5c518; }
+.rec-fav-btn:hover { opacity: 1; filter: none; transform: scale(1.2); }
+.rec-fav-btn.on { opacity: 1; filter: none; }
 
 /* ── Bulk action bar ─────────────────────────────────────────────────────── */
 #rv-bulk-bar {

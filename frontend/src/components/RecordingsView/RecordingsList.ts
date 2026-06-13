@@ -741,7 +741,7 @@ export class RecordingsListElement extends LitElement {
     const someSelected = this.multiSelected.size > 0 && !allSelected;
 
     const colLabels: Record<string, string> = {
-      favorite: "★",
+      favorite: "⭐",
       day: "Day",
       time: "Time",
       duration: "Duration",
@@ -881,7 +881,7 @@ export class RecordingsListElement extends LitElement {
 
     const cellMap: Record<string, unknown> = {
       day: html`<span class="rec-time">${day}</span>`,
-      favorite: html`<span class="rec-fav"><button class="rec-fav-btn ${r.favorite ? "on" : ""}" title=${r.favorite ? "Unstar" : "Star"} aria-label=${r.favorite ? "Unstar" : "Star"} @click=${(e: Event) => { e.stopPropagation(); void this.toggleFavorite(r); }}>${r.favorite ? "★" : "☆"}</button></span>`,
+      favorite: html`<span class="rec-fav"><button class="rec-fav-btn ${r.favorite ? "on" : ""}" title=${r.favorite ? "Unstar" : "Star"} aria-label=${r.favorite ? "Unstar" : "Star"} @click=${(e: Event) => { e.stopPropagation(); void this.toggleFavorite(r); }}>⭐</button></span>`,
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
