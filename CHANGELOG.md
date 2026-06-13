@@ -83,6 +83,15 @@ trust boundary. Verified against current code.*
   round-trip is bounded so a wedged daemon can't hang a request. Opt-in via
   `[rest_api] enabled = true` (`port` default 3737). See
   [REST API](docs/developer-guide/rest_api.md).
+- [x] **Webhook HMAC signing + custom headers** — when `[webhook] hmac_secret`
+  is set, every outbound webhook POST carries an `X-Phoneme-Signature:
+  sha256=<hex>` header (HMAC-SHA256 over the exact body bytes), so a receiver can
+  verify the request genuinely came from this Phoneme install. `[webhook]
+  custom_headers` attaches arbitrary `name = "value"` headers (e.g. an
+  `Authorization` bearer), with collisions against headers Phoneme controls
+  (`Content-Type`, the signature) ignored so they can't break the content type
+  or forge the signature. The secret is DPAPI-encrypted at rest and masked at the
+  WebView boundary like API keys; signing is off by default.
 
 ### Developer experience
 

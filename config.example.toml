@@ -257,6 +257,19 @@ allow_private_network = false
 # Loopback is exempt; private targets are governed by allow_private_network.
 allow_http = false
 
+# Shared secret for HMAC-SHA256 signing of the outbound webhook body. When
+# non-empty, the POST carries an "X-Phoneme-Signature: sha256=<hex>" header (the
+# HMAC over the exact body bytes) so the receiver can verify the request came
+# from this Phoneme install. Encrypted at rest (DPAPI) and masked in the UI.
+# Empty (default) = signing off.
+hmac_secret = ""
+
+# Extra HTTP headers attached to every outbound webhook POST (name = "value").
+# Use for receiver-specific auth/routing (e.g. Authorization, X-Api-Key). A
+# header colliding with one Phoneme controls (Content-Type, the signature
+# header) is ignored. Empty by default. Example:
+# custom_headers = { Authorization = "Bearer ..." }
+
 
 # -----------------------------------------------------------------------------
 # [hotkey] / [in_place_hotkey] / [meeting_hotkey] — global keyboard shortcuts

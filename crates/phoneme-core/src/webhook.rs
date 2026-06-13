@@ -16,8 +16,40 @@
 use crate::config::WebhookConfig;
 use crate::error::{Error, Result};
 use crate::types::HookPayload;
+use hmac::{Hmac, Mac};
+use secrecy::ExposeSecret;
+use sha2::Sha256;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
+
+/// The header carrying the HMAC-SHA256 signature of the request body. The value
+/// is `sha256=<lowercase-hex>`, the de-facto standard shape (GitHub, Stripe,
+/// etc.), so receivers can verify with off-the-shelf logic.
+const SIGNATURE_HEADER: &str = "X-Phoneme-Signature";
+
+/// Headers Phoneme owns and a `custom_headers` entry must never override: the
+/// JSON content type (set by the body builder) and the signature header (forged
+/// otherwise). Compared case-insensitively. A collision is skipped, Phoneme's
+/// value wins, and a warning is logged.
+const RESERVED_HEADERS: &[&str] = &["content-type", SIGNATURE_HEADER];
+
+/// Compute the `sha256=<lowercase-hex>` signature value for `body` under
+/// `secret` (HMAC-SHA256). The secret is the raw key bytes; an empty secret is
+/// the caller's signal that signing is off, so this is only called for a
+/// non-empty one.
+fn sign_body(secret: &[u8], body: &[u8]) -> String {
+    // HMAC accepts a key of any length, so `expect` cannot fire here.
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(body);
+    let digest = mac.finalize().into_bytes();
+    let mut hex = String::with_capacity(7 + digest.len() * 2);
+    hex.push_str("sha256=");
+    for b in digest {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
+}
 
 /// SSRF classification of a webhook target address (S-H1).
 ///
@@ -193,6 +225,14 @@ impl WebhookClient {
     /// POST `payload` to `url` as JSON, after the `policy` SSRF guard passes.
     ///
     /// The guard runs first, so a blocked target never receives a packet.
+    ///
+    /// When `policy.hmac_secret` is non-empty the request carries an
+    /// `X-Phoneme-Signature: sha256=<hex>` header computed over the exact body
+    /// bytes (HMAC-SHA256), and every `policy.custom_headers` entry is attached —
+    /// except ones colliding with a header Phoneme owns (`Content-Type`, the
+    /// signature header), which are skipped so they can't break the content type
+    /// or forge the signature.
+    ///
     /// Returns [`Error::InvalidConfig`] when the target is disallowed by policy,
     /// [`Error::HookTimeout`] on a slow response, and [`Error::HookFailed`]
     /// (carrying the status and body) on a non-2xx answer — a 3xx included,
@@ -206,22 +246,52 @@ impl WebhookClient {
     ) -> Result<()> {
         // The SSRF guard runs first so a blocked target never sees a packet.
         check_target(url, policy).await?;
-        let response = self
+
+        // Serialize the body ourselves so the signature is over the EXACT bytes
+        // that go on the wire (rather than trusting `.json()` to round-trip
+        // identically), and set the JSON content type to match.
+        let body = serde_json::to_vec(payload)
+            .map_err(|e| Error::Internal(format!("webhook payload serialization failed: {e}")))?;
+
+        let mut request = self
             .http
             .post(url)
             .timeout(timeout)
-            .json(payload)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    Error::HookTimeout {
-                        secs: timeout.as_secs(),
-                    }
-                } else {
-                    Error::Internal(format!("webhook send failed: {e}"))
+            .header("content-type", "application/json")
+            .body(body.clone());
+
+        // Custom headers first, so a reserved-header collision logged below is
+        // about the user's config — and so Phoneme's own headers set afterwards
+        // always win even if the skip guard ever missed one.
+        for (name, value) in &policy.custom_headers {
+            if RESERVED_HEADERS
+                .iter()
+                .any(|r| r.eq_ignore_ascii_case(name))
+            {
+                tracing::warn!(
+                    header = %name,
+                    "ignoring webhook custom_headers entry: it collides with a header Phoneme controls"
+                );
+                continue;
+            }
+            request = request.header(name, value);
+        }
+
+        // Sign last so the signature header can never be shadowed by a custom one.
+        let secret = policy.hmac_secret.expose_secret();
+        if !secret.is_empty() {
+            request = request.header(SIGNATURE_HEADER, sign_body(secret.as_bytes(), &body));
+        }
+
+        let response = request.send().await.map_err(|e| {
+            if e.is_timeout() {
+                Error::HookTimeout {
+                    secs: timeout.as_secs(),
                 }
-            })?;
+            } else {
+                Error::Internal(format!("webhook send failed: {e}"))
+            }
+        })?;
         if !response.status().is_success() {
             return Err(Error::HookFailed {
                 code: response.status().as_u16() as i32,
@@ -238,6 +308,7 @@ mod tests {
     use crate::types::HookMetadata;
     use crate::RecordingId;
     use chrono::Local;
+    use secrecy::SecretString;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -561,5 +632,189 @@ mod tests {
             }
             other => panic!("expected HookFailed(302), got {other:?}"),
         }
+    }
+
+    // ── HMAC signing + custom headers ──────────────────────────────────────
+
+    /// Pull the single request a mock server received. Asserts exactly one
+    /// request landed, and hands back the full [`wiremock::Request`] so callers
+    /// can read its `body` (bytes) and `headers`.
+    async fn single_request(server: &MockServer) -> wiremock::Request {
+        let mut reqs = server.received_requests().await.unwrap();
+        assert_eq!(reqs.len(), 1, "expected exactly one delivered request");
+        reqs.remove(0)
+    }
+
+    /// `sign_body` matches a known (key, body) → HMAC-SHA256 vector. The expected
+    /// hex is the canonical RFC-4231-style value for this key+message (verified
+    /// against an independent implementation), so a future refactor that changes
+    /// the algorithm or hex casing is caught.
+    #[test]
+    fn sign_body_matches_known_vector() {
+        // HMAC-SHA256(key="key", msg="The quick brown fox jumps over the lazy dog")
+        let got = sign_body(b"key", b"The quick brown fox jumps over the lazy dog");
+        assert_eq!(
+            got,
+            "sha256=f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
+    }
+
+    /// With a non-empty `hmac_secret`, the POST carries
+    /// `X-Phoneme-Signature: sha256=<hex>` whose value is the HMAC over the EXACT
+    /// body bytes the server received — recomputing it from the body matches.
+    #[tokio::test]
+    async fn signs_body_when_secret_set() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let policy = WebhookConfig {
+            hmac_secret: SecretString::from("topsecret".to_string()),
+            ..Default::default()
+        };
+        WebhookClient::new()
+            .unwrap()
+            .post(
+                &server.uri(),
+                Duration::from_secs(5),
+                &sample_payload(),
+                &policy,
+            )
+            .await
+            .expect("signed POST to a 2xx is Ok");
+
+        let req = single_request(&server).await;
+        let sig = req
+            .headers
+            .get("x-phoneme-signature")
+            .expect("signature header present when secret set")
+            .to_str()
+            .unwrap();
+        assert_eq!(
+            sig,
+            sign_body(b"topsecret", &req.body),
+            "header signature must be the HMAC over the exact body bytes"
+        );
+        assert!(sig.starts_with("sha256="), "de-facto-standard prefix");
+    }
+
+    /// With an empty `hmac_secret` (the default), no signature header is attached —
+    /// signing is opt-in.
+    #[tokio::test]
+    async fn no_signature_when_secret_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        WebhookClient::new()
+            .unwrap()
+            .post(
+                &server.uri(),
+                Duration::from_secs(5),
+                &sample_payload(),
+                &WebhookConfig::default(),
+            )
+            .await
+            .expect("unsigned POST to a 2xx is Ok");
+
+        let req = single_request(&server).await;
+        assert!(
+            req.headers.get("x-phoneme-signature").is_none(),
+            "no signature header when the secret is empty"
+        );
+    }
+
+    /// Every `custom_headers` entry is attached to the outgoing request, and a
+    /// custom entry colliding with a reserved header (`Content-Type`) is ignored
+    /// so it can't override Phoneme's `application/json`.
+    #[tokio::test]
+    async fn custom_headers_are_attached_reserved_skipped() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let mut custom_headers = std::collections::BTreeMap::new();
+        custom_headers.insert("X-Webhook-Source".to_string(), "phoneme".to_string());
+        custom_headers.insert("Authorization".to_string(), "Bearer abc123".to_string());
+        // Reserved: must be ignored, Phoneme's application/json must win.
+        custom_headers.insert("Content-Type".to_string(), "text/plain".to_string());
+        let policy = WebhookConfig {
+            custom_headers,
+            ..Default::default()
+        };
+
+        WebhookClient::new()
+            .unwrap()
+            .post(
+                &server.uri(),
+                Duration::from_secs(5),
+                &sample_payload(),
+                &policy,
+            )
+            .await
+            .expect("POST with custom headers to a 2xx is Ok");
+
+        let req = single_request(&server).await;
+        assert_eq!(
+            req.headers
+                .get("x-webhook-source")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "phoneme"
+        );
+        assert_eq!(
+            req.headers.get("authorization").unwrap().to_str().unwrap(),
+            "Bearer abc123"
+        );
+        assert_eq!(
+            req.headers.get("content-type").unwrap().to_str().unwrap(),
+            "application/json",
+            "a custom Content-Type must not override Phoneme's JSON type"
+        );
+    }
+
+    /// The `hmac_secret` redacts in `Debug` exactly like an `api_key`: a stray
+    /// `{:?}` on the config (or `WebhookConfig`) never prints the plaintext.
+    #[test]
+    fn hmac_secret_redacted_in_debug() {
+        let policy = WebhookConfig {
+            hmac_secret: SecretString::from("supersecretsigningkey".to_string()),
+            ..Default::default()
+        };
+        let dump = format!("{policy:?}");
+        assert!(
+            !dump.contains("supersecretsigningkey"),
+            "Debug leaked the plaintext HMAC secret: {dump}"
+        );
+        assert!(
+            dump.contains("<redacted>"),
+            "expected the redaction marker, got: {dump}"
+        );
+    }
+
+    /// The `hmac_secret` round-trips through TOML like an `api_key`: a non-empty
+    /// value survives a serialize → deserialize cycle (encrypted at rest, never
+    /// stored in plaintext), and reloads equal to the original.
+    #[test]
+    fn hmac_secret_round_trips_through_toml() {
+        let policy = WebhookConfig {
+            hmac_secret: SecretString::from("a-signing-secret".to_string()),
+            ..Default::default()
+        };
+        let serialized = toml::to_string(&policy).unwrap();
+        assert!(
+            !serialized.contains("a-signing-secret"),
+            "the secret must not be written in plaintext: {serialized}"
+        );
+        let parsed: WebhookConfig = toml::from_str(&serialized).unwrap();
+        assert_eq!(parsed.hmac_secret.expose_secret(), "a-signing-secret");
+        assert_eq!(parsed, policy);
     }
 }

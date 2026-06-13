@@ -81,6 +81,8 @@ followed.
 |-----|------|---------|-------------|
 | `allow_private_network` | bool | `false` | Allow non-loopback private targets — RFC1918, link-local, IPv6 ULA (e.g. n8n on a NAS) |
 | `allow_http` | bool | `false` | Allow plain `http://` for **public** targets; otherwise public targets must be `https://` |
+| `hmac_secret` | string (secret) | `""` | Shared secret for HMAC-SHA256 signing of the POST body. Non-empty adds an `X-Phoneme-Signature: sha256=<hex>` header (HMAC over the exact body bytes) so the receiver can verify authenticity. Encrypted at rest (DPAPI), masked in the UI; empty = signing off. |
+| `custom_headers` | table | `{}` | Extra `name = "value"` headers on every webhook POST (e.g. `Authorization`). Entries colliding with a header Phoneme controls (`Content-Type`, the signature header) are ignored. |
 
 ---
 

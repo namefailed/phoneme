@@ -1019,7 +1019,7 @@ pub struct HookConfig {
 /// beyond loopback, so a mistyped or hostile `hook.webhook_url` can't quietly
 /// point transcripts at an internal service or send them over the internet in
 /// the clear (S-H1). Both default to off — the safe posture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WebhookConfig {
     /// Allow webhook targets on non-loopback PRIVATE ranges — RFC1918 (10/8,
     /// 172.16/12, 192.168/16), link-local 169.254/16, IPv6 ULA fc00::/7 and
@@ -1033,6 +1033,77 @@ pub struct WebhookConfig {
     /// [`allow_private_network`](Self::allow_private_network) instead.
     #[serde(default)]
     pub allow_http: bool,
+    /// Shared secret for signing the outbound webhook body. When non-empty, the
+    /// POST carries an `X-Phoneme-Signature: sha256=<hex>` header — the
+    /// lowercase hex of `HMAC-SHA256(secret, exact_body_bytes)` — so the
+    /// receiver can verify the request really came from this Phoneme install and
+    /// wasn't tampered with. Empty (the default) turns signing off.
+    ///
+    /// Like the API-key fields, this is a [`SecretString`]: encrypted at rest
+    /// (DPAPI on Windows), redacted in `Debug`, and never serialized in
+    /// plaintext.
+    #[serde(
+        default = "default_secret_string",
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
+    )]
+    pub hmac_secret: SecretString,
+    /// Extra HTTP headers attached to every outbound webhook POST, as
+    /// name → value pairs. Empty by default. Use these for receiver-specific
+    /// auth or routing (e.g. `Authorization = "Bearer …"`, an `X-Api-Key`, or a
+    /// `X-Webhook-Source` tag). A header here that collides with one Phoneme
+    /// sets itself (`Content-Type`, the signature header) is ignored — Phoneme's
+    /// own value wins — so a custom header can't break the JSON content type or
+    /// forge the signature.
+    #[serde(default)]
+    pub custom_headers: std::collections::BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for WebhookConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebhookConfig")
+            .field("allow_private_network", &self.allow_private_network)
+            .field("allow_http", &self.allow_http)
+            .field("hmac_secret", &redact_key(self.hmac_secret.expose_secret()))
+            .field("custom_headers", &self.custom_headers)
+            .finish()
+    }
+}
+
+impl PartialEq for WebhookConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.allow_private_network == other.allow_private_network
+            && self.allow_http == other.allow_http
+            && self.hmac_secret.expose_secret() == other.hmac_secret.expose_secret()
+            && self.custom_headers == other.custom_headers
+    }
+}
+
+impl Default for WebhookConfig {
+    fn default() -> Self {
+        WebhookConfig {
+            allow_private_network: false,
+            allow_http: false,
+            hmac_secret: SecretString::from(String::new()),
+            custom_headers: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl WebhookConfig {
+    /// Replace the HMAC signing secret from a plain string (encapsulates the
+    /// [`SecretString`] construction so callers outside this crate — the tray's
+    /// config masking — needn't depend on `secrecy`). Empty turns signing off.
+    pub fn set_hmac_secret(&mut self, secret: impl Into<String>) {
+        self.hmac_secret = SecretString::from(secret.into());
+    }
+
+    /// The HMAC signing secret as a plain `&str`, so callers outside this crate
+    /// can read it (e.g. the tray masking config for the WebView) without
+    /// depending on `secrecy`. Empty means signing is off.
+    pub fn hmac_secret_str(&self) -> &str {
+        self.hmac_secret.expose_secret()
+    }
 }
 
 /// Global keyboard shortcut bindings for triggering push-to-talk.

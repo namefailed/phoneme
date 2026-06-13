@@ -21,7 +21,8 @@
 //! API keys never enter the WebView. `read_config` serializes the config
 //! and replaces every non-empty `api_key` (whisper, llm_post_process,
 //! summary, auto_tag, title, preview_whisper, and the nested
-//! `in_place.stt`) with the `__phoneme_secret_kept__` sentinel;
+//! `in_place.stt`) — plus the `webhook.hmac_secret` signing key — with the
+//! `__phoneme_secret_kept__` sentinel;
 //! `write_config` restores any field still holding the sentinel from the
 //! on-disk config before validating and saving, so an unchanged key
 //! round-trips without ever leaving the Rust side — and saving can never
@@ -796,6 +797,13 @@ fn mask_config_secrets(v: &mut Value) {
             *key = Value::String(MASKED_SECRET.to_string());
         }
     }
+    // The webhook HMAC signing key is a secret too — mask it like the API keys
+    // so the signing secret never crosses into the WebView (`webhook.hmac_secret`).
+    if let Some(key) = v.get_mut("webhook").and_then(|s| s.get_mut("hmac_secret")) {
+        if key.as_str().is_some_and(|k| !k.is_empty()) {
+            *key = Value::String(MASKED_SECRET.to_string());
+        }
+    }
 }
 
 /// Restore any masked key in an incoming config from the current on-disk config,
@@ -846,6 +854,13 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
                 .unwrap_or_default();
             stt.set_api_key(cur);
         }
+    }
+    // Restore the webhook HMAC secret when it arrives still masked, so saving
+    // config without touching it keeps the on-disk signing key.
+    if incoming.webhook.hmac_secret_str() == MASKED_SECRET {
+        incoming
+            .webhook
+            .set_hmac_secret(current.webhook.hmac_secret_str().to_owned());
     }
 }
 
