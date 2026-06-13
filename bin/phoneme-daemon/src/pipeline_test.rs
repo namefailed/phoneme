@@ -443,6 +443,145 @@ async fn meeting_system_track_takes_the_normal_path_and_is_not_named_you() {
     );
 }
 
+/// BUG 1 (silent data loss): a user rename of the meeting mic speaker must
+/// survive a retranscribe / re-run. The first run seeds label 1 → "You"; the
+/// user renames it to "Alice"; a SECOND `pipeline::run` on the same id (which
+/// re-enters the `is_meeting_mic` branch with the same fixed-speaker labelling)
+/// must NOT clobber the rename back to "You". This pins the if-absent seed.
+#[tokio::test]
+async fn meeting_mic_rename_survives_retranscribe() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "hello everyone thanks for joining",
+            "segments": [
+                {"start": 0.0, "end": 1.5, "text": " hello everyone"},
+                {"start": 1.5, "end": 3.0, "text": " thanks for joining"}
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::Local;
+    cfg.llm_post_process.enabled = false;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_meeting_track(&state, tmp.path(), "meeting-rename", "mic").await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+
+    // First run: label 1 is seeded as "You".
+    crate::pipeline::run(&state, payload.clone(), CancellationToken::new())
+        .await
+        .expect("first mic-track run should succeed");
+    assert_eq!(
+        state.catalog.speaker_names_for(&id).await.unwrap(),
+        vec![phoneme_core::types::SpeakerName {
+            speaker_label: 1,
+            name: "You".to_string(),
+        }],
+    );
+
+    // The user renames the speaker.
+    state
+        .catalog
+        .set_speaker_name(&id, 1, "Alice")
+        .await
+        .unwrap();
+
+    // Re-run the pipeline on the SAME id (Retranscribe / Re-run / requeue). The
+    // mic-track branch fires again, but the if-absent seed must NOT revert the
+    // rename to "You".
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("retranscribe of the mic track should succeed");
+    assert_eq!(
+        state.catalog.speaker_names_for(&id).await.unwrap(),
+        vec![phoneme_core::types::SpeakerName {
+            speaker_label: 1,
+            name: "Alice".to_string(),
+        }],
+        "a user rename must survive retranscribe — never re-stamped 'You'"
+    );
+}
+
+/// BUG 2 (orphan/mislabel), local case: a meeting mic track whose provider
+/// returns text but NO segments produces no `[Speaker 1]` (the fixed-speaker
+/// short-circuit is guarded by `!segs.is_empty()`), so `fixed_speaker_applied`
+/// stays false and NO `speaker_names` row is written — the gate is the result
+/// flag, not just `is_meeting_mic`. (This same false-flag path is what a cloud
+/// STT backend — which ignores the hint entirely — also takes, so it stands in
+/// for the cloud-provider case too.)
+#[tokio::test]
+async fn meeting_mic_track_without_segments_writes_no_speaker_name() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        // Text only — no `segments` array (e.g. a silent/empty mic clip, or a
+        // backend that returns plain text). The fixed-speaker short-circuit
+        // can't wrap a `[Speaker 1]` turn, so it falls through.
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "mm"
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::Local;
+    cfg.llm_post_process.enabled = false;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_meeting_track(&state, tmp.path(), "meeting-empty", "mic").await;
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("segment-less mic-track run should succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::Done);
+    // No `[Speaker 1]` was emitted → the recording is not falsely diarized…
+    let original = state.catalog.get_original_transcript(&id).await.unwrap();
+    assert_eq!(original.as_deref(), Some("mm"));
+    assert!(
+        !rec.diarized,
+        "no segments → no fixed-speaker label → not diarized"
+    );
+    // …and NO orphan "You" speaker-name row was written.
+    assert!(
+        rec.speaker_names.is_empty(),
+        "a segment-less mic track must NOT get an orphan 'You' speaker name"
+    );
+}
+
 /// A queued per-recording model override is applied to JUST that job: the
 /// transcription provider uses the override model, the override is consumed
 /// (removed from the pending map), and the process-global config is left

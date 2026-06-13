@@ -34,7 +34,11 @@ use tokio::fs;
 /// confidence highlighting). It is independent of `segments`: a provider may
 /// emit one, both, or neither. Providers/paths with no per-word data return an
 /// empty `words` — the substrate degrades gracefully rather than failing.
-#[derive(Debug, Clone)]
+///
+/// This is an internal core type — it never crosses the IPC boundary (the wire
+/// contract carries `TranscriptSegment`/`TranscriptWord`, not `Transcription`),
+/// so it derives no `serde` traits and new fields need no `#[serde(default)]`.
+#[derive(Debug, Clone, Default)]
 pub struct Transcription {
     /// The transcript text (speaker-labelled when diarization ran).
     pub text: String,
@@ -43,6 +47,17 @@ pub struct Transcription {
     /// Per-word timing (and per-word confidence where the provider supplies
     /// it), or empty for providers/paths with no per-word data.
     pub words: Vec<TranscriptWord>,
+    /// Whether the local fixed-speaker (`DiarizationTrack::FixedSpeaker`)
+    /// labelling actually ran on this result — i.e. the `OpenAiCompatProvider`
+    /// short-circuit wrapped the segments under a single `[Speaker 1]` turn.
+    ///
+    /// It is `true` ONLY on that one path; every other construction (diarized,
+    /// plain text, the cloud providers, native whisper, the `DiarizationTrack`
+    /// hint being ignored, or an empty/segment-less mic track) leaves it
+    /// `false`. The daemon gates its "You" speaker-name write on this flag, so a
+    /// cloud STT backend (which ignores the hint) or a silent mic track never
+    /// gets an orphaned/mislabelled `speaker_names` row.
+    pub fixed_speaker_applied: bool,
 }
 
 impl Transcription {
@@ -50,8 +65,7 @@ impl Transcription {
     pub fn plain(text: String) -> Self {
         Self {
             text,
-            segments: Vec::new(),
-            words: Vec::new(),
+            ..Default::default()
         }
     }
 }
@@ -550,10 +564,16 @@ impl TranscriptionProvider for OpenAiCompatProvider {
                         ..w
                     })
                     .collect();
+                // The ONLY path that sets `fixed_speaker_applied`: the segments
+                // were actually wrapped under `[Speaker 1]` here, so the daemon
+                // can safely seed the "You" name. A segment-less/empty mic track
+                // falls through below with the flag left `false`, so no orphan
+                // "You" row is written.
                 return Ok(Transcription {
                     text,
                     segments,
                     words,
+                    fixed_speaker_applied: true,
                 });
             }
         }
@@ -586,6 +606,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             text: parsed.text,
             segments,
             words,
+            fixed_speaker_applied: false,
         })
     }
 }
@@ -646,6 +667,7 @@ pub(crate) async fn diarize_transcript(
                     .into_iter()
                     .map(|w| TranscriptWord { speaker: None, ..w })
                     .collect(),
+                fixed_speaker_applied: false,
             }
         };
 
@@ -725,6 +747,7 @@ fn diarize_per_segment(
             text: plain_text,
             segments: segs,
             words: strip_word_speakers(words),
+            fixed_speaker_applied: false,
         };
     }
 
@@ -760,6 +783,7 @@ fn diarize_per_segment(
         text,
         segments: out_segments,
         words: strip_word_speakers(words),
+        fixed_speaker_applied: false,
     }
 }
 
@@ -863,6 +887,7 @@ fn diarize_per_word(
         text,
         segments: out_segments,
         words: out_words,
+        fixed_speaker_applied: false,
     })
 }
 
@@ -1047,6 +1072,7 @@ impl TranscriptionProvider for DeepgramProvider {
             text,
             segments: Vec::new(),
             words: plain_words.clone(),
+            fixed_speaker_applied: false,
         };
 
         if !self.diarize || dg_words.is_empty() {
@@ -1117,6 +1143,7 @@ impl TranscriptionProvider for DeepgramProvider {
             text: final_transcript,
             segments,
             words,
+            fixed_speaker_applied: false,
         })
     }
 }
@@ -1355,6 +1382,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             text,
                             segments: Vec::new(),
                             words: words.clone(),
+                            fixed_speaker_applied: false,
                         };
 
                         if !self.diarize || t.utterances.is_none() {
@@ -1398,6 +1426,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                             text: final_transcript,
                             segments,
                             words,
+                            fixed_speaker_applied: false,
                         });
                     }
                     "error" => {
@@ -1701,6 +1730,49 @@ mod tests {
         assert!(
             !cache.is_loaded(),
             "the diarizer pipeline must never load for a fixed-speaker track"
+        );
+        assert!(
+            t.fixed_speaker_applied,
+            "the fixed-speaker labelling actually ran (real segments wrapped under [Speaker 1])"
+        );
+    }
+
+    /// A `FixedSpeaker` hint on a provider that returns text but NO segments
+    /// can't wrap a `[Speaker 1]` turn, so the short-circuit (guarded by
+    /// `!segs.is_empty()`) falls through and `fixed_speaker_applied` stays
+    /// `false` — the signal the daemon uses to skip the orphan "You" write.
+    #[tokio::test]
+    async fn fixed_speaker_without_segments_leaves_flag_false() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "mm" })),
+            )
+            .mount(&server)
+            .await;
+
+        let provider = OpenAiCompatProvider::new(
+            client(),
+            server.uri(),
+            None,
+            None,
+            Duration::from_secs(30),
+            None,
+            true,
+        );
+        let (_dir, audio) = dummy_audio();
+
+        let t = provider
+            .transcribe_with_segments(&audio, None, DiarizationTrack::FixedSpeaker("You"))
+            .await
+            .unwrap();
+
+        assert_eq!(t.text, "mm");
+        assert!(t.segments.is_empty());
+        assert!(
+            !t.fixed_speaker_applied,
+            "no segments → the fixed-speaker labelling did not run"
         );
     }
 

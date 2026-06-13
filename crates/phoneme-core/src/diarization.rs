@@ -197,9 +197,11 @@ pub fn label_segments<'a>(
 /// a single voice (the user's), so there is nothing to diarize. Reusing the
 /// existing `[Speaker N]` machinery (rather than inventing a `[You]` marker)
 /// keeps the pipeline's `diarized` detection (`"[Speaker "`) and the
-/// merged-meeting view (`[Speaker N]:`) working unchanged; the daemon then
-/// renames label `speaker_label` to "You" via a `speaker_names` row, so the UI
-/// shows "You" and it stays user-renamable.
+/// merged-meeting view (`[Speaker N]:`) working unchanged; when this labelling
+/// actually runs (the result's `fixed_speaker_applied`), the daemon SEEDS label
+/// `speaker_label` as "You" via an if-absent `speaker_names` row — a friendly
+/// default on the first transcribe that never overwrites a row, so a later user
+/// rename survives a retranscribe.
 ///
 /// `speaker_label` is the 1-based index the segments are stamped with (1 for the
 /// mic track). Empty/whitespace segments are skipped, exactly as

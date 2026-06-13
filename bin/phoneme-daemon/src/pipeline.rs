@@ -1059,6 +1059,11 @@ pub async fn run(
         text: transcript,
         segments,
         words,
+        // Did the local fixed-speaker labelling actually run (mic track with
+        // real segments on the OpenAI-compatible path)? Carried to the "You"
+        // speaker-name write below so a cloud STT backend (which ignores the
+        // hint) or a silent/segment-less mic track never gets an orphan row.
+        fixed_speaker_applied,
     } = transcription;
 
     // Finish the Transcribing activity entry with timing + size for the popout.
@@ -1190,15 +1195,28 @@ pub async fn run(
         tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
     }
 
-    // Track-aware Meeting Mode: the mic track was labelled `[Speaker 1]` in
-    // place of a diarizer pass (see `diar_track` above). Name that one speaker
-    // "You" via a `speaker_names` row so the UI renders "You" instead of
-    // "Speaker 1" — and, like any speaker name, it stays user-renamable and
-    // never rewrites the canonical `[Speaker 1]` markers in the transcript.
-    // Best-effort: a failure costs only the friendly label, not the recording.
-    if is_meeting_mic {
-        if let Err(e) = state.catalog.set_speaker_name(&id, 1, "You").await {
-            tracing::warn!(id = %id.as_str(), "failed to name meeting mic speaker 'You': {e}");
+    // Track-aware Meeting Mode: seed label 1 → "You" only when the mic track
+    // was ACTUALLY labelled `[Speaker 1]` in place of a diarizer pass
+    // (`fixed_speaker_applied` — the local OpenAI-compatible path with real
+    // segments). Gating on the result flag, not just `is_meeting_mic`, avoids
+    // two bugs: a cloud STT backend ignores the fixed-speaker hint (no
+    // `[Speaker 1]` to attach to → an orphan/mislabelled row), and an
+    // empty/segment-less/silent mic track produces no `[Speaker 1]` either.
+    //
+    // The write is `set_speaker_name_if_absent`, NOT the upsert: it seeds the
+    // friendly default on the first transcribe but never clobbers an existing
+    // row, so a user rename (e.g. Speaker 1 → "Alice") survives a Retranscribe /
+    // Re-run / crash-recovery requeue that re-enters this branch. Like any
+    // speaker name, it stays user-renamable and never rewrites the canonical
+    // `[Speaker 1]` markers. Best-effort: a failure costs only the friendly
+    // label, not the recording.
+    if is_meeting_mic && fixed_speaker_applied {
+        if let Err(e) = state
+            .catalog
+            .set_speaker_name_if_absent(&id, 1, "You")
+            .await
+        {
+            tracing::warn!(id = %id.as_str(), "failed to seed meeting mic speaker 'You': {e}");
         }
     }
 

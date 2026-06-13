@@ -1752,6 +1752,39 @@ impl Catalog {
         Ok(())
     }
 
+    /// Seed a default display name for a speaker label only if none exists yet —
+    /// `INSERT ... ON CONFLICT DO NOTHING`, so an existing row is left untouched.
+    ///
+    /// This is the pipeline's "friendly default" path (the meeting mic track's
+    /// label 1 → "You"). Unlike [`Self::set_speaker_name`] (the user/IPC rename
+    /// path, an upsert), this NEVER overwrites a name already on the row, so a
+    /// user rename of that speaker survives a retranscribe / re-run that
+    /// re-seeds the same default. The `name` is trimmed like `set_speaker_name`;
+    /// a blank/whitespace-only `name` is a no-op (we never seed an empty
+    /// default). The recording is expected to exist; a foreign-key violation
+    /// surfaces as an error.
+    pub async fn set_speaker_name_if_absent(
+        &self,
+        recording_id: &RecordingId,
+        speaker_label: i64,
+        name: &str,
+    ) -> Result<()> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        sqlx::query(
+            "INSERT INTO speaker_names (recording_id, speaker_label, name) VALUES (?, ?, ?) \
+             ON CONFLICT(recording_id, speaker_label) DO NOTHING",
+        )
+        .bind(recording_id.as_str())
+        .bind(speaker_label)
+        .bind(trimmed)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// All custom speaker names for a recording, ordered by speaker index. Empty
     /// when none have been set. Used to populate `Recording::speaker_names` and
     /// by the IPC layer so the frontend can map `[Speaker N]` → name at display
@@ -3381,6 +3414,49 @@ mod tests {
                 name: "Alex P.".into()
             }],
             "clearing speaker 1 leaves only speaker 2"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_speaker_name_if_absent_seeds_then_never_overwrites() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+
+        // Absent → the friendly default is seeded (trimmed like set_speaker_name).
+        db.set_speaker_name_if_absent(&r.id, 1, "  You  ")
+            .await
+            .unwrap();
+        assert_eq!(
+            db.speaker_names_for(&r.id).await.unwrap(),
+            vec![SpeakerName {
+                speaker_label: 1,
+                name: "You".into()
+            }]
+        );
+
+        // A blank name never seeds an empty default (no-op).
+        db.set_speaker_name_if_absent(&r.id, 2, "   ")
+            .await
+            .unwrap();
+        assert_eq!(
+            db.speaker_names_for(&r.id).await.unwrap().len(),
+            1,
+            "blank name must not seed a row"
+        );
+
+        // Present → a later if-absent write is a no-op, preserving a user rename.
+        db.set_speaker_name(&r.id, 1, "Alice").await.unwrap();
+        db.set_speaker_name_if_absent(&r.id, 1, "You")
+            .await
+            .unwrap();
+        assert_eq!(
+            db.speaker_names_for(&r.id).await.unwrap(),
+            vec![SpeakerName {
+                speaker_label: 1,
+                name: "Alice".into()
+            }],
+            "if-absent must NOT clobber an existing user rename"
         );
     }
 
