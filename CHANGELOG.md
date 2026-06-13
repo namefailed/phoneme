@@ -57,6 +57,10 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] Doctor's local whisper-server probes follow the port the server bound
+  after a fallback (and say "running on 51234, fallback from 5809") instead
+  of probing the dead configured port — fixed on both the daemon-side and
+  tray-side Doctor paths.
 - [x] Settings/wizard hints name the **effective** whisper port after a
   fallback ("running on 51234 — preferred 5809 was busy") instead of the
   configured one; the configured port stays editable.

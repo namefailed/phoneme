@@ -1114,10 +1114,41 @@ pub fn doctor_local_checks() -> Result<Vec<CheckResult>, CommandError> {
 
 /// Probe remote backends (Whisper, Ollama) for reachability.
 /// Uses 3-second timeouts per endpoint so the Doctor UI stays responsive.
+///
+/// The bundled whisper-servers fall back to a free port when another app holds
+/// the configured one; the daemon publishes the live ports in `daemon_status`.
+/// We read them so a fallback can't make the probe hit the dead configured
+/// port. `current()` only peeks at an existing connection (never spawns a
+/// daemon), so when the daemon is down the probes simply use the configured
+/// ports — the honest "unreachable" the user should then see.
 #[tauri::command]
-pub async fn doctor_backend_checks() -> Result<Vec<CheckResult>, CommandError> {
+pub async fn doctor_backend_checks(bridge: Br<'_>) -> Result<Vec<CheckResult>, CommandError> {
     let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
-    Ok(crate::doctor::run_backend_checks(&cfg).await)
+    let ports = effective_whisper_ports(&bridge).await;
+    Ok(crate::doctor::run_backend_checks_with_ports(&cfg, &ports).await)
+}
+
+/// The bundled whisper-servers' live ports as published in `daemon_status`,
+/// for threading into the Doctor backend probes. Default (no ports) when the
+/// daemon is down or its status lacks the fields (an older daemon) — the
+/// probes then fall back to the configured ports.
+async fn effective_whisper_ports(bridge: &Br<'_>) -> crate::doctor::EffectiveWhisperPorts {
+    let Some(b) = bridge.current() else {
+        return crate::doctor::EffectiveWhisperPorts::default();
+    };
+    let Ok(Response::Ok(status)) = b.request(Request::DaemonStatus).await else {
+        return crate::doctor::EffectiveWhisperPorts::default();
+    };
+    let port = |key: &str| {
+        status
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|p| u16::try_from(p).ok())
+    };
+    crate::doctor::EffectiveWhisperPorts {
+        main: port("whisper_effective_port"),
+        preview: port("preview_whisper_effective_port"),
+    }
 }
 
 /// Attempt to start the background daemon. Used by the Doctor "Fix" button

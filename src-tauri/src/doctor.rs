@@ -6,4 +6,6 @@
 //! `#[tauri::command]` wrappers in `commands.rs` keep referring to
 //! `crate::doctor::*`.
 
-pub use phoneme_core::doctor::{run_backend_checks, run_local_checks, CheckResult};
+pub use phoneme_core::doctor::{
+    run_backend_checks_with_ports, run_local_checks, CheckResult, EffectiveWhisperPorts,
+};

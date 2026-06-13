@@ -855,8 +855,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::RunDoctor => {
             let cfg = state.config.load();
+            // Thread the bundled servers' LIVE ports into the backend probes so
+            // a startup port fallback can't make Doctor probe the dead
+            // configured port. The supervisors publish these in `whisper_ports`
+            // the same way the pipeline reads them via `apply`.
+            let ports = phoneme_core::doctor::EffectiveWhisperPorts {
+                main: state.whisper_ports.main(),
+                preview: state.whisper_ports.preview(),
+            };
             let mut checks = phoneme_core::doctor::run_local_checks(&cfg);
-            checks.extend(phoneme_core::doctor::run_backend_checks(&cfg).await);
+            checks.extend(phoneme_core::doctor::run_backend_checks_with_ports(&cfg, &ports).await);
             serialize_response(checks)
         }
         Request::RestartWhisper => {

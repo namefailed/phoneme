@@ -629,10 +629,10 @@ alongside the feature releases above.*
 - [x] Settings/wizard URL hints show the EFFECTIVE whisper port — after a
   fallback the Transcription/Dictation hints and the wizard's preview note
   name the bound port ("running on 51234 — preferred 5809 was busy").
-- [ ] Doctor probes should follow effective whisper ports — the daemon-side
-  RunDoctor handler and tray-side backend checks still build URLs from
-  config; rewrite via the published effective ports and say "running on
-  51234 (fallback from 5809)" when they differ.
+- [x] Doctor probes follow effective whisper ports — both the daemon-side
+  RunDoctor handler and the separate tray-side backend checks rewrite the
+  local-bundled probe URL via the published effective port and say "running
+  on 51234 (fallback from 5809)" when it differs from the configured one.
 - [x] Record the request model id for cloud STT — cloud/custom backends now store the requested `whisper.model`; local keeps the file-stem.
 - [ ] Doctor: decide whether local whisper model/server checks should skip (or downgrade) when a cloud STT provider is configured — today they run regardless (behavior parity kept on purpose).
 - [ ] Trim redundant `http.clone()` (transcription.rs ×7, llm.rs ×4); avoid the `attention_mask` clone in `embed.rs`.
