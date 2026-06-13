@@ -62,7 +62,7 @@ here, because those drift; the field names below are just enough to orient you.
 
 **Catalog & import:**
 - `list_recordings` (with a `filter`), `get_recording`, `list_meeting`, `get_segments` (machine transcript segments with ms timing + speaker labels; empty list when none are stored)
-- `get_words` (machine transcript **words** — the finer per-word layer beneath `get_segments`; ordered JSON array of `{ idx, start_ms, end_ms, text, speaker, confidence }`, where `confidence` is a 0..1 per-word score or `null` when the provider gives none — whisper-family endpoints emit only segment-level logprobs, so only Deepgram/AssemblyAI populate it. Empty list when none are stored. Fetched lazily by the word-level features — word↔waveform seek and confidence highlighting)
+- `get_words` (machine transcript **words** — the finer per-word layer beneath `get_segments`; ordered JSON array of `{ idx, start_ms, end_ms, text, speaker, confidence }`, where `confidence` is a 0..1 per-word score or `null` when the provider gives none — whisper-family endpoints emit only segment-level logprobs, so only Deepgram/AssemblyAI populate it. `speaker` is the `[Speaker N]` label (or `null` when undiarized): Deepgram/AssemblyAI tag words from their own speaker labels, and local diarization now tags each word too — it assigns speakers per word off the diarizer's per-frame activation matrix rather than per whole segment. Empty list when none are stored. Fetched lazily by the word-level features — word↔waveform seek and confidence highlighting)
 - `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`/`.flac`)
 
 **Transcript & metadata edits:**

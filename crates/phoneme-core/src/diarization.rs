@@ -10,6 +10,7 @@
 
 use crate::config::DiarizationConfig;
 use anyhow::Result;
+use ndarray::{Array2, Array3};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -36,6 +37,25 @@ pub struct TextSegment {
     /// Segment end, in seconds from the start of the audio.
     pub end: f64,
     /// The transcript text for this segment.
+    pub text: String,
+}
+
+/// One transcript word with its audio-relative timing, the unit of per-word
+/// speaker attribution.
+///
+/// Times are **seconds** from the start of the audio — the same clock the
+/// diarizer's frame matrix uses, so a word's span maps straight onto frame rows
+/// with no offset. This is the diarization-layer mirror of
+/// [`crate::types::TranscriptWord`] (which carries milliseconds): the provider
+/// path converts ms → seconds when handing words to [`assign_words`], keeping
+/// this module free of the persistence type and unit-testable with bare floats.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WordSpan {
+    /// Word start, in seconds from the start of the audio.
+    pub start: f64,
+    /// Word end, in seconds from the start of the audio.
+    pub end: f64,
+    /// The single word/token text.
     pub text: String,
 }
 
@@ -163,6 +183,124 @@ pub fn label_segments<'a>(
             None => 0, // no diarization info at all → unlabeled, plain text
         };
         out.push((seg, idx));
+    }
+
+    (out, next_idx - 1)
+}
+
+// ── Per-word speaker attribution (from the frame-activation matrix) ──────────
+
+/// The frame row covering instant `t` seconds: `floor(t / FRAME_STEP_SECONDS)`.
+///
+/// speakrs's `discrete_diarization` matrix has one row per frame, frames spaced
+/// `FRAME_STEP_SECONDS` apart on the same audio clock (seconds from start) that
+/// whisper word timestamps use — so there is no offset to apply. A negative `t`
+/// (shouldn't happen) clamps to row 0. The returned index is *not* bounds-checked
+/// against the matrix height; callers clamp it to the last row, since the final
+/// frame can end slightly before the last word's timestamp.
+fn frame_for_time(t: f64, frame_step: f64) -> usize {
+    if t <= 0.0 {
+        0
+    } else {
+        (t / frame_step).floor() as usize
+    }
+}
+
+/// speakrs labels the `k`-th column of its activation matrix `SPEAKER_{k:02}` —
+/// the exact label its `to_segments` (and therefore `DiarizationResult.segments`,
+/// our [`SpeakerSpan`] source) emits. Producing the identical string here lets a
+/// per-word column index flow through the SAME first-appearance map
+/// [`label_segments`] uses, so word-level and segment-level labels share one
+/// stable `[Speaker N]` numbering.
+fn column_label(speaker_idx: usize) -> String {
+    format!("SPEAKER_{speaker_idx:02}")
+}
+
+/// The speaker column with the most total activation over the frame range
+/// `[start_frame, end_frame]` (inclusive of both, so a sub-frame word still
+/// scores its one overlapping frame). Returns `None` when the matrix has no
+/// speaker columns, or when no frame in range carries any activation (a word
+/// landing in pure silence — the caller treats it as unattributed).
+fn dominant_column(
+    activations: &Array2<f32>,
+    start_frame: usize,
+    end_frame: usize,
+) -> Option<usize> {
+    let (num_frames, num_speakers) = activations.dim();
+    if num_speakers == 0 || num_frames == 0 {
+        return None;
+    }
+    // Clamp to the matrix: a word can end a hair past the final frame.
+    let last = num_frames - 1;
+    let lo = start_frame.min(last);
+    let hi = end_frame.min(last);
+
+    let mut best: Option<(usize, f64)> = None;
+    for spk in 0..num_speakers {
+        let mut sum = 0.0f64;
+        for frame in lo..=hi {
+            sum += activations[[frame, spk]] as f64;
+        }
+        // Strict `>` keeps the lowest column index on ties, so a tie is
+        // resolved deterministically toward the first-appearing speaker.
+        match best {
+            Some((_, bsum)) if sum <= bsum => {}
+            _ => best = Some((spk, sum)),
+        }
+    }
+    best.and_then(|(spk, sum)| (sum > 0.0).then_some(spk))
+}
+
+/// Per-word speaker attribution from the diarizer's per-frame activation matrix:
+/// each word paired with its stable 1-based speaker index (0 = unattributed),
+/// plus the number of distinct speakers used. The word-level counterpart of
+/// [`label_segments`], and it shares that function's labelling contract:
+///
+/// - A word's `[start, end]` span maps to the frame range
+///   `[floor(start/STEP), floor(end/STEP)]`; the speaker column with the most
+///   summed activation over that range wins (so a word straddling a hand-off
+///   goes to whoever speaks for most of it — the case whole-segment attribution
+///   gets wrong).
+/// - The winning column `k` becomes label `SPEAKER_{k:02}` and is mapped to a
+///   stable 1-based index **in first-appearance order**, the identical scheme
+///   [`label_segments`] applies to `DiarizationResult.segments`. So the
+///   `[Speaker N]` numbers a word-level transcript shows match what the
+///   segment-level path would have produced for the same speakers.
+/// - A word landing in silence (no activation in its frames) gets index 0 and
+///   is excluded from the speaker count, mirroring the segment-level `None`.
+/// - Empty/whitespace words are skipped (as empty segments are).
+///
+/// `frame_step` is `speakrs::pipeline::FRAME_STEP_SECONDS` in production; it is a
+/// parameter so the mapping is unit-testable with a synthetic matrix.
+pub fn assign_words<'a>(
+    words: &'a [WordSpan],
+    activations: &Array2<f32>,
+    frame_step: f64,
+) -> (Vec<(&'a WordSpan, usize)>, usize) {
+    use std::collections::HashMap;
+
+    let mut label_to_idx: HashMap<String, usize> = HashMap::new();
+    let mut next_idx = 1usize;
+    let mut out = Vec::with_capacity(words.len());
+
+    for word in words {
+        if word.text.trim().is_empty() {
+            continue;
+        }
+        let start_frame = frame_for_time(word.start, frame_step);
+        let end_frame = frame_for_time(word.end, frame_step);
+        let idx = match dominant_column(activations, start_frame, end_frame) {
+            Some(col) => {
+                let label = column_label(col);
+                *label_to_idx.entry(label).or_insert_with(|| {
+                    let i = next_idx;
+                    next_idx += 1;
+                    i
+                })
+            }
+            None => 0, // word in silence / empty matrix → unattributed
+        };
+        out.push((word, idx));
     }
 
     (out, next_idx - 1)
@@ -496,21 +634,62 @@ impl LocalDiarizer {
 
     /// Diarize one audio file through the shared pipeline. Blocking — run via
     /// `spawn_blocking` from async contexts.
-    pub fn run(&self, audio_path: &Path) -> Result<Vec<SpeakerSpan>> {
+    pub fn run(&self, audio_path: &Path) -> Result<LocalDiarization> {
         run_local_diarization(audio_path, &self.cache, &self.config)
     }
 }
 
-/// Run local diarization on a 16 kHz mono WAV, returning speaker turns. The
-/// pipeline comes from `cache` — loaded on first use, then reused across
-/// recordings (the per-call `from_pretrained` reload this replaced cost
-/// seconds and ~500 MB of churn per transcription). Blocking for the whole
-/// inference; callers run it off the async runtime (e.g. `spawn_blocking`).
+/// The full result of one local diarization run: the cleaned speaker turns the
+/// transcript paths consume **plus** the raw model arrays a few of them need.
+///
+/// `spans` is the post-processed turn list (`clean_speaker_spans`) used by the
+/// segment-level attribution path and the word-level fallback — unchanged from
+/// what [`run_local_diarization`] used to return.
+///
+/// `discrete_diarization` is the per-frame activation matrix (frames × speakers,
+/// one row per `FRAME_STEP_SECONDS`) that word-level attribution
+/// ([`assign_words`]) sums over to pick each word's speaker. Column `k`
+/// corresponds to label `SPEAKER_{k:02}`.
+///
+/// `embeddings`, `hard_clusters`, and `segmentations` are surfaced verbatim from
+/// the speakrs result for a **future feature** (persistent named-speaker
+/// voiceprints — "Cluster 5"): per-cluster embedding centroids are aggregated
+/// from `embeddings` (chunks × speakers × dim) over the `(chunk, speaker)` cells
+/// whose `hard_clusters` id matches and that are active in `segmentations`.
+/// Nothing in the current word-level path reads them; they are carried here so
+/// the return type isn't rewritten again when that feature lands.
+#[derive(Debug, Clone)]
+pub struct LocalDiarization {
+    /// Cleaned, assignment-ready speaker turns (the segment-level path and the
+    /// word-level fallback consume these).
+    pub spans: Vec<SpeakerSpan>,
+    /// Per-frame binary speaker activations, shape `(frames, speakers)`, one row
+    /// per `FRAME_STEP_SECONDS`. Word-level attribution sums over this; column
+    /// `k` maps to label `SPEAKER_{k:02}`.
+    pub discrete_diarization: Array2<f32>,
+    /// Per-chunk speaker embeddings, shape `(chunks, speakers, dim)`. Surfaced
+    /// for the deferred named-speaker-voiceprint feature; unused today.
+    pub embeddings: Array3<f32>,
+    /// Per-chunk-speaker cluster ids, shape `(chunks, speakers)` (`-1` =
+    /// unassigned). Surfaced for the deferred voiceprint feature; unused today.
+    pub hard_clusters: Array2<i32>,
+    /// Decoded powerset segmentations, shape `(chunks, frames, speakers)`.
+    /// Tells which `(chunk, speaker)` cells are active when aggregating
+    /// centroids. Surfaced for the deferred voiceprint feature; unused today.
+    pub segmentations: Array3<f32>,
+}
+
+/// Run local diarization on a 16 kHz mono WAV, returning the cleaned speaker
+/// turns alongside the raw model arrays (see [`LocalDiarization`]). The pipeline
+/// comes from `cache` — loaded on first use, then reused across recordings (the
+/// per-call `from_pretrained` reload this replaced cost seconds and ~500 MB of
+/// churn per transcription). Blocking for the whole inference; callers run it off
+/// the async runtime (e.g. `spawn_blocking`).
 pub fn run_local_diarization(
     audio_path: &Path,
     cache: &LocalDiarizerCache,
     cfg: &DiarizationConfig,
-) -> Result<Vec<SpeakerSpan>> {
+) -> Result<LocalDiarization> {
     // Decode the audio before touching the cache so a bad WAV fails fast
     // without costing (or being blamed on) a model load.
     let audio = load_audio_mono_16khz(audio_path)?;
@@ -522,7 +701,7 @@ pub fn run_local_diarization(
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "audio".to_string());
 
-    let result = match pipeline.diarize(&file_id, audio) {
+    let mut result = match pipeline.diarize(&file_id, audio) {
         Ok(result) => result,
         Err(QueueRunError::Job(e)) => return Err(e.into()),
         Err(QueueRunError::QueueDead(e)) => {
@@ -535,23 +714,41 @@ pub fn run_local_diarization(
         }
     };
 
+    // Collapse each frame to its single highest-scoring speaker before we read
+    // the matrix for word-level attribution. The powerset model can mark a frame
+    // active for several speakers at once (overlapping speech); making it
+    // exclusive gives each frame one winner, so summing a word's frames over the
+    // speaker columns yields a clean argmax. It also matches how speakrs derives
+    // `result.segments` internally (post-inference makes the matrix exclusive
+    // before `to_segments`), keeping the word and segment label columns aligned.
+    result.discrete_diarization.make_exclusive();
+
     // `result.segments` carries correctly-scaled (seconds) turns — that part of
     // the prior fix was right; the old `to_segments(1.0, 1.0)` had passed a frame
     // STEP/DURATION of 1.0 s against the model's real ~16.9 ms / ~61.9 ms geometry
     // and inflated every timestamp ~59×. But `result.segments` is NOT actually
     // merged (speakrs builds it with the default `merge_gap == 0.0`, a no-op), so
     // we coalesce same-speaker fragments ourselves before handing them off.
-    let spans = result
+    let raw_spans: Vec<SpeakerSpan> = result
         .segments
-        .into_iter()
+        .iter()
         .map(|s| SpeakerSpan {
             start: s.start,
             end: s.end,
-            label: s.speaker,
+            label: s.speaker.clone(),
         })
         .collect();
+    let spans = clean_speaker_spans(raw_spans, SPEAKER_MERGE_GAP_SECS);
 
-    Ok(clean_speaker_spans(spans, SPEAKER_MERGE_GAP_SECS))
+    Ok(LocalDiarization {
+        spans,
+        // Move the arrays out of their newtype wrappers (each derefs to the
+        // inner ndarray); the `.0` is the owned `Array`.
+        discrete_diarization: result.discrete_diarization.0,
+        embeddings: result.embeddings.0,
+        hard_clusters: result.hard_clusters.0,
+        segmentations: result.segmentations.0,
+    })
 }
 
 #[cfg(test)]
@@ -570,6 +767,13 @@ mod tests {
             start,
             end,
             label: label.to_string(),
+        }
+    }
+    fn word(start: f64, end: f64, text: &str) -> WordSpan {
+        WordSpan {
+            start,
+            end,
+            text: text.to_string(),
         }
     }
 
@@ -768,6 +972,153 @@ mod tests {
         let (text, n) = assign_speakers(&segments, &speakers);
         assert_eq!(n, 2, "exactly two speakers, got: {text}");
         assert_eq!(text, "[Speaker 1]: a one a two\n\n[Speaker 2]: b one b two");
+    }
+
+    // ── Per-word attribution from the frame-activation matrix ────────────────
+    //
+    // The real `discrete_diarization` matrix needs the speakrs models, so these
+    // feed `assign_words` synthetic frames×speakers matrices. Each row is one
+    // `frame_step`-long frame; column k is speaker `SPEAKER_{k:02}`. The frame
+    // step is the same for the matrix rows and the word→frame mapping.
+
+    use ndarray::array;
+
+    /// Frame step chosen so a word at 0.10 s lands on frame 1 (0.10/0.05 = 2 →
+    /// floor 2), keeping the synthetic geometry easy to reason about. The
+    /// production step is `speakrs::pipeline::FRAME_STEP_SECONDS`; the mapping
+    /// logic is identical regardless of the constant.
+    const STEP: f64 = 0.05;
+
+    #[test]
+    fn frame_for_time_floors_to_the_covering_row() {
+        // floor(t / STEP); negatives clamp to row 0.
+        assert_eq!(frame_for_time(0.0, STEP), 0);
+        assert_eq!(frame_for_time(0.049, STEP), 0);
+        assert_eq!(frame_for_time(0.05, STEP), 1);
+        assert_eq!(frame_for_time(0.10, STEP), 2);
+        assert_eq!(frame_for_time(0.149, STEP), 2);
+        assert_eq!(frame_for_time(-1.0, STEP), 0);
+    }
+
+    #[test]
+    fn column_label_matches_speakrs_to_segments_naming() {
+        // The whole stable-index alignment hinges on this string matching the
+        // label speakrs' `to_segments` emits for column k.
+        assert_eq!(column_label(0), "SPEAKER_00");
+        assert_eq!(column_label(1), "SPEAKER_01");
+        assert_eq!(column_label(12), "SPEAKER_12");
+    }
+
+    #[test]
+    fn each_word_lands_on_its_dominant_speaker_when_the_flip_is_mid_segment() {
+        // Two speakers, six frames. Speaker 0 (column 0) owns frames 0–2, speaker
+        // 1 (column 1) owns frames 3–5 — the flip is at frame 3 (t = 0.15 s), in
+        // the MIDDLE of what a single whisper segment might span. Whole-segment
+        // attribution would put the entire segment on one speaker; per-word
+        // attribution splits it correctly.
+        let m = array![
+            [1.0, 0.0], // frame 0  [0.00,0.05)
+            [1.0, 0.0], // frame 1  [0.05,0.10)
+            [1.0, 0.0], // frame 2  [0.10,0.15)
+            [0.0, 1.0], // frame 3  [0.15,0.20)
+            [0.0, 1.0], // frame 4  [0.20,0.25)
+            [0.0, 1.0], // frame 5  [0.25,0.30)
+        ];
+        let words = vec![
+            word(0.00, 0.05, "alpha"), // frames 0..=1 → speaker 0
+            word(0.10, 0.14, "beta"),  // frame 2      → speaker 0
+            word(0.15, 0.20, "gamma"), // frames 3..=4 → speaker 1
+            word(0.25, 0.29, "delta"), // frame 5      → speaker 1
+        ];
+        let (labeled, n) = assign_words(&words, &m, STEP);
+        assert_eq!(n, 2, "two distinct speakers used");
+        let idxs: Vec<usize> = labeled.iter().map(|(_, i)| *i).collect();
+        // First-appearance order: speaker 0 → index 1, speaker 1 → index 2.
+        assert_eq!(idxs, vec![1, 1, 2, 2]);
+    }
+
+    #[test]
+    fn boundary_straddling_word_goes_to_its_dominant_frames() {
+        // The case whole-segment (and naive midpoint) attribution gets wrong: a
+        // word straddling the hand-off. Speaker 0 owns frames 0–1, speaker 1 owns
+        // frames 2–5. A word spanning [0.05, 0.29] covers frame 1 (spk 0) plus
+        // frames 2,3,4,5 (spk 1): 1 frame vs 4 → speaker 1 wins on summed
+        // activation, even though it starts inside speaker 0's region.
+        let m = array![
+            [1.0, 0.0], // 0
+            [1.0, 0.0], // 1
+            [0.0, 1.0], // 2
+            [0.0, 1.0], // 3
+            [0.0, 1.0], // 4
+            [0.0, 1.0], // 5
+        ];
+        let words = vec![word(0.05, 0.29, "straddle")]; // frames 1..=5
+        let (labeled, n) = assign_words(&words, &m, STEP);
+        assert_eq!(n, 1);
+        // Only one word, so it's the first-appearing speaker → index 1, but it is
+        // speaker column 1 (the dominant one), not column 0 where it started.
+        assert_eq!(labeled[0].1, 1);
+        // Prove the dominance: the same word over a matrix where column 0 is
+        // dominant instead would still map to index 1 (first appearance), so
+        // assert the column directly via the helper.
+        assert_eq!(dominant_column(&m, 1, 5), Some(1));
+    }
+
+    #[test]
+    fn word_in_silence_is_unattributed() {
+        // A word whose frames carry no activation (a gap in diarization) gets
+        // index 0 and is excluded from the speaker count, mirroring the
+        // segment-level `None`.
+        let m = array![[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]];
+        let words = vec![
+            word(0.05, 0.09, "voiced"), // frame 1 → speaker 0
+            word(0.10, 0.14, "silent"), // frame 2 → all-zero → unattributed
+        ];
+        let (labeled, n) = assign_words(&words, &m, STEP);
+        assert_eq!(n, 1, "only the voiced word counts toward speaker count");
+        assert_eq!(labeled[0].1, 1);
+        assert_eq!(labeled[1].1, 0, "silent word is unattributed");
+    }
+
+    #[test]
+    fn empty_words_are_skipped_like_empty_segments() {
+        let m = array![[1.0, 0.0], [0.0, 1.0]];
+        let words = vec![
+            word(0.00, 0.04, "  "), // skipped
+            word(0.00, 0.04, "a"),  // frame 0 → speaker 0
+            word(0.05, 0.09, "b"),  // frame 1 → speaker 1
+        ];
+        let (labeled, n) = assign_words(&words, &m, STEP);
+        assert_eq!(labeled.len(), 2, "the whitespace word is dropped");
+        assert_eq!(n, 2);
+        assert_eq!(labeled[0].0.text, "a");
+        assert_eq!(labeled[1].0.text, "b");
+    }
+
+    #[test]
+    fn argmax_ties_break_to_the_lowest_column() {
+        // Equal activation across columns resolves deterministically to the
+        // lowest-index column (the first-appearing speaker), never flickers.
+        let m = array![[1.0, 1.0]];
+        assert_eq!(dominant_column(&m, 0, 0), Some(0));
+    }
+
+    #[test]
+    fn dominant_column_clamps_a_word_ending_past_the_last_frame() {
+        // The final frame can end a hair before the last word's timestamp; the
+        // frame index clamps to the last row rather than panicking.
+        let m = array![[1.0, 0.0], [0.0, 1.0]];
+        // end_frame 9 is well past row 1; clamp → consider rows [1,1] → speaker 1.
+        assert_eq!(dominant_column(&m, 1, 9), Some(1));
+    }
+
+    #[test]
+    fn empty_matrix_attributes_nothing() {
+        let m: Array2<f32> = Array2::zeros((0, 0));
+        let words = vec![word(0.0, 0.1, "x")];
+        let (labeled, n) = assign_words(&words, &m, STEP);
+        assert_eq!(n, 0);
+        assert_eq!(labeled[0].1, 0, "no columns → unattributed");
     }
 
     // ── Pipeline cache: lazy init / invalidation / no double load ────────────

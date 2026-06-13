@@ -61,6 +61,17 @@ trust boundary. Verified against current code.*
   waveform, and the word under the playhead highlights as audio plays. The shared
   substrate also unlocks confidence highlighting and tighter diarization
   boundaries.
+- [x] **Word-level speaker attribution** — local diarization now assigns speakers
+  **per word** instead of per whole segment. Building on the word-timestamp
+  substrate, each word's time span is mapped onto the diarizer's per-frame
+  activation matrix and attributed to the speaker who actually owns most of its
+  frames, so a word straddling a hand-off lands on the right speaker (the case
+  whole-segment labelling got wrong). Consecutive same-speaker words group into
+  `[Speaker N]` turns for the transcript, the stored timeline, and the per-word
+  speaker tags — all kept in agreement, and tied to the same stable numbering the
+  segment path uses. Cloud and segments-only transcripts are unchanged: they fall
+  back to the existing segment-level attribution, and a single-voice recording
+  still reads as plain prose.
 - [x] **Audio normalization** — optionally boost a quiet recording's gain to a
   consistent peak level before transcribing, so a soft microphone still hands
   Whisper a healthy signal (Settings → Capture → Recording; off by default,

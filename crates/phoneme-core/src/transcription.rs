@@ -500,10 +500,14 @@ impl TranscriptionProvider for OpenAiCompatProvider {
 
         if let Some(diarizer) = &self.local_diarize {
             if !segs.is_empty() {
-                let mut diarized =
-                    diarize_transcript(audio_path, segs, parsed.text, diarizer).await;
-                diarized.words = words;
-                return Ok(diarized);
+                // Hand the per-word timing to diarization too: when whisper
+                // returned words, the diarizer attributes speakers per word off
+                // the frame matrix and threads the speaker labels back into
+                // these words; with no words it falls back to segment-level
+                // attribution and returns the words untouched.
+                return Ok(
+                    diarize_transcript(audio_path, segs, words, parsed.text, diarizer).await,
+                );
             }
         }
 
@@ -532,10 +536,23 @@ fn secs_to_ms(secs: f64) -> i64 {
     (secs * 1000.0).round() as i64
 }
 
-/// Run local diarization for a transcript and return the speaker-labeled text
-/// plus the per-segment timeline, falling back to `plain_text` (with unlabeled
-/// segments — the timing is still good) when diarization fails or finds ≤1
-/// speaker.
+/// Run local diarization for a transcript and return the speaker-labeled text,
+/// the per-segment timeline, and the (speaker-tagged) per-word layer, falling
+/// back to `plain_text` (with unlabeled segments and words — the timing is still
+/// good) when diarization fails or finds ≤1 speaker.
+///
+/// When `words` is non-empty (the local whisper path requested
+/// `timestamp_granularities[]=word`), speakers are attributed **per word** off
+/// the diarizer's per-frame activation matrix: each word's frames are summed per
+/// speaker column, argmax wins, and consecutive same-speaker words are grouped
+/// into turns for the text and the persisted timeline. When `words` is empty
+/// (cloud STT routed here, or whisper returned segments only) it falls back to
+/// the segment-level `label_segments` attribution, so behavior is unchanged for
+/// those inputs and a one-word-per-segment transcript reproduces the old labels.
+///
+/// The returned `words` carry their resolved `[Speaker N]` label (when ≥2
+/// speakers were found); on any fallback they are returned with their timing and
+/// confidence intact but no speaker.
 ///
 /// The CPU-bound model inference is run on a blocking thread so it never stalls
 /// the async runtime. `diarizer` carries the process-wide pipeline cache, so
@@ -543,58 +560,112 @@ fn secs_to_ms(secs: f64) -> i64 {
 pub(crate) async fn diarize_transcript(
     audio_path: &std::path::Path,
     segments: Vec<crate::diarization::TextSegment>,
+    words: Vec<TranscriptWord>,
     plain_text: String,
     diarizer: &LocalDiarizer,
 ) -> Transcription {
     // Diarization failing must not cost the timeline its timing data, so the
-    // fallback carries the whisper segments with no speaker attribution.
-    // Words are attached by the caller (the OpenAI-compat path decodes them
-    // independently of speaker attribution), so every result built here starts
-    // with an empty `words`.
-    let unlabeled = |text: String, segments: &[crate::diarization::TextSegment]| Transcription {
-        text,
-        segments: segments
-            .iter()
-            .filter(|s| !s.text.trim().is_empty())
-            .map(|s| TranscriptSegment {
-                start_ms: secs_to_ms(s.start),
-                end_ms: secs_to_ms(s.end),
-                text: s.text.trim().to_string(),
-                speaker: None,
-            })
-            .collect(),
-        words: Vec::new(),
-    };
+    // fallback carries the whisper segments with no speaker attribution. The
+    // words ride along with their timing/confidence but no speaker label (we
+    // never produced one), mirroring the undiarized provider paths.
+    let unlabeled =
+        |text: String, segments: &[crate::diarization::TextSegment], words: Vec<TranscriptWord>| {
+            Transcription {
+                text,
+                segments: segments
+                    .iter()
+                    .filter(|s| !s.text.trim().is_empty())
+                    .map(|s| TranscriptSegment {
+                        start_ms: secs_to_ms(s.start),
+                        end_ms: secs_to_ms(s.end),
+                        text: s.text.trim().to_string(),
+                        speaker: None,
+                    })
+                    .collect(),
+                words: words
+                    .into_iter()
+                    .map(|w| TranscriptWord { speaker: None, ..w })
+                    .collect(),
+            }
+        };
 
     let path = audio_path.to_path_buf();
     let diarizer = diarizer.clone();
-    let speakers = match tokio::task::spawn_blocking(move || diarizer.run(&path)).await {
-        Ok(Ok(s)) => {
-            tracing::info!(turns = s.len(), "local diarization completed");
-            s
+    let diar = match tokio::task::spawn_blocking(move || diarizer.run(&path)).await {
+        Ok(Ok(d)) => {
+            tracing::info!(turns = d.spans.len(), "local diarization completed");
+            d
         }
         Ok(Err(e)) => {
             tracing::warn!("local diarization failed, falling back to raw whisper: {e}");
-            return unlabeled(plain_text, &segments);
+            return unlabeled(plain_text, &segments, words);
         }
         Err(e) => {
             tracing::warn!("local diarization task panicked: {e}");
-            return unlabeled(plain_text, &segments);
+            return unlabeled(plain_text, &segments, words);
         }
     };
 
-    let (labeled, num_speakers) = crate::diarization::label_segments(&segments, &speakers);
+    // The per-word path is taken only when whisper actually returned words; with
+    // segments-only input the frame matrix has nothing word-shaped to attribute
+    // and we use the legacy segment-level path so those transcripts are byte-for
+    // -byte unchanged.
+    if !words.is_empty() {
+        if let Some(diarized) = diarize_per_word(&words, &diar) {
+            return diarized;
+        }
+        // `diarize_per_word` returns `None` for the ≤1-speaker gate; fall through
+        // to plain text (keeping segment timing) exactly as the segment path does.
+        return unlabeled(plain_text, &segments, words);
+    }
+
+    diarize_per_segment(&segments, &diar.spans, plain_text, words)
+}
+
+/// Segment-level attribution (the path for segments-only / cloud-routed inputs
+/// and the fallback): label each whisper segment by the turn it overlaps most,
+/// build the `[Speaker N]` text and timeline from that single attribution, and
+/// gate ≤1-speaker transcripts to plain text. The `words` are returned with no
+/// speaker (this path never attributes them).
+fn diarize_per_segment(
+    segments: &[crate::diarization::TextSegment],
+    spans: &[crate::diarization::SpeakerSpan],
+    plain_text: String,
+    words: Vec<TranscriptWord>,
+) -> Transcription {
+    let strip_word_speakers = |words: Vec<TranscriptWord>| -> Vec<TranscriptWord> {
+        words
+            .into_iter()
+            .map(|w| TranscriptWord { speaker: None, ..w })
+            .collect()
+    };
+
+    let (labeled, num_speakers) = crate::diarization::label_segments(segments, spans);
     // Surface the assignment result so "why isn't this diarized?" is answerable
     // from the log: a recording is only labeled when ≥2 distinct speakers are
     // found (a single voice reads better as plain prose, so it stays unlabeled).
     tracing::info!(
-        turns = speakers.len(),
+        turns = spans.len(),
         speakers = num_speakers,
         labeled = num_speakers > 1,
+        granularity = "segment",
         "local diarization assignment",
     );
     if num_speakers <= 1 {
-        return unlabeled(plain_text, &segments);
+        let segs = labeled
+            .iter()
+            .map(|(seg, _)| TranscriptSegment {
+                start_ms: secs_to_ms(seg.start),
+                end_ms: secs_to_ms(seg.end),
+                text: seg.text.trim().to_string(),
+                speaker: None,
+            })
+            .collect();
+        return Transcription {
+            text: plain_text,
+            segments: segs,
+            words: strip_word_speakers(words),
+        };
     }
 
     // Build the formatted text and the persisted timeline from the SAME
@@ -628,8 +699,110 @@ pub(crate) async fn diarize_transcript(
     Transcription {
         text,
         segments: out_segments,
-        words: Vec::new(),
+        words: strip_word_speakers(words),
     }
+}
+
+/// Word-level attribution: assign each word a speaker from the per-frame
+/// activation matrix, group consecutive same-speaker words into turns, and build
+/// the `[Speaker N]` text, the persisted segment timeline, and the speaker-tagged
+/// word layer from that single pass — so all three agree. Returns `None` for the
+/// ≤1-speaker gate (the caller then emits plain text), so a single-voice
+/// recording reads as prose just like the segment path.
+fn diarize_per_word(
+    words: &[TranscriptWord],
+    diar: &crate::diarization::LocalDiarization,
+) -> Option<Transcription> {
+    use crate::diarization::{assign_words, WordSpan};
+
+    // Map persisted words (ms) onto the seconds clock the frame matrix uses.
+    let spans: Vec<WordSpan> = words
+        .iter()
+        .map(|w| WordSpan {
+            start: w.start_ms as f64 / 1000.0,
+            end: w.end_ms as f64 / 1000.0,
+            text: w.text.clone(),
+        })
+        .collect();
+
+    let (labeled, num_speakers) = assign_words(
+        &spans,
+        &diar.discrete_diarization,
+        speakrs::pipeline::FRAME_STEP_SECONDS,
+    );
+    tracing::info!(
+        turns = diar.spans.len(),
+        speakers = num_speakers,
+        labeled = num_speakers > 1,
+        words = labeled.len(),
+        granularity = "word",
+        "local diarization assignment",
+    );
+    if num_speakers <= 1 {
+        return None;
+    }
+
+    // `assign_words` skips empty/whitespace words (mirroring `label_segments`),
+    // so its output aligns with the non-empty source words, NOT all of `words`.
+    // Filter the source words by the same predicate to pair label↔confidence
+    // safely even if the provider ever stops pre-dropping empties. Group
+    // consecutive same-speaker words into turns, emitting text + a per-turn
+    // segment + the tagged word in lockstep so all three agree.
+    let non_empty: Vec<&TranscriptWord> =
+        words.iter().filter(|w| !w.text.trim().is_empty()).collect();
+    debug_assert_eq!(
+        labeled.len(),
+        non_empty.len(),
+        "assign_words must label exactly the non-empty words"
+    );
+
+    let mut text = String::new();
+    let mut current: Option<usize> = None;
+    let mut out_segments: Vec<TranscriptSegment> = Vec::new();
+    let mut out_words: Vec<TranscriptWord> = Vec::with_capacity(non_empty.len());
+
+    for ((span, idx), src) in labeled.iter().zip(non_empty.iter()) {
+        let idx = *idx;
+        let trimmed = span.text.trim();
+        let start_ms = secs_to_ms(span.start);
+        let end_ms = secs_to_ms(span.end);
+        let speaker = (idx > 0).then(|| idx.to_string());
+
+        if current != Some(idx) {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            if idx > 0 {
+                text.push_str(&format!("[Speaker {idx}]: "));
+            }
+            current = Some(idx);
+            out_segments.push(TranscriptSegment {
+                start_ms,
+                end_ms,
+                text: trimmed.to_string(),
+                speaker: speaker.clone(),
+            });
+        } else {
+            text.push(' ');
+            if let Some(seg) = out_segments.last_mut() {
+                seg.text.push(' ');
+                seg.text.push_str(trimmed);
+                seg.end_ms = end_ms.max(seg.end_ms);
+            }
+        }
+        text.push_str(trimmed);
+
+        out_words.push(TranscriptWord {
+            speaker,
+            ..(*src).clone()
+        });
+    }
+
+    Some(Transcription {
+        text,
+        segments: out_segments,
+        words: out_words,
+    })
 }
 
 /// Provider for Deepgram's prerecorded speech-to-text API (`/v1/listen`).
@@ -1549,5 +1722,166 @@ mod tests {
         assert_eq!(t.words[0].confidence, Some(0.95));
         assert_eq!(t.words[1].text, "morning");
         assert_eq!(t.words[1].confidence, Some(0.6));
+    }
+
+    // ── Word-level diarization: integration shape + fallback equivalence ─────
+    //
+    // The real per-frame matrix needs the speakrs models, so the per-word
+    // matrix logic is exercised in `diarization.rs` against synthetic matrices.
+    // Here we pin (1) that the segment-level fallback path
+    // (`diarize_per_segment`) reproduces the legacy `assign_speakers` labels —
+    // which is what guarantees a segments-only / one-word-per-segment input is
+    // unchanged — and (2) the per-word turn builder's text/segment/word
+    // agreement off a hand-built `LocalDiarization`.
+
+    use crate::diarization::{LocalDiarization, SpeakerSpan, TextSegment};
+    use ndarray::Array2;
+
+    fn tseg(start: f64, end: f64, text: &str) -> TextSegment {
+        TextSegment {
+            start,
+            end,
+            text: text.to_string(),
+        }
+    }
+    fn sspan(start: f64, end: f64, label: &str) -> SpeakerSpan {
+        SpeakerSpan {
+            start,
+            end,
+            label: label.to_string(),
+        }
+    }
+
+    #[test]
+    fn fallback_segment_path_reproduces_legacy_assign_speakers_labels() {
+        // The fallback (no words) must produce the SAME `[Speaker N]` text the
+        // pure `assign_speakers` produces — this is the regression guard that a
+        // segments-only transcript (and a one-word-per-segment transcript routed
+        // through the fallback) is byte-for-byte unchanged from before C2.
+        let segments = vec![
+            tseg(0.0, 2.0, "hello there"),
+            tseg(2.0, 4.0, "hi back"),
+            tseg(4.0, 6.0, "how are you"),
+        ];
+        let spans = vec![
+            sspan(0.0, 2.0, "SPEAKER_00"),
+            sspan(2.0, 4.0, "SPEAKER_01"),
+            sspan(4.0, 6.0, "SPEAKER_00"),
+        ];
+
+        let legacy_text = crate::diarization::assign_speakers(&segments, &spans).0;
+        let out = diarize_per_segment(&segments, &spans, "PLAIN".to_string(), Vec::new());
+        assert_eq!(
+            out.text, legacy_text,
+            "fallback text must match legacy labels"
+        );
+        // The persisted timeline speakers agree with the markers in the text.
+        assert_eq!(out.segments.len(), 3);
+        assert_eq!(out.segments[0].speaker.as_deref(), Some("1"));
+        assert_eq!(out.segments[1].speaker.as_deref(), Some("2"));
+        assert_eq!(out.segments[2].speaker.as_deref(), Some("1"));
+        assert!(out.words.is_empty(), "no words in → no words out");
+    }
+
+    #[test]
+    fn fallback_single_speaker_falls_back_to_plain_text() {
+        // ≤1 speaker → plain prose, segments unlabeled, the supplied words kept
+        // (timing/confidence) but stripped of any speaker label.
+        let segments = vec![tseg(0.0, 2.0, "just me talking")];
+        let spans = vec![sspan(0.0, 2.0, "SPEAKER_00")];
+        let words = vec![TranscriptWord {
+            start_ms: 0,
+            end_ms: 2000,
+            text: "just".to_string(),
+            speaker: Some("stale".to_string()),
+            confidence: Some(0.9),
+        }];
+        let out = diarize_per_segment(&segments, &spans, "just me talking".to_string(), words);
+        assert_eq!(out.text, "just me talking");
+        assert!(out.segments.iter().all(|s| s.speaker.is_none()));
+        assert_eq!(out.words.len(), 1);
+        assert_eq!(out.words[0].speaker, None, "stale speaker label cleared");
+        assert_eq!(out.words[0].confidence, Some(0.9), "timing/confidence kept");
+    }
+
+    #[test]
+    fn per_word_turns_agree_across_text_segments_and_words() {
+        // A hand-built two-speaker matrix (frames at FRAME_STEP_SECONDS) drives
+        // the per-word turn builder; assert the `[Speaker N]` text, the segment
+        // timeline, and the tagged word layer all describe the same two turns.
+        let step = speakrs::pipeline::FRAME_STEP_SECONDS;
+        // 4 frames: speaker 0 owns 0–1, speaker 1 owns 2–3.
+        let m: Array2<f32> = ndarray::array![[1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0],];
+        let diar = LocalDiarization {
+            spans: vec![
+                sspan(0.0, 2.0 * step, "SPEAKER_00"),
+                sspan(2.0 * step, 4.0 * step, "SPEAKER_01"),
+            ],
+            discrete_diarization: m,
+            embeddings: ndarray::Array3::zeros((0, 0, 0)),
+            hard_clusters: Array2::zeros((0, 0)),
+            segmentations: ndarray::Array3::zeros((0, 0, 0)),
+        };
+        // Place each word at the CENTER of its target frame so the ms→seconds
+        // round-trip (truncate on the way in, floor in `frame_for_time`) can't
+        // nudge it across a frame boundary. Frame f's center is (f+0.5)*step.
+        let center_ms = |frame: f64| ((frame + 0.5) * step * 1000.0).round() as i64;
+        let at = |frame: f64, text: &str, conf: Option<f32>| TranscriptWord {
+            start_ms: center_ms(frame),
+            end_ms: center_ms(frame),
+            text: text.to_string(),
+            speaker: None,
+            confidence: conf,
+        };
+        let words = vec![
+            at(0.0, "alpha", Some(0.5)), // frame 0 → speaker 0
+            at(1.0, "beta", None),       // frame 1 → speaker 0
+            at(2.0, "gamma", None),      // frame 2 → speaker 1
+            at(3.0, "delta", None),      // frame 3 → speaker 1
+        ];
+
+        let out = diarize_per_word(&words, &diar).expect("two speakers → labeled");
+        assert_eq!(
+            out.text,
+            "[Speaker 1]: alpha beta\n\n[Speaker 2]: gamma delta"
+        );
+        // Two turns in the timeline, matching the text markers.
+        assert_eq!(out.segments.len(), 2);
+        assert_eq!(out.segments[0].speaker.as_deref(), Some("1"));
+        assert_eq!(out.segments[0].text, "alpha beta");
+        assert_eq!(out.segments[1].speaker.as_deref(), Some("2"));
+        assert_eq!(out.segments[1].text, "gamma delta");
+        // Every word tagged, in order, timing/confidence preserved.
+        assert_eq!(out.words.len(), 4);
+        assert_eq!(out.words[0].speaker.as_deref(), Some("1"));
+        assert_eq!(out.words[0].confidence, Some(0.5), "word confidence kept");
+        assert_eq!(out.words[1].speaker.as_deref(), Some("1"));
+        assert_eq!(out.words[2].speaker.as_deref(), Some("2"));
+        assert_eq!(out.words[3].speaker.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn per_word_single_speaker_gates_to_none() {
+        // One speaker across all words → the ≤1-speaker gate returns None so the
+        // caller emits plain text (reads better as prose).
+        let step = speakrs::pipeline::FRAME_STEP_SECONDS;
+        let m: Array2<f32> = ndarray::array![[1.0], [1.0]];
+        let diar = LocalDiarization {
+            spans: vec![sspan(0.0, 2.0 * step, "SPEAKER_00")],
+            discrete_diarization: m,
+            embeddings: ndarray::Array3::zeros((0, 0, 0)),
+            hard_clusters: Array2::zeros((0, 0)),
+            segmentations: ndarray::Array3::zeros((0, 0, 0)),
+        };
+        let center_ms = |frame: f64| ((frame + 0.5) * step * 1000.0).round() as i64;
+        let at = |frame: f64, text: &str| TranscriptWord {
+            start_ms: center_ms(frame),
+            end_ms: center_ms(frame),
+            text: text.to_string(),
+            speaker: None,
+            confidence: None,
+        };
+        let words = vec![at(0.0, "one"), at(1.0, "two")];
+        assert!(diarize_per_word(&words, &diar).is_none());
     }
 }
