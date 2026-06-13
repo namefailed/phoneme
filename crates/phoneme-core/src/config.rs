@@ -138,6 +138,9 @@ pub struct Config {
     /// Automatic cleanup policy — delete old recordings by age or count.
     #[serde(default)]
     pub retention: RetentionConfig,
+    /// Optional local REST/SSE bridge (`phoneme-rest`). Off by default.
+    #[serde(default)]
+    pub rest_api: RestApiConfig,
 }
 
 /// Diarization providers supported by Phoneme.
@@ -1200,6 +1203,39 @@ pub struct RetentionConfig {
     pub delete_audio: bool,
 }
 
+/// Local REST/SSE bridge settings (the optional `phoneme-rest` server).
+///
+/// Off by default: the bridge exposes the daemon's IPC surface over
+/// `http://127.0.0.1:<port>` (loopback only — the trust boundary for a
+/// local-first app), so it is opt-in. The `phoneme-rest` binary reads this
+/// section and refuses to start unless [`enabled`](Self::enabled) is `true`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestApiConfig {
+    /// Whether the local REST/SSE bridge is allowed to run. **Default false**
+    /// — the `phoneme-rest` binary exits with a clear message when this is
+    /// off, so the HTTP surface is never exposed unless the user opts in.
+    #[serde(default)]
+    pub enabled: bool,
+    /// TCP port the bridge binds on `127.0.0.1`. **Default 3737.** Only the
+    /// loopback interface is ever bound; the bridge never listens on
+    /// `0.0.0.0`.
+    #[serde(default = "default_rest_api_port")]
+    pub port: u16,
+}
+
+fn default_rest_api_port() -> u16 {
+    3737
+}
+
+impl Default for RestApiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_rest_api_port(),
+        }
+    }
+}
+
 /// Background daemon runtime settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonConfig {
@@ -1409,6 +1445,7 @@ impl Default for Config {
             title: TitleConfig::default(),
             semantic_search: SemanticSearchConfig::default(),
             retention: RetentionConfig::default(),
+            rest_api: RestApiConfig::default(),
         }
     }
 }

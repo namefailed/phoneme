@@ -508,6 +508,18 @@ delete_audio = false
 
 
 # -----------------------------------------------------------------------------
+# [rest_api] — optional localhost HTTP/REST + SSE bridge (phoneme-rest)
+# -----------------------------------------------------------------------------
+[rest_api]
+# Allow the phoneme-rest bridge to run. When false, the phoneme-rest binary
+# exits with a clear message and the HTTP surface is never exposed. The bridge
+# binds 127.0.0.1 only (loopback is the trust boundary) — never 0.0.0.0.
+enabled = false
+# TCP port the bridge binds on 127.0.0.1.
+port = 3737
+
+
+# -----------------------------------------------------------------------------
 # Config profiles (not a section in THIS file)
 # -----------------------------------------------------------------------------
 # A profile is a full-config snapshot saved as a separate file under

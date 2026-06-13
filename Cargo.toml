@@ -7,6 +7,7 @@ members = [
     "bin/phoneme-daemon",
     "bin/phoneme",
     "bin/phoneme-mcp",
+    "bin/phoneme-rest",
     "src-tauri",
 ]
 

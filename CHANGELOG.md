@@ -74,6 +74,15 @@ trust boundary. Verified against current code.*
   (8 MiB, mirroring the IPC codec) against oversized or unterminated frames.
   Drop-in for Claude Desktop and other MCP hosts — see
   [MCP Server](docs/developer-guide/mcp_server.md).
+- [x] **Local REST API (`phoneme-rest`, off by default)** — a localhost `axum`
+  bridge over the daemon, bound to `127.0.0.1` only (the loopback trust
+  boundary). Each endpoint maps one HTTP call to one `phoneme-ipc` `Request`
+  (recordings list/get/segments, search, record start/stop, status, health), and
+  `GET /api/events` streams `DaemonEvent`s as Server-Sent Events. Never
+  auto-spawns the daemon (down → 503, bad input → 400), and the daemon
+  round-trip is bounded so a wedged daemon can't hang a request. Opt-in via
+  `[rest_api] enabled = true` (`port` default 3737). See
+  [REST API](docs/developer-guide/rest_api.md).
 
 ### Developer experience
 

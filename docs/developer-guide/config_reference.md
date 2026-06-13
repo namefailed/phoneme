@@ -277,6 +277,17 @@ Changing the model or its dimension makes old vectors unsearchable — re-index 
 
 ---
 
+## `[rest_api]`
+
+Optional localhost HTTP/REST + SSE bridge (the `phoneme-rest` binary). Off by default; binds `127.0.0.1` only (loopback is the trust boundary). See [REST API](rest_api.md).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Allow the `phoneme-rest` bridge to run. When `false`, the binary exits with a clear message and the HTTP surface is never exposed. |
+| `port` | `3737` | TCP port bound on `127.0.0.1` (loopback only — the bridge never listens on `0.0.0.0`). |
+
+---
+
 ## Config profiles
 
 Named copies under `%APPDATA%\phoneme\profiles\`. Switch via tray menu. See [Config Profiles](../user-guide/config_profiles.md).

@@ -63,6 +63,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 - [CLI Reference](developer-guide/cli_reference.md) — Every `phoneme` subcommand
 - [IPC Integration](developer-guide/ipc_integration.md) — NDJSON over `\\.\pipe\phoneme-daemon`
 - [MCP Server](developer-guide/mcp_server.md) — Expose Phoneme to MCP hosts (Claude Desktop) via `phoneme-mcp`
+- [REST API](developer-guide/rest_api.md) — Opt-in localhost HTTP/REST + SSE bridge (`phoneme-rest`)
 - [Plugins & Hooks](developer-guide/plugins_and_hooks.md) — Hook payloads, presets, keyword rules
 
 ### Build & quality
