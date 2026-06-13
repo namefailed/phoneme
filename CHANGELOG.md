@@ -69,6 +69,14 @@ trust boundary. Verified against current code.*
   waveform, and the word under the playhead highlights as audio plays. The shared
   substrate also unlocks confidence highlighting and tighter diarization
   boundaries.
+  - **Fix — the local whisper path stored zero words, so 🔤 Synced was always
+    empty.** whisper.cpp's server nests per-word timings inside each segment
+    (`segments[].words[]`); the parser only read the OpenAI *cloud* shape (a flat
+    top-level `words[]`), so every local-whisper recording persisted no words and
+    the Synced view fell back to "no word timings" forever. The parser now reads
+    whichever shape the provider returns, and keeps whisper.cpp's per-word
+    probability as confidence. (Cloud transcription was already fine.) Existing
+    recordings backfill on the next **Transcribe** re-run.
 - [x] **Word-level speaker attribution** — local diarization now assigns speakers
   **per word** instead of per whole segment. Building on the word-timestamp
   substrate, each word's time span is mapped onto the diarizer's per-frame

@@ -316,7 +316,8 @@ pub struct TranscriptWord {
     #[serde(default)]
     pub speaker: Option<String>,
     /// The provider's 0..1 per-word confidence, or `None` when the provider
-    /// gives none (whisper-family endpoints emit only segment-level logprobs).
+    /// gives none (local whisper.cpp emits a per-word probability; the OpenAI/Groq
+    /// cloud transcription endpoints emit no per-word confidence).
     /// `None` and `Some(0.0)` are distinct: provider-absent must be `None` so
     /// consumers can suppress confidence styling rather than render a
     /// misleading "lowest confidence".

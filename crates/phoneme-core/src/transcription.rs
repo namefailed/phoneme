@@ -321,10 +321,11 @@ fn model_or(model: &str, default: &str) -> String {
 struct OpenAiResponse {
     text: String,
     segments: Option<Vec<OpenAiSegment>>,
-    /// Top-level per-word timing, present only when the request asked for
-    /// `timestamp_granularities[]=word`. The OpenAI verbose_json contract (and
-    /// whisper.cpp's server mirroring it) carries word + start + end, but no
-    /// per-word probability — so the captured words get `confidence: None`.
+    /// Per-word timing, present only when the request asked for
+    /// `timestamp_granularities[]=word`. The OpenAI/Groq cloud returns it HERE,
+    /// flat at the top level; whisper.cpp instead nests it under each
+    /// `segments[].words[]`. The parse reads whichever the provider used, so
+    /// both yield the finer word layer.
     words: Option<Vec<OpenAiWord>>,
 }
 
@@ -333,13 +334,21 @@ struct OpenAiSegment {
     start: f32,
     end: f32,
     text: String,
+    /// whisper.cpp's server nests the per-word timings inside each segment
+    /// (`segments[].words[]`) rather than returning a single top-level array.
+    /// Present only when word granularity was requested and the endpoint nests
+    /// them; flattened into the word layer by the parse.
+    words: Option<Vec<OpenAiWord>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct OpenAiWord {
     word: String,
     start: f32,
     end: f32,
+    /// whisper.cpp's per-word probability (0..1), captured as `confidence`. The
+    /// OpenAI/Groq cloud omits it, so cloud words stay `confidence: None`.
+    probability: Option<f32>,
 }
 
 /// Cap a third-party error response body before it flows into an `Error` (and
@@ -517,34 +526,32 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             .await
             .map_err(|e| Error::Internal(format!("decoding transcription response: {e}")))?;
 
+        // Consume the segments into the timeline shape, pulling out any per-word
+        // timings whisper.cpp nested inside each one as we go (the cloud returns
+        // a flat top-level `words[]` instead — handled just below).
+        let mut nested_words: Vec<OpenAiWord> = Vec::new();
         let segs: Vec<crate::diarization::TextSegment> = parsed
             .segments
             .unwrap_or_default()
             .into_iter()
-            .map(|w| crate::diarization::TextSegment {
-                start: w.start as f64,
-                end: w.end as f64,
-                text: w.text,
+            .map(|mut s| {
+                if let Some(ws) = s.words.take() {
+                    nested_words.extend(ws);
+                }
+                crate::diarization::TextSegment {
+                    start: s.start as f64,
+                    end: s.end as f64,
+                    text: s.text,
+                }
             })
             .collect();
 
-        // Decode the per-word layer once (whisper gives no per-word
-        // confidence → `None`), then attach it to whichever transcription path
-        // we take below. Words are independent of the speaker attribution, so
-        // the same set rides both the diarized and undiarized result.
-        let words: Vec<TranscriptWord> = parsed
-            .words
-            .unwrap_or_default()
-            .into_iter()
-            .map(|w| TranscriptWord {
-                start_ms: secs_to_ms(w.start as f64),
-                end_ms: secs_to_ms(w.end as f64),
-                text: w.word.trim().to_string(),
-                speaker: None,
-                confidence: None,
-            })
-            .filter(|w| !w.text.is_empty())
-            .collect();
+        // Decode the per-word layer once, then attach it to whichever
+        // transcription path we take below (words are independent of speaker
+        // attribution, so the same set rides both the diarized and undiarized
+        // result). Prefer the cloud's flat top-level `words[]`; fall back to the
+        // segment-nested words whisper.cpp emits.
+        let words = words_from_response(parsed.words, nested_words);
 
         // Meeting mic track: this is a single voice (the user's), so skip the
         // diarizer entirely and wrap the whole transcript under one fixed
@@ -615,6 +622,36 @@ impl TranscriptionProvider for OpenAiCompatProvider {
 /// persisted segment format).
 fn secs_to_ms(secs: f64) -> i64 {
     (secs * 1000.0).round() as i64
+}
+
+/// Build the per-word timing layer from an OpenAI-compatible response.
+///
+/// The two server families disagree on where word timings live: the OpenAI/Groq
+/// cloud returns a single flat `words[]` at the top level, while whisper.cpp's
+/// server nests them inside each segment (`segments[].words[]`, already
+/// flattened in timeline order by the caller into `segment_words`). We prefer
+/// the top-level array when it actually carried words, and otherwise fall back
+/// to the segment-nested ones — so both shapes yield the finer word layer rather
+/// than the local path silently persisting none. A whisper per-word
+/// `probability` rides along as `confidence`; the cloud omits it (`None`).
+/// Empty-text words (whitespace-only tokens) are dropped.
+fn words_from_response(
+    top_level: Option<Vec<OpenAiWord>>,
+    segment_words: Vec<OpenAiWord>,
+) -> Vec<TranscriptWord> {
+    top_level
+        .filter(|w| !w.is_empty())
+        .unwrap_or(segment_words)
+        .into_iter()
+        .map(|w| TranscriptWord {
+            start_ms: secs_to_ms(w.start as f64),
+            end_ms: secs_to_ms(w.end as f64),
+            text: w.word.trim().to_string(),
+            speaker: None,
+            confidence: w.probability,
+        })
+        .filter(|w| !w.text.is_empty())
+        .collect()
 }
 
 /// Run local diarization for a transcript and return the speaker-labeled text,
@@ -1623,6 +1660,93 @@ mod tests {
         assert!(!format!("{p:?}").contains(SECRET));
     }
 
+    fn word(text: &str, start: f32, end: f32, prob: Option<f32>) -> OpenAiWord {
+        OpenAiWord {
+            word: text.to_string(),
+            start,
+            end,
+            probability: prob,
+        }
+    }
+
+    #[test]
+    fn words_prefer_top_level_trim_and_keep_confidence() {
+        // Top-level present → used as-is (nested ignored); whitespace-only tokens
+        // dropped; seconds → ms; probability → confidence.
+        let top = vec![
+            word(" Hello", 0.0, 0.5, Some(0.9)),
+            word("  ", 0.5, 0.6, None),
+            word("world", 0.6, 1.2, Some(0.8)),
+        ];
+        let nested = vec![word("IGNORED", 0.0, 9.0, None)];
+        let words = words_from_response(Some(top), nested);
+        assert_eq!(
+            words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(),
+            ["Hello", "world"]
+        );
+        assert_eq!(words[0].start_ms, 0);
+        assert_eq!(words[0].end_ms, 500);
+        assert!((words[0].confidence.unwrap() - 0.9).abs() < 1e-4);
+        assert!((words[1].confidence.unwrap() - 0.8).abs() < 1e-4);
+    }
+
+    #[test]
+    fn words_fall_back_to_nested_when_top_level_absent_or_empty() {
+        let nested = vec![
+            word(" The", 0.0, 0.42, Some(0.44)),
+            word(" end", 0.42, 1.0, Some(0.97)),
+        ];
+        // None → nested; Some(empty) → nested too (an empty top-level array must
+        // not shadow the real per-segment words).
+        for top in [None, Some(Vec::new())] {
+            let words = words_from_response(top, nested.clone());
+            assert_eq!(words.len(), 2);
+            assert_eq!(words[0].text, "The");
+            assert_eq!(words[0].end_ms, 420);
+            assert!((words[1].confidence.unwrap() - 0.97).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn whisper_cpp_verbose_json_nests_words_in_segments() {
+        // The shape whisper.cpp's server actually returns: NO top-level `words`,
+        // per-word timings nested under each segment (with a `probability` and a
+        // `t_dtw` we ignore). This guards the bug where the parser only read the
+        // top-level array, so every local-whisper recording stored zero words.
+        let body = r#"{
+            "text": " The search bar.",
+            "segments": [
+                {"id": 0, "start": 0.0, "end": 1.5, "text": " The search bar.",
+                 "tokens": [383, 2989],
+                 "words": [
+                    {"word": " The", "start": 0.0, "end": 0.42, "t_dtw": -1, "probability": 0.43},
+                    {"word": " search", "start": 0.42, "end": 1.27, "t_dtw": -1, "probability": 0.97},
+                    {"word": " bar.", "start": 1.27, "end": 1.5, "t_dtw": -1, "probability": 0.88}
+                 ]}
+            ]
+        }"#;
+        let parsed: OpenAiResponse =
+            serde_json::from_str(body).expect("whisper.cpp verbose_json parses");
+        assert!(
+            parsed.words.is_none(),
+            "whisper.cpp has no top-level words[]"
+        );
+        // Flatten the nested words exactly as transcribe_with_segments does.
+        let mut nested = Vec::new();
+        for mut s in parsed.segments.unwrap_or_default() {
+            if let Some(ws) = s.words.take() {
+                nested.extend(ws);
+            }
+        }
+        let words = words_from_response(parsed.words, nested);
+        assert_eq!(
+            words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(),
+            ["The", "search", "bar."]
+        );
+        assert_eq!(words[1].start_ms, 420);
+        assert!((words[1].confidence.unwrap() - 0.97).abs() < 1e-4);
+    }
+
     #[test]
     fn truncate_error_body_caps_long_bodies_but_passes_short_ones() {
         let short = "boom".to_string();
@@ -1779,8 +1903,8 @@ mod tests {
     #[tokio::test]
     async fn openai_compat_decodes_word_timestamps_with_none_confidence() {
         let server = MockServer::start().await;
-        // verbose_json with a top-level `words[]` array (the `granularities[]=word`
-        // shape). Whisper carries no per-word probability, so confidence is None.
+        // verbose_json with a top-level `words[]` array (the OpenAI/Groq cloud
+        // shape). The cloud omits per-word probability, so confidence is None.
         Mock::given(method("POST"))
             .and(path("/v1/audio/transcriptions"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1824,6 +1948,63 @@ mod tests {
         assert!(
             t.words.iter().all(|w| w.speaker.is_none()),
             "undiarized words carry no speaker label"
+        );
+    }
+
+    #[tokio::test]
+    async fn openai_compat_decodes_whisper_cpp_segment_nested_words() {
+        // whisper.cpp's server returns NO top-level `words[]`; it nests the
+        // per-word timings (with a `probability` and a `t_dtw` we ignore) inside
+        // each segment. This is the real shape behind the empty-Synced-view bug —
+        // the parser must flatten the nested layer and keep the probability as
+        // confidence.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "text": " the search bar",
+                "segments": [
+                    {"id": 0, "start": 0.0, "end": 1.27, "text": " the search",
+                     "tokens": [383, 2989],
+                     "words": [
+                        {"word": " the", "start": 0.0, "end": 0.42, "t_dtw": -1, "probability": 0.44},
+                        {"word": " search", "start": 0.42, "end": 1.27, "t_dtw": -1, "probability": 0.98}
+                     ]},
+                    {"id": 1, "start": 1.27, "end": 1.8, "text": " bar",
+                     "tokens": [2318],
+                     "words": [
+                        {"word": " bar", "start": 1.27, "end": 1.8, "t_dtw": -1, "probability": 0.9}
+                     ]}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let provider = OpenAiCompatProvider::new(
+            client(),
+            server.uri(),
+            None,
+            None,
+            Duration::from_secs(30),
+            None,
+            true,
+        );
+        let (_dir, audio) = dummy_audio();
+        let t = provider
+            .transcribe_with_segments(&audio, None, DiarizationTrack::Diarize)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            t.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(),
+            ["the", "search", "bar"],
+            "nested per-segment words are flattened in order"
+        );
+        assert_eq!(t.words[1].start_ms, 420, "seconds → ms");
+        assert_eq!(t.words[2].end_ms, 1800);
+        assert!(
+            (t.words[1].confidence.unwrap() - 0.98).abs() < 1e-4,
+            "whisper.cpp per-word probability is kept as confidence"
         );
     }
 
