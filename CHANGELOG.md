@@ -50,6 +50,9 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] Settings/wizard hints name the **effective** whisper port after a
+  fallback ("running on 51234 — preferred 5809 was busy") instead of the
+  configured one; the configured port stays editable.
 - [x] Failures record their reason on the recording (survives a restart);
   cloud/custom transcriptions store the real model id instead of "unknown";
   failure toasts drop the internal "internal error:" prefix; the transcript

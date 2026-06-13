@@ -625,9 +625,9 @@ alongside the feature releases above.*
 - [ ] Per-item failed-quarantine dismiss — the inbox failed/ store only
   supports all-or-nothing ClearFailed; the failure panel wants per-recording
   dismiss IPC.
-- [ ] Settings/wizard URL hints should show the EFFECTIVE whisper port —
-  after a port fallback the text still names the configured port; read
-  daemon_status in SectionWhisper/SectionInPlace/the wizard.
+- [x] Settings/wizard URL hints show the EFFECTIVE whisper port — after a
+  fallback the Transcription/Dictation hints and the wizard's preview note
+  name the bound port ("running on 51234 — preferred 5809 was busy").
 - [ ] Doctor probes should follow effective whisper ports — the daemon-side
   RunDoctor handler and tray-side backend checks still build URLs from
   config; rewrite via the published effective ports and say "running on

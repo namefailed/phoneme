@@ -7,6 +7,7 @@ import { showToast } from "../../utils/toast";
 import { CLOUD_LLM_PRESETS, findLlmPreset } from "../../services/llmProviders";
 import { CLOUD_STT_PROVIDERS, PREVIEW_STT_PROVIDERS } from "../../services/sttProviders";
 import { curatedTranscriptionModels, curatedCleanupModels, type CuratedModel } from "../../data/curatedModels";
+import { effectivePortFor, type WhisperPortStatus } from "../SettingsView/SectionWhisper";
 import "./styles.css";
 
 /** The dedicated preview source the user picked: reuse the final model, run a
@@ -98,6 +99,11 @@ export class FirstRunWizardElement extends LitElement {
   @state() private previewDownloading = false;
   /** Whisper model files already on disk (for the dedicated-local picker). */
   @state() private downloadedModels: string[] = [];
+  /** Live bundled-server ports from a running daemon, fetched best-effort on
+   *  init. Lets the dedicated-local preview hint name the EFFECTIVE port when a
+   *  running server fell back from the configured one; null when no daemon is
+   *  up (the common first-run case), so the hint stays silent. */
+  @state() private portStatus: WhisperPortStatus | null = null;
 
   // Hotkey mode state
   @state() private capturingHotkeyFor: "general" | "meeting" | "in_place" | null = null;
@@ -117,6 +123,10 @@ export class FirstRunWizardElement extends LitElement {
       
       this.devices = await invoke<string[]>("list_input_devices").catch(() => []);
       this.downloadedModels = await invoke<string[]>("wizard_list_downloaded_models").catch(() => []);
+      // Best-effort: name the effective preview-server port if a daemon is
+      // already up and fell back from the configured one. Usually null on a
+      // true first run (no daemon yet) — the hint just stays silent then.
+      this.portStatus = await invoke<WhisperPortStatus>("daemon_status").catch(() => null);
       // Pre-fill the recommended local setup so the express welcome can show the
       // plan immediately (idempotent; the customize picker reuses these choices).
       this.applyRecommendedSetup();
@@ -879,6 +889,16 @@ export class FirstRunWizardElement extends LitElement {
     return (this.config.whisper?.bundled_server_port ?? 5809) as number;
   }
 
+  /** A " (running on … — preferred … was busy)" suffix when a daemon is up and
+   *  the dedicated-local preview server fell back from its configured port;
+   *  empty otherwise. Pure display — the configured port is unchanged. */
+  private previewPortNote(): string {
+    const configuredPort =
+      (this.config.preview_whisper?.bundled_server_port ?? this.mainPreviewPort() + 1) as number;
+    const eff = effectivePortFor(configuredPort, this.portStatus);
+    return eff ? ` It's currently ${eff.note.replace(/^\(|\)$/g, "")}.` : "";
+  }
+
   /** Full path of an already-downloaded model file ending in `filename`, or null. */
   private downloadedPath(filename: string): string | null {
     return this.downloadedModels.find((p) => p.replace(/\\/g, "/").endsWith(filename)) ?? null;
@@ -1115,7 +1135,7 @@ export class FirstRunWizardElement extends LitElement {
             })}
           </select>
           <span class="wizard-feature-note" style="margin-top:6px;">
-            Runs on a second, thread-limited whisper-server. Smaller models (Tiny / Base) give the snappiest overlay.
+            Runs on a second, thread-limited whisper-server. Smaller models (Tiny / Base) give the snappiest overlay.${this.previewPortNote()}
           </span>
         </div>`;
     }
