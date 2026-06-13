@@ -593,7 +593,7 @@ alongside the feature releases above.*
 
 **Reliability**
 - [ ] Retry/backoff for webhooks; rate limiting / circuit breakers for external services (OpenAI, Ollama, webhooks).
-- [ ] Reconnection backoff/limit in `bridge.rs`.
+- [x] Reconnection backoff/limit in `bridge.rs` — the `BridgeSlot` reconnect path now rate-limits with bounded exponential backoff (250ms → 10s cap), so a burst of UI actions during a daemon outage no longer spawn-storms. Cap-and-keep-trying-slowly: a successful connect resets it, and a daemon started later still heals once the window elapses (no hard give-up).
 - [ ] Replace remaining `unwrap()` in production paths (`recorder.rs` source opens; remaining hot paths).
 - [ ] Integration tests for daemon components; a synthetic-audio E2E covering the single-recording path.
 

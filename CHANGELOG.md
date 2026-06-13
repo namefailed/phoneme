@@ -75,6 +75,11 @@ trust boundary. Verified against current code.*
   cloud/custom transcriptions store the real model id instead of "unknown";
   failure toasts drop the internal "internal error:" prefix; the transcript
   diff computes once per refresh instead of twice.
+- [x] The tray's daemon reconnect now backs off (250ms doubling to a 10s cap)
+  instead of re-spawning and re-dialing on every action — a burst of UI
+  clicks during a daemon outage no longer spawn-storms. A successful connect
+  resets the backoff, and a daemon started later still heals on its own once
+  the window elapses (the cap holds; it never permanently gives up).
 
 ### GUI parity
 

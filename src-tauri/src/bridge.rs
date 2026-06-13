@@ -18,8 +18,18 @@
 
 use phoneme_core::Config;
 use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
+
+/// First reconnect delay after a failed connect.
+const BACKOFF_START: Duration = Duration::from_millis(250);
+
+/// Ceiling the reconnect delay doubles up to and then holds at. We cap and keep
+/// trying slowly rather than ever giving up: the daemon can be started long
+/// after the tray, so a connect attempt must still fire once each window
+/// elapses — there is deliberately no permanent "too many attempts" failure.
+const BACKOFF_CAP: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct Bridge {
@@ -60,6 +70,58 @@ impl Bridge {
     }
 }
 
+/// Rate-limiter state for the reconnect path, all decided against a passed-in
+/// `Instant` so the gating logic is unit-testable with a fake clock and no real
+/// IPC. Held behind a plain mutex inside [`BridgeSlot`]; every method is cheap
+/// and synchronous, so it is never locked across an `.await`.
+///
+/// The policy is bounded exponential backoff with no hard limit: each failed
+/// connect doubles the delay from [`BACKOFF_START`] up to [`BACKOFF_CAP`] and
+/// then holds there, a successful connect resets it, and while inside a window
+/// the slot reports the daemon as down without re-attempting the spawn+connect.
+/// That stops a flurry of UI actions during an outage from spawn-storming the
+/// daemon, while still healing on its own once the daemon comes up.
+#[derive(Debug, Default)]
+struct Backoff {
+    /// Earliest instant a connect may be attempted again. `None` means no
+    /// failure is currently being backed off — attempt immediately.
+    next_attempt: Option<Instant>,
+    /// The delay applied at the last failure; the next failure doubles it
+    /// (saturating at [`BACKOFF_CAP`]). Zero until the first failure.
+    current_delay: Duration,
+}
+
+impl Backoff {
+    /// Whether a connect may be attempted at `now`. True when no backoff is
+    /// active or the current window has elapsed; false while still inside it.
+    fn may_attempt(&self, now: Instant) -> bool {
+        match self.next_attempt {
+            Some(t) => now >= t,
+            None => true,
+        }
+    }
+
+    /// Record a failed connect at `now`: start at [`BACKOFF_START`], then double
+    /// each subsequent failure, saturating at [`BACKOFF_CAP`]. Arms the window
+    /// that [`may_attempt`](Self::may_attempt) gates on.
+    fn record_failure(&mut self, now: Instant) {
+        let next = if self.current_delay.is_zero() {
+            BACKOFF_START
+        } else {
+            (self.current_delay * 2).min(BACKOFF_CAP)
+        };
+        self.current_delay = next;
+        self.next_attempt = Some(now + next);
+    }
+
+    /// Record a successful connect: clear the window and reset the delay, so the
+    /// next outage starts backing off from [`BACKOFF_START`] again.
+    fn record_success(&mut self) {
+        self.next_attempt = None;
+        self.current_delay = Duration::ZERO;
+    }
+}
+
 /// Shared, lazily-reconnecting holder for the daemon [`Bridge`].
 ///
 /// The tray can launch before the daemon accepts connections (cold boot,
@@ -70,9 +132,18 @@ impl Bridge {
 /// caller that finds it empty re-runs the auto-spawn + connect and caches the
 /// result for everyone. An ESTABLISHED bridge already self-heals per request
 /// (see [`Bridge::request`]); the slot only covers the never-connected case.
+///
+/// Reconnect attempts are rate-limited by an internal [`Backoff`]: a failed
+/// connect arms an exponential window, and while inside it `get_or_connect`
+/// reports the daemon as down without re-running the spawn+connect, so a burst
+/// of UI actions during an outage cannot spawn-storm the daemon. The cap holds
+/// rather than gives up, so a daemon started later still heals — just on the
+/// backoff cadence instead of instantly.
 #[derive(Clone)]
 pub struct BridgeSlot {
     inner: Arc<RwLock<Option<Bridge>>>,
+    /// Reconnect rate-limiter, shared across clones of the slot.
+    backoff: Arc<StdMutex<Backoff>>,
     /// False only in tests: a slot that never dials out, so unit tests can
     /// assert the disconnected error path without touching real pipes or
     /// spawning a real daemon.
@@ -83,6 +154,7 @@ impl BridgeSlot {
     pub fn new(initial: Option<Bridge>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(initial)),
+            backoff: Arc::new(StdMutex::new(Backoff::default())),
             connect_enabled: true,
         }
     }
@@ -92,6 +164,7 @@ impl BridgeSlot {
     pub fn offline() -> Self {
         Self {
             inner: Arc::new(RwLock::new(None)),
+            backoff: Arc::new(StdMutex::new(Backoff::default())),
             connect_enabled: false,
         }
     }
@@ -118,6 +191,11 @@ impl BridgeSlot {
         if let Some(b) = slot.clone() {
             return Some(b); // another caller connected while we waited
         }
+        // Inside a backoff window: report down without re-attempting, so a burst
+        // of UI actions during an outage cannot spawn-storm the daemon.
+        if !self.backoff.lock().unwrap().may_attempt(Instant::now()) {
+            return None;
+        }
         let config = crate::config_io::read().unwrap_or_default();
         if let Err(e) = crate::auto_spawn::ensure_running(&config).await {
             tracing::warn!(error = %e, "could not auto-spawn daemon on retry");
@@ -125,13 +203,93 @@ impl BridgeSlot {
         match Bridge::connect(config).await {
             Ok(b) => {
                 tracing::info!("connected to daemon on retry");
+                self.backoff.lock().unwrap().record_success();
                 *slot = Some(b.clone());
                 Some(b)
             }
             Err(e) => {
-                tracing::warn!(error = %e, "daemon still unreachable");
+                let mut backoff = self.backoff.lock().unwrap();
+                backoff.record_failure(Instant::now());
+                tracing::warn!(
+                    error = %e,
+                    retry_in_ms = backoff.current_delay.as_millis() as u64,
+                    "daemon still unreachable; backing off"
+                );
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_backoff_attempts_immediately() {
+        let now = Instant::now();
+        let b = Backoff::default();
+        assert!(b.may_attempt(now), "no failure recorded yet — attempt now");
+    }
+
+    #[test]
+    fn first_failure_arms_the_start_window() {
+        let now = Instant::now();
+        let mut b = Backoff::default();
+        b.record_failure(now);
+        assert_eq!(b.current_delay, BACKOFF_START);
+        // Still inside the window: gated.
+        assert!(!b.may_attempt(now));
+        assert!(!b.may_attempt(now + BACKOFF_START - Duration::from_millis(1)));
+        // Window elapsed: free to attempt again.
+        assert!(b.may_attempt(now + BACKOFF_START));
+    }
+
+    #[test]
+    fn repeated_failures_double_up_to_the_cap() {
+        let now = Instant::now();
+        let mut b = Backoff::default();
+        b.record_failure(now);
+        assert_eq!(b.current_delay, BACKOFF_START); // 250ms
+        b.record_failure(now);
+        assert_eq!(b.current_delay, BACKOFF_START * 2); // 500ms
+        b.record_failure(now);
+        assert_eq!(b.current_delay, BACKOFF_START * 4); // 1s
+                                                        // Drive well past the cap; it saturates and holds, never overflows.
+        for _ in 0..20 {
+            b.record_failure(now);
+        }
+        assert_eq!(b.current_delay, BACKOFF_CAP);
+        b.record_failure(now);
+        assert_eq!(b.current_delay, BACKOFF_CAP, "stays capped, no overshoot");
+    }
+
+    #[test]
+    fn success_resets_the_backoff() {
+        let now = Instant::now();
+        let mut b = Backoff::default();
+        b.record_failure(now);
+        b.record_failure(now);
+        b.record_success();
+        assert_eq!(b.current_delay, Duration::ZERO);
+        assert!(b.may_attempt(now), "reset slot attempts immediately again");
+        // A fresh outage after recovery starts from the bottom, not the cap.
+        b.record_failure(now);
+        assert_eq!(b.current_delay, BACKOFF_START);
+    }
+
+    #[test]
+    fn cap_holds_but_never_gives_up() {
+        // The "limit" is cap-and-keep-trying-slowly: even after many failures,
+        // once the (capped) window elapses an attempt is allowed again — the
+        // daemon may be started long after the tray.
+        let now = Instant::now();
+        let mut b = Backoff::default();
+        for _ in 0..50 {
+            b.record_failure(now);
+        }
+        assert_eq!(b.current_delay, BACKOFF_CAP);
+        assert!(!b.may_attempt(now + BACKOFF_CAP - Duration::from_millis(1)));
+        assert!(b.may_attempt(now + BACKOFF_CAP));
     }
 }
