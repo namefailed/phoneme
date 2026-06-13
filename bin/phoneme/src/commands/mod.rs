@@ -5,6 +5,7 @@
 //! `crate::exit`'s table.
 
 pub mod cleanup;
+pub mod completions;
 pub mod config_cmd;
 pub mod daemon_cmd;
 pub mod delete;

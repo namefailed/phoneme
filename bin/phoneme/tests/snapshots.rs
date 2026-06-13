@@ -170,6 +170,37 @@ fn record_toggle_flag_is_recognized() {
         .failure();
 }
 
+/// `phoneme completions bash` must generate a non-empty script naming the
+/// binary, all without touching the daemon (pure local generation, exit 0).
+#[test]
+fn completions_bash_emits_script() {
+    let output = Command::cargo_bin("phoneme")
+        .unwrap()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(!stdout.trim().is_empty(), "completion script was empty");
+    assert!(
+        stdout.contains("phoneme"),
+        "completion script did not mention the binary name"
+    );
+}
+
+/// Every shell the `Shell` value-enum covers must be accepted and emit output.
+#[test]
+fn completions_all_shells_are_recognized() {
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["completions", shell])
+            .assert()
+            .success();
+    }
+}
+
 /// `record --pause` / `--resume` must parse, and be mutually exclusive with
 /// each other and the other mode flags (clap enforces `conflicts_with_all`).
 #[test]

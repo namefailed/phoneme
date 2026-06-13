@@ -80,8 +80,16 @@ pub enum Command {
     Profile(ProfileArgs),
     /// Export all recordings and metadata to a zip file.
     Export(ExportArgs),
+    /// Print a shell-completion script for the given shell to stdout.
+    Completions(CompletionsArgs),
     /// Print version + commit info.
     Version,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for (bash, zsh, fish, powershell, elvish).
+    pub shell: clap_complete::Shell,
 }
 
 #[derive(Debug, clap::Args)]

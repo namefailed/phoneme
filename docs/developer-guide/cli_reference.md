@@ -627,6 +627,38 @@ Print version and commit info.
 phoneme version
 ```
 
+### ⌨️ `phoneme completions <SHELL>`
+
+Print a shell-completion script for the chosen shell to stdout. This is pure
+local generation — it never contacts the daemon, so it works before the daemon
+is even running. Supported shells: `bash`, `zsh`, `fish`, `powershell`,
+`elvish`.
+
+Install one-liners:
+
+```bash
+# bash — drop the script where bash-completion looks for it
+phoneme completions bash > ~/.local/share/bash-completion/completions/phoneme
+
+# zsh — write into a directory on your $fpath (here a personal completions dir),
+# then ensure that dir is on fpath and compinit runs in ~/.zshrc
+mkdir -p ~/.zfunc
+phoneme completions zsh > ~/.zfunc/_phoneme
+# in ~/.zshrc, before `compinit`: fpath=(~/.zfunc $fpath)
+
+# fish
+phoneme completions fish > ~/.config/fish/completions/phoneme.fish
+```
+
+```powershell
+# PowerShell — load completions for the current session only
+phoneme completions powershell | Out-String | Invoke-Expression
+
+# Persist across sessions: append the same line to your profile
+'phoneme completions powershell | Out-String | Invoke-Expression' |
+  Add-Content $PROFILE
+```
+
 ## 🧠 Daemon Management
 
 While the daemon is usually auto-spawned by the CLI, the System Tray application, or `phoneme daemon start`, you can run it directly:

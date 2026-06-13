@@ -50,6 +50,8 @@ trust boundary. Verified against current code.*
 
 ### Developer experience
 
+- [x] `phoneme completions <bash|zsh|fish|powershell|elvish>` prints a shell-completion script to stdout (pure local, no daemon needed).
+
 - [x] A fully-commented `config.example.toml` and `.env.example` at the repo
   root document every config key (with defaults) and every runtime env var.
 
