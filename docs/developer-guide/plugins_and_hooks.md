@@ -46,7 +46,7 @@ Every hook receives a JSON payload that looks like this:
   "duration_ms": 8470,
   "model": "ggml-base.en",
   "metadata": {
-    "phoneme_version": "1.8.0",
+    "phoneme_version": "1.8.1",
     "hook_version": 1
   }
 }
@@ -67,9 +67,11 @@ These are **all** the fields a hook receives — the schema is defined by the
 | `metadata.hook_version` | number | Payload schema version (currently `1`). |
 
 The hook always gets the post-processed `transcript`; the raw pre-cleanup text,
-the unedited transcript, and the summary are **not** included in the payload —
-fetch them over IPC (`get_original_transcript`, `get_clean_transcript`,
-`get_recording`) if a hook needs them.
+the unedited transcript, the title, and the summary are **not** included in the
+payload — fetch them over IPC (`get_original_transcript`, `get_clean_transcript`,
+`get_recording`) if a hook needs them. See the
+[IPC Integration Guide](ipc_integration.md) for the full command set and wire
+format.
 
 ### 🔑 Convenience environment variables
 

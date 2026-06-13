@@ -100,11 +100,15 @@ installer the user launches themselves from a floating URL.
 
 ## 🧪 Testing
 
-Phoneme has a comprehensive test suite. We use `SyntheticSource` audio generators so you can run the entire test suite without needing a physical microphone.
+Phoneme has a comprehensive test suite. Capture is abstracted behind a `Source`
+trait, so tests swap the real microphone (`CpalSource`) for a `GeneratorSource`
+that emits synthetic audio — you can run the entire suite without a physical
+microphone.
 
-To run the Rust backend tests:
+To run the Rust backend tests (always single-threaded — many tests mutate
+process-global env vars; see [Testing & CI](testing_and_ci.md) for why):
 ```bash
-cargo test --workspace
+cargo test --workspace -- --test-threads=1
 ```
 
 To run the frontend tests:
@@ -120,8 +124,23 @@ API reference and open it in your browser with:
 ```bash
 cargo doc --workspace --no-deps --open
 ```
-CI builds the same docs with `-D warnings`, so the reference stays
-warning-clean (broken intra-doc links fail the build like any other lint).
+
+Three crates carry `#![warn(missing_docs)]` and are documented to **100%
+coverage** — start your reading there:
+
+- **`phoneme-core`** — the shared engine: config, catalog, transcription/LLM
+  providers, hooks, webhook, the pipeline types. The crate-level doc is a map of
+  the whole system grouped by pipeline stage.
+- **`phoneme-audio`** — capture, decode, WAV, silence detection, meeting
+  alignment (every public item documents its units — ms, samples, frames).
+- **`phoneme-ipc`** — the wire contract. `schema.rs` documents every
+  `Request`/`Response`/`DaemonEvent` variant: its payload, reply shape, the
+  events it emits, and which surfaces send it.
+
+CI builds the same docs with `RUSTDOCFLAGS="-D warnings"`, so the reference stays
+warning-clean — a missing doc comment or a broken intra-doc link fails the build
+like any other lint. For the prose companion to the rustdoc, see the
+[Architecture Wiki](architecture.md).
 
 ## 🚑 Troubleshooting Build Errors
 

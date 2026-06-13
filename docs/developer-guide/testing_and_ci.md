@@ -4,13 +4,28 @@ Phoneme CI runs on **windows-latest** for all jobs. Local parity commands match 
 
 ## CI jobs (`.github/workflows/ci.yml`)
 
+Five jobs run on every push/PR to `main`/`master`:
+
 | Job | Commands |
 |-----|----------|
-| **Rust** | `cargo fmt --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace -- --test-threads=1` |
+| **Rust** | `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --workspace -- --test-threads=1` |
+| **Rustdoc** | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` — fails on any rustdoc warning, including a `missing_docs` gap or a broken intra-doc link |
 | **Frontend** | `pnpm install --frozen-lockfile` · `pnpm lint` · `pnpm exec vitest run` · `pnpm type-check` · `pnpm build` |
-| **Tauri build** | Debug MSI/build after Rust + frontend pass |
+| **Tauri build** | `cargo build --workspace` then `cargo tauri build --debug` — runs only after Rust + Frontend pass |
+| **Dependency audit** | `cargo audit` + `pnpm audit` — **advisory only** (`continue-on-error`), surfaces RUSTSEC / npm advisories without blocking merges |
 
-Tauri build needs `frontend/dist` — CI creates an empty `frontend/dist` before clippy so the Tauri macro succeeds.
+Both the Rust and Rustdoc jobs need `frontend/dist` to exist before they compile (the Tauri macro in `src-tauri` requires it), so CI creates an empty `frontend/dist` first.
+
+### The doc-coverage gate
+
+`#![warn(missing_docs)]` is set on `phoneme-core`, `phoneme-audio`, `phoneme-ipc`
+(`src/lib.rs`) and the daemon binary (`bin/phoneme-daemon/src/main.rs`). On its
+own a `warn` lint wouldn't fail a build — but the **Rustdoc** job builds with
+`RUSTDOCFLAGS="-D warnings"`, which promotes every rustdoc warning (an undocumented
+public item, a dead intra-doc link) into a hard error. The practical effect: every
+public item in those crates must carry a doc comment, or the `docs` job goes red.
+Run `cargo doc --workspace --no-deps` locally with the same flag before pushing if
+you touched a public API.
 
 ## Local pre-PR checklist
 
@@ -19,6 +34,7 @@ Tauri build needs `frontend/dist` — CI creates an empty `frontend/dist` before
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace -- --test-threads=1
+$env:RUSTDOCFLAGS="-D warnings"; cargo doc --workspace --no-deps
 
 cd frontend
 pnpm install
@@ -30,19 +46,49 @@ pnpm build
 
 Stop `phoneme-daemon` and `phoneme-tray` before `cargo test` if link fails with "Access is denied" on `.exe` files.
 
+### The serial-test contract (`--test-threads=1`)
+
+`cargo test` is always run with `-- --test-threads=1`, locally and in CI. This is
+not optional: many backend tests mutate **process-global** state — chiefly the
+`PHONEME_DATA_LOCAL` / `PHONEME_CONFIG` environment variables that redirect the
+inbox, catalog, and log directories into a per-test temp dir. Environment variables
+are shared across threads, so running tests in parallel would let one test's temp
+path leak into another's. Single-threaded execution keeps each test's data dirs
+isolated. If you add a test that sets an env var, assume the serial contract and
+restore/remove the var when done.
+
+### Avoiding lock contention with a separate target dir
+
+The Tauri tray and the daemon hold `target/debug/*.exe` open while running, which
+makes `cargo test` fail to relink. To run tests without stopping a live build, point
+Cargo at a separate target directory:
+
+```powershell
+$env:CARGO_TARGET_DIR="target-test"
+cargo test --workspace -- --test-threads=1
+```
+
+`target-test/` is gitignored. Parallel work in another terminal may hold the
+`target-test` lock — Cargo simply waits for it, which is expected.
+
 ## Rust test layout
 
 | Crate / binary | Tests |
 |----------------|-------|
 | `phoneme-core` | Unit + integration (`tests/`) |
-| `phoneme-audio` | `meeting_align`, recorder, wav, silence |
+| `phoneme-audio` | `meeting_align`, recorder, wav, silence, decode |
 | `phoneme-ipc` | Codec NDJSON, schema round-trips |
-| `phoneme-daemon` | Integration tests spawn daemon with synthetic audio |
+| `phoneme-daemon` | In-crate unit tests (`*_test.rs`) plus end-to-end integration tests under `bin/phoneme-daemon/tests/` that spawn a real daemon over a temp pipe and drive it with synthetic audio (`record_synthetic`, `import`, `hook_controls`, `list_session`, …) |
 | `phoneme` CLI | Command parsing, doctor |
 
 ### Synthetic audio backend
 
-Set `PHONEME_AUDIO_BACKEND=synthetic` to drive capture without a microphone. Used in CI E2E tests (`GeneratorSource`).
+Capture is abstracted behind the `Source` trait in `phoneme-audio`. Production uses
+`CpalSource` (the real microphone / WASAPI loopback); tests use `GeneratorSource`,
+which feeds silence/sine blocks so the whole pipeline runs on a headless CI runner
+with no audio hardware. Set `PHONEME_AUDIO_BACKEND=synthetic` to make the daemon's
+recorder pick `GeneratorSource` instead of CPAL — this is how the daemon E2E tests
+(e.g. `tests/record_synthetic.rs`) drive capture.
 
 ### Meeting alignment tests
 
