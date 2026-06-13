@@ -729,6 +729,7 @@ fn diarize_per_word(
         &spans,
         &diar.discrete_diarization,
         speakrs::pipeline::FRAME_STEP_SECONDS,
+        speakrs::pipeline::FRAME_DURATION_SECONDS,
     );
     tracing::info!(
         turns = diar.spans.len(),
@@ -1823,9 +1824,11 @@ mod tests {
             segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
         // Place each word at the CENTER of its target frame so the ms→seconds
-        // round-trip (truncate on the way in, floor in `frame_for_time`) can't
-        // nudge it across a frame boundary. Frame f's center is (f+0.5)*step.
-        let center_ms = |frame: f64| ((frame + 0.5) * step * 1000.0).round() as i64;
+        // round-trip can't nudge it across a frame boundary. speakrs centers
+        // frame f at frame_middle(f) = f*step + 0.5*FRAME_DURATION, which is the
+        // mapping `frame_for_time` inverts.
+        let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
+        let center_ms = |frame: f64| ((frame * step + 0.5 * dur) * 1000.0).round() as i64;
         let at = |frame: f64, text: &str, conf: Option<f32>| TranscriptWord {
             start_ms: center_ms(frame),
             end_ms: center_ms(frame),
@@ -1873,7 +1876,8 @@ mod tests {
             hard_clusters: Array2::zeros((0, 0)),
             segmentations: ndarray::Array3::zeros((0, 0, 0)),
         };
-        let center_ms = |frame: f64| ((frame + 0.5) * step * 1000.0).round() as i64;
+        let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
+        let center_ms = |frame: f64| ((frame * step + 0.5 * dur) * 1000.0).round() as i64;
         let at = |frame: f64, text: &str| TranscriptWord {
             start_ms: center_ms(frame),
             end_ms: center_ms(frame),

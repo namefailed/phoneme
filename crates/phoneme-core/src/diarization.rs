@@ -190,19 +190,30 @@ pub fn label_segments<'a>(
 
 // ── Per-word speaker attribution (from the frame-activation matrix) ──────────
 
-/// The frame row covering instant `t` seconds: `floor(t / FRAME_STEP_SECONDS)`.
+/// The frame row whose window *covers* instant `t` seconds, using speakrs's own
+/// frame geometry: `round((t - 0.5 * frame_duration) / frame_step)`.
 ///
-/// speakrs's `discrete_diarization` matrix has one row per frame, frames spaced
-/// `FRAME_STEP_SECONDS` apart on the same audio clock (seconds from start) that
-/// whisper word timestamps use — so there is no offset to apply. A negative `t`
-/// (shouldn't happen) clamps to row 0. The returned index is *not* bounds-checked
-/// against the matrix height; callers clamp it to the last row, since the final
-/// frame can end slightly before the last word's timestamp.
-fn frame_for_time(t: f64, frame_step: f64) -> usize {
-    if t <= 0.0 {
+/// speakrs does NOT place frame `f` at `f * STEP`; it centers frame `f` at
+/// `frame_middle(f) = f * FRAME_STEP_SECONDS + 0.5 * FRAME_DURATION_SECONDS`
+/// (speakrs `segment.rs`), which is the geometry behind the very
+/// `result.segments` / [`SpeakerSpan`]s this module also returns. Its canonical
+/// inverse is therefore `closest_frame(t) = round((t - 0.5*FRAME_DURATION)/STEP)`
+/// (speakrs `layout.rs`). Using that exact mapping keeps the per-word frame
+/// window in the SAME time domain as the segment-level spans. Omitting the
+/// half-duration offset (and using `floor` instead of `round`) would bias every
+/// word ~1.8 frames (~30 ms) late and make the word and segment timelines
+/// disagree at speaker hand-offs — exactly the boundary case word-level
+/// attribution exists to get right.
+///
+/// `t` at/below the first frame's center clamps to row 0. The index is *not*
+/// bounds-checked against the matrix height; callers clamp it to the last row,
+/// since the final frame can end slightly before the last word's timestamp.
+fn frame_for_time(t: f64, frame_step: f64, frame_duration: f64) -> usize {
+    let f = ((t - 0.5 * frame_duration) / frame_step).round();
+    if f <= 0.0 {
         0
     } else {
-        (t / frame_step).floor() as usize
+        f as usize
     }
 }
 
@@ -256,11 +267,11 @@ fn dominant_column(
 /// plus the number of distinct speakers used. The word-level counterpart of
 /// [`label_segments`], and it shares that function's labelling contract:
 ///
-/// - A word's `[start, end]` span maps to the frame range
-///   `[floor(start/STEP), floor(end/STEP)]`; the speaker column with the most
-///   summed activation over that range wins (so a word straddling a hand-off
-///   goes to whoever speaks for most of it — the case whole-segment attribution
-///   gets wrong).
+/// - A word's `[start, end]` span maps to the frame range covering it via
+///   speakrs's `closest_frame` geometry (see `frame_for_time`); the speaker
+///   column with the most summed activation over that range wins (so a word
+///   straddling a hand-off goes to whoever speaks for most of it — the case
+///   whole-segment attribution gets wrong).
 /// - The winning column `k` becomes label `SPEAKER_{k:02}` and is mapped to a
 ///   stable 1-based index **in first-appearance order**, the identical scheme
 ///   [`label_segments`] applies to `DiarizationResult.segments`. So the
@@ -270,12 +281,14 @@ fn dominant_column(
 ///   is excluded from the speaker count, mirroring the segment-level `None`.
 /// - Empty/whitespace words are skipped (as empty segments are).
 ///
-/// `frame_step` is `speakrs::pipeline::FRAME_STEP_SECONDS` in production; it is a
-/// parameter so the mapping is unit-testable with a synthetic matrix.
+/// `frame_step` / `frame_duration` are `speakrs::pipeline::FRAME_STEP_SECONDS` /
+/// `FRAME_DURATION_SECONDS` in production; they are parameters so the mapping is
+/// unit-testable with a synthetic matrix.
 pub fn assign_words<'a>(
     words: &'a [WordSpan],
     activations: &Array2<f32>,
     frame_step: f64,
+    frame_duration: f64,
 ) -> (Vec<(&'a WordSpan, usize)>, usize) {
     use std::collections::HashMap;
 
@@ -287,8 +300,8 @@ pub fn assign_words<'a>(
         if word.text.trim().is_empty() {
             continue;
         }
-        let start_frame = frame_for_time(word.start, frame_step);
-        let end_frame = frame_for_time(word.end, frame_step);
+        let start_frame = frame_for_time(word.start, frame_step, frame_duration);
+        let end_frame = frame_for_time(word.end, frame_step, frame_duration);
         let idx = match dominant_column(activations, start_frame, end_frame) {
             Some(col) => {
                 let label = column_label(col);
@@ -718,9 +731,13 @@ pub fn run_local_diarization(
     // the matrix for word-level attribution. The powerset model can mark a frame
     // active for several speakers at once (overlapping speech); making it
     // exclusive gives each frame one winner, so summing a word's frames over the
-    // speaker columns yields a clean argmax. It also matches how speakrs derives
-    // `result.segments` internally (post-inference makes the matrix exclusive
-    // before `to_segments`), keeping the word and segment label columns aligned.
+    // speaker columns yields a clean argmax. The `SPEAKER_{k:02}` column labels
+    // are unchanged by this collapse, so word-level columns stay aligned with the
+    // labels speakrs's `to_segments` emits into `result.segments`. (speakrs itself
+    // runs `to_segments` on the reconstructed matrix WITHOUT `make_exclusive` — it
+    // thresholds each speaker column independently at > 0.5 — so this collapse is
+    // ours alone, for the per-word argmax, not a reproduction of how
+    // `result.segments` was built.)
     result.discrete_diarization.make_exclusive();
 
     // `result.segments` carries correctly-scaled (seconds) turns — that part of
@@ -983,21 +1000,39 @@ mod tests {
 
     use ndarray::array;
 
-    /// Frame step chosen so a word at 0.10 s lands on frame 1 (0.10/0.05 = 2 →
-    /// floor 2), keeping the synthetic geometry easy to reason about. The
-    /// production step is `speakrs::pipeline::FRAME_STEP_SECONDS`; the mapping
-    /// logic is identical regardless of the constant.
+    /// Synthetic frame step; the real one is `speakrs::pipeline::FRAME_STEP_SECONDS`.
     const STEP: f64 = 0.05;
+    /// Synthetic frame duration. speakrs centers frame `f` at `f*STEP + 0.5*DUR`;
+    /// with `0.5*DUR == STEP` here, frame `f`'s center is the clean value
+    /// `(f+1)*STEP`, and `frame_for_time(frame_mid(f)) == f`.
+    const DUR: f64 = 0.10;
+    /// Center of frame `f` (speakrs `frame_middle`): the time a word must sit at
+    /// to map back to frame `f` via [`frame_for_time`].
+    fn frame_mid(f: usize) -> f64 {
+        f as f64 * STEP + 0.5 * DUR
+    }
 
     #[test]
-    fn frame_for_time_floors_to_the_covering_row() {
-        // floor(t / STEP); negatives clamp to row 0.
-        assert_eq!(frame_for_time(0.0, STEP), 0);
-        assert_eq!(frame_for_time(0.049, STEP), 0);
-        assert_eq!(frame_for_time(0.05, STEP), 1);
-        assert_eq!(frame_for_time(0.10, STEP), 2);
-        assert_eq!(frame_for_time(0.149, STEP), 2);
-        assert_eq!(frame_for_time(-1.0, STEP), 0);
+    fn frame_for_time_maps_to_the_covering_frame_center() {
+        // round((t - 0.5*DUR) / STEP): a word at frame f's center maps back to f;
+        // times at/below the first center clamp to row 0.
+        for f in 0..6 {
+            assert_eq!(frame_for_time(frame_mid(f), STEP, DUR), f);
+        }
+        assert_eq!(frame_for_time(0.0, STEP, DUR), 0);
+        assert_eq!(frame_for_time(-1.0, STEP, DUR), 0);
+    }
+
+    #[test]
+    fn frame_for_time_matches_speakrs_closest_frame_with_real_constants() {
+        // Regression for the half-duration offset: against speakrs's real frame
+        // geometry, t = 1.0 s is frame 57 — round((1.0 - 0.5*FRAME_DURATION)/STEP)
+        // — NOT 59, the offset-free floor(1.0/STEP) the first cut produced.
+        let step = speakrs::pipeline::FRAME_STEP_SECONDS;
+        let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
+        assert_eq!(frame_for_time(1.0, step, dur), 57);
+        assert_eq!(frame_for_time(0.5, step, dur), 28);
+        assert_eq!(frame_for_time(0.0, step, dur), 0);
     }
 
     #[test]
@@ -1025,12 +1060,12 @@ mod tests {
             [0.0, 1.0], // frame 5  [0.25,0.30)
         ];
         let words = vec![
-            word(0.00, 0.05, "alpha"), // frames 0..=1 → speaker 0
-            word(0.10, 0.14, "beta"),  // frame 2      → speaker 0
-            word(0.15, 0.20, "gamma"), // frames 3..=4 → speaker 1
-            word(0.25, 0.29, "delta"), // frame 5      → speaker 1
+            word(frame_mid(0), frame_mid(1), "alpha"), // frames 0..=1 → speaker 0
+            word(frame_mid(2), frame_mid(2), "beta"),  // frame 2      → speaker 0
+            word(frame_mid(3), frame_mid(4), "gamma"), // frames 3..=4 → speaker 1
+            word(frame_mid(5), frame_mid(5), "delta"), // frame 5      → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
         assert_eq!(n, 2, "two distinct speakers used");
         let idxs: Vec<usize> = labeled.iter().map(|(_, i)| *i).collect();
         // First-appearance order: speaker 0 → index 1, speaker 1 → index 2.
@@ -1052,8 +1087,8 @@ mod tests {
             [0.0, 1.0], // 4
             [0.0, 1.0], // 5
         ];
-        let words = vec![word(0.05, 0.29, "straddle")]; // frames 1..=5
-        let (labeled, n) = assign_words(&words, &m, STEP);
+        let words = vec![word(frame_mid(1), frame_mid(5), "straddle")]; // frames 1..=5
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
         assert_eq!(n, 1);
         // Only one word, so it's the first-appearing speaker → index 1, but it is
         // speaker column 1 (the dominant one), not column 0 where it started.
@@ -1071,10 +1106,10 @@ mod tests {
         // segment-level `None`.
         let m = array![[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]];
         let words = vec![
-            word(0.05, 0.09, "voiced"), // frame 1 → speaker 0
-            word(0.10, 0.14, "silent"), // frame 2 → all-zero → unattributed
+            word(frame_mid(1), frame_mid(1), "voiced"), // frame 1 → speaker 0
+            word(frame_mid(2), frame_mid(2), "silent"), // frame 2 → all-zero → unattributed
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
         assert_eq!(n, 1, "only the voiced word counts toward speaker count");
         assert_eq!(labeled[0].1, 1);
         assert_eq!(labeled[1].1, 0, "silent word is unattributed");
@@ -1084,11 +1119,11 @@ mod tests {
     fn empty_words_are_skipped_like_empty_segments() {
         let m = array![[1.0, 0.0], [0.0, 1.0]];
         let words = vec![
-            word(0.00, 0.04, "  "), // skipped
-            word(0.00, 0.04, "a"),  // frame 0 → speaker 0
-            word(0.05, 0.09, "b"),  // frame 1 → speaker 1
+            word(frame_mid(0), frame_mid(0), "  "), // skipped
+            word(frame_mid(0), frame_mid(0), "a"),  // frame 0 → speaker 0
+            word(frame_mid(1), frame_mid(1), "b"),  // frame 1 → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
         assert_eq!(labeled.len(), 2, "the whitespace word is dropped");
         assert_eq!(n, 2);
         assert_eq!(labeled[0].0.text, "a");
@@ -1115,8 +1150,8 @@ mod tests {
     #[test]
     fn empty_matrix_attributes_nothing() {
         let m: Array2<f32> = Array2::zeros((0, 0));
-        let words = vec![word(0.0, 0.1, "x")];
-        let (labeled, n) = assign_words(&words, &m, STEP);
+        let words = vec![word(frame_mid(0), frame_mid(1), "x")];
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
         assert_eq!(n, 0);
         assert_eq!(labeled[0].1, 0, "no columns → unattributed");
     }
