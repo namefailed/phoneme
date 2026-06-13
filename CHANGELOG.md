@@ -48,6 +48,11 @@ trust boundary. Verified against current code.*
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
 
+### Developer experience
+
+- [x] A fully-commented `config.example.toml` and `.env.example` at the repo
+  root document every config key (with defaults) and every runtime env var.
+
 ### Performance
 
 - [x] Semantic search holds the deserialized embedding corpus in memory, so

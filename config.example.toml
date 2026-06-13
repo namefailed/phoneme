@@ -1,0 +1,505 @@
+# =============================================================================
+# Phoneme — example config.toml
+# =============================================================================
+#
+# This file documents every config section and key with its DEFAULT value and a
+# plain-language note. It is a valid, copy-paste-runnable config: drop it in at
+# %APPDATA%\phoneme\config.toml (Windows) and Phoneme loads it as-is, behaving
+# exactly like a fresh install with no config file.
+#
+# - Path tokens `~/`, `%APPDATA%`, and `%USERPROFILE%` are expanded on load.
+# - The config is validated on load/reload; an invalid file is rejected with an
+#   error rather than silently ignored. Reload after editing with
+#   `phoneme config reload` (or IPC `reload_config`).
+# - Almost every key is optional — omitting a key falls back to the default
+#   shown here, so an older config keeps parsing after an upgrade. (One quirk:
+#   `recording.pre_roll_ms` reads as 0/disabled when the key is ABSENT, even
+#   though a freshly written config ships 1500. See that key below.)
+# - Override the active config path with the PHONEME_CONFIG environment
+#   variable. See `.env.example` for the runtime environment variables.
+#
+# SECRETS: every `api_key` field is shown empty on purpose. Keys are entered
+# through Settings in the app (or `phoneme config set`), which encrypts them at
+# rest with Windows DPAPI before they touch this file — they are never stored or
+# committed in plaintext. Leave them blank here; do not paste a real key.
+#
+# Schema source of truth: crates/phoneme-core/src/config.rs
+# Full per-key reference: docs/developer-guide/config_reference.md
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# [whisper] — the transcription engine for the FINAL transcript
+# -----------------------------------------------------------------------------
+[whisper]
+# How the transcription server is provisioned / reached:
+#   "bundled_download" — download and run a bundled local model (first-run path)
+#   "bundled_model"    — run a local whisper-server against `model_path` on disk
+#   "external"         — talk to an already-running OpenAI-compatible endpoint
+mode = "bundled_download"
+
+# Which backend transcribes audio. "local" keeps audio on this machine; the
+# cloud options send audio off-device and need an `api_key`:
+#   "local" | "openai" | "groq" | "deepgram" | "assemblyai" | "elevenlabs" | "custom"
+provider = "local"
+
+# Base URL of the OpenAI-compatible server (used when mode = "external").
+external_url = "http://127.0.0.1:5809"
+
+# Absolute path to a local GGML model file (.bin). Required when
+# mode = "bundled_model"; ignored otherwise.
+model_path = ""
+
+# Preferred TCP port for the bundled local server. If another app already holds
+# it, the daemon starts whisper-server on a free port and every consumer
+# follows automatically — so this is a preference, not a hard requirement.
+bundled_server_port = 5809
+
+# Extra command-line arguments passed to the bundled whisper-server on startup.
+bundled_server_args = []
+
+# Max seconds to wait for a transcription response before timing out.
+timeout_secs = 60
+
+# Cloud transcription model id (e.g. "whisper-1" for OpenAI, "whisper-large-v3"
+# for Groq). Empty = the provider's default. Ignored for "local".
+model = ""
+
+# Override a cloud provider's base URL (proxies / OpenAI-compatible gateways).
+# Empty = the provider's default endpoint. Required for the "custom" provider.
+api_url = ""
+
+# Cloud provider API key. Leave EMPTY here — set it via Settings (DPAPI-encrypted
+# at rest). Ignored for the "local" provider.
+api_key = ""
+
+# `language` — BCP-47 hint passed to Whisper (e.g. "en", "es", "fr"). Omitted
+# entirely by default, which means auto-detect (recommended). Uncomment to pin:
+# language = "en"
+
+
+# -----------------------------------------------------------------------------
+# [preview_whisper] — OPTIONAL independent provider for the LIVE PREVIEW only
+# -----------------------------------------------------------------------------
+# Omit this whole section (the default) and the live preview reuses [whisper].
+# Define it to give the preview its own fast/small model or cloud API so it never
+# contends with the final transcription. It has the SAME keys as [whisper]. If
+# you point it at a second local bundled model, give it a distinct
+# `bundled_server_port`. The FINAL transcript always uses [whisper] regardless.
+#
+# [preview_whisper]
+# mode = "bundled_model"
+# provider = "local"
+# model_path = "C:/models/ggml-tiny.en.bin"
+# bundled_server_port = 5810
+# timeout_secs = 60
+
+
+# -----------------------------------------------------------------------------
+# [recording] — capture hardware and thresholds
+# -----------------------------------------------------------------------------
+[recording]
+# Directory where .wav recordings are written (path tokens expanded on load).
+audio_dir = "~/Documents/phoneme/audio"
+
+# Capture sample rate in Hz. Whisper wants 16000; allowed range is 8000–96000.
+sample_rate = 16000
+
+# Channel count: 1 = mono (recommended for speech), 2 = stereo.
+channels = 1
+
+# Silence threshold in dBFS. Audio quieter than this counts as silence (used by
+# the oneshot auto-stop path).
+silence_threshold_dbfs = -45.0
+
+# How many milliseconds of continuous silence end a oneshot recording.
+silence_window_ms = 3000
+
+# Hard ceiling on a single recording's length, in seconds — it stops here no
+# matter what.
+max_duration_secs = 300
+
+# Input device name to record from, or "default" for the system default.
+input_device = "default"
+
+# Which audio source a single-track recording captures:
+#   "microphone"   — the mic input (default)
+#   "system_audio" — the system output via WASAPI loopback (Windows only)
+source = "microphone"
+
+# Pre-roll ring buffer length in milliseconds. When > 0 AND source = microphone,
+# the mic stays open between recordings and the last `pre_roll_ms` of audio is
+# prepended on start so the first syllable isn't clipped. A freshly written
+# config ships 1500; NOTE that a config which simply OMITS this key reads as 0
+# (disabled) so pre-upgrade installs keep the old mic-only-while-recording
+# behavior. 0 = disabled.
+pre_roll_ms = 1500
+
+# Live streaming transcription preview while recording (periodic incremental
+# re-transcriptions, shown in the UI). The authoritative final transcript is
+# still produced by the post-stop pipeline. false = off (no preview task).
+streaming_preview = false
+
+# Whether the GUI Record button auto-stops once the mic goes quiet (using the
+# silence threshold/window above), or runs as a manual start/stop toggle.
+# false = manual toggle (the silence settings only apply when this is true).
+# The push-to-talk hotkey is always hold-to-record regardless of this flag.
+auto_stop_on_silence = false
+
+# How the live preview handles a MEETING's two tracks (needs streaming_preview):
+#   "toggle" — one preview loop follows one track; the overlay 🎤/🔊 button
+#              switches it (same cost as a single recording)
+#   "both"   — one loop per track, captions stacked (~double the preview work)
+meeting_preview = "toggle"
+
+
+# -----------------------------------------------------------------------------
+# [in_place] — dictation (transcription typed at the cursor): the fast lane
+# -----------------------------------------------------------------------------
+[in_place]
+# Text polish applied before typing:
+#   "fast" — rule-based and instant (strips fillers + non-speech tags, collapses
+#            stutter-doubled words, fixes caps and terminal punctuation)
+#   "off"  — the raw whisper text
+#   "llm"  — a full round-trip through [llm_post_process] (slowest)
+cleanup = "fast"
+
+# How the text lands at the cursor:
+#   "type"  — simulated keystrokes (works everywhere)
+#   "paste" — clipboard + Ctrl+V, restoring the previous clipboard (fast for
+#             long text)
+type_mode = "type"
+
+# Keep the dictation in the library after typing (transcript, segments,
+# embeddings persist like any recording). false = ephemeral: the row and audio
+# are deleted once typed.
+save_to_library = true
+
+# Route dictations through the FULL normal pipeline (inbox queue + configured
+# cleanup, summary, auto-tags, hooks) instead of the fast lane. false = fast lane.
+full_pipeline = false
+
+# Only meaningful when full_pipeline = true — WHEN the typed text lands:
+#   true  — type immediately from a fast pass; cleanup/summary/tags/hooks
+#           continue in the background for the library copy
+#   false — the typed text waits for, and includes, every configured step
+# Ignored on the fast lane (full_pipeline = false), which always types at once.
+type_first = false
+
+# `stt` — OPTIONAL dedicated STT provider for dictation, shaped exactly like
+# [whisper]. Unset (the default): dictation follows the live preview's provider
+# when the preview is enabled, else the main [whisper]. For a local model, point
+# it at an ALREADY-RUNNING server — the daemon does not supervise a third one.
+#
+# [in_place.stt]
+# mode = "external"
+# provider = "local"
+# external_url = "http://127.0.0.1:5810"
+
+
+# -----------------------------------------------------------------------------
+# [hook] — scripts/webhook fired after a successful transcription
+# -----------------------------------------------------------------------------
+[hook]
+# Shell commands / script paths run sequentially. Each receives the JSON
+# HookPayload on stdin (and PHONEME_ID / PHONEME_AUDIO_PATH / PHONEME_TRANSCRIPT
+# in its environment). The default echoes the transcript to stdout (captured to
+# hook.log) — safe and inert. Path tokens like %APPDATA% are expanded.
+commands = ["powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1"]
+
+# Per-hook kill timeout in seconds.
+timeout_secs = 30
+
+# Fire hooks (and the webhook) automatically after every transcription, including
+# re-transcriptions. false = transcription just updates the stored transcript and
+# you fire hooks on demand via "Re-fire hook".
+run_on_transcribe = true
+
+# `webhook_url` — optional HTTP target POSTed the payload concurrently with the
+# hooks. Omitted by default. Network policy lives in [webhook] below.
+# webhook_url = "http://127.0.0.1:5678/webhook/phoneme"
+
+# `keyword_rules` — conditional hooks that also run when the transcript matches a
+# pattern, on top of `commands`. Empty by default. Each rule:
+#   pattern        = substring to look for in the (post-processed) transcript
+#   command        = shell command to run on a match (same JSON on stdin)
+#   case_sensitive = false (default) matches case-insensitively
+# [[hook.keyword_rules]]
+# pattern = "Action Item:"
+# command = "powershell -NoProfile -File %APPDATA%/phoneme/hooks/to-tasks.ps1"
+# case_sensitive = false
+
+
+# -----------------------------------------------------------------------------
+# [webhook] — network policy (SSRF guard) for hook.webhook_url
+# -----------------------------------------------------------------------------
+# Loopback targets (127.0.0.1, [::1], localhost) are ALWAYS allowed, any scheme —
+# webhooks into n8n / Home Assistant on this machine are the primary use case.
+# These knobs only govern targets beyond loopback. Both default off (safe).
+[webhook]
+# Allow non-loopback PRIVATE targets — RFC1918 (10/8, 172.16/12, 192.168/16),
+# link-local 169.254/16, IPv6 ULA fc00::/7 and link-local fe80::/10. Turn on to
+# webhook into a LAN box (e.g. n8n on a NAS).
+allow_private_network = false
+
+# Allow plain http:// for PUBLIC targets. Off = public targets must be https://.
+# Loopback is exempt; private targets are governed by allow_private_network.
+allow_http = false
+
+
+# -----------------------------------------------------------------------------
+# [hotkey] / [in_place_hotkey] / [meeting_hotkey] — global keyboard shortcuts
+# -----------------------------------------------------------------------------
+# [hotkey] starts a standard recording; [in_place_hotkey] a dictation typed at
+# the cursor; [meeting_hotkey] a meeting recording (mic + system audio). All
+# disabled by default. `mode`: "hold" = record only while held; "toggle" = press
+# to start, press again to stop.
+[hotkey]
+enabled = false
+combo = "Ctrl+Alt+Space"
+mode = "hold"
+
+[in_place_hotkey]
+enabled = false
+combo = "Ctrl+Alt+I"
+mode = "hold"
+
+[meeting_hotkey]
+enabled = false
+combo = "Ctrl+Alt+M"
+mode = "toggle"
+
+
+# -----------------------------------------------------------------------------
+# [tray] — OS tray behavior
+# -----------------------------------------------------------------------------
+[tray]
+# Open the main window automatically when the app starts.
+show_on_startup = true
+# Closing the main window minimizes to the system tray instead of quitting.
+minimize_to_tray = true
+# Register a Windows Run key so the app starts at login.
+start_at_login = false
+
+
+# -----------------------------------------------------------------------------
+# [editor] — the built-in transcript editor
+# -----------------------------------------------------------------------------
+[editor]
+# Use Vim keybindings in the CodeMirror transcript editor.
+vim_mode = false
+# Inline vimrc applied when vim_mode is on (key remappings, etc.).
+vimrc = ""
+# Absolute path to an external .vimrc to load automatically.
+vimrc_path = ""
+
+
+# -----------------------------------------------------------------------------
+# [diarization] — speaker labeling
+# -----------------------------------------------------------------------------
+[diarization]
+# Backend that assigns speakers:
+#   "none" (default) | "local" (Pyannote ONNX) | "deepgram" | "assemblyai"
+provider = "none"
+# Absolute path to the local Pyannote ONNX model file (used when provider="local").
+local_model_path = ""
+
+
+# -----------------------------------------------------------------------------
+# [daemon] — background daemon runtime
+# -----------------------------------------------------------------------------
+[daemon]
+# Log verbosity: one of "error" | "warn" | "info" | "debug" | "trace".
+# The RUST_LOG environment variable overrides this when set.
+log_level = "info"
+# CURRENTLY UNUSED — rotation is daily, not size-based. Kept so older configs
+# keep parsing; a future size-based rotator would honor it.
+log_max_size_mb = 10
+# Max rotated DAILY log files (daemon.log.YYYY-MM-DD) to keep; older days are
+# pruned at daemon startup.
+log_max_files = 5
+# IPC channel name. On Windows this is the named pipe \\.\pipe\<name>.
+pipe_name = "phoneme-daemon"
+
+
+# -----------------------------------------------------------------------------
+# [interface] — frontend aesthetics and layout
+# -----------------------------------------------------------------------------
+[interface]
+# Strip the OS window decorations (custom chrome).
+strip_titlebar = false
+# Use 24-hour time format in the UI.
+format_24h = false
+# Active CSS theme id (e.g. "catppuccin-mocha", "tokyo-night").
+theme = "catppuccin-mocha"
+# Columns shown in the main list view.
+visible_columns = ["day", "time", "duration", "status", "transcript"]
+# Column widths (CSS grid track sizes) matching `visible_columns`.
+column_widths = ["100px", "60px", "60px", "100px", "1fr"]
+# Float the live preview in a system-wide, always-on-top overlay window instead
+# of inside the app. Requires recording.streaming_preview to have anything to show.
+preview_overlay = false
+# System-wide vim-style keyboard navigation across the whole app (h/l between
+# panes, j/k in the list, gg/G, i/Enter, Esc). Distinct from editor.vim_mode,
+# which only affects the transcript editor.
+vim_nav = false
+# Pane show/hide animation speed: "off" | "fast" | "normal" | "slow".
+# "off" makes sidebar / detail-pane / focus-mode toggles instant.
+animation_speed = "normal"
+# Toast a note as each pipeline step finishes and when a recording is fully
+# ready. Failure toasts always show regardless of this setting.
+step_notifications = true
+# Tray Quit also shuts the daemon down (stops an in-flight recording, then the
+# whisper-server(s) and a Phoneme-launched Ollama). false = the daemon outlives
+# the tray (headless setups). Also read at daemon spawn time to decide whether
+# the tray ties the daemon's lifetime to its own.
+quit_stops_daemon = true
+
+
+# -----------------------------------------------------------------------------
+# [llm_post_process] — optional LLM transcript cleanup (the inherit anchor)
+# -----------------------------------------------------------------------------
+# This is the cleanup step AND the connection that [summary], [auto_tag], and
+# [title] inherit from when their own provider/key/url/model fields are blank.
+[llm_post_process]
+# Run the LLM cleanup step after Whisper.
+enabled = false
+# Provider / wire protocol: "none" | "ollama" | "openai" | "groq" | "anthropic".
+provider = "none"
+# Override the provider's base endpoint. Empty = the provider default.
+api_url = ""
+# Model id (e.g. "llama3.2:3b", "gpt-4o").
+model = "llama3.2:3b"
+# System prompt instructing the LLM how to clean the transcript.
+prompt = "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone."
+# Max seconds to wait for the cleanup LLM before falling back to the raw transcript.
+timeout_secs = 30
+# Launch `ollama serve` on demand when a step's effective connection is a LOCAL
+# Ollama and nothing answers there. Applies to every inheriting step
+# (cleanup, summary, tags, titles, in-place polish). An Ollama already running
+# when the daemon first probed it is never managed; one the daemon launched is
+# stopped at daemon shutdown. Remote URLs and non-Ollama providers never launch.
+autostart_ollama = true
+# Provider API key. Leave EMPTY here — set it via Settings (DPAPI-encrypted at
+# rest). Local providers (ollama) need no key.
+api_key = ""
+
+
+# -----------------------------------------------------------------------------
+# [summary] — optional AI summary of each transcript
+# -----------------------------------------------------------------------------
+# Blank provider/api_url/api_key/model each inherit the [llm_post_process] value,
+# so summaries can use a fully independent provider+model or just reuse cleanup.
+[summary]
+# Summarize automatically as the FINAL pipeline step on every recording.
+auto = false
+# Provider override. Empty = inherit the cleanup provider.
+provider = ""
+# Base URL override. Empty = inherit / provider default.
+api_url = ""
+# Model override. Empty = inherit the cleanup model.
+model = ""
+# Prompt instructing the LLM how to summarize.
+prompt = "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble."
+# API key override. Empty = inherit the cleanup key. Set via Settings (DPAPI).
+api_key = ""
+
+
+# -----------------------------------------------------------------------------
+# [auto_tag] — LLM tag suggestions (you approve them before they apply)
+# -----------------------------------------------------------------------------
+# Blank provider/api_url/api_key/model inherit [llm_post_process], like [summary].
+[auto_tag]
+# Suggest tags automatically as a pipeline step on every recording.
+auto = false
+# Provider override. Empty = inherit.
+provider = ""
+# Base URL override. Empty = inherit / provider default.
+api_url = ""
+# Model override. Empty = inherit the cleanup model.
+model = ""
+# Tagger instructions; the existing-tag list and transcript are appended at run time.
+prompt = "You tag voice-note transcripts. Suggest concise topical tags (1-3 words each). Reuse tags from the EXISTING TAGS list when they genuinely fit, AND coin new tags for topics no existing tag covers — a good answer usually mixes both. Reply with ONLY a JSON array of tag-name strings — no preamble, no explanations."
+# Maximum number of suggested tags per recording.
+max_tags = 5
+# Auto-apply a suggestion when a tag with that name ALREADY EXISTS in your
+# library (matched case-insensitively); suggestions that would CREATE a new tag
+# always wait as approve/dismiss chips.
+auto_accept_existing = false
+# API key override. Empty = inherit the cleanup key. Set via Settings (DPAPI).
+api_key = ""
+
+
+# -----------------------------------------------------------------------------
+# [title] — auto-generated recording titles (heuristic free; LLM optional)
+# -----------------------------------------------------------------------------
+# Blank provider/api_url/api_key/model inherit [llm_post_process]. A title you
+# set by hand is never overwritten by auto generation.
+[title]
+# Generate a title for every recording (and refresh it on retranscribe). The
+# heuristic — first meaningful sentence of the transcript — is free and local,
+# so this defaults on.
+enabled = true
+# Ask the LLM for the title instead of using the heuristic alone. The heuristic
+# remains the fallback on any error.
+use_llm = false
+# Provider override. Empty = inherit.
+provider = ""
+# Base URL override. Empty = inherit / provider default.
+api_url = ""
+# Model override. Empty = inherit the cleanup model.
+model = ""
+# Title instructions; the transcript is appended at run time.
+prompt = "You title voice-note transcripts. Reply with ONLY a short title for the transcript: at most 8 words, plain text, no quotes, no trailing punctuation, no preamble."
+# API key override. Empty = inherit the cleanup key. Set via Settings (DPAPI).
+api_key = ""
+
+
+# -----------------------------------------------------------------------------
+# [semantic_search] — local ONNX embeddings for meaning-based search
+# -----------------------------------------------------------------------------
+# Defaults match the bundled all-MiniLM-L6-v2; the lower fields adapt Phoneme to
+# other embedding models. Changing the model/dimension makes old vectors
+# unsearchable — re-index with "Re-embed all recordings".
+[semantic_search]
+# Index new transcripts (chunked, hybrid with FTS5). When on, the daemon loads
+# the ONNX model at startup.
+enabled = false
+# Directory containing the ONNX model and tokenizer.
+model_dir = ""
+# Max input length (tokens) before truncation. all-MiniLM was trained at 256.
+max_tokens = 256
+# Token-pooling strategy: "mean" (MiniLM/MPNet/E5/BGE) or "cls".
+pooling = "mean"
+# Whether the model takes a token_type_ids input. BERT-family models (MiniLM,
+# MPNet) do; some E5 exports reject it. Leave on for the bundled model.
+token_type_ids = true
+# Prefix prepended to a SEARCH QUERY before embedding (e.g. "query: " for E5).
+# Empty for symmetric models like all-MiniLM.
+query_prefix = ""
+# Prefix prepended to a STORED PASSAGE before embedding (e.g. "passage: " for E5).
+passage_prefix = ""
+
+
+# -----------------------------------------------------------------------------
+# [retention] — automatic cleanup of old recordings
+# -----------------------------------------------------------------------------
+[retention]
+# Drop the WAV file even when the catalog row is kept — keeps metadata
+# searchable while freeing disk space.
+delete_audio = false
+# `max_age_days` — delete recordings older than N days (audio + catalog row).
+# Omitted by default = age-based cleanup disabled. Uncomment to enable:
+# max_age_days = 90
+# `max_count` — keep only the newest N recordings; delete older ones.
+# Omitted by default = count-based cleanup disabled. Uncomment to enable:
+# max_count = 500
+
+
+# -----------------------------------------------------------------------------
+# Config profiles (not a section in THIS file)
+# -----------------------------------------------------------------------------
+# A profile is a full-config snapshot saved as a separate file under
+# %APPDATA%\phoneme\profiles\<name>.toml. Switching to a profile copies its
+# contents over config.toml and reloads. Manage profiles via the tray menu or
+# `phoneme profile`. There is no [profiles] table inside config.toml itself.

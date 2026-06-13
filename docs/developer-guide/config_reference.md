@@ -6,6 +6,10 @@ The config is **validated on load/reload** — an invalid file is rejected with 
 
 Schema source: `crates/phoneme-core/src/config.rs`.
 
+### Example files
+
+A fully-commented `config.example.toml` and `.env.example` live at the **repo root**. `config.example.toml` lists every section and key with its default value and a plain-language note, and is itself a valid, copy-paste-runnable config (drop it in at `%APPDATA%\phoneme\config.toml`). `.env.example` documents the runtime environment variables below. Neither stores a real API key — secrets are entered via Settings and encrypted at rest with DPAPI.
+
 ---
 
 ## `[whisper]`
@@ -279,10 +283,19 @@ Named copies under `%APPDATA%\phoneme\profiles\`. Switch via tray menu. See [Con
 
 ## Environment variables
 
+Runtime variables read by the daemon / CLI / tray. See the commented `.env.example` at the repo root for examples; Phoneme reads these from the process environment and does not auto-load a `.env` file.
+
 | Variable | Effect |
 |----------|--------|
-| `PHONEME_AUDIO_BACKEND=synthetic` | Use generator source instead of CPAL (tests/CI) |
 | `PHONEME_CONFIG` | Override the active config file path (honored by the daemon, CLI, and tray) |
-| `RUST_LOG` | Tracing filter for the daemon (e.g. `debug`) |
+| `PHONEME_DATA_LOCAL` | Override the local data dir (inbox / catalog / logs); default `%LOCALAPPDATA%\phoneme`. Primarily for test isolation, but a real runtime override |
+| `RUST_LOG` | Tracing filter for the daemon (e.g. `debug`); overrides `daemon.log_level` |
+| `NO_COLOR` | When set to any value, the `phoneme` CLI disables ANSI color (same as `--no-color`) |
+| `HF_HOME` | Hugging Face cache root the doctor reads to locate downloaded models |
+| `PHONEME_AUDIO_BACKEND=synthetic` | Use generator source instead of CPAL (tests/CI) |
+
+API keys are **not** environment variables — they are entered via Settings and stored DPAPI-encrypted in `config.toml`.
+
+Hook scripts additionally receive `PHONEME_ID`, `PHONEME_AUDIO_PATH`, and `PHONEME_TRANSCRIPT` in their environment (set by Phoneme, not read from yours) — see [`[hook]`](#hook).
 
 See [Testing & CI](testing_and_ci.md) for synthetic audio in integration tests.
