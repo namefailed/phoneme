@@ -1538,6 +1538,10 @@ impl Catalog {
         cfg: &crate::config::RetentionConfig,
     ) -> Result<Vec<String>> {
         let mut deleted_paths: Vec<String> = Vec::new();
+        // Tracks whether any row was hard-deleted (not audio-only). A hard
+        // delete cascade-drops that recording's embeddings, so the warm cache
+        // must be dropped or deleted vectors keep surfacing in search.
+        let mut hard_deleted = false;
 
         // `delete_audio = true` is the disk-saver mode: the catalog row stays
         // (transcript searchable forever), only the WAV goes. The row's
@@ -1577,6 +1581,7 @@ impl Catalog {
                         .bind(&id)
                         .execute(&self.pool)
                         .await?;
+                    hard_deleted = true;
                 }
                 deleted_paths.push(audio_path);
             }
@@ -1616,9 +1621,17 @@ impl Catalog {
                         .bind(&id)
                         .execute(&self.pool)
                         .await?;
+                    hard_deleted = true;
                 }
                 deleted_paths.push(audio_path);
             }
+        }
+
+        // A hard delete cascade-drops the recordings' embeddings; drop the warm
+        // snapshot so deleted vectors stop surfacing in semantic search. (The
+        // audio-only path keeps the rows + embeddings, so it needs no drop.)
+        if hard_deleted {
+            self.invalidate_embedding_cache();
         }
 
         Ok(deleted_paths)
@@ -2426,6 +2439,57 @@ mod tests {
         assert_eq!(
             scores1, scores2,
             "hybrid_search yields the same per-recording relevance over the warm cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn retention_hard_delete_invalidates_the_embedding_cache() {
+        // A retention sweep that hard-deletes recordings cascade-drops their
+        // embeddings; the warm cache MUST be invalidated or the deleted vectors
+        // keep surfacing as ghost hits in search.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap(); // warm the cache
+        assert!(db.cached_vector_count().is_some(), "warm after the query");
+
+        // Hard delete every terminal recording (max_count = 0, delete_audio off).
+        let cfg = crate::config::RetentionConfig {
+            max_count: Some(0),
+            ..Default::default()
+        };
+        db.apply_retention(&cfg).await.unwrap();
+        assert_eq!(
+            db.cached_vector_count(),
+            None,
+            "a retention hard-delete must invalidate the embedding cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn audio_only_retention_does_not_drop_the_cache() {
+        // delete_audio mode only blanks audio_path (keeps row + embeddings), so
+        // it must NOT needlessly drop a warm cache.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert!(db.cached_vector_count().is_some());
+        let cfg = crate::config::RetentionConfig {
+            max_count: Some(0),
+            delete_audio: true,
+            ..Default::default()
+        };
+        db.apply_retention(&cfg).await.unwrap();
+        assert!(
+            db.cached_vector_count().is_some(),
+            "audio-only retention keeps embeddings, so the cache should stay warm"
         );
     }
 
