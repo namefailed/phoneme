@@ -15,6 +15,7 @@ export type RerunAllParams = {
   cleanupApiUrl: string | null;
   summaryModel: string | null;
   summaryPrompt: string | null;
+  titleModel: string | null;
 };
 
 /** What the Re-run form asked for: which step to re-run, with that step's
@@ -49,6 +50,7 @@ export async function applyRerun(id: string, p: RerunPayload): Promise<void> {
         cleanup_api_url: p.overrides.cleanupApiUrl,
         summary_model: p.overrides.summaryModel,
         summary_prompt: p.overrides.summaryPrompt,
+        title_model: p.overrides.titleModel,
       } : null);
       break;
     case "hook":

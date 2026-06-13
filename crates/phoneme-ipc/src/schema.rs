@@ -42,6 +42,10 @@ pub struct RerunAllOverrides {
     /// Summary prompt for this run only.
     #[serde(default)]
     pub summary_prompt: Option<String>,
+    /// Auto-title model for this run only. When set, the title step runs with an
+    /// LLM using this model (it's enabled for the run even if globally off).
+    #[serde(default)]
+    pub title_model: Option<String>,
 }
 
 /// All operations a client can ask the daemon to perform.

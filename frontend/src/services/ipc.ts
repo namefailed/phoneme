@@ -298,6 +298,9 @@ export type RerunAllOverrides = {
   cleanup_api_url?: string | null;
   summary_model?: string | null;
   summary_prompt?: string | null;
+  /** Auto-title model for this run only. When set, the title step runs with an
+   *  LLM using this model (enabled for the run even if globally off). */
+  title_model?: string | null;
 };
 
 /**

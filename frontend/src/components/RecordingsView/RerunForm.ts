@@ -332,6 +332,9 @@ export class RerunFormElement extends LitElement {
           cleanupApiUrl: isApi ? orNull(this.cleanupApiUrl) : null,
           summaryModel: orNull(this.summaryModel),
           summaryPrompt: this.summaryPrompt.trim() === "" ? null : this.summaryPrompt,
+          // The robust Re-run form has no title slot — the quick model switcher
+          // (ModelPicker) owns the title override.
+          titleModel: null,
         } : null;
         return { step: "all", model: this.selectedModel || null, overrides };
       }

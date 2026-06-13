@@ -240,6 +240,11 @@ trust boundary. Verified against current code.*
   **✓ All** / **✕ Clear**; and the tag input no longer eats `j`/`k` (an old
   empty-box vim-browse shortcut swallowed the first letter of tags like
   "javascript" — gone; use ↑/↓ to browse suggestions).
+- [x] **Title model in the quick model switcher.** The Re-run / Models modal
+  gained a **Title** tab alongside Summary and Auto-tag (a blank provider inherits
+  the post-processing connection). "Save as default" writes `[title]`; **Run
+  once** carries a one-time title-model override (new `title_model` field on the
+  re-run-all IPC) that enables the LLM title step for that run.
 - [x] **Webhook safety toggles** — Settings now exposes
   `webhook.allow_private_network` and `webhook.allow_http` (previously
   TOML-only) with plain-language warnings.

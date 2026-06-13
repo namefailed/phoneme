@@ -13,7 +13,7 @@ import { applyRerun, rerunToastMessage, type RerunPayload } from './RecordingsVi
 import { getOpenRecordingId } from '../state/openRecording';
 
 /** Every surface where a model can be switched from the quick picker. */
-type MpTab = "transcription" | "postprocessing" | "summary" | "autotag" | "preview" | "semantic";
+type MpTab = "transcription" | "postprocessing" | "summary" | "title" | "autotag" | "preview" | "semantic";
 
 /** Size/speed rank for ordering whisper models smallest→largest. Turbo (a
  *  distilled large model, faster than Large v3) sorts just before Large v3. */
@@ -107,6 +107,13 @@ export class ModelPickerElement extends LitElement {
   @state() private sumUrl = "";
   @state() private sumModel = "";
   @state() private sumKey = "";
+
+  // Auto-title model (config.title). Empty provider = inherit the post-processing
+  // (cleanup) connection, mirroring summary.
+  @state() private titProvider = "";
+  @state() private titUrl = "";
+  @state() private titModel = "";
+  @state() private titKey = "";
 
   // Auto-tag model (config.auto_tag). Empty provider = inherit the cleanup
   // connection, like the summary.
@@ -245,6 +252,17 @@ export class ModelPickerElement extends LitElement {
       setApiKey: (k) => { this.sumKey = k; },
     });
 
+    mountConn("tit", {
+      catalog: "llm",
+      inheritLabel: "Same as post-processing",
+      getKind: () => this.titProvider,
+      setKind: (k) => { this.titProvider = k; },
+      getApiUrl: () => this.titUrl,
+      setApiUrl: (u) => { this.titUrl = u; },
+      getApiKey: () => this.titKey,
+      setApiKey: (k) => { this.titKey = k; },
+    });
+
     mountConn("at", {
       catalog: "llm",
       inheritLabel: "Same as post-processing",
@@ -285,6 +303,17 @@ export class ModelPickerElement extends LitElement {
       getApiKey: () => this.sumKey,
       getModel: () => this.sumModel,
       setModel: (m) => { this.sumModel = m; },
+    });
+
+    // Auto-title — mirrors summary; a blank provider inherits cleanup wholesale.
+    mount("tit", `${this.titProvider}|${this.titUrl}|${this.titKey}`, {
+      mode: "llm",
+      blankLabel: "(provider default)",
+      getProvider: () => this.titProvider,
+      getApiUrl: () => this.titUrl,
+      getApiKey: () => this.titKey,
+      getModel: () => this.titModel,
+      setModel: (m) => { this.titModel = m; },
     });
 
     // Auto-tag — mirrors summary; a blank model falls back to the cleanup model.
@@ -349,6 +378,12 @@ export class ModelPickerElement extends LitElement {
     this.sumUrl = String(s.api_url ?? "");
     this.sumModel = String(s.model ?? "");
     this.sumKey = String(s.api_key ?? "");
+
+    const tit = this.config.title || {};
+    this.titProvider = String(tit.provider ?? "");
+    this.titUrl = String(tit.api_url ?? "");
+    this.titModel = String(tit.model ?? "");
+    this.titKey = String(tit.api_key ?? "");
 
     const at = this.config.auto_tag || {};
     this.atProvider = String(at.provider ?? "");
@@ -426,6 +461,14 @@ export class ModelPickerElement extends LitElement {
     this.config.summary.api_key = this.sumKey;
     this.config.summary.api_url = this.sumUrl.trim();
 
+    // Auto-title model — blank fields inherit the post-processing connection
+    // (mirrors summary). The enable / use-LLM toggles live in Settings.
+    if (!this.config.title) this.config.title = {};
+    this.config.title.provider = this.titProvider.trim();
+    this.config.title.model = this.titModel.trim();
+    this.config.title.api_key = this.titKey;
+    this.config.title.api_url = this.titUrl.trim();
+
     // Auto-tag model — blank fields inherit the post-processing connection
     // (mirrors summary). The enable toggle itself lives in Settings.
     if (!this.config.auto_tag) this.config.auto_tag = {};
@@ -489,6 +532,7 @@ export class ModelPickerElement extends LitElement {
             cleanupApiUrl: isApi ? orNull(this.llmUrl) : null,
             summaryModel: orNull(this.sumModel),
             summaryPrompt: null,
+            titleModel: orNull(this.titModel),
           }
         : null,
     };
@@ -548,6 +592,7 @@ export class ModelPickerElement extends LitElement {
             <button class="mp-tab ${this.activeTab === 'transcription' ? 'active' : ''}" @click=${() => this.activeTab = 'transcription'} role="tab">Transcription</button>
             <button class="mp-tab ${this.activeTab === 'postprocessing' ? 'active' : ''}" @click=${() => this.activeTab = 'postprocessing'} role="tab">Post-processing</button>
             <button class="mp-tab ${this.activeTab === 'summary' ? 'active' : ''}" @click=${() => this.activeTab = 'summary'} role="tab">Summary</button>
+            <button class="mp-tab ${this.activeTab === 'title' ? 'active' : ''}" @click=${() => this.activeTab = 'title'} role="tab">Title</button>
             <button class="mp-tab ${this.activeTab === 'autotag' ? 'active' : ''}" @click=${() => this.activeTab = 'autotag'} role="tab">Auto-tag</button>
             <button class="mp-tab ${this.activeTab === 'preview' ? 'active' : ''}" @click=${() => this.activeTab = 'preview'} role="tab">Live preview</button>
             <button class="mp-tab ${this.activeTab === 'semantic' ? 'active' : ''}" @click=${() => this.activeTab = 'semantic'} role="tab">Semantic</button>
@@ -600,6 +645,17 @@ export class ModelPickerElement extends LitElement {
               <div class="mp-model-host" id="mp-sum-model-host"></div>
             </div>
             <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
+          </div>
+
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'title'}>
+            <label class="mp-label">Provider</label>
+            <div class="mp-conn-host" id="mp-tit-conn-host"></div>
+
+            <div style="display:${this.titProvider ? '' : 'none'}">
+              <label class="mp-label">Model</label>
+              <div class="mp-model-host" id="mp-tit-model-host"></div>
+            </div>
+            <p class="mp-hint">Model for auto-generating recording titles. <b>Same as post-processing</b> reuses your cleanup connection. Turn auto-titles + the AI-title option on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'autotag'}>

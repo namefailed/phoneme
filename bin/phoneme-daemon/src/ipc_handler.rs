@@ -692,6 +692,13 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     if let Some(p) = ov.summary_prompt {
                         cfg.summary.prompt = p;
                     }
+                    // A chosen title model implies "run the title step with it"
+                    // for this run — enable it + the LLM path even if globally off.
+                    if let Some(m) = ov.title_model {
+                        cfg.title.enabled = true;
+                        cfg.title.use_llm = true;
+                        cfg.title.model = m;
+                    }
                     changed = true;
                 }
                 if changed {
