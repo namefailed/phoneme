@@ -21,8 +21,9 @@ export type ActionRowCallbacks = {
 
 /**
  * The detail pane's action strip: Play/Pause · Re-run… (opens the Models modal
- * in "Run once" mode) · 🗑 Delete · Export ▾ (transcript / captions / all-data,
- * via a save dialog). Export applies custom speaker names before emitting text.
+ * in "Run once" mode) · Export ▾ (transcript / captions / all-data, via a save
+ * dialog) · 🗑 Delete (last, the destructive action). Export applies custom
+ * speaker names before emitting text.
  * (Copy lives on the transcript box now — it copies the transcript, so it sits
  * there; ✨ Similar lives in the detail title bar, and Reveal is the clickable
  * footer path — all owned by RecordingDetail.)
@@ -211,7 +212,6 @@ export class ActionRowElement extends LitElement {
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
-        <button class="danger" title="Delete this recording" @click=${this.handleDelete}>🗑 Delete</button>
         <span class="export-trigger-wrap" style="position: relative; display: inline-block;">
           <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ▾</button>
           ${this.exportMenuOpen
@@ -223,6 +223,7 @@ export class ActionRowElement extends LitElement {
               </div>`
             : null}
         </span>
+        <button class="danger" title="Delete this recording" @click=${this.handleDelete}>🗑 Delete</button>
       </div>
     `;
   }

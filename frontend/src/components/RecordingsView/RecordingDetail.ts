@@ -151,6 +151,7 @@ export class RecordingDetail {
           this.editor?.dispose();
           this.editor = new TranscriptEditor(editorRoot, r.id, newText, (d) => {
             this.dirty = d;
+            this.setTranscriptCopyVisible(!d);
           }, !!r.user_edited);
         }
       }
@@ -224,6 +225,31 @@ export class RecordingDetail {
     }
   }
 
+  /** Hide the transcript Copy button while there are unsaved edits — the
+   *  editor's "Save Changes" button takes that top-right corner then, and two
+   *  buttons fighting for the same spot looks broken. */
+  private setTranscriptCopyVisible(visible: boolean) {
+    const btn = this.container.querySelector<HTMLElement>("#transcript-copy");
+    if (btn) btn.style.display = visible ? "" : "none";
+  }
+
+  /** Copy the recording's notes (the live editor text, including unsaved edits)
+   *  to the clipboard and flash a ✓ on the notes-box Copy button. */
+  private async copyNotes(btn: HTMLButtonElement) {
+    const text = this.notesEditor?.getText() ?? this.recording?.notes ?? "";
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "✅";
+      btn.classList.add("copied");
+      window.setTimeout(() => {
+        btn.textContent = "📋";
+        btn.classList.remove("copied");
+      }, 1500);
+    } catch (e) {
+      showToast(`Clipboard copy failed: ${errText(e)}`, "error");
+    }
+  }
+
   private renderEmpty() {
     this.container.innerHTML = `
       <div class="empty">
@@ -257,10 +283,10 @@ export class RecordingDetail {
           <div style="min-width: 0; flex: 1;">
             <div class="detail-title" id="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px; cursor: text;" title="Click to edit the title — Enter saves, Esc cancels, empty resets to automatic"><span id="detail-title-text">${escapeHtml(r.title ?? formatDate(r.started_at))}</span></div>
             <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
+              <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
               <span id="detail-title-date" style="${r.title ? "" : "display: none;"}">${formatDate(r.started_at)}</span>
               <span>${formatDuration(r.duration_ms)}</span>
-              <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
-              <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="Where this recording's audio came from"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span><span class="rec-source-label">${r.track === "system" ? "System audio" : "Microphone"}</span></span>
+              <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="${r.track === "system" ? "System audio" : "Microphone"}"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span></span>
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
@@ -295,7 +321,8 @@ export class RecordingDetail {
             </div>
           </div>
         </div>
-        <div class="notes-block" style="margin-top: 6px;">
+        <div class="notes-block" style="margin-top: 6px; position: relative;">
+          <button class="notes-copy" id="notes-copy" type="button" aria-label="Copy notes" title="Copy the notes to the clipboard">📋</button>
           <div id="notes-editor"></div>
         </div>
         <div class="detail-footer">
@@ -327,6 +354,7 @@ export class RecordingDetail {
       this.editor?.dispose();
       this.editor = new TranscriptEditor(editorRoot, r.id, r.transcript ?? "", (d) => {
         this.dirty = d;
+        this.setTranscriptCopyVisible(!d);
       }, !!r.user_edited);
     }
 
@@ -537,11 +565,14 @@ export class RecordingDetail {
       .querySelector<HTMLButtonElement>("#detail-similar")
       ?.addEventListener("click", () => applyMoreLikeThis(r.id, r.title ?? null));
 
-    // 📋 Copy — the cute button floating at the transcript box's top-right.
-    // Copies the live transcript with custom speaker names applied (matching the
-    // old action-row Copy), with a brief ✓ on the button itself.
+    // 📋 Copy — the cute buttons floating at the transcript/notes boxes'
+    // top-right. The transcript one copies the live transcript with custom
+    // speaker names applied (matching the old action-row Copy); the notes one
+    // copies the live notes text. Each flashes a brief ✓ on itself.
     const copyBtn = this.container.querySelector<HTMLButtonElement>("#transcript-copy");
     copyBtn?.addEventListener("click", () => void this.copyTranscript(copyBtn));
+    const notesBtn = this.container.querySelector<HTMLButtonElement>("#notes-copy");
+    notesBtn?.addEventListener("click", () => void this.copyNotes(notesBtn));
 
     // The footer file path is clickable — reveal it in the OS file explorer
     // (replaces the old Reveal action-row button).

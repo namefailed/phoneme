@@ -394,10 +394,13 @@ mark.search-hit {
   /* Anchor for the floating Copy button (top-right of the box). */
   position: relative;
 }
-/* Cute Copy button tucked into the transcript box's top-right corner — it
-   copies the transcript, so it lives on the transcript. Faint until the box is
-   hovered/focused so it never fights the text, and it lifts on its own hover. */
-.transcript-copy {
+/* Cute Copy buttons tucked into the transcript/notes boxes' top-right corners —
+   each copies its own box's text, so it lives on it. Faint by default so it
+   never fights the text, and it lights up + lifts when you hover the BUTTON
+   itself (not the whole box). The transcript one is hidden while there are
+   unsaved edits, so it never collides with the editor's Save Changes button. */
+.transcript-copy,
+.notes-copy {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -415,21 +418,20 @@ mark.search-hit {
   background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
   color: var(--fg-muted);
   cursor: pointer;
-  opacity: 0.35;
+  opacity: 0.4;
   transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease,
     background 0.15s ease, transform 0.1s ease;
 }
-.transcript-block:hover .transcript-copy,
-.transcript-block:focus-within .transcript-copy {
+.transcript-copy:hover,
+.notes-copy:hover {
   opacity: 1;
-}
-.transcript-copy:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--bg-elevated);
   transform: translateY(-1px);
 }
-.transcript-copy.copied {
+.transcript-copy.copied,
+.notes-copy.copied {
   opacity: 1;
   color: var(--ok);
   border-color: var(--ok);

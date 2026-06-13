@@ -205,10 +205,14 @@ trust boundary. Verified against current code.*
 - [x] **Detail-pane action row tidied.** ✨ Similar moved up into the recording's
   title bar (beside fullscreen/close); **Copy** became a small button tucked into
   the transcript box's top-right corner (it copies the transcript, so it lives on
-  it — faint until you hover the box, with a ✓ flash on copy); 🗑 **Delete** sits
-  in the action row (where Copy used to be, styled as the destructive action). The
-  Reveal button is gone — the file path in the footer is now clickable to reveal
-  it in the OS explorer. The footer's model line became real **pipeline
+  it — it lights up when you hover the button, flashes a ✓ on copy, and hides
+  itself while there are unsaved edits so it never collides with the editor's
+  Save Changes button). The **notes box** gained the same Copy button. 🗑 **Delete**
+  sits last in the action row (Play · Re-run… · Export ▾ · Delete), styled as the
+  destructive action. The header meta line is reordered to **status → date/time →
+  duration → source**, and the source is now just its 🎤/🔊 icon (full name on
+  hover). The Reveal button is gone — the file path in the footer is now clickable
+  to reveal it in the OS explorer. The footer's model line became real **pipeline
   provenance**: every stage that actually touched this file, in the order the
   daemon ran them — capture → transcription (+ diarization) → cleanup →
   auto-title → hook → summary → auto-tags — naming each step's model where it's
@@ -217,9 +221,17 @@ trust boundary. Verified against current code.*
   model per recording (new `title_model` / `tag_model` / `diarization_model`
   columns), so those steps name their model too once a recording is (re)processed;
   the local speakrs diarizer has no model name, so it still reads "diarized".
+- [x] **More recordings-list columns + stickier widths.** The list gained
+  toggleable, reorderable **Title Model**, **Auto-Tag Model**, and **Diarization
+  Model** columns (alongside the existing per-step model columns), the **Source**
+  column shrank to just its 🎤/🔊 icon, and column widths now persist **by column
+  name** (per device) — so adding, removing, or reordering a column no longer
+  resets every width.
 - [x] **Auto-tag suggestion chips tidied.** Dropped the redundant ✨ from each
-  suggested-tag pill (the row already reads as suggestions), and the bulk buttons
-  now read **Check all** / **✕ Clear** instead of ✓ All / ✕ All.
+  suggested-tag pill (the row already reads as suggestions); the bulk buttons read
+  **✓ All** / **✕ Clear**; and the tag input no longer eats `j`/`k` (an old
+  empty-box vim-browse shortcut swallowed the first letter of tags like
+  "javascript" — gone; use ↑/↓ to browse suggestions).
 - [x] **Webhook safety toggles** — Settings now exposes
   `webhook.allow_private_network` and `webhook.allow_http` (previously
   TOML-only) with plain-language warnings.

@@ -49,6 +49,12 @@ export class NotesEditor {
     return this.current !== this.lastSaved;
   }
 
+  /** The live editor text (what's on screen, including unsaved edits) — used by
+   *  the notes-box Copy button so it copies what the user sees. */
+  getText(): string {
+    return this.current;
+  }
+
   private async init() {
     let vimrc = "";
     let vimrcPath = "";
