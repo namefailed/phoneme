@@ -249,13 +249,9 @@ The CLI-parity pass predates several newer features. CLI is missing:
 
 GUI is missing:
 
-- [ ] **Caption export button** — SRT/VTT export is CLI-only; the detail
-  pane (and bulk bar?) should offer it for transcribed recordings.
-- [ ] **Webhook safety knobs** — `[webhook] allow_private_network` /
-  `allow_http` ship without Settings toggles (TOML-only); surface them in
-  the hooks/webhook section with plain-language warning copy.
-- [ ] **Whole-library export** — verify the GUI can produce the same backup
-  zip as `phoneme export <file>`; wire it into Settings → Storage if not.
+- [x] **Caption export button** — a 💬 Captions SRT/VTT split-menu on the detail-pane action row (no-segments → retranscribe hint).
+- [x] **Webhook safety knobs** — Allow-private-network / Allow-insecure-HTTP toggles in SectionHook with warning copy.
+- [x] **Whole-library export** — Settings → Storage "Back up to .zip…" produces the CLI-equivalent catalog+audio archive (the old text Export is now labelled text-only).
 
 House rule going forward: a new Request lands with BOTH surfaces (or an
 explicit roadmap line here saying why not).

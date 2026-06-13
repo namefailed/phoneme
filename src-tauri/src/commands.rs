@@ -39,7 +39,7 @@ use crate::config_io;
 use crate::doctor::CheckResult;
 use crate::wizard::TestConnectResult;
 use futures::StreamExt;
-use phoneme_core::{Config, ListFilter, RecordMode, RecordingId};
+use phoneme_core::{Config, ListFilter, RecordMode, RecordingId, TranscriptSegment};
 use phoneme_ipc::{Request, Response};
 use serde_json::Value;
 use tauri::{Emitter, State};
@@ -497,6 +497,154 @@ pub async fn set_recording_title(
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::SetRecordingTitle { id, title }).await
+}
+
+/// Render one recording's machine segments as caption text in the requested
+/// format. `format` is `"srt"` or `"vtt"` (anything else is rejected as an
+/// invalid config). Fetches the segments through the daemon (`GetSegments`),
+/// then renders them with `phoneme_core::export`. Returns the caption body as
+/// a string for the WebView to drop into a save dialog — no file is written
+/// here, so the dialog plugin owns the destination the same way the plain-text
+/// transcript export does.
+///
+/// An empty segment list is the "retranscribe to generate them" case: it comes
+/// back as a `not_found` error carrying the same hint the CLI prints, so the
+/// caller can toast it instead of saving an empty file.
+#[tauri::command]
+pub async fn export_captions(
+    bridge: Br<'_>,
+    id: String,
+    format: String,
+) -> Result<String, CommandError> {
+    let id = parse_id(&id)?;
+    // Validate the format up front so a typo never reaches a silent default.
+    let fmt = match format.as_str() {
+        "srt" => CaptionFormat::Srt,
+        "vtt" => CaptionFormat::Vtt,
+        other => {
+            return Err(CommandError::new(
+                "invalid_config",
+                format!("unknown caption format {other:?} (expected \"srt\" or \"vtt\")"),
+            ));
+        }
+    };
+
+    let value = forward(&bridge, Request::GetSegments { id }).await?;
+    let segments: Vec<TranscriptSegment> = serde_json::from_value(value)
+        .map_err(|e| CommandError::new("internal", format!("parsing segments: {e}")))?;
+
+    if segments.is_empty() {
+        return Err(CommandError::new(
+            "not_found",
+            "no segments stored — retranscribe this recording to generate them",
+        ));
+    }
+
+    Ok(render_captions(&segments, fmt))
+}
+
+/// The two caption formats `export_captions` understands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptionFormat {
+    Srt,
+    Vtt,
+}
+
+/// Render segments into the chosen caption format. Split out from the command
+/// so the format→content mapping is unit-testable without a live bridge.
+fn render_captions(segments: &[TranscriptSegment], format: CaptionFormat) -> String {
+    match format {
+        CaptionFormat::Srt => phoneme_core::export::segments_to_srt(segments),
+        CaptionFormat::Vtt => phoneme_core::export::segments_to_vtt(segments),
+    }
+}
+
+/// Write a portable backup of the whole library to `dest` (a `.zip` path the
+/// WebView picked via the save dialog). Mirrors `phoneme export <FILE>`: a
+/// `catalog.json` versioned envelope (recordings + tags fetched from the
+/// daemon) plus every `.wav` under the configured audio dir packed into
+/// `audio/`. The GUI's plain JSON/CSV/TXT "Export All" carries no audio — this
+/// is the one that round-trips with the CLI backup. Returns how many audio
+/// files were packed so the caller can report it.
+#[tauri::command]
+pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, CommandError> {
+    use std::io::{Read, Write};
+    use zip::write::SimpleFileOptions;
+
+    let recordings = forward(
+        &bridge,
+        Request::ListRecordings {
+            filter: ListFilter::default(),
+        },
+    )
+    .await?;
+    // Tags are best-effort: a backup without the tag list is still useful.
+    let tags = forward(&bridge, Request::ListTags)
+        .await
+        .unwrap_or_else(|_| serde_json::json!([]));
+
+    let export_data = serde_json::json!({
+        "version": 1,
+        "recordings": recordings,
+        "tags": tags,
+    });
+    let json_bytes = serde_json::to_vec_pretty(&export_data)
+        .map_err(|e| CommandError::new("internal", format!("serializing catalog: {e}")))?;
+
+    let file = std::fs::File::create(&dest)
+        .map_err(|e| CommandError::new("io", format!("creating {dest}: {e}")))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("catalog.json", options)
+        .map_err(|e| CommandError::new("io", format!("writing catalog.json: {e}")))?;
+    zip.write_all(&json_bytes)
+        .map_err(|e| CommandError::new("io", format!("writing catalog bytes: {e}")))?;
+
+    // The audio dir is resolved tray-side (env-var/`~` expansion), the same way
+    // the CLI does it — so the GUI backup packs the same files.
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
+    let audio_dir_raw = cfg
+        .expanded()
+        .map(|c| c.recording.audio_dir)
+        .unwrap_or_else(|_| cfg.recording.audio_dir.clone());
+    let audio_dir = std::path::PathBuf::from(&audio_dir_raw);
+
+    let mut packed: u64 = 0;
+    if audio_dir.exists() {
+        let mut stack = vec![audio_dir];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if !name.ends_with(".wav") {
+                    continue;
+                }
+                if zip.start_file(format!("audio/{name}"), options).is_err() {
+                    continue;
+                }
+                if let Ok(mut f) = std::fs::File::open(&path) {
+                    let mut buf = Vec::new();
+                    if f.read_to_end(&mut buf).is_ok() && zip.write_all(&buf).is_ok() {
+                        packed += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    zip.finish()
+        .map_err(|e| CommandError::new("io", format!("finalizing zip: {e}")))?;
+    Ok(packed)
 }
 
 /// Persist every window's position/size NOW. tauri-plugin-window-state only
@@ -1670,6 +1818,52 @@ mod tests {
     use super::*;
 
     // ── forward() with no bridge ───────────────────────────────────────────
+
+    // ── render_captions (export_captions format→content mapping) ────────────
+
+    fn cap_seg(start_ms: i64, end_ms: i64, text: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            start_ms,
+            end_ms,
+            text: text.to_string(),
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn render_captions_srt_uses_comma_separator_and_cue_numbers() {
+        let segs = [cap_seg(1000, 4500, "Hello world.")];
+        let out = render_captions(&segs, CaptionFormat::Srt);
+        // 1-based cue index, `HH:MM:SS,mmm` separator — the SRT shape.
+        assert_eq!(out, "1\n00:00:01,000 --> 00:00:04,500\nHello world.\n");
+    }
+
+    #[test]
+    fn render_captions_vtt_emits_header_and_dot_separator() {
+        let segs = [cap_seg(1000, 4500, "Hello world.")];
+        let out = render_captions(&segs, CaptionFormat::Vtt);
+        // WEBVTT header + `HH:MM:SS.mmm` separator — distinct from SRT.
+        assert_eq!(
+            out,
+            "WEBVTT\n\n00:00:01.000 --> 00:00:04.500\nHello world.\n\n"
+        );
+    }
+
+    #[test]
+    fn render_captions_formats_diverge_for_the_same_segments() {
+        let segs = [cap_seg(0, 2000, "One."), cap_seg(2500, 5000, "Two.")];
+        let srt = render_captions(&segs, CaptionFormat::Srt);
+        let vtt = render_captions(&segs, CaptionFormat::Vtt);
+        assert!(
+            srt.starts_with('1'),
+            "SRT starts with a cue number: {srt:?}"
+        );
+        assert!(
+            vtt.starts_with("WEBVTT"),
+            "VTT starts with its header: {vtt:?}"
+        );
+        assert_ne!(srt, vtt);
+    }
 
     // ── effective_local_whisper_url ────────────────────────────────────────
 

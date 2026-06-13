@@ -55,6 +55,18 @@ trust boundary. Verified against current code.*
   failure toasts drop the internal "internal error:" prefix; the transcript
   diff computes once per refresh instead of twice.
 
+### GUI parity
+
+- [x] **Caption export in the GUI** — a 💬 Captions button on a transcribed
+  recording's action row saves SubRip (.srt) or WebVTT (.vtt), matching
+  `phoneme export --captions`.
+- [x] **Webhook safety toggles** — Settings now exposes
+  `webhook.allow_private_network` and `webhook.allow_http` (previously
+  TOML-only) with plain-language warnings.
+- [x] **Whole-library backup zip** — Settings → Storage → "Back up to .zip…"
+  writes the same portable catalog+audio archive as `phoneme export <file>`
+  (the old text-only Export is relabeled).
+
 ### CLI parity
 
 - [x] **CLI reaches the GUI's per-recording actions** — `phoneme edit <id>

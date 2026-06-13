@@ -457,6 +457,35 @@ export async function setRecordingTitle(id: string, title: string | null): Promi
   await tauriInvoke("set_recording_title", { id, title });
 }
 
+/** Caption export formats `exportCaptions` understands (no leading dot). */
+export type CaptionFormat = "srt" | "vtt";
+
+/**
+ * Render a recording's machine segments as caption text in the chosen format
+ * ("srt" or "vtt"), returning the body for the caller to drop into a save
+ * dialog (the command writes no file — the dialog owns the destination). The
+ * format→content mapping lives in `phoneme_core::export`, so the GUI captions
+ * match `phoneme export --captions` byte for byte. Rejects with a `not_found`
+ * error carrying "no segments stored — retranscribe…" when the recording has
+ * no segments, so callers surface the same hint the CLI gives instead of
+ * saving an empty file.
+ */
+export async function exportCaptions(id: string, format: CaptionFormat): Promise<string> {
+  return await tauriInvoke<string>("export_captions", { id, format });
+}
+
+/**
+ * Write a portable backup of the whole library to `dest` (a `.zip` path picked
+ * via the save dialog). Mirrors `phoneme export <FILE>`: a `catalog.json`
+ * envelope (recordings + tags) plus every `.wav` under the audio dir packed
+ * into `audio/`. Distinct from Settings → Storage's plain JSON/CSV/TXT
+ * "Export All", which carries no audio. Returns the number of audio files
+ * packed.
+ */
+export async function exportLibraryZip(dest: string): Promise<number> {
+  return await tauriInvoke<number>("export_library_zip", { dest });
+}
+
 /** Skip the LLM step (cleanup / summary / tagging) currently running for the
  *  active queue item; the pipeline continues with the next step. */
 export async function skipCurrentStage(): Promise<void> {

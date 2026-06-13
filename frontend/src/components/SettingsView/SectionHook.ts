@@ -47,6 +47,13 @@ export class SectionHook {
     delete h.command; // legacy field — we manage `commands` from here on
     if (!Array.isArray(h.keyword_rules)) h.keyword_rules = [];
 
+    // Seed the [webhook] table so the safety toggles can bind to it
+    // (setByPath throws on a missing parent). The two knobs default off — the
+    // safe posture the backend ships.
+    const w = config.webhook ?? (config.webhook = {});
+    if (typeof w.allow_private_network !== "boolean") w.allow_private_network = false;
+    if (typeof w.allow_http !== "boolean") w.allow_http = false;
+
     this.render(container);
   }
 
@@ -108,6 +115,26 @@ export class SectionHook {
           )}</div>
           <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
             Optional. Phoneme sends an HTTP POST with the recording's JSON payload to this URL after each transcription (alongside any Integration Scripts above). Leave blank to disable. Honors the <b>Run hooks after transcription</b> toggle below.
+          </span>
+        </div>
+        <div class="settings-field">
+          <label>Allow private network</label>
+          <div>${renderField(
+            { key: "webhook.allow_private_network", label: "", kind: "checkbox" },
+            this.config.webhook.allow_private_network ?? false,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Allow the webhook to POST to private network addresses (your LAN, <code>10.x</code> / <code>192.168.x</code> / <code>172.16–31.x</code>, link-local). Off by default — such targets are blocked to stop a transcript being sent to an internal service by mistake. <b>Only enable for local automation you trust</b> (e.g. an n8n box on your NAS).
+          </span>
+        </div>
+        <div class="settings-field">
+          <label>Allow insecure HTTP</label>
+          <div>${renderField(
+            { key: "webhook.allow_http", label: "", kind: "checkbox" },
+            this.config.webhook.allow_http ?? false,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Allow plain <code>http://</code> for public webhook targets. Off by default — public URLs must be <code>https://</code> so transcripts aren't sent in the clear. Loopback is always allowed; <b>leave this off unless you really mean to send over unencrypted HTTP</b>.
           </span>
         </div>
         <div class="settings-field">
