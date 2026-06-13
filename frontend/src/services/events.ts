@@ -55,7 +55,7 @@ export function stageLabel(stage: PipelineStage): string {
  */
 export type DaemonEvent =
   | { event: "recording_started"; id: string; started_at: string; meeting_id?: string | null; track?: string | null }
-  | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string }
+  | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string; meeting_id?: string | null }
   | { event: "transcription_started"; id: string }
   | { event: "transcription_partial"; id: string; text: string }
   | { event: "transcription_done"; id: string; transcript: string }
