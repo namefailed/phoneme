@@ -186,6 +186,19 @@ pub async fn get_segments(bridge: Br<'_>, id: String) -> Result<Value, CommandEr
     forward(&bridge, Request::GetSegments { id }).await
 }
 
+/// Fetch one recording's machine transcript words in timeline order — the
+/// finer per-word layer beneath `get_segments`. Returns a JSON array (possibly
+/// empty) of `{ idx, start_ms, end_ms, text, speaker, confidence }`, ordered by
+/// `idx`; `confidence` is `null` when the provider gives none. An empty list is
+/// normal (older recordings predate word capture, some providers emit no
+/// per-word data). Fetched lazily by the word-level features (word seek,
+/// confidence highlighting).
+#[tauri::command]
+pub async fn get_words(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::GetWords { id }).await
+}
+
 /// Drop every pending tag suggestion across the whole library. Returns
 /// `{ "cleared": n }`; the daemon's AllTagSuggestionsCleared event refreshes
 /// any open views.

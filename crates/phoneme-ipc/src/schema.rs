@@ -174,6 +174,22 @@ pub enum Request {
         /// The recording whose segments to fetch.
         id: RecordingId,
     },
+    /// Fetch one recording's machine transcript words in timeline order — the
+    /// finer per-word layer beneath `GetSegments`. Ok = JSON array (possibly
+    /// empty) of word objects, each `{ idx, start_ms, end_ms, text, speaker,
+    /// confidence }`: a 0-based `idx` (the array order), `start_ms`/`end_ms`
+    /// offsets into the track's audio, the word text, the optional speaker
+    /// label matching the transcript's `[Speaker …]` markers, and a 0..1
+    /// per-word `confidence` (`null` when the provider gives none — whisper-
+    /// family endpoints emit only segment-level logprobs). An empty list is a
+    /// normal state — the recording predates word capture or its provider
+    /// returned no per-word timing — not an error. Words are fetched lazily by
+    /// the word-level features (word seek, confidence highlighting); the
+    /// cheaper `GetSegments` still powers the segment timeline.
+    GetWords {
+        /// The recording whose words to fetch.
+        id: RecordingId,
+    },
     /// Delete a recording. The catalog row goes first (an error there leaves
     /// the audio untouched); the WAV is then unlinked unless `keep_audio` —
     /// and only when it lives under the configured audio directory

@@ -664,6 +664,14 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
             "segments": [
                 {"start": 0.0, "end": 1.4, "text": " um so we shipped"},
                 {"start": 1.4, "end": 3.2, "text": " the new onboarding flow today"}
+            ],
+            // The finer per-word layer (the `granularities[]=word` shape).
+            // Whisper carries no per-word confidence, so it stays null end to end.
+            "words": [
+                {"word": "um", "start": 0.0, "end": 0.3},
+                {"word": "so", "start": 0.3, "end": 0.6},
+                {"word": "we", "start": 0.6, "end": 0.9},
+                {"word": "shipped", "start": 0.9, "end": 1.4}
             ]
         })))
         .mount(&server)
@@ -893,6 +901,20 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     assert_eq!(segments[1].start_ms, 1400);
     assert_eq!(segments[1].end_ms, 3200);
     assert_eq!(segments[1].text, "the new onboarding flow today");
+
+    // ── Words: the finer per-word timeline persists alongside the segments,
+    //    ms-converted, in idx order, with null confidence (whisper gives none) ─
+    let words = state.catalog.words_for(&id).await.unwrap();
+    assert_eq!(words.len(), 4, "all whisper words persist");
+    assert_eq!(words[0].text, "um");
+    assert_eq!(words[0].start_ms, 0);
+    assert_eq!(words[0].end_ms, 300, "seconds → ms");
+    assert_eq!(words[3].text, "shipped");
+    assert_eq!(words[3].end_ms, 1400);
+    assert!(
+        words.iter().all(|w| w.confidence.is_none()),
+        "whisper supplies no per-word confidence → None all the way to the catalog"
+    );
 
     // ── Tag suggestions: canonicalized to the existing casing, deduped, and
     //    the already-present spelling kept (auto-accept is off here) ───────

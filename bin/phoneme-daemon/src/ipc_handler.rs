@@ -243,6 +243,32 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(segments) => serialize_response(segments),
             Err(e) => err_response(&e),
         },
+        // Like GetSegments, an unknown id yields an empty list (not NotFound):
+        // "no words" is a normal state (pre-capture recordings, providers
+        // without per-word timing). Each object carries an explicit 0-based
+        // `idx` (the array order) so the frontend can rely on it without
+        // re-deriving it from position — `TranscriptWord` itself stores no idx,
+        // so we attach it here via enumerate.
+        Request::GetWords { id } => match state.catalog.words_for(&id).await {
+            Ok(words) => {
+                let with_idx: Vec<serde_json::Value> = words
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, w)| {
+                        serde_json::json!({
+                            "idx": idx,
+                            "start_ms": w.start_ms,
+                            "end_ms": w.end_ms,
+                            "text": w.text,
+                            "speaker": w.speaker,
+                            "confidence": w.confidence,
+                        })
+                    })
+                    .collect();
+                serialize_response(with_idx)
+            }
+            Err(e) => err_response(&e),
+        },
         Request::SemanticSearch { query, limit } => {
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {

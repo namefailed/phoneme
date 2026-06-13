@@ -146,6 +146,30 @@ export async function getSegments(id: string): Promise<TranscriptSegment[]> {
   return await tauriInvoke<TranscriptSegment[]>("get_segments", { id });
 }
 
+/** One machine transcript word with its audio-relative timing.
+ *  `idx` is the 0-based timeline order across the whole recording;
+ *  `start_ms`/`end_ms` are offsets into the track's audio file; `speaker`
+ *  mirrors the owning segment's `[Speaker …]` label (or null when undiarized);
+ *  `confidence` is 0..1 when the provider reports it, else null (whisper-family
+ *  cloud, native whisper, and older recordings give none). Machine truth: user
+ *  edits to the live transcript never rewrite these. */
+export type TranscriptWord = {
+  idx: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  speaker?: string | null;
+  confidence?: number | null;
+};
+
+/** A recording's machine transcript words in timeline order. Like segments, an
+ *  empty list is a normal state — older recordings predate word capture, and
+ *  several providers return no per-word timing — so the synced-transcript view
+ *  treats it as "no word timings" rather than an error. */
+export async function getWords(id: string): Promise<TranscriptWord[]> {
+  return await tauriInvoke<TranscriptWord[]>("get_words", { id });
+}
+
 /** One semantic-search hit: the recording plus its similarity score
  *  (cosine-derived, 0..1, higher = more relevant). */
 export interface SemanticSearchResult {

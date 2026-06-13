@@ -1029,12 +1029,13 @@ pub async fn run(
         return Ok(());
     }
 
-    // The segment timeline is machine truth (it describes the raw whisper
-    // output, not the LLM-cleaned text), so split it off here — the rest of
-    // the pipeline only transforms the text.
+    // The segment + word timelines are machine truth (they describe the raw
+    // whisper output, not the LLM-cleaned text), so split them off here — the
+    // rest of the pipeline only transforms the text.
     let phoneme_core::transcription::Transcription {
         text: transcript,
         segments,
+        words,
     } = transcription;
 
     // Finish the Transcribing activity entry with timing + size for the popout.
@@ -1156,6 +1157,14 @@ pub async fn run(
     // here costs the timeline views, not the recording.
     if let Err(e) = state.catalog.replace_segments(&id, &segments).await {
         tracing::warn!(id = %id.as_str(), "failed to persist transcript segments: {e}");
+    }
+
+    // Persist the finer per-word timeline alongside the segments (same
+    // machine-truth, replace-on-(re)transcribe semantics). Empty for providers
+    // with no per-word data. Best-effort: a failure costs only the word-level
+    // views (word seek, confidence highlighting), not the recording.
+    if let Err(e) = state.catalog.replace_words(&id, &words).await {
+        tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
     }
 
     // Record which post-processing model was used and whether diarization was

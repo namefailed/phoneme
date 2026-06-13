@@ -15,7 +15,7 @@
 use crate::config::{TranscriptionBackend, WhisperConfig};
 use crate::diarization::{LocalDiarizer, LocalDiarizerCache};
 use crate::error::{Error, Result};
-use crate::types::TranscriptSegment;
+use crate::types::{TranscriptSegment, TranscriptWord};
 use async_trait::async_trait;
 use reqwest::multipart;
 use secrecy::ExposeSecret;
@@ -29,12 +29,20 @@ use tokio::fs;
 /// timing, when it produced any. The segments power the timeline features
 /// (per-track timing, transcript↔waveform seek, the chronological meeting
 /// merge); providers without timing data return an empty `segments`.
+///
+/// `words` is the finer per-word timing layer (transcript↔waveform word seek,
+/// confidence highlighting). It is independent of `segments`: a provider may
+/// emit one, both, or neither. Providers/paths with no per-word data return an
+/// empty `words` — the substrate degrades gracefully rather than failing.
 #[derive(Debug, Clone)]
 pub struct Transcription {
     /// The transcript text (speaker-labelled when diarization ran).
     pub text: String,
     /// Per-segment timing, or empty for providers/paths with no timing data.
     pub segments: Vec<TranscriptSegment>,
+    /// Per-word timing (and per-word confidence where the provider supplies
+    /// it), or empty for providers/paths with no per-word data.
+    pub words: Vec<TranscriptWord>,
 }
 
 impl Transcription {
@@ -43,6 +51,7 @@ impl Transcription {
         Self {
             text,
             segments: Vec::new(),
+            words: Vec::new(),
         }
     }
 }
@@ -265,6 +274,11 @@ fn model_or(model: &str, default: &str) -> String {
 struct OpenAiResponse {
     text: String,
     segments: Option<Vec<OpenAiSegment>>,
+    /// Top-level per-word timing, present only when the request asked for
+    /// `timestamp_granularities[]=word`. The OpenAI verbose_json contract (and
+    /// whisper.cpp's server mirroring it) carries word + start + end, but no
+    /// per-word probability — so the captured words get `confidence: None`.
+    words: Option<Vec<OpenAiWord>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -272,6 +286,13 @@ struct OpenAiSegment {
     start: f32,
     end: f32,
     text: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiWord {
+    word: String,
+    start: f32,
+    end: f32,
 }
 
 /// Cap a third-party error response body before it flows into an `Error` (and
@@ -399,7 +420,13 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         // `request_segments`).
         if self.local_diarize.is_some() || self.request_segments {
             form = form.text("response_format", "verbose_json");
+            // Ask for both granularities: `segment` powers the segment timeline,
+            // `word` adds the top-level `words[]` array for the finer word
+            // layer. The OpenAI API accepts the param repeated; whisper.cpp's
+            // server honors it too, and an endpoint that ignores `word` simply
+            // omits the array (we degrade to no words).
             form = form.text("timestamp_granularities[]", "segment");
+            form = form.text("timestamp_granularities[]", "word");
         } else {
             form = form.text("response_format", "json");
         }
@@ -453,9 +480,30 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             })
             .collect();
 
+        // Decode the per-word layer once (whisper gives no per-word
+        // confidence → `None`), then attach it to whichever transcription path
+        // we take below. Words are independent of the speaker attribution, so
+        // the same set rides both the diarized and undiarized result.
+        let words: Vec<TranscriptWord> = parsed
+            .words
+            .unwrap_or_default()
+            .into_iter()
+            .map(|w| TranscriptWord {
+                start_ms: secs_to_ms(w.start as f64),
+                end_ms: secs_to_ms(w.end as f64),
+                text: w.word.trim().to_string(),
+                speaker: None,
+                confidence: None,
+            })
+            .filter(|w| !w.text.is_empty())
+            .collect();
+
         if let Some(diarizer) = &self.local_diarize {
             if !segs.is_empty() {
-                return Ok(diarize_transcript(audio_path, segs, parsed.text, diarizer).await);
+                let mut diarized =
+                    diarize_transcript(audio_path, segs, parsed.text, diarizer).await;
+                diarized.words = words;
+                return Ok(diarized);
             }
         }
 
@@ -473,6 +521,7 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         Ok(Transcription {
             text: parsed.text,
             segments,
+            words,
         })
     }
 }
@@ -499,6 +548,9 @@ pub(crate) async fn diarize_transcript(
 ) -> Transcription {
     // Diarization failing must not cost the timeline its timing data, so the
     // fallback carries the whisper segments with no speaker attribution.
+    // Words are attached by the caller (the OpenAI-compat path decodes them
+    // independently of speaker attribution), so every result built here starts
+    // with an empty `words`.
     let unlabeled = |text: String, segments: &[crate::diarization::TextSegment]| Transcription {
         text,
         segments: segments
@@ -511,6 +563,7 @@ pub(crate) async fn diarize_transcript(
                 speaker: None,
             })
             .collect(),
+        words: Vec::new(),
     };
 
     let path = audio_path.to_path_buf();
@@ -575,6 +628,7 @@ pub(crate) async fn diarize_transcript(
     Transcription {
         text,
         segments: out_segments,
+        words: Vec::new(),
     }
 }
 
@@ -658,6 +712,10 @@ struct DeepgramWord {
     /// so a missing field degrades to "no timeline" instead of a decode error.
     start: Option<f64>,
     end: Option<f64>,
+    /// Per-word confidence (0..1), present on every Deepgram word; optional so
+    /// a missing field degrades to `None` (no styling) rather than a decode
+    /// error.
+    confidence: Option<f32>,
 }
 
 #[async_trait]
@@ -730,42 +788,75 @@ impl TranscriptionProvider for DeepgramProvider {
             .and_then(|c| c.alternatives.into_iter().next())
             .ok_or_else(|| Error::Internal("Deepgram response had no transcript".into()))?;
 
-        if !self.diarize || alt.words.is_none() {
-            return Ok(Transcription::plain(alt.transcript));
+        // Capture the per-word layer on BOTH paths — Deepgram returns word
+        // timing + confidence whether or not diarization is on, so the
+        // substrate must keep it even when the (undiarized) text falls back to
+        // plain prose. A word's speaker label is attached only when diarization
+        // actually produced multi-speaker turns (decided below); the undiarized
+        // word still carries timing + confidence with `speaker: None`.
+        let dg_words = alt.words.unwrap_or_default();
+        let plain_words: Vec<TranscriptWord> = dg_words
+            .iter()
+            .map(|w| TranscriptWord {
+                start_ms: w.start.map(secs_to_ms).unwrap_or(0),
+                end_ms: w.end.or(w.start).map(secs_to_ms).unwrap_or(0),
+                text: w.word.clone(),
+                speaker: None,
+                confidence: w.confidence,
+            })
+            .collect();
+
+        let plain_with_words = |text: String| Transcription {
+            text,
+            segments: Vec::new(),
+            words: plain_words.clone(),
+        };
+
+        if !self.diarize || dg_words.is_empty() {
+            return Ok(plain_with_words(alt.transcript));
         }
 
-        let words = alt.words.unwrap();
         let mut unique_speakers = std::collections::HashSet::new();
-        for w in &words {
+        for w in &dg_words {
             if let Some(spk) = w.speaker {
                 unique_speakers.insert(spk);
             }
         }
 
         if unique_speakers.len() <= 1 {
-            return Ok(Transcription::plain(alt.transcript));
+            return Ok(plain_with_words(alt.transcript));
         }
 
         // Group the speaker-tagged words into turns, building the formatted
-        // text and the persisted timeline from the same pass so the stored
-        // `speaker` labels always agree with the `[Speaker N]` markers
-        // (Deepgram speakers are 0-based and stay that way in both).
+        // text, the persisted segment timeline, and the per-word layer from the
+        // same pass so the stored `speaker` labels always agree with the
+        // `[Speaker N]` markers (Deepgram speakers are 0-based and stay that
+        // way in all three).
         let mut final_transcript = String::new();
         let mut current_speaker: Option<u32> = None;
         let mut segments: Vec<TranscriptSegment> = Vec::new();
+        let mut words: Vec<TranscriptWord> = Vec::with_capacity(dg_words.len());
 
-        for w in words {
+        for w in dg_words {
             let spk = w.speaker.unwrap_or(0);
             let start_ms = w.start.map(secs_to_ms);
             let end_ms = w.end.map(secs_to_ms);
+            // A word missing timing (shouldn't happen) chains from the previous
+            // word's end rather than poisoning the timeline.
+            let fallback = words.last().map(|p| p.end_ms).unwrap_or(0);
+            words.push(TranscriptWord {
+                start_ms: start_ms.unwrap_or(fallback),
+                end_ms: end_ms.or(start_ms).unwrap_or(fallback),
+                text: w.word.clone(),
+                speaker: Some(spk.to_string()),
+                confidence: w.confidence,
+            });
             if current_speaker != Some(spk) {
                 if !final_transcript.is_empty() {
                     final_transcript.push_str("\n\n");
                 }
                 final_transcript.push_str(&format!("[Speaker {}]: ", spk));
                 current_speaker = Some(spk);
-                // A word missing timing (shouldn't happen) chains from the
-                // previous turn's end rather than poisoning the timeline.
                 let fallback_start = segments.last().map(|s| s.end_ms).unwrap_or(0);
                 segments.push(TranscriptSegment {
                     start_ms: start_ms.unwrap_or(fallback_start),
@@ -788,6 +879,7 @@ impl TranscriptionProvider for DeepgramProvider {
         Ok(Transcription {
             text: final_transcript,
             segments,
+            words,
         })
     }
 }
@@ -898,6 +990,12 @@ struct AaiTranscript {
     text: Option<String>,
     error: Option<String>,
     utterances: Option<Vec<AaiUtterance>>,
+    /// Top-level per-word array, returned independently of diarization (start/
+    /// end in **milliseconds**, with per-word `confidence` and a `speaker`
+    /// label when speaker labels were requested). Captured on every path so the
+    /// word substrate is populated even when the text falls back to plain
+    /// prose.
+    words: Option<Vec<AaiWord>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -909,6 +1007,20 @@ struct AaiUtterance {
     /// error.
     start: Option<i64>,
     end: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AaiWord {
+    text: String,
+    /// Word timing in **milliseconds** (AssemblyAI's native unit) — optional so
+    /// a missing field degrades to a chained timeline, not a decode error.
+    start: Option<i64>,
+    end: Option<i64>,
+    /// Per-word confidence (0..1), present on every AssemblyAI word.
+    confidence: Option<f32>,
+    /// Speaker label ("A"/"B"-style), present only when speaker labels were
+    /// requested; `None` otherwise.
+    speaker: Option<String>,
 }
 
 /// Delay between AssemblyAI status polls.
@@ -984,8 +1096,29 @@ impl TranscriptionProvider for AssemblyAiProvider {
                     .await?;
                 match t.status.as_str() {
                     "completed" => {
+                        // The per-word layer is top-level and independent of
+                        // diarization, so capture it once (already ms; carries
+                        // confidence and an optional speaker label) and attach
+                        // it to whichever text path we take below.
+                        let mut words: Vec<TranscriptWord> = Vec::new();
+                        for w in t.words.into_iter().flatten() {
+                            let fallback = words.last().map(|p| p.end_ms).unwrap_or(0);
+                            words.push(TranscriptWord {
+                                start_ms: w.start.unwrap_or(fallback),
+                                end_ms: w.end.or(w.start).unwrap_or(fallback),
+                                text: w.text,
+                                speaker: w.speaker,
+                                confidence: w.confidence,
+                            });
+                        }
+                        let with_words = |text: String| Transcription {
+                            text,
+                            segments: Vec::new(),
+                            words: words.clone(),
+                        };
+
                         if !self.diarize || t.utterances.is_none() {
-                            return t.text.map(Transcription::plain).ok_or_else(|| {
+                            return t.text.map(with_words).ok_or_else(|| {
                                 Error::Internal("AssemblyAI completed without text".into())
                             });
                         }
@@ -997,7 +1130,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                         }
 
                         if unique_speakers.len() <= 1 {
-                            return t.text.map(Transcription::plain).ok_or_else(|| {
+                            return t.text.map(with_words).ok_or_else(|| {
                                 Error::Internal("AssemblyAI completed without text".into())
                             });
                         }
@@ -1024,6 +1157,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                         return Ok(Transcription {
                             text: final_transcript,
                             segments,
+                            words,
                         });
                     }
                     "error" => {
@@ -1232,5 +1366,188 @@ mod tests {
             out.chars().count()
         );
         assert!(out.ends_with("(truncated)"));
+    }
+
+    // ── Per-word decode: each provider that emits words populates
+    //    `Transcription.words` with the right timing/confidence ──────────────
+    //
+    // These exercise the real `transcribe_with_segments` path against a
+    // wiremock endpoint (same fake-server style as the pipeline integration
+    // test), so the assertions cover decode + ms conversion + the
+    // confidence-vs-`None` contract, not just the struct shapes.
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A dummy wav on disk; wiremock ignores the bytes but the provider reads
+    /// the file before posting it.
+    fn dummy_audio() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("clip.wav");
+        std::fs::write(&p, b"RIFF....not-real-audio").unwrap();
+        (dir, p)
+    }
+
+    #[tokio::test]
+    async fn openai_compat_decodes_word_timestamps_with_none_confidence() {
+        let server = MockServer::start().await;
+        // verbose_json with a top-level `words[]` array (the `granularities[]=word`
+        // shape). Whisper carries no per-word probability, so confidence is None.
+        Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "text": "hello world",
+                "segments": [{"start": 0.0, "end": 1.0, "text": " hello world"}],
+                "words": [
+                    {"word": "hello", "start": 0.0, "end": 0.4},
+                    {"word": "world", "start": 0.4, "end": 1.0}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        // request_segments = true → verbose_json + word granularity requested.
+        let provider = OpenAiCompatProvider::new(
+            client(),
+            server.uri(),
+            None,
+            None,
+            Duration::from_secs(30),
+            None,
+            true,
+        );
+        let (_dir, audio) = dummy_audio();
+        let t = provider
+            .transcribe_with_segments(&audio, None)
+            .await
+            .unwrap();
+
+        assert_eq!(t.words.len(), 2, "both words decoded");
+        assert_eq!(t.words[0].text, "hello");
+        assert_eq!(t.words[0].start_ms, 0);
+        assert_eq!(t.words[0].end_ms, 400, "seconds → ms");
+        assert_eq!(t.words[1].text, "world");
+        assert_eq!(t.words[1].start_ms, 400);
+        assert_eq!(t.words[1].end_ms, 1000);
+        assert!(
+            t.words.iter().all(|w| w.confidence.is_none()),
+            "whisper gives no per-word confidence → None"
+        );
+        assert!(
+            t.words.iter().all(|w| w.speaker.is_none()),
+            "undiarized words carry no speaker label"
+        );
+    }
+
+    #[tokio::test]
+    async fn deepgram_decodes_words_with_confidence_on_the_non_diarize_path() {
+        let server = MockServer::start().await;
+        // Deepgram returns word timing + confidence whether or not diarization
+        // is on. With diarize OFF the text falls back to plain prose, but the
+        // word substrate must still be captured.
+        Mock::given(method("POST"))
+            .and(path("/v1/listen"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": { "channels": [ { "alternatives": [ {
+                    "transcript": "hey there",
+                    "words": [
+                        {"word": "hey", "start": 0.0, "end": 0.5, "confidence": 0.99},
+                        {"word": "there", "start": 0.5, "end": 1.2, "confidence": 0.8}
+                    ]
+                } ] } ] }
+            })))
+            .mount(&server)
+            .await;
+
+        // diarize = false → the non-diarize path (the one that used to drop words).
+        let provider = DeepgramProvider::new(
+            client(),
+            server.uri(),
+            SECRET,
+            "nova-2",
+            Duration::from_secs(30),
+            false,
+        );
+        let (_dir, audio) = dummy_audio();
+        let t = provider
+            .transcribe_with_segments(&audio, None)
+            .await
+            .unwrap();
+
+        assert_eq!(t.text, "hey there");
+        assert!(t.segments.is_empty(), "undiarized → no speaker segments");
+        assert_eq!(t.words.len(), 2, "words captured even without diarization");
+        assert_eq!(t.words[0].text, "hey");
+        assert_eq!(t.words[0].start_ms, 0);
+        assert_eq!(t.words[0].end_ms, 500, "seconds → ms");
+        assert_eq!(t.words[0].confidence, Some(0.99));
+        assert_eq!(t.words[1].text, "there");
+        assert_eq!(t.words[1].end_ms, 1200);
+        assert_eq!(t.words[1].confidence, Some(0.8));
+        assert!(
+            t.words.iter().all(|w| w.speaker.is_none()),
+            "undiarized words carry no speaker label"
+        );
+    }
+
+    #[tokio::test]
+    async fn assemblyai_decodes_top_level_words_with_confidence_in_ms() {
+        let server = MockServer::start().await;
+        // upload → create → poll(completed). The completed body carries the
+        // top-level `words[]` (already ms, with confidence) independent of
+        // diarization.
+        Mock::given(method("POST"))
+            .and(path("/v2/upload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "upload_url": "https://cdn.assemblyai.test/audio"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v2/transcript"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "job-1"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v2/transcript/job-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "completed",
+                "text": "good morning",
+                "words": [
+                    {"text": "good", "start": 100, "end": 500, "confidence": 0.95},
+                    {"text": "morning", "start": 500, "end": 1100, "confidence": 0.6}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        // diarize = false → the plain-text completed path; words still captured.
+        let provider = AssemblyAiProvider::new(
+            client(),
+            server.uri(),
+            SECRET,
+            "",
+            Duration::from_secs(30),
+            false,
+        );
+        let (_dir, audio) = dummy_audio();
+        let t = provider
+            .transcribe_with_segments(&audio, None)
+            .await
+            .unwrap();
+
+        assert_eq!(t.text, "good morning");
+        assert_eq!(t.words.len(), 2);
+        assert_eq!(t.words[0].text, "good");
+        assert_eq!(
+            t.words[0].start_ms, 100,
+            "AssemblyAI is already ms — no conversion"
+        );
+        assert_eq!(t.words[0].end_ms, 500);
+        assert_eq!(t.words[0].confidence, Some(0.95));
+        assert_eq!(t.words[1].text, "morning");
+        assert_eq!(t.words[1].confidence, Some(0.6));
     }
 }

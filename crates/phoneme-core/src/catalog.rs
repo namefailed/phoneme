@@ -26,7 +26,9 @@
 use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
-use crate::types::{ListFilter, Recording, RecordingStatus, SpeakerName, TranscriptSegment};
+use crate::types::{
+    ListFilter, Recording, RecordingStatus, SpeakerName, TranscriptSegment, TranscriptWord,
+};
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
@@ -1808,6 +1810,66 @@ impl Catalog {
             })
             .collect()
     }
+
+    /// Replace a recording's machine transcript words with a fresh set.
+    ///
+    /// The word-level twin of [`replace_segments`](Self::replace_segments):
+    /// called by the pipeline after every transcribe/retranscribe, so the old
+    /// rows are dropped first in the same transaction (a crash can't leave a
+    /// half-replaced word timeline). An empty slice simply clears them — the
+    /// normal state for a provider that emits no per-word timing.
+    pub async fn replace_words(
+        &self,
+        recording_id: &RecordingId,
+        words: &[TranscriptWord],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM transcript_words WHERE recording_id = ?")
+            .bind(recording_id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        for (idx, word) in words.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO transcript_words (recording_id, idx, start_ms, end_ms, text, speaker, confidence) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(recording_id.as_str())
+            .bind(idx as i64)
+            .bind(word.start_ms)
+            .bind(word.end_ms)
+            .bind(&word.text)
+            .bind(&word.speaker)
+            .bind(word.confidence)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// A recording's machine transcript words in timeline order. Empty when the
+    /// recording predates word capture or its provider returned no per-word
+    /// timing — callers must treat "no words" as a normal state, not an error.
+    pub async fn words_for(&self, recording_id: &RecordingId) -> Result<Vec<TranscriptWord>> {
+        let rows = sqlx::query(
+            "SELECT start_ms, end_ms, text, speaker, confidence FROM transcript_words \
+             WHERE recording_id = ? ORDER BY idx",
+        )
+        .bind(recording_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(TranscriptWord {
+                    start_ms: r.try_get("start_ms")?,
+                    end_ms: r.try_get("end_ms")?,
+                    text: r.try_get("text")?,
+                    speaker: r.try_get("speaker")?,
+                    confidence: r.try_get("confidence")?,
+                })
+            })
+            .collect()
+    }
 }
 
 /// Decode one `(id, vector, meeting_id)` embedding row into a [`CachedVector`].
@@ -3487,6 +3549,59 @@ mod tests {
         assert!(
             db.segments_for(&r.id).await.unwrap().is_empty(),
             "segments must be cascade-deleted with their recording"
+        );
+    }
+
+    #[tokio::test]
+    async fn words_replace_round_trip_and_cascade() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+
+        // No words yet is a normal (empty) state, not an error.
+        assert!(db.words_for(&r.id).await.unwrap().is_empty());
+
+        // A mix of present and absent confidence — the nullable column must
+        // round-trip both (a whisper-family word has `None`, a Deepgram word
+        // has a score). Ordering by idx is the timeline order.
+        let first = vec![
+            TranscriptWord {
+                start_ms: 0,
+                end_ms: 400,
+                text: "hello".into(),
+                speaker: Some("1".into()),
+                confidence: Some(0.97),
+            },
+            TranscriptWord {
+                start_ms: 400,
+                end_ms: 900,
+                text: "there".into(),
+                speaker: Some("1".into()),
+                confidence: None,
+            },
+        ];
+        db.replace_words(&r.id, &first).await.unwrap();
+        let got = db.words_for(&r.id).await.unwrap();
+        assert_eq!(got, first, "words round-trip in idx order, confidence kept");
+        assert_eq!(got[0].confidence, Some(0.97));
+        assert_eq!(got[1].confidence, None, "a NULL confidence stays None");
+
+        // A retranscribe REPLACES the word timeline — fewer rows must not leave
+        // stale tail words behind.
+        let second = vec![TranscriptWord {
+            start_ms: 0,
+            end_ms: 500,
+            text: "rerun".into(),
+            speaker: None,
+            confidence: Some(0.5),
+        }];
+        db.replace_words(&r.id, &second).await.unwrap();
+        assert_eq!(db.words_for(&r.id).await.unwrap(), second);
+
+        db.delete(&r.id).await.unwrap();
+        assert!(
+            db.words_for(&r.id).await.unwrap().is_empty(),
+            "words must be cascade-deleted with their recording"
         );
     }
 }

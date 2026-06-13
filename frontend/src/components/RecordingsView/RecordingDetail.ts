@@ -26,6 +26,7 @@ import { TranscriptEditor } from "./TranscriptEditor";
 import { NotesEditor } from "./NotesEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
 import { TimelineView } from "./TimelineView";
+import { SyncedTranscript } from "./SyncedTranscript";
 
 /**
  * The right pane: one recording, fully editable. This file owns the detail
@@ -58,6 +59,8 @@ export class RecordingDetail {
   private notesDirty = false;
   /** The mounted Timeline peek (segment list), when open. */
   private timeline: TimelineView | null = null;
+  /** The mounted Synced-transcript peek (clickable word flow), when open. */
+  private synced: SyncedTranscript | null = null;
   /** Meeting id when this pane is half of a dual-timeline split — the timeline
    *  views with the same group mirror seeks and scrolling across panes. */
   private syncGroup: string | null = null;
@@ -172,6 +175,8 @@ export class RecordingDetail {
     this.notesEditor = null;
     this.timeline?.dispose();
     this.timeline = null;
+    this.synced?.dispose();
+    this.synced = null;
     this.openTimelinePeek = null;
     this.pendingTimeline = false;
     this.syncGroup = null;
@@ -216,6 +221,8 @@ export class RecordingDetail {
     // alone: it may have been set for THIS render.
     this.timeline?.dispose();
     this.timeline = null;
+    this.synced?.dispose();
+    this.synced = null;
     this.openTimelinePeek = null;
     const r = this.recording;
     const stats = wordCountSummary(r.transcript ?? "");
@@ -252,11 +259,13 @@ export class RecordingDetail {
           <div id="unedited-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="summary-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div id="timeline-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 4px;"></div>
+          <div id="synced-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div class="transcript-history">
             <div class="th-group th-left">
               <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
               <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
               <button class="view-btn" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
+              <button class="view-btn" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
             </div>
             <div class="th-group th-right">
               <button class="view-btn" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
@@ -311,7 +320,7 @@ export class RecordingDetail {
     //   • summary    — AI summary (generated on demand if absent)
     // Exactly one of {editor, original, unedited, summary} is visible at a time.
     const editorEl = this.container.querySelector<HTMLElement>("#editor");
-    type PeekKind = "original" | "unedited" | "summary" | "timeline";
+    type PeekKind = "original" | "unedited" | "summary" | "timeline" | "synced";
     const peeks: Record<PeekKind, { btn: HTMLButtonElement | null; el: HTMLElement | null; idle: string }> = {
       original: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-original"),
@@ -332,6 +341,11 @@ export class RecordingDetail {
         btn: this.container.querySelector<HTMLButtonElement>("#view-timeline"),
         el: this.container.querySelector<HTMLElement>("#timeline-peek"),
         idle: "🕒 Timeline",
+      },
+      synced: {
+        btn: this.container.querySelector<HTMLButtonElement>("#view-synced"),
+        el: this.container.querySelector<HTMLElement>("#synced-peek"),
+        idle: "🔤 Synced",
       },
     };
 
@@ -430,8 +444,30 @@ export class RecordingDetail {
       mountTimeline();
     });
     this.openTimelinePeek = mountTimeline;
-    // The waveform playhead drives the timeline's active-segment highlight.
-    this.player.setOnTimeUpdate((t) => this.timeline?.setPlaybackTime(t));
+
+    // Synced-transcript peek: the MACHINE transcript as clickable word spans.
+    // Read-only and entirely separate from the editor — click a word → seek
+    // THIS pane's waveform to that word; the playhead highlights the live word.
+    const mountSynced = () => {
+      if (!this.synced) {
+        this.synced = new SyncedTranscript(peeks.synced.el!, r.id, {
+          speakerNames: r.speaker_names ?? [],
+          onSeek: (seconds) => this.player.seekTo(seconds),
+        });
+      }
+      openPeek("synced");
+    };
+    peeks.synced.btn?.addEventListener("click", () => {
+      if (activePeek === "synced") return resetPeek();
+      mountSynced();
+    });
+
+    // The waveform playhead drives both views' active highlight (the timeline's
+    // active segment and the synced view's active word).
+    this.player.setOnTimeUpdate((t) => {
+      this.timeline?.setPlaybackTime(t);
+      this.synced?.setPlaybackTime(t);
+    });
     if (this.pendingTimeline) {
       this.pendingTimeline = false;
       mountTimeline();

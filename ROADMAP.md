@@ -224,9 +224,13 @@ persona actually wants — still needs the alignment + timestamp substrate below
   system-audio loopback drops gaps). An interleaved timeline built on mis-aligned
   tracks is *worse* than two stacked panes. **Solidify alignment before the merged
   view.**
-- [ ] **Word-level timestamps** — shared substrate for transcript↔waveform sync,
-  confidence highlighting, *and* tighter diarization boundaries. Do it once; it
-  unlocks three features.
+- [x] **Word-level timestamps** — shared substrate for transcript↔waveform sync,
+  confidence highlighting, *and* tighter diarization boundaries. *Shipped:*
+  providers capture per-word timing + confidence into `transcript_words`
+  (`GetWords` IPC / `get_words` Tauri command); the detail pane's **🔤 Synced**
+  peek renders the machine transcript as clickable, time-coded words (click →
+  seek, playhead-follow highlight). Confidence highlighting and word-level
+  diarization build on this substrate.
 
 ### 🏚️ Finish the attic (backend exists, GUI doesn't)
 
@@ -494,7 +498,7 @@ explicit roadmap line here saying why not).
 
 ### Recording
 - [ ] **Multi-microphone** — capture from two input devices simultaneously (two-person interviews).
-- [ ] **Audio normalization** — normalize gain before Whisper; improves accuracy on quiet voices.
+- [x] **Audio normalization** — peak-normalize a quiet recording's gain before Whisper; improves accuracy on soft microphones. *Shipped:* off by default (`recording.normalize`, `-1.0` dBFS ceiling), boost-only, applied to the finalized single recording and each meeting track (never the live preview or imports).
 
 ### Data
 - [ ] **Cloud sync** (opt-in, user-controlled) — encrypted sync of the catalog to a user-owned S3/Backblaze bucket; audio files excluded by default.

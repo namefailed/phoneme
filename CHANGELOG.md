@@ -47,6 +47,21 @@ trust boundary. Verified against current code.*
   desktop window that floats the live caption over any app, even when the main
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
+- [x] **Word-level timestamps** — transcription providers now capture per-word
+  timing (and per-word confidence from Deepgram/AssemblyAI) into a new
+  `transcript_words` table, exposed via the `get_words` IPC request / Tauri
+  command. The detail pane gains a **🔤 Synced** transcript peek: the machine
+  transcript rendered as clickable, time-coded words — click a word to seek the
+  waveform, and the word under the playhead highlights as audio plays. The shared
+  substrate also unlocks confidence highlighting and tighter diarization
+  boundaries.
+- [x] **Audio normalization** — optionally boost a quiet recording's gain to a
+  consistent peak level before transcribing, so a soft microphone still hands
+  Whisper a healthy signal (Settings → Capture → Recording; off by default,
+  `recording.normalize` / `recording.normalize_target_dbfs`). Boost-only —
+  silent or already-loud recordings are left untouched — and applied to the
+  finalized capture (single recordings and each meeting track), never the live
+  preview or imported files.
 
 ### Developer experience
 

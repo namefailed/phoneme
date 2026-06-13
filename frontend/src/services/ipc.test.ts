@@ -5,8 +5,10 @@ import {
   recordStart,
   deleteRecording,
   moreLikeThis,
+  getWords,
   exportCaptions,
   exportLibraryZip,
+  type TranscriptWord,
   listTags,
   listAllTags,
   addTag,
@@ -102,6 +104,28 @@ describe('IPC Services', () => {
       id: '20260519T143500823',
       limit: 5,
     });
+  });
+
+  it('getWords forwards the id and returns the word array unchanged', async () => {
+    const words: TranscriptWord[] = [
+      { idx: 0, start_ms: 0, end_ms: 320, text: 'hello', speaker: '1', confidence: 0.98 },
+      { idx: 1, start_ms: 320, end_ms: 700, text: 'there', speaker: '1', confidence: null },
+    ];
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(words);
+
+    const res = await getWords('20260519T143500823');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('get_words', { id: '20260519T143500823' });
+    expect(res).toEqual(words);
+  });
+
+  it('getWords returns an empty array for a recording with no word timings', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce([]);
+
+    const res = await getWords('20260519T143500823');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('get_words', { id: '20260519T143500823' });
+    expect(res).toEqual([]);
   });
 
   it('exportCaptions forwards id + format and returns the caption body', async () => {

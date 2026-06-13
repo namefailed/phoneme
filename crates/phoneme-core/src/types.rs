@@ -266,6 +266,41 @@ pub struct TranscriptSegment {
     pub speaker: Option<String>,
 }
 
+/// One machine transcript word with its audio-relative timing — the finest
+/// timing layer beneath [`TranscriptSegment`].
+///
+/// Captured from the transcription provider (whisper `verbose_json` words,
+/// Deepgram words, AssemblyAI words) and persisted per recording in
+/// `transcript_words`. Times are **milliseconds from the start of the track's
+/// audio file**, the same frame as [`TranscriptSegment`]. Words are machine
+/// truth like segments: user edits to the live transcript never rewrite them.
+/// They exist for word-level seek and confidence highlighting; providers
+/// without per-word data simply persist none (an empty set is normal).
+///
+/// `speaker` is the label text exactly as it appears in the transcript's
+/// `[Speaker …]` marker (mirroring [`TranscriptSegment::speaker`]), `None` for
+/// an undiarized word.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TranscriptWord {
+    /// Word start, in milliseconds from the start of the track's audio.
+    pub start_ms: i64,
+    /// Word end, in milliseconds from the start of the track's audio.
+    pub end_ms: i64,
+    /// The single word/token as the provider emitted it.
+    pub text: String,
+    /// Speaker label as it appears in the `[Speaker …]` marker, or `None` for an
+    /// undiarized word (see the type doc for how numeric labels join names).
+    #[serde(default)]
+    pub speaker: Option<String>,
+    /// The provider's 0..1 per-word confidence, or `None` when the provider
+    /// gives none (whisper-family endpoints emit only segment-level logprobs).
+    /// `None` and `Some(0.0)` are distinct: provider-absent must be `None` so
+    /// consumers can suppress confidence styling rather than render a
+    /// misleading "lowest confidence".
+    #[serde(default)]
+    pub confidence: Option<f32>,
+}
+
 /// Recording-type filter for [`ListFilter::kind`]: single voice notes (no
 /// `meeting_id`) vs. meeting tracks (a `meeting_id` set). Mirrors the GUI
 /// Library filter and the CLI `phoneme list --kind` values; "all" is simply
