@@ -37,8 +37,17 @@ export function recordFailureDetail(id: string, stage: FailureStage, error: stri
 }
 
 /** Statuses that mean "this recording's pipeline failed permanently". The
- *  catalog filter is an exact match, so the panel queries each separately. */
-const FAILED_STATUSES = ["transcribe_failed", "hook_failed"] as const;
+ *  catalog filter is an exact match, so the panel queries each separately.
+ *  Includes the optional-step failures (cleanup/summary/title/tag): the
+ *  transcript is intact, but the enrichment failed and is worth triaging. */
+const FAILED_STATUSES = [
+  "transcribe_failed",
+  "hook_failed",
+  "cleanup_failed",
+  "summarize_failed",
+  "title_failed",
+  "tag_failed",
+] as const;
 
 /** Cap per status query — keeps the panel snappy; nobody triages more. */
 const LIST_LIMIT = 100;
@@ -48,16 +57,25 @@ function rowTitle(r: Recording): string {
   return r.title?.trim() || new Date(r.started_at).toLocaleString();
 }
 
-/** Which step failed, as a short label. Prefers the stored `error_kind` the
- *  daemon now writes; falls back to deriving it from the failed status. */
+/** Which step failed, as a short label. The failed status is the reliable
+ *  source (every failure has one); the stored `error_kind` is a fallback for
+ *  older rows or unexpected statuses. */
 function failureStage(r: Recording): string {
+  switch (r.status) {
+    case "hook_failed":       return "Hook";
+    case "cleanup_failed":    return "Cleanup";
+    case "summarize_failed":  return "Summary";
+    case "title_failed":      return "Title";
+    case "tag_failed":        return "Tagging";
+    case "transcribe_failed": return "Transcription";
+  }
   const kind = r.error_kind?.trim();
   if (kind) {
     if (kind === "whisper_error") return "Transcription";
     if (kind.startsWith("hook")) return "Hook";
     return kind.replace(/_/g, " ");
   }
-  return r.status === "hook_failed" ? "Hook" : "Transcription";
+  return "Transcription";
 }
 
 /** The best error text we have for a row, and whether it's a real message

@@ -46,6 +46,7 @@ async fn sweep_stale_catalog_rows(state: &AppState) -> anyhow::Result<usize> {
     for status in [
         RecordingStatus::Recording,
         RecordingStatus::Paused,
+        RecordingStatus::Queued,
         RecordingStatus::Transcribing,
         RecordingStatus::HookRunning,
     ] {

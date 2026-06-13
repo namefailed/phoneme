@@ -136,11 +136,19 @@ phoneme list
 phoneme list --since 2026-05-19
 phoneme list --since 2026-05-01 --until 2026-05-31
 
-# Filter by status: recording, transcribing, cleaning_up, summarizing,
-# tagging, hook_running, done, transcribe_failed, hook_failed, or cancelled
-# (a run the user cancelled — terminal, but not a failure)
+# Filter by status: recording, queued, transcribing, cleaning_up, summarizing,
+# tagging, hook_running, done, transcribe_failed, hook_failed, cleanup_failed,
+# summarize_failed, title_failed, tag_failed, or cancelled.
+#  - queued: waiting in the transcription queue (flips to transcribing when the
+#    worker claims it) — so a recording that's only WAITING no longer reads as
+#    "transcribing".
+#  - *_failed for an optional step (cleanup/summary/title/tag) is terminal like
+#    hook_failed: the transcript is intact, only that enrichment didn't land, and
+#    the reason is stored on the row so you can find and re-run it.
+#  - cancelled: a run the user cancelled — terminal, but not a failure.
 phoneme list --status done
 phoneme list --status cancelled
+phoneme list --status tag_failed   # find recordings whose auto-tagging failed
 
 # Limit the number of results returned (with optional offset for pagination)
 phoneme list --limit 10

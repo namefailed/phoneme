@@ -82,10 +82,19 @@ The `list_recordings` filter takes `limit`/`offset` (pagination),
 `false` = unstarred only). All fields are optional; older clients that omit
 the newer ones keep working.
 
-Recording `status` values: `recording`, `paused`, `transcribing`,
+Recording `status` values: `recording`, `paused`, `queued`, `transcribing`,
 `cleaning_up`, `summarizing`, `tagging`, `hook_running`, `done`,
-`transcribe_failed`, `hook_failed`, and `cancelled`. `cancelled` is terminal
-like the failed pair but means the **user** stopped the run (`cancel_queued`,
+`transcribe_failed`, `hook_failed`, `cleanup_failed`, `summarize_failed`,
+`title_failed`, `tag_failed`, and `cancelled`. `queued` is the recording
+**waiting** in the serial transcription queue — it flips to `transcribing` only
+when the worker actually claims it (enqueue sets `queued`, so a waiting item is
+no longer mislabelled `transcribing`). The four optional-step failures
+(`cleanup_failed` / `summarize_failed` / `title_failed` / `tag_failed`) are
+terminal like `hook_failed`: the transcript is intact and the recording is
+fully usable — only that enrichment step failed — and the reason is persisted on
+the row (`error_kind` = the status, `error_message` = why), so the failure is
+filterable, searchable, and survives a restart. `cancelled` is terminal like the
+failures but means the **user** stopped the run (`cancel_queued`,
 `cancel_all_queued`, or `cancel_processing`) — clients should never render it
 as a failure.
 

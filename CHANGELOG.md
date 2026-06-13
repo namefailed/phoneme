@@ -191,14 +191,30 @@ trust boundary. Verified against current code.*
   event; notifications toasted on both. The `summarizing`/`tagging` stages now
   stay quiet (still tracked, so a later "done" still reads "Summarized ✓ —
   recording ready") and their dedicated event owns the single toast.
-- [x] **Every optional step now reports its failures.** Previously only
-  transcription and hooks had failure visibility; cleanup, auto-title, and
-  auto-tag failed silently (log-only). The daemon now emits `CleanupFailed` /
-  `TitleFailed` / `TagFailed` events (joining the existing `SummaryFailed`), and
-  the UI toasts them ("Cleanup failed: …", "Title generation failed: …",
-  "Auto-tagging failed: …"). These stay **best-effort** — the recording keeps its
-  transcript and stays "done"; the toast just tells you an optional step didn't
-  land. A user-skipped stage reads as "skipped", not an error.
+- [x] **Optional-step failures are now filterable, searchable statuses.**
+  Previously only transcription and hooks had failure visibility; cleanup,
+  auto-title, auto-summary, and auto-tag failed silently (log-only), then briefly
+  toast-only. They now become real terminal statuses — `cleanup_failed`,
+  `summarize_failed`, `title_failed`, `tag_failed` — exactly like `hook_failed`:
+  the transcript is intact and the recording is fully usable, only that one
+  enrichment didn't land. The earliest failed step wins the status, and its
+  reason is persisted on the row (`error_kind` + `error_message`) so the failure
+  survives a restart and the **why** shows in the failed panel and `phoneme list`.
+  Filter for them in the status dropdown or `phoneme list --status tag_failed`;
+  the failed panel lists them with a per-step "Cleanup / Summary / Title /
+  Tagging" label and a Retry. The daemon still emits the matching `CleanupFailed`
+  / `TitleFailed` / `TagFailed` / `SummaryFailed` events for live toasts, and a
+  user-skipped stage still reads as "skipped", never a failure.
+- [x] **A recording WAITING in the queue now reads "Queued", not "Transcribing".**
+  Enqueue (a finished recording, a meeting track, a re-transcribe, an import) sets
+  the new non-terminal `queued` status; the pipeline worker flips it to
+  `transcribing` only when it actually claims the item. So a backlog of three
+  recordings shows one "Transcribing" and two "Queued" instead of three lying
+  "Transcribing". `queued` is filterable everywhere statuses are (status dropdown,
+  `phoneme list --status queued`), and crash-recovery sweeps an orphaned `queued`
+  row (no inbox file) to `transcribe_failed` like the other in-flight states. The
+  dictation fast lane is unaffected — it transcribes immediately, so it stays
+  "Transcribing".
 
 ### GUI parity
 

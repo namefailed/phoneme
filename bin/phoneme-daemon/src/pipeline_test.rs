@@ -1468,3 +1468,49 @@ fn stage_skip_errors_are_recognizable() {
     // The phrase the frontend regex keys on must survive in the sentinel.
     assert!(STAGE_SKIPPED_REASON.contains("skipped by user"));
 }
+
+/// A failed optional step (cleanup/title/summary/tag) ends the recording on its
+/// own terminal status — filterable like `hook_failed` — AND persists the
+/// reason on the row (`error_kind` = the status string, `error_message` = the
+/// message) so the failed panel and `phoneme list` show WHY after a restart,
+/// not merely THAT it failed.
+#[tokio::test]
+async fn finalize_step_status_persists_failure_status_and_reason() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path(), Config::default()).await;
+    let (id, _audio) = seed_recording(&state, tmp.path()).await;
+
+    crate::pipeline::finalize_step_status(
+        &state,
+        &id,
+        Some((
+            RecordingStatus::SummarizeFailed,
+            "summary endpoint refused".into(),
+        )),
+    )
+    .await
+    .expect("finalize must succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::SummarizeFailed);
+    assert_eq!(rec.error_kind.as_deref(), Some("summarize_failed"));
+    assert_eq!(
+        rec.error_message.as_deref(),
+        Some("summary endpoint refused")
+    );
+}
+
+/// A clean run — no optional step failed — ends `Done`.
+#[tokio::test]
+async fn finalize_step_status_clean_run_is_done() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path(), Config::default()).await;
+    let (id, _audio) = seed_recording(&state, tmp.path()).await;
+
+    crate::pipeline::finalize_step_status(&state, &id, None)
+        .await
+        .expect("finalize must succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::Done);
+}

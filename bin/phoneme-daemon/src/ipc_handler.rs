@@ -718,12 +718,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 };
                 match state.inbox.enqueue(&payload).await {
                     Ok(()) => {
+                        // Queued, not Transcribing: it waits behind the serial
+                        // inbox; the pipeline flips it to Transcribing when the
+                        // worker claims it.
                         if let Err(e) = state
                             .catalog
-                            .update_status(&id, RecordingStatus::Transcribing)
+                            .update_status(&id, RecordingStatus::Queued)
                             .await
                         {
-                            tracing::error!("failed to update status to transcribing: {e}");
+                            tracing::error!("failed to update status to queued: {e}");
                         }
                         ok_null()
                     }
@@ -1693,7 +1696,9 @@ async fn import_recording(state: &AppState, path: String) -> Response {
         in_place: false,
         transcript: None,
         model: None,
-        status: RecordingStatus::Transcribing,
+        // Queued, not Transcribing: the import rides the serial inbox; the
+        // pipeline flips it to Transcribing when the worker claims it.
+        status: RecordingStatus::Queued,
         error_kind: None,
         error_message: None,
         hook_command: None,
@@ -1738,7 +1743,7 @@ async fn import_recording(state: &AppState, path: String) -> Response {
     if let Err(e) = state.inbox.enqueue(&payload).await {
         // No queue entry means this import would never be processed — roll the
         // catalog row and the canonical WAV back so it can't sit in the list
-        // stuck on Transcribing forever. The caller can simply retry.
+        // stuck on Queued forever. The caller can simply retry.
         let _ = state.catalog.delete(&id).await;
         let _ = tokio::fs::remove_file(&audio_path).await;
         return err_response(&e);
@@ -2019,9 +2024,10 @@ mod tests {
             );
         }
 
-        // And the recording was put back into the transcribing state + enqueued.
+        // And the recording was put back into the queue (Queued; the worker
+        // flips it to Transcribing when it claims the item) + enqueued.
         let rec = state.catalog.get(&id).await.unwrap().unwrap();
-        assert_eq!(rec.status, RecordingStatus::Transcribing);
+        assert_eq!(rec.status, RecordingStatus::Queued);
     }
 
     /// The Shutdown handler must REPLY before the daemon exits: the Ok is
@@ -2086,12 +2092,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let state = override_test_state(tmp.path(), Config::default()).await;
 
-        // A recording waiting in the queue: catalog row at Transcribing plus a
+        // A recording waiting in the queue: catalog row at Queued plus a
         // pending inbox payload (what RecordStop / import leave behind).
         let id = insert_done_recording(&state).await;
         state
             .catalog
-            .update_status(&id, RecordingStatus::Transcribing)
+            .update_status(&id, RecordingStatus::Queued)
             .await
             .unwrap();
         let payload = phoneme_core::HookPayload {
@@ -2128,7 +2134,7 @@ mod tests {
             let id = insert_done_recording(&state).await;
             state
                 .catalog
-                .update_status(&id, RecordingStatus::Transcribing)
+                .update_status(&id, RecordingStatus::Queued)
                 .await
                 .unwrap();
             let payload = phoneme_core::HookPayload {

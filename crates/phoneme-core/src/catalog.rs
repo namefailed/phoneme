@@ -2156,6 +2156,7 @@ fn parse_status(s: &str) -> Result<RecordingStatus> {
     Ok(match s {
         "recording" => RecordingStatus::Recording,
         "paused" => RecordingStatus::Paused,
+        "queued" => RecordingStatus::Queued,
         "transcribing" => RecordingStatus::Transcribing,
         "cleaning_up" => RecordingStatus::CleaningUp,
         "summarizing" => RecordingStatus::Summarizing,
@@ -2164,6 +2165,10 @@ fn parse_status(s: &str) -> Result<RecordingStatus> {
         "done" => RecordingStatus::Done,
         "transcribe_failed" => RecordingStatus::TranscribeFailed,
         "hook_failed" => RecordingStatus::HookFailed,
+        "cleanup_failed" => RecordingStatus::CleanupFailed,
+        "summarize_failed" => RecordingStatus::SummarizeFailed,
+        "title_failed" => RecordingStatus::TitleFailed,
+        "tag_failed" => RecordingStatus::TagFailed,
         "cancelled" => RecordingStatus::Cancelled,
         other => {
             return Err(crate::error::Error::Internal(format!(
@@ -2186,6 +2191,7 @@ mod tests {
         for s in [
             "recording",
             "paused",
+            "queued",
             "transcribing",
             "cleaning_up",
             "summarizing",
@@ -2194,6 +2200,10 @@ mod tests {
             "done",
             "transcribe_failed",
             "hook_failed",
+            "cleanup_failed",
+            "summarize_failed",
+            "title_failed",
+            "tag_failed",
             "cancelled",
         ] {
             assert_eq!(

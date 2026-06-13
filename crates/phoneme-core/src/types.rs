@@ -24,6 +24,9 @@ pub enum RecordingStatus {
     Recording,
     /// Capture is paused (no audio is being added).
     Paused,
+    /// Waiting in the transcription queue — claimed for processing but the
+    /// worker hasn't started it yet. Flips to `Transcribing` when work begins.
+    Queued,
     /// The recording is being transcribed.
     Transcribing,
     /// LLM post-processing (cleanup) is rewriting the transcript.
@@ -40,6 +43,16 @@ pub enum RecordingStatus {
     TranscribeFailed,
     /// The hook failed (terminal). Surfaced in the failed-recordings views.
     HookFailed,
+    /// An optional post-transcription step failed (terminal). The transcript is
+    /// intact and usable — only that enrichment didn't land — exactly like
+    /// `HookFailed`. Surfaced so the user can find + re-run the failed step.
+    CleanupFailed,
+    /// The auto-summary step failed (terminal). See [`Self::CleanupFailed`].
+    SummarizeFailed,
+    /// The auto-title step failed (terminal). See [`Self::CleanupFailed`].
+    TitleFailed,
+    /// The auto-tag step failed (terminal). See [`Self::CleanupFailed`].
+    TagFailed,
     /// The user cancelled the recording's pipeline run (a queued item removed
     /// from the queue, or an in-flight transcription aborted). Terminal, like
     /// the failed states — but nothing *broke*, so it is never surfaced as a
@@ -54,6 +67,7 @@ impl RecordingStatus {
         match self {
             Self::Recording => "recording",
             Self::Paused => "paused",
+            Self::Queued => "queued",
             Self::Transcribing => "transcribing",
             Self::CleaningUp => "cleaning_up",
             Self::Summarizing => "summarizing",
@@ -62,11 +76,15 @@ impl RecordingStatus {
             Self::Done => "done",
             Self::TranscribeFailed => "transcribe_failed",
             Self::HookFailed => "hook_failed",
+            Self::CleanupFailed => "cleanup_failed",
+            Self::SummarizeFailed => "summarize_failed",
+            Self::TitleFailed => "title_failed",
+            Self::TagFailed => "tag_failed",
             Self::Cancelled => "cancelled",
         }
     }
 
-    /// Every terminal status — `Done`, the two failures, and `Cancelled` — in a
+    /// Every terminal status — `Done`, the failures, and `Cancelled` — in a
     /// fixed order. The single source of truth that [`Self::is_terminal`] and
     /// [`Self::terminal_sql_list`] both derive from, so a new terminal variant
     /// can't be added to one without the others following.
@@ -74,10 +92,14 @@ impl RecordingStatus {
         Self::Done,
         Self::TranscribeFailed,
         Self::HookFailed,
+        Self::CleanupFailed,
+        Self::SummarizeFailed,
+        Self::TitleFailed,
+        Self::TagFailed,
         Self::Cancelled,
     ];
 
-    /// Whether this is an end state — `Done`, the two failures, or `Cancelled`.
+    /// Whether this is an end state — `Done`, a failure, or `Cancelled`.
     /// A terminal recording will not advance further on its own.
     pub fn is_terminal(&self) -> bool {
         Self::TERMINAL.contains(self)

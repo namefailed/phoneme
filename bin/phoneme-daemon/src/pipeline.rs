@@ -484,9 +484,17 @@ fn pipeline_should_type(in_place: &InPlaceConfig, rec_in_place: bool, transcript
     rec_in_place && !transcript.is_empty() && !(in_place.full_pipeline && in_place.type_first)
 }
 
-async fn maybe_auto_summarize(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
+/// Returns `Some(error)` only when the summary step REALLY failed (a user-skip
+/// and "not configured" are non-failures) — the caller folds that into the
+/// terminal status and persists the message. `None` means no failure.
+async fn maybe_auto_summarize(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+) -> Option<String> {
     if !cfg.summary.auto {
-        return;
+        return None;
     }
     state.events.emit(DaemonEvent::PipelineStageChanged {
         id: id.clone(),
@@ -500,24 +508,34 @@ async fn maybe_auto_summarize(state: &AppState, cfg: &Config, id: &RecordingId, 
                 .await
             {
                 tracing::warn!(error = %e, "failed to persist auto summary");
+                let msg = e.to_string();
                 state.events.emit(DaemonEvent::SummaryFailed {
                     id: id.clone(),
-                    error: e.to_string(),
+                    error: msg.clone(),
                 });
+                Some(msg)
             } else {
                 tracing::info!(id = %id.as_str(), "auto summary saved");
                 state
                     .events
                     .emit(DaemonEvent::SummaryUpdated { id: id.clone() });
+                None
             }
         }
         Err(reason) => {
             // Auto-summary failed — surface the REAL reason (the transcript
-            // itself is fine; only the optional summary step failed).
+            // itself is fine; only the optional summary step failed). A user-skip
+            // carries the sentinel and is NOT a failure for the terminal status.
+            let skipped = reason == STAGE_SKIPPED_REASON;
             state.events.emit(DaemonEvent::SummaryFailed {
                 id: id.clone(),
-                error: reason,
+                error: reason.clone(),
             });
+            if skipped {
+                None
+            } else {
+                Some(reason)
+            }
         }
     }
 }
@@ -608,9 +626,18 @@ fn parse_tag_names(raw: &str, max: usize) -> Vec<String> {
 /// `TagSuggestionsUpdated` so the UI shows the approval chips. The existing
 /// tag list is included in the prompt so the model prefers reusing tags.
 /// Non-fatal: failures are logged and leave existing suggestions untouched.
-pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
+/// Returns `Some(error)` only when the tag step REALLY failed (an LLM call
+/// error) — the caller folds that into the terminal status and persists the
+/// message. An empty transcript, a missing provider, a user-skip, or "nothing
+/// new to suggest" are all non-failures (`None`).
+pub async fn suggest_tags(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+) -> Option<String> {
     if transcript.trim().is_empty() {
-        return;
+        return None;
     }
     let llm_cfg = auto_tag_llm_config(cfg);
     let llm = match llm_provider_for_run(state, &llm_cfg).await {
@@ -620,7 +647,7 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
                 provider = %llm_cfg.provider,
                 "tag suggestions requested but no usable LLM provider is configured"
             );
-            return;
+            return None;
         }
     };
     // EVERY existing tag (attached or not) — the model reuses these where they
@@ -715,7 +742,7 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
             }
             if names.is_empty() && accepted == 0 {
                 tracing::info!(id = %id.as_str(), "tag suggestion produced nothing new");
-                return;
+                return None;
             }
             // Persist the remaining (new-tag) names — empty clears any previous
             // suggestions, which is right when everything was auto-accepted.
@@ -728,15 +755,24 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
                 }
                 Err(e) => tracing::warn!(error = %e, "failed to persist tag suggestions"),
             }
+            None
         }
         Err(e) => {
             tracing::warn!(error = %e, "tag suggestion LLM call failed");
-            // Best-effort: no suggestions added; surface the failure for a toast
-            // without failing the recording. (Carries the skip sentinel on skip.)
+            // Best-effort: no suggestions added; surface the failure for a toast +
+            // the terminal status. A user-skip carries the sentinel and is NOT a
+            // failure.
+            let skipped = stage_skipped(&e);
+            let msg = e.to_string();
             state.events.emit(DaemonEvent::TagFailed {
                 id: id.clone(),
-                error: e.to_string(),
+                error: msg.clone(),
             });
+            if skipped {
+                None
+            } else {
+                Some(msg)
+            }
         }
     }
 }
@@ -808,15 +844,19 @@ fn sanitize_llm_title(raw: &str) -> Option<String> {
 /// and silently skips user-owned ones. Best-effort: a failure here costs
 /// only the title. No status flip and no events — the title lands before
 /// `TranscriptionDone`, whose refresh paints it.
+/// Returns `Some(error)` only when the title step REALLY failed (an LLM call
+/// error) — the caller folds that into the recording's terminal status and
+/// persists the message. A heuristic title, "nothing usable" (heuristic kept),
+/// or a user-owned title are all non-failures (`None`).
 async fn maybe_auto_title(
     state: &AppState,
     cfg: &Config,
     id: &RecordingId,
     transcript: &str,
     raw_transcript: &str,
-) {
+) -> Option<String> {
     if !cfg.title.enabled {
-        return;
+        return None;
     }
     let heuristic = phoneme_core::title::heuristic_title(transcript)
         .or_else(|| phoneme_core::title::heuristic_title(raw_transcript));
@@ -824,6 +864,7 @@ async fn maybe_auto_title(
     // The model that produced the title, recorded for the provenance line — only
     // set when an LLM title is actually accepted; a heuristic title has none.
     let mut title_model: Option<String> = None;
+    let mut failure: Option<String> = None;
     if cfg.title.use_llm && !transcript.trim().is_empty() {
         let title_cfg = title_llm_config(cfg);
         if let Some(llm) = llm_provider_for_run(state, &title_cfg).await {
@@ -840,18 +881,20 @@ async fn maybe_auto_title(
                 Err(e) => {
                     tracing::warn!(error = %e, "title LLM call failed; keeping the heuristic");
                     // Best-effort: the heuristic title (or none) is kept; surface
-                    // the LLM failure for a toast without failing the recording.
+                    // the LLM failure for a toast + the terminal status.
+                    let msg = e.to_string();
                     state.events.emit(DaemonEvent::TitleFailed {
                         id: id.clone(),
-                        error: e.to_string(),
+                        error: msg.clone(),
                     });
+                    failure = Some(msg);
                 }
             }
         }
     }
     let Some(title) = title else {
         // Nothing usable in the transcript either — leave any stored title be.
-        return;
+        return failure;
     };
     match state
         .catalog
@@ -864,20 +907,61 @@ async fn maybe_auto_title(
         }
         Err(e) => tracing::warn!(error = %e, "failed to persist auto title"),
     }
+    failure
 }
 
 /// Run the auto-tag step when enabled (`auto_tag.auto`). Best-effort and
 /// quiet: the transcript is already saved; only the optional suggestions step
 /// is affected by a failure.
-async fn maybe_auto_tag(state: &AppState, cfg: &Config, id: &RecordingId, transcript: &str) {
+async fn maybe_auto_tag(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+) -> Option<String> {
     if !cfg.auto_tag.auto {
-        return;
+        return None;
     }
     state.events.emit(DaemonEvent::PipelineStageChanged {
         id: id.clone(),
         stage: PipelineStage::Tagging,
     });
-    suggest_tags(state, cfg, id, transcript).await;
+    suggest_tags(state, cfg, id, transcript).await
+}
+
+/// Write a recording's terminal status at the end of the pipeline: `Done` on a
+/// clean run, or the earliest failed optional step's status — and in that case
+/// persist its message on the row (`error_kind` = the status string,
+/// `error_message` = the reason) so the failed panel and `phoneme list` show
+/// WHY, surviving a restart. Runs AFTER `update_transcript` (which clears any
+/// stale error from a prior run), so a recording that re-runs cleanly ends with
+/// no error and a fresh failure overwrites an old one. The status write
+/// propagates its error (it's the pipeline's final commit); the error write is
+/// best-effort logging on top.
+async fn finalize_step_status(
+    state: &AppState,
+    id: &RecordingId,
+    failure: Option<(RecordingStatus, String)>,
+) -> Result<()> {
+    match failure {
+        Some((status, message)) => {
+            state.catalog.update_status(id, status).await?;
+            if let Err(e) = state
+                .catalog
+                .update_error(id, status.as_str(), &message)
+                .await
+            {
+                tracing::warn!(error = %e, "failed to persist step-failure error");
+            }
+        }
+        None => {
+            state
+                .catalog
+                .update_status(id, RecordingStatus::Done)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// Finalize an in-flight item canceled by the user: move the inbox file out of
@@ -922,6 +1006,14 @@ pub async fn run(
         id: id.clone(),
         stage: PipelineStage::Transcribing,
     });
+    // The worker has now actually claimed this item — flip Queued → Transcribing.
+    // Enqueue sites set Queued, so a recording WAITING in the queue reads as
+    // "queued" rather than mislabeled "transcribing". Best-effort: a status
+    // write failing must not abort the run.
+    let _ = state
+        .catalog
+        .update_status(&id, RecordingStatus::Transcribing)
+        .await;
 
     // Transcribe — reuse the process-wide client (AppState) so the HTTP
     // connection pool to the local whisper-server stays warm across items.
@@ -1134,6 +1226,14 @@ pub async fn run(
     // transcript. `provider()` returns None when disabled or provider = none.
     let mut transcript = transcript;
     let mut cleanup_model: Option<String> = None;
+    // The earliest optional step (cleanup → title → summary → tag) that REALLY
+    // failed (a user-skip doesn't count) becomes the recording's terminal status
+    // instead of `Done`, so a failed enrichment is filterable/searchable — like
+    // `HookFailed`, the transcript is still intact and usable. `get_or_insert`
+    // keeps the first/most-upstream failure (a single status can't hold several);
+    // the paired message is persisted as the row's error so the failed panel +
+    // logs show WHY, surviving a restart (see `finalize_step_status`).
+    let mut step_failure: Option<(RecordingStatus, String)> = None;
     if let Some(llm) = llm_provider_for_run(state, &cfg.llm_post_process).await {
         // The list/detail/activity views read the DB status, so it tracks the
         // stage events step for step — "transcribing" no longer covers the
@@ -1173,10 +1273,14 @@ pub async fn run(
                 // Best-effort step: the raw transcript is kept and the recording
                 // stays usable — surface the failure for a toast without flipping
                 // to a terminal status. (Carries the skip sentinel when skipped.)
+                let msg = e.to_string();
                 state.events.emit(DaemonEvent::CleanupFailed {
                     id: id.clone(),
-                    error: e.to_string(),
+                    error: msg.clone(),
                 });
+                if !stage_skipped(&e) {
+                    step_failure.get_or_insert((RecordingStatus::CleanupFailed, msg));
+                }
             }
         }
     }
@@ -1288,7 +1392,9 @@ pub async fn run(
     // before TranscriptionDone fires, so the refreshed list shows the title
     // together with the new text. A retranscribe re-runs this and refreshes
     // auto titles; user-set titles are protected inside.
-    maybe_auto_title(state, &cfg, &id, &transcript, &raw_transcript).await;
+    if let Some(msg) = maybe_auto_title(state, &cfg, &id, &transcript, &raw_transcript).await {
+        step_failure.get_or_insert((RecordingStatus::TitleFailed, msg));
+    }
 
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {
@@ -1334,18 +1440,22 @@ pub async fn run(
                 .update_status(&id, RecordingStatus::Summarizing)
                 .await;
         }
-        maybe_auto_summarize(state, &cfg, &id, &transcript).await;
+        if let Some(msg) = maybe_auto_summarize(state, &cfg, &id, &transcript).await {
+            step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
+        }
         if auto_tag_enabled(&cfg) {
             let _ = state
                 .catalog
                 .update_status(&id, RecordingStatus::Tagging)
                 .await;
         }
-        maybe_auto_tag(state, &cfg, &id, &transcript).await;
-        state
-            .catalog
-            .update_status(&id, RecordingStatus::Done)
-            .await?;
+        if let Some(msg) = maybe_auto_tag(state, &cfg, &id, &transcript).await {
+            step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
+        }
+        // A failed optional step (cleanup/title/summary/tag) becomes the terminal
+        // status — like hook_failed, the transcript is intact and usable, but the
+        // failure is now filterable, with the reason persisted. No failure → Done.
+        finalize_step_status(state, &id, step_failure).await?;
         state.events.emit(DaemonEvent::TranscriptionDone {
             id: id.clone(),
             transcript: transcript.clone(),
@@ -1463,23 +1573,26 @@ pub async fn run(
             .update_status(&id, RecordingStatus::Summarizing)
             .await;
     }
-    maybe_auto_summarize(state, &cfg, &id, &payload.transcript).await;
+    if let Some(msg) = maybe_auto_summarize(state, &cfg, &id, &payload.transcript).await {
+        step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
+    }
     if auto_tag_enabled(&cfg) {
         let _ = state
             .catalog
             .update_status(&id, RecordingStatus::Tagging)
             .await;
     }
-    maybe_auto_tag(state, &cfg, &id, &payload.transcript).await;
+    if let Some(msg) = maybe_auto_tag(state, &cfg, &id, &payload.transcript).await {
+        step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
+    }
 
     state
         .catalog
         .update_hook_result(&id, &last_cmd, final_exit_code, total_duration)
         .await?;
-    state
-        .catalog
-        .update_status(&id, RecordingStatus::Done)
-        .await?;
+    // A failed optional step becomes the terminal status (filterable, reason
+    // persisted), like hook_failed; otherwise Done.
+    finalize_step_status(state, &id, step_failure).await?;
     state.inbox.finish_done(&id, &payload).await?;
     state.events.emit(DaemonEvent::HookDone {
         id,

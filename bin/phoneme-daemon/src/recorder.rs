@@ -842,6 +842,14 @@ impl DaemonRecorder {
                 model: String::new(),
                 metadata: HookMetadata::current(),
             };
+            // Mark it Queued, not Transcribing: it's waiting behind anything
+            // ahead of it in the serial inbox, and the pipeline (`run`) flips
+            // it to Transcribing the moment the worker actually claims it. The
+            // fast lane above keeps Transcribing — it transcribes immediately.
+            state
+                .catalog
+                .update_status(&active.id, RecordingStatus::Queued)
+                .await?;
             state.inbox.enqueue(&payload).await?;
             crate::queue_worker::emit_queue_depth(state).await;
         }
@@ -1542,10 +1550,12 @@ impl DaemonRecorder {
         }
         phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg)?;
 
-        // Update catalog with the (possibly padded) duration
+        // Update catalog with the (possibly padded) duration. A meeting track
+        // always rides the serial queue, so it starts Queued; the pipeline
+        // flips it to Transcribing when the worker claims it.
         state
             .catalog
-            .update_status_and_duration(&id, RecordingStatus::Transcribing, final_duration_ms)
+            .update_status_and_duration(&id, RecordingStatus::Queued, final_duration_ms)
             .await?;
 
         let payload = HookPayload {
@@ -1725,11 +1735,12 @@ mod tests {
         tracks.sort_unstable();
         assert_eq!(tracks, vec!["mic", "system"]);
 
-        // Both were enqueued for transcription (status flipped to Transcribing).
+        // Both were enqueued (status flipped to Queued; the pipeline worker
+        // flips each to Transcribing when it claims the item).
         for r in &meeting_rows {
             assert_eq!(
                 r.status,
-                RecordingStatus::Transcribing,
+                RecordingStatus::Queued,
                 "each meeting track must be enqueued for transcription"
             );
         }
@@ -2076,7 +2087,7 @@ mod tests {
         let mic = by_track("mic");
         assert_eq!(
             mic.status,
-            RecordingStatus::Transcribing,
+            RecordingStatus::Queued,
             "the healthy track must still reach the pipeline"
         );
         assert!(

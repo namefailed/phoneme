@@ -714,6 +714,7 @@ export class HeaderBarElement extends LitElement {
         <select class="filter-pill hb-status-select" title="Filter recordings by processing status" @change=${this.handleStatus}>
           <option value="">All status</option>
           <option value="recording" ?selected=${f.status === "recording"}>Recording</option>
+          <option value="queued" ?selected=${f.status === "queued"}>Queued</option>
           <option value="transcribing" ?selected=${f.status === "transcribing"}>Transcribing</option>
           <option value="cleaning_up" ?selected=${f.status === "cleaning_up"}>Cleaning Up</option>
           <option value="summarizing" ?selected=${f.status === "summarizing"}>Summarizing</option>
@@ -722,6 +723,10 @@ export class HeaderBarElement extends LitElement {
           <option value="done" ?selected=${f.status === "done"}>Done</option>
           <option value="transcribe_failed" ?selected=${f.status === "transcribe_failed"}>Transcription Failed</option>
           <option value="hook_failed" ?selected=${f.status === "hook_failed"}>Hook Failed</option>
+          <option value="cleanup_failed" ?selected=${f.status === "cleanup_failed"}>Cleanup Failed</option>
+          <option value="summarize_failed" ?selected=${f.status === "summarize_failed"}>Summary Failed</option>
+          <option value="title_failed" ?selected=${f.status === "title_failed"}>Title Failed</option>
+          <option value="tag_failed" ?selected=${f.status === "tag_failed"}>Tagging Failed</option>
           <option value="cancelled" ?selected=${f.status === "cancelled"}>Cancelled</option>
         </select>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">

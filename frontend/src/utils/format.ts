@@ -34,7 +34,15 @@ export function formatDuration(ms: number): string {
  */
 export function statusToClass(status: string): "done" | "failed" | "cancelled" | "pending" {
   if (status === "done") return "done";
-  if (status === "transcribe_failed" || status === "hook_failed") return "failed";
+  if (
+    status === "transcribe_failed" ||
+    status === "hook_failed" ||
+    status === "cleanup_failed" ||
+    status === "summarize_failed" ||
+    status === "title_failed" ||
+    status === "tag_failed"
+  )
+    return "failed";
   if (status === "cancelled") return "cancelled";
   return "pending";
 }
@@ -50,8 +58,13 @@ export function statusLabel(status: string): string {
     case "done":              return "Done";
     case "transcribe_failed": return "Transcription Failed";
     case "hook_failed":       return "Hook Failed";
+    case "cleanup_failed":    return "Cleanup Failed";
+    case "summarize_failed":  return "Summary Failed";
+    case "title_failed":      return "Title Failed";
+    case "tag_failed":        return "Tagging Failed";
     case "recording":         return "Recording";
     case "paused":            return "Paused";
+    case "queued":            return "Queued";
     case "transcribing":      return "Transcribing";
     case "cleaning_up":       return "Cleaning Up";
     case "summarizing":       return "Summarizing";
