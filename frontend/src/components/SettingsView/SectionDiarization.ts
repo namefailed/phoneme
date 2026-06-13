@@ -28,8 +28,17 @@ export function diarizationMismatch(diar: string, stt: string): string | null {
   return null;
 }
 
+/**
+ * Settings → Speaker Diarization (`config.diarization`): the provider choice
+ * (off / local speakrs-ONNX / Deepgram / AssemblyAI), the optional local
+ * model path, and provider-conditional help boxes. Shows a live warning (via
+ * {@link diarizationMismatch}) when the chosen provider can't run with the
+ * configured transcription backend, so the mismatch is visible at pick time
+ * rather than silently doing nothing. Plain section class on the form.ts
+ * binding.
+ */
 export class SectionDiarization {
-   
+
   constructor(
     private container: HTMLElement,
     private config: any,

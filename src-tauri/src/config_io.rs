@@ -1,4 +1,13 @@
-//! Atomic config.toml read/write.
+//! Atomic config.toml read/write — the tray's only path to the config file.
+//!
+//! `read` returns defaults when the file doesn't exist yet (first run);
+//! `write` validates first and replaces the file atomically (temp +
+//! rename), so a crash mid-save can never leave a truncated config that
+//! bricks the daemon's next load. Reads here see REAL secrets — the masking
+//! for the WebView happens a layer up in `commands::read_config`; daemon-
+//! and tray-side code that needs actual keys calls this module directly.
+//! Uses the per-user default path (the tray doesn't honor `PHONEME_CONFIG`;
+//! that override is a CLI/daemon/testing affordance).
 
 use phoneme_core::Config;
 use std::path::PathBuf;

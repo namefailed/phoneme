@@ -9,6 +9,86 @@ import { curatedTranscriptionModels } from "../../data/curatedModels";
 const HELP =
   "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
 
+/** The port fields a `DaemonStatus` reply carries for the bundled whisper
+ *  servers. The `preferred` ports are the configured `bundled_server_port`
+ *  values; the `effective` ports are what the supervisors ACTUALLY bound —
+ *  they fall back to a free port when a foreign app holds the preferred one —
+ *  and are `null` while that server isn't running. Mirrors the daemon's
+ *  `DaemonStatus` reply (crates/phoneme-ipc/src/schema.rs). All fields are
+ *  optional so a partial/old reply, or a probe against a down daemon, simply
+ *  yields "no fallback known" rather than throwing. */
+export interface WhisperPortStatus {
+  whisper_preferred_port?: number | null;
+  whisper_effective_port?: number | null;
+  preview_whisper_preferred_port?: number | null;
+  preview_whisper_effective_port?: number | null;
+}
+
+/** A configured port that the daemon actually bound elsewhere: the live
+ *  `effective` port plus a short human note explaining the fallback. */
+export interface EffectivePort {
+  /** The port the server is really listening on right now. */
+  effective: number;
+  /** The configured port the user picked, which was busy. */
+  preferred: number;
+  /** Ready-to-show note, e.g. "(running on 51234 — preferred 5809 was busy)". */
+  note: string;
+}
+
+/**
+ * Decide which port to actually SHOW for a configured local-whisper port.
+ *
+ * Pure display logic — the editable config value never changes. Mirrors the
+ * tray's `effective_local_whisper_url` (src-tauri/src/commands.rs): for either
+ * supervised server (main or live-preview), when the configured port matches a
+ * reported `preferred` port and the live `effective` port differs and is
+ * known, the server fell back to a free port — return the effective port and a
+ * note. Otherwise (no status, daemon down, ports equal, server not running, or
+ * an unrelated port) returns `null`, so the caller keeps showing the
+ * configured port unchanged.
+ */
+export function effectivePortFor(
+  configuredPort: number,
+  status: WhisperPortStatus | null | undefined,
+): EffectivePort | null {
+  if (!status) return null;
+  const pairs: [number | null | undefined, number | null | undefined][] = [
+    [status.whisper_preferred_port, status.whisper_effective_port],
+    [status.preview_whisper_preferred_port, status.preview_whisper_effective_port],
+  ];
+  for (const [preferred, effective] of pairs) {
+    if (
+      typeof preferred === "number" &&
+      typeof effective === "number" &&
+      preferred === configuredPort &&
+      effective !== preferred
+    ) {
+      return {
+        effective,
+        preferred,
+        note: `(running on ${effective} — preferred ${preferred} was busy)`,
+      };
+    }
+  }
+  return null;
+}
+
+/** Rewrite a `http://127.0.0.1:<port>` URL to the port the daemon actually
+ *  bound, when it fell back. Returns the original URL untouched for any other
+ *  shape or when no fallback applies. The matching `note` (or `""`) rides
+ *  alongside so callers can append it to a hint. */
+export function effectiveLocalWhisperHint(
+  url: string,
+  status: WhisperPortStatus | null | undefined,
+): { url: string; note: string } {
+  const m = url.trim().match(/^http:\/\/127\.0\.0\.1:(\d+)\/?$/);
+  if (!m) return { url, note: "" };
+  const port = Number(m[1]);
+  const eff = effectivePortFor(port, status);
+  if (!eff) return { url, note: "" };
+  return { url: `http://127.0.0.1:${eff.effective}`, note: eff.note };
+}
+
 const MODELS = [
   { id: "tiny", filename: "ggml-tiny.en.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin", name: "Tiny", size: "75 MB", desc: "Fastest, lowest accuracy. Good for quick dictation." },
   { id: "base", filename: "ggml-base.en.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", name: "Base", size: "142 MB", desc: "Fast, decent accuracy. Good balance for older machines." },
@@ -20,14 +100,52 @@ const MODELS = [
   { id: "large-v3", filename: "ggml-large-v3.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin", name: "Large v3", size: "3.1 GB", desc: "Slowest, best accuracy. High-end hardware only." }
 ];
 
+/**
+ * Settings → Transcription: the main speech-to-text engine (`config.whisper`).
+ * Provider choice via the shared connection block (local whisper.cpp / the
+ * cloud providers / custom endpoint — see services/sttProviders), the shared
+ * model field with curated per-provider suggestions, and — for the local
+ * engine — downloadable whisper model cards with size/accuracy notes, a
+ * "recommended for your RAM" pick (`wizard_get_system_info`), download
+ * progress, and the currently-downloaded check
+ * (`wizard_list_downloaded_models`). Plain section class composing the
+ * shared connectionField/modelField mounts over the form.ts binding.
+ */
 export class SectionWhisper {
-   
+
   constructor(
     private container: HTMLElement,
     private config: any,
   ) {
     this.render(container);
     void this.fetchHardwareAndModels();
+    void this.refreshEffectivePort();
+  }
+
+  /** Ask the daemon which port the bundled main server actually bound and, if
+   *  it fell back from the configured one, surface a small note next to the
+   *  local-server hint. Best-effort: a down daemon or a partial reply just
+   *  leaves the note empty. Calls `daemon_status` directly (the typed services
+   *  wrapper drops the port fields) — pure display, the config is untouched. */
+  private async refreshEffectivePort() {
+    const slot = this.container.querySelector<HTMLElement>("#whisper-effective-port");
+    if (!slot) return;
+    const w = this.config.whisper ?? {};
+    // Only meaningful for a bundled local server (no fixed port for external/cloud).
+    if (String(w.provider ?? "local") !== "local" || w.mode === "external") {
+      slot.textContent = "";
+      return;
+    }
+    const configuredPort = (w.bundled_server_port ?? 5809) as number;
+    try {
+      const status = await invoke<WhisperPortStatus>("daemon_status");
+      const eff = effectivePortFor(configuredPort, status);
+      slot.textContent = eff
+        ? `The server is currently ${eff.note.replace(/^\(|\)$/g, "")}.`
+        : "";
+    } catch {
+      slot.textContent = "";
+    }
   }
 
   private async fetchHardwareAndModels() {
@@ -224,6 +342,7 @@ export class SectionWhisper {
               Normally the app starts and manages its own whisper server for the model picked
               above — nothing to configure. Fill the URL below only to use a server you run yourself.
             </span>
+            <span id="whisper-effective-port" style="display:block; font-size:11px; color:var(--accent); margin:0 0 10px;"></span>
             <div class="settings-field long-input">
               <label>External URL</label>
               <div>${renderField(

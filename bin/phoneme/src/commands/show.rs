@@ -1,3 +1,14 @@
+//! `phoneme show <ID>` — print one recording.
+//!
+//! Observe-only. The default view sends `GetRecording` and renders the full
+//! row; the variant flags swap the request: `--original` →
+//! `GetOriginalTranscript` (raw machine output), `--unedited` →
+//! `GetCleanTranscript` (pipeline output before hand edits), `--segments` →
+//! `GetSegments` rendered as a `m:ss–m:ss [Speaker N] text` timeline, and
+//! `--audio-path-only` prints just the WAV path for shell piping. Exits 7
+//! (not found) for an unknown id — and for `--segments` when no segments
+//! are stored, with a hint to retranscribe.
+
 use crate::args::ShowArgs;
 use crate::client::Client;
 use crate::exit;

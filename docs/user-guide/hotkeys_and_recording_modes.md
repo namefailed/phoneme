@@ -49,7 +49,10 @@ Click **Record** or use the record hotkey.
 
 ### Pause / resume
 
-While recording, click **Pause** (or send `record_pause` over IPC). Capture suspends without finalizing. **Resume** continues the same catalog entry — no duplicate rows.
+While recording, click **Pause** to suspend capture without finalizing the
+recording; **Resume** continues the *same* catalog entry, so you never get
+duplicate rows. This works on the CLI too — `phoneme record --pause` and
+`phoneme record --resume` — and pausing a meeting pauses every track at once.
 
 ### Meeting Mode
 
@@ -69,11 +72,17 @@ Both tracks share a **wall-clock timeline** so scrubbing to the same timestamp o
 | UI action | CLI |
 |-----------|-----|
 | Start / stop mic | `phoneme record --start` / `--stop` |
+| Toggle (start if idle, else stop) | `phoneme record --toggle` |
 | In-place dictation | `phoneme record --start --in-place` |
 | Oneshot (silence-stop) | `phoneme record --oneshot` |
 | Fixed duration | `phoneme record --duration 30` |
+| Pause / resume | `phoneme record --pause` / `--resume` |
 | Start / stop meeting | `phoneme meeting start` / `stop` |
+| Toggle meeting | `phoneme meeting toggle` |
 | Cancel | `phoneme record --cancel` |
+
+The `--toggle` / `meeting toggle` variants are atomic (start-or-stop in one
+call), which makes them the cleanest thing to bind to a single external hotkey.
 
 ## Tips
 

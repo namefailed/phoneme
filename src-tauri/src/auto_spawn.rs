@@ -1,4 +1,5 @@
-//! Auto-spawn the daemon when the tray app starts.
+//! Auto-spawn the daemon when the tray app starts (and on every lazy
+//! `BridgeSlot` reconnect).
 //!
 //! On Windows, named pipe handles can remain open for a brief window after
 //! the hosting process exits (the kernel keeps the handle alive until all
@@ -6,6 +7,24 @@
 //! reachable we treat the daemon as already running. If not, we spawn a
 //! detached process and poll with a generous timeout to accommodate slow
 //! start or post-crash cleanup.
+//!
+//! Two policies live here beyond the spawn itself:
+//!
+//! - **Version handshake**: a reachable daemon is only reused when its
+//!   `DaemonStatus.version` matches this build — a stale daemon drops the
+//!   pipe on requests it can't decode. A mismatched daemon is restarted,
+//!   EXCEPT when it positively reports being mid-recording or
+//!   mid-transcription (`daemon_is_busy`): bouncing it then would kill the
+//!   capture stream, so the old daemon is left to finish and upgrades on
+//!   the next idle start.
+//! - **Job membership** (the `quit_stops_daemon` contract): when the knob is
+//!   on (default), the freshly-spawned daemon is assigned to the tray's
+//!   kill-on-close job object, so even an "End task" on the tray takes the
+//!   daemon (and, transitively, its whisper/Ollama children) down. Windows
+//!   can't remove a process from a kill-on-close job, so membership is
+//!   decided AT SPAWN TIME — flipping the setting applies to the NEXT
+//!   daemon spawn. With the knob off the daemon is spawned outside any
+//!   tray-held job and survives the tray byte-for-byte (headless setups).
 
 use phoneme_core::Config;
 use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};

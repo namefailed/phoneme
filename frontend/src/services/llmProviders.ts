@@ -14,11 +14,14 @@
  * OpenAI-compatible endpoint under the hood.
  */
 
+/** The four wire protocols the daemon speaks (see the module comment). */
 export type LlmProviderKind = "ollama" | "openai" | "anthropic" | "groq";
 
 /** Which optgroup a provider sits under in the shared connection picker. */
 export type ProviderGroup = "local" | "cloud" | "advanced";
 
+/** One catalog entry: a friendly provider mapped onto a wire protocol plus
+ *  its default endpoint/model and picker metadata. */
 export interface LlmPreset {
   /** Stable id used as the <option> value. */
   id: string;
@@ -296,6 +299,7 @@ export const LOCAL_LLM_PRESETS = LLM_PRESETS.filter((p) => p.local);
 /** Cloud presets (need a key). */
 export const CLOUD_LLM_PRESETS = LLM_PRESETS.filter((p) => !p.local);
 
+/** Look a preset up by its stable id. */
 export function findLlmPreset(id: string): LlmPreset | undefined {
   return LLM_PRESETS.find((p) => p.id === id);
 }

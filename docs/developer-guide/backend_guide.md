@@ -1,66 +1,161 @@
-# 🦀 Backend Developer Guide
+# Backend Developer Guide — the Rust workspace
 
-Phoneme's backend is a headless, local-first background daemon process and a companion CLI. It is written in **Rust** and leverages **Tokio** for async task orchestration and **SQLx** for database persistence.
+Phoneme's backend is a headless, local-first daemon plus a companion CLI,
+written in **Rust** with **Tokio** for async orchestration and **SQLx** for
+persistence. This guide is the map: which crate owns what, and the patterns the
+daemon leans on. For the runtime *journey* read [architecture.md](architecture.md);
+for subsystem mechanics read [internals.md](internals.md).
 
----
+Every crate and module carries its own rustdoc. The crate-level docs are system
+maps in their own right — read them first:
 
-## 🕸️ 1. Tokio Async Architecture & Actors
+- [`phoneme-core/src/lib.rs`](../../crates/phoneme-core/src/lib.rs) — modules
+  grouped by pipeline stage.
+- [`phoneme-audio/src/lib.rs`](../../crates/phoneme-audio/src/lib.rs) — the
+  capture/encode path.
+- [`phoneme-ipc/src/lib.rs`](../../crates/phoneme-ipc/src/lib.rs) — the wire
+  contract and compatibility rules.
 
-The background daemon is a multi-threaded asynchronous process. Tasks cooperate using channels and synchronization primitives rather than mutating global memory.
-
-### Actor Design Pattern
-To manage exclusive hardware resources (such as microphone capture or loopback streams), Phoneme uses an **Actor Pattern** inside [`recorder.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-audio/src/recorder.rs):
-- The `Recorder` struct does not expose internal audio buffers. Instead, it exposes a `Sender<RecorderCommand>` command queue channel.
-- A long-running Tokio async loop owns the audio device state and processes commands (`Stop`, `Cancel`, `Pause`, `Resume`) one at a time.
-- Return values are dispatched back to the caller using a one-time `oneshot::Sender`.
-
-### Semaphore Resource Limits
-Transcription and AI models are computationally intensive. To prevent OOM (Out Of Memory) crashes or CPU starvation, Phoneme gates model inference using semaphores:
-- **`whisper_sem`:** A shared `Semaphore` in [`AppState`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/app_state.rs) limits final transcriptions and preview ticks.
-- Before running a transcription pass, the worker must acquire a permit. This guarantees that only one Whisper model execution runs at any time, protecting system resources.
-
----
-
-## 🗄️ 2. SQLite Database & FTS5 Indexing (`phoneme-core`)
-
-Phoneme uses a single SQLite database file (`catalog.db`) to persist recording histories, transcriptions, and vectors.
-
-### WAL & Connection Options
-The connection pool is configured with custom options in [`catalog.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/catalog.rs):
-- **WAL Mode:** Write-Ahead Logging is turned on, allowing read queries to complete while a write transaction is executing.
-- **Autocheckpoints:** `wal_autocheckpoint=1000` tells SQLite to merge the log file back into the main database file once the log reaches 1000 pages (~4MB).
-- **Idle Checkpointing:** Long-running read connections can block auto-checkpointing, causing the WAL file to grow indefinitely. To prevent this, the daemon calls `Catalog::checkpoint` when idle to force-flush transaction logs to disk.
-
-### Full-Text Search (FTS5)
-Full-text indexing is managed through an SQLite virtual table `recordings_fts`.
-- **Lexical Queries:** Non-alphanumeric characters are stripped from user searches, and terms are formatted into prefix checks (`term* AND term*`). This prevents search queries containing dangling quotes or operators from crashing the SQLite query engine.
+Generate the HTML locally with `cargo doc --workspace --no-deps --open`.
 
 ---
 
-## 🤖 3. Model Supervision & Overrides
+## 1. Workspace map
 
-### The Supervisor Task
-Local transcription runs via a bundled C++ Whisper server (`whisper-server.exe`).
-- [`whisper_supervisor.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/bin/phoneme-daemon/src/whisper_supervisor.rs) is responsible for starting, monitoring, and restarting this server.
-- The supervisor runs in an infinite loop. If the server terminates unexpected, the supervisor waits with an exponential backoff before respawning the server process.
+The repository is a Cargo workspace of three library crates and three binaries
+(plus the frontend, which is a separate Vite/TypeScript app — see
+[frontend_guide.md](frontend_guide.md)).
 
-### One-Job Model Overrides
-When a user requests a re-transcription with a different model, the daemon performs a one-job override:
-1. The model override is stored in `whisper_model_override` inside `AppState`.
-2. The supervisor detects the change, terminates the running `whisper-server.exe`, and restarts it with the overridden model path.
-3. Once the transcription job completes, a drop guard (`WhisperOverrideGuard`) automatically clears the override in `AppState`, triggering the supervisor to restore the server back to the user's default model configuration.
+### Library crates (`crates/`)
+
+| Crate | Owns | Notable modules |
+| :--- | :--- | :--- |
+| [`phoneme-core`](../../crates/phoneme-core/src/lib.rs) | All domain logic & the data layer, knows nothing about IPC/windows/hotkeys | [`config`](../../crates/phoneme-core/src/config.rs), [`transcription`](../../crates/phoneme-core/src/transcription.rs), [`llm`](../../crates/phoneme-core/src/llm.rs), [`diarization`](../../crates/phoneme-core/src/diarization.rs), [`catalog`](../../crates/phoneme-core/src/catalog.rs), [`chunk`](../../crates/phoneme-core/src/chunk.rs)/[`embed`](../../crates/phoneme-core/src/embed.rs)/[`fusion`](../../crates/phoneme-core/src/fusion.rs), [`hook`](../../crates/phoneme-core/src/hook.rs)/[`webhook`](../../crates/phoneme-core/src/webhook.rs), [`doctor`](../../crates/phoneme-core/src/doctor.rs), [`queue`](../../crates/phoneme-core/src/queue.rs), [`types`](../../crates/phoneme-core/src/types.rs) |
+| [`phoneme-audio`](../../crates/phoneme-audio/src/lib.rs) | Capture & encoding to canonical 16 kHz mono i16 | [`recorder`](../../crates/phoneme-audio/src/recorder.rs), [`source`](../../crates/phoneme-audio/src/source.rs), [`convert`](../../crates/phoneme-audio/src/convert.rs), [`silence`](../../crates/phoneme-audio/src/silence.rs), [`preroll`](../../crates/phoneme-audio/src/preroll.rs), [`decode`](../../crates/phoneme-audio/src/decode.rs), [`meeting_align`](../../crates/phoneme-audio/src/meeting_align.rs) |
+| [`phoneme-ipc`](../../crates/phoneme-ipc/src/lib.rs) | The wire contract between daemon and clients | [`schema`](../../crates/phoneme-ipc/src/schema.rs) (the protocol reference), [`codec`](../../crates/phoneme-ipc/src/codec.rs), [`named_pipe`](../../crates/phoneme-ipc/src/named_pipe.rs), [`transport`](../../crates/phoneme-ipc/src/transport.rs) |
+
+### Binaries (`bin/`) and the tray (`src-tauri/`)
+
+| Binary | Owns | Notable modules |
+| :--- | :--- | :--- |
+| [`phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | The brain — IPC server, recorder glue, inbox worker, pipeline, supervisors, event bus | [`main`](../../bin/phoneme-daemon/src/main.rs), [`app_state`](../../bin/phoneme-daemon/src/app_state.rs), [`recorder`](../../bin/phoneme-daemon/src/recorder.rs), [`queue_worker`](../../bin/phoneme-daemon/src/queue_worker.rs), [`pipeline`](../../bin/phoneme-daemon/src/pipeline.rs), [`in_place`](../../bin/phoneme-daemon/src/in_place.rs), [`whisper_supervisor`](../../bin/phoneme-daemon/src/whisper_supervisor.rs), [`ollama_launcher`](../../bin/phoneme-daemon/src/ollama_launcher.rs), [`event_bus`](../../bin/phoneme-daemon/src/event_bus.rs), [`shutdown`](../../bin/phoneme-daemon/src/shutdown.rs), [`reconcile`](../../bin/phoneme-daemon/src/reconcile.rs), [`retention`](../../bin/phoneme-daemon/src/retention.rs) |
+| [`phoneme`](../../bin/phoneme/src/main.rs) | The CLI — one module per subcommand, translating to IPC requests | [`args`](../../bin/phoneme/src/args.rs) (clap), [`client`](../../bin/phoneme/src/client.rs) (spawn vs observe), [`commands/`](../../bin/phoneme/src/commands/mod.rs) |
+| [`src-tauri`](../../src-tauri/src/lib.rs) | The Tauri 2 tray shell — spawn/bridge the daemon, forward commands, re-emit events | [`lib`](../../src-tauri/src/lib.rs), [`auto_spawn`](../../src-tauri/src/auto_spawn.rs), [`bridge`](../../src-tauri/src/bridge.rs), [`commands`](../../src-tauri/src/commands.rs), [`events`](../../src-tauri/src/events.rs), [`tray`](../../src-tauri/src/tray.rs), [`overlay`](../../src-tauri/src/overlay.rs), [`wizard`](../../src-tauri/src/wizard.rs)/[`checksums`](../../src-tauri/src/checksums.rs) |
+
+**The dependency arrow points one way.** `phoneme-core` is the shared substrate;
+the daemon, CLI, and tray all depend on it (and on `phoneme-ipc`), never the
+reverse. `phoneme-core` deliberately has no knowledge of pipes, windows, or
+hotkeys — it transcribes, post-processes, stores, and answers questions, and the
+daemon wires those pieces into a running pipeline.
 
 ---
 
-## 👥 4. Dual-Track Alignment Math (`phoneme-audio`)
+## 2. Tokio async architecture & actors
 
-In Meeting Mode, Phoneme records two WAV files: a microphone track (dense) and a system audio WASAPI loopback track (sparse).
+The daemon is a multi-threaded async process; tasks cooperate over channels and
+synchronization primitives rather than shared mutable globals. The task topology
+diagram and channel table are in
+[internals.md](internals.md#async-task-topology).
 
-### Sparse WASAPI Behavior
-Windows only sends audio packets to the system loopback device when a sound is actually playing. When the call is quiet, the loopback device delivers no frames. As a result, the captured loopback audio buffer is shorter than the microphone buffer.
+### The actor pattern
 
-### Reconstruction & Padding
-[`meeting_align.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-audio/src/meeting_align.rs) aligns the two tracks onto a single wall-clock timeline:
-- The system loopback track records the offset of the first audible block.
-- We check for a *SPARSE* state: if the loopback buffer has a significant duration deficit and the first loud sound occurred after the meeting started, it is classified as sparse.
-- We pad the beginning of the sparse loopback buffer with silence matching its wall-clock start time, aligning it with the microphone track.
+Exclusive hardware (microphone, loopback) is owned by an **actor**
+([`recorder.rs`](../../crates/phoneme-audio/src/recorder.rs)): the `Recorder`
+exposes a `Sender<RecorderCommand>` rather than its buffers, and a long-running
+loop owns the device state and processes commands (`Stop`, `Cancel`, `Pause`,
+`Resume`, `Snapshot`) one at a time, replying over a `oneshot`. The daemon-side
+glue ([`bin/phoneme-daemon/src/recorder.rs`](../../bin/phoneme-daemon/src/recorder.rs))
+ties that lifecycle to the catalog, the inbox queue, and the event bus, and owns
+the "at most one capture", toggle-atomicity, and no-slow-await-under-a-lock
+invariants.
+
+### Semaphore resource limits
+
+Transcription is heavy, so the daemon gates the bundled whisper-server with a
+shared `whisper_sem` permit in [`AppState`](../../bin/phoneme-daemon/src/app_state.rs):
+a final transcription holds the permit for its whole STT call, and the live
+preview only ticks when the permit is free — so a preview can never starve a real
+transcription, and a one-job model-override swap happens *under* the permit so
+nothing else talks to the server mid-restart.
+
+### Shared state
+
+Everything that outlives a request hangs off [`AppState`](../../bin/phoneme-daemon/src/app_state.rs):
+the hot-swappable config, catalog, inbox queue, event bus, recorder, shared
+HTTP-backed provider clients, and the shutdown coordinator. Cloning `AppState`
+clones `Arc`s, so every task sees the same components. It also holds the
+coordination cells — the one-job `WhisperModelOverride`, the `WhisperEffectivePorts`
+published after port fallback, the `processing` slot (in-flight id + cancel
+token), and the kill-on-close job object.
+
+---
+
+## 3. SQLite, WAL & FTS5 (`phoneme-core`)
+
+A single SQLite file (`catalog.db`) persists recordings, transcripts, segments,
+tags, and embedding vectors. The connection options (WAL, `synchronous=NORMAL`,
+bounded autocheckpoint, idle checkpointing), the three-transcript-layer design,
+the FTS5 sync triggers and query sanitizing, and the in-memory embedding cache
+are all detailed in
+[internals.md](internals.md#sqlite-catalog--search-internals). The module is
+[`catalog.rs`](../../crates/phoneme-core/src/catalog.rs).
+
+---
+
+## 4. Child-process supervision
+
+Local transcription runs via a bundled C++ whisper-server. The
+[`whisper_supervisor`](../../bin/phoneme-daemon/src/whisper_supervisor.rs) keeps
+it (and a second, thread-capped preview server when configured) alive:
+
+- **Respawn loop** — spawn the binary, then watch four wake sources at once:
+  child exit (respawn with 2 s → 60 s backoff, reset after a healthy minute), a
+  spec-change poll (model/port/mode differs from what the child was spawned
+  with), an explicit `whisper_restart` notify (the Doctor "Fix" — the only path
+  that heals a *hung* server), and shutdown. Even the crash backoff is
+  cancellable by restart/shutdown so a Doctor fix is never lost.
+- **Effective ports** — the configured port is a preference; a pre-flight probe
+  routes around a foreign squatter to a free OS-assigned port (excluding the
+  sibling server's ports), publishes the choice to `AppState::whisper_ports`
+  *before* the spawn, and clears it when down.
+- **One-job model overrides** — the spawn uses `effective_model_path`
+  (override-if-set, else config) and the spec-change check compares the same
+  effective value, so a model-override re-transcription is exactly one
+  restart-to-override plus one restore — never a config-mutation thrash.
+- **Job membership & sweeps** — every child joins the kill-on-close job;
+  `sweep_stray_servers` additionally kills every whisper-server on the box to
+  free squatted ports and hung orphans before a respawn.
+- **No pipe wedging** — the child's stdout/stderr are discarded; a piped-but-
+  undrained child blocks once the OS buffer fills and silently hangs
+  transcription.
+
+A Phoneme-launched Ollama is supervised separately by
+[`ollama_launcher`](../../bin/phoneme-daemon/src/ollama_launcher.rs) under the
+ownership ledger described in
+[architecture.md](architecture.md#2-process-lifecycle--ownership).
+
+---
+
+## 5. Dual-track meeting alignment (`phoneme-audio`)
+
+Meeting mode records a dense mic track and a sparse WASAPI loopback track, then
+reconstructs both onto one wall-clock timeline. The sparse-detection and
+silence-padding math lives in
+[internals.md](internals.md#dual-track-alignment-math); the module is
+[`meeting_align.rs`](../../crates/phoneme-audio/src/meeting_align.rs).
+
+---
+
+## 6. Where to make common changes
+
+| To add… | Touch | Then |
+| :--- | :--- | :--- |
+| A new IPC command | [`schema.rs`](../../crates/phoneme-ipc/src/schema.rs) (variant + doc), [`ipc_handler.rs`](../../bin/phoneme-daemon/src/ipc_handler.rs) (handler) | a CLI command and/or a tray [`commands.rs`](../../src-tauri/src/commands.rs) forward |
+| A new transcription/LLM provider | [`transcription.rs`](../../crates/phoneme-core/src/transcription.rs) / [`llm.rs`](../../crates/phoneme-core/src/llm.rs) | config in [`config.rs`](../../crates/phoneme-core/src/config.rs), the picker in [frontend_guide.md](frontend_guide.md) |
+| A new pipeline stage | [`pipeline.rs`](../../bin/phoneme-daemon/src/pipeline.rs) | a `PipelineStage`/`DaemonEvent` if it needs UI progress |
+| A new config key | [`config.rs`](../../crates/phoneme-core/src/config.rs) (`#[serde(default)]`!) | [config_reference.md](config_reference.md) + the masking list if it's a secret |
+
+See [how_to_extend.md](how_to_extend.md) for step-by-step recipes and
+[ipc_integration.md](ipc_integration.md) for the wire format. House rules,
+target-test isolation, and the local check commands are in
+[testing_and_ci.md](testing_and_ci.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md).

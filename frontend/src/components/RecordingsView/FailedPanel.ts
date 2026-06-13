@@ -20,13 +20,13 @@ export type FailureStage = "transcribe" | "hook";
 type FailureDetail = { stage: FailureStage; error: string; at: number };
 
 /**
- * Session-level cache of failure details, keyed by recording id. The catalog's
- * `error_kind`/`error_message` columns aren't populated by the daemon today —
- * the real error text travels in the `transcription_failed` / `hook_failed`
- * events (and in the inbox `failed/` payloads, which have no read IPC). The
- * always-mounted queue panel feeds this map from its event subscription, so
- * any failure that happens while the app is open shows its actual message
- * here; rows that failed before launch fall back to a pointer at the log.
+ * Session-level cache of failure details, keyed by recording id. The daemon now
+ * persists the reason on the row (`error_kind`/`error_message`), so the stored
+ * value is authoritative and survives a restart — `failureMessage` prefers it.
+ * This cache is the fallback for the window between a live
+ * `transcription_failed` / `hook_failed` event and the next catalog refresh: the
+ * always-mounted queue panel feeds it from its event subscription so a failure
+ * that happens while the app is open shows its actual message immediately.
  */
 const sessionFailures = new Map<string, FailureDetail>();
 
@@ -48,8 +48,8 @@ function rowTitle(r: Recording): string {
   return r.title?.trim() || new Date(r.started_at).toLocaleString();
 }
 
-/** Which step failed, as a short label. Prefers a stored `error_kind` when a
- *  future daemon writes one; today it derives from the failed status. */
+/** Which step failed, as a short label. Prefers the stored `error_kind` the
+ *  daemon now writes; falls back to deriving it from the failed status. */
 function failureStage(r: Recording): string {
   const kind = r.error_kind?.trim();
   if (kind) {

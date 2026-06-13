@@ -15,10 +15,17 @@ use tokio_util::codec::{Decoder, Encoder};
 /// 8 MiB is far above any legitimate request/response/event.
 const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
+/// A tokio_util [`Decoder`]/[`Encoder`] pair for one NDJSON message type.
+///
+/// The type parameter picks what a frame deserializes to — the server frames
+/// connections as `JsonLineCodec<ServerRequest>`, clients as
+/// `JsonLineCodec<Response>` and (after subscribing) `JsonLineCodec<DaemonEvent>`.
+/// Stateless apart from the decode buffer tokio_util owns.
 #[derive(Debug)]
 pub struct JsonLineCodec<T>(PhantomData<T>);
 
 impl<T> JsonLineCodec<T> {
+    /// A fresh codec (no state to configure).
     pub fn new() -> Self {
         Self(PhantomData)
     }

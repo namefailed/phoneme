@@ -1,7 +1,20 @@
-// Tiny declarative form helpers.
+// Tiny declarative form helpers — the data-binding layer every plain (non-Lit)
+// Settings section is built on. A section renders inputs with
+// `renderField({ key: "whisper.timeout_secs", … })` and calls
+// `bindFieldEvents(container, config)` once; from then on each input writes
+// its value to that dotted path in the SHARED config object on every
+// input/change, and the Settings Save button persists the object. No
+// validation, no events out — the config object is the form state.
 
+/** The supported input flavors. */
 export type FieldKind = "text" | "number" | "checkbox" | "select" | "textarea";
 
+/** One field's declaration. `key` is the dotted path into the config object
+ *  (it becomes the element's `data-key` and must point at a parent object
+ *  that already exists — sections seed missing config tables before
+ *  rendering). `kind` picks the markup; `type`/`list`/`placeholder` pass
+ *  through to text inputs; `options` populates a select. `label`/`help` are
+ *  carried for callers that lay the field out themselves. */
 export type Field = {
   key: string; // dotted path e.g. "whisper.timeout_secs"
   label: string;
@@ -13,11 +26,17 @@ export type Field = {
   options?: { value: string; label: string }[]; // for "select"
 };
 
+/** Read a dotted path from a nested object (`undefined` past any null/missing
+ *  link, never a throw). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getByPath(obj: any, path: string): any {
   return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 }
 
+/** Write `value` at a dotted path, mutating `obj` in place. Unlike getByPath
+ *  this THROWS if an intermediate object is missing — by design, so a typo'd
+ *  field key (or an unseeded config table) fails loudly in dev instead of
+ *  silently dropping the user's edit. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function setByPath(obj: any, path: string, value: any): void {
   const parts = path.split(".");
@@ -26,6 +45,9 @@ export function setByPath(obj: any, path: string, value: any): void {
   target[last] = value;
 }
 
+/** The HTML string for one field, pre-filled with `value` (escaped) and
+ *  tagged with `data-key` for bindFieldEvents to find. Callers compose it
+ *  into their section template (usually inside a `.settings-field` row). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function renderField(field: Field, value: any): string {
   switch (field.kind) {
@@ -55,6 +77,11 @@ export function renderField(field: Field, value: any): string {
   }
 }
 
+/** Wire every `[data-key]` element under `root` to write its (type-coerced:
+ *  checkbox→boolean, number→Number, else string) value to that path in
+ *  `config` on input/change. Call ONCE per render, after the innerHTML is
+ *  set. Sections that re-render must call it again (listeners die with the
+ *  old DOM). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function bindFieldEvents(root: HTMLElement, config: any) {
   root.querySelectorAll<HTMLElement>("[data-key]").forEach((el) => {

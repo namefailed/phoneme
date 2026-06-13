@@ -1,8 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
 import { curatedSttModels } from "../../services/sttProviders";
 import { curatedTranscriptionModels } from "../../data/curatedModels";
 import { mountConnectionField } from "./connectionField";
 import { mountModelField } from "./modelField";
 import { bindFieldEvents, renderField } from "./form";
+import { effectiveLocalWhisperHint, type WhisperPortStatus } from "./SectionWhisper";
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -36,12 +38,34 @@ export class SectionInPlace {
    *  provider actually changed (curated suggestions are per-provider). */
   private sttModelMountKey = "";
   private sttModelHost: HTMLElement | null = null;
+  /** Live bundled-server ports from the daemon, fetched once on mount. Lets
+   *  the local-server hint name the EFFECTIVE port after a port fallback; left
+   *  null until the probe resolves (or when the daemon is down). */
+  private portStatus: WhisperPortStatus | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(container: HTMLElement, config: any) {
     this.config = config;
     this.container = container;
     this.render();
+    void this.refreshPortStatus();
+  }
+
+  /** Probe the daemon for the bundled servers' effective ports, then re-render
+   *  so the local-server hint reflects any fallback. Best-effort: a down daemon
+   *  leaves the configured port showing. Calls `daemon_status` directly — the
+   *  typed services wrapper drops the port fields, and this is pure display. */
+  private async refreshPortStatus() {
+    try {
+      this.portStatus = await invoke<WhisperPortStatus>("daemon_status");
+    } catch {
+      this.portStatus = null;
+      return;
+    }
+    // Only the local-server hint consumes the ports; skip a re-render otherwise.
+    if (this.config.in_place?.stt && (this.config.in_place.stt.provider ?? "local") === "local") {
+      this.render();
+    }
   }
 
   private sttMode(): SttMode {
@@ -307,6 +331,10 @@ export class SectionInPlace {
       const previewServerRuns =
         !!this.config.recording?.streaming_preview &&
         this.config.preview_whisper?.provider === "local";
+      // Show the port the server ACTUALLY bound when the daemon reports a
+      // fallback; the configured port stays the editable value. The note is
+      // empty for external configs or when no fallback is known.
+      const hint = effectiveLocalWhisperHint(this.sttLocalUrl(stt), this.portStatus);
       host.innerHTML = `
         <div id="ip-stt-conn"></div>
         <div class="settings-field">
@@ -320,7 +348,7 @@ export class SectionInPlace {
               Dictation reuses a whisper server that's <b>already running</b> — the daemon never
               starts a third one just for it. <b>Main</b> is the regular transcription server;
               <b>Live Preview's</b> is the second, fast-model one, only alive while the preview
-              is enabled with a dedicated local model. Requests go to ${escHtml(this.sttLocalUrl(stt))}.
+              is enabled with a dedicated local model. Requests go to ${escHtml(hint.url)}${hint.note ? ` ${escHtml(hint.note)}` : ""}.
             </span>
             ${
               server === "preview" && !previewServerRuns

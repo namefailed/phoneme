@@ -1,4 +1,18 @@
-//! Bridge daemon events to the frontend via Tauri's emit().
+//! Bridge daemon events to the frontend — the tray's read side of the event
+//! stream.
+//!
+//! `spawn` runs a forever-loop: open a DEDICATED pipe connection (the
+//! subscription consumes its connection per the IPC protocol, so the
+//! request/response bridge is never used for it), `SubscribeEvents`, and for
+//! every received `DaemonEvent` (1) derive a new [`TrayState`] where the
+//! event implies one — recording, transcribing, backlog count, whisper
+//! error, hook failure, back to idle — and update the tray icon, and (2)
+//! re-emit the event verbatim as the Tauri `daemon-event`, which broadcasts
+//! to ALL webviews: the main window's stores refresh from it and the
+//! overlay drives its show/hide. When the stream ends (daemon restart, lag
+//! disconnect), it reconnects on a 2 s loop — by re-subscribing it also
+//! satisfies the "re-fetch after lag" contract, since the frontend re-syncs
+//! on reconnect.
 
 use crate::bridge::Bridge;
 use crate::tray::{self, TrayState};

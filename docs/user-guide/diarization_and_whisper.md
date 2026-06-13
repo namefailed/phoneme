@@ -70,14 +70,24 @@ When you record with [Meeting Mode](meeting_mode.md), Phoneme already separates
 *you* (the mic track) from *everyone else* (the system-audio track). Diarization
 goes further and labels the distinct speakers **within** a track.
 
-Phoneme supports several diarization backends (`diarization.provider`):
+Pick the backend in **Settings → Transcription → Speaker Diarization**
+(`diarization.provider`):
 
 | Backend | Where it runs |
 |---------|---------------|
-| `none` *(default)* | Diarization disabled |
-| `local` | Local **speakrs** ONNX segmentation model (offline) — set `diarization.local_model_path` |
+| `none` *(default)* | Diarization disabled — rely on Meeting Mode's two tracks |
+| `local` | Local **speakrs** ONNX segmentation model (offline) |
 | `deepgram` | Cloud diarization via Deepgram |
 | `assemblyai` | Cloud diarization via AssemblyAI |
+
+> [!IMPORTANT]
+> **Cloud diarization is part of the cloud provider's own transcription.** It
+> only runs when that *same* provider also does the transcription: Deepgram
+> diarization needs Deepgram transcription, AssemblyAI needs AssemblyAI. Local
+> diarization is a separate pass and works with any provider that returns
+> segment timing (Local / OpenAI / Groq / Custom). The Settings panel shows a
+> live warning if your diarization and transcription providers can't work
+> together, so the mismatch is visible the moment you pick it.
 
 ### How local diarization works
 
@@ -87,9 +97,18 @@ Phoneme supports several diarization backends (`diarization.provider`):
 3. **Transcribe:** Whisper transcribes the time-slices.
 4. **Merge:** the transcript identifies the distinct speakers.
 
+### The local diarization models
+
+Local diarization uses the **speakrs** ONNX models (around 500 MB total). You
+don't have to download or point at them yourself: by default they live in your
+**Hugging Face cache** (`%USERPROFILE%\.cache\huggingface\hub`) and are fetched
+automatically the first time diarization runs, or when you install them from the
+First Run Wizard. The **Model Path** field in
+**Settings → Transcription → Speaker Diarization** (`diarization.local_model_path`)
+is **optional** — leave it blank to use the auto-managed cache; only fill it in
+if you keep the model somewhere specific.
+
 > [!NOTE]
-> Local diarization needs an ONNX model, which you can install from the First
-> Run Wizard or **Settings → Transcription → Diarization**. It runs entirely on
-> your machine, so a long meeting may take a few minutes on older hardware — but
-> it stays 100% private. Cloud diarization (Deepgram/AssemblyAI) sends audio
-> off-device.
+> Local diarization runs entirely on your machine and needs noticeably more RAM,
+> so a long meeting may take a few minutes on older hardware — but it stays 100%
+> private. Cloud diarization (Deepgram/AssemblyAI) sends audio off-device.

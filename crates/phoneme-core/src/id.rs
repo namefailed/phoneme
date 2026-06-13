@@ -1,3 +1,19 @@
+//! The recording identifier.
+//!
+//! This module owns [`RecordingId`], the timestamp-shaped string that names
+//! every recording. The daemon mints one the moment a recording starts, and it
+//! threads through everything afterwards — the catalog primary key, the WAV's
+//! path on disk (the id's date prefix *is* the day folder and file stem), inbox
+//! payload filenames, and IPC.
+//!
+//! Two invariants make that work: the id sorts chronologically (so a plain
+//! string sort orders recordings by time), and it is unique within a process
+//! even when two are generated in the same wall-clock millisecond (a monotonic
+//! counter in the last three digits). The fixed-offset accessors
+//! ([`RecordingId::file_stem`], [`RecordingId::day_folder`]) slice at byte
+//! positions, so anything reconstructing an id from outside the process should
+//! go through [`RecordingId::parse`] to avoid a panic on a malformed string.
+
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -39,6 +55,7 @@ impl RecordingId {
         Self(s)
     }
 
+    /// The id in its canonical 18-char string form.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -69,6 +86,14 @@ impl RecordingId {
     /// string is the canonical 18-char `YYYYMMDDTHHmmssNNN` shape. Callers
     /// should map `None` to a "not found" error rather than risk a panic in
     /// the fixed-offset slicing accessors.
+    ///
+    /// ```
+    /// use phoneme_core::RecordingId;
+    /// let id = RecordingId::parse("20260519T143500042").unwrap();
+    /// assert_eq!(id.day_folder(), "2026-05-19");
+    /// assert_eq!(id.file_stem(), "143500042");
+    /// assert!(RecordingId::parse("not-an-id").is_none());
+    /// ```
     pub fn parse(s: impl Into<String>) -> Option<Self> {
         let s = s.into();
         let bytes = s.as_bytes();

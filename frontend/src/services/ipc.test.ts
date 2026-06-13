@@ -5,6 +5,8 @@ import {
   recordStart,
   deleteRecording,
   moreLikeThis,
+  exportCaptions,
+  exportLibraryZip,
   listTags,
   listAllTags,
   addTag,
@@ -100,6 +102,41 @@ describe('IPC Services', () => {
       id: '20260519T143500823',
       limit: 5,
     });
+  });
+
+  it('exportCaptions forwards id + format and returns the caption body', async () => {
+    const body = '1\n00:00:01,000 --> 00:00:04,500\nHello world.\n';
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(body);
+
+    const res = await exportCaptions('20260519T143500823', 'srt');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('export_captions', {
+      id: '20260519T143500823',
+      format: 'srt',
+    });
+    expect(res).toBe(body);
+  });
+
+  it('exportCaptions passes the vtt format through unchanged', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce('WEBVTT\n\n');
+
+    await exportCaptions('20260519T143500823', 'vtt');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('export_captions', {
+      id: '20260519T143500823',
+      format: 'vtt',
+    });
+  });
+
+  it('exportLibraryZip forwards the dest path and returns the audio count', async () => {
+    vi.mocked(tauriCore.invoke).mockResolvedValueOnce(3);
+
+    const count = await exportLibraryZip('C:\\backups\\phoneme-backup.zip');
+
+    expect(tauriCore.invoke).toHaveBeenCalledWith('export_library_zip', {
+      dest: 'C:\\backups\\phoneme-backup.zip',
+    });
+    expect(count).toBe(3);
   });
 });
 

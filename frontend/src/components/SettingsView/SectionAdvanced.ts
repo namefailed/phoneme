@@ -1,8 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 
+/**
+ * Settings → Advanced: the daemon log level (`daemon.log_level`), an "open
+ * config.toml" escape hatch for hand edits, and the "re-run the First Run
+ * Wizard" button (`onNavigateToWizard`, threaded from App via SettingsView).
+ * Plain section class (house pattern): renders into its container once and
+ * binds inputs to the shared config object via form.ts.
+ */
 export class SectionAdvanced {
-   
+
   constructor(
     container: HTMLElement,
     private config: any,

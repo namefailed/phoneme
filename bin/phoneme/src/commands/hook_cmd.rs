@@ -1,3 +1,11 @@
+//! `phoneme hook test` — run the first configured hook once with a sample
+//! payload and report exit code, duration, and (secret-redacted) stderr.
+//!
+//! Spawning path. Sends `HookTest { custom_command: None }` — the daemon
+//! builds a representative payload so `{transcript}`-style placeholders are
+//! exercised exactly as a real run would. The GUI Hook Manager's "test"
+//! button uses the same request (with the in-edit command).
+
 use crate::args::{HookAction, HookArgs};
 use crate::client::Client;
 use phoneme_core::Config;

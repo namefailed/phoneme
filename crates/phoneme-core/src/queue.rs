@@ -1,3 +1,22 @@
+//! The inbox: a filesystem-backed work queue for the transcription pipeline.
+//!
+//! This module owns [`InboxQueue`], the durable hand-off between "a recording
+//! finished capturing" and "the daemon's worker transcribed it". The daemon
+//! enqueues a payload when a recording stops; a single worker claims items one
+//! at a time and runs the pipeline against each.
+//!
+//! Why the filesystem instead of an in-memory queue: state must survive a crash
+//! or restart. Each item is a JSON file, and every state change is an atomic
+//! rename between four subdirectories — `pending/` → `processing/` →
+//! `done/`/`failed/`. That gives crash recovery for free ([`recover_orphans`]
+//! re-queues anything stuck in `processing/`, and is idempotent across the
+//! finish-then-crash window). Two dot-files control ordering and pausing without
+//! showing up as payloads: `.queue-order` (the user's custom claim order) and
+//! `.queue-paused` (a sentinel the worker checks before each claim). The badge
+//! counts in the GUI come from [`InboxQueue::counts`].
+//!
+//! [`recover_orphans`]: InboxQueue::recover_orphans
+
 use crate::error::{Error, Result};
 use crate::id::RecordingId;
 use crate::types::HookPayload;
@@ -15,16 +34,21 @@ const ORDER_FILE: &str = ".queue-order";
 /// finishes). No `.json` extension so payload scans ignore it.
 const PAUSE_FILE: &str = ".queue-paused";
 
-/// Which directory of the inbox a payload lives in.
+/// Which directory of the inbox a payload lives in (one per subdirectory).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InboxState {
+    /// Awaiting a worker (`pending/`).
     Pending,
+    /// Being transcribed/post-processed right now (`processing/`, at most one).
     Processing,
+    /// Completed (`done/`).
     Done,
+    /// Quarantined after an error or cancellation (`failed/`).
     Failed,
 }
 
 impl InboxState {
+    /// The subdirectory name this state maps to under the inbox root.
     pub fn subdir(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -35,20 +59,27 @@ impl InboxState {
     }
 }
 
-/// Count of payloads in each inbox state.
+/// Count of payloads in each inbox state (powers the queue badge).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InboxCounts {
+    /// Files in `pending/`.
     pub pending: usize,
+    /// Files in `processing/`.
     pub processing: usize,
+    /// Files in `done/`.
     pub done: usize,
+    /// Files in `failed/`.
     pub failed: usize,
 }
 
-/// Failure payload (written when finish_failed is called).
+/// The record written into `failed/` when an item is quarantined, capturing why.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedPayload {
+    /// The recording this failure belongs to.
     pub id: RecordingId,
+    /// Short machine-readable failure category (e.g. `"corrupt_payload"`).
     pub error_kind: String,
+    /// Human-readable failure detail.
     pub error_message: String,
 }
 
@@ -89,11 +120,30 @@ impl InboxQueue {
         })
     }
 
+    /// Remove any terminal marker (`done/` or `failed/`) for this id. Called
+    /// when an item is (re-)enqueued: the recording is live again, so a stale
+    /// marker from a previous run must not (a) make crash recovery treat the
+    /// new run as already finished — [`Self::recover_orphans`] drops a
+    /// `processing/` file whenever a `done/` marker exists, which would
+    /// silently lose a retranscribe that crashed mid-run — or (b) keep
+    /// inflating the failed-quarantine count for an item now being reprocessed.
+    async fn clear_terminal_markers(&self, id: &RecordingId) {
+        for sub in ["done", "failed"] {
+            let p = self.root.join(sub).join(format!("{}.json", id.as_str()));
+            if fs::try_exists(&p).await.unwrap_or(false) {
+                let _ = fs::remove_file(&p).await;
+            }
+        }
+    }
+
     /// Atomically write a new pending payload.
     ///
     /// Implementation: write to a temp file in the same directory, then rename
-    /// to the final name. Rename on the same filesystem is atomic.
+    /// to the final name. Rename on the same filesystem is atomic. Any stale
+    /// `done/`/`failed/` marker for this id is cleared first so a re-enqueued
+    /// recording isn't mistaken for already-finished by crash recovery.
     pub async fn enqueue(&self, payload: &HookPayload) -> Result<()> {
+        self.clear_terminal_markers(&payload.id).await;
         let pending = self.root.join("pending");
         let final_path = pending.join(format!("{}.json", payload.id));
         let temp_path = pending.join(format!("{}.json.tmp", payload.id));
@@ -278,6 +328,7 @@ impl InboxQueue {
     /// Move a processing payload back to pending (e.g., a user-initiated
     /// re-transcribe from `failed/` goes pending -> processing on next claim).
     pub async fn requeue(&self, id: &RecordingId) -> Result<()> {
+        self.clear_terminal_markers(id).await;
         let processing = self.root.join("processing").join(format!("{id}.json"));
         let pending = self.root.join("pending").join(format!("{id}.json"));
         if fs::try_exists(&processing).await.unwrap_or(false) {
@@ -610,6 +661,36 @@ mod tests {
     // detect the done+processing pair and discard the stale processing file
     // instead of re-queuing the already-completed item.
     // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn re_enqueue_clears_a_stale_done_marker_so_recovery_keeps_the_retranscribe() {
+        // Regression: a recording that finished (or was cancelled) leaves a
+        // done/ marker. Retranscribing it must clear that marker, or a crash
+        // mid-retranscribe makes recover_orphans drop the live processing file
+        // as "already done" — silently losing the retranscribe.
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+        inbox.claim_next().await.unwrap();
+        inbox.finish_done(&p.id, &p).await.unwrap();
+        assert_eq!(inbox.counts().await.unwrap().done, 1);
+
+        // Retranscribe: re-enqueue the same id — the stale done marker must go.
+        inbox.enqueue(&p).await.unwrap();
+        let c = inbox.counts().await.unwrap();
+        assert_eq!(c.done, 0, "re-enqueue must clear the stale done marker");
+        assert_eq!(c.pending, 1);
+
+        // Claim it (processing), then run recovery as if the daemon crashed.
+        inbox.claim_next().await.unwrap();
+        let recovered = inbox.recover_orphans().await.unwrap();
+        assert_eq!(
+            recovered.len(),
+            1,
+            "the live retranscribe must be recovered, not dropped as already-done"
+        );
+    }
 
     #[tokio::test]
     async fn finish_cancelled_archives_to_done_not_failed() {

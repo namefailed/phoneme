@@ -18,9 +18,17 @@ import { importAudioPaths } from "./utils/import";
 type MountedView = { dispose?: () => void };
 
 /**
- * The root Application controller.
- * Responsible for initializing the main shell, the routing layer, and bootstrapping
- * initial states like theming and first-run wizard checks.
+ * The root Application controller — the only object `main.ts` creates.
+ * Builds the shell (header slot + main slot), constructs the Router and
+ * mounts/disposes the active view on its changes, and wires every app-wide
+ * concern once: the global keyboard layer, pipeline toast notifications,
+ * tray-menu events (`menu:*` / `nav:*`), the `phoneme:navigate` window event
+ * (in-app deep links, routed through the Settings unsaved-edits guard),
+ * `config:saved` re-theming, native file drag-drop import, and the
+ * first-run-wizard auto-launch when no config exists.
+ *
+ * Plain class, not a Lit component: it owns imperative lifecycle (mount /
+ * dispose of whole views) rather than reactive rendering.
  */
 export class App {
   private container: HTMLElement;

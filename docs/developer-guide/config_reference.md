@@ -44,9 +44,9 @@ An optional, **independent** transcription provider used only for the live previ
 | `max_duration_secs` | u32 | `300` | Hard cap per recording |
 | `input_device` | string | `default` | CPAL device name |
 | `source` | `microphone` \| `system_audio` | `microphone` | Single-track capture source |
-| `pre_roll_ms` | u32 | `1500` | Idle mic ring buffer; `0` = off |
+| `pre_roll_ms` | u32 | `1500` | Idle mic ring buffer; `0` = off. A fresh config ships `1500`; a config file that simply **omits** the key reads as `0` (disabled), so pre-upgrade configs keep the old mic-only-while-recording behavior. |
 | `streaming_preview` | bool | `false` | Live partial transcript while recording |
-| `auto_stop_on_silence` | bool | `false` | GUI Record button auto-stops on silence; `false` = manual start/stop toggle. Push-to-talk hotkey is always hold-to-record regardless. |
+| `auto_stop_on_silence` | bool | `false` | GUI Record button auto-stops on silence; `false` = manual start/stop toggle. Push-to-talk hotkey is always hold-to-record regardless. The Record button's **▾ stop-mode dropdown** (manual / silence / fixed seconds) is stored per device in the browser, not in this file — until a mode is picked there, this key decides. |
 
 ---
 
@@ -108,6 +108,9 @@ followed.
 | `visible_columns` | day, time, duration, status, transcript | List columns |
 | `column_widths` | px/fr strings | Resizable column layout |
 | `preview_overlay` | `false` | Float the live preview in a system-wide, always-on-top overlay window (requires `recording.streaming_preview`) |
+| `vim_nav` | `false` | System-wide vim-style keyboard navigation (`h`/`l` across panes, `j`/`k` within the list, `gg`/`G`, `i`/`Enter`, `Esc`). Distinct from `editor.vim_mode`, which only affects the transcript editor. |
+| `animation_speed` | `normal` | Pane show/hide animation speed: `off` \| `fast` \| `normal` \| `slow`. `off` makes sidebar / detail-pane / focus-mode toggles instant. |
+| `step_notifications` | `true` | Toast a note as each pipeline step finishes (transcribed, cleaned up, summarized, tags suggested) and when a recording is fully ready. Failure toasts always show regardless — a silently lost transcription is never the right default. |
 | `quit_stops_daemon` | `true` | Tray **Quit** also shuts the daemon down: an in-flight recording is stopped and queued first, then the whisper-server(s) and a Phoneme-launched Ollama go with it. `false` = the daemon outlives the tray (headless setups). Also read at daemon **spawn** time to decide whether the tray ties the daemon's lifetime to its own at the OS level (kill-on-close job) — that part of a change applies on the next spawn. |
 
 ---
@@ -135,9 +138,9 @@ followed.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `log_level` | `info` | `trace` … `error` |
-| `log_max_size_mb` | `10` | Rotation size |
-| `log_max_files` | `5` | Retained rotations |
+| `log_level` | `info` | `trace` … `error` (`RUST_LOG` overrides it) |
+| `log_max_size_mb` | `10` | **Currently unused** — rotation is daily, not size-based. Kept so older configs keep parsing; a future size-based rotator would honor it. |
+| `log_max_files` | `5` | Max rotated **daily** log files (`daemon.log.YYYY-MM-DD`) retained; older days are pruned at daemon startup |
 | `pipe_name` | `phoneme-daemon` | Named pipe: `\\.\pipe\<name>` |
 
 ---

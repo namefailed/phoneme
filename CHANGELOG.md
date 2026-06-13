@@ -48,6 +48,48 @@ trust boundary. Verified against current code.*
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
 
+### Performance
+
+- [x] Semantic search holds the deserialized embedding corpus in memory, so
+  repeated queries (and the upcoming RAG retrieval) skip re-reading and
+  re-decoding every vector BLOB from SQLite; invalidated on any re-embed or
+  delete, bounded for large libraries.
+
+### Reliability & polish
+
+- [x] Doctor's local whisper-server probes follow the port the server bound
+  after a fallback (and say "running on 51234, fallback from 5809") instead
+  of probing the dead configured port — fixed on both the daemon-side and
+  tray-side Doctor paths.
+- [x] Settings/wizard hints name the **effective** whisper port after a
+  fallback ("running on 51234 — preferred 5809 was busy") instead of the
+  configured one; the configured port stays editable.
+- [x] Failures record their reason on the recording (survives a restart);
+  cloud/custom transcriptions store the real model id instead of "unknown";
+  failure toasts drop the internal "internal error:" prefix; the transcript
+  diff computes once per refresh instead of twice.
+
+### GUI parity
+
+- [x] **Caption export in the GUI** — a 💬 Captions button on a transcribed
+  recording's action row saves SubRip (.srt) or WebVTT (.vtt), matching
+  `phoneme export --captions`.
+- [x] **Webhook safety toggles** — Settings now exposes
+  `webhook.allow_private_network` and `webhook.allow_http` (previously
+  TOML-only) with plain-language warnings.
+- [x] **Whole-library backup zip** — Settings → Storage → "Back up to .zip…"
+  writes the same portable catalog+audio archive as `phoneme export <file>`
+  (the old text-only Export is relabeled).
+
+### CLI parity
+
+- [x] **CLI reaches the GUI's per-recording actions** — `phoneme edit <id>
+  --title/--clear-title/--favorite/--unfavorite`, `phoneme speaker
+  rename|clear <id> <label> [name]`, `phoneme tag suggestions <id>
+  [--approve|--dismiss <name>]`, `phoneme record --pause/--resume`, and
+  `phoneme suggest-tags <id>` — all sending IPC requests that already
+  existed, now reachable from the terminal.
+
 ### Security & reliability
 
 - [x] **Masked config at the WebView boundary (S-H2)** — API keys are masked before

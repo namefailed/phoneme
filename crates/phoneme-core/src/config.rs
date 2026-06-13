@@ -1,3 +1,26 @@
+//! The configuration schema — `config.toml` as Rust types.
+//!
+//! This module owns [`Config`] and every section under it. It is the single
+//! source of truth the daemon, CLI, and tray all load, validate, and serialize;
+//! the [`resolved_config_path`] / [`load_resolved`](Config::load_resolved)
+//! helpers make sure all three agree on which file is live.
+//!
+//! Three things here are worth knowing before editing:
+//!
+//! - **Secrets are encrypted at rest.** API-key fields are [`SecretString`]s
+//!   with custom serde that runs them through the crate's `secret_crypto`
+//!   module (DPAPI on Windows) on the way to disk and back — a key is never written to
+//!   `config.toml` in plaintext, and the manual `Debug` impls redact them so a
+//!   stray `debug!(?cfg)` can't leak one either.
+//! - **Blank fields inherit.** The summary, auto-tag, and title sections each
+//!   model their own LLM connection, but a left-blank provider/key/URL/model
+//!   field falls back to the `[llm_post_process]` (cleanup) connection. So "use
+//!   the same provider as cleanup" is just leaving the fields empty.
+//! - **Old configs keep loading.** Almost every field is `#[serde(default)]`, so
+//!   a config written before a feature existed still parses. `validate()`
+//!   catches the cross-field mistakes the type system can't (a cloud provider
+//!   enabled with no key anywhere, a bad sample rate or log level).
+
 use crate::error::{Error, Result};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -149,8 +172,12 @@ pub struct DiarizationConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EmbeddingPooling {
+    /// Attention-mask-weighted average over real tokens (the default; fits
+    /// MiniLM/MPNet/E5/BGE).
     #[default]
     Mean,
+    /// Take the `[CLS]` token's hidden vector (for models trained for CLS
+    /// pooling).
     Cls,
 }
 

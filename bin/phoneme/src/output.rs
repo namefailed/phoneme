@@ -1,4 +1,11 @@
 //! Output formatting — pretty tables (comfy-table) + JSON-lines.
+//!
+//! Every command renders through these helpers so the two output modes stay
+//! consistent: human tables by default, machine output under the global
+//! `--json` flag (one JSON object per line for lists, a single object
+//! otherwise — grep/jq friendly). Human formatting is presentation only;
+//! the JSON paths print the daemon's response values unmodified, so the
+//! wire shapes documented in `phoneme-ipc::schema` are what scripts see.
 
 use comfy_table::{presets::UTF8_FULL, ContentArrangement, Table};
 use phoneme_core::Recording;

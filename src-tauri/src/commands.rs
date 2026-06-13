@@ -1,11 +1,45 @@
-//! Tauri commands — frontend invokes these via `invoke("…")`.
+//! Tauri commands — the WebView's entire `invoke("…")` surface.
+//!
+//! Three families live here:
+//! - **Daemon forwards** — most commands are one `forward()` call: map the
+//!   WebView's arguments onto a `phoneme_ipc::Request`, send it over the
+//!   `BridgeSlot` (which lazily reconnects/auto-spawns when empty, A2-H3),
+//!   and return the daemon's JSON value as-is. Errors come back as a
+//!   structured [`CommandError`] `{kind, message}` whose `kind` is the
+//!   IPC error kind's wire string, so the frontend branches the same way
+//!   for every command. WebView-supplied recording ids are validated here
+//!   (`parse_id`) before they can reach the daemon's fixed-offset
+//!   accessors.
+//! - **Local config/profile/window commands** — `read_config`/`write_config`
+//!   and the profile commands work on config.toml directly, plus hotkey
+//!   re-registration and window-state saving.
+//! - **Wizard helpers** — checksum-pinned downloads, dependency detection,
+//!   and connection tests (see `wizard` and `checksums`).
+//!
+//! ## Secret masking (S-H2)
+//!
+//! API keys never enter the WebView. `read_config` serializes the config
+//! and replaces every non-empty `api_key` (whisper, llm_post_process,
+//! summary, auto_tag, title, preview_whisper, and the nested
+//! `in_place.stt`) with the `__phoneme_secret_kept__` sentinel;
+//! `write_config` restores any field still holding the sentinel from the
+//! on-disk config before validating and saving, so an unchanged key
+//! round-trips without ever leaving the Rust side — and saving can never
+//! clobber a real key with the mask. The frontend mirrors the sentinel
+//! constant. Commands that accept per-run key overrides resolve the
+//! sentinel the same way (e.g. the cleanup re-run maps a masked key back
+//! to the configured one).
+//!
+//! `write_config` also applies side effects after saving: registry Run-key
+//! for start-at-login, `ReloadConfig` to the daemon, hotkey
+//! re-registration, and overlay create/destroy.
 
 use crate::bridge::BridgeSlot;
 use crate::config_io;
 use crate::doctor::CheckResult;
 use crate::wizard::TestConnectResult;
 use futures::StreamExt;
-use phoneme_core::{Config, ListFilter, RecordMode, RecordingId};
+use phoneme_core::{Config, ListFilter, RecordMode, RecordingId, TranscriptSegment};
 use phoneme_ipc::{Request, Response};
 use serde_json::Value;
 use tauri::{Emitter, State};
@@ -463,6 +497,154 @@ pub async fn set_recording_title(
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(&bridge, Request::SetRecordingTitle { id, title }).await
+}
+
+/// Render one recording's machine segments as caption text in the requested
+/// format. `format` is `"srt"` or `"vtt"` (anything else is rejected as an
+/// invalid config). Fetches the segments through the daemon (`GetSegments`),
+/// then renders them with `phoneme_core::export`. Returns the caption body as
+/// a string for the WebView to drop into a save dialog — no file is written
+/// here, so the dialog plugin owns the destination the same way the plain-text
+/// transcript export does.
+///
+/// An empty segment list is the "retranscribe to generate them" case: it comes
+/// back as a `not_found` error carrying the same hint the CLI prints, so the
+/// caller can toast it instead of saving an empty file.
+#[tauri::command]
+pub async fn export_captions(
+    bridge: Br<'_>,
+    id: String,
+    format: String,
+) -> Result<String, CommandError> {
+    let id = parse_id(&id)?;
+    // Validate the format up front so a typo never reaches a silent default.
+    let fmt = match format.as_str() {
+        "srt" => CaptionFormat::Srt,
+        "vtt" => CaptionFormat::Vtt,
+        other => {
+            return Err(CommandError::new(
+                "invalid_config",
+                format!("unknown caption format {other:?} (expected \"srt\" or \"vtt\")"),
+            ));
+        }
+    };
+
+    let value = forward(&bridge, Request::GetSegments { id }).await?;
+    let segments: Vec<TranscriptSegment> = serde_json::from_value(value)
+        .map_err(|e| CommandError::new("internal", format!("parsing segments: {e}")))?;
+
+    if segments.is_empty() {
+        return Err(CommandError::new(
+            "not_found",
+            "no segments stored — retranscribe this recording to generate them",
+        ));
+    }
+
+    Ok(render_captions(&segments, fmt))
+}
+
+/// The two caption formats `export_captions` understands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptionFormat {
+    Srt,
+    Vtt,
+}
+
+/// Render segments into the chosen caption format. Split out from the command
+/// so the format→content mapping is unit-testable without a live bridge.
+fn render_captions(segments: &[TranscriptSegment], format: CaptionFormat) -> String {
+    match format {
+        CaptionFormat::Srt => phoneme_core::export::segments_to_srt(segments),
+        CaptionFormat::Vtt => phoneme_core::export::segments_to_vtt(segments),
+    }
+}
+
+/// Write a portable backup of the whole library to `dest` (a `.zip` path the
+/// WebView picked via the save dialog). Mirrors `phoneme export <FILE>`: a
+/// `catalog.json` versioned envelope (recordings + tags fetched from the
+/// daemon) plus every `.wav` under the configured audio dir packed into
+/// `audio/`. The GUI's plain JSON/CSV/TXT "Export All" carries no audio — this
+/// is the one that round-trips with the CLI backup. Returns how many audio
+/// files were packed so the caller can report it.
+#[tauri::command]
+pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, CommandError> {
+    use std::io::{Read, Write};
+    use zip::write::SimpleFileOptions;
+
+    let recordings = forward(
+        &bridge,
+        Request::ListRecordings {
+            filter: ListFilter::default(),
+        },
+    )
+    .await?;
+    // Tags are best-effort: a backup without the tag list is still useful.
+    let tags = forward(&bridge, Request::ListTags)
+        .await
+        .unwrap_or_else(|_| serde_json::json!([]));
+
+    let export_data = serde_json::json!({
+        "version": 1,
+        "recordings": recordings,
+        "tags": tags,
+    });
+    let json_bytes = serde_json::to_vec_pretty(&export_data)
+        .map_err(|e| CommandError::new("internal", format!("serializing catalog: {e}")))?;
+
+    let file = std::fs::File::create(&dest)
+        .map_err(|e| CommandError::new("io", format!("creating {dest}: {e}")))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("catalog.json", options)
+        .map_err(|e| CommandError::new("io", format!("writing catalog.json: {e}")))?;
+    zip.write_all(&json_bytes)
+        .map_err(|e| CommandError::new("io", format!("writing catalog bytes: {e}")))?;
+
+    // The audio dir is resolved tray-side (env-var/`~` expansion), the same way
+    // the CLI does it — so the GUI backup packs the same files.
+    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
+    let audio_dir_raw = cfg
+        .expanded()
+        .map(|c| c.recording.audio_dir)
+        .unwrap_or_else(|_| cfg.recording.audio_dir.clone());
+    let audio_dir = std::path::PathBuf::from(&audio_dir_raw);
+
+    let mut packed: u64 = 0;
+    if audio_dir.exists() {
+        let mut stack = vec![audio_dir];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if !name.ends_with(".wav") {
+                    continue;
+                }
+                if zip.start_file(format!("audio/{name}"), options).is_err() {
+                    continue;
+                }
+                if let Ok(mut f) = std::fs::File::open(&path) {
+                    let mut buf = Vec::new();
+                    if f.read_to_end(&mut buf).is_ok() && zip.write_all(&buf).is_ok() {
+                        packed += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    zip.finish()
+        .map_err(|e| CommandError::new("io", format!("finalizing zip: {e}")))?;
+    Ok(packed)
 }
 
 /// Persist every window's position/size NOW. tauri-plugin-window-state only
@@ -932,10 +1114,41 @@ pub fn doctor_local_checks() -> Result<Vec<CheckResult>, CommandError> {
 
 /// Probe remote backends (Whisper, Ollama) for reachability.
 /// Uses 3-second timeouts per endpoint so the Doctor UI stays responsive.
+///
+/// The bundled whisper-servers fall back to a free port when another app holds
+/// the configured one; the daemon publishes the live ports in `daemon_status`.
+/// We read them so a fallback can't make the probe hit the dead configured
+/// port. `current()` only peeks at an existing connection (never spawns a
+/// daemon), so when the daemon is down the probes simply use the configured
+/// ports — the honest "unreachable" the user should then see.
 #[tauri::command]
-pub async fn doctor_backend_checks() -> Result<Vec<CheckResult>, CommandError> {
+pub async fn doctor_backend_checks(bridge: Br<'_>) -> Result<Vec<CheckResult>, CommandError> {
     let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
-    Ok(crate::doctor::run_backend_checks(&cfg).await)
+    let ports = effective_whisper_ports(&bridge).await;
+    Ok(crate::doctor::run_backend_checks_with_ports(&cfg, &ports).await)
+}
+
+/// The bundled whisper-servers' live ports as published in `daemon_status`,
+/// for threading into the Doctor backend probes. Default (no ports) when the
+/// daemon is down or its status lacks the fields (an older daemon) — the
+/// probes then fall back to the configured ports.
+async fn effective_whisper_ports(bridge: &Br<'_>) -> crate::doctor::EffectiveWhisperPorts {
+    let Some(b) = bridge.current() else {
+        return crate::doctor::EffectiveWhisperPorts::default();
+    };
+    let Ok(Response::Ok(status)) = b.request(Request::DaemonStatus).await else {
+        return crate::doctor::EffectiveWhisperPorts::default();
+    };
+    let port = |key: &str| {
+        status
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|p| u16::try_from(p).ok())
+    };
+    crate::doctor::EffectiveWhisperPorts {
+        main: port("whisper_effective_port"),
+        preview: port("preview_whisper_effective_port"),
+    }
 }
 
 /// Attempt to start the background daemon. Used by the Doctor "Fix" button
@@ -1636,6 +1849,52 @@ mod tests {
     use super::*;
 
     // ── forward() with no bridge ───────────────────────────────────────────
+
+    // ── render_captions (export_captions format→content mapping) ────────────
+
+    fn cap_seg(start_ms: i64, end_ms: i64, text: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            start_ms,
+            end_ms,
+            text: text.to_string(),
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn render_captions_srt_uses_comma_separator_and_cue_numbers() {
+        let segs = [cap_seg(1000, 4500, "Hello world.")];
+        let out = render_captions(&segs, CaptionFormat::Srt);
+        // 1-based cue index, `HH:MM:SS,mmm` separator — the SRT shape.
+        assert_eq!(out, "1\n00:00:01,000 --> 00:00:04,500\nHello world.\n");
+    }
+
+    #[test]
+    fn render_captions_vtt_emits_header_and_dot_separator() {
+        let segs = [cap_seg(1000, 4500, "Hello world.")];
+        let out = render_captions(&segs, CaptionFormat::Vtt);
+        // WEBVTT header + `HH:MM:SS.mmm` separator — distinct from SRT.
+        assert_eq!(
+            out,
+            "WEBVTT\n\n00:00:01.000 --> 00:00:04.500\nHello world.\n\n"
+        );
+    }
+
+    #[test]
+    fn render_captions_formats_diverge_for_the_same_segments() {
+        let segs = [cap_seg(0, 2000, "One."), cap_seg(2500, 5000, "Two.")];
+        let srt = render_captions(&segs, CaptionFormat::Srt);
+        let vtt = render_captions(&segs, CaptionFormat::Vtt);
+        assert!(
+            srt.starts_with('1'),
+            "SRT starts with a cue number: {srt:?}"
+        );
+        assert!(
+            vtt.starts_with("WEBVTT"),
+            "VTT starts with its header: {vtt:?}"
+        );
+        assert_ne!(srt, vtt);
+    }
 
     // ── effective_local_whisper_url ────────────────────────────────────────
 

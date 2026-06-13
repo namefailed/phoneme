@@ -2,7 +2,11 @@
 //!
 //! Copies reference hook scripts from the installed `hooks-templates/`
 //! directory (or the repo's `hooks/` directory in dev) into the user's
-//! `%APPDATA%\phoneme\hooks\`. Never overwrites existing files.
+//! `%APPDATA%\phoneme\hooks\`, so the Hook Manager and the docs can point
+//! at ready-to-edit examples. Never overwrites existing files — a
+//! user-edited hook is sacred. Runs at every daemon startup (via
+//! [`crate::reconcile`]); the existing-file check is what makes that
+//! idempotent rather than a true "first run only" gate.
 
 use crate::app_state::AppState;
 use std::path::PathBuf;

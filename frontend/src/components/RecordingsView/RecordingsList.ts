@@ -76,6 +76,10 @@ function saveMeetingIcon(meetingId: string, icon: string): void {
   }
 }
 
+/** The list state, held in a Store OWNED BY RecordingsView (not here) so the
+ *  view and its other panes share one source of truth for what's loaded and
+ *  selected. This element is the only writer of `recordings`/`loading`/
+ *  `error`; selection is written by both (clicks here, clears from the view). */
 export type RecordingsListState = {
   recordings: Recording[];
   selectedId: string | null;
@@ -83,6 +87,30 @@ export type RecordingsListState = {
   error: string | null;
 };
 
+/**
+ * The middle pane: the recordings table. Renders day-grouped rows (with
+ * meeting tracks folded under expandable group headers — see grouping.ts),
+ * the configured columns (`interface.visible_columns`), status pills, tag
+ * pills, and the semantic-relevance chip; infinite-scrolls in pages of 100.
+ *
+ * Data flow: subscribes to the shared `filterStore` and re-queries the daemon
+ * on ANY filter change — `listRecordings` for normal/FTS lists,
+ * `semanticSearch` for ✨ queries, `moreLikeThis` in like-mode. Results land
+ * in the shared state store (RecordingsView re-renders the other panes off
+ * it). It listens for `config:saved` (column layout, 24h time), but daemon
+ * events are NOT handled here — RecordingsView calls `refresh()`.
+ *
+ * Keyboard (its own `keydown`, when the table is focused): ↑/↓ + j/k move,
+ * Enter opens (or folds/unfolds a meeting header), Shift+Enter on a header
+ * opens the merged view, Space multi-selects, Shift+↑/↓ extends, `\` splits,
+ * Esc clears. The vim layer's gg/G/zz/dd arrive via the public
+ * `focusEdge`/`centerCursor`/`getFocusedId` API instead (keyboard.ts →
+ * RecordingsView → here). Dispatches `phoneme:enter-header-nav` when k walks
+ * off the top.
+ *
+ * Selection callbacks (`onSelectCb`, `onSelectionChangeCb`) are injected by
+ * RecordingsView, which owns what selection MEANS (detail pane, bulk bar).
+ */
 @customElement("ph-recordings-list")
 export class RecordingsListElement extends LitElement {
   protected createRenderRoot() {
@@ -1027,6 +1055,11 @@ function truncatedError(r: Recording): string {
 }
 
 // Temporary vanilla wrapper to keep index.ts working without changes
+/** Imperative mount wrapper for `<ph-recordings-list>` — RecordingsView's
+ *  handle on the list. Forwards the shared state store + selection callbacks
+ *  in, and re-exposes the element's keyboard/selection API out (refresh,
+ *  clear/selectAll, focusEdge, getFocusedId, setPendingDelete, ensureCursor,
+ *  centerCursor) so the view never touches the element directly. */
 export class RecordingsList {
   private element: RecordingsListElement;
   constructor(

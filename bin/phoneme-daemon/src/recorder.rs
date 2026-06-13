@@ -1,5 +1,37 @@
-//! Daemon recorder — owns the active recording (at most one) and ties
-//! capture lifecycle to the catalog and inbox.
+//! Daemon recorder — first link in the chain. Owns the active capture and
+//! ties its lifecycle to the catalog, the inbox queue, and the event bus.
+//!
+//! A recording is born here: `start` inserts the catalog row (status
+//! `recording`), opens the audio source, and emits `RecordingStarted`;
+//! `stop` finalizes the WAV, flips the row to `transcribing`, and hands the
+//! work item to the durable inbox queue — where `queue_worker` →
+//! `pipeline` take over. In-place dictations branch to `in_place`'s fast
+//! lane (or a type-first pass) instead of the queue; `cancel` deletes the
+//! row and keeps nothing.
+//!
+//! Invariants this module owns:
+//! - **At most one capture** — a single recording (`active`) OR a two-track
+//!   meeting (`meeting`), never both; starts cross-check the other slot
+//!   before reserving theirs, always in the same lock order (`meeting` →
+//!   `active`) so the two paths can't deadlock or double-open the mic.
+//! - **Toggle atomicity** — `toggle_meeting` holds `toggle_guard` across its
+//!   read+act so a double-tapped hotkey can't race two starts or two stops.
+//! - **No slow await under a state lock** — `stop`/`cancel` take the slot
+//!   and recorder handle in one short critical section and release the locks
+//!   before preview teardown / finalization, keeping `RecordStatus` and
+//!   other control IPC responsive mid-stop.
+//! - **Idle pre-roll** — between recordings an optional background task
+//!   feeds a ring buffer holding the last `pre_roll_ms` of mic audio; start
+//!   snapshots and prepends it, then reuses (or reopens) the source.
+//! - **Live preview** — while recording (and `streaming_preview` is on), a
+//!   loop transcribes a rolling tail window and emits
+//!   `TranscriptionPartial`; it only runs a tick when the shared
+//!   `whisper_sem` permit is free, so it can never starve a final
+//!   transcription. The stitcher below keeps the displayed caption
+//!   forward-growing as the window slides.
+//! - **Meetings** — both tracks record concurrently, share a `meeting_id`,
+//!   and are wall-clock aligned on stop; a partial start failure aborts
+//!   cleanly, and a partial stop failure still finalizes the healthy track.
 
 use crate::app_state::AppState;
 use chrono::Local;

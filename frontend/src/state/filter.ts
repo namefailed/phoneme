@@ -1,15 +1,23 @@
+/**
+ * The shared library-filter state: ONE `filterStore` that every filtering
+ * surface (header search box, sidebar kind/tag rows, saved searches, the
+ * "More like this" pill) writes to, and that RecordingsList re-queries the
+ * daemon on whenever it changes. This module owns the UI-side filter shape
+ * and its translation to the daemon's wire `ListFilter`.
+ */
 import { Store } from "./store";
 import type { ListFilter } from "../services/ipc";
 
-/**
- * Extends ListFilter with UI-only state that isn't sent to the daemon.
- * `_timePreset` tracks which named preset is active in the time dropdown so
- * the select can restore its selected value after a re-render.
- */
 /** Library type-filter: all recordings, single-track only, meetings only, or
  *  starred (favorites). */
 export type RecordingKind = "all" | "single" | "meeting" | "favorite";
 
+/**
+ * The library filter as the UI models it: the daemon's `ListFilter` extended
+ * with UI-only state that is never sent over the wire (`semantic`, the
+ * like-mode fields) and with `kind`/`favorite` re-modelled as one four-way
+ * choice. Convert with `toWireFilter` before calling `listRecordings`.
+ */
 export type UiFilter = Omit<ListFilter, "kind" | "favorite"> & {
   semantic?: boolean;
   /** Library type-filter as the UI models it (one dropdown of four choices).
@@ -24,6 +32,9 @@ export type UiFilter = Omit<ListFilter, "kind" | "favorite"> & {
   like_label?: string | null;
 };
 
+/** The one shared library-filter store. `{}` = no filters (the whole library).
+ *  Update immutably (`filterStore.set({ ...filterStore.get(), … })`) so
+ *  subscribers — primarily RecordingsList's re-query — actually fire. */
 export const filterStore = new Store<UiFilter>({});
 
 /**

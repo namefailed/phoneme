@@ -1,3 +1,12 @@
+//! `phoneme retranscribe <ID>` (alias `replay`) — queue a re-transcription.
+//!
+//! Spawning path: it creates queue work. Sends `RetranscribeRecording` with
+//! the one-time overrides mapped from flags: `--model` (per-job model, never
+//! persisted), `--run-hooks`/`--no-run-hooks` → `Some(true/false)` (absent =
+//! configured behavior), `--no-post-process` → skip LLM cleanup this run.
+//! Prints "re-transcribe queued" and exits — the run itself happens when the
+//! queue worker claims the item (watch it via `phoneme watch`/`queue`).
+
 use crate::args::RetranscribeArgs;
 use crate::client::Client;
 use phoneme_core::{Config, RecordingId};

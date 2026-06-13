@@ -5,6 +5,22 @@ import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, type UiFilter, type RecordingKind } from "../../state/filter";
 import "./QueuePanel";
 
+/**
+ * The left pane: Library kind-filters (All / Voice Notes / Meetings /
+ * Favorites), the tag list with usage counts, and the always-mounted
+ * QueuePanel pinned at the bottom. Declarative mount — RecordingsView places
+ * `<ph-sidebar>` in its shell template; show/hide and width live in the VIEW
+ * (this element doesn't manage its own visibility).
+ *
+ * Clicking a row just writes `kind`/`tag_id` into the shared `filterStore`
+ * (kind and tag are independent and combine); the list re-queries off that —
+ * no callback wiring. Subscribes to `filterStore` (active-row highlight) and
+ * to the `tag_*` daemon events (reload names/counts). Section fold state
+ * persists per device (`phoneme.sidebar.libraryOpen` / `.tagsOpen`).
+ *
+ * Keyboard: the vim layer's sidebar grid (j/k rows, h/l across a queue row's
+ * buttons, Enter applies) is driven by RecordingsView over this DOM.
+ */
 @customElement('ph-sidebar')
 export class SidebarElement extends LitElement {
   protected createRenderRoot() {

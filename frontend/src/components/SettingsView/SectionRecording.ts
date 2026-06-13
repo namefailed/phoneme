@@ -1,8 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 
+/**
+ * Settings → Recording: capture options under `config.recording` — the
+ * input device (live-listed via the `list_input_devices` command), the
+ * capture source, audio directory, max duration, silence auto-stop with its
+ * threshold/window, and the pre-roll buffer. Plain section class on the
+ * form.ts binding; the daemon picks changes up when the saved config
+ * reloads.
+ */
 export class SectionRecording {
-   
+
   constructor(
     container: HTMLElement,
     private config: any,

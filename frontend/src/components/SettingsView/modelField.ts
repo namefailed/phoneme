@@ -22,6 +22,8 @@ import { fetchLlmModels } from "../../services/llmModels";
 import type { CuratedModel } from "../../data/curatedModels";
 import { curatedCleanupModels, curatedTranscriptionModels, modelHint } from "../../data/curatedModels";
 
+/** What a caller wires into {@link mountModelField}: live getters for the
+ *  provider/connection (suggestions follow them) and the model get/set pair. */
 export interface ModelFieldOpts {
   /** Effective provider id (e.g. "ollama", "openai", "groq"). */
   getProvider: () => string;
@@ -87,6 +89,10 @@ export function buildModelOptionIds(curated: string[], fetched: string[], curren
  */
 const mountTokens = new WeakMap<HTMLElement, object>();
 
+/** Render the model field into `host` (owning host.innerHTML) and keep it
+ *  live: the dropdown writes through `setModel`, ↻ re-fetches, and "Other…"
+ *  flips to free text. Re-mount (callers do, via onProviderChanged) when the
+ *  provider changes so the suggestions follow. */
 export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
   const token = {};
   mountTokens.set(host, token);

@@ -42,6 +42,27 @@ function localModelLabel(path: string): string {
   return map[file] ?? file;
 }
 
+/**
+ * The unified Models modal ("Quick Model Switcher"): one dialog with a tab
+ * per model-using subsystem — Transcription, Post-processing (cleanup),
+ * Summary, Auto-tag, Live preview, and Semantic embeddings — each built from
+ * the SHARED connection/model field idioms (SettingsView/connectionField +
+ * modelField), so it offers exactly the same provider/model choices as the
+ * corresponding Settings sections.
+ *
+ * Two footer modes ({@link ModelPickerElement.activeMode}): "Save as default"
+ * persists the edited subsystems to config (`write_config`, then dispatches
+ * `config:saved` like Settings does), while "Run once" applies the choices as
+ * a one-time re-run of the target recording(s) without saving (via
+ * rerunActions.applyRerun). Opened from the header (defaults mode), a
+ * recording's ↻ Re-run (oneshot, that id), or the bulk bar (oneshot, the
+ * selection).
+ *
+ * State: a draft copy of each subsystem's provider/url/key/model fields,
+ * hydrated from the `config` object passed in by {@link openModelPicker};
+ * saved API keys arrive masked and are only written back if changed. Escape
+ * or the overlay click cancels (`resolved` event, false).
+ */
 @customElement('ph-model-picker')
 export class ModelPickerElement extends LitElement {
   protected createRenderRoot() { return this; }
@@ -641,6 +662,14 @@ export class ModelPickerElement extends LitElement {
   }
 }
 
+/**
+ * Open the Models modal (the house "self-removing modal element" idiom:
+ * create, append to body, await the `resolved` event, remove). Loads the
+ * current config first; resolves `true` if anything was saved/applied,
+ * `false` on cancel. With `mode: "oneshot"` and no explicit target it falls
+ * back to the recording open in the detail pane, so the header's quick
+ * switcher can still "Run once".
+ */
 export async function openModelPicker(
   initialTab: MpTab = "transcription",
   anchor?: HTMLElement,

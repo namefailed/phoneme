@@ -1,3 +1,9 @@
+//! `phoneme delete <ID> [--keep-audio]` — remove a recording.
+//!
+//! Spawning path. Sends `DeleteRecording`: the catalog row always goes;
+//! `--keep-audio` leaves the WAV on disk (the daemon only ever unlinks audio
+//! inside its own audio directory regardless). Exits 7 for an unknown id.
+
 use crate::args::DeleteArgs;
 use crate::client::Client;
 use phoneme_core::{Config, RecordingId};

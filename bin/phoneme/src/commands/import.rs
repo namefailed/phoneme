@@ -1,3 +1,13 @@
+//! `phoneme import <FILE>` — feed an existing audio file into the pipeline.
+//!
+//! Pre-checks the extension locally (wav/mp3/m4a/flac) and canonicalizes to
+//! an absolute path — the daemon has its own working directory, so a
+//! relative path would not resolve the same way on its side. Then sends
+//! `ImportRecording` on the spawning path (`Client::connect`); the daemon
+//! decodes, catalogs, and enqueues exactly like a mic recording. Prints the
+//! new recording id and returns immediately — transcription progress is
+//! observable via `phoneme watch` or `phoneme queue`.
+
 use crate::args::ImportArgs;
 use crate::client::Client;
 use phoneme_core::Config;

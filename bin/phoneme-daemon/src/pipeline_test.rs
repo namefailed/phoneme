@@ -336,6 +336,13 @@ async fn pipeline_applies_pending_model_override_without_touching_global_config(
     let rec = state.catalog.get(&id).await.unwrap().unwrap();
     assert_eq!(rec.status, RecordingStatus::Done);
     assert_eq!(rec.transcript.as_deref(), Some("overridden transcript"));
+    // The recorded model is the one that actually ran: for a cloud/custom
+    // backend that's the request model id, here the one-job override.
+    assert_eq!(
+        rec.model.as_deref(),
+        Some("override-model-xyz"),
+        "a cloud backend records the requested (overridden) model id"
+    );
 }
 
 /// A TRANSIENT transcribe failure (server unreachable) must leave the
@@ -931,18 +938,18 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
         "payload carries the audio path"
     );
     assert_eq!(body["duration_ms"], 4200, "payload carries the duration");
-    // The stored `model` is the STEM of the per-job `whisper.model_path`, not the
-    // request-field `whisper.model`. A Custom/cloud backend sends its model in the
-    // request and leaves `model_path` empty, so the recorded model is "unknown" —
-    // the same value the catalog row stores. Assert the real contract, not the
-    // request model id.
+    // A Custom/cloud backend sends its model id in the request and leaves
+    // `model_path` empty, so the recorded model is the REQUESTED `whisper.model`
+    // ("test-stt" here), not the path stem. (The local bundled backend, which
+    // only knows its model as a file on disk, still records the `model_path`
+    // stem.) The catalog row and the webhook payload agree on it.
     assert_eq!(
-        body["model"], "unknown",
-        "cloud backend leaves model_path empty, so the recorded model is 'unknown'"
+        body["model"], "test-stt",
+        "cloud backend records the requested whisper.model id"
     );
     assert_eq!(
         rec.model.as_deref(),
-        Some("unknown"),
+        Some("test-stt"),
         "the catalog row and the webhook agree on the recorded model"
     );
     assert_eq!(

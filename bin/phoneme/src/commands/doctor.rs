@@ -1,3 +1,23 @@
+//! `phoneme doctor` — health checks, with optional repairs.
+//!
+//! Observe-only on purpose: "is the daemon running?" is doctor's first
+//! finding, so it must never auto-spawn one. The daemon-reachability and
+//! pid checks are CLI-specific (`DaemonStatus`); everything else — config,
+//! audio dir, hook command, model file, whisper/ollama/provider probes —
+//! runs in-process via the SAME `phoneme_core::doctor` checks the GUI
+//! Doctor view uses, so both surfaces always agree. Failures print a
+//! category badge (`[critical]`/`[warning]`/`[info]`) plus explanation and
+//! fix hint; only non-optional, non-info failures make the run exit 1.
+//!
+//! `--fix` asks the daemon to `RestartWhisper` when a failed check carries
+//! the `restart_whisper` fix action, waits for the respawn, and re-probes.
+//! `--rebuild-catalog` is the heavy hammer: it shuts the daemon down
+//! (`Shutdown`), waits — bounded — for the pipe to actually vanish (the
+//! dying daemon holds the SQLite handles while finalizing), then deletes
+//! catalog.db and its WAL sidecars so the next daemon start rebuilds from
+//! the inbox + audio files. It refuses to touch the files if the daemon
+//! won't exit.
+
 use crate::args::DoctorArgs;
 use crate::client::Client;
 use crate::exit;
@@ -101,18 +121,36 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
         fix_hint: (!daemon_ok).then(|| "Run: phoneme daemon start".into()),
     });
 
+    // The bundled whisper-servers may have fallen back off their configured
+    // ports (another app held them); the backend probes must follow the live
+    // ports the daemon reports, or doctor probes a dead port and disagrees
+    // with the GUI Doctor. Default (no live ports) until DaemonStatus answers.
+    let mut whisper_ports = doctor::EffectiveWhisperPorts::default();
+
     // Daemon status detail (pid) — only if daemon is reachable.
     if let Ok(ref mut c) = client_result {
         match c.send(Request::DaemonStatus).await {
-            Ok(value) => checks.push(CheckResult {
-                name: "daemon_pid".into(),
-                ok: true,
-                detail: format!("pid {}", value["pid"]),
-                fix_action: None,
-                category: CheckCategory::Info,
-                explanation: "Reports the daemon process id, useful when debugging.".into(),
-                fix_hint: None,
-            }),
+            Ok(value) => {
+                let port = |k: &str| {
+                    value
+                        .get(k)
+                        .and_then(|v| v.as_u64())
+                        .and_then(|n| u16::try_from(n).ok())
+                };
+                whisper_ports = doctor::EffectiveWhisperPorts {
+                    main: port("whisper_effective_port"),
+                    preview: port("preview_whisper_effective_port"),
+                };
+                checks.push(CheckResult {
+                    name: "daemon_pid".into(),
+                    ok: true,
+                    detail: format!("pid {}", value["pid"]),
+                    fix_action: None,
+                    category: CheckCategory::Info,
+                    explanation: "Reports the daemon process id, useful when debugging.".into(),
+                    fix_hint: None,
+                });
+            }
             Err(_) => checks.push(CheckResult {
                 name: "daemon_pid".into(),
                 ok: false,
@@ -130,7 +168,7 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     // Shared local-filesystem + backend-reachability checks (config presence,
     // audio dir, hook command, whisper model, whisper/ollama probes).
     checks.extend(doctor::run_local_checks(cfg));
-    checks.extend(doctor::run_backend_checks(cfg).await);
+    checks.extend(doctor::run_backend_checks_with_ports(cfg, &whisper_ports).await);
 
     // --fix: when a check the daemon can repair failed (the whisper / preview
     // server probes carry fix_action "restart_whisper"), ask the daemon to
@@ -151,7 +189,7 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 Ok(_) => {
                     // Give the supervisors a moment to respawn, then re-probe.
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    let recheck = doctor::run_backend_checks(cfg).await;
+                    let recheck = doctor::run_backend_checks_with_ports(cfg, &whisper_ports).await;
                     // Replace the stale backend results with the fresh probes.
                     checks.retain(|c| !recheck.iter().any(|r| r.name == c.name));
                     checks.extend(recheck);

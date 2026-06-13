@@ -63,10 +63,22 @@ fn list_command_recognized() {
 /// daemon. Each top-level command is exercised here.
 #[test]
 fn new_subcommands_are_recognized() {
-    for cmd in ["queue", "reembed", "refire-hook"] {
+    for cmd in ["queue", "reembed", "refire-hook", "suggest-tags", "speaker"] {
         Command::cargo_bin("phoneme")
             .unwrap()
             .args([cmd, "--help"])
+            .assert()
+            .success();
+    }
+}
+
+/// `speaker`'s own subcommands must parse.
+#[test]
+fn speaker_subcommands_are_recognized() {
+    for sub in ["rename", "clear"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["speaker", sub, "--help"])
             .assert()
             .success();
     }
@@ -100,7 +112,7 @@ fn queue_subcommands_are_recognized() {
 /// `list --all` flag must parse.
 #[test]
 fn tag_parity_subcommands_are_recognized() {
-    for sub in ["for", "usage", "merge"] {
+    for sub in ["for", "usage", "merge", "suggestions"] {
         Command::cargo_bin("phoneme")
             .unwrap()
             .args(["tag", sub, "--help"])
@@ -112,6 +124,21 @@ fn tag_parity_subcommands_are_recognized() {
         .args(["tag", "list", "--all", "--help"])
         .assert()
         .success();
+    // The suggestions review flags must parse together with the recording id.
+    for flag in ["--approve", "--dismiss"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args([
+                "tag",
+                "suggestions",
+                "20260519T143500823",
+                flag,
+                "work",
+                "--help",
+            ])
+            .assert()
+            .success();
+    }
 }
 
 /// The meeting subcommands added for parity (`toggle`, `tracks`) must parse.
@@ -139,6 +166,24 @@ fn record_toggle_flag_is_recognized() {
     Command::cargo_bin("phoneme")
         .unwrap()
         .args(["record", "--toggle", "--start"])
+        .assert()
+        .failure();
+}
+
+/// `record --pause` / `--resume` must parse, and be mutually exclusive with
+/// each other and the other mode flags (clap enforces `conflicts_with_all`).
+#[test]
+fn record_pause_resume_flags_are_recognized() {
+    for flag in ["--pause", "--resume"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["record", flag, "--help"])
+            .assert()
+            .success();
+    }
+    Command::cargo_bin("phoneme")
+        .unwrap()
+        .args(["record", "--pause", "--resume"])
         .assert()
         .failure();
 }

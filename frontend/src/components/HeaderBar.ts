@@ -15,14 +15,43 @@ import { showToast } from '../utils/toast';
 import { setSettingsAnchor } from './shared/settingsAnchor';
 import './SavedSearches';
 
+/** Callbacks App threads in: the ⚙ button (toggles Settings open/closed) and
+ *  the ☰ sidebar toggle (forwarded to RecordingsView when it's mounted). */
 export type HeaderBarCallbacks = {
   onOpenSettings: () => void;
   onToggleSidebar?: () => void;
 };
 
+/**
+ * The top bar — the app's permanent chrome, mounted once by App (via the
+ * `HeaderBar` wrapper below) and kept alive across view switches; views that
+ * don't want it (Settings, the wizard, zen modes) hide it with the
+ * `phoneme-hide-header` body class instead of unmounting it.
+ *
+ * It renders, left to right: the search box (text/✨-semantic, with date +
+ * sort + status filters), the 🔖 saved-searches dropdown, the live-preview
+ * ticker, the health pill, the Record split-button (record/meeting mode, the
+ * stop-mode dropdown), and the ⚙ Settings split-button.
+ *
+ * State it owns: the search/filter draft (written to the shared `filterStore`
+ * — the actual filtering lives there), recording status (synced from
+ * `recording_*` daemon events + an initial daemon query), the record-mode and
+ * stop-mode choices (persisted per device: `phoneme.recordMode`,
+ * `phoneme.semanticSearch`, plus services/recordStopMode's keys), and the
+ * Doctor-driven health pill (periodic checks, deferred while the window is
+ * hidden).
+ *
+ * Events: subscribes to daemon events and `config:saved`; dispatches
+ * `phoneme:navigate` (Doctor deep links). Keyboard: `/` and `g /` focus or
+ * highlight its search box (keyboard.ts owns those bindings); with vim nav
+ * on, h/l roam its controls and Enter sub-navigates its dropdowns — the bar
+ * only supplies the DOM (`.headerbar` + standard controls) those layers walk.
+ * Its own Escape handler (capture phase) closes an open dropdown before the
+ * global layers can see the key.
+ */
 @customElement('ph-header-bar')
 export class HeaderBarElement extends LitElement {
-  protected createRenderRoot() { return this; }
+  protected createRenderRoot() { return this; } // light DOM: global .hb-* styles
 
   @property({ type: Object })
   callbacks!: HeaderBarCallbacks;
@@ -870,7 +899,9 @@ export class HeaderBarElement extends LitElement {
   }
 }
 
-// Ensure the older `HeaderBar` class export still works for `App.ts` until it's migrated.
+/** Imperative mount wrapper (the house pattern for using a Lit component from
+ *  a plain class): creates `<ph-header-bar>`, injects the callbacks, and
+ *  appends it. App constructs one; `dispose` unmounts. */
 export class HeaderBar {
   private element: HeaderBarElement;
   constructor(container: HTMLElement, callbacks: HeaderBarCallbacks) {

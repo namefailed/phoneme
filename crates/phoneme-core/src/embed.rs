@@ -1,3 +1,20 @@
+//! Text embedding for semantic search.
+//!
+//! This module owns [`Embedder`], the ONNX sentence-transformer that turns text
+//! into a vector. The daemon loads one at startup (when semantic search is on)
+//! and uses it for both halves of search: embedding each new transcript's
+//! [chunks](crate::chunk) at ingest, and embedding the user's query at search
+//! time. The catalog stores the vectors and does the cosine ranking; this just
+//! produces them.
+//!
+//! Every vector is L2-normalized, so cosine similarity is a plain dot product
+//! ([`Embedder::cosine_similarity`]). The bundled model is `all-MiniLM-L6-v2`
+//! (384-dim, mean-pooled, no prefixes), but each knob — pooling, max length,
+//! whether the model takes `token_type_ids`, the query/passage prefixes — is
+//! driven by [`SemanticSearchConfig`], so a user can swap in E5/BGE/GTE/MPNet
+//! and have it work. The pure pooling/normalization helpers are split out so the
+//! math is unit-testable without the (unbundled) model.
+
 use crate::config::{EmbeddingPooling, SemanticSearchConfig};
 use crate::error::{Error, Result};
 use ort::{

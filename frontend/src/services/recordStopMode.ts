@@ -18,13 +18,20 @@
  */
 import type { RecordMode } from "./ipc";
 
+/** The three stop behaviors offered in the Record dropdown (see the module
+ *  comment for their wire mapping). */
 export type StopModeKind = "toggle" | "silence" | "duration";
+/** A chosen stop behavior; `durationSecs` only matters for kind "duration". */
 export type StopMode = { kind: StopModeKind; durationSecs: number };
 
+/** localStorage key for the chosen kind (exported for the tests). */
 export const LS_STOP_MODE = "phoneme.recordStopMode";
+/** localStorage key for the fixed-length seconds (exported for the tests). */
 export const LS_STOP_DURATION = "phoneme.recordStopDurationSecs";
 
+/** Fixed-length default (one minute) when no duration was ever entered. */
 export const DEFAULT_DURATION_SECS = 60;
+/** Shortest accepted fixed length — sub-second notes make no sense. */
 export const MIN_DURATION_SECS = 1;
 /** 4 hours — past any sane fixed-length note; the daemon's max-duration
  *  ceiling still applies on top. */
@@ -53,6 +60,7 @@ export function loadStopMode(): StopMode | null {
   }
 }
 
+/** Persist the stop-mode choice (clamping the duration). Best-effort. */
 export function saveStopMode(mode: StopMode): void {
   try {
     localStorage.setItem(LS_STOP_MODE, mode.kind);

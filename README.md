@@ -76,14 +76,16 @@ flowchart TD
 ## ✨ Core Features
 
 - **🎙️ Local transcription by default**: A bundled `whisper.cpp` server runs on your machine — audio never leaves your PC. The First Run Wizard detects your RAM/VRAM and picks the right model.
-- **🔌 Bring-your-own provider**: Transcription, live preview, cleanup, and summary each pick their own provider+model **independently**. Local whisper.cpp/Ollama for privacy, or cloud APIs (OpenAI, Anthropic, Groq, Gemini, Deepgram, AssemblyAI, ElevenLabs, and many more) for speed. One-click presets, live model lists.
-- **👥 Meeting Mode (Dual-Track Capture)**: Capture both your microphone and your computer's audio as two linked tracks sharing a wall-clock timeline. Optional **speaker diarization** (offline ONNX, or cloud) labels who spoke on any Zoom, Teams, or Meet call.
-- **⌨️ Transcribe-in-Place (`Ctrl+Alt+I`)**: Speak with a global hotkey and Phoneme types your dictated words into the focused application (Word, Slack, Chrome, VS Code) via OS-level keystroke simulation.
-- **✨ Smart Cleanup & AI Summary**: Pipe raw transcripts through an LLM to fix stutters, reformat, or translate — and optionally generate a per-recording summary, on demand or automatically. Three transcript layers (raw → cleaned → edited) are kept so nothing is lost.
-- **🔍 Keyword + Semantic Search**: Manage thousands of recordings with SQLite FTS5 full-text search, or search by *meaning* with an offline, **chunked hybrid** index — per-passage ONNX embeddings fused with keyword ranking (RRF) so a query finds the recording whether you remember the gist or the one distinctive word. Bring your own embedding model.
+- **🔌 Bring-your-own provider**: Transcription, live preview, cleanup, summary, auto-title, and auto-tags each pick their own provider+model **independently**. Local whisper.cpp/Ollama for privacy, or cloud APIs (OpenAI, Anthropic, Groq, Gemini, Deepgram, AssemblyAI, ElevenLabs, and many more) for speed. One-click presets, live model lists.
+- **👥 Meeting Mode (Dual-Track Capture)**: Capture both your microphone and your computer's audio as two linked tracks sharing a wall-clock timeline, merged into one chronological transcript. Optional **speaker diarization** (offline ONNX, or cloud) labels who spoke on any Zoom, Teams, or Meet call.
+- **⌨️ Transcribe-in-Place (`Ctrl+Alt+I`)**: Speak with a global hotkey and Phoneme types (or pastes) your dictated words into the focused application (Word, Slack, Chrome, VS Code). A zero-latency fast lane skips the queue entirely so text lands the moment you stop talking.
+- **✨ Smart Cleanup, AI Summary & Auto-Titles**: Pipe raw transcripts through an LLM to fix stutters, reformat, or translate — and optionally generate a per-recording summary, on demand or automatically. Every recording gets a readable auto-title (a free heuristic, or an optional LLM title). Three transcript layers (raw → cleaned → edited) are kept so nothing is lost.
+- **🔍 Keyword + Semantic Search**: Manage thousands of recordings with SQLite FTS5 full-text search, or search by *meaning* with an offline, **chunked hybrid** index — per-passage ONNX embeddings fused with keyword ranking (RRF), cached in memory for fast recall, so a query finds the recording whether you remember the gist or the one distinctive word. **More-like-this** finds a recording's neighbours from its stored vectors (no re-embedding). Bring your own embedding model.
 - **🏷️ Organize at scale**: Tags with a full manager, ⭐ favorites, saved searches that snapshot every filter, AI **auto-tag suggestions** you approve before they apply, and a side-by-side view for any two transcripts.
+- **📤 Import & export anything**: Import `.wav` / `.mp3` / `.m4a` / `.flac` straight into the pipeline; export the whole library as a portable zip, or any recording as **SRT / WebVTT captions**.
 - **⌨️ Keyboard everything**: Opt-in vim-style navigation drives all three panes (and the queue), `g`-chords jump anywhere, the list zooms with `Ctrl+=`/`-`, and `?` shows the full cheat sheet.
-- **🩺 Self-healing**: A header health pill + Doctor watch the local servers; one click (or `phoneme doctor --fix`) sweeps a hung/orphaned whisper-server and respawns it from config.
+- **🩺 Provider-aware Self-healing**: A header health pill + Doctor watch the local servers and follow the *effective* connection each feature uses (cloud keys included); one click (or `phoneme doctor --fix`) sweeps a hung/orphaned whisper-server and respawns it from config.
+- **♻️ Clean lifecycle**: The daemon owns the work and outlives any window. Quit stops it cleanly (finalizing an in-flight take, killing its whisper/Ollama children) — or leave it running headless. A Phoneme-launched Ollama is started on demand and never touches an Ollama you already had running.
 - **💻 CLI is a Peer**: Every GUI action is a CLI command (`phoneme record --start`). Bind it to AutoHotkey, Stream Deck, or Kanata.
 
 ---
@@ -121,8 +123,9 @@ Phoneme isn't for everyone, and that's fine. If one of these fits your needs bet
 | Guide | Topic |
 |-------|--------|
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, IPC workflow, PR checklist |
-| [Architecture](docs/developer-guide/architecture.md) | Daemon / CLI / tray |
-| [Internals](docs/developer-guide/internals.md) | Pipeline, audio, meeting alignment |
+| [Architecture](docs/developer-guide/architecture.md) | The full journey: three processes, a recording's life, recall path |
+| [Internals](docs/developer-guide/internals.md) | Subsystem deep dives: async topology, audio, catalog/search, alignment math |
+| [Backend Guide](docs/developer-guide/backend_guide.md) | Rust workspace map, actors, supervision, SQLx/WAL |
 | [Config Reference](docs/developer-guide/config_reference.md) | Full `config.toml` schema |
 | [IPC Integration](docs/developer-guide/ipc_integration.md) | NDJSON named pipe |
 | [CLI Reference](docs/developer-guide/cli_reference.md) | All commands |

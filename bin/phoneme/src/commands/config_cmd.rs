@@ -1,3 +1,18 @@
+//! `phoneme config` — inspect and edit the shared config.toml.
+//!
+//! With no subcommand, prints the full resolved config as TOML. `path`
+//! prints the config file location; both are purely local. `reload` sends
+//! `ReloadConfig` (spawning path) so a daemon re-reads the file.
+//!
+//! `set <key> <value>` edits the file directly — no daemon involved (run
+//! `config reload` after, or let the queue worker's mtime check pick it
+//! up). Dotted keys navigate tables (`whisper.mode`), values are
+//! type-sniffed (bool → int → float → string), and the FULL updated config
+//! is parsed and validated BEFORE anything touches disk — a bad value must
+//! never brick the config file. Writes go atomically (tmp + rename) to the
+//! SAME file the daemon reads (`PHONEME_CONFIG`-aware). Exits 6 on any
+//! rejected value.
+
 use crate::args::{ConfigAction, ConfigArgs};
 use crate::exit;
 use phoneme_core::Config;

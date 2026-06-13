@@ -1,4 +1,11 @@
-//! Spec-defined CLI exit codes.
+//! Spec-defined CLI exit codes — the scriptable half of the CLI contract.
+//!
+//! Scripts branch on these, so they are stable API: 0 success, 1 generic
+//! failure, 2 usage error (clap's own), 3 daemon not reachable, 4 whisper
+//! backend unreachable/timed out, 5 hook failed, 6 invalid config, 7 not
+//! found. [`from_ipc_kind`] is the single mapping from a daemon
+//! [`IpcErrorKind`] to a code — every command's error path funnels through
+//! it (via `Client::send`), so a given failure always exits the same way.
 
 use phoneme_ipc::IpcErrorKind;
 

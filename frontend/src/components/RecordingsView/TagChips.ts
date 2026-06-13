@@ -6,6 +6,9 @@ import { subscribe, type DaemonEvent } from "../../services/events";
 import { showToast } from "../../utils/toast";
 import { fuzzyFilter } from "../../utils/fuzzy";
 
+/** Black or white (#11111b / #ffffff), whichever reads better on `hexColor`
+ *  (YIQ luma threshold). `""` for non-hex input — callers then inherit the
+ *  CSS default. Shared with the list's tag pills. */
 export function getContrastColor(hexColor: string): string {
   if (!hexColor || !hexColor.startsWith('#')) {
     return '';
@@ -21,6 +24,22 @@ export function getContrastColor(hexColor: string): string {
   return yiq >= 128 ? '#11111b' : '#ffffff';
 }
 
+/**
+ * The detail pane's tag row: the recording's attached tags as colored chips
+ * (× detaches; click opens an inline rename/recolor editor), a "+ add tag"
+ * box with a fuzzy-filtered dropdown (Enter attaches the highlighted tag or
+ * creates a new one from the typed text), and the ✨ auto-tag suggestions as
+ * approve/dismiss pills (with ✓ All / ✕ All when several are pending).
+ *
+ * Loads its own data per `recordingId` (tagsFor + listAllTags) and reloads on
+ * the `tag_*` / `tag_suggestions_updated` daemon events, so it stays correct
+ * when tags change anywhere else (Tag Manager, bulk bar, the LLM).
+ *
+ * Keyboard: the dropdown supports ↑/↓ + j/k browsing and Enter; the global
+ * `t` shortcut focuses the add-tag box via the vim layer (RecordingsView
+ * targets this element's input); dispatches `phoneme:vim` "open-tag-manager"
+ * on Shift+Enter. Errors toast.
+ */
 @customElement('ph-tag-chips')
 export class TagChipsElement extends LitElement {
   protected createRenderRoot() {
@@ -420,7 +439,8 @@ export class TagChipsElement extends LitElement {
   }
 }
 
-// Keep the vanilla wrapper so we don't break parent components yet.
+/** Imperative mount wrapper: RecordingDetail creates one per render; the
+ *  element manages its own data from there. */
 export class TagChips {
   private element: TagChipsElement;
   constructor(container: HTMLElement, recordingId: string) {

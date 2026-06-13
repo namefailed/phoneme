@@ -1,3 +1,13 @@
+//! `phoneme profile …` — named full-config snapshots ("work" vs "home"
+//! setups).
+//!
+//! `list` and `save` are purely local (`phoneme_core::profiles` file
+//! operations — no daemon involved). `use <name>` validates and atomically
+//! writes the saved profile over the live config.toml, then sends
+//! `ReloadConfig` so a running daemon adopts it immediately — an absent
+//! daemon is fine (it reads the new file on next start). Exits 7 for an
+//! unknown profile, 6 when the snapshot no longer validates.
+
 use crate::args::{ProfileAction, ProfileArgs};
 use crate::client;
 use crate::exit;

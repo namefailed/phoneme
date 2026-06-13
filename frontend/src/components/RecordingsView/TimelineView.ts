@@ -33,6 +33,11 @@ export function activeSegmentIndex(segments: TranscriptSegment[], ms: number): n
 
 type SeekDetail = { group: string; source: string; ms: number };
 
+/** The Timeline peek's controller (see the file-top comment). Plain class:
+ *  RecordingDetail constructs one per open peek with the host waveform's
+ *  seek callback; `setActiveTime(seconds)` follows playback; `dispose()`
+ *  detaches the window-level sync listeners (`phoneme:timeline-seek` /
+ *  `-scroll`) — required, or a closed peek keeps mirroring its old peer. */
 export class TimelineView {
   private container: HTMLElement;
   private recordingId: string;

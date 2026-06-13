@@ -1,8 +1,14 @@
-//! Periodic retention cleanup — deletes old recordings per the configured policy.
+//! Periodic retention cleanup — deletes old recordings per the configured
+//! `[retention]` policy (`max_age_days` / `max_count`; both unset = the
+//! task is a no-op).
 //!
-//! Runs once at startup, then again every hour while the daemon is alive.
-//! Only terminal-state recordings (done / failed) are eligible; in-progress
-//! recordings are never touched.
+//! A background loop spawned from `main`, ticking hourly until shutdown.
+//! Each pass first emits a [`phoneme_ipc::DaemonEvent::RetentionWarning`]
+//! (at most once per 24 h) for recordings entering the next 24 h deletion
+//! window — the UI's chance to warn before audio disappears — then asks the
+//! catalog to apply the policy and unlinks the returned WAV paths
+//! best-effort. Only terminal-state recordings (done / failed) are
+//! eligible; in-progress recordings are never touched.
 
 use crate::app_state::AppState;
 use phoneme_ipc::DaemonEvent;

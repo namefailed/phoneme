@@ -1,4 +1,16 @@
 //! Auto-spawn the daemon when the CLI can't reach it.
+//!
+//! Used by `Client::connect` (the work-creating path) and `phoneme daemon
+//! start`. `ensure_running` first reuses a reachable daemon — but only when
+//! its `DaemonStatus.version` matches this build; a stale daemon would fail
+//! to deserialize newer requests and drop the pipe, so a mismatched one is
+//! asked to shut down and replaced. The binary is found on PATH or next to
+//! the `phoneme` executable, spawned fully detached (no window, no inherited
+//! handles), and the pipe is polled briefly until it answers.
+//!
+//! Unlike the tray's `auto_spawn` (src-tauri), the CLI never puts the daemon
+//! in a job object and has no busy-daemon check — a CLI-spawned daemon is
+//! always meant to outlive the invocation.
 
 use phoneme_core::Config;
 use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};

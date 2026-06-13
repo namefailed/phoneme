@@ -59,6 +59,10 @@ Clicking on any recording in your list will open the **Detail Pane**.
 The detail pane includes an interactive waveform (wavesurfer.js), transcript editor, notes field, and action buttons.
 
 Here you can:
+- **Rename**: Recordings get an automatic title from the first line of the
+  transcript. Click the title at the top of the pane to rename it — Enter saves,
+  Esc cancels, and clearing it hands the recording back to auto-titling. A title
+  you set by hand is never overwritten by a re-transcribe.
 - **Listen Back**: Click the play button on the interactive waveform to hear your original audio.
 - **Edit**: Spot a mistake? Click into the transcript to fix it.
 - **Take Notes**: Use the free-form Notes text area to jot down thoughts related to the recording. This field is yours and is never overwritten by AI or re-transcription.
@@ -78,6 +82,22 @@ Phoneme keeps three versions of every transcript so you never lose data and can 
 
 The **Restore** buttons replace the current transcript with an earlier layer; the
 earlier layers themselves are never overwritten.
+
+## 🔌 How Phoneme runs in the background
+
+Phoneme has two parts: the **window** you interact with (it lives in your system
+tray) and a small **background engine** that does the real work — listening for
+hotkeys, recording, transcribing, and running your post-processing.
+
+By default, **quitting the tray shuts the engine down too** — cleanly: any
+recording in progress is finalized and queued first, then the engine and
+everything it started (the Whisper server, and an Ollama it auto-launched for
+you) stop with it. An Ollama you started yourself is always left running.
+
+If you'd rather keep the engine working after you close the window — for
+hotkey-free, headless use driven by the CLI — turn off **Settings → Appearance →
+"Quit stops the engine"**. The [FAQ](faq.md#quitting--the-background-engine)
+covers both modes in detail.
 
 ## ⏭️ Next Steps
 

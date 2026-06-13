@@ -73,6 +73,7 @@ update this file in the same PR.
 | Files on disk | API keys are encrypted at rest with Windows DPAPI (`CryptProtectData`, per-user, `dpapi:v1:` prefix); decrypted only in-process on config load, and legacy plaintext migrates on the next save | `phoneme-core::secret_crypto` + `config.rs` | S-H2 |
 | Outbound network | Webhook SSRF guard: loopback targets always allowed (local-first); non-loopback private ranges (RFC1918, link-local, IPv6 ULA) blocked unless `[webhook] allow_private_network = true`; public targets must be HTTPS unless `[webhook] allow_http = true`. Hostnames are resolved and every address classified (most restrictive wins), and the webhook client never follows redirects, so an allowed endpoint can't bounce the POST somewhere blocked | `phoneme-core::webhook` | S-H1 |
 | IPC pipe | `HookTest` output is redacted before it crosses the pipe: credential-shaped tokens (`sk-`/`ghp_`/`AKIA`-style prefixes, `Bearer` values, `key=`-style assignments) are masked and the text is length-capped — on the failure path too, since `HookFailed` embeds the command's stderr in its message | `phoneme-core::hook::redact_secrets` + `phoneme-daemon::ipc_handler` | — |
+| Tampered downloads | Every artifact the first-run wizard loads or extracts is pinned to an exact SHA-256: the whisper GGML models, the semantic-search ONNX model + tokenizer, and `whisper-bin-x64.zip` (verified **before** it's unzipped). A download whose bytes don't match its pin — or that has no pin — is deleted and the wizard surfaces an error rather than loading it. A unit test fails if a wizard URL has no pin. (The Ollama installer is intentionally unpinned — a third-party auto-updating installer the user launches themselves.) | `phoneme-tray::checksums` (`expected_sha256` / `file_sha256`) | S-H7 |
 
 ## Content Security Policy
 
@@ -132,8 +133,11 @@ documented data location both work as-is.
   ships a real production `csp` (plus a `devCsp` for the Vite dev server), and the
   asset-protocol scope is narrowed from `$HOME/**` to the Phoneme audio subtree.
   See the **Content Security Policy** section below. (S-H4.)*
-- **Model/binary download checksums** — pin and verify SHA-256 before extracting
-  the whisper-server zip and model files. *(S-H7.)*
+- ~~**Model/binary download checksums**~~ *Done — every wizard artifact (whisper
+  GGML models, the semantic ONNX model + tokenizer, the whisper-server zip) is
+  pinned to an exact SHA-256 and verified before it's loaded/extracted; an
+  unpinned or mismatched download is deleted, and a test fails if a wizard URL
+  has no pin. See the mitigations table above. (S-H7.)*
 - ~~**Redact hook test stderr**~~ *Done — `phoneme-core::hook::redact_secrets`
   masks credential-shaped tokens, `Bearer` values, and `key=`-style assignments
   (and caps the length) before `HookTest` output returns over IPC; the failure

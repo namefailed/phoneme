@@ -1,3 +1,17 @@
+//! Hook execution — running the user's script after a transcription.
+//!
+//! This module owns [`HookRunner`], which spawns the configured hook command
+//! with the recording's [`HookPayload`] as JSON on stdin. The daemon's pipeline
+//! calls it once per recording (and on a "re-fire hook" action). The webhook
+//! sibling ([`crate::webhook`]) does the HTTP equivalent.
+//!
+//! The non-obvious parts are all about not hanging or leaking: stdout/stderr are
+//! drained concurrently with the wait so a chatty hook can't deadlock on a full
+//! pipe buffer, and a timed-out child is explicitly killed (Tokio's `Drop` does
+//! not terminate the process on Windows). [`redact_secrets`] is a separate
+//! concern — it scrubs credential-shaped text out of subprocess output before it
+//! crosses the IPC trust boundary back to the GUI (the hook-test feature).
+
 use crate::error::{Error, Result};
 use crate::types::HookPayload;
 use std::process::Stdio;
@@ -6,10 +20,16 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::time::timeout;
 
+/// Outcome of a successful hook run.
 #[derive(Debug, Clone)]
 pub struct HookResult {
+    /// The process exit code (always `0` here — a non-zero exit is reported as
+    /// [`Error::HookFailed`] instead).
     pub exit_code: i32,
+    /// The tail of the hook's stderr (capped at ~4 KiB), kept even on success so
+    /// the UI can show any warnings the script printed.
     pub stderr_tail: String,
+    /// Wall-clock duration of the run, in milliseconds.
     pub duration_ms: i64,
 }
 
@@ -21,10 +41,18 @@ pub struct HookRunner {
 }
 
 impl HookRunner {
+    /// A runner for `command` (a shell-style command line) bounded by `timeout`.
     pub fn new(command: String, timeout: Duration) -> Self {
         Self { command, timeout }
     }
 
+    /// Run the hook with `payload` serialized to JSON on stdin.
+    ///
+    /// The payload is also exposed via the `PHONEME_ID`, `PHONEME_AUDIO_PATH`,
+    /// and `PHONEME_TRANSCRIPT` environment variables for scripts that prefer
+    /// them. Returns [`Error::HookFailed`] on a non-zero exit (carrying the
+    /// stderr tail) and [`Error::HookTimeout`] if the process runs past the
+    /// configured timeout (the process is killed first).
     pub async fn run(&self, payload: &HookPayload) -> Result<HookResult> {
         let json = serde_json::to_vec(payload)?;
         let (program, args) = split_command(&self.command);

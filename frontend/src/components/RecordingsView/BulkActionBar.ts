@@ -8,6 +8,8 @@ import {
 } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 
+/** Injected by RecordingsView: re-query the list after a bulk mutation, and
+ *  clear the multi-selection (which unmounts the bar). */
 export type BulkActionCallbacks = {
   onRefresh: () => void;
   onClear: () => void;
@@ -15,8 +17,26 @@ export type BulkActionCallbacks = {
 
 type ExportFormat = "txt" | "json" | "csv";
 
+/** Persisted floating position of the bar (drag it by the ⠿ handle);
+ *  Ctrl+Shift+click the handle resets to the default bottom-center. */
 const POS_LS = "phoneme.bulkBarPos";
 
+/**
+ * The floating bar that appears while recordings are multi-selected (Space /
+ * Shift+↑↓ in the list). Buttons: Re-run… (the shared RerunForm in a modal,
+ * applied to every selected id), Tag (attach one tag to all), Export
+ * (txt/json/csv via a save dialog), Side-by-side (exactly two selected —
+ * dispatches `phoneme:open-split`), Delete (`phoneme:request-delete`, the
+ * undoable flow), and ✕ Clear.
+ *
+ * State: the selection itself is OWNED by the list — this gets it as the
+ * `selected` property on every change; its own state is just menu/busy/drag
+ * bookkeeping. Keyboard: Shift+Enter in the list dispatches
+ * `phoneme:enter-bulk-bar`, which starts a roving h/l cursor over the
+ * buttons (Enter activates, j/k/Esc return to the list); its Escape handler
+ * runs capture-phase so an open menu closes without clearing the selection.
+ * Mounted/unmounted by RecordingsView per selection change.
+ */
 @customElement('ph-bulk-action-bar')
 export class BulkActionBarElement extends LitElement {
   protected createRenderRoot() {
@@ -371,7 +391,8 @@ export class BulkActionBarElement extends LitElement {
   }
 }
 
-// Vanilla wrapper used by RecordingsView.
+/** Imperative mount wrapper used by RecordingsView: mounts the bar with the
+ *  current selection and pushes later selection changes via `update`. */
 export class BulkActionBar {
   private element: BulkActionBarElement;
   constructor(

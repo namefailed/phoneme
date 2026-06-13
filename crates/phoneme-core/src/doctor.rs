@@ -77,8 +77,13 @@ fn category_for(ok: bool, severity_if_failed: CheckCategory) -> CheckCategory {
 /// daemon or opening a file); the CLI renders only the human fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckResult {
+    /// Short check name shown in the Doctor list (e.g. `"Whisper server"`).
     pub name: String,
+    /// Whether the check passed. A failing `Info`-category check never fails the
+    /// overall run.
     pub ok: bool,
+    /// One line of context — the path probed, the status seen, the free space,
+    /// etc. Never contains a secret value.
     pub detail: String,
     /// Opaque token the GUI uses to decide what "Fix" does.
     /// Supported values: `"start_daemon"`, `"open_config"`,
@@ -95,6 +100,84 @@ pub struct CheckResult {
     /// Actionable next step, set when the check fails and a remedy is known.
     #[serde(default)]
     pub fix_hint: Option<String>,
+}
+
+/// The ports the bundled whisper-servers are ACTUALLY listening on after any
+/// startup port fallback, threaded into [`run_backend_checks`] so the Doctor
+/// probes where the server really landed instead of the configured (possibly
+/// dead) port.
+///
+/// Core can't see the daemon's live port atomics, so the caller fills this in:
+/// the daemon from its `WhisperEffectivePorts`, the tray from the published
+/// `daemon_status` fields. `None` (the default) means nothing is published —
+/// the server isn't running, or the reader is older than the port-fallback
+/// work — in which case every probe falls back to the configured port,
+/// exactly the pre-fallback behavior.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EffectiveWhisperPorts {
+    /// The main (final-transcription) server's live port, when it is running.
+    pub main: Option<u16>,
+    /// The dedicated live-preview server's live port, when it is running.
+    pub preview: Option<u16>,
+}
+
+impl EffectiveWhisperPorts {
+    /// The live port to dial for `provider`, when one is published and differs
+    /// from `provider`'s configured port — else `None` (dial the config).
+    ///
+    /// Matching is by preferred port, mirroring the daemon's
+    /// `WhisperEffectivePorts::resolve`: `provider` may be `[whisper]` itself,
+    /// `[preview_whisper]`, or an `[in_place].stt` block the Settings UI
+    /// pointed at either server's configured port — all three must follow the
+    /// same server wherever it actually bound.
+    fn live_port_for(&self, cfg: &Config, provider: &WhisperConfig) -> Option<u16> {
+        // Only a local bundled server runs on a supervised port that can fall
+        // back; external endpoints are user-managed and cloud backends never
+        // use the port — mirror the daemon's `WhisperEffectivePorts::apply`
+        // guard so neither is ever rewritten.
+        if provider.provider != TranscriptionBackend::Local
+            || !matches!(
+                provider.mode,
+                WhisperMode::BundledModel | WhisperMode::BundledDownload
+            )
+        {
+            return None;
+        }
+        let preferred = provider.bundled_server_port;
+        let live = if preferred == cfg.whisper.bundled_server_port {
+            self.main
+        } else if cfg
+            .preview_whisper
+            .as_ref()
+            .is_some_and(|p| p.bundled_server_port == preferred)
+        {
+            self.preview
+        } else {
+            None
+        };
+        live.filter(|&p| p != preferred)
+    }
+}
+
+/// The base URL to probe for a bundled `provider`, plus a "(fallback from …)"
+/// suffix when the live port differs from the configured one. Only a local
+/// bundled server is rewritten — external endpoints are user-managed and the
+/// caller passes those through `server_base_url` unchanged.
+fn bundled_probe_url(
+    ports: &EffectiveWhisperPorts,
+    cfg: &Config,
+    provider: &WhisperConfig,
+) -> (String, String) {
+    match ports.live_port_for(cfg, provider) {
+        Some(live) => (
+            format!("http://127.0.0.1:{live}"),
+            format!(
+                " (running on {live}, fallback from {})",
+                provider.bundled_server_port
+            ),
+        ),
+        None => (provider.server_base_url(), String::new()),
+    }
 }
 
 // ── Disk-space thresholds ──────────────────────────────────────────────────
@@ -840,7 +923,25 @@ fn api_key_check(
 /// (401/403 counts — only what a real request would bill is left unverified).
 /// Each probe uses a 3-second timeout so callers don't hang on unreachable
 /// services.
+///
+/// Equivalent to [`run_backend_checks_with_ports`] with no live ports known
+/// (every local-bundled probe uses the configured port). Callers that can see
+/// the daemon's live whisper ports — the daemon's `RunDoctor` handler and the
+/// tray's backend-checks command — should call `run_backend_checks_with_ports`
+/// instead so a startup port fallback can't make them probe a dead port.
 pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
+    run_backend_checks_with_ports(cfg, &EffectiveWhisperPorts::default()).await
+}
+
+/// `ports` carries the bundled whisper-servers' live ports (see
+/// [`EffectiveWhisperPorts`]): a local-bundled probe follows the live port
+/// when the server fell back off its configured one, and says so, so a
+/// fallback never makes Doctor probe the wrong (dead, configured) port. Pass
+/// `EffectiveWhisperPorts::default()` when no live ports are known.
+pub async fn run_backend_checks_with_ports(
+    cfg: &Config,
+    ports: &EffectiveWhisperPorts,
+) -> Vec<CheckResult> {
     let mut out = Vec::new();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
@@ -851,16 +952,26 @@ pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
     match classify_stt(&cfg.whisper) {
         // Local provider: the whisper-server health probe, exactly as it
         // always was (bundled = supervised + fixable; external = the user's).
+        // A bundled server follows its live port after any startup fallback;
+        // an external server is the user's own, so its URL is never rewritten.
         SttConnection::LocalBundled | SttConnection::LocalExternal => {
-            let whisper_url = cfg.whisper.server_base_url();
+            let (whisper_url, fallback_note) = bundled_probe_url(ports, cfg, &cfg.whisper);
             let probe_url = format!("{whisper_url}/health");
             let (whisper_ok, whisper_detail) = match client.get(&probe_url).send().await {
                 Ok(resp) => (
                     resp.status().is_success() || resp.status().as_u16() == 404,
-                    format!("{whisper_url} — HTTP {}", resp.status().as_u16()),
+                    format!(
+                        "{whisper_url} — HTTP {}{fallback_note}",
+                        resp.status().as_u16()
+                    ),
                 ),
-                Err(e) if e.is_timeout() => (false, format!("{whisper_url} — timed out")),
-                Err(_) => (false, format!("{whisper_url} — not reachable")),
+                Err(e) if e.is_timeout() => {
+                    (false, format!("{whisper_url} — timed out{fallback_note}"))
+                }
+                Err(_) => (
+                    false,
+                    format!("{whisper_url} — not reachable{fallback_note}"),
+                ),
             };
             let external = cfg.whisper.mode == WhisperMode::External;
             out.push(CheckResult {
@@ -938,17 +1049,20 @@ pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
     if cfg.recording.streaming_preview {
         if let Some(pv) = cfg.preview_whisper.as_ref() {
             match classify_stt(pv) {
-                // Dedicated bundled server on its own port — supervised, fixable.
+                // Dedicated bundled server on its own port — supervised,
+                // fixable, and follows its live port after any startup fallback.
                 SttConnection::LocalBundled => {
-                    let url = format!("http://127.0.0.1:{}", pv.bundled_server_port);
+                    let (url, fallback_note) = bundled_probe_url(ports, cfg, pv);
                     let probe = format!("{url}/health");
                     let (ok, detail) = match client.get(&probe).send().await {
                         Ok(resp) => (
                             resp.status().is_success() || resp.status().as_u16() == 404,
-                            format!("{url} — HTTP {}", resp.status().as_u16()),
+                            format!("{url} — HTTP {}{fallback_note}", resp.status().as_u16()),
                         ),
-                        Err(e) if e.is_timeout() => (false, format!("{url} — timed out")),
-                        Err(_) => (false, format!("{url} — not reachable")),
+                        Err(e) if e.is_timeout() => {
+                            (false, format!("{url} — timed out{fallback_note}"))
+                        }
+                        Err(_) => (false, format!("{url} — not reachable{fallback_note}")),
                     };
                     out.push(CheckResult {
                         name: "Live-preview server".into(),
@@ -1030,21 +1144,23 @@ pub async fn run_backend_checks(cfg: &Config) -> Vec<CheckResult> {
     if let Some(stt) = cfg.in_place.stt.as_ref() {
         match classify_stt(stt) {
             // Dictation never gets its own supervised server — a local
-            // connection must point at an ALREADY-RUNNING one, so the check
-            // is reachability of that URL, not a model file.
+            // connection must point at an ALREADY-RUNNING one (the main or
+            // preview bundled server), so the check is reachability of that
+            // URL, not a model file. When that server fell back off its
+            // configured port, follow it there.
             SttConnection::LocalBundled | SttConnection::LocalExternal => {
-                let url = stt.server_base_url();
-                out.push(
-                    endpoint_check(
-                        &client,
-                        "Dictation STT endpoint",
-                        &url,
-                        CheckCategory::Warning,
-                        "Probes the STT endpoint dictation is pointed at — in-place dictation types nothing while it's unreachable.",
-                        "Dictation expects an already-running server here — point it at the main or preview server, or fix the URL (Settings → Capture → Dictation).",
-                    )
-                    .await,
-                );
+                let (url, fallback_note) = bundled_probe_url(ports, cfg, stt);
+                let mut check = endpoint_check(
+                    &client,
+                    "Dictation STT endpoint",
+                    &url,
+                    CheckCategory::Warning,
+                    "Probes the STT endpoint dictation is pointed at — in-place dictation types nothing while it's unreachable.",
+                    "Dictation expects an already-running server here — point it at the main or preview server, or fix the URL (Settings → Capture → Dictation).",
+                )
+                .await;
+                check.detail.push_str(&fallback_note);
+                out.push(check);
             }
             SttConnection::SelfHosted { url } => {
                 out.push(
@@ -1849,6 +1965,166 @@ mod tests {
             .map(|r| r.name.clone())
             .collect();
         assert_eq!(names, ["Whisper server", "Ollama (optional)"]);
+    }
+
+    // ── Effective-port rewrite (port-fallback) ─────────────────────────────
+
+    /// The listen port of a wiremock server, parsed from its `http://…:PORT` uri.
+    fn server_port(server: &wiremock::MockServer) -> u16 {
+        server
+            .uri()
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse().ok())
+            .expect("wiremock uri ends in a port")
+    }
+
+    #[tokio::test]
+    async fn local_whisper_check_follows_the_effective_port_with_a_fallback_note() {
+        // The supervisor fell back from the configured 5809 to the wiremock
+        // port. With that live port published, the probe must hit the live
+        // server (reachable) and the detail must name both ports — never probe
+        // the dead configured 5809.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let live = server_port(&server);
+
+        let mut cfg = Config::default();
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.bundled_server_port = 5809; // configured (the one that lost the race)
+
+        let ports = EffectiveWhisperPorts {
+            main: Some(live),
+            preview: None,
+        };
+        let results = run_backend_checks_with_ports(&cfg, &ports).await;
+        let w = results.iter().find(|r| r.name == "Whisper server").unwrap();
+        assert!(w.ok, "probe must follow the live port: {}", w.detail);
+        assert_eq!(w.category, CheckCategory::Info);
+        assert!(
+            w.detail.contains(&format!("127.0.0.1:{live}")),
+            "detail names the live port: {}",
+            w.detail
+        );
+        assert!(
+            w.detail
+                .contains(&format!("running on {live}, fallback from 5809")),
+            "detail explains the fallback: {}",
+            w.detail
+        );
+        assert!(
+            !w.detail.contains(":5809"),
+            "the dead configured port is never probed: {}",
+            w.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn published_port_equal_to_config_adds_no_fallback_note() {
+        // Server bound its configured port (no fallback) → the detail is the
+        // plain configured URL, with no "(running on … fallback …)" suffix.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let live = server_port(&server);
+
+        let mut cfg = Config::default();
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.bundled_server_port = live; // configured == live
+
+        let ports = EffectiveWhisperPorts {
+            main: Some(live),
+            preview: None,
+        };
+        let w = run_backend_checks_with_ports(&cfg, &ports)
+            .await
+            .into_iter()
+            .find(|r| r.name == "Whisper server")
+            .unwrap();
+        assert!(w.ok, "{}", w.detail);
+        assert!(!w.detail.contains("fallback from"), "no note: {}", w.detail);
+    }
+
+    #[tokio::test]
+    async fn preview_check_follows_its_own_effective_port() {
+        // Each server's fallback is independent: a preview that landed on a
+        // free port follows the published `preview` port, not the main one.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        let preview_live = server_port(&server);
+
+        let mut cfg = Config::default();
+        cfg.recording.streaming_preview = true;
+        cfg.whisper.bundled_server_port = 5809;
+        let mut pv = cfg.whisper.clone();
+        pv.mode = WhisperMode::BundledModel;
+        pv.bundled_server_port = 5810; // configured preview port (lost the race)
+        cfg.preview_whisper = Some(pv);
+
+        let ports = EffectiveWhisperPorts {
+            main: Some(5809),
+            preview: Some(preview_live),
+        };
+        let p = run_backend_checks_with_ports(&cfg, &ports)
+            .await
+            .into_iter()
+            .find(|r| r.name == "Live-preview server")
+            .unwrap();
+        assert!(p.ok, "preview probe follows its live port: {}", p.detail);
+        assert!(
+            p.detail
+                .contains(&format!("running on {preview_live}, fallback from 5810")),
+            "detail explains the preview fallback: {}",
+            p.detail
+        );
+    }
+
+    #[tokio::test]
+    async fn external_whisper_url_is_never_rewritten_by_effective_ports() {
+        // An external server is the user's own. Even with a main live port
+        // published, the external URL must be probed verbatim — the rewrite is
+        // for bundled servers only.
+        let mut cfg = Config::default();
+        cfg.whisper.mode = WhisperMode::External;
+        cfg.whisper.external_url = "http://127.0.0.1:19998".into();
+
+        let ports = EffectiveWhisperPorts {
+            main: Some(51234),
+            preview: None,
+        };
+        let w = run_backend_checks_with_ports(&cfg, &ports)
+            .await
+            .into_iter()
+            .find(|r| r.name == "Whisper server")
+            .unwrap();
+        assert!(!w.ok);
+        assert!(
+            w.detail.contains("19998"),
+            "external URL verbatim: {}",
+            w.detail
+        );
+        assert!(!w.detail.contains("51234"), "no rewrite: {}", w.detail);
+        assert!(!w.detail.contains("fallback"), "no note: {}", w.detail);
     }
 
     #[tokio::test]

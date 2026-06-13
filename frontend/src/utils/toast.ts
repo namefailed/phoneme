@@ -11,6 +11,7 @@
  * .app-shell so overflow:hidden on #main never clips it.
  */
 
+/** Toast flavor: picks the icon, color, and default auto-dismiss delay. */
 export type ToastType = "success" | "error" | "info" | "warning";
 
 const AUTO_DISMISS_MS: Record<ToastType, number> = {

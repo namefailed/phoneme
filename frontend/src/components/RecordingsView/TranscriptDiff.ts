@@ -1,5 +1,5 @@
 import { escapeHtml } from "../../utils/format";
-import { diffText, diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode } from "../../utils/diff";
+import { diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode, type DiffOutcome } from "../../utils/diff";
 
 /**
  * Read-only side-by-side-ish DIFF of a recording's transcript layers
@@ -20,8 +20,10 @@ import { diffText, diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode
  * (RecordingDetail) fetches `original`/`clean` once via IPC before mounting.
  */
 
+/** One of the three comparable transcript layers (see the file-top comment). */
 export type LayerKey = "original" | "clean" | "current";
 
+/** The already-resolved text of each layer, as the host fetched it. */
 export interface TranscriptLayers {
   /** Raw machine transcript, or null/empty if none was preserved. */
   original: string | null;
@@ -39,6 +41,10 @@ const LAYER_LABELS: Record<LayerKey, string> = {
 
 const LAYER_ORDER: LayerKey[] = ["original", "clean", "current"];
 
+/** The diff view's controller. Plain class: RecordingDetail mounts one with
+ *  the pre-fetched layers; it owns the layer pickers, the word↔line mode
+ *  toggle, and re-rendering — fully self-contained and read-only from there
+ *  (no IPC, no events). Unmount by clearing the container. */
 export class TranscriptDiff {
   private container: HTMLElement;
   private layers: TranscriptLayers;
@@ -72,6 +78,10 @@ export class TranscriptDiff {
   }
 
   private render() {
+    // Compute the (capped) diff once and feed BOTH the body and the stats from
+    // it — the two used to each run `diffTextDetailed` independently at the same
+    // granularity, doubling the LCS work on every render/refresh.
+    const outcome = this.computeDiff();
     this.container.innerHTML = `
       <div class="tdiff">
         <div class="tdiff-bar">
@@ -86,15 +96,28 @@ export class TranscriptDiff {
           </div>
         </div>
         <div class="tdiff-legend">
-          <span class="tdiff-stat" id="tdiff-stats">${this.statsHtml()}</span>
+          <span class="tdiff-stat" id="tdiff-stats">${this.statsHtml(outcome)}</span>
           <span class="tdiff-spacer"></span>
           <span class="tdiff-key tdiff-del">removed</span>
           <span class="tdiff-key tdiff-ins">added</span>
         </div>
-        <div class="tdiff-body" id="tdiff-body">${this.bodyHtml()}</div>
+        <div class="tdiff-body" id="tdiff-body">${this.bodyHtml(outcome)}</div>
       </div>
     `;
     this.wire();
+  }
+
+  /**
+   * The diff for the currently-selected sides + mode, or `null` when there's
+   * nothing to compare (a missing layer, or the same layer on both sides). The
+   * single source of truth for both the body and the stats so the LCS runs once
+   * per render.
+   */
+  private computeDiff(): DiffOutcome | null {
+    if (this.left === this.right || !this.hasContent(this.left) || !this.hasContent(this.right)) {
+      return null;
+    }
+    return diffTextDetailed(this.valueOf(this.left) ?? "", this.valueOf(this.right) ?? "", this.mode);
   }
 
   private selectHtml(side: "left" | "right", selected: LayerKey): string {
@@ -106,11 +129,9 @@ export class TranscriptDiff {
     return `<select class="tdiff-select" data-side="${side}" aria-label="${side} version">${opts}</select>`;
   }
 
-  /** The diff body, or a clear empty/unavailable state. */
-  private bodyHtml(): string {
-    const leftVal = this.valueOf(this.left);
-    const rightVal = this.valueOf(this.right);
-
+  /** The diff body, or a clear empty/unavailable state. `outcome` is the
+   *  shared precomputed diff (`null` when there's nothing to compare). */
+  private bodyHtml(outcome: DiffOutcome | null): string {
     // A layer that was never saved (null) vs one that's merely empty are both
     // "nothing to compare", but the message is friendlier when we name which
     // side is missing.
@@ -122,14 +143,14 @@ export class TranscriptDiff {
       return `<div class="tdiff-empty">No ${escapeHtml(which.toLowerCase())} version is available for this recording, so there's nothing to compare.</div>`;
     }
 
-    if (this.left === this.right) {
+    if (this.left === this.right || !outcome) {
       return `<div class="tdiff-empty">Pick two different versions to compare.</div>`;
     }
 
     // Size-guarded: hour-long transcripts can exceed the word-level LCS cap,
     // in which case the diff arrives at a coarser granularity — say so rather
     // than letting the view silently look less precise than the mode toggle.
-    const { ops, fallback } = diffTextDetailed(leftVal ?? "", rightVal ?? "", this.mode);
+    const { ops, fallback } = outcome;
     const note =
       fallback === "line"
         ? `<div class="tdiff-empty">These versions are too long for a word-level diff — showing line-level changes instead.</div>`
@@ -211,12 +232,11 @@ export class TranscriptDiff {
       .join("");
   }
 
-  /** A short "+N added · −M removed" (by word count) summary of the diff. */
-  private statsHtml(): string {
-    if (this.left === this.right || !this.hasContent(this.left) || !this.hasContent(this.right)) {
-      return "";
-    }
-    const ops = diffText(this.valueOf(this.left) ?? "", this.valueOf(this.right) ?? "", this.mode);
+  /** A short "+N added · −M removed" (by word count) summary of the diff.
+   *  Reuses the shared precomputed `outcome` instead of re-diffing. */
+  private statsHtml(outcome: DiffOutcome | null): string {
+    if (!outcome) return "";
+    const ops = outcome.ops;
     const words = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
     let added = 0;
     let removed = 0;
@@ -228,12 +248,14 @@ export class TranscriptDiff {
     return `<span class="tdiff-stat-add">+${added} added</span> · <span class="tdiff-stat-del">−${removed} removed</span>`;
   }
 
-  /** Re-render the diff body + the stats (after a picker/mode/swap change). */
+  /** Re-render the diff body + the stats (after a picker/mode/swap change).
+   *  Computes the diff once and feeds both, like `render`. */
   private refresh() {
+    const outcome = this.computeDiff();
     const body = this.container.querySelector<HTMLElement>("#tdiff-body");
-    if (body) body.innerHTML = this.bodyHtml();
+    if (body) body.innerHTML = this.bodyHtml(outcome);
     const stats = this.container.querySelector<HTMLElement>("#tdiff-stats");
-    if (stats) stats.innerHTML = this.statsHtml();
+    if (stats) stats.innerHTML = this.statsHtml(outcome);
   }
 
   private wire() {

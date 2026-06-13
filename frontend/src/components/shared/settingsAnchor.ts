@@ -9,10 +9,14 @@ export type SettingsAnchor = { top: number; left: number; width: number; height:
 
 let anchor: SettingsAnchor | null = null;
 
+/** Capture the header ⚙ button's viewport rect (App calls this just before
+ *  mounting Settings, while the header is still visible). */
 export function setSettingsAnchor(rect: SettingsAnchor): void {
   anchor = rect;
 }
 
+/** The captured rect, or null when Settings was reached without one (keyboard
+ *  shortcut / deep link) — the floating button then uses its CSS position. */
 export function getSettingsAnchor(): SettingsAnchor | null {
   return anchor;
 }

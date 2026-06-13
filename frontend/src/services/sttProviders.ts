@@ -14,6 +14,7 @@
 
 import { CURATED_TRANSCRIPTION, curatedTranscriptionModelIds } from "../data/curatedModels";
 
+/** One STT provider as the simple (wire-value) catalog models it. */
 export interface SttProvider {
   /** Value stored in `config.whisper.provider`. */
   value: string;
@@ -33,6 +34,7 @@ export interface SttProvider {
   keyUrl?: string;
 }
 
+/** The simple STT catalog: every provider the daemon supports, local first. */
 export const STT_PROVIDERS: SttProvider[] = [
   {
     value: "local",
@@ -92,9 +94,12 @@ export const STT_PROVIDERS: SttProvider[] = [
   },
 ];
 
+/** The named cloud providers (excludes local and the custom escape hatch). */
 export const CLOUD_STT_PROVIDERS = STT_PROVIDERS.filter((p) => !p.local && p.value !== "custom");
+/** Providers fast enough for the live preview's API source picker. */
 export const PREVIEW_STT_PROVIDERS = STT_PROVIDERS.filter((p) => p.previewFriendly || p.value === "custom");
 
+/** Look a provider up by its wire value (`config.whisper.provider`). */
 export function findSttProvider(value: string): SttProvider | undefined {
   return STT_PROVIDERS.find((p) => p.value === value);
 }
@@ -112,8 +117,12 @@ export function findSttProvider(value: string): SttProvider | undefined {
  * override (proxies/gateways), so it never breaks the match.
  */
 
+/** Optgroup of the grouped provider select ("On this computer" / "Cloud" /
+ *  "Advanced"). */
 export type SttProviderGroup = "local" | "cloud" | "advanced";
 
+/** One STT provider as the shared connection block models it (see the
+ *  section comment above). */
 export interface NamedSttProvider {
   /** Stable id — the <option> value in the grouped provider select. */
   id: string;
@@ -139,6 +148,7 @@ export interface NamedSttProvider {
   defaultModel: string;
 }
 
+/** The named-provider catalog the shared connection block lists for STT. */
 export const STT_NAMED_PROVIDERS: NamedSttProvider[] = [
   {
     id: "local",
@@ -224,6 +234,7 @@ export const STT_NAMED_PROVIDERS: NamedSttProvider[] = [
   },
 ];
 
+/** Look a named provider up by its stable id. */
 export function findNamedSttProvider(id: string): NamedSttProvider | undefined {
   return STT_NAMED_PROVIDERS.find((p) => p.id === id);
 }
@@ -262,11 +273,13 @@ export interface SttCustomPreset {
   apiUrl: string;
   model: string;
 }
+/** The shipped custom-endpoint presets. */
 export const STT_CUSTOM_PRESETS: SttCustomPreset[] = [
   { id: "fireworks", label: "Fireworks", apiUrl: "https://api.fireworks.ai/inference", model: "whisper-v3" },
   { id: "lemonfox", label: "Lemonfox", apiUrl: "https://api.lemonfox.ai/v1", model: "whisper-1" },
 ];
 
+/** Look a custom-endpoint preset up by id. */
 export function findSttCustomPreset(id: string): SttCustomPreset | undefined {
   return STT_CUSTOM_PRESETS.find((p) => p.id === id);
 }
@@ -287,6 +300,7 @@ export const STT_CURATED_MODELS: Record<string, string[]> = Object.fromEntries(
   Object.keys(CURATED_TRANSCRIPTION).map((p) => [p, curatedTranscriptionModelIds(p)]),
 );
 
+/** Curated model ids for one provider (see `STT_CURATED_MODELS`). */
 export function curatedSttModels(provider: string): string[] {
   return curatedTranscriptionModelIds(provider);
 }

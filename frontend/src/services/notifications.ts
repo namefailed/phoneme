@@ -23,6 +23,17 @@ export function setStepNotifications(on: boolean) {
   stepsEnabled = on;
 }
 
+/**
+ * Strip the daemon's thiserror `Internal` wrapper for display. The Rust
+ * `Error::Internal(msg)` variant renders as `"internal error: {msg}"`, which is
+ * plumbing detail the user shouldn't see in a toast — only the real reason
+ * matters. Drop a single leading `"internal error: "` (case-insensitive) and
+ * keep everything after it verbatim. Anything else passes through untouched.
+ */
+export function stripInternalPrefix(reason: string): string {
+  return reason.replace(/^\s*internal error:\s*/i, "");
+}
+
 /** What the PREVIOUS stage having ended means, in past tense. */
 const STEP_DONE: Partial<Record<PipelineStage, string>> = {
   transcribing: "Transcribed",
@@ -62,11 +73,12 @@ function onEvent(event: DaemonEvent) {
       return;
     }
     case "transcription_failed":
-      // Always — regardless of the step-notification setting.
-      showToast(`Transcription failed: ${e.error}`, "error");
+      // Always — regardless of the step-notification setting. The daemon's
+      // `internal error:` wrapper is stripped so the toast shows the real reason.
+      showToast(`Transcription failed: ${stripInternalPrefix(String(e.error ?? ""))}`, "error");
       return;
     case "hook_failed":
-      showToast(`Hook failed: ${e.error}`, "error");
+      showToast(`Hook failed: ${stripInternalPrefix(String(e.error ?? ""))}`, "error");
       return;
     case "summary_failed": {
       // A user-initiated skip (the queue panel's ⏭ / `phoneme queue skip`)
@@ -79,7 +91,9 @@ function onEvent(event: DaemonEvent) {
         return;
       }
       // Real summary failures always surface, like the other *_failed events.
-      showToast(`Summary failed: ${error || "check the AI provider in Settings"}`, "error");
+      // Strip the daemon's `internal error:` wrapper so only the reason shows.
+      const reason = stripInternalPrefix(error);
+      showToast(`Summary failed: ${reason || "check the AI provider in Settings"}`, "error");
       return;
     }
     case "summary_updated":

@@ -1,6 +1,42 @@
-//! Pipeline orchestration: transcribe → hook → done.
+//! Pipeline orchestration — the stage after the queue: every claimed
+//! recording flows through [`run`] on its way from WAV to finished library
+//! entry.
 //!
-//! Called by the queue worker per claimed payload.
+//! Stage order (each optional stage is gated by config and non-fatal):
+//! transcribe (with segments + diarization) → LLM cleanup → auto title →
+//! in-place typing (full-pipeline dictations only) → embed for semantic
+//! search → hooks + keyword hooks → auto summary → auto tags → done +
+//! webhook. Results land in the catalog as they settle; progress is
+//! broadcast as `PipelineStageChanged` / `LlmActivity` events, and the
+//! catalog status column tracks the stages step for step.
+//!
+//! Invariants owned here:
+//! - **Whisper-server serialization** — the final transcription holds the
+//!   `whisper_sem` permit for its whole STT call, so the live preview can
+//!   never starve it; a one-job model-override swap also happens UNDER the
+//!   permit, so nothing else talks to the bundled server mid-restart (#49).
+//! - **One-job model overrides** — `apply_model_override` reads the
+//!   recording's pending override, publishes it to the supervisor (local
+//!   backend) or clones it into the per-job config (cloud), and the drop
+//!   guard restores the configured model on EVERY exit path. The
+//!   process-global config is never mutated.
+//! - **Effective ports** — the per-job whisper config is rewritten through
+//!   `whisper_ports.apply` right before building the provider, so the
+//!   request dials the port the server actually bound after any fallback.
+//! - **Cancellation** — the queue worker passes a token; transcription races
+//!   it directly, and checkpoints between stages finalize a canceled item
+//!   (`finalize_canceled`: status `Cancelled`, inbox `finish_cancelled`,
+//!   cancel events) so a cancel always settles.
+//! - **Transient vs permanent failures** — unreachable/timeout STT errors
+//!   leave the inbox item claimed for the worker to requeue and retry;
+//!   permanent errors quarantine it in `failed/` and mark the row failed.
+//! - **Skip** — the in-flight LLM stage races `skip_stage` and aborts as a
+//!   non-fatal stage failure when the user hits skip.
+//!
+//! The helpers here (`run_llm_stage`, `generate_summary`, `suggest_tags`,
+//! `embed_and_store`, the per-step `*_llm_config` builders) are also called
+//! by the IPC re-run handlers, so on-demand re-runs behave byte-for-byte
+//! like their pipeline counterparts.
 
 use crate::app_state::{AppState, WhisperModelOverride};
 use phoneme_core::config::{
@@ -962,6 +998,17 @@ pub async fn run(
                         .catalog
                         .update_status(&id, RecordingStatus::TranscribeFailed)
                         .await?;
+                    // Persist the reason on the row so it survives a restart —
+                    // best-effort, since the status + quarantine below are what
+                    // actually fail the recording. Same kind label the inbox
+                    // quarantine uses.
+                    if let Err(err) = state
+                        .catalog
+                        .update_error(&id, "whisper_error", &e.to_string())
+                        .await
+                    {
+                        tracing::warn!(error = %err, "failed to persist transcribe error reason");
+                    }
                     state
                         .inbox
                         .finish_failed(&id, "whisper_error", &e.to_string())
@@ -1068,14 +1115,34 @@ pub async fn run(
     }
 
     payload.transcript = transcript.clone();
-    // Record the model that actually ran. Use the per-job whisper config so a
-    // one-time model-override re-transcription stores the override's model file
-    // stem (for the local backend) rather than the configured default.
-    payload.model = std::path::Path::new(&whisper_cfg.model_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
+    // Record the model that actually ran, from the per-job whisper config so a
+    // one-time model override is reflected. The local bundled backend talks to
+    // whisper.cpp over HTTP and only knows its model as a file on disk, so its
+    // id is the `model_path` stem; the cloud/custom backends send a model id in
+    // the request, so theirs is the REQUESTED `whisper.model` (falling back to
+    // the path stem only when no model was set, which keeps the old behavior
+    // for a misconfigured cloud backend rather than recording an empty string).
+    payload.model = {
+        use phoneme_core::config::TranscriptionBackend as TB;
+        let path_stem = || {
+            std::path::Path::new(&whisper_cfg.model_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        };
+        match whisper_cfg.provider {
+            TB::Local => path_stem(),
+            _ => {
+                let requested = whisper_cfg.model.trim();
+                if requested.is_empty() {
+                    path_stem()
+                } else {
+                    requested.to_string()
+                }
+            }
+        }
+    };
 
     // `transcript` = LLM-processed (or raw if LLM is disabled/failed).
     // `raw_transcript` = raw Whisper output, always preserved as the original.
@@ -1223,6 +1290,16 @@ pub async fn run(
                     .catalog
                     .update_status(&id, RecordingStatus::HookFailed)
                     .await?;
+                // Persist the reason on the row so it survives a restart (see the
+                // transcribe-failed path). Best-effort; the quarantine below is
+                // what actually fails the recording.
+                if let Err(err) = state
+                    .catalog
+                    .update_error(&id, "hook_failed", &e.to_string())
+                    .await
+                {
+                    tracing::warn!(error = %err, "failed to persist hook error reason");
+                }
                 state
                     .inbox
                     .finish_failed(&id, "hook_failed", &e.to_string())

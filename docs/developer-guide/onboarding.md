@@ -27,10 +27,14 @@ To work on Phoneme, you will need the following tools installed on your developm
 Because Phoneme separates the background daemon from the GUI window, local development requires launching the services in three separate terminals:
 
 ### Terminal 1: Start the Background Daemon
-Runs the headless daemon which hosts the named pipe IPC server and audio capture engine:
+Runs the headless daemon which hosts the named pipe IPC server and audio capture
+engine. `--foreground` keeps it attached to the terminal so you see its logs while
+debugging:
 ```bash
-cargo run --bin phoneme-daemon
+cargo run -p phoneme-daemon -- --foreground
 ```
+*(If you skip this terminal, the tray auto-spawns a background daemon when it
+starts — but running it yourself is the easier way to read backend logs.)*
 
 ### Terminal 2: Run the Webpack/Vite Dev Server
 Serves the Lit/TypeScript web application:
@@ -55,7 +59,7 @@ cargo tauri dev
 The frontend is a single-page app built with **Vite**, **TypeScript**, **Lit**, and **Vanilla CSS**.
 
 ### Lit Components
-All views extend Lit's `LitElement` class ([`App.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/App.ts)). 
+All views extend Lit's `LitElement` class ([`App.ts`](../../frontend/src/App.ts)). 
 
 > [!IMPORTANT]
 > **Light DOM vs. Shadow DOM:**
@@ -67,7 +71,7 @@ All views extend Lit's `LitElement` class ([`App.ts`](file:///c:/Users/Namef/Pro
 > ```
 
 ### Reactive Store
-UI data is synchronized via a custom reactive store ([`store.ts`](file:///c:/Users/Namef/Projects/dev/phoneme/frontend/src/state/store.ts)):
+UI data is synchronized via a custom reactive store ([`store.ts`](../../frontend/src/state/store.ts)):
 - Components subscribe to state changes inside `connectedCallback` and release their subscriptions inside `disconnectedCallback`.
 - The store acts as a single source of truth, receiving state updates over the Tauri IPC channel.
 
@@ -82,12 +86,25 @@ UI data is synchronized via a custom reactive store ([`store.ts`](file:///c:/Use
 The backend is built in **Rust** using the **Tokio** async runtime.
 
 ### SQLite Database & sqlx
-The catalog is stored in `catalog.db` ([`catalog.rs`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/src/catalog.rs)).
-- **Migrations:** All schema changes must be versioned. Schema migration files are placed under [`crates/phoneme-core/migrations/`](file:///c:/Users/Namef/Projects/dev/phoneme/crates/phoneme-core/migrations).
+The catalog is stored in `catalog.db` ([`catalog.rs`](../../crates/phoneme-core/src/catalog.rs)).
+- **Migrations:** All schema changes must be versioned. Schema migration files are placed under [`crates/phoneme-core/migrations/`](../../crates/phoneme-core/migrations).
 - **WAL Mode:** The catalog is opened in Write-Ahead Logging mode to ensure read queries don't block concurrent writes.
 
 ### Async Task Cancellation
 Background tasks (transcription, cleanup, hooks) accept a `CancellationToken` from `tokio-util`. If the user cancels an operation or quits the app, the token is aborted, allowing the tokio task to unwind and clean up its lock permits safely.
+
+### Where to read next
+The backend is documented to 100% rustdoc coverage in three crates — start there
+before diving into source:
+- **`phoneme-core`** — the shared engine (config, catalog, providers, pipeline types).
+- **`phoneme-audio`** — capture, decode, WAV, silence, meeting alignment.
+- **`phoneme-ipc`** — the daemon ↔ client wire contract (`schema.rs`).
+
+Build and open it with `cargo doc --workspace --no-deps --open`. The
+[Architecture Wiki](architecture.md) is the prose narrative that ties these
+together — one story from hotkey press to searchable transcript. The
+[Backend](backend_guide.md) and [Frontend](frontend_guide.md) developer guides go
+deeper on each side.
 
 ---
 
@@ -96,11 +113,13 @@ Background tasks (transcription, cleanup, hooks) accept a `CancellationToken` fr
 Before opening a pull request, run the test suites and code linters locally.
 
 ### Running Tests
-- **Rust backend unit tests:**
+- **Rust backend tests** (always `--test-threads=1` — many tests mutate
+  process-global env vars and must run serially; see [Testing & CI](testing_and_ci.md)):
   ```bash
-  cargo test --workspace
+  cargo test --workspace -- --test-threads=1
   ```
-  *(Unit tests use a synthetic audio source, so they can run successfully on headless CI runners without physical microphones).*
+  *(Tests swap the real microphone for a synthetic `GeneratorSource`, so they run
+  on headless CI runners without physical microphones).*
 - **Frontend Vitest unit tests:**
   ```bash
   cd frontend

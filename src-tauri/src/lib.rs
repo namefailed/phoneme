@@ -1,4 +1,36 @@
-//! Phoneme tray app — Tauri 2 desktop shell.
+//! Phoneme tray app — the Tauri 2 desktop shell around `phoneme-daemon`.
+//!
+//! The tray does no recording or transcription itself; it spawns and talks
+//! to the daemon (`auto_spawn` + `bridge`), forwards the WebView's `invoke`
+//! calls as IPC requests (`commands`, `similar`), re-emits the daemon's
+//! event stream to every webview (`events`), and owns the desktop chrome:
+//! tray icon + menu (`tray`), the system-wide live-preview overlay window
+//! (`overlay`), global hotkeys, and the first-run wizard's downloads with
+//! pinned checksums (`wizard`, `checksums`). Config is read/written
+//! atomically by `config_io`; `doctor` re-exports the shared check
+//! implementations from phoneme-core.
+//!
+//! Boot sequence (`run`):
+//! 1. Build the tokio runtime, read config, `auto_spawn` the daemon, and
+//!    try one bridge connect — failure is tolerated, the `BridgeSlot`
+//!    lazily reconnects on the first action.
+//! 2. Window chrome: window-state plugin (geometry remembered, visibility
+//!    deliberately NOT), titlebar strip, show-on-startup, tray icon.
+//! 3. Register the global hotkeys (record / meeting / in-place) via the
+//!    shared `commands::register_hotkeys`, and pre-create the hidden
+//!    overlay when enabled — none of this needs the daemon, only config,
+//!    so a down-at-launch daemon costs nothing but the bridge.
+//! 4. Attach the daemon event stream (`events::spawn`) — immediately when
+//!    the bridge is up, otherwise from a background retry loop the moment
+//!    it connects, so the UI never stays event-dead until a restart.
+//! 5. Hand the invoke handler the full command surface and run; the exit
+//!    hook sends the daemon a last-resort `Shutdown` honoring
+//!    `interface.quit_stops_daemon` and the tray Quit chain's
+//!    already-stopped flag (see `tray`).
+//!
+//! The hotkey handler is sync: it peeks the slot (`current()`), kicks a
+//! background connect when empty, and spawns the actual request — pressing
+//! a hotkey must never block on a dial.
 
 mod auto_spawn;
 mod bridge;
@@ -323,6 +355,8 @@ pub fn run() {
             commands::update_notes,
             commands::set_favorite,
             commands::set_recording_title,
+            commands::export_captions,
+            commands::export_library_zip,
             commands::restart_whisper,
             commands::save_window_state,
             commands::set_preview_source,

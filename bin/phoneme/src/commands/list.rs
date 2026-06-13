@@ -1,3 +1,15 @@
+//! `phoneme list` — query the recording catalog.
+//!
+//! Observe-only (`Client::connect_observe`): listing is inspection, and "the
+//! daemon is down" is a more useful answer than silently starting one.
+//! Builds a `ListFilter` from the flags (`--limit/--offset` pagination,
+//! `--since/--until` dates, `--status`, `--search` FTS5, `--kind`
+//! single/meeting) and sends `ListRecordings`; `--tag` accepts an id or a
+//! name and is resolved against `ListTags`/`ListAllTags` first. The `kind`
+//! filter is applied in SQL by the daemon — before LIMIT/OFFSET — so pages
+//! stay full. `--semantic <QUERY>` short-circuits the whole flow into
+//! `commands::search` (a `SemanticSearch` request) reusing `--limit`.
+
 use crate::args::ListArgs;
 use crate::client::Client;
 use crate::exit;

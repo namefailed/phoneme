@@ -1,11 +1,19 @@
 import { errText } from "../../utils/error";
 import { renderField, bindFieldEvents } from "./form";
-import { listRecordings, IMPORT_AUDIO_EXTENSIONS } from "../../services/ipc";
+import { listRecordings, exportLibraryZip, IMPORT_AUDIO_EXTENSIONS } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { pickAndImportAudio } from "../../utils/import";
 
+/**
+ * Settings → Storage: where audio lives and how long it's kept — the audio
+ * directory (`recording.audio_dir`, with Browse/Open buttons), the retention
+ * policy (`retention.max_age_days` / `max_count`, blank = disabled), the
+ * "Import audio…" button (the shared utils/import picker — same path as
+ * window drag-drop), and a whole-library export (json/csv via a save
+ * dialog). Plain section class on the form.ts binding.
+ */
 export class SectionStorage {
-   
+
   constructor(
     container: HTMLElement,
     private config: any,
@@ -76,7 +84,16 @@ export class SectionStorage {
             <button class="inline-button" id="btn-export-all">⬇ Export All…</button>
             <span id="export-status" style="font-size:11px; color: var(--fg-muted);"></span>
           </div>
-          <span>Exports all recordings and their transcripts to a single file.</span>
+          <span>Exports all recordings and their transcripts to a single file (text only — no audio).</span>
+        </div>
+
+        <div class="settings-field">
+          <label>Back up library</label>
+          <div>
+            <button class="inline-button" id="btn-backup-zip">🗄 Back up to .zip…</button>
+            <span id="backup-status" style="font-size:11px; color: var(--fg-muted);"></span>
+          </div>
+          <span>A portable backup zip — the full catalog (<code>catalog.json</code>) plus every audio file under <code>audio/</code>. This is the same archive <code>phoneme export &lt;file&gt;</code> produces, so it can be restored later. Audio can make this large.</span>
         </div>
       </div>
     `;
@@ -183,6 +200,33 @@ export class SectionStorage {
           }
         } catch (e) {
           showToast(`Export failed: ${errText(e)}`, "error");
+          if (statusEl) statusEl.textContent = "";
+        }
+      });
+
+    // Whole-library backup zip — catalog + audio, the same artifact the CLI's
+    // `phoneme export <file>` produces. The heavy lifting (walking the audio
+    // dir, packing the wavs) happens backend-side; here we just pick the path.
+    container
+      .querySelector("#btn-backup-zip")
+      ?.addEventListener("click", async () => {
+        const statusEl = container.querySelector<HTMLElement>("#backup-status");
+        try {
+          const { save } = await import("@tauri-apps/plugin-dialog");
+          const dest = await save({
+            defaultPath: "phoneme-backup.zip",
+            filters: [{ name: "Zip archive", extensions: ["zip"] }, { name: "All files", extensions: ["*"] }],
+          });
+          if (!dest) {
+            if (statusEl) statusEl.textContent = "";
+            return;
+          }
+          if (statusEl) statusEl.textContent = "Backing up…";
+          const audioCount = await exportLibraryZip(dest);
+          showToast(`Library backed up (${audioCount} audio file${audioCount === 1 ? "" : "s"})`, "success");
+          if (statusEl) statusEl.textContent = `Backed up ${audioCount} audio file${audioCount === 1 ? "" : "s"}.`;
+        } catch (e) {
+          showToast(`Backup failed: ${errText(e)}`, "error");
           if (statusEl) statusEl.textContent = "";
         }
       });

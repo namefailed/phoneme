@@ -1,3 +1,13 @@
+//! `phoneme search <QUERY>` / `phoneme search --like <ID>` — semantic recall
+//! over the library.
+//!
+//! Observe-only: search is inspection. A text query sends `SemanticSearch`
+//! (hybrid embedding + FTS5 ranking); `--like` sends `MoreLikeThis` instead,
+//! using the recording's already-stored vectors as the query — no embedding
+//! happens, so it works even when the model isn't loaded. Both return the
+//! same `[{recording, score}]` shape, rendered as a relevance-scored list
+//! (clap enforces exactly one of query/--like). `--limit` caps results.
+
 use crate::args::SearchArgs;
 use crate::client::Client;
 use crate::output;

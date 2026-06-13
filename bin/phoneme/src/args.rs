@@ -1,4 +1,10 @@
-//! Clap definitions for every `phoneme` subcommand.
+//! Clap definitions for every `phoneme` subcommand and flag.
+//!
+//! This file is the single source of truth for the CLI surface — the
+//! doc-comments on the variants/fields below ARE the `--help` text, and
+//! `docs/developer-guide/cli_reference.md` is audited against it. Adding a
+//! command means: a variant here, a module under `commands/`, a dispatch arm
+//! in `main`, and a cli_reference entry (DOCS-ALWAYS).
 
 use clap::{Parser, Subcommand};
 
@@ -40,10 +46,14 @@ pub enum Command {
     Cleanup(CleanupArgs),
     /// Generate (or regenerate) an LLM summary of a recording.
     Summarize(SummarizeArgs),
+    /// Re-run the LLM tag-suggestion step on a recording on demand.
+    SuggestTags(SuggestTagsArgs),
     /// Get or set a recording's free-form notes.
     Notes(NotesArgs),
-    /// Replace a recording's transcript text (hand edit).
+    /// Edit a recording's transcript and/or metadata (title, favorite).
     Edit(EditArgs),
+    /// Rename or clear a recording's diarized speaker labels.
+    Speaker(SpeakerArgs),
     /// Semantic (embedding) search over transcripts.
     Search(SearchArgs),
     /// Clear all embeddings and re-embed the whole library with the current model.
@@ -95,6 +105,13 @@ pub struct RecordArgs {
     /// Discard the active recording without saving.
     #[arg(long, conflicts_with_all = ["start", "stop", "oneshot", "duration"])]
     pub cancel: bool,
+    /// Non-blocking: pause capture of the active recording (or every track of
+    /// the active meeting), exit 0.
+    #[arg(long, conflicts_with_all = ["start", "stop", "toggle", "cancel", "resume", "oneshot", "duration"])]
+    pub pause: bool,
+    /// Non-blocking: resume the paused recording/meeting, exit 0.
+    #[arg(long, conflicts_with_all = ["start", "stop", "toggle", "cancel", "pause", "oneshot", "duration"])]
+    pub resume: bool,
     /// In-place transcription: type the transcript into the focused window using simulated keystrokes.
     #[arg(long, short = 'i')]
     pub in_place: bool,
@@ -226,6 +243,40 @@ pub struct SummarizeArgs {
 }
 
 #[derive(Debug, clap::Args)]
+pub struct SuggestTagsArgs {
+    pub id: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct SpeakerArgs {
+    #[command(subcommand)]
+    pub action: SpeakerAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SpeakerAction {
+    /// Give a recording's diarized speaker label a custom display name. The
+    /// label is the 1-based `[Speaker N]` index from the transcript; the
+    /// stored transcript keeps its `[Speaker N]` markers, so a rename is
+    /// reversible.
+    Rename {
+        /// The recording whose speaker map to edit.
+        id: String,
+        /// The 1-based `[Speaker N]` index to rename.
+        label: i64,
+        /// The display name to show for that speaker.
+        name: String,
+    },
+    /// Clear a speaker label's custom name (revert to the default "Speaker N").
+    Clear {
+        /// The recording whose speaker map to edit.
+        id: String,
+        /// The 1-based `[Speaker N]` index to clear.
+        label: i64,
+    },
+}
+
+#[derive(Debug, clap::Args)]
 pub struct NotesArgs {
     pub id: String,
     /// Set the notes to this text. Without --set, the current notes are printed.
@@ -236,9 +287,26 @@ pub struct NotesArgs {
 #[derive(Debug, clap::Args)]
 pub struct EditArgs {
     pub id: String,
-    /// New transcript text. If omitted, the text is read from stdin.
+    /// New transcript text. With no metadata flag and no `--text`, the text is
+    /// read from stdin; when a metadata flag (`--title`/`--clear-title`/
+    /// `--favorite`/`--unfavorite`) is the only edit, the transcript is left
+    /// untouched.
     #[arg(long)]
     pub text: Option<String>,
+    /// Set a user-owned display title. The pipeline never overwrites a
+    /// user-set title on a later retranscribe.
+    #[arg(long, value_name = "TITLE", conflicts_with = "clear_title")]
+    pub title: Option<String>,
+    /// Clear the title back to auto-generation (it empties now and is
+    /// regenerated on the next pipeline run).
+    #[arg(long)]
+    pub clear_title: bool,
+    /// Star this recording (Favorites view).
+    #[arg(long, conflicts_with = "unfavorite")]
+    pub favorite: bool,
+    /// Unstar this recording.
+    #[arg(long)]
+    pub unfavorite: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -413,6 +481,21 @@ pub enum TagAction {
     /// List the tags attached to one recording.
     For {
         recording_id: String,
+    },
+    /// Review one recording's pending auto-tag suggestions: list them, or
+    /// approve/dismiss a suggestion by name (approving creates+attaches the
+    /// real tag, dismissing just drops the proposal).
+    Suggestions {
+        /// The recording whose suggestions to review.
+        recording_id: String,
+        /// Approve this suggested tag (create if needed, attach, drop the
+        /// suggestion). Case-insensitive name match.
+        #[arg(long, value_name = "NAME", conflicts_with = "dismiss")]
+        approve: Option<String>,
+        /// Dismiss this suggested tag (drop the proposal, attach nothing).
+        /// Case-insensitive name match.
+        #[arg(long, value_name = "NAME")]
+        dismiss: Option<String>,
     },
     /// Drop every pending auto-tag suggestion across the whole library.
     /// Approved tags are untouched; only not-yet-decided proposals go.

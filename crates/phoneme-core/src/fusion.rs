@@ -41,6 +41,16 @@ pub const RRF_K: f32 = 60.0;
 /// `weights`, if provided, scales each list's contribution (same length as
 /// `lists`); `None` weights every list equally. Weighting lets us, e.g., trust
 /// the semantic list a little more for paraphrase queries.
+///
+/// ```
+/// use phoneme_core::reciprocal_rank_fusion;
+/// // `b` is only mid-ranked in each list, but it appears in *both*, so the
+/// // fused ranking floats it to the top.
+/// let semantic = ["a", "b"];
+/// let lexical = ["c", "b"];
+/// let fused = reciprocal_rank_fusion(&[&semantic[..], &lexical[..]], None);
+/// assert_eq!(fused[0].0, "b");
+/// ```
 pub fn reciprocal_rank_fusion<K>(lists: &[&[K]], weights: Option<&[f32]>) -> Vec<(K, f32)>
 where
     K: Eq + Hash + Clone,

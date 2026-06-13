@@ -20,6 +20,17 @@ const COLUMN_CATALOG: { value: string; label: string }[] = [
   { value: "transcript", label: "Transcript Snippet" },
 ];
 
+/**
+ * Settings → Interface: the look-and-feel knobs under `config.interface` —
+ * theme, 24h time, titlebar stripping, vim navigation, animation speed, step
+ * notifications, quit semantics (`quit_stops_daemon`) — plus the recordings
+ * list's column layout: a drag-to-reorder, toggleable list driving
+ * `interface.visible_columns` (order = display order; see COLUMN_CATALOG),
+ * with a reset-to-defaults action. Also hosts the "Reset interface
+ * preferences" button that clears the per-device `phoneme.*` localStorage
+ * keys. Plain section class on the form.ts binding; consumers apply changes
+ * live off the `config:saved` event.
+ */
 export class SectionInterface {
   private container: HTMLElement;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

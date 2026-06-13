@@ -1,3 +1,11 @@
+//! `phoneme notes <ID> [--set TEXT]` — read or replace a recording's
+//! free-form notes (independent of the transcript; never touched by
+//! re-transcription).
+//!
+//! Spawning path (it can mutate). Without `--set`, fetches the recording
+//! (`GetRecording`) and prints the current notes; with `--set`, sends
+//! `UpdateNotes` (the daemon emits `NotesUpdated` for open GUI views).
+
 use crate::args::NotesArgs;
 use crate::client::Client;
 use crate::exit;

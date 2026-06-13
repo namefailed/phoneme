@@ -31,9 +31,15 @@ max_count = 5000       # keep only newest N (optional)
 delete_audio = false   # if true, drop WAV but keep catalog row searchable
 ```
 
-Phoneme can toast a **pre-deletion warning** ~24 hours before scheduled cleanup (if enabled in your version).
+Phoneme toasts a **pre-deletion warning** when recordings are about to enter
+the next 24-hour deletion window, so audio never vanishes without notice (at
+most one warning per day).
 
-Retention deletes **catalog rows and audio** together unless `delete_audio = true`.
+Retention deletes **catalog rows and audio** together unless `delete_audio = true`
+— set that to drop the WAV while keeping the transcript searchable (the same
+"keep the audio file" idea as a manual delete, applied automatically). Only
+finished recordings (done or failed) are ever cleaned up; anything still
+recording or processing is left alone.
 
 ## Backup strategy
 
@@ -56,7 +62,7 @@ Walks `audio_dir` and `inbox/done/` to reconstruct rows.
 
 ## Factory reset
 
-See [Troubleshooting](troubleshooting.md#-reset-to-factory-defaults). Audio in `audio_dir` is **not** deleted by default — only AppData state.
+See [Troubleshooting](troubleshooting.md#reset-to-factory-defaults). Audio in `audio_dir` is **not** deleted by default — only AppData state.
 
 ## Developer detail
 

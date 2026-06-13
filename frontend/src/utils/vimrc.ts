@@ -1,3 +1,13 @@
+/**
+ * Vim-mode plumbing shared by the transcript and notes editors (CodeMirror +
+ * @replit/codemirror-vim): global `:w`-family Ex commands, and a tiny .vimrc
+ * mapping parser so users can bring their own keybindings (`editor.vimrc` /
+ * `editor.vimrc_path` in config). Pure helpers — the editors own the
+ * CodeMirror instances and pass the Vim API in.
+ */
+
+/** The slice of the codemirror-vim `Vim` API that `applyVimrc` drives —
+ *  narrow on purpose so tests can pass a plain mock object. */
 export interface VimMock {
   noremap: (keys: string, target: string, ctx: string) => void;
   map: (keys: string, target: string, ctx: string) => void;
@@ -31,6 +41,14 @@ export function defineVimWrite(Vim: any) {
   }
 }
 
+/**
+ * Apply the map/noremap lines of a .vimrc to a Vim instance. Supported:
+ * `[n|i|v](nore)map <keys> <target>` — the mode prefix picks the context
+ * (none → normal), `nore` picks non-recursive. Everything else — comments
+ * (`"`), blank lines, `set` options, and any line with fewer than three
+ * fields — is silently skipped: this is a keybinding importer, not a vimrc
+ * interpreter, and an unsupported line must never break the editor.
+ */
 export function applyVimrc(vimrc: string, vimInstance: VimMock) {
   if (!vimrc) return;
   const lines = vimrc.split("\n");

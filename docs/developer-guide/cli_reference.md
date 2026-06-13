@@ -12,13 +12,40 @@ These apply to any subcommand:
 | `--no-color` | Disable colored output (or set `NO_COLOR=1`) |
 | `-v`, `--verbose` | Verbose tracing to stderr |
 
-The CLI auto-spawns the daemon when needed. **Read-only or inspection commands
-(`list`, `show`, `search`, `doctor`, `queue list/counts/status/skip`,
-`daemon status`, `watch`)** never start a daemon automatically — if the daemon
-is not running, they report that clearly and exit non-zero (`queue skip` joins
-them because only a live daemon mid-stage has anything to skip). Commands that
-create work (`record`, `import`, `retranscribe`, `cleanup`, `summarize`,
-`export --captions`, …) do auto-spawn.
+## 🚦 Spawn vs observe
+
+The CLI auto-spawns the daemon when needed — but only for commands that
+**create work**. Read-only / inspection commands never start a daemon: a
+daemon-is-down state is itself the answer for them, so they print
+`daemon not reachable` and exit with code 3 instead of silently starting one.
+
+| Behavior | Commands |
+|----------|----------|
+| **Auto-spawn** (start the daemon if it's not running, then send) | `record`, `meeting start/stop/toggle/rename`, `import`, `retranscribe`, `cleanup`, `summarize`, `notes`, `edit`, `reembed`, `refire-hook`, `delete`, `queue pause/resume/reorder/cancel/cancel-processing/cancel-all/clear-failed`, `tag add/update/delete/attach/detach/clear-suggestions/merge`, `profile use`, `hook test`, `export` (zip and `--captions`), `config reload`, `daemon start` |
+| **Observe-only** (fail fast with exit 3 when no daemon) | `list`, `show`, `search`, `watch`, `doctor`, `daemon status`, `queue list/counts/status`, `queue skip`*, `tag list/for/usage`, `meeting tracks`, `profile list` |
+| **Purely local** (no daemon involved at all) | `config` (print), `config path`, `config set`, `profile save`, `version` |
+
+\* `queue skip` mutates, but only a live daemon mid-LLM-stage has anything to
+skip — spawning one just to skip nothing would mask reality.
+
+`daemon stop` is its own special case: it stops a running daemon but never
+spawns one just to stop it (stopping an already-stopped daemon succeeds).
+
+## 🚪 Exit codes
+
+Exit codes are stable API — scripts can branch on them. Every command maps a
+daemon error to the same code via one shared table:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Generic failure (including internal daemon errors) |
+| `2` | Usage error (bad flags — clap's own) |
+| `3` | Daemon not reachable (also: pipe in use, daemon shutting down) |
+| `4` | Whisper backend unreachable or timed out |
+| `5` | Hook failed |
+| `6` | Invalid config (e.g. a rejected `config set` value) |
+| `7` | Recording / tag / path not found |
 
 ## ⚙️ Core Commands
 
@@ -48,9 +75,18 @@ phoneme record --start --in-place
 # Discard the active recording without saving.
 phoneme record --cancel
 
+# Non-blocking: pause / resume the active recording (or every track of the
+# active meeting). Exit 0.
+phoneme record --pause
+phoneme record --resume
+
 # Record exactly 10 seconds.
 phoneme record --duration 10
 ```
+
+`--pause` / `--resume` are non-blocking like `--start` / `--stop`: each sends a
+single request (`RecordPause` / `RecordResume`) and exits. They are mutually
+exclusive with each other and with the other mode flags.
 
 ### 👥 `phoneme meeting`
 
@@ -89,8 +125,9 @@ Query the local SQLite recording catalog.
 # List all recordings
 phoneme list
 
-# List recordings since a specific date
+# List recordings in a date range (ISO 8601, both bounds inclusive)
 phoneme list --since 2026-05-19
+phoneme list --since 2026-05-01 --until 2026-05-31
 
 # Filter by status: recording, transcribing, cleaning_up, summarizing,
 # tagging, hook_running, done, transcribe_failed, hook_failed, or cancelled
@@ -102,8 +139,15 @@ phoneme list --status cancelled
 phoneme list --limit 10
 phoneme list --limit 10 --offset 20
 
+# Filter by tag (numeric id or tag name)
+phoneme list --tag work
+
 # Full-Text Search via FTS5
 phoneme list --search "rust migration"
+
+# Semantic (embedding) search instead of an FTS5/list query — same engine as
+# `phoneme search`, reusing --limit (default 20) as the result cap
+phoneme list --semantic "database migration plan"
 
 # Filter by recording type: all (default), single (voice notes), or meeting.
 # Applied by the daemon in SQL, before --limit/--offset, so pages stay full.
@@ -175,15 +219,50 @@ phoneme summarize 20260519T143500823
 phoneme summarize 20260519T143500823 --model llama3.1
 ```
 
-### ✏️ `phoneme edit <ID>`
+### ✨ `phoneme suggest-tags <ID>`
 
-Replace a recording's transcript with a hand edit. The new text comes from
-`--text`, or from stdin if `--text` is omitted.
+Re-run the LLM tag-suggestion step on a recording on demand (the CLI face of the
+GUI ✨ Suggest button), regardless of the `auto_tag.auto` gate. The command
+awaits the model, then returns; the suggestions land on the recording. Review
+them with `phoneme tag suggestions <ID>`. Errors when the recording has no
+transcript yet (exit 6) or the id is unknown (exit 7).
 
 ```bash
+phoneme suggest-tags 20260519T143500823
+```
+
+### ✏️ `phoneme edit <ID>`
+
+Edit a recording's transcript and/or metadata. Any combination of the edits
+below applies in one invocation:
+
+- **Transcript** — `--text "…"`, or from stdin when no metadata flag and no
+  `--text` is given.
+- **Title** — `--title "…"` sets a user-owned title (the pipeline never
+  overwrites it on a later retranscribe); `--clear-title` (or `--title ""`)
+  reverts to auto-generation (the title empties now and regenerates on the next
+  pipeline run).
+- **Favorite** — `--favorite` / `--unfavorite` star or unstar the recording
+  (the Favorites view).
+
+```bash
+# Transcript edit (the original behavior): --text or stdin
 phoneme edit 20260519T143500823 --text "Corrected transcript."
 echo "Corrected transcript." | phoneme edit 20260519T143500823
+
+# Set or clear the display title
+phoneme edit 20260519T143500823 --title "Q3 Planning Sync"
+phoneme edit 20260519T143500823 --clear-title
+
+# Star / unstar
+phoneme edit 20260519T143500823 --favorite
+phoneme edit 20260519T143500823 --unfavorite
+
+# Combine: fix the text and set a title in one call
+phoneme edit 20260519T143500823 --text "Fixed." --title "Standup notes"
 ```
+
+A metadata-only edit (e.g. just `--favorite`) never blocks reading stdin.
 
 ### 🗒️ `phoneme notes <ID>`
 
@@ -196,6 +275,23 @@ phoneme notes 20260519T143500823
 # Set the notes
 phoneme notes 20260519T143500823 --set "Follow up with Alex."
 ```
+
+### 🎭 `phoneme speaker`
+
+Name a recording's diarized speaker labels (the CLI face of the GUI speaker
+chips). The `<LABEL>` is the 1-based `[Speaker N]` index from the transcript.
+The stored transcript keeps its canonical `[Speaker N]` markers — names are
+applied at display/export time — so a rename is reversible.
+
+```bash
+# Give [Speaker 2] a display name
+phoneme speaker rename 20260519T143500823 2 "Sarah"
+
+# Clear a speaker label's custom name (revert to "Speaker N")
+phoneme speaker clear 20260519T143500823 2
+```
+
+A label below 1 is rejected locally (exit 1) before any request is sent.
 
 ### 🔎 `phoneme search <QUERY>`
 
@@ -373,6 +469,15 @@ phoneme tag for 20260519T143500823
 # Show how many recordings each tag is attached to
 phoneme tag usage
 
+# Review one recording's pending auto-tag suggestions
+phoneme tag suggestions 20260519T143500823
+
+# Approve a suggestion (creates + attaches the real tag, drops the proposal)
+phoneme tag suggestions 20260519T143500823 --approve work
+
+# Dismiss a suggestion (drops the proposal, attaches nothing)
+phoneme tag suggestions 20260519T143500823 --dismiss spam
+
 # Drop every pending auto-tag suggestion across the whole library (approved
 # tags stay attached; only not-yet-decided proposals are discarded)
 phoneme tag clear-suggestions
@@ -389,9 +494,17 @@ Manage config profiles (named full-config snapshots).
 # List saved profiles
 phoneme profile list
 
+# Save the current config as a named profile snapshot
+phoneme profile save work_mode
+
 # Switch the active config to a saved profile and reload the daemon
 phoneme profile use work_mode
 ```
+
+`save` and `list` are purely local (they copy/read files under
+`%APPDATA%\phoneme\profiles\`); `use` overwrites the live `config.toml` with
+the snapshot and sends the daemon a reload. The GUI equivalent is
+**Settings → Managers → Profiles**.
 
 ### 🩺 `phoneme doctor`
 

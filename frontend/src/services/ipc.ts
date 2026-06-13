@@ -1,9 +1,32 @@
 /**
  * This module provides the frontend TypeScript boundary to the Tauri Rust backend.
  * It encapsulates the `invoke` calls into strictly typed async functions.
+ *
+ * Path of a call: a function here → Tauri `invoke("<command>")` → the tray's
+ * `#[tauri::command]` in src-tauri/src/commands.rs → BridgeSlot (the tray's
+ * pipe connection to the daemon) → the daemon's ipc_handler. The command
+ * names and payload shapes therefore mirror commands.rs, which in turn
+ * mirrors the wire schema in crates/phoneme-ipc/src/schema.rs.
+ *
+ * Error behavior: every function REJECTS on failure with the structured
+ * `{ kind, message }` command error (see utils/error.ts). Nothing here
+ * toasts — callers decide how to surface failures.
+ *
+ * House rules for adding a call: argument keys are camelCase (Tauri converts
+ * the top-level keys to the command's snake_case parameters — but NOT keys
+ * nested inside object values, so wire-shaped objects like `ListFilter` and
+ * `RerunAllOverrides` keep snake_case fields), and mutations that change
+ * catalog state come back to the UI as daemon events, not return values.
  */
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
+/**
+ * One catalog row, as the daemon serializes it (snake_case fields). The core
+ * identity/audio fields are always present; most enrichment fields are
+ * optional because older rows predate their features. `status` holds the
+ * pipeline state ("recording", "transcribing", …, "done", "transcribe_failed",
+ * "hook_failed", "cancelled" — see utils/format.ts `statusLabel`).
+ */
 export type Recording = {
   id: string;
   started_at: string;
@@ -58,8 +81,15 @@ export type Recording = {
  *  `speaker_label` is the 1-based index from a `[Speaker N]` marker. */
 export type SpeakerName = { speaker_label: number; name: string };
 
+/** How a recording started via `recordStart` decides to stop: "hold" = on the
+ *  explicit stop signal (Stop click / hotkey release), "oneshot" = by itself
+ *  on silence (or the max-duration ceiling), `duration:N` = after exactly N
+ *  seconds. See services/recordStopMode.ts for the UI-level mapping. */
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
 
+/** Server-side query filter for `listRecordings` (wire shape — snake_case
+ *  fields, applied in SQL before pagination). The UI builds it from the
+ *  richer `UiFilter` via `state/filter.ts` `toWireFilter`. */
 export type ListFilter = {
   limit?: number | null;
   /** Rows to skip before returning results (pagination; pairs with `limit`). */
@@ -88,6 +118,9 @@ export async function listRecordings(filter: ListFilter = {}): Promise<Recording
   return await tauriInvoke<Recording[]>("list_recordings", { filter });
 }
 
+/** Fetch one recording by id (rejects if it doesn't exist). The standard
+ *  "re-fetch on event" call: most `*_updated` daemon events carry only an id
+ *  and expect listeners to reload the row through here. */
 export async function getRecording(id: string): Promise<Recording> {
   return await tauriInvoke<Recording>("get_recording", { id });
 }
@@ -113,11 +146,18 @@ export async function getSegments(id: string): Promise<TranscriptSegment[]> {
   return await tauriInvoke<TranscriptSegment[]>("get_segments", { id });
 }
 
+/** One semantic-search hit: the recording plus its similarity score
+ *  (cosine-derived, 0..1, higher = more relevant). */
 export interface SemanticSearchResult {
   recording: Recording;
   score: number;
 }
 
+/** Meaning-based search: embed `query` and rank recordings by vector
+ *  similarity, best first. Needs the semantic index (the daemon embeds
+ *  transcripts as they complete); rejects when the embedding model is
+ *  unavailable. The header's ✨ toggle routes searches here instead of the
+ *  FTS path inside `listRecordings`. */
 export async function semanticSearch(query: string, limit: number = 20): Promise<SemanticSearchResult[]> {
   return await tauriInvoke<SemanticSearchResult[]>("semantic_search", { query, limit });
 }
@@ -162,22 +202,31 @@ export async function recordStart(mode: RecordMode): Promise<{ id: string }> {
   return await tauriInvoke<{ id: string }>("record_start", { mode });
 }
 
+/** Stop the active recording; it finalizes and enters the transcription
+ *  queue (`recording_stopped` fires, then the pipeline events follow). */
 export async function recordStop(): Promise<void> {
   await tauriInvoke("record_stop");
 }
 
+/** Pause the active recording's capture (a `recording_paused` event fires;
+ *  the audio file simply stops growing until resume). */
 export async function recordPause(): Promise<void> {
   await tauriInvoke("record_pause");
 }
 
+/** Resume a paused recording (`recording_resumed` fires). */
 export async function recordResume(): Promise<void> {
   await tauriInvoke("record_resume");
 }
 
+/** Set (or clear, with `null`) the display name of a meeting session. Shown
+ *  on the list's group header; the tracks themselves are untouched. */
 export async function updateMeetingName(meetingId: string, name: string | null): Promise<void> {
   await tauriInvoke("update_meeting_name", { meetingId, name });
 }
 
+/** Abort the active recording and DISCARD its audio — nothing is transcribed
+ *  and no catalog row survives (`recording_cancelled` fires). */
 export async function recordCancel(): Promise<void> {
   await tauriInvoke("record_cancel");
 }
@@ -212,6 +261,14 @@ export type RerunAllOverrides = {
   summary_prompt?: string | null;
 };
 
+/**
+ * Re-run the whole pipeline on a recording's stored audio. Each `null` means
+ * "use the configured default": `model` overrides the transcription model for
+ * this run, `runHooks`/`postProcess` force the hook / cleanup steps on or off,
+ * and `allOverrides` (Re-run → "All") additionally overrides the cleanup +
+ * summary settings one-time. Returns as soon as the job is queued — progress
+ * arrives as the normal pipeline events.
+ */
 export async function retranscribeRecording(
   id: string,
   model: string | null = null,
@@ -233,6 +290,10 @@ export async function importRecording(path: string): Promise<{ id: string }> {
 /** File extensions accepted by the import flow (no leading dot). */
 export const IMPORT_AUDIO_EXTENSIONS = ["wav", "mp3", "m4a", "flac"] as const;
 
+/** Re-run the post-transcription hook(s) for a recording without touching the
+ *  transcript. `command` overrides the configured hook command for this run
+ *  only; `null` re-fires the configured ones. `hook_started` / `hook_done` /
+ *  `hook_failed` events report the outcome. */
 export async function refireHook(id: string, command: string | null = null): Promise<void> {
   await tauriInvoke("refire_hook", { id, command });
 }
@@ -396,6 +457,35 @@ export async function setRecordingTitle(id: string, title: string | null): Promi
   await tauriInvoke("set_recording_title", { id, title });
 }
 
+/** Caption export formats `exportCaptions` understands (no leading dot). */
+export type CaptionFormat = "srt" | "vtt";
+
+/**
+ * Render a recording's machine segments as caption text in the chosen format
+ * ("srt" or "vtt"), returning the body for the caller to drop into a save
+ * dialog (the command writes no file — the dialog owns the destination). The
+ * format→content mapping lives in `phoneme_core::export`, so the GUI captions
+ * match `phoneme export --captions` byte for byte. Rejects with a `not_found`
+ * error carrying "no segments stored — retranscribe…" when the recording has
+ * no segments, so callers surface the same hint the CLI gives instead of
+ * saving an empty file.
+ */
+export async function exportCaptions(id: string, format: CaptionFormat): Promise<string> {
+  return await tauriInvoke<string>("export_captions", { id, format });
+}
+
+/**
+ * Write a portable backup of the whole library to `dest` (a `.zip` path picked
+ * via the save dialog). Mirrors `phoneme export <FILE>`: a `catalog.json`
+ * envelope (recordings + tags) plus every `.wav` under the audio dir packed
+ * into `audio/`. Distinct from Settings → Storage's plain JSON/CSV/TXT
+ * "Export All", which carries no audio. Returns the number of audio files
+ * packed.
+ */
+export async function exportLibraryZip(dest: string): Promise<number> {
+  return await tauriInvoke<number>("export_library_zip", { dest });
+}
+
 /** Skip the LLM step (cleanup / summary / tagging) currently running for the
  *  active queue item; the pipeline continues with the next step. */
 export async function skipCurrentStage(): Promise<void> {
@@ -414,7 +504,6 @@ export async function approveTagSuggestion(id: string, name: string): Promise<Ta
   return await tauriInvoke<Tag>("approve_tag_suggestion", { id, name });
 }
 
-/** Dismiss one suggested tag (drops it from the suggestion list). */
 /** Drop every pending tag suggestion across the whole library. Returns how
  *  many recordings had suggestions to clear. */
 export async function clearAllTagSuggestions(): Promise<number> {
@@ -422,6 +511,7 @@ export async function clearAllTagSuggestions(): Promise<number> {
   return res?.cleared ?? 0;
 }
 
+/** Dismiss one suggested tag (drops it from the suggestion list). */
 export async function dismissTagSuggestion(id: string, name: string): Promise<void> {
   await tauriInvoke("dismiss_tag_suggestion", { id, name });
 }
@@ -441,12 +531,21 @@ export async function setSpeakerName(
   await tauriInvoke("set_speaker_name", { id, speakerLabel, name });
 }
 
+/** Whether the daemon process is running, and its pid. Answered by the TRAY
+ *  (it owns the daemon process), so it works even when the daemon is down —
+ *  the Doctor surfaces use it as the "is anything alive" check. */
 export async function daemonStatus(): Promise<{ running: boolean; pid: number }> {
   return await tauriInvoke("daemon_status");
 }
 
+// ── Tags ─────────────────────────────────────────────────────────────────────
+// Every mutation below also broadcasts a `tag_*` daemon event, so tag surfaces
+// (sidebar, chips, Tag Manager) refresh themselves without explicit wiring.
+
+/** A catalog tag. `color` is a `#rrggbb` hex string or null (theme accent). */
 export type Tag = { id: number; name: string; color: string | null };
 
+/** Tags attached to at least one recording (what the sidebar lists). */
 export async function listTags(): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("list_tags");
 }
@@ -456,26 +555,32 @@ export async function listAllTags(): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("list_all_tags");
 }
 
+/** Create a tag (name must be unique; rejects on a duplicate). Returns it. */
 export async function addTag(name: string, color?: string): Promise<Tag> {
   return await tauriInvoke<Tag>("add_tag", { name, color: color ?? null });
 }
 
+/** Rename / recolor a tag. The change shows everywhere it's attached. */
 export async function updateTag(id: number, name: string, color?: string | null): Promise<Tag> {
   return await tauriInvoke<Tag>("update_tag", { id, name, color: color ?? null });
 }
 
+/** Delete a tag everywhere — it detaches from every recording it was on. */
 export async function deleteTag(id: number): Promise<void> {
   await tauriInvoke("delete_tag", { id });
 }
 
+/** Attach an existing tag to a recording (idempotent). */
 export async function attachTag(recordingId: string, tagId: number): Promise<void> {
   await tauriInvoke("attach_tag", { recordingId, tagId });
 }
 
+/** Detach a tag from a recording (the tag itself survives, even unused). */
 export async function detachTag(recordingId: string, tagId: number): Promise<void> {
   await tauriInvoke("detach_tag", { recordingId, tagId });
 }
 
+/** The tags attached to one recording. */
 export async function tagsFor(recordingId: string): Promise<Tag[]> {
   return await tauriInvoke<Tag[]>("tags_for", { recordingId });
 }

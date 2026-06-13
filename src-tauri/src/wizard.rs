@@ -1,4 +1,14 @@
-//! Wizard-only backend helpers.
+//! Wizard-only backend helpers — connection tests for the first-run wizard
+//! and the Settings "test" buttons.
+//!
+//! Two probes, both returning the WebView-friendly [`TestConnectResult`]
+//! `{ok, message}` instead of an error type: `test_whisper_endpoint` GETs an
+//! external whisper URL (any HTTP answer, even 4xx, proves something is
+//! listening and speaking HTTP), and `test_hook` runs `HookTest` through the
+//! daemon bridge so the command executes with the daemon's environment and
+//! redaction, not the tray's. The wizard's download commands live in
+//! `commands` (they need the Tauri app handle) with their integrity pins in
+//! `checksums`.
 
 use crate::bridge::Bridge;
 use phoneme_ipc::{Request, Response};
