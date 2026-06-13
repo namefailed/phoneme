@@ -34,6 +34,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 /// One stored embedding vector, deserialized once and held in memory: the
@@ -99,13 +100,26 @@ struct EmbeddingCorpus {
 /// - **Shared across clones.** The cache sits behind `Arc<RwLock<…>>`, so the
 ///   derived `Clone` (the daemon hands clones to its workers) shares one cache
 ///   and one set of invalidations rather than diverging per clone.
+/// - **Lost-invalidation safe.** A miss snapshots a generation counter before it
+///   reads from SQLite; an `invalidate_embedding_cache` racing between that read
+///   and the store bumps the counter under the cache lock, so the store sees the
+///   bump and declines to cache — the racing writer's view wins instead of being
+///   clobbered by a snapshot taken before the write committed.
 #[derive(Debug, Clone)]
 pub struct Catalog {
     pool: SqlitePool,
     /// The decoded embedding corpus, or `None` when nothing is cached yet (cold,
-    /// invalidated, or over the cache cap). Shared across clones; see the
-    /// type-level "Embedding cache" notes.
-    embedding_cache: Arc<RwLock<Option<EmbeddingCorpus>>>,
+    /// invalidated, or over the cache cap). Held behind an `Arc` so a warm hit
+    /// returns the snapshot by cloning the `Arc` (O(1)) instead of deep-copying
+    /// every vector. Shared across clones; see the type-level "Embedding cache"
+    /// notes.
+    embedding_cache: Arc<RwLock<Option<Arc<EmbeddingCorpus>>>>,
+    /// Monotonic generation bumped on every embedding-cache invalidation. A
+    /// corpus rebuild snapshots this before its SQL reads and, under the cache
+    /// write lock at store time, only caches the snapshot when the generation is
+    /// unchanged — so an invalidation that races the rebuild can't be lost. See
+    /// the "Lost-invalidation safe" note above.
+    embedding_cache_gen: Arc<AtomicU64>,
 }
 
 /// Upper bound on how many vectors the in-memory embedding cache will hold.
@@ -174,6 +188,7 @@ impl Catalog {
         Ok(Self {
             pool,
             embedding_cache: Arc::new(RwLock::new(None)),
+            embedding_cache_gen: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -181,30 +196,52 @@ impl Catalog {
     /// mutates a stored vector so the next search rebuilds from SQLite. A
     /// poisoned lock is recovered (cleared) rather than propagated: failing to
     /// invalidate is the dangerous outcome (stale rankings), so we always clear.
+    ///
+    /// The generation counter is bumped *while holding the cache write lock* so
+    /// it is ordered with respect to a racing `embedding_corpus` store: that
+    /// store snapshots the generation before its SQL reads and re-checks it under
+    /// this same lock before caching, so an invalidation that lands between the
+    /// snapshot's read and its store is observed (the bump) and the store backs
+    /// off — the writer's invalidation can't be silently clobbered.
     fn invalidate_embedding_cache(&self) {
         match self.embedding_cache.write() {
-            Ok(mut guard) => *guard = None,
-            Err(poisoned) => *poisoned.into_inner() = None,
+            Ok(mut guard) => {
+                self.embedding_cache_gen.fetch_add(1, Ordering::Release);
+                *guard = None;
+            }
+            Err(poisoned) => {
+                self.embedding_cache_gen.fetch_add(1, Ordering::Release);
+                *poisoned.into_inner() = None;
+            }
         }
     }
 
     /// The decoded embedding corpus, loaded once and held until the next write
     /// invalidates it.
     ///
-    /// On a hit, returns a clone of the cached corpus (the vectors themselves are
-    /// behind an `Arc`-shared lock, but the ranking loops consume them by
-    /// reference, so a clone of the snapshot is a shallow copy of the `Vec`
-    /// headers + their contents — cheap relative to re-decoding from disk). On a
+    /// On a hit, returns the cached snapshot by cloning its `Arc` (O(1) — no deep
+    /// copy of the vectors). The ranking loops consume the corpus by reference,
+    /// so the shared `Arc<EmbeddingCorpus>` serves them all without copying. On a
     /// miss, reads both embedding tables, decodes every BLOB once, and caches the
     /// result unless it exceeds [`MAX_CACHED_VECTORS`] (in which case the corpus
-    /// is returned but not stored, bounding memory).
-    async fn embedding_corpus(&self) -> Result<EmbeddingCorpus> {
-        // Fast path: a warm snapshot. Read lock only.
+    /// is returned but not stored, bounding memory) — or unless an invalidation
+    /// raced the rebuild, in which case the freshly-read snapshot is returned but
+    /// the slot is left cold so the racing writer's view wins (see the generation
+    /// guard below).
+    async fn embedding_corpus(&self) -> Result<Arc<EmbeddingCorpus>> {
+        // Fast path: a warm snapshot. Read lock only; clone the Arc (O(1)).
         if let Ok(guard) = self.embedding_cache.read() {
             if let Some(corpus) = guard.as_ref() {
                 return Ok(corpus.clone());
             }
         }
+
+        // Snapshot the generation BEFORE the SQL reads. If an invalidation runs
+        // while we read+decode below, it bumps this counter (under the cache
+        // write lock), and the store step sees the mismatch and declines to
+        // cache — so a vector changed mid-rebuild can't be masked by a snapshot
+        // taken before that change committed.
+        let gen_at_miss = self.embedding_cache_gen.load(Ordering::Acquire);
 
         // Miss: rebuild from SQLite. Decode happens outside any lock.
         let chunk_rows = sqlx::query(
@@ -229,21 +266,33 @@ impl Catalog {
             legacy.push(row_to_cached_vector(&row)?);
         }
 
-        let corpus = EmbeddingCorpus { chunks, legacy };
-
-        // Store unless the corpus is over the cap — large libraries stay
-        // uncached so memory can't grow without bound. An invalidation may have
-        // raced in between the read miss and here; that's fine — we overwrite
-        // with a fresh, consistent snapshot read after that write committed, and
-        // any write *after* this store will invalidate again.
-        if Self::cap_allows_caching(corpus.chunks.len() + corpus.legacy.len()) {
-            match self.embedding_cache.write() {
-                Ok(mut guard) => *guard = Some(corpus.clone()),
-                Err(poisoned) => *poisoned.into_inner() = Some(corpus.clone()),
-            }
-        }
-
+        let corpus = Arc::new(EmbeddingCorpus { chunks, legacy });
+        self.store_corpus_if_current(corpus.clone(), gen_at_miss);
         Ok(corpus)
+    }
+
+    /// Cache `corpus` under the write lock, but ONLY when the generation still
+    /// matches `gen_at_miss` (the value snapshotted before the rebuild's SQL
+    /// reads) and the corpus is under [`MAX_CACHED_VECTORS`].
+    ///
+    /// This is the store half of the lost-invalidation guard: holding the write
+    /// lock here orders the generation re-read against `invalidate_embedding_cache`
+    /// (which bumps the generation under the same lock), so an invalidation that
+    /// raced the rebuild is observed as a mismatch and the slot is left cold —
+    /// the racing writer's view wins instead of being clobbered by a snapshot
+    /// taken before its write committed.
+    fn store_corpus_if_current(&self, corpus: Arc<EmbeddingCorpus>, gen_at_miss: u64) {
+        // Large libraries stay uncached so memory can't grow without bound.
+        if !Self::cap_allows_caching(corpus.chunks.len() + corpus.legacy.len()) {
+            return;
+        }
+        let mut guard = match self.embedding_cache.write() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if self.embedding_cache_gen.load(Ordering::Acquire) == gen_at_miss {
+            *guard = Some(corpus);
+        }
     }
 
     /// Whether a corpus of `total_vectors` is small enough to cache in memory.
@@ -2692,6 +2741,78 @@ mod tests {
             db.cached_vector_count(),
             None,
             "delete invalidates the snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn rebuild_does_not_clobber_an_invalidation_that_raced_it() {
+        // The lost-invalidation TOCTOU: `embedding_corpus` snapshots the
+        // generation BEFORE its SQL reads and only caches when the generation is
+        // unchanged at store time. If `invalidate_embedding_cache` (a racing
+        // embedding write) lands between the snapshot and the store, the store
+        // MUST leave the slot cold so the writer's fresh data wins — otherwise a
+        // pre-write snapshot would be cached and search would go stale.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+
+        // Simulate the race exactly: take the gen snapshot a rebuild would take,
+        // then let an invalidation land before the store.
+        let gen_at_miss = db.embedding_cache_gen.load(Ordering::Acquire);
+        let raced_corpus = Arc::new(EmbeddingCorpus {
+            chunks: vec![CachedVector {
+                id: a.id.as_str().to_string(),
+                meeting_id: None,
+                vector: Some(vec![1.0, 0.0, 0.0]),
+            }],
+            legacy: vec![],
+        });
+        db.invalidate_embedding_cache(); // the racing write bumps the generation
+        db.store_corpus_if_current(raced_corpus, gen_at_miss);
+        assert_eq!(
+            db.cached_vector_count(),
+            None,
+            "a snapshot taken before a racing invalidation must NOT be cached"
+        );
+
+        // Control: with no racing invalidation, the same store DOES cache (so the
+        // guard isn't just refusing to ever cache).
+        let gen_now = db.embedding_cache_gen.load(Ordering::Acquire);
+        let fresh_corpus = Arc::new(EmbeddingCorpus {
+            chunks: vec![CachedVector {
+                id: a.id.as_str().to_string(),
+                meeting_id: None,
+                vector: Some(vec![1.0, 0.0, 0.0]),
+            }],
+            legacy: vec![],
+        });
+        db.store_corpus_if_current(fresh_corpus, gen_now);
+        assert_eq!(
+            db.cached_vector_count(),
+            Some(1),
+            "an uncontested store caches the snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn warm_cache_hit_shares_the_same_corpus_arc() {
+        // Fix 2: a warm hit returns the SAME Arc (O(1) clone), not a deep copy of
+        // every vector. Two reads with no intervening write must hand back Arcs
+        // that point at one allocation.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        let first = db.embedding_corpus().await.unwrap(); // miss → caches
+        let second = db.embedding_corpus().await.unwrap(); // warm hit
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a warm hit must clone the Arc, not deep-copy the corpus"
         );
     }
 

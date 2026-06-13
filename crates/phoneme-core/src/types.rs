@@ -66,13 +66,36 @@ impl RecordingStatus {
         }
     }
 
+    /// Every terminal status — `Done`, the two failures, and `Cancelled` — in a
+    /// fixed order. The single source of truth that [`Self::is_terminal`] and
+    /// [`Self::terminal_sql_list`] both derive from, so a new terminal variant
+    /// can't be added to one without the others following.
+    pub const TERMINAL: &'static [RecordingStatus] = &[
+        Self::Done,
+        Self::TranscribeFailed,
+        Self::HookFailed,
+        Self::Cancelled,
+    ];
+
     /// Whether this is an end state — `Done`, the two failures, or `Cancelled`.
     /// A terminal recording will not advance further on its own.
     pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Done | Self::TranscribeFailed | Self::HookFailed | Self::Cancelled
-        )
+        Self::TERMINAL.contains(self)
+    }
+
+    /// The terminal statuses as a SQL `IN`-list literal, e.g.
+    /// `'done','transcribe_failed','hook_failed','cancelled'`.
+    ///
+    /// Built from [`Self::TERMINAL`] via each variant's stable [`Self::as_str`],
+    /// so the retention queries can't drift out of sync with the enum when a new
+    /// terminal status is added. The values are enum-controlled (never
+    /// user-supplied), so interpolating them into a query is injection-safe.
+    pub fn terminal_sql_list() -> String {
+        Self::TERMINAL
+            .iter()
+            .map(|s| format!("'{}'", s.as_str()))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
