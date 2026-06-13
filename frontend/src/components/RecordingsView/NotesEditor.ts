@@ -30,6 +30,9 @@ export class NotesEditor {
   private vimCurrentMode = "NORMAL";
   private vimBadgeElement: HTMLElement | null = null;
   private saveBtn: HTMLButtonElement | null = null;
+  /** Copy button — a sibling of Save in the header row, shown only when clean
+   *  (so it's never beside / overlapping Save Changes). */
+  private copyBtn: HTMLButtonElement | null = null;
   private onDirtyChange?: (dirty: boolean) => void;
   private vimSaveHandler = () => {
     if (this.view?.hasFocus) void this.save();
@@ -53,6 +56,26 @@ export class NotesEditor {
    *  the notes-box Copy button so it copies what the user sees. */
   getText(): string {
     return this.current;
+  }
+
+  /** Copy the notes to the clipboard and flash a ✓ on the Copy button. */
+  private async copyNotes(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.current);
+      if (this.copyBtn) {
+        this.copyBtn.textContent = "✅";
+        this.copyBtn.style.color = "var(--ok)";
+        this.copyBtn.style.borderColor = "var(--ok)";
+        window.setTimeout(() => {
+          if (!this.copyBtn) return;
+          this.copyBtn.textContent = "📋";
+          this.copyBtn.style.color = "var(--fg-muted)";
+          this.copyBtn.style.borderColor = "var(--border-subtle)";
+        }, 1500);
+      }
+    } catch (e) {
+      showToast(`Clipboard copy failed: ${errText(e)}`, "error");
+    }
   }
 
   private async init() {
@@ -91,6 +114,7 @@ export class NotesEditor {
             : ""
         }
         <span style="flex: 1;"></span>
+        <button id="notes-copy-btn" title="Copy the notes to the clipboard" aria-label="Copy notes" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; font-size: 13px; line-height: 1; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-elevated); color: var(--fg-muted); cursor: pointer;">📋</button>
         <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">Save Changes</button>
       </div>
       <div id="notes-cm-root" class="notes-cm-root"></div>
@@ -102,6 +126,8 @@ export class NotesEditor {
     this.vimBadgeElement = this.container.querySelector<HTMLElement>("#notes-vim-badge");
     this.saveBtn = this.container.querySelector<HTMLButtonElement>("#notes-save-btn");
     this.saveBtn?.addEventListener("click", () => void this.save());
+    this.copyBtn = this.container.querySelector<HTMLButtonElement>("#notes-copy-btn");
+    this.copyBtn?.addEventListener("click", () => void this.copyNotes());
 
     const theme = EditorView.theme({
       "&": {
@@ -203,9 +229,12 @@ export class NotesEditor {
     }
   }
 
-  /** Show the "Save Changes" button only when there are unsaved edits. */
+  /** Show "Save Changes" only when there are unsaved edits; the Copy button is
+   *  its inverse — visible only when clean, so the two never sit side by side. */
   private updateSaveBtn() {
-    if (this.saveBtn) this.saveBtn.style.display = this.current !== this.lastSaved ? "" : "none";
+    const dirty = this.current !== this.lastSaved;
+    if (this.saveBtn) this.saveBtn.style.display = dirty ? "" : "none";
+    if (this.copyBtn) this.copyBtn.style.display = dirty ? "none" : "inline-flex";
   }
 
   async save() {

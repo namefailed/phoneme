@@ -36,10 +36,15 @@ export class TranscriptEditorElement extends LitElement {
   /** Whether this transcript was manually edited before (the catalog's
    *  `user_edited` flag) — surfaced as an "Edited" badge next to Save. */
   @property({ type: Boolean }) userEdited = false;
+  /** Transform applied to the editor text before copying (the host uses it to
+   *  bake in custom speaker names). Identity when unset. */
+  @property({ attribute: false }) copyTransform?: (text: string) => string;
 
   @state() private currentText = "";
   @state() private vimMode = false;
   @state() private vimCurrentMode = "NORMAL";
+  /** Brief ✓ flash on the Copy button right after a successful copy. */
+  @state() private copied = false;
 
   @query('#cm-editor-root') editorRoot!: HTMLElement;
 
@@ -257,6 +262,20 @@ export class TranscriptEditorElement extends LitElement {
     }
   }
 
+  /** Copy the transcript (with the host's transform — speaker names — applied)
+   *  and flash a ✓. The button is only shown when clean, so this never fights
+   *  the Save Changes button. */
+  private async requestCopy() {
+    const text = this.copyTransform ? this.copyTransform(this.currentText) : this.currentText;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.copied = true;
+      window.setTimeout(() => { this.copied = false; }, 1500);
+    } catch (e) {
+      showToast(`Clipboard copy failed: ${errText(e)}`, "error");
+    }
+  }
+
   render() {
     return html`
       <style>
@@ -311,6 +330,32 @@ export class TranscriptEditorElement extends LitElement {
           cursor: pointer;
           font-weight: bold;
         }
+        /* Copy lives in this row (a sibling of Save / Edited), not an overlay,
+           so it never collides with them. Subtle until hovered. */
+        ph-transcript-editor .btn-copy {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 26px;
+          height: 24px;
+          padding: 0;
+          font-size: 13px;
+          line-height: 1;
+          border: 1px solid var(--border-subtle);
+          border-radius: 4px;
+          background: var(--bg-elevated);
+          color: var(--fg-muted);
+          cursor: pointer;
+          transition: color 0.15s ease, border-color 0.15s ease;
+        }
+        ph-transcript-editor .btn-copy:hover {
+          color: var(--accent);
+          border-color: var(--accent);
+        }
+        ph-transcript-editor .btn-copy.copied {
+          color: var(--ok);
+          border-color: var(--ok);
+        }
         /* "Edited" status badge — same footprint as Save, but a non-interactive
            accent-tinted pill so it reads as a marker, not an action. */
         ph-transcript-editor .edited-badge {
@@ -328,6 +373,14 @@ export class TranscriptEditorElement extends LitElement {
           Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
         <div class="header-actions">
+          ${this.isDirty()
+            ? ""
+            : html`<button
+                class="btn-copy ${this.copied ? "copied" : ""}"
+                title="Copy the transcript to the clipboard"
+                aria-label="Copy transcript"
+                @click=${this.requestCopy}
+              >${this.copied ? "✅" : "📋"}</button>`}
           ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
           <button class="btn-save" style="display: ${this.isDirty() ? 'inline-flex' : 'none'};" @click=${this.save}>Save Changes</button>
         </div>
@@ -349,11 +402,13 @@ export class TranscriptEditor {
     initial: string,
     onDirtyChange: (dirty: boolean) => void,
     userEdited = false,
+    copyTransform?: (text: string) => string,
   ) {
     this.element = document.createElement('ph-transcript-editor') as TranscriptEditorElement;
     this.element.recordingId = id;
     this.element.initialText = initial;
     this.element.userEdited = userEdited;
+    this.element.copyTransform = copyTransform;
     this.element.addEventListener('dirty-change', (e: Event) => {
       onDirtyChange((e as CustomEvent<boolean>).detail);
     });

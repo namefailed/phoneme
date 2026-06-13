@@ -211,11 +211,12 @@ trust boundary. Verified against current code.*
   write permission for an arbitrary save-dialog path. The merged-meeting Export
   was on the same broken path and is fixed too.
 - [x] **Detail-pane action row tidied.** ✨ Similar moved up into the recording's
-  title bar (beside fullscreen/close); **Copy** became a small button tucked into
-  the transcript box's top-right corner (it copies the transcript, so it lives on
-  it — it lights up when you hover the button, flashes a ✓ on copy, and hides
-  itself while there are unsaved edits so it never collides with the editor's
-  Save Changes button). The **notes box** gained the same Copy button. 🗑 **Delete**
+  title bar (beside fullscreen/close); **Copy** is a 📋 button that lives in the
+  transcript editor's header button row — a sibling of the ✓ Edited badge and
+  Save Changes, not an overlay — so it never collides with them; it shows only
+  when the transcript is saved (hidden while editing) and flashes a ✓ on copy.
+  The **notes box** gained the same header Copy button (same show-when-clean
+  rule). 🗑 **Delete**
   sits last in the action row (Play · Re-run… · Export ▾ · Delete), styled as the
   destructive action. The header meta line is reordered to **status → date/time →
   duration → source**, and the source is now just its 🎤/🔊 icon (full name on
