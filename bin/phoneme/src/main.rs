@@ -41,6 +41,14 @@ async fn main() -> Result<ExitCode> {
             .init();
     }
 
+    // `completions` is a pure local generator (clap_complete): it needs neither
+    // config nor the daemon, and is typically run at install time before a valid
+    // config exists. Handle it here, before load_config(), so a missing or
+    // malformed config.toml can never block shell-completion generation.
+    if let Command::Completions(args) = cli.command {
+        return Ok(commands::completions::run(args));
+    }
+
     let cfg = load_config()?;
     let exit_code = dispatch(cli, &cfg).await;
     Ok(exit_code)

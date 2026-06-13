@@ -1,11 +1,13 @@
 //! `phoneme completions <SHELL>` — print a shell-completion script to stdout.
 //!
-//! Pure local generation: this is the one subcommand that never loads config
-//! or touches the daemon. It hands clap's own [`Command`](clap::Command) tree
-//! to `clap_complete::generate`, so the emitted script always matches the
-//! current CLI surface (every subcommand and flag in `args`). Pipe the output
-//! into your shell's completion directory — see the cli_reference for the
-//! per-shell install one-liners.
+//! Pure local generation: completions need neither config nor the daemon, so
+//! `main()` dispatches this subcommand *before* loading `config.toml` — a
+//! missing or malformed config can't block generating completions at install
+//! time. It hands clap's own [`Command`](clap::Command) tree to
+//! `clap_complete::generate`, so the emitted script always matches the current
+//! CLI surface (every subcommand and flag in `args`). Pipe the output into your
+//! shell's completion directory — see the cli_reference for the per-shell
+//! install one-liners.
 
 use crate::args::{Cli, CompletionsArgs};
 use clap::CommandFactory;
