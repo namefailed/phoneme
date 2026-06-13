@@ -28,11 +28,14 @@ export function formatDuration(ms: number): string {
 
 /**
  * Returns the CSS class for a recording status pill.
- * Maps the 6 backend statuses to the 3 visual states: done / failed / pending.
+ * Maps the backend statuses to 4 visual states: done / failed / cancelled /
+ * pending. Cancelled gets its own neutral pill — the user chose it, so the
+ * red "failed" treatment would be a lie.
  */
-export function statusToClass(status: string): "done" | "failed" | "pending" {
+export function statusToClass(status: string): "done" | "failed" | "cancelled" | "pending" {
   if (status === "done") return "done";
   if (status === "transcribe_failed" || status === "hook_failed") return "failed";
+  if (status === "cancelled") return "cancelled";
   return "pending";
 }
 
@@ -54,6 +57,7 @@ export function statusLabel(status: string): string {
     case "summarizing":       return "Summarizing";
     case "tagging":           return "Tagging";
     case "hook_running":      return "Hook Running";
+    case "cancelled":         return "Cancelled";
     default:                  return status;
   }
 }

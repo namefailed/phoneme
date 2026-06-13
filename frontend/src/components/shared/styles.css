@@ -152,6 +152,8 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
 .status-pill.done    { background: rgba(166,227,161,0.15); color: var(--ok); }
 .status-pill.failed  { background: rgba(243,139,168,0.15); color: var(--err); }
 .status-pill.pending { background: rgba(249,226,175,0.15); color: var(--warn); }
+/* Cancelled is the user's own action, not an error — a quiet neutral pill. */
+.status-pill.cancelled { background: rgba(147,153,178,0.15); color: var(--fg-muted); }
 .status-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--fg-muted);
@@ -159,6 +161,7 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
 .status-dot.done    { background: var(--ok); }
 .status-dot.failed  { background: var(--err); }
 .status-dot.pending { background: var(--warn); }
+.status-dot.cancelled { background: var(--fg-muted); }
 
 select {
   appearance: none;

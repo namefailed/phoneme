@@ -10,9 +10,10 @@ import type { ListFilter } from "../services/ipc";
  *  starred (favorites). */
 export type RecordingKind = "all" | "single" | "meeting" | "favorite";
 
-export type UiFilter = ListFilter & {
+export type UiFilter = Omit<ListFilter, "kind" | "favorite"> & {
   semantic?: boolean;
-  /** UI-only: filter the list by recording type (client-side, on meeting_id). */
+  /** Library type-filter as the UI models it (one dropdown of four choices).
+   *  `toWireFilter` maps it onto the daemon's `kind` / `favorite` fields. */
   kind?: RecordingKind;
   /** UI-only "More like this" mode: when set, the list shows recordings
    *  semantically similar to this recording (by its stored vectors) instead
@@ -24,6 +25,29 @@ export type UiFilter = ListFilter & {
 };
 
 export const filterStore = new Store<UiFilter>({});
+
+/**
+ * Translate the UI filter into the daemon's wire `ListFilter`: drop the
+ * UI-only state (semantic toggle, like-mode) and map the four-way Library
+ * `kind` onto the server-side `kind` / `favorite` fields, so the daemon
+ * filters in SQL *before* pagination. Filtering client-side after pagination
+ * made pages of the chosen kind come back mostly (or entirely) empty.
+ */
+export function toWireFilter(f: UiFilter): ListFilter {
+  const wire: ListFilter = {
+    limit: f.limit,
+    offset: f.offset,
+    since: f.since,
+    until: f.until,
+    status: f.status,
+    search: f.search,
+    tag_id: f.tag_id,
+    sort_desc: f.sort_desc,
+  };
+  if (f.kind === "single" || f.kind === "meeting") wire.kind = f.kind;
+  else if (f.kind === "favorite") wire.favorite = true;
+  return wire;
+}
 
 /**
  * Switch the recordings list into "More like this" mode for one recording:

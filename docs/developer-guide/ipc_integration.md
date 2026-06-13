@@ -61,6 +61,21 @@ list is the `Request` enum in `crates/phoneme-ipc/src/schema.rs`.
 - `update_transcript`, `update_notes`, `update_meeting_name`
 - `get_original_transcript` (raw machine transcript), `get_clean_transcript` (cleaned, pre-edit)
 
+The `list_recordings` filter takes `limit`/`offset` (pagination),
+`since`/`until` (RFC 3339), `status` (one of the recording statuses below),
+`search` (FTS5), `tag_id`, `sort_desc`, plus two type filters applied in SQL
+**before** pagination so pages stay full: `kind` (`"single"` voice notes /
+`"meeting"` tracks; omit for all) and `favorite` (`true` = starred only,
+`false` = unstarred only). All fields are optional; older clients that omit
+the newer ones keep working.
+
+Recording `status` values: `recording`, `paused`, `transcribing`,
+`cleaning_up`, `summarizing`, `tagging`, `hook_running`, `done`,
+`transcribe_failed`, `hook_failed`, and `cancelled`. `cancelled` is terminal
+like the failed pair but means the **user** stopped the run (`cancel_queued`,
+`cancel_all_queued`, or `cancel_processing`) — clients should never render it
+as a failure.
+
 **Re-processing** (one-time overrides, never persisted to config):
 - `retranscribe_recording` (optional `model`, `run_hooks`, `post_process`)
 - `rerun_cleanup` (re-runs only LLM cleanup against the preserved original; optional `model`/`provider`/`prompt`/`api_url`/`api_key`)

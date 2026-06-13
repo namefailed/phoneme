@@ -26,7 +26,9 @@ pub async fn run(args: DaemonArgs, cfg: &Config, json: bool) -> ExitCode {
         },
         DaemonAction::Stop => stop(cfg).await,
         DaemonAction::Status => {
-            let mut client = match Client::connect(cfg).await {
+            // Observe-only: if the daemon isn't running, "not reachable" is
+            // the correct answer — no point spawning one just to ask its status.
+            let mut client = match Client::connect_observe(cfg).await {
                 Ok(c) => c,
                 Err(code) => return code,
             };
@@ -75,14 +77,46 @@ async fn stop(cfg: &Config) -> ExitCode {
     // The daemon replies before it exits (finalizing any in-flight recording
     // and reaping its children on the way) — poll until the pipe vanishes so
     // "stopped" means stopped, not merely "asked".
-    let deadline = std::time::Instant::now() + STOP_WAIT;
-    while std::time::Instant::now() < deadline {
-        if NamedPipeTransport::connect(pipe_name).await.is_err() {
-            println!("daemon stopped");
-            return ExitCode::SUCCESS;
-        }
-        tokio::time::sleep(Duration::from_millis(150)).await;
+    if wait_for_pipe_death(pipe_name, STOP_WAIT).await {
+        println!("daemon stopped");
+        return ExitCode::SUCCESS;
     }
     println!("shutdown requested (daemon is still winding down)");
     ExitCode::SUCCESS
+}
+
+/// Poll until the daemon's pipe stops accepting connections, bounded by
+/// `timeout`. Returns `true` once the pipe is gone (the daemon has exited),
+/// `false` if it is still answering at the deadline. Shared by `daemon stop`
+/// and `doctor --rebuild-catalog`, which must not touch the catalog files
+/// while the daemon still holds them.
+pub(crate) async fn wait_for_pipe_death(pipe_name: &str, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if NamedPipeTransport::connect(pipe_name).await.is_err() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With no daemon listening, the wait reports "gone" on the first probe —
+    /// well inside the timeout — so callers like `doctor --rebuild-catalog`
+    /// never stall on an already-stopped daemon.
+    #[tokio::test]
+    async fn wait_for_pipe_death_returns_immediately_when_no_pipe_exists() {
+        let started = std::time::Instant::now();
+        let gone =
+            wait_for_pipe_death("phoneme-test-no-such-pipe-m18", Duration::from_secs(5)).await;
+        assert!(gone, "a non-existent pipe counts as dead");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the first failed probe should settle it, not the timeout"
+        );
+    }
 }

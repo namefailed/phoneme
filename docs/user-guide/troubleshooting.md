@@ -85,6 +85,13 @@ recording:
 restarting) never land here — the queue retries those automatically, as
 described above.
 
+Cancelling is not failing: a recording you cancel yourself (removed from the
+queue, or aborted mid-transcription) is marked **Cancelled** — a quiet, gray
+status of its own. It never appears in this panel and never lights the failed
+badge's red. Cancelled recordings stay in the library (find them with the
+status filter's **Cancelled** entry) and can be re-run any time via
+**Re-transcribe**.
+
 ## 🔌 Something else is using port 5809
 
 You don't have to free the port. `whisper.bundled_server_port` (and the

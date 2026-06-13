@@ -102,6 +102,85 @@ trust boundary. Verified against current code.*
   Settings/wizard "Test" probe — dials the effective port. The preview's
   choice can never collide with the main server's
   (`whisper_supervisor.rs`, `app_state.rs`).
+- [x] **Audit wave C hardening** — five reliability fixes from the code audit:
+  - *WAV atomic write* — recordings are written to a `.tmp` sibling and renamed
+    into place; a crash mid-write never leaves a corrupt WAV at the final path
+    (also handles Windows rename semantics correctly).
+  - *IPC accept backoff* — repeated `accept()` failures on the named-pipe
+    listener now back off exponentially (up to 4 s) instead of looping
+    immediately, preventing a busy-spin during transient handle exhaustion.
+  - *Config reload by mtime* — the queue worker compares the config file's
+    modification time before parsing it; unchanged files skip the TOML parse
+    entirely. The diarizer-cache invalidation hook still fires on real disk
+    changes.
+  - *No-spawn read-only commands* — `list`, `show`, `search`, `doctor`, `queue
+    list/counts/status`, `daemon status`, and `watch` no longer silently start
+    the daemon when it isn't running; they report "daemon not reachable" and
+    exit non-zero, making the daemon's state visible instead of masking it.
+  - *Idempotent crash recovery* — if the daemon crashes in the window between
+    writing `done/<id>.json` and removing `processing/<id>.json`, startup
+    recovery now detects the done+processing pair and drops the stale
+    processing file instead of re-queuing the already-completed item.
+- [x] **Audit wave — status semantics, filters, config tooling, perf** — six
+  fixes from the code audit:
+  - *A real `Cancelled` status* — cancelling a queued or in-flight recording
+    now marks it `cancelled` (its own quiet gray pill, a status-filter entry,
+    CLI rendering) instead of borrowing `transcribe_failed`; cancelled
+    recordings never appear in the failed panel or count as failures, and
+    retention treats them as terminal like done/failed. Wire/DB string is
+    `"cancelled"`; the string status column needs no migration.
+  - *Server-side kind/favorite filtering* — `ListFilter` gained `kind`
+    (`single`/`meeting`) and `favorite` flags applied in SQL before
+    LIMIT/OFFSET; the GUI Library filter and `phoneme list --kind` ride them,
+    so Favorites/Meetings pages deep into a large library come back full
+    instead of mostly empty (the old client-side post-pagination filter
+    remains only as a fallback for older daemons).
+  - *`config set` honors `PHONEME_CONFIG`, validates, writes atomically* — it
+    now writes the same file the daemon resolves (env override first), runs
+    the full `Config::validate()` parse-back before touching disk (a bad value
+    can no longer brick the config), and replaces the file via tmp+rename.
+  - *`doctor --rebuild-catalog` no longer races the daemon's shutdown* — it
+    waits (bounded, 15s) for the daemon's pipe to actually vanish before
+    deleting `catalog.db` (now including the `-wal`/`-shm` sidecars), and
+    refuses to touch the files if the daemon won't exit.
+  - *Embedding backfill no longer blocks config reloads* — the startup chunk
+    -embedding backfill and the `ReembedAll` sweep re-acquire the embedder
+    read lock per item instead of holding it across the whole loop, so a
+    Settings save mid-backfill applies immediately instead of waiting minutes.
+  - *`ipc_handler` deduplicated* — the repeated error/ok/not-found response
+    shapes are factored into three helpers (`err_response`, `not_found`,
+    `ok_null`), byte-identical on the wire, dropping ~8 KB of boilerplate.
+- [x] **Audit wave — capture + daemon correctness** — six fixes from the code
+  audit:
+  - *Loopback gap filling runs on the audio clock* — the silence inserted to
+    keep a meeting's system track continuous is now sized against what the
+    device actually delivered (counted at the capture callback) instead of
+    wall-clock elapsed vs. processed samples; CPU load that delays the audio
+    worker can no longer read as a fake gap and stuff extra silence into the
+    track (which ran it long and desynced the meeting).
+  - *Every device sample format captures* — recording used to support only
+    f32/i16 devices; all formats cpal can report (i8/i16/i32/i64, u8/u16/u32/
+    u64, f32/f64) now convert through one lossless path, and a truly unknown
+    format fails with an error naming the format and the device instead of a
+    generic refusal.
+  - *Meeting stop finalizes tracks independently* — one track failing to
+    write/enqueue no longer abandons the other mid-stop: each track is
+    finalized on its own, failures land on the normal `transcribe_failed`
+    path, and only a meeting where *every* track failed reports an error.
+  - *Status IPC no longer stalls behind stop* — `record stop`/`cancel` release
+    the active-recording lock before tearing down the live-preview loop, so a
+    preview stuck in a slow transcription tick can't freeze every
+    status/pause/cancel request for its duration.
+  - *Doctor restarts cancel the whisper backoff* — a restart request that
+    arrived while a supervisor was sleeping out its crash backoff (up to 60 s)
+    was silently lost; the backoff now listens and respawns immediately (both
+    the main and preview server loops, and shutdown cancels the wait too).
+  - *Version-mismatch restart spares in-flight work* — the tray no longer
+    bounces an older-version daemon that is mid-recording or mid-transcription
+    (the restart killed the capture); it proceeds against the old daemon and
+    the upgrade happens at the next idle start. The CLI's blocking `record`
+    also subscribes to events *before* sending stop, so a fast transcription
+    finishing in that gap can't leave it hanging to timeout.
 - [x] **Pinned download checksums (S-H7)** — every wizard artifact (whisper GGML
   weights, the semantic model + tokenizer, the whisper-server zip) is verified
   against a pinned SHA-256 before use; the zip is checked before extraction,

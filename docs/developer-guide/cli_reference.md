@@ -12,7 +12,12 @@ These apply to any subcommand:
 | `--no-color` | Disable colored output (or set `NO_COLOR=1`) |
 | `-v`, `--verbose` | Verbose tracing to stderr |
 
-The CLI auto-spawns the daemon if it isn't already running.
+The CLI auto-spawns the daemon when needed. **Read-only or inspection commands
+(`list`, `show`, `search`, `doctor`, `queue list/counts/status`, `daemon status`,
+`watch`)** never start a daemon automatically — if the daemon is not running,
+they report that clearly and exit non-zero. Commands that create work (`record`,
+`import`, `retranscribe`, `cleanup`, `summarize`, `export --captions`, …) do
+auto-spawn.
 
 ## ⚙️ Core Commands
 
@@ -86,8 +91,11 @@ phoneme list
 # List recordings since a specific date
 phoneme list --since 2026-05-19
 
-# Filter by status (e.g., Recording, Transcribing, Done, Failed)
-phoneme list --status Done
+# Filter by status: recording, transcribing, cleaning_up, summarizing,
+# tagging, hook_running, done, transcribe_failed, hook_failed, or cancelled
+# (a run the user cancelled — terminal, but not a failure)
+phoneme list --status done
+phoneme list --status cancelled
 
 # Limit the number of results returned (with optional offset for pagination)
 phoneme list --limit 10
@@ -96,7 +104,8 @@ phoneme list --limit 10 --offset 20
 # Full-Text Search via FTS5
 phoneme list --search "rust migration"
 
-# Filter by recording type: all (default), single (voice notes), or meeting
+# Filter by recording type: all (default), single (voice notes), or meeting.
+# Applied by the daemon in SQL, before --limit/--offset, so pages stay full.
 phoneme list --kind meeting
 ```
 
@@ -411,7 +420,10 @@ phoneme doctor
 # and respawn them from config, then re-probes and reports the fresh results.
 phoneme doctor --fix
 
-# Force the catalog to rebuild itself from orphan files on disk
+# Force the catalog to rebuild itself from orphan files on disk. Asks a
+# running daemon to shut down and WAITS (up to 15s) for it to actually exit
+# before deleting catalog.db (plus its -wal/-shm sidecars) — if the daemon
+# won't die in time, the command fails and leaves the catalog untouched.
 phoneme doctor --rebuild-catalog
 ```
 
@@ -438,6 +450,20 @@ phoneme config set whisper.mode external
 # changes (hotkeys, models, …) without restarting.
 phoneme config reload
 ```
+
+`config set` semantics:
+
+- **It writes the file the daemon actually reads** — the `PHONEME_CONFIG`
+  override when that env var is set, otherwise the per-user default
+  (`config path` prints the default; the override wins everywhere).
+- **The full updated config is validated first.** A value with the wrong type
+  for its field, or one that fails the same `validate()` the daemon runs on
+  load (e.g. an out-of-range `recording.sample_rate`), is rejected with exit
+  code for invalid config and **nothing is written** — `config set` can never
+  produce a file the daemon refuses to load.
+- **The write is atomic**: the new content lands in a `.toml.tmp` sibling and
+  is renamed over the real file, so a crash mid-write leaves the previous
+  config intact rather than a truncated half-file.
 
 > The config is **validated automatically** when the daemon loads or reloads it; an invalid file is rejected with an error. There is no separate `config validate` subcommand.
 

@@ -47,6 +47,10 @@ describe("statusToClass", () => {
     expect(statusToClass("hook_failed")).toBe("failed");
   });
 
+  it("maps 'cancelled' to its own neutral class — never 'failed'", () => {
+    expect(statusToClass("cancelled")).toBe("cancelled");
+  });
+
   it("maps all in-progress statuses to 'pending'", () => {
     expect(statusToClass("recording")).toBe("pending");
     expect(statusToClass("transcribing")).toBe("pending");
@@ -72,6 +76,7 @@ describe("statusLabel", () => {
     expect(statusLabel("tagging")).toBe("Tagging");
     expect(statusLabel("transcribing")).toBe("Transcribing");
     expect(statusLabel("hook_running")).toBe("Hook Running");
+    expect(statusLabel("cancelled")).toBe("Cancelled");
   });
 
   it("returns the raw string for unknown statuses (passthrough)", () => {

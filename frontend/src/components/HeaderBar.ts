@@ -670,6 +670,7 @@ export class HeaderBarElement extends LitElement {
           <option value="done" ?selected=${f.status === "done"}>Done</option>
           <option value="transcribe_failed" ?selected=${f.status === "transcribe_failed"}>Transcription Failed</option>
           <option value="hook_failed" ?selected=${f.status === "hook_failed"}>Hook Failed</option>
+          <option value="cancelled" ?selected=${f.status === "cancelled"}>Cancelled</option>
         </select>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
           <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;"

@@ -784,23 +784,19 @@ async fn maybe_auto_tag(state: &AppState, cfg: &Config, id: &RecordingId, transc
 }
 
 /// Finalize an in-flight item canceled by the user: move the inbox file out of
-/// `processing/`, mark the recording terminal, and emit the cancel events.
+/// `processing/`, mark the recording `Cancelled`, and emit the cancel events.
 /// Best-effort — logs (but doesn't propagate) errors so a cancel always settles.
-/// (Uses TranscribeFailed for parity with the pending-queue cancel until a
-/// dedicated Canceled status lands.)
+/// `Cancelled` is terminal like the failed states, but it is the user's own
+/// action — it never shows up as a failure in the list or the failed panel.
 async fn finalize_canceled(state: &AppState, id: &RecordingId) {
     if let Err(e) = state
         .catalog
-        .update_status(id, RecordingStatus::TranscribeFailed)
+        .update_status(id, RecordingStatus::Cancelled)
         .await
     {
         tracing::warn!(error = %e, "cancel: failed to set status");
     }
-    if let Err(e) = state
-        .inbox
-        .finish_failed(id, "canceled", "canceled by user")
-        .await
-    {
+    if let Err(e) = state.inbox.finish_cancelled(id).await {
         tracing::warn!(error = %e, "cancel: failed to move inbox item out of processing");
     }
     state.events.emit(DaemonEvent::PipelineStageChanged {

@@ -4,7 +4,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { listRecordings, semanticSearch, moreLikeThis, updateMeetingName, setFavorite, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
-import { filterStore, type RecordingKind } from "../../state/filter";
+import { filterStore, toWireFilter, type RecordingKind } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
 import { formatDay } from "../../utils/date";
 import {
@@ -176,10 +176,12 @@ export class RecordingsListElement extends LitElement {
   }
 
   /**
-   * Client-side Library type-filter. Single recordings have no `meeting_id`;
-   * meeting tracks have one. NOTE: applied after pagination, so with very large
-   * libraries a page may contain few of the chosen kind (acceptable for typical
-   * use; a server-side filter is the follow-up if needed).
+   * Client-side Library type-filter — a FALLBACK only. The kind/favorite
+   * choice rides in the wire filter (`toWireFilter`) and is applied in SQL
+   * before pagination; this re-filter is a no-op on those already-filtered
+   * pages. It still does real work for an older daemon that ignores the
+   * filter fields, and for the semantic/like result paths, which don't go
+   * through `listRecordings` at all.
    */
   private filterByKind(rows: Recording[], kind?: RecordingKind): Recording[] {
     if (!kind || kind === "all") return rows;
@@ -230,7 +232,9 @@ export class RecordingsListElement extends LitElement {
         for (const r of results) this.relevanceById.set(r.recording.id, r.score);
         this.reachedEnd = true;
       } else {
-        rows = await listRecordings({ ...f, limit: this.pageSize, offset: 0 });
+        // The kind/favorite filter goes server-side (SQL, pre-pagination) so
+        // every page is full of the chosen kind — see toWireFilter.
+        rows = await listRecordings({ ...toWireFilter(f), limit: this.pageSize, offset: 0 });
         this.reachedEnd = rows.length < this.pageSize;
       }
       rows = this.filterByKind(rows, f.kind);
@@ -253,7 +257,7 @@ export class RecordingsListElement extends LitElement {
       const f = filterStore.get();
       const nextOffset = this.offset + this.pageSize;
       const rows = this.filterByKind(
-        await listRecordings({ ...f, limit: this.pageSize, offset: nextOffset }),
+        await listRecordings({ ...toWireFilter(f), limit: this.pageSize, offset: nextOffset }),
         f.kind,
       );
       this.offset = nextOffset;
@@ -1018,6 +1022,7 @@ function truncatedError(r: Recording): string {
   if (r.error_message) return `(${r.error_message})`;
   if (r.status === "transcribe_failed") return "(transcription failed)";
   if (r.status === "hook_failed") return "(hook failed)";
+  if (r.status === "cancelled") return "(cancelled)";
   return "(processing…)";
 }
 

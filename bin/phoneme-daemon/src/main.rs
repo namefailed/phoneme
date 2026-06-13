@@ -62,31 +62,46 @@ async fn main() -> Result<()> {
     // without the user re-recording or re-transcribing anything.
     let retroactive_state = state.clone();
     tokio::spawn(async move {
-        let embedder_guard = retroactive_state.embedder.read().await;
-        if let Some(embedder) = embedder_guard.as_ref() {
-            if let Ok(records) = retroactive_state
-                .catalog
-                .list_recordings_without_chunk_embeddings()
-                .await
-            {
-                if !records.is_empty() {
-                    tracing::info!(
-                        "Found {} recordings without chunk embeddings, (re-)embedding...",
-                        records.len()
-                    );
-                    for r in records {
-                        if let Some(transcript) = r.transcript.as_ref() {
-                            pipeline::embed_and_store(
-                                embedder,
-                                &retroactive_state.catalog,
-                                &r.id,
-                                transcript,
-                            )
-                            .await;
-                        }
-                    }
-                    tracing::info!("Finished backfilling chunk embeddings.");
+        // No embedder loaded → nothing to backfill (semantic search off or the
+        // model failed to load); same silent no-op as before.
+        if retroactive_state.embedder.read().await.is_none() {
+            return;
+        }
+        if let Ok(records) = retroactive_state
+            .catalog
+            .list_recordings_without_chunk_embeddings()
+            .await
+        {
+            if !records.is_empty() {
+                tracing::info!(
+                    "Found {} recordings without chunk embeddings, (re-)embedding...",
+                    records.len()
+                );
+                for r in records {
+                    let Some(transcript) = r.transcript.as_ref() else {
+                        continue;
+                    };
+                    // Re-acquire the embedder PER ITEM rather than holding the
+                    // read guard across the whole loop: a large-library backfill
+                    // runs for minutes, and config reloads need the write lock —
+                    // clone the Arc and drop the guard so writers interleave
+                    // between items. If the embedder is gone mid-backfill (the
+                    // user turned semantic search off), stop — the same
+                    // exit-when-unloaded behavior the up-front check gave.
+                    let embedder = retroactive_state.embedder.read().await.as_ref().cloned();
+                    let Some(embedder) = embedder else {
+                        tracing::info!("backfill stopped: embedding model unloaded");
+                        return;
+                    };
+                    pipeline::embed_and_store(
+                        &embedder,
+                        &retroactive_state.catalog,
+                        &r.id,
+                        transcript,
+                    )
+                    .await;
                 }
+                tracing::info!("Finished backfilling chunk embeddings.");
             }
         }
     });
