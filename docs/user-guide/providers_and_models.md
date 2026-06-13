@@ -1,20 +1,57 @@
 # 🔌 Providers & Models
 
-Phoneme is built around an **independent provider system**. Four different jobs
-each pick their *own* provider and model:
+Phoneme is built around an **independent provider system**. Each job below
+picks its *own* provider and model:
 
 | Job | What it does | Config section |
 |-----|--------------|----------------|
 | **Transcription** | Turns audio into text (the final transcript) | `[whisper]` |
 | **Live Preview** | Low-latency partial text while you record | `[preview_whisper]` |
+| **Dictation** | The transcribe-in-place fast lane's own STT | `[in_place]` |
 | **Cleanup** | LLM that polishes the transcript | `[llm_post_process]` |
 | **Summary** | LLM that summarizes the transcript | `[summary]` |
+| **Auto-Tag** | LLM that suggests tags for the transcript | `[auto_tag]` |
+| **Title** | Optional LLM that names the recording | `[title]` |
 
 That means you can, for example, transcribe locally with whisper.cpp, preview
 with Groq for speed, clean up with a local Ollama model, and summarize with
-Claude — all at once. Each is optional except transcription.
+Claude — all at once. Only transcription is required; the rest are optional,
+and the LLM steps (Summary, Auto-Tag, Title) reuse your Cleanup connection
+until you give them one of their own.
 
 ---
+
+## The unified connection picker
+
+Every place you choose a provider — Cleanup, Summary, Auto-Tag, Title,
+Transcription, Live Preview, Dictation, and the header Models modal — uses the
+**same connection block**, so once you learn one you know them all. It is a
+single control with up to four parts:
+
+- **A provider dropdown** grouped by where the provider runs: **On this
+  computer** (local servers — whisper.cpp, Ollama, LM Studio, Jan, llama.cpp),
+  **Cloud** (OpenAI, Anthropic, Groq, …), and **Advanced** (the
+  "Custom (OpenAI-compatible)" escape hatch for any endpoint that isn't named).
+  You pick the brand you know — no protocol jargon. A one-line hint under the
+  dropdown explains the choice (e.g. "Cloud — needs an API key; audio is sent
+  to OpenAI and billed to your account").
+- **An API-key row that appears only when the provider needs one.** Local
+  servers show no key row at all. Cloud providers show a password field plus a
+  **Get a key ↗** link straight to that provider's key page.
+- **A Test button** that proves the connection inline before you save: for
+  providers with a model-list endpoint it fetches the list and reports
+  "Connected — N models"; for the local whisper server it probes the running
+  server; providers without a cheap probe (Deepgram, AssemblyAI, ElevenLabs)
+  show a short "no quick test — your key is used on the next run" note instead
+  of a button that could only fail. (A saved key arrives hidden, so the Test
+  button asks you to re-enter it to test it.)
+- **An Advanced disclosure** that tucks the endpoint URL out of the way — you
+  only open it to point a provider at a proxy or a self-hosted gateway.
+
+The Summary, Auto-Tag, and Title pickers add one extra option at the top of the
+dropdown: **"Same as Post-Processing"**. Choosing it blanks that step's own
+connection so it rides your Cleanup provider — the inherit anchor. Pick a real
+provider instead and the step gets its own connection.
 
 ## The unified model field
 
@@ -72,10 +109,10 @@ Curated lists:
 
 | Provider | Models |
 |----------|--------|
-| OpenAI | `whisper-1`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` |
-| Groq | `whisper-large-v3`, `whisper-large-v3-turbo`, `distil-whisper-large-v3-en` |
+| OpenAI | `gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, `whisper-1` |
+| Groq | `whisper-large-v3-turbo`, `whisper-large-v3` |
 | Deepgram | `nova-3`, `nova-2`, `enhanced`, `base` |
-| AssemblyAI | `best`, `nano` |
+| AssemblyAI | `best`, `nano`, `slam-1` |
 | ElevenLabs | `scribe_v1` |
 
 ---

@@ -230,8 +230,13 @@ If the tray app was launched while the daemon was already down (rare — usually
 
 **Why:** The tray process keeps a single IPC connection established at launch. When no daemon was available at launch, the connection was never established, and Tauri's state is immutable once the app starts. The daemon *is* running after Fix — other commands will reconnect automatically. Close the main window (tray stays alive) and click the tray icon to reopen it.
 
+## Reset to factory defaults
+
 > [!CAUTION]
-> **Reset to factory defaults**
+> This wipes every setting and your whole transcript catalog. Audio files in
+> your `audio_dir` are left untouched, but the recordings list is rebuilt from
+> scratch.
+>
 > ```powershell
 > Stop-Process -Name phoneme-daemon -ErrorAction SilentlyContinue
 > Remove-Item -Recurse "$env:APPDATA\phoneme"
