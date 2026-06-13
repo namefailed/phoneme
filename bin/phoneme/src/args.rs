@@ -1,4 +1,10 @@
-//! Clap definitions for every `phoneme` subcommand.
+//! Clap definitions for every `phoneme` subcommand and flag.
+//!
+//! This file is the single source of truth for the CLI surface — the
+//! doc-comments on the variants/fields below ARE the `--help` text, and
+//! `docs/developer-guide/cli_reference.md` is audited against it. Adding a
+//! command means: a variant here, a module under `commands/`, a dispatch arm
+//! in `main`, and a cli_reference entry (DOCS-ALWAYS).
 
 use clap::{Parser, Subcommand};
 

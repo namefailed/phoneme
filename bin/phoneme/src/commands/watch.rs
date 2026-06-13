@@ -1,3 +1,11 @@
+//! `phoneme watch` — tail the daemon's event stream as JSON lines.
+//!
+//! Observe-only: there is nothing to watch without a running daemon. Sends
+//! `SubscribeEvents` and prints every `DaemonEvent` verbatim, one JSON
+//! object per line, until the stream closes — the scripting counterpart of
+//! the GUI's live updates (pipe through `jq` to filter). Exits 3 when the
+//! daemon goes away mid-stream.
+
 use crate::client::Client;
 use crate::exit;
 use futures::StreamExt;

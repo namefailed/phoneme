@@ -1,4 +1,38 @@
-//! Tauri commands — frontend invokes these via `invoke("…")`.
+//! Tauri commands — the WebView's entire `invoke("…")` surface.
+//!
+//! Three families live here:
+//! - **Daemon forwards** — most commands are one `forward()` call: map the
+//!   WebView's arguments onto a `phoneme_ipc::Request`, send it over the
+//!   `BridgeSlot` (which lazily reconnects/auto-spawns when empty, A2-H3),
+//!   and return the daemon's JSON value as-is. Errors come back as a
+//!   structured [`CommandError`] `{kind, message}` whose `kind` is the
+//!   IPC error kind's wire string, so the frontend branches the same way
+//!   for every command. WebView-supplied recording ids are validated here
+//!   (`parse_id`) before they can reach the daemon's fixed-offset
+//!   accessors.
+//! - **Local config/profile/window commands** — `read_config`/`write_config`
+//!   and the profile commands work on config.toml directly, plus hotkey
+//!   re-registration and window-state saving.
+//! - **Wizard helpers** — checksum-pinned downloads, dependency detection,
+//!   and connection tests (see `wizard` and `checksums`).
+//!
+//! ## Secret masking (S-H2)
+//!
+//! API keys never enter the WebView. `read_config` serializes the config
+//! and replaces every non-empty `api_key` (whisper, llm_post_process,
+//! summary, auto_tag, title, preview_whisper, and the nested
+//! `in_place.stt`) with the `__phoneme_secret_kept__` sentinel;
+//! `write_config` restores any field still holding the sentinel from the
+//! on-disk config before validating and saving, so an unchanged key
+//! round-trips without ever leaving the Rust side — and saving can never
+//! clobber a real key with the mask. The frontend mirrors the sentinel
+//! constant. Commands that accept per-run key overrides resolve the
+//! sentinel the same way (e.g. the cleanup re-run maps a masked key back
+//! to the configured one).
+//!
+//! `write_config` also applies side effects after saving: registry Run-key
+//! for start-at-login, `ReloadConfig` to the daemon, hotkey
+//! re-registration, and overlay create/destroy.
 
 use crate::bridge::BridgeSlot;
 use crate::config_io;

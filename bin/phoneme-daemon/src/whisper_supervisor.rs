@@ -1,4 +1,38 @@
-//! whisper-server supervisor — spawns and monitors the bundled binary.
+//! whisper-server supervisor — keeps the bundled STT server(s) alive so the
+//! pipeline and the live preview always have something local to dial.
+//!
+//! Two independent loops: [`run`] supervises the main (final-transcription)
+//! server from `[whisper]`, and [`run_preview`] a second, thread-capped
+//! server from `[preview_whisper]` when the preview needs its own (otherwise
+//! it idles). Each loop spawns the binary, then watches four wake sources at
+//! once: child exit (respawn with 2 s → 60 s backoff, reset after a healthy
+//! minute), a spec change poll (model/port/mode differs from what the child
+//! was spawned with), an explicit `whisper_restart` notify (the Doctor's
+//! "Fix" — the only path that heals a HUNG server), and shutdown. Even the
+//! crash backoff itself is cancellable by restart/shutdown so a Doctor fix
+//! is never lost to a sleeping supervisor.
+//!
+//! Invariants owned here:
+//! - **Effective ports** — the configured port is a preference. A pre-flight
+//!   probe routes around a foreign squatter to a free OS-assigned port,
+//!   excluding the sibling server's published + configured ports so the two
+//!   can never collide; the choice is published to
+//!   `AppState::whisper_ports` BEFORE the spawn (so the sibling's probe sees
+//!   it mid-restart) and cleared whenever the server is down. Consumers
+//!   resolve effective-or-configured right where they build providers.
+//! - **One-job model overrides** — the spawn uses `effective_model_path`
+//!   (override-if-set, else config), and the spec-change check compares the
+//!   same effective value, which is what makes a model-override
+//!   re-transcription exactly one restart-to-override plus one restore (#49)
+//!   instead of a config-mutation thrash.
+//! - **Job membership** — every spawned child is assigned to the daemon's
+//!   kill-on-close job object, so the kernel reaps it even when the daemon
+//!   dies uncleanly; [`sweep_stray_servers`] additionally kills every
+//!   whisper-server on the box (ours by definition) to free squatted ports
+//!   and hung orphans before a respawn.
+//! - **No pipe wedging** — the child's stdout/stderr are discarded; a
+//!   piped-but-undrained child blocks once the OS buffer fills and silently
+//!   hangs transcription (audit A2-H1).
 
 use crate::app_state::AppState;
 use crate::shutdown::ShutdownSignal;

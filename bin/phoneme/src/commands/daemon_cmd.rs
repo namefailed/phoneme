@@ -1,3 +1,18 @@
+//! `phoneme daemon start|stop|status` — daemon lifecycle control.
+//!
+//! `start` runs `auto_spawn::ensure_running` (spawn detached + poll, with
+//! the version handshake that replaces a stale daemon). `status` is
+//! observe-only — `DaemonStatus` against a running daemon, or exit 3 with a
+//! clear message; no point spawning a daemon to ask if it's running. With
+//! no subcommand, defaults to `status`.
+//!
+//! `stop` connects DIRECTLY (never through `Client::connect`, whose
+//! auto-spawn would briefly start a daemon just to stop it), sends
+//! `Shutdown`, and then polls until the pipe actually vanishes — the daemon
+//! ACKs before finalizing in-flight recordings and reaping children, so
+//! "stopped" must mean gone, not merely asked. Stopping an already-stopped
+//! daemon is a success.
+
 use crate::args::{DaemonAction, DaemonArgs};
 use crate::auto_spawn;
 use crate::client::Client;

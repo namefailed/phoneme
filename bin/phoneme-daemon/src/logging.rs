@@ -1,9 +1,18 @@
 //! Tracing/logging configuration for the daemon.
 //!
-//! - Foreground mode: pretty logs to stderr.
+//! Called once from `main`, right after `AppState` resolves the log dir.
+//! The daemon normally runs detached with no console, so the log file is
+//! the only window into it (`%LOCALAPPDATA%\phoneme\logs\` — the path the
+//! tray's error messages point users at).
+//!
+//! - Foreground mode (`--foreground`): pretty logs to stderr.
 //! - Background (default): JSON lines to `<log_dir>/daemon.log.YYYY-MM-DD`,
 //!   rotated DAILY (tracing-appender has no size-based rotation), with old
 //!   days pruned down to `daemon.log_max_files` at startup.
+//!
+//! The level comes from `daemon.log_level` unless `RUST_LOG` overrides it;
+//! the returned guard must live for the whole process or buffered lines are
+//! lost on exit.
 
 use phoneme_core::Config;
 use std::path::Path;

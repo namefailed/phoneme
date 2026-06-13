@@ -1,3 +1,11 @@
+//! `phoneme edit <ID> [--text …]` — replace a recording's transcript with
+//! hand-edited text (read from `--text`, else stdin — pipe-friendly:
+//! `fix-typos < old.txt | phoneme edit <id>`).
+//!
+//! Spawning path. Sends `UpdateTranscript`; the daemon preserves the
+//! original/unedited copies, re-embeds the new text for semantic search,
+//! and emits `TranscriptUpdated`.
+
 use crate::args::EditArgs;
 use crate::client::Client;
 use crate::exit;

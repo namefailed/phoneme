@@ -1,8 +1,28 @@
-//! Queue worker — drains inbox/pending serially.
+//! Queue worker — the link between the durable inbox and the pipeline. One
+//! task, claiming strictly one item at a time, so transcription is serial by
+//! construction (the bundled whisper-server handles one request well, many
+//! poorly).
 //!
-//! Loop: claim_next → pipeline::run → emit QueueDepthChanged. On
-//! transient failure (WhisperUnreachable, WhisperTimeout) sleep with exponential
-//! backoff and retry.
+//! Loop: respect the user's pause flag → `inbox.claim_next()` → publish the
+//! in-flight id + a fresh cancellation token in `state.processing` (what
+//! `CancelProcessing` cancels) → `pipeline::run` → clear the slot → emit
+//! `QueueDepthChanged`.
+//!
+//! Failure policy owned here:
+//! - **Transient** STT failures (unreachable / timeout) requeue the SAME
+//!   item and retry with exponential backoff (30 s → 5 min), emitting
+//!   `WhisperStatusChanged { reachable: false }`; after
+//!   `MAX_TRANSIENT_ATTEMPTS` consecutive misses the item is declared failed
+//!   so a permanently dead server can't loop one recording forever.
+//! - **Permanent** pipeline errors are already quarantined by the pipeline;
+//!   the worker just logs and moves on.
+//! - An inbox **claim error** (antivirus lock, NTFS hiccup) retries with the
+//!   same backoff rather than killing the worker.
+//!
+//! After every run the worker re-reads the config from disk — but only when
+//! the file's mtime actually changed (a stat per run instead of a TOML
+//! parse), invalidating the cached diarizer when `[diarization]` changed.
+//! This is the second config-apply point next to the `ReloadConfig` IPC.
 
 use crate::app_state::AppState;
 use crate::pipeline;

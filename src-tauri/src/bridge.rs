@@ -1,4 +1,20 @@
-//! Connection to phoneme-daemon — wraps phoneme-ipc client.
+//! Connection to phoneme-daemon — the tray's single request/response pipe.
+//!
+//! [`Bridge`] wraps one `NamedPipeTransport` behind a mutex: every Tauri
+//! command serializes through it (which is exactly why slow daemon work runs
+//! detached on the daemon side — one stalled request would stall the whole
+//! invoke surface). A failed request triggers one transparent
+//! reconnect-and-retry, so an established bridge self-heals across daemon
+//! restarts without the WebView noticing.
+//!
+//! [`BridgeSlot`] covers the other failure mode — never connected at all.
+//! It is the lazily-reconnecting holder the rest of the tray actually talks
+//! to: sync callers (hotkey handler, exit hook) `current()` a non-blocking
+//! peek, async callers `get_or_connect()`, which re-runs auto-spawn +
+//! connect under a write lock (concurrent callers reuse the winner's
+//! connection) and caches the bridge for everyone. Event streaming does NOT
+//! go through here — `events` opens its own dedicated subscription
+//! connection, per the pipe protocol.
 
 use phoneme_core::Config;
 use phoneme_ipc::{NamedPipeTransport, Request, Response, Transport};

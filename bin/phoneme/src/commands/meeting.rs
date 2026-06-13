@@ -1,9 +1,16 @@
-//! `phoneme meeting start|stop` — Meeting Mode (v1.6).
+//! `phoneme meeting …` — Meeting Mode (v1.6) from the terminal.
 //!
-//! Each subcommand maps 1:1 to an IPC request: `StartMeeting` / `StopMeeting`.
-//! A meeting records the microphone and the system audio (WASAPI loopback) as
-//! two separate recordings linked by a shared `meeting_id`; both are
+//! A meeting records the microphone and the system audio (WASAPI loopback)
+//! as two separate recordings linked by a shared `meeting_id`; both are
 //! transcribed independently through the normal pipeline.
+//!
+//! Each subcommand maps 1:1 to an IPC request on the spawning path:
+//! `start` → `StartMeeting`, `stop` → `StopMeeting`, `toggle` →
+//! `MeetingToggle` (atomic, for hotkey-style bindings), `tracks
+//! <meeting_id>` → `ListMeeting` (rendered like `phoneme list`), and
+//! `rename <meeting_id> <name>` → `UpdateMeetingName`. The start/stop/
+//! toggle replies print the `meeting_id` so scripts can chain into
+//! `tracks`.
 
 use crate::args::{MeetingAction, MeetingArgs};
 use crate::client::Client;

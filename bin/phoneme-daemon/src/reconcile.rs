@@ -1,10 +1,17 @@
-//! Startup reconciliation — recover from previous crashes.
+//! Startup reconciliation — make the on-disk world consistent before any new
+//! work runs. Called once from `main`, before the queue worker spawns, so the
+//! worker only ever sees a sane inbox.
 //!
-//! Startup recovery operations for the daemon.
-//!
-//! Responsibilities:
-//! 1. Scan inbox/processing/ → move back to pending/ to recover stranded recordings.
-//! 2. Scan catalog where status=processing → set status=pending to retry transcription.
+//! A daemon can die mid-pipeline (crash, kill, power loss); the durable inbox
+//! is what makes that survivable, and this module is the recovery half:
+//! 1. Re-run the first-run hook copy ([`crate::first_run`], idempotent).
+//! 2. Inbox sweep: anything stranded in `processing/` (claimed when the old
+//!    daemon died) moves back to `pending/`, so the recording transcribes on
+//!    this run instead of being lost.
+//! 3. Catalog sweep: rows stuck in an in-progress status (`recording`,
+//!    `transcribing`, `hook_running`) with NO matching inbox entry can never
+//!    finish — mark them `transcribe_failed` so the UI shows a re-runnable
+//!    failure rather than a forever-spinner.
 
 use crate::app_state::AppState;
 use crate::first_run;

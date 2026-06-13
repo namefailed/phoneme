@@ -1,4 +1,42 @@
-//! phoneme-daemon — the headless brain.
+//! phoneme-daemon — the headless brain of Phoneme.
+//!
+//! Every other surface (the tray GUI, the `phoneme` CLI, global hotkeys) is a
+//! thin client of this process: it owns the microphone, the catalog database,
+//! the durable inbox queue, the bundled whisper-server children, and the
+//! event stream. Clients speak NDJSON over a named pipe (see `phoneme-ipc`).
+//!
+//! A recording's life, told by module:
+//! 1. [`recorder`] captures audio (with optional pre-roll and live preview)
+//!    and finalizes the WAV;
+//! 2. the inbox queue (`phoneme_core::InboxQueue`, held by [`app_state`])
+//!    durably stores the work item as a JSON file in `pending/`;
+//! 3. [`queue_worker`] claims items one at a time;
+//! 4. [`pipeline`] transcribes, cleans up, titles, embeds, runs hooks,
+//!    summarizes, and tags — writing every result to the catalog;
+//! 5. [`event_bus`] broadcasts progress so every subscribed client (tray,
+//!    `phoneme watch`, blocking `phoneme record`) follows along.
+//!
+//! In-place dictations skip 2–4 through [`in_place`]'s fast lane; requests
+//! and event subscriptions enter via [`ipc_server`] → [`ipc_handler`].
+//!
+//! `main` wires the pieces: load config → build [`app_state::AppState`] →
+//! recover crash leftovers ([`reconcile`]) → spawn the queue worker, both
+//! whisper supervisors ([`whisper_supervisor`]), the retention loop
+//! ([`retention`]), and the chunk-embedding backfill → serve IPC until the
+//! shutdown coordinator ([`shutdown`]) fires — then finalize any in-flight
+//! recording through the normal stop path (so a quit mid-take never leaves a
+//! corrupt WAV), await the workers, and stop a daemon-launched Ollama
+//! ([`ollama_launcher`]).
+//!
+//! Crash discipline: the IPC serve loop selects on the queue-worker and
+//! main-supervisor join handles, so a crashed critical task takes the whole
+//! daemon down (children die with the kill-on-close job object) instead of
+//! leaving a zombie that accepts requests it can never serve. The preview
+//! supervisor is deliberately not in that select — a preview crash must not
+//! kill the daemon — but its handle is awaited on shutdown so its server
+//! never outlives us.
+
+#![warn(missing_docs)]
 
 use anyhow::Result;
 use clap::Parser;
@@ -213,8 +251,12 @@ async fn main() -> Result<()> {
     server_result
 }
 
+/// Load the daemon's configuration from disk.
+///
+/// Canonical loader shared with the CLI: honors `PHONEME_CONFIG`, else the
+/// per-user default path, else built-in defaults. Also called by the
+/// `ReloadConfig` IPC handler and the queue worker's post-run mtime check, so
+/// every config-(re)read in the process resolves the same file.
 pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
-    // Canonical loader shared with the CLI: honors PHONEME_CONFIG, else the
-    // per-user default, else built-in defaults.
     Ok(phoneme_core::Config::load_resolved()?)
 }

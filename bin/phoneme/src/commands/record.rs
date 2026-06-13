@@ -1,3 +1,21 @@
+//! `phoneme record` — push-to-talk recording from the terminal.
+//!
+//! Spawning path (`Client::connect`): recording is the daemon's reason to
+//! exist, so a missing daemon is started. Two shapes:
+//!
+//! - **Non-blocking** (`--start` / `--stop` / `--toggle` / `--cancel`): send
+//!   one request (`RecordStart` / `RecordStop` / `RecordToggle` /
+//!   `RecordCancel`) and exit 0 — hotkey/script bindings. `--toggle` is
+//!   atomic on the daemon side, and `--in-place` rides along so a binding
+//!   can start dictation.
+//! - **Blocking** (default hold mode, `--oneshot`, `--duration N`): open an
+//!   event subscription FIRST (a fast transcription can finish in the gap
+//!   between stop and a late subscribe — events are never replayed), then
+//!   send `RecordStart` on a second connection, stop on Enter/EOF for hold
+//!   mode, and wait for THIS recording's `TranscriptionDone` (print the
+//!   transcript, exit 0) or `TranscriptionFailed` (exit 4). Other
+//!   recordings' completions on the shared stream are ignored by id.
+
 use crate::args::RecordArgs;
 use crate::client::Client;
 use crate::exit;

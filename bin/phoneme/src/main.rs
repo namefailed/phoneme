@@ -1,4 +1,20 @@
-//! phoneme CLI entrypoint.
+//! phoneme CLI — a thin scriptable client of `phoneme-daemon`.
+//!
+//! Nearly every subcommand is a wrapper around one or two IPC requests (see
+//! `phoneme-ipc::schema` for the wire contract): parse args (`args`), load
+//! the same config the daemon reads, connect (`client`), send, render
+//! (`output`), and exit with a spec-defined code (`exit`). The only commands
+//! that do real local work are `config set` (edits config.toml directly),
+//! `profile save/list` (profile files), `doctor` (runs the shared checks
+//! in-process), `export` (writes the zip/captions locally from fetched
+//! data), and `daemon start` (spawns the process).
+//!
+//! Connection semantics are the CLI's one real policy decision: commands
+//! that CREATE work auto-spawn a missing daemon (`Client::connect` →
+//! `auto_spawn`), while read-only/inspection commands fail fast with "daemon
+//! not reachable" instead (`Client::connect_observe`) — see `client` for the
+//! full split. Global flags: `--json` (machine output where supported),
+//! `--no-color` / `NO_COLOR`, `--verbose` (tracing to stderr).
 
 use anyhow::Result;
 use clap::Parser;

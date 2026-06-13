@@ -1,13 +1,33 @@
-//! IPC request routing.
+//! IPC request routing — where every client request meets the daemon.
 //!
-//! Each accepted pipe connection runs `handle_connection`, which loops:
-//!   1. Read one Request.
+//! [`ipc_server`](crate::ipc_server) hands each accepted pipe connection to
+//! `handle_connection`, which loops:
+//!   1. Read one Request (leniently — an unknown variant from a newer client
+//!      is answered with an error, never a dropped connection).
 //!   2. Call `handle_request` to produce a Response.
 //!   3. Send the Response.
 //!   4. Repeat until the client closes.
 //!
-//! `SubscribeEvents` is special — it hijacks the connection for the rest of
-//! its life and streams DaemonEvents (wired up in Task 10).
+//! `SubscribeEvents` is special — it permanently converts the connection
+//! into a one-way `DaemonEvent` stream fed from the [`crate::event_bus`],
+//! closing it when the subscriber lags.
+//!
+//! `handle_request` is the single dispatch point for the whole wire contract
+//! (see `phoneme-ipc::schema` for the per-request documentation). Position
+//! in the chain: most handlers read/write the catalog directly and return;
+//! the ones that create transcription work (`RecordStop` via the recorder,
+//! `ImportRecording`, `RetranscribeRecording`) enqueue into the inbox for
+//! the queue worker. Handlers must stay fast — anything slow (hook re-fires,
+//! LLM cleanup/summary re-runs, import decoding) runs in a spawned task or
+//! on a blocking thread and reports through DaemonEvents, because one stalled
+//! handler would stall every queued request on that connection (and the
+//! tray's single-connection bridge with it).
+//!
+//! Security invariants enforced here: `RefireHook` only runs commands already
+//! in the configured hook allowlist (S-C2); `HookTest` output is
+//! secret-redacted on both outcomes; `DeleteRecording` only unlinks audio
+//! under the configured audio dir; `ImportRecording` canonicalizes the path
+//! and enforces a size cap before decoding.
 
 use crate::app_state::AppState;
 use phoneme_core::hook::redact_secrets;

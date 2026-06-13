@@ -1,3 +1,7 @@
+//! Queue-worker unit tests: the depth-event emission contract — a real
+//! `AppState` (temp-dir inbox/catalog) enqueues a payload and asserts the
+//! exact `QueueDepthChanged` counts subscribers receive.
+
 #[cfg(test)]
 use crate::app_state::AppState;
 use crate::queue_worker::emit_queue_depth;

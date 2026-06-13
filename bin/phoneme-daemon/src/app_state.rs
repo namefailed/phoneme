@@ -1,4 +1,28 @@
 //! AppState — central holder for all long-lived daemon components.
+//!
+//! Everything that outlives a single request hangs off [`AppState`]: the
+//! hot-swappable config, the catalog and inbox queue, the event bus, the
+//! recorder, the shared transcription/LLM/webhook clients, and the shutdown
+//! coordinator. Cloning an `AppState` clones `Arc`s — every task in the
+//! daemon (IPC handlers, queue worker, supervisors, detached re-runs) sees
+//! the same underlying components.
+//!
+//! This module also owns the small coordination cells that let daemon state
+//! flow into otherwise daemon-agnostic code paths:
+//! - [`WhisperModelOverride`] — the one-job-scoped bundled-server model swap
+//!   used by model-override re-transcriptions (the #49 fix: the override
+//!   never touches the global config, so previews and other jobs never see
+//!   it);
+//! - [`WhisperEffectivePorts`] — the ports the bundled whisper-servers are
+//!   ACTUALLY listening on after any port fallback, published by the
+//!   supervisors and resolved by every consumer right where it builds a
+//!   provider;
+//! - the `processing` slot (in-flight recording + cancellation token, set by
+//!   the queue worker and cancelled by `CancelProcessing`), the
+//!   `pending_overrides` ledger, the `whisper_sem` permit that serializes
+//!   the bundled server between the final transcription and the preview,
+//!   and — on Windows — the kill-on-close job object every child process is
+//!   assigned to.
 
 use crate::event_bus::EventBus;
 use crate::recorder::DaemonRecorder;

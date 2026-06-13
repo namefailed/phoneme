@@ -1,6 +1,42 @@
-//! Pipeline orchestration: transcribe → hook → done.
+//! Pipeline orchestration — the stage after the queue: every claimed
+//! recording flows through [`run`] on its way from WAV to finished library
+//! entry.
 //!
-//! Called by the queue worker per claimed payload.
+//! Stage order (each optional stage is gated by config and non-fatal):
+//! transcribe (with segments + diarization) → LLM cleanup → auto title →
+//! in-place typing (full-pipeline dictations only) → embed for semantic
+//! search → hooks + keyword hooks → auto summary → auto tags → done +
+//! webhook. Results land in the catalog as they settle; progress is
+//! broadcast as `PipelineStageChanged` / `LlmActivity` events, and the
+//! catalog status column tracks the stages step for step.
+//!
+//! Invariants owned here:
+//! - **Whisper-server serialization** — the final transcription holds the
+//!   `whisper_sem` permit for its whole STT call, so the live preview can
+//!   never starve it; a one-job model-override swap also happens UNDER the
+//!   permit, so nothing else talks to the bundled server mid-restart (#49).
+//! - **One-job model overrides** — `apply_model_override` reads the
+//!   recording's pending override, publishes it to the supervisor (local
+//!   backend) or clones it into the per-job config (cloud), and the drop
+//!   guard restores the configured model on EVERY exit path. The
+//!   process-global config is never mutated.
+//! - **Effective ports** — the per-job whisper config is rewritten through
+//!   `whisper_ports.apply` right before building the provider, so the
+//!   request dials the port the server actually bound after any fallback.
+//! - **Cancellation** — the queue worker passes a token; transcription races
+//!   it directly, and checkpoints between stages finalize a canceled item
+//!   (`finalize_canceled`: status `Cancelled`, inbox `finish_cancelled`,
+//!   cancel events) so a cancel always settles.
+//! - **Transient vs permanent failures** — unreachable/timeout STT errors
+//!   leave the inbox item claimed for the worker to requeue and retry;
+//!   permanent errors quarantine it in `failed/` and mark the row failed.
+//! - **Skip** — the in-flight LLM stage races `skip_stage` and aborts as a
+//!   non-fatal stage failure when the user hits skip.
+//!
+//! The helpers here (`run_llm_stage`, `generate_summary`, `suggest_tags`,
+//! `embed_and_store`, the per-step `*_llm_config` builders) are also called
+//! by the IPC re-run handlers, so on-demand re-runs behave byte-for-byte
+//! like their pipeline counterparts.
 
 use crate::app_state::{AppState, WhisperModelOverride};
 use phoneme_core::config::{

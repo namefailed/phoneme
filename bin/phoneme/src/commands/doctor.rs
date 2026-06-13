@@ -1,3 +1,23 @@
+//! `phoneme doctor` — health checks, with optional repairs.
+//!
+//! Observe-only on purpose: "is the daemon running?" is doctor's first
+//! finding, so it must never auto-spawn one. The daemon-reachability and
+//! pid checks are CLI-specific (`DaemonStatus`); everything else — config,
+//! audio dir, hook command, model file, whisper/ollama/provider probes —
+//! runs in-process via the SAME `phoneme_core::doctor` checks the GUI
+//! Doctor view uses, so both surfaces always agree. Failures print a
+//! category badge (`[critical]`/`[warning]`/`[info]`) plus explanation and
+//! fix hint; only non-optional, non-info failures make the run exit 1.
+//!
+//! `--fix` asks the daemon to `RestartWhisper` when a failed check carries
+//! the `restart_whisper` fix action, waits for the respawn, and re-probes.
+//! `--rebuild-catalog` is the heavy hammer: it shuts the daemon down
+//! (`Shutdown`), waits — bounded — for the pipe to actually vanish (the
+//! dying daemon holds the SQLite handles while finalizing), then deletes
+//! catalog.db and its WAL sidecars so the next daemon start rebuilds from
+//! the inbox + audio files. It refuses to touch the files if the daemon
+//! won't exit.
+
 use crate::args::DoctorArgs;
 use crate::client::Client;
 use crate::exit;

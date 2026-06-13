@@ -9,6 +9,9 @@ use crate::schema::{DaemonEvent, Request, Response};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 
+/// A client-side connection to the daemon: send requests, or convert the
+/// connection into an event stream. Implemented by
+/// [`crate::NamedPipeTransport`].
 #[async_trait]
 pub trait Transport: Send + Sync {
     /// Send a single request and await its response.

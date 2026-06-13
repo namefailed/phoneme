@@ -1,3 +1,21 @@
+//! `phoneme export` — two export modes behind one command.
+//!
+//! **Library zip** (`phoneme export <FILE>`): fetches every recording
+//! (`ListRecordings` with the default filter) and the tag list
+//! (`ListTags`), writes them as `catalog.json` (versioned envelope), and
+//! packs every `.wav` under the configured audio dir into `audio/` —
+//! a portable backup of the whole library.
+//!
+//! **Captions** (`phoneme export --captions <ID> [--format srt|vtt]
+//! [--out FILE|-]`): fetches the recording's machine segments
+//! (`GetSegments`) and renders them through `phoneme_core::export` into
+//! SRT (default) or WebVTT, written to `--out` (`-` = stdout) or
+//! `<id>.<ext>` in the current directory. Exits 7 with a "retranscribe to
+//! generate them" hint when no segments are stored.
+//!
+//! Both modes use the spawning path — an export with no daemon should
+//! start one rather than fail.
+
 use crate::args::{CaptionFormat, ExportArgs};
 use phoneme_core::{Config, ListFilter, TranscriptSegment};
 use std::fs::File;

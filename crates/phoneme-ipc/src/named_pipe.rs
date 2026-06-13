@@ -206,6 +206,9 @@ pub struct NamedPipeTransport {
 }
 
 impl NamedPipeTransport {
+    /// Dial the daemon's pipe by short name (see [`pipe_path`]). Retries a
+    /// momentarily-busy pipe for up to 5 s, then fails like any other
+    /// connect error so callers can report "daemon not reachable".
     pub async fn connect(name: &str) -> TransportResult<Self> {
         let path = pipe_path(name);
         // ERROR_PIPE_BUSY (231) means every server instance is momentarily

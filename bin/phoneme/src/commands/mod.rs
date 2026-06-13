@@ -1,3 +1,9 @@
+//! One module per `phoneme` subcommand. Each module's `run` takes its parsed
+//! args + the loaded config, talks to the daemon through `crate::client`
+//! (spawning vs observe-only per command — see the module docs), renders via
+//! `crate::output`, and returns a `std::process::ExitCode` from
+//! `crate::exit`'s table.
+
 pub mod cleanup;
 pub mod config_cmd;
 pub mod daemon_cmd;

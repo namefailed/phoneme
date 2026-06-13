@@ -1,4 +1,25 @@
-//! Tray icon — visual state + menu.
+//! Tray icon — visual state, menu, and the Quit chain.
+//!
+//! `install` builds the tray: icon + tooltip (driven by [`TrayState`], which
+//! `events` derives from the daemon stream — idle / recording /
+//! transcribing / backlog / whisper error / hook failure), a left-click
+//! that toggles the main window, and the menu: Record / Stop (emitted to
+//! the frontend as `menu:record` / `menu:stop`), Show window, Doctor and
+//! Settings (show + navigate), a Profiles submenu built from the saved
+//! profile list (selecting one switches config, reloads the daemon, and
+//! re-registers hotkeys entirely in the tray process — no window needed),
+//! and Quit.
+//!
+//! The Quit chain is the part with rules. With
+//! `interface.quit_stops_daemon` (default on): Quit first asks the daemon
+//! to `Shutdown` and POLLS until its pipe is gone — the daemon finalizes an
+//! in-flight recording, kills its whisper-server(s), and stops a
+//! Phoneme-launched Ollama on the way out — then exits the tray. The
+//! `DAEMON_STOP_DONE` flag tells the process-wide exit hook (lib.rs) not to
+//! send a second Shutdown; that hook exists for exits that bypass this menu
+//! (e.g. an OS session end). With the knob off, Quit exits immediately and
+//! the daemon deliberately outlives the tray (headless contract). The pure
+//! `should_stop_daemon_on_exit` encodes exactly that decision table.
 
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,3 +1,16 @@
+//! `phoneme tag …` — manage tags from the terminal (the CLI face of the GUI
+//! Tag Manager).
+//!
+//! Each subcommand maps 1:1 to a tag IPC request: `list` (`ListTags`, or
+//! `ListAllTags` with `--all` to include orphans), `add` (`AddTag`),
+//! `update` (`UpdateTag`), `delete` (`DeleteTag`), `attach`/`detach`
+//! (`AttachTag`/`DetachTag`), `for` (`TagsFor`), `usage` (`TagUsageCounts`),
+//! `merge` (`MergeTags`), and `clear-suggestions`
+//! (`ClearAllTagSuggestions`). Subcommands taking a tag accept an id or a
+//! name (names are resolved against the tag list first). Uses the spawning
+//! path throughout — tag edits need a daemon, and listing through the same
+//! connection keeps the command simple.
+
 use crate::args::{TagAction, TagArgs};
 use crate::client;
 use crate::output;
