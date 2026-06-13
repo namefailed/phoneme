@@ -72,4 +72,25 @@ Matching is case-insensitive and considers every tag in your library, attached
 or not.
 
 The suggestion chips also have **✓ All** / **✕ All** buttons to apply or
-dismiss everything at once.
+dismiss everything at once *on that one recording*.
+
+## Clearing suggestions in bulk
+
+Decided to stop using auto-tagging, or just want a clean slate? **Settings →
+Post-Processing → Auto-Tagging → 🧹 Clear all suggestions** drops every pending
+✨ chip across your *entire* library in one sweep (after a confirm). Tags you
+already approved stay attached — only the not-yet-decided proposals go.
+
+The same library-wide sweep is on the CLI:
+
+```bash
+phoneme tag clear-suggestions
+```
+
+To review or decide a single recording's suggestions from the CLI instead:
+
+```bash
+phoneme tag suggestions <recording-id>                 # list them
+phoneme tag suggestions <recording-id> --approve code  # create+attach "code"
+phoneme tag suggestions <recording-id> --dismiss code  # drop the proposal
+```

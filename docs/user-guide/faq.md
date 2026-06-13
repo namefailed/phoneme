@@ -8,7 +8,7 @@ The app is open source (MIT / Apache-2.0). **Default configuration is 100% local
 
 ### Does Phoneme work on macOS or Linux?
 
-**Windows only today.** macOS and Linux are on the [v2.0 roadmap](../CHANGELOG.md). Meeting Mode on macOS will require a virtual loopback device (BlackHole, etc.).
+**Windows only today.** macOS and Linux are on the [v2.0 roadmap](../../CHANGELOG.md). Meeting Mode on macOS will require a virtual loopback device (BlackHole, etc.).
 
 ### Where is the source code?
 
@@ -62,11 +62,24 @@ Yes. Set **Settings → Transcription → Language** to a BCP-47 code or leave a
 
 ### Tags vs favorites?
 
-Use **tags**. There is no separate favorites system — create a `⭐` tag if you want that workflow.
+Both exist. **Favorites** are a single built-in star: hit the ⭐ on a recording
+(or `phoneme edit <id> --favorite`) and it shows up under the sidebar's
+**⭐ Favorites** filter — best for "come back to this" flags. **Tags** are
+free-form labels you create and color, for grouping by topic or project. Use
+favorites for a quick shortlist and tags for everything else.
 
 ### Keyword search vs semantic search?
 
 **Keyword (FTS5)** matches exact tokens. **Semantic** matches meaning. See [Semantic Search](semantic_search.md).
+
+### Where do recording titles come from?
+
+By default Phoneme auto-titles each recording from the first meaningful line of
+its transcript, so the list reads better than a wall of timestamps. Click the
+title in the detail pane to rename it — Enter saves, Esc cancels, and clearing
+it (empty) hands the recording back to auto-titling. A title you set by hand is
+never overwritten when you re-transcribe. From the CLI:
+`phoneme edit <id> --title "..."` (or `--clear-title`).
 
 ---
 
@@ -95,7 +108,7 @@ takes the engine and its helpers down — the OS reaps them.
 
 ### Can I keep the engine running headless, without the tray?
 
-Yes — set `interface.quit_stops_daemon = false` (Settings → Interface → "Quit
+Yes — set `interface.quit_stops_daemon = false` (Settings → Appearance → "Quit
 stops the engine"). Quit then only closes the tray; the daemon keeps recording
 hotkeyless via the CLI (`phoneme record`, `phoneme watch`, hooks, webhooks).
 Stop it explicitly with `phoneme daemon stop` when you want it gone. Flip the

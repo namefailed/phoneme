@@ -12,7 +12,22 @@ Phoneme can import and transcribe the following audio formats:
 
 ## 🚀 How to Import
 
-You can feed an existing file directly into Phoneme's pipeline via the CLI:
+You have three ways to feed an existing file into Phoneme's pipeline:
+
+### Drag and drop
+
+Drag one or more audio files straight onto the Phoneme window. Each supported
+file is imported; anything in an unsupported format is skipped with a quick
+note.
+
+### The Import button
+
+Go to **Settings → Storage → Import audio…**. This opens a file picker
+filtered to the supported formats; you can select several files at once.
+
+### The CLI
+
+Feed a file in by path — great for scripts and bulk jobs:
 
 ```bash
 phoneme import C:\path\to\my_recording.mp3
