@@ -6,6 +6,7 @@ members = [
     "crates/phoneme-ipc",
     "bin/phoneme-daemon",
     "bin/phoneme",
+    "bin/phoneme-mcp",
     "src-tauri",
 ]
 

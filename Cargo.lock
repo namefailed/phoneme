@@ -4735,6 +4735,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoneme-mcp"
+version = "1.8.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "phoneme-core",
+ "phoneme-ipc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "phoneme-tray"
 version = "1.8.1"
 dependencies = [

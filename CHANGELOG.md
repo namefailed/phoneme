@@ -63,6 +63,18 @@ trust boundary. Verified against current code.*
   finalized capture (single recordings and each meeting track), never the live
   preview or imported files.
 
+### Integration
+
+- [x] **MCP server (`phoneme-mcp`)** — a thin Model Context Protocol bridge
+  (JSON-RPC 2.0 over stdio) exposing five tools — `start_recording`,
+  `stop_recording`, `get_transcript`, `search_recordings`, `list_recent` — that
+  map straight onto the daemon's existing IPC requests with near-zero business
+  logic. Observe-only (never spawns a daemon); a down/erroring daemon and any
+  bad input surface as clean MCP tool errors, and the stdio framing is bounded
+  (8 MiB, mirroring the IPC codec) against oversized or unterminated frames.
+  Drop-in for Claude Desktop and other MCP hosts — see
+  [MCP Server](docs/developer-guide/mcp_server.md).
+
 ### Developer experience
 
 - [x] `phoneme completions <bash|zsh|fish|powershell|elvish>` prints a shell-completion script to stdout (pure local, no daemon needed).
