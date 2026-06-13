@@ -163,6 +163,12 @@ trust boundary. Verified against current code.*
   `tokio::task::spawn_blocking`. (The two confirmed fix-now items from the
   external-audit validation pass — the rest were false, already-optimized,
   intentional, or large refactors deferred to the roadmap.)
+- [x] **Title column in the recordings list.** The display title (previously only
+  bolded inside the transcript-snippet cell) is now a standalone, toggleable,
+  reorderable column in **Settings → Appearance** — width, header, and a cell
+  that shows the title (em-dash + muted for untitled rows). Off by default (the
+  snippet already shows it). The per-step model columns it sits beside
+  (Transcription / Post-Processing / Summary Model) were already present.
 - [x] **Favorites star is a ⭐ emoji** in the list column (and its header) instead
   of the flat `★`/`☆` glyphs — bright when starred, a faded ghost (dimmed +
   grayscaled) when not, brightening on hover.

@@ -9,6 +9,7 @@ const COLUMN_CATALOG: { value: string; label: string }[] = [
   { value: "day", label: "Day" },
   { value: "time", label: "Time" },
   { value: "duration", label: "Duration" },
+  { value: "title", label: "Title" },
   { value: "status", label: "Status" },
   { value: "tags", label: "Tags" },
   { value: "model", label: "Transcription Model" },

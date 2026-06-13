@@ -685,6 +685,7 @@ export class RecordingsListElement extends LitElement {
         time: "94px",
         duration: "84px",
         status: "89px",
+        title: "180px",
         tags: "100px",
         model: "120px",
         cleanup_model: "120px",
@@ -746,6 +747,7 @@ export class RecordingsListElement extends LitElement {
       time: "Time",
       duration: "Duration",
       status: "Status",
+      title: "Title",
       tags: "Tags",
       model: "Transcript Model",
       cleanup_model: "Post-Process Model",
@@ -885,6 +887,7 @@ export class RecordingsListElement extends LitElement {
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
+      title: html`<span class="rec-title-col" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; ${r.title ? "color: var(--fg-default);" : "color: var(--fg-faded);"}" title=${r.title || "Untitled"}>${r.title || "—"}</span>`,
       tags: html`<span class="rec-tags">${
         (r.tags ?? []).length
           ? r.tags!.map((t: any) => html`<span class="rec-tag-chip" style=${t.color ? `background:${t.color}; color:${getContrastColor(t.color)};` : ""}>${t.name}</span>`)
