@@ -51,6 +51,8 @@ An optional, **independent** transcription provider used only for the live previ
 | `pre_roll_ms` | u32 | `1500` | Idle mic ring buffer; `0` = off. A fresh config ships `1500`; a config file that simply **omits** the key reads as `0` (disabled), so pre-upgrade configs keep the old mic-only-while-recording behavior. |
 | `streaming_preview` | bool | `false` | Live partial transcript while recording |
 | `auto_stop_on_silence` | bool | `false` | GUI Record button auto-stops on silence; `false` = manual start/stop toggle. Push-to-talk hotkey is always hold-to-record regardless. The Record button's **▾ stop-mode dropdown** (manual / silence / fixed seconds) is stored per device in the browser, not in this file — until a mode is picked there, this key decides. |
+| `normalize` | bool | `false` | Peak-normalize a finished recording's gain before writing the WAV, so a quiet mic still hands transcription a healthy signal. Boost-only; silent / already-loud recordings are left untouched. Final captured recording only (single recordings + each meeting track) — not the live preview, not imported files. |
+| `normalize_target_dbfs` | f32 | `-1.0` | Target peak ceiling in dBFS when `normalize` is on. `0.0` = full scale; `-1.0` leaves a hair of headroom below clipping. |
 
 ---
 

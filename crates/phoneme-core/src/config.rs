@@ -845,10 +845,38 @@ pub struct RecordingConfig {
     ///   semaphore so they never run two requests at once.
     #[serde(default = "default_meeting_preview")]
     pub meeting_preview: String,
+    /// Peak-normalize the gain of a finished recording before it is written to
+    /// disk, so a quiet microphone still hands transcription a healthy signal.
+    ///
+    /// When `true`, the daemon scales the captured samples so the loudest sample
+    /// sits at `normalize_target_dbfs`; the whole waveform moves by one gain, so
+    /// relative dynamics are preserved. Silent or already-loud recordings are
+    /// left untouched (it only ever *boosts* quiet audio, never attenuates and
+    /// never amplifies a noise floor). Applies to the **final captured
+    /// recording only** — not the live streaming preview, and not imported
+    /// files (those keep whatever level their author chose).
+    ///
+    /// **Default false** = off, so existing recordings sound exactly as before.
+    #[serde(default)]
+    pub normalize: bool,
+    /// Target peak level for normalization, in full-scale decibels (dBFS), used
+    /// only when `normalize` is `true`.
+    ///
+    /// On the dBFS scale `0.0` is digital full scale (the loudest an `i16`
+    /// sample can be) and negative values leave headroom below clipping. The
+    /// default `-1.0` lifts a quiet recording to just under full scale — loud
+    /// and clear without risking a clipped peak. Values at or above `0.0` are
+    /// accepted but offer no headroom.
+    #[serde(default = "default_normalize_target_dbfs")]
+    pub normalize_target_dbfs: f32,
 }
 
 fn default_meeting_preview() -> String {
     "toggle".into()
+}
+
+fn default_normalize_target_dbfs() -> f32 {
+    -1.0
 }
 
 /// Dictation (transcription-in-place) behavior.
@@ -1306,6 +1334,8 @@ impl Default for Config {
                 streaming_preview: false,
                 auto_stop_on_silence: false,
                 meeting_preview: default_meeting_preview(),
+                normalize: false,
+                normalize_target_dbfs: default_normalize_target_dbfs(),
             },
             hook: HookConfig {
                 commands: vec![

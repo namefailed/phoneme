@@ -16,6 +16,23 @@ fn silent_block(samples: usize) -> Vec<i16> {
     vec![0; samples]
 }
 
+/// A deliberately quiet sine: peaks around 1000 of 32767 (~-30 dBFS), well above
+/// the noise-floor guard but far below any sensible normalization ceiling.
+fn quiet_block(samples: usize) -> Vec<i16> {
+    (0..samples)
+        .map(|i| ((i as f32 * 0.05).sin() * 1000.0) as i16)
+        .collect()
+}
+
+/// Largest sample magnitude in a buffer.
+fn peak_of(samples: &[i16]) -> i16 {
+    samples
+        .iter()
+        .map(|&s| s.saturating_abs())
+        .max()
+        .unwrap_or(0)
+}
+
 fn make_synthetic() -> (SyntheticSource, SyntheticSink) {
     SyntheticSource::new(AudioConfig::phoneme_default())
 }
@@ -376,4 +393,62 @@ async fn config_is_canonical_format() {
     let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
     assert_eq!(recorder.audio_config().sample_rate, SampleRate::HZ_16K);
     let _ = recorder.cancel().await;
+}
+
+#[tokio::test]
+async fn normalize_boosts_quiet_recording_on_finalize() {
+    // With normalization enabled, a quiet capture (peak ~1000) is lifted toward
+    // the -1 dBFS ceiling (~29204) before the WAV is written.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("quiet.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 10_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 1000,
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None)
+        .await
+        .unwrap()
+        .with_normalize(-1.0);
+
+    sink.push(quiet_block(16_000)).await.unwrap();
+    sink.close();
+
+    recorder.wait_for_finalize(&wav_path).await.unwrap();
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    // The -1 dBFS ceiling is ~29204; the boosted peak should sit just under it,
+    // proving the audio was lifted toward — but never past — full scale.
+    let peak = peak_of(&samples);
+    assert!(
+        (25_000..=29_205).contains(&peak),
+        "quiet recording should be normalized up to just under -1 dBFS, got peak {peak}"
+    );
+}
+
+#[tokio::test]
+async fn normalize_off_by_default_leaves_quiet_recording_quiet() {
+    // Without `with_normalize`, the captured level is preserved verbatim.
+    let dir = TempDir::new().unwrap();
+    let wav_path = dir.path().join("quiet-asis.wav");
+    let (source, sink) = make_synthetic();
+    let cfg = RecorderConfig {
+        mode: RecordingMode::Hold,
+        max_duration_ms: 10_000,
+        silence_threshold_dbfs: -45.0,
+        silence_window_ms: 1000,
+    };
+    let recorder = Recorder::start(Box::new(source), cfg, None).await.unwrap();
+
+    sink.push(quiet_block(16_000)).await.unwrap();
+    sink.close();
+
+    recorder.wait_for_finalize(&wav_path).await.unwrap();
+    let (samples, _) = wav::read_wav(&wav_path).unwrap();
+    assert!(
+        peak_of(&samples) < 1_200,
+        "default-off must leave the quiet recording as captured, got peak {}",
+        peak_of(&samples)
+    );
 }

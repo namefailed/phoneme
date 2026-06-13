@@ -92,6 +92,13 @@ pub struct Recorder {
     cfg: AudioConfig,
     cmd_tx: mpsc::Sender<RecorderCommand>,
     task: JoinHandle<Result<TaskOutput>>,
+    /// Peak-normalization ceiling in dBFS, applied to the captured buffer right
+    /// before the WAV is written. `None` (the default) leaves the audio at its
+    /// captured level; `Some(target_dbfs)` boosts a quiet recording so its
+    /// loudest sample lands on that ceiling. See [`Recorder::with_normalize`]
+    /// and [`crate::normalize::normalize_peak`]. Only the *finalized* recording
+    /// is normalized — the live preview is never touched.
+    normalize_target_dbfs: Option<f32>,
 }
 
 enum RecorderCommand {
@@ -314,7 +321,34 @@ impl Recorder {
             cfg: audio_cfg,
             cmd_tx,
             task,
+            normalize_target_dbfs: None,
         })
+    }
+
+    /// Enable peak normalization of the finalized recording.
+    ///
+    /// When set, the captured buffer is peak-normalized to `target_dbfs`
+    /// full-scale decibels (a negative ceiling such as `-1.0`) just before the
+    /// WAV is written by [`Self::stop_and_finalize`] or
+    /// [`Self::wait_for_finalize`]. A quiet recording is boosted so its loudest
+    /// sample lands on that ceiling, which gives transcription a healthier
+    /// signal; an already-loud or silent recording is left untouched. See
+    /// [`crate::normalize::normalize_peak`] for the exact guards.
+    ///
+    /// Normalization is off by default. This is a consuming builder so it can be
+    /// chained right after [`Self::start`] without changing that call's
+    /// signature; [`Self::set_normalize`] is the equivalent setter when the
+    /// recorder is already owned mutably.
+    pub fn with_normalize(mut self, target_dbfs: f32) -> Self {
+        self.normalize_target_dbfs = Some(target_dbfs);
+        self
+    }
+
+    /// Set or clear the finalize-time peak-normalization ceiling. `Some` enables
+    /// it (see [`Self::with_normalize`]); `None` disables it. Affects only the
+    /// WAV written on finalize, never the live preview.
+    pub fn set_normalize(&mut self, target_dbfs: Option<f32>) {
+        self.normalize_target_dbfs = target_dbfs;
     }
 
     /// The format this recorder captures into — always the source's canonical
@@ -334,10 +368,14 @@ impl Recorder {
         if out.cancelled {
             return Err(Error::Internal("recording was cancelled".into()));
         }
-        wav::write_wav(path, &out.samples, self.cfg)?;
+        let mut samples = out.samples;
+        if let Some(target_dbfs) = self.normalize_target_dbfs {
+            crate::normalize::normalize_peak(&mut samples, target_dbfs);
+        }
+        wav::write_wav(path, &samples, self.cfg)?;
         Ok(RecordingResult {
             duration_ms: out.duration_ms,
-            samples_written: out.samples.len(),
+            samples_written: samples.len(),
         })
     }
 
@@ -415,10 +453,14 @@ impl Recorder {
         if out.cancelled {
             return Err(Error::Internal("recording was cancelled".into()));
         }
-        wav::write_wav(path, &out.samples, self.cfg)?;
+        let mut samples = out.samples;
+        if let Some(target_dbfs) = self.normalize_target_dbfs {
+            crate::normalize::normalize_peak(&mut samples, target_dbfs);
+        }
+        wav::write_wav(path, &samples, self.cfg)?;
         Ok(RecordingResult {
             duration_ms: out.duration_ms,
-            samples_written: out.samples.len(),
+            samples_written: samples.len(),
         })
     }
 }

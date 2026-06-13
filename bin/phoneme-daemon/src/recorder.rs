@@ -715,7 +715,7 @@ impl DaemonRecorder {
             silence_window_ms: state.config.load().recording.silence_window_ms,
         };
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let recorder =
+        let mut recorder =
             match Recorder::start_with_prepend(source, recorder_cfg, Some(tx), prepend).await {
                 Ok(r) => r,
                 Err(e) => {
@@ -726,6 +726,16 @@ impl DaemonRecorder {
                     return Err(e);
                 }
             };
+        // Peak-normalize the finalized WAV when enabled (off by default). The
+        // ceiling is applied at finalize time from the recorder's own field, so
+        // setting it on the owned instance now — before it moves into the active
+        // slot — is sufficient. The live preview snapshot is never normalized.
+        {
+            let snap = state.config.load();
+            if snap.recording.normalize {
+                recorder.set_normalize(Some(snap.recording.normalize_target_dbfs));
+            }
+        }
         // Clone a snapshot handle before moving the recorder into the slot, so
         // the preview loop can read this recording's audio.
         let preview_snapshot = recorder.snapshot_handle();
@@ -1514,8 +1524,17 @@ impl DaemonRecorder {
             duration_ms: final_duration_ms,
         } = track;
 
-        // Write the timeline-aligned samples to WAV.
+        // Write the timeline-aligned samples to WAV. Peak-normalize first when
+        // enabled (off by default), matching the single-recording path: each
+        // meeting track is transcribed independently, so per-track normalization
+        // hands every speaker's track a healthy signal without affecting the
+        // others' relative levels.
         let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
+        let mut samples = samples;
+        let snap = state.config.load();
+        if snap.recording.normalize {
+            phoneme_audio::normalize_peak(&mut samples, snap.recording.normalize_target_dbfs);
+        }
         phoneme_audio::wav::write_wav(&audio_path, &samples, audio_cfg)?;
 
         // Update catalog with the (possibly padded) duration

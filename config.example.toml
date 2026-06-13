@@ -146,6 +146,17 @@ streaming_preview = false
 # The push-to-talk hotkey is always hold-to-record regardless of this flag.
 auto_stop_on_silence = false
 
+# Peak-normalize a finished recording's gain before writing the WAV, so a quiet
+# microphone still hands transcription a healthy signal. Boost-only: silent or
+# already-loud recordings are left untouched. Applies to the finalized capture
+# (single recordings and each meeting track) — never the live preview or
+# imported files. false = off.
+normalize = false
+
+# Target peak ceiling in dBFS when `normalize` is on. 0.0 = full scale; -1.0
+# leaves a hair of headroom below clipping.
+normalize_target_dbfs = -1.0
+
 # How the live preview handles a MEETING's two tracks (needs streaming_preview):
 #   "toggle" — one preview loop follows one track; the overlay 🎤/🔊 button
 #              switches it (same cost as a single recording)

@@ -67,6 +67,15 @@ Both tracks share a **wall-clock timeline** so scrubbing to the same timestamp o
 
 **Cancel** discards the in-progress capture without writing a catalog row. Useful when you started recording by mistake.
 
+## Normalize audio level
+
+A microphone left turned down captures the same words far quieter than the transcription model expects, and quiet recordings transcribe worse. Turn on **Normalize audio level** under **Settings → Capture → Recording** (`recording.normalize`) to fix this: when a recording finishes, Phoneme boosts its gain so the loudest moment sits just below clipping before the WAV is written.
+
+- It is a single gain applied to the whole recording, so relative dynamics are preserved — loud parts stay louder than quiet parts.
+- It only ever **boosts quiet audio**: an already-loud recording is left as captured, and a silent clip is never amplified into hiss.
+- The ceiling is set by `recording.normalize_target_dbfs` (default **-1.0 dBFS** — a hair below full scale).
+- It is **off by default**, and applies to **newly captured recordings only** — not the live streaming preview, and not [imported files](importing_audio.md) (those keep whatever level their author chose).
+
 ## CLI equivalents
 
 | UI action | CLI |
@@ -87,5 +96,6 @@ call), which makes them the cleanest thing to bind to a single external hotkey.
 ## Tips
 
 - **Pre-roll** (`recording.pre_roll_ms`, default 1500 ms) keeps a rolling mic buffer so the first syllable is not clipped when you react to a hotkey. See [Streaming Preview & Pre-Roll](streaming_preview_and_preroll.md).
+- **Quiet mic?** Enable **Normalize audio level** (`recording.normalize`) to boost soft recordings to a consistent level before transcribing — see above.
 - **Wear headphones in Meeting Mode** so speaker bleed does not duplicate remote audio on your mic track.
 - If built-in hotkeys conflict with another app, change the combo in Settings or disable Phoneme's listener and use an external tool.

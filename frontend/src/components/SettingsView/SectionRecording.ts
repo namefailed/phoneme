@@ -106,6 +106,17 @@ export class SectionRecording {
           </span>
         </div>
         <div class="settings-field">
+          <label>Normalize audio level</label>
+          <div>${renderField(
+            { key: "recording.normalize", label: "", kind: "checkbox" },
+            this.config.recording.normalize || false,
+          )}</div>
+          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            Boost quiet recordings to a consistent level before transcribing — a turned-down mic still hands transcription a healthy signal.<br/>
+            <b>Off</b> by default; affects newly captured recordings only (not the live preview or imported files).
+          </span>
+        </div>
+        <div class="settings-field">
           <label>Pre-roll (ms)</label>
           <div>${renderField(
             { key: "recording.pre_roll_ms", label: "", kind: "number" },
