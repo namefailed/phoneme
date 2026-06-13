@@ -11,6 +11,36 @@ use tokio::process::{Child, Command};
 const RESTART_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
 const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(60);
 
+/// Why a restart-backoff pause ended. `Elapsed` is the scheduled retry; the
+/// other two cancel the wait early.
+#[derive(Debug, PartialEq, Eq)]
+enum BackoffWake {
+    /// The full backoff elapsed — respawn on schedule.
+    Elapsed,
+    /// An explicit restart was requested (the Doctor's "Fix") — respawn now.
+    Restart,
+    /// The daemon is shutting down — the supervisor should return.
+    Shutdown,
+}
+
+/// Wait out a restart backoff without going deaf. `tokio::sync::Notify` stores
+/// no permit for `notify_waiters`, so a Doctor restart fired while the
+/// supervisor slept in a plain `tokio::time::sleep` was simply LOST — the user
+/// pressed "Fix", nothing happened, and the respawn still waited out the full
+/// (up to 60 s) backoff. Selecting over the sleep, the restart notify, and
+/// shutdown makes the pause cancellable by both signals.
+async fn backoff_pause(
+    backoff: Duration,
+    restart: &tokio::sync::Notify,
+    shutdown: &mut ShutdownSignal,
+) -> BackoffWake {
+    tokio::select! {
+        _ = tokio::time::sleep(backoff) => BackoffWake::Elapsed,
+        _ = restart.notified() => BackoffWake::Restart,
+        _ = shutdown.wait() => BackoffWake::Shutdown,
+    }
+}
+
 /// Put a freshly-spawned whisper-server into the daemon's kill-on-close job,
 /// so the kernel reaps it even when the daemon dies without running its
 /// graceful shutdown (panic, Task Manager). Best-effort: a failure costs the
@@ -222,8 +252,11 @@ pub async fn run_with(
             Err(e) => {
                 state.whisper_ports.set_main(None);
                 tracing::error!(error = %e, "failed to spawn whisper-server");
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
+                match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                    BackoffWake::Shutdown => return Ok(()),
+                    BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                    BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+                }
                 continue;
             }
         };
@@ -262,15 +295,14 @@ pub async fn run_with(
                         Ok(status) => tracing::warn!(?status, "whisper-server exited"),
                         Err(e) => tracing::warn!(error = %e, "wait on whisper-server failed"),
                     }
-                    // Down for at least the backoff sleep — consumers fall
-                    // back to the configured port until the respawn publishes
-                    // a fresh choice.
+                    // Down for at least the backoff pause (taken below, after
+                    // this inner loop, where it can also hear a Doctor restart)
+                    // — consumers fall back to the configured port until the
+                    // respawn publishes a fresh choice.
                     state.whisper_ports.set_main(None);
                     if spawned_at.elapsed() >= Duration::from_secs(60) {
                         backoff = RESTART_BACKOFF_INITIAL;
                     }
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
                     exited = true;
                     break;
                 }
@@ -310,6 +342,13 @@ pub async fn run_with(
             }
         }
         if exited {
+            // The crash backoff, taken OUTSIDE the select so an explicit
+            // restart request (or shutdown) cancels it instead of being lost.
+            match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                BackoffWake::Shutdown => return Ok(()),
+                BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+            }
             continue;
         }
     }
@@ -438,8 +477,11 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
             Err(e) => {
                 state.whisper_ports.set_preview(None);
                 tracing::error!(error = %e, "failed to spawn preview whisper-server");
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
+                match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                    BackoffWake::Shutdown => return Ok(()),
+                    BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                    BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+                }
                 continue;
             }
         };
@@ -468,8 +510,6 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
                     if spawned_at.elapsed() >= Duration::from_secs(60) {
                         backoff = RESTART_BACKOFF_INITIAL;
                     }
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(RESTART_BACKOFF_MAX);
                     exited = true;
                     break;
                 }
@@ -507,6 +547,13 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
             }
         }
         if exited {
+            // Crash backoff outside the select — cancellable by a Doctor
+            // restart or shutdown, mirroring the main supervisor loop.
+            match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                BackoffWake::Shutdown => return Ok(()),
+                BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+            }
             continue;
         }
     }
@@ -585,7 +632,12 @@ fn locate_bundled_server() -> anyhow::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{choose_listen_port, effective_model_path, port_is_free};
+    use super::{
+        backoff_pause, choose_listen_port, effective_model_path, port_is_free, BackoffWake,
+    };
+    use crate::shutdown::ShutdownCoordinator;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn effective_model_prefers_override_when_present() {
@@ -664,5 +716,71 @@ mod tests {
             "an excluded port is off limits even when free"
         );
         assert_ne!(chosen, 0);
+    }
+
+    #[tokio::test]
+    async fn backoff_cancelled_immediately_by_restart_request() {
+        // A Doctor "Fix" fired mid-backoff must cancel the wait. `Notify`
+        // stores no permit for `notify_waiters`, so anything not already
+        // selecting on it when the notify fires loses the request outright —
+        // the old plain-sleep backoff did exactly that and the user's restart
+        // silently did nothing for up to 60 s.
+        let restart = Arc::new(tokio::sync::Notify::new());
+        let coordinator = ShutdownCoordinator::new();
+        let mut shutdown = coordinator.signal.clone();
+
+        let waiter = {
+            let restart = restart.clone();
+            tokio::spawn(async move {
+                let started = Instant::now();
+                let wake = backoff_pause(Duration::from_secs(30), &restart, &mut shutdown).await;
+                (wake, started.elapsed())
+            })
+        };
+        // Let the pause reach its select before firing the notify (the same
+        // notify_waiters call the Doctor's IPC handler uses).
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        restart.notify_waiters();
+
+        let (wake, elapsed) = waiter.await.expect("join backoff waiter");
+        assert_eq!(wake, BackoffWake::Restart);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "restart must cancel the backoff, not wait it out: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn backoff_cancelled_by_shutdown() {
+        // Shutdown during a long backoff must end the pause promptly so the
+        // supervisor task can return instead of stalling daemon shutdown.
+        let restart = Arc::new(tokio::sync::Notify::new());
+        let coordinator = ShutdownCoordinator::new();
+        let mut shutdown = coordinator.signal.clone();
+
+        let waiter = {
+            let restart = restart.clone();
+            tokio::spawn(async move {
+                backoff_pause(Duration::from_secs(30), &restart, &mut shutdown).await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        coordinator.trigger();
+
+        assert_eq!(waiter.await.expect("join"), BackoffWake::Shutdown);
+    }
+
+    #[tokio::test]
+    async fn backoff_elapses_when_nothing_fires() {
+        // No restart, no shutdown: the pause behaves exactly like the sleep it
+        // replaced and reports a scheduled wake.
+        let restart = tokio::sync::Notify::new();
+        let coordinator = ShutdownCoordinator::new();
+        let mut shutdown = coordinator.signal.clone();
+
+        let started = Instant::now();
+        let wake = backoff_pause(Duration::from_millis(50), &restart, &mut shutdown).await;
+        assert_eq!(wake, BackoffWake::Elapsed);
+        assert!(started.elapsed() >= Duration::from_millis(45));
     }
 }

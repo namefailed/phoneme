@@ -59,6 +59,43 @@ async fn daemon_version_matches(t: &mut NamedPipeTransport) -> bool {
     }
 }
 
+/// Whether the daemon reachable on `t` is mid-capture or mid-transcription —
+/// in-flight work a version-mismatch restart would destroy (an active
+/// recording dies with the daemon process; a mid-pipeline transcription is
+/// aborted and has to re-run).
+///
+/// Conservative on purpose, in the direction that protects user audio: only a
+/// daemon that POSITIVELY reports being busy is spared. A probe that errors,
+/// times out, or is too old to know the request counts as idle — for a wedged
+/// or ancient daemon, restarting IS the recovery path, exactly as the version
+/// probe above already concluded.
+async fn daemon_is_busy(t: &mut NamedPipeTransport) -> bool {
+    // Capture in flight? `RecordStatus` predates the version handshake, so any
+    // daemon old enough to mismatch still answers it.
+    match tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::RecordStatus)).await {
+        Ok(Ok(Response::Ok(v))) => {
+            let recording = v
+                .get("recording")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false);
+            let meeting = v.get("meeting").and_then(|x| x.as_bool()).unwrap_or(false);
+            if recording || meeting {
+                return true;
+            }
+        }
+        // Unanswerable → not provably busy; fall through to the queue probe.
+        _ => return false,
+    }
+    // Transcription in flight? `processing` counts the inbox item the pipeline
+    // is working on right now (pending items survive a restart on disk; the
+    // processing one is the only loss). Daemons too old for `QueueCounts`
+    // answer with an error and count as idle.
+    match tokio::time::timeout(PROBE_TIMEOUT, t.request(Request::QueueCounts)).await {
+        Ok(Ok(Response::Ok(v))) => v.get("processing").and_then(|x| x.as_u64()).unwrap_or(0) > 0,
+        _ => false,
+    }
+}
+
 /// Poll until the named pipe is no longer reachable (the old daemon has exited
 /// and released its server handle) so a fresh daemon can bind it. Bounded so a
 /// daemon that refuses to die doesn't hang startup forever.
@@ -87,6 +124,21 @@ pub async fn ensure_running(cfg: &Config) -> anyhow::Result<()> {
     if let Ok(mut t) = NamedPipeTransport::connect(&cfg.daemon.pipe_name).await {
         if daemon_version_matches(&mut t).await {
             tracing::debug!("matching daemon already reachable on startup");
+            return Ok(());
+        }
+        // Version mismatch — but NEVER bounce a daemon that is mid-recording
+        // or mid-transcription: the restart would kill the capture stream and
+        // lose the user's audio. Conservative behavior: leave the old daemon
+        // running and proceed against it (its protocol is close enough for
+        // the tray's day-to-day requests; anything it can't decode answers
+        // with an error rather than dropping the pipe). The version upgrade
+        // happens on the next idle startup, or when the user restarts the
+        // daemon manually (tray Quit→reopen, or `phoneme daemon restart`).
+        if daemon_is_busy(&mut t).await {
+            tracing::warn!(
+                "running daemon is a different version but is mid-recording or mid-transcription; \
+                 leaving it running — it will be updated at the next idle restart"
+            );
             return Ok(());
         }
         tracing::warn!("running daemon is a different version; restarting it");
@@ -239,6 +291,75 @@ mod tests {
         assert!(
             result.is_ok(),
             "a matching-version daemon should be reused: {result:?}"
+        );
+    }
+
+    /// Busy-skip path: a reachable daemon with a MISMATCHED version that is
+    /// mid-recording must be left running — ensure_running returns Ok against
+    /// the old daemon and never sends it `Shutdown`. (A restart would kill the
+    /// capture stream and lose the recording.)
+    #[tokio::test]
+    async fn version_mismatch_skips_restart_while_daemon_is_busy() {
+        let name = unique_pipe("busy");
+        let mut listener = NamedPipeListener::bind(&name).expect("bind");
+
+        // Every request the mock daemon sees, for the no-Shutdown assertion.
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_srv = seen.clone();
+
+        // Mock daemon: an old version (mismatch guaranteed) that reports an
+        // active recording. Serves connections until aborted.
+        let responder = tokio::spawn(async move {
+            loop {
+                let Ok(mut conn) = listener.accept().await else {
+                    break;
+                };
+                while let Ok(Some(req)) = conn.recv().await {
+                    let res = match req {
+                        phoneme_ipc::ServerRequest::Known(req) => {
+                            seen_srv.lock().unwrap().push(format!("{req:?}"));
+                            match *req {
+                                Request::DaemonStatus => Response::Ok(serde_json::json!({
+                                    "running": true,
+                                    "pid": 0,
+                                    "version": "0.0.0-old",
+                                })),
+                                Request::RecordStatus => Response::Ok(serde_json::json!({
+                                    "recording": true,
+                                    "id": "rec-busy",
+                                    "meeting": false,
+                                    "paused": false,
+                                })),
+                                _ => Response::Ok(serde_json::Value::Null),
+                            }
+                        }
+                        _ => Response::Ok(serde_json::Value::Null),
+                    };
+                    if conn.send_response(res).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let mut cfg = phoneme_core::Config::default();
+        cfg.daemon.pipe_name = name;
+
+        let result = ensure_running(&cfg).await;
+        responder.abort();
+        assert!(
+            result.is_ok(),
+            "a busy mismatched daemon must be reused, not restarted: {result:?}"
+        );
+        let seen = seen.lock().unwrap();
+        assert!(
+            seen.iter().any(|r| r.contains("RecordStatus")),
+            "busy probe must actually run: {seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|r| r.contains("Shutdown")),
+            "must never bounce a daemon that is mid-recording: {seen:?}"
         );
     }
 
