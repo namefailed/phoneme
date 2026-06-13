@@ -19,16 +19,23 @@ use std::sync::{Arc, Mutex, PoisonError};
 /// map it to a stable 1-based index ourselves.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpeakerSpan {
+    /// Turn start, in seconds from the start of the audio.
     pub start: f64,
+    /// Turn end, in seconds from the start of the audio.
     pub end: f64,
+    /// Opaque speaker label as the diarizer emits it (e.g. `"SPEAKER_00"`);
+    /// mapped to a stable 1-based index by [`label_segments`].
     pub label: String,
 }
 
 /// One ASR transcript segment: `[start, end)` in **seconds** plus its text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSegment {
+    /// Segment start, in seconds from the start of the audio.
     pub start: f64,
+    /// Segment end, in seconds from the start of the audio.
     pub end: f64,
+    /// The transcript text for this segment.
     pub text: String,
 }
 

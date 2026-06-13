@@ -1,3 +1,28 @@
+//! The recordings catalog — the durable home of the archive.
+//!
+//! This module owns [`Catalog`], the SQLite database every recording lands in.
+//! The daemon writes to it as a recording moves through the pipeline (insert →
+//! transcript → segments → summary/title → status), and the GUI/CLI read from it
+//! for everything they show: the library list, the detail view, search, tags,
+//! speaker names, and retention sweeps.
+//!
+//! A few conventions run through the whole file:
+//!
+//! - **Status is a string column.** [`RecordingStatus`] round-trips through
+//!   stable lowercase strings (`"transcribing"`, `"hook_failed"`, …) via
+//!   `parse_status`/`as_str`; a status the parser doesn't know errors the whole
+//!   query, so every variant must have an arm.
+//! - **Machine truth vs. user edits.** `original_transcript` (raw ASR) and
+//!   `clean_transcript` (pipeline output) are preserved so a hand edit to the
+//!   live `transcript` is reversible, and segments are stored separately and
+//!   replaced wholesale on every (re)transcribe — user edits never rewrite them.
+//! - **Search is hybrid.** Lexical FTS5 and per-chunk vector cosine are computed
+//!   separately, fused with RRF ([`crate::fusion`]), and de-duplicated on a
+//!   meeting-stable key so a meeting's two tracks collapse to one result.
+//! - **WAL with bounded growth.** The pool runs in WAL mode; [`Catalog::open`]
+//!   caps the WAL size and the daemon calls [`Catalog::checkpoint`] on idle so a
+//!   long-lived reader can't let it grow without bound.
+
 use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
@@ -74,6 +99,8 @@ impl Catalog {
         Ok(Self { pool })
     }
 
+    /// Insert a new recording row. The pipeline calls this once, when capture
+    /// starts; later stages update the same row in place.
     pub async fn insert(&self, r: &Recording) -> Result<()> {
         sqlx::query(
             "INSERT INTO recordings (
@@ -109,6 +136,7 @@ impl Catalog {
         Ok(())
     }
 
+    /// Set (or clear) the display name for every track sharing `meeting_id`.
     pub async fn update_meeting_name(&self, meeting_id: &str, name: Option<&str>) -> Result<()> {
         sqlx::query("UPDATE recordings SET meeting_name = ?, updated_at = datetime('now') WHERE meeting_id = ?")
             .bind(name)
@@ -118,6 +146,8 @@ impl Catalog {
         Ok(())
     }
 
+    /// Move a recording to a new lifecycle status (the pipeline calls this as it
+    /// advances through transcribing → cleaning up → … → done/failed).
     pub async fn update_status(&self, id: &RecordingId, status: RecordingStatus) -> Result<()> {
         sqlx::query("UPDATE recordings SET status = ?, updated_at = datetime('now') WHERE id = ?")
             .bind(status.as_str())
@@ -383,6 +413,8 @@ impl Catalog {
         Ok(())
     }
 
+    /// Record the outcome of the hook that ran for a recording (command, exit
+    /// code, duration), stamping `hook_ran_at`.
     pub async fn update_hook_result(
         &self,
         id: &RecordingId,
@@ -405,6 +437,9 @@ impl Catalog {
         Ok(())
     }
 
+    /// Fetch a single recording by id, with its custom speaker names populated
+    /// (tags are loaded separately via [`Catalog::tags_for`]). `None` when the
+    /// id is unknown.
     pub async fn get(&self, id: &RecordingId) -> Result<Option<Recording>> {
         let row = sqlx::query("SELECT * FROM recordings WHERE id = ?")
             .bind(id.as_str())
@@ -442,6 +477,8 @@ impl Catalog {
         Ok(())
     }
 
+    /// Recordings with a transcript but no legacy whole-recording embedding yet.
+    /// Drives the embedding backfill for the older `embeddings` table.
     pub async fn list_recordings_without_embeddings(&self) -> Result<Vec<Recording>> {
         let rows = sqlx::query(
             "SELECT * FROM recordings \
@@ -985,6 +1022,14 @@ impl Catalog {
         Ok(results)
     }
 
+    /// List recordings matching `filter`, newest-first by default, with tags and
+    /// speaker names populated per row.
+    ///
+    /// Every predicate — full-text search, tag, status, kind (single vs.
+    /// meeting), favorites, date range — is applied in SQL *before* `LIMIT`/
+    /// `OFFSET`, so pagination composes correctly (filtering after pagination
+    /// would return mostly-empty pages of the chosen kind). Backs the GUI
+    /// Library and the CLI `phoneme list`.
     pub async fn list(&self, filter: &ListFilter) -> Result<Vec<Recording>> {
         let mut sql = String::from("SELECT recordings.* FROM recordings");
 
@@ -1112,6 +1157,9 @@ impl Catalog {
         Ok(recs)
     }
 
+    /// Delete a recording's catalog row. Cascading foreign keys take its tags,
+    /// segments, speaker names, and embeddings with it; the caller removes the
+    /// audio file from disk separately.
     pub async fn delete(&self, id: &RecordingId) -> Result<()> {
         sqlx::query("DELETE FROM recordings WHERE id = ?")
             .bind(id.as_str())
@@ -1132,6 +1180,9 @@ impl Catalog {
         Ok(())
     }
 
+    /// Tags attached to at least one recording, name-sorted. Powers the filter
+    /// dropdown and tag autocomplete — orphaned tags are excluded (see
+    /// [`Catalog::list_all_tags`] for the unfiltered set).
     pub async fn list_tags(&self) -> Result<Vec<Tag>> {
         // Only return tags that are attached to at least one recording.
         // Orphaned tags (detached from all recordings) are excluded so they
@@ -1154,6 +1205,9 @@ impl Catalog {
             .collect()
     }
 
+    /// Create a tag named `name`, or return the existing one (matching is
+    /// case-insensitive, so adding "code" when "Code" exists reuses it, colour
+    /// and links intact).
     pub async fn add_tag(&self, name: &str, color: Option<&str>) -> Result<Tag> {
         // Tags are case-INSENSITIVELY unique at the application level: "Code"
         // and "code" are the same tag, so adding either reuses the existing
@@ -1190,6 +1244,7 @@ impl Catalog {
         })
     }
 
+    /// Rename and/or recolour an existing tag, returning the updated record.
     pub async fn update_tag(&self, id: i64, name: &str, color: Option<&str>) -> Result<Tag> {
         sqlx::query("UPDATE tags SET name = ?, color = ? WHERE id = ?")
             .bind(name)
@@ -1208,6 +1263,8 @@ impl Catalog {
         })
     }
 
+    /// Delete a tag entirely; cascading foreign keys detach it from every
+    /// recording it was on.
     pub async fn delete_tag(&self, id: i64) -> Result<()> {
         sqlx::query("DELETE FROM tags WHERE id = ?")
             .bind(id)
@@ -1233,6 +1290,8 @@ impl Catalog {
             .collect()
     }
 
+    /// Attach a tag to a recording (idempotent — attaching an already-attached
+    /// tag is a no-op).
     pub async fn attach_tag(&self, recording_id: &RecordingId, tag_id: i64) -> Result<()> {
         sqlx::query("INSERT OR IGNORE INTO recording_tags (recording_id, tag_id) VALUES (?, ?)")
             .bind(recording_id.as_str())
@@ -1242,6 +1301,7 @@ impl Catalog {
         Ok(())
     }
 
+    /// Detach a tag from a recording (the tag itself is left intact).
     pub async fn detach_tag(&self, recording_id: &RecordingId, tag_id: i64) -> Result<()> {
         sqlx::query("DELETE FROM recording_tags WHERE recording_id = ? AND tag_id = ?")
             .bind(recording_id.as_str())
@@ -1427,6 +1487,8 @@ impl Catalog {
         Ok(count as u32)
     }
 
+    /// The tags attached to one recording, name-sorted. Used to fill
+    /// `Recording::tags` and back the detail view.
     pub async fn tags_for(&self, recording_id: &RecordingId) -> Result<Vec<Tag>> {
         let rows = sqlx::query(
             r#"SELECT t.id, t.name, t.color

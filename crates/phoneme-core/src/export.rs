@@ -43,6 +43,18 @@ fn cue_text(seg: &TranscriptSegment) -> String {
 ///
 /// Empty input produces an empty string (valid, zero-cue SRT). Cue indices are
 /// 1-based. Hours pad to at least two digits and keep counting past 99.
+///
+/// ```
+/// use phoneme_core::export::segments_to_srt;
+/// use phoneme_core::TranscriptSegment;
+/// let segs = [TranscriptSegment {
+///     start_ms: 1000,
+///     end_ms: 4500,
+///     text: "Hello world.".into(),
+///     speaker: None,
+/// }];
+/// assert_eq!(segments_to_srt(&segs), "1\n00:00:01,000 --> 00:00:04,500\nHello world.\n");
+/// ```
 pub fn segments_to_srt(segments: &[TranscriptSegment]) -> String {
     if segments.is_empty() {
         return String::new();

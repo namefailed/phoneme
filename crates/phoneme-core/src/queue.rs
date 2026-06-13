@@ -1,3 +1,22 @@
+//! The inbox: a filesystem-backed work queue for the transcription pipeline.
+//!
+//! This module owns [`InboxQueue`], the durable hand-off between "a recording
+//! finished capturing" and "the daemon's worker transcribed it". The daemon
+//! enqueues a payload when a recording stops; a single worker claims items one
+//! at a time and runs the pipeline against each.
+//!
+//! Why the filesystem instead of an in-memory queue: state must survive a crash
+//! or restart. Each item is a JSON file, and every state change is an atomic
+//! rename between four subdirectories — `pending/` → `processing/` →
+//! `done/`/`failed/`. That gives crash recovery for free ([`recover_orphans`]
+//! re-queues anything stuck in `processing/`, and is idempotent across the
+//! finish-then-crash window). Two dot-files control ordering and pausing without
+//! showing up as payloads: `.queue-order` (the user's custom claim order) and
+//! `.queue-paused` (a sentinel the worker checks before each claim). The badge
+//! counts in the GUI come from [`InboxQueue::counts`].
+//!
+//! [`recover_orphans`]: InboxQueue::recover_orphans
+
 use crate::error::{Error, Result};
 use crate::id::RecordingId;
 use crate::types::HookPayload;
@@ -15,16 +34,21 @@ const ORDER_FILE: &str = ".queue-order";
 /// finishes). No `.json` extension so payload scans ignore it.
 const PAUSE_FILE: &str = ".queue-paused";
 
-/// Which directory of the inbox a payload lives in.
+/// Which directory of the inbox a payload lives in (one per subdirectory).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InboxState {
+    /// Awaiting a worker (`pending/`).
     Pending,
+    /// Being transcribed/post-processed right now (`processing/`, at most one).
     Processing,
+    /// Completed (`done/`).
     Done,
+    /// Quarantined after an error or cancellation (`failed/`).
     Failed,
 }
 
 impl InboxState {
+    /// The subdirectory name this state maps to under the inbox root.
     pub fn subdir(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -35,20 +59,27 @@ impl InboxState {
     }
 }
 
-/// Count of payloads in each inbox state.
+/// Count of payloads in each inbox state (powers the queue badge).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InboxCounts {
+    /// Files in `pending/`.
     pub pending: usize,
+    /// Files in `processing/`.
     pub processing: usize,
+    /// Files in `done/`.
     pub done: usize,
+    /// Files in `failed/`.
     pub failed: usize,
 }
 
-/// Failure payload (written when finish_failed is called).
+/// The record written into `failed/` when an item is quarantined, capturing why.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedPayload {
+    /// The recording this failure belongs to.
     pub id: RecordingId,
+    /// Short machine-readable failure category (e.g. `"corrupt_payload"`).
     pub error_kind: String,
+    /// Human-readable failure detail.
     pub error_message: String,
 }
 

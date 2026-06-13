@@ -77,8 +77,13 @@ fn category_for(ok: bool, severity_if_failed: CheckCategory) -> CheckCategory {
 /// daemon or opening a file); the CLI renders only the human fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckResult {
+    /// Short check name shown in the Doctor list (e.g. `"Whisper server"`).
     pub name: String,
+    /// Whether the check passed. A failing `Info`-category check never fails the
+    /// overall run.
     pub ok: bool,
+    /// One line of context — the path probed, the status seen, the free space,
+    /// etc. Never contains a secret value.
     pub detail: String,
     /// Opaque token the GUI uses to decide what "Fix" does.
     /// Supported values: `"start_daemon"`, `"open_config"`,

@@ -51,6 +51,7 @@ fn profile_path(dir: &std::path::Path, name: &str) -> Result<PathBuf> {
 /// Metadata about a saved profile, for the richer Settings Profile Manager.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct ProfileInfo {
+    /// The profile name (its `.toml` file stem).
     pub name: String,
     /// Last-modified time of the profile file, in milliseconds since the Unix
     /// epoch. `None` if the timestamp couldn't be read.

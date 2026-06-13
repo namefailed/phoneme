@@ -1,3 +1,18 @@
+//! Outbound webhook delivery, behind an SSRF guard.
+//!
+//! This module owns [`WebhookClient`], which POSTs a recording's [`HookPayload`]
+//! as JSON to `hook.webhook_url`. The daemon's pipeline fires it alongside the
+//! local hook ([`crate::hook`]) when one is configured.
+//!
+//! The load-bearing part is the guard, not the POST. Phoneme is local-first, so
+//! the policy is three-tiered (`HostClass`): a webhook into THIS machine
+//! (loopback) is the primary use case and always allowed; the LAN needs an
+//! explicit opt-in; the public internet requires TLS. The target is validated —
+//! including resolving a DNS name and classifying *every* address it yields —
+//! before a single byte leaves the machine, and redirects are never followed, so
+//! a mistyped or hostile URL can't bounce transcripts at an internal service
+//! (S-H1).
+
 use crate::config::WebhookConfig;
 use crate::error::{Error, Result};
 use crate::types::HookPayload;
@@ -151,12 +166,15 @@ async fn check_target(url: &str, policy: &WebhookConfig) -> Result<()> {
     }
 }
 
+/// HTTP client for delivering webhook POSTs, configured to never follow
+/// redirects (so a 3xx can't bypass the SSRF guard).
 #[derive(Clone)]
 pub struct WebhookClient {
     http: reqwest::Client,
 }
 
 impl WebhookClient {
+    /// Build a webhook client with a redirect-disabled HTTP client.
     pub fn new() -> Result<Self> {
         let http = reqwest::Client::builder()
             // Never follow redirects: `check_target` classifies the URL the
@@ -172,6 +190,13 @@ impl WebhookClient {
         Ok(Self { http })
     }
 
+    /// POST `payload` to `url` as JSON, after the `policy` SSRF guard passes.
+    ///
+    /// The guard runs first, so a blocked target never receives a packet.
+    /// Returns [`Error::InvalidConfig`] when the target is disallowed by policy,
+    /// [`Error::HookTimeout`] on a slow response, and [`Error::HookFailed`]
+    /// (carrying the status and body) on a non-2xx answer — a 3xx included,
+    /// since redirects are deliberately not followed.
     pub async fn post(
         &self,
         url: &str,

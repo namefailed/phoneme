@@ -31,7 +31,9 @@ use tokio::fs;
 /// merge); providers without timing data return an empty `segments`.
 #[derive(Debug, Clone)]
 pub struct Transcription {
+    /// The transcript text (speaker-labelled when diarization ran).
     pub text: String,
+    /// Per-segment timing, or empty for providers/paths with no timing data.
     pub segments: Vec<TranscriptSegment>,
 }
 
@@ -328,6 +330,10 @@ impl std::fmt::Debug for OpenAiCompatProvider {
 }
 
 impl OpenAiCompatProvider {
+    /// Build a provider for an OpenAI-compatible transcription endpoint. `api_key`
+    /// and `model` are `None` for the local whisper.cpp server; `local_diarize`
+    /// enables a local diarization pass; `request_segments` asks for
+    /// `verbose_json` timing even with diarization off.
     pub fn new(
         http: reqwest::Client,
         base_url: impl Into<String>,
@@ -602,6 +608,8 @@ impl std::fmt::Debug for DeepgramProvider {
 }
 
 impl DeepgramProvider {
+    /// Build a Deepgram provider. `diarize` requests Deepgram's own
+    /// speaker labelling (`diarize=true`).
     pub fn new(
         http: reqwest::Client,
         base_url: impl Into<String>,
@@ -817,6 +825,9 @@ impl std::fmt::Debug for AssemblyAiProvider {
 }
 
 impl AssemblyAiProvider {
+    /// Build an AssemblyAI provider. `diarize` requests speaker labels
+    /// (`speaker_labels=true`); `timeout` bounds the whole upload+create+poll
+    /// flow.
     pub fn new(
         http: reqwest::Client,
         base_url: impl Into<String>,
@@ -1067,6 +1078,7 @@ impl std::fmt::Debug for ElevenLabsProvider {
 }
 
 impl ElevenLabsProvider {
+    /// Build an ElevenLabs Scribe provider (`xi-api-key` auth, multipart upload).
     pub fn new(
         http: reqwest::Client,
         base_url: impl Into<String>,

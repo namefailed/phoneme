@@ -1,3 +1,17 @@
+//! The domain types shared across the workspace.
+//!
+//! This module is the vocabulary the daemon, CLI, tray, and frontend all speak.
+//! [`Recording`] is the central record — the catalog's row shape and the thing
+//! the UI renders — and the rest are the supporting cast: its [`RecordingStatus`]
+//! and [`RecordMode`], the [`TranscriptSegment`]/[`SpeakerName`] timeline pieces,
+//! the [`ListFilter`]/[`ListKind`] query shape, and the [`HookPayload`] handed to
+//! hooks and webhooks.
+//!
+//! Everything here is `serde`-serializable so it crosses IPC and the DB
+//! unchanged, and most enums serialize as stable lowercase strings (the catalog
+//! stores them as text). New `Recording` fields are `#[serde(default)]` so an
+//! older catalog row or wire payload that predates them still deserializes.
+
 use crate::id::RecordingId;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -6,8 +20,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingStatus {
+    /// Audio is being captured right now.
     Recording,
+    /// Capture is paused (no audio is being added).
     Paused,
+    /// The recording is being transcribed.
     Transcribing,
     /// LLM post-processing (cleanup) is rewriting the transcript.
     CleaningUp,
@@ -15,9 +32,13 @@ pub enum RecordingStatus {
     Summarizing,
     /// The auto-tag LLM step is suggesting tags.
     Tagging,
+    /// The post-transcription hook (or webhook) is running.
     HookRunning,
+    /// Fully processed and at rest — the terminal success state.
     Done,
+    /// Transcription failed (terminal). Surfaced in the failed-recordings views.
     TranscribeFailed,
+    /// The hook failed (terminal). Surfaced in the failed-recordings views.
     HookFailed,
     /// The user cancelled the recording's pipeline run (a queued item removed
     /// from the queue, or an in-flight transcription aborted). Terminal, like
@@ -27,6 +48,8 @@ pub enum RecordingStatus {
 }
 
 impl RecordingStatus {
+    /// The stable lowercase string stored in the catalog `status` column and
+    /// sent on the wire (e.g. `"hook_running"`, `"cancelled"`).
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Recording => "recording",
@@ -43,6 +66,8 @@ impl RecordingStatus {
         }
     }
 
+    /// Whether this is an end state — `Done`, the two failures, or `Cancelled`.
+    /// A terminal recording will not advance further on its own.
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
@@ -60,7 +85,10 @@ pub enum RecordMode {
     /// Stop on silence detection or max duration.
     Oneshot,
     /// Stop after exactly N seconds.
-    Duration { secs: u32 },
+    Duration {
+        /// The fixed recording length, in seconds.
+        secs: u32,
+    },
 }
 
 /// Which track of a meeting session a recording belongs to.
@@ -78,6 +106,8 @@ pub enum MeetingTrack {
 }
 
 impl MeetingTrack {
+    /// The stable lowercase string stored in the catalog `track` column
+    /// (`"mic"` / `"system"`).
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Mic => "mic",
@@ -89,19 +119,35 @@ impl MeetingTrack {
 /// The canonical Recording row as exposed by `Catalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recording {
+    /// Unique id; also encodes the start time and the on-disk path.
     pub id: RecordingId,
+    /// When capture began (local time).
     pub started_at: DateTime<Local>,
+    /// Captured length in milliseconds.
     pub duration_ms: i64,
+    /// Absolute path to the `.wav` file. Empty once retention reclaims the audio
+    /// but keeps the row.
     pub audio_path: String,
+    /// The live transcript (LLM-cleaned when post-processing ran). `None` until
+    /// transcription completes.
     pub transcript: Option<String>,
+    /// The transcription model that produced the text (e.g. `ggml-base.en`).
     pub model: Option<String>,
+    /// Current lifecycle status.
     pub status: RecordingStatus,
+    /// Machine-readable failure category when `status` is a failed state.
     pub error_kind: Option<String>,
+    /// Human-readable failure detail when `status` is a failed state.
     pub error_message: Option<String>,
+    /// The hook command that ran, if any.
     pub hook_command: Option<String>,
+    /// The hook's exit code, if it ran.
     pub hook_exit_code: Option<i32>,
+    /// The hook's run duration in milliseconds, if it ran.
     pub hook_duration_ms: Option<i64>,
+    /// When transcription completed, if it has.
     pub transcribed_at: Option<DateTime<Local>>,
+    /// When the hook last ran, if it has.
     pub hook_ran_at: Option<DateTime<Local>>,
     /// Free-form user notes, stored separately from the transcript and never
     /// touched by (re-)transcription or AI post-processing.
@@ -111,6 +157,8 @@ pub struct Recording {
     /// leave this `None`.
     #[serde(default)]
     pub meeting_id: Option<String>,
+    /// User-given name for the meeting session, shared by both its tracks.
+    /// `None` for single-track recordings or an unnamed meeting.
     #[serde(default)]
     pub meeting_name: Option<String>,
     /// Which track of a meeting session this recording is: `"mic"` (the user's
@@ -184,7 +232,9 @@ fn default_title_is_auto() -> bool {
 /// renders. Stored in the `speaker_names` table, keyed per recording.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpeakerName {
+    /// The 1-based speaker index from the transcript's `[Speaker N]` marker.
     pub speaker_label: i64,
+    /// The user-chosen display name for that speaker.
     pub name: String,
 }
 
@@ -204,9 +254,14 @@ pub struct SpeakerName {
 /// edits to the live transcript never rewrite them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranscriptSegment {
+    /// Segment start, in milliseconds from the start of the track's audio.
     pub start_ms: i64,
+    /// Segment end, in milliseconds from the start of the track's audio.
     pub end_ms: i64,
+    /// The transcript text for this segment.
     pub text: String,
+    /// Speaker label as it appears in the `[Speaker …]` marker, or `None` for an
+    /// undiarized segment (see the type doc for how numeric labels join names).
     #[serde(default)]
     pub speaker: Option<String>,
 }
@@ -227,16 +282,22 @@ pub enum ListKind {
 /// Filter for `Catalog::list` and the CLI `phoneme list` command.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListFilter {
+    /// Maximum rows to return; `None` for no cap.
     pub limit: Option<u32>,
     /// Number of rows to skip before returning results (for pagination). Applied
     /// after ordering; pairs with `limit` to fetch successive pages. Serde-
     /// defaulted so older clients/configs that omit it still deserialize.
     #[serde(default)]
     pub offset: Option<u32>,
+    /// Keep only recordings started at or after this time.
     pub since: Option<DateTime<Local>>,
+    /// Keep only recordings started at or before this time.
     pub until: Option<DateTime<Local>>,
+    /// Keep only recordings in this status.
     pub status: Option<RecordingStatus>,
+    /// Full-text query over transcripts (and a `LIKE` over tag names).
     pub search: Option<String>,
+    /// Keep only recordings carrying this tag.
     pub tag_id: Option<i64>,
     /// `true` (default) = newest first; `false` = oldest first.
     #[serde(default)]
@@ -256,24 +317,39 @@ pub struct ListFilter {
 /// The payload sent to hook scripts on stdin (and stored verbatim in inbox JSON).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookPayload {
+    /// The recording this payload describes.
     pub id: RecordingId,
+    /// When the recording started (local time).
     pub timestamp: DateTime<Local>,
+    /// The (post-processed) transcript text.
     pub transcript: String,
+    /// Absolute path to the recording's audio file.
     pub audio_path: String,
+    /// Captured length in milliseconds.
     pub duration_ms: i64,
+    /// The transcription model that produced the text.
     pub model: String,
+    /// Schema/version metadata so a hook can guard against payload changes.
     pub metadata: HookMetadata,
 }
 
+/// Versioning metadata embedded in every [`HookPayload`], so a hook script can
+/// detect the app version and the payload schema it was written for.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookMetadata {
+    /// The Phoneme version that produced the payload (semver `X.Y.Z`).
     pub phoneme_version: String,
+    /// The hook payload schema version (see [`HookMetadata::HOOK_VERSION`]).
     pub hook_version: u32,
 }
 
 impl HookMetadata {
+    /// The current hook payload schema version. Bump when the payload shape
+    /// changes in a way a hook would care about.
     pub const HOOK_VERSION: u32 = 1;
 
+    /// Metadata for the running build: the crate version and the current schema
+    /// version.
     pub fn current() -> Self {
         Self {
             phoneme_version: env!("CARGO_PKG_VERSION").to_string(),

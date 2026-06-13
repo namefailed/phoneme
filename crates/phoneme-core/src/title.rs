@@ -29,6 +29,15 @@ const FILLERS: &[&str] = &[
 /// Returns `None` when the text holds nothing usable (empty, whitespace,
 /// annotations, or filler all the way down) — callers should then leave any
 /// stored title alone rather than blanking it.
+///
+/// ```
+/// use phoneme_core::title::heuristic_title;
+/// assert_eq!(
+///     heuristic_title("Um, okay so plan the Denver trip. Also call the bank."),
+///     Some("plan the Denver trip".into()),
+/// );
+/// assert_eq!(heuristic_title("uh... um. okay"), None);
+/// ```
 pub fn heuristic_title(text: &str) -> Option<String> {
     // Line by line: if the first line is filler-only ("Um, okay so"), the
     // next line gets its chance instead of the whole text yielding nothing.

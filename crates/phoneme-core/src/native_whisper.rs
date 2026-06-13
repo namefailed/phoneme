@@ -1,12 +1,30 @@
+//! In-process Whisper transcription via whisper-rs (feature `native-whisper`).
+//!
+//! This module owns [`NativeWhisperProvider`], a [`TranscriptionProvider`] that
+//! runs the GGML model directly in the daemon process instead of talking to a
+//! whisper.cpp HTTP server. It's an alternative wiring of the local transcription
+//! path: [`Transcriber::provider`](crate::transcription::Transcriber::provider)
+//! reaches for it (when the feature is on and `whisper.model_path` is set) before
+//! falling back to the bundled-server provider.
+//!
+//! The model is loaded once at construction and held; each transcription creates
+//! a fresh inference state. Errors use `anyhow` here (not the crate
+//! [`Error`](crate::Error)) because this whole module is optional and isolated
+//! behind the feature flag.
+
 use anyhow::{Context, Result};
 use std::path::Path;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+/// A [`TranscriptionProvider`](crate::transcription::TranscriptionProvider) that
+/// runs a GGML Whisper model in-process via whisper-rs.
 pub struct NativeWhisperProvider {
     context: WhisperContext,
 }
 
 impl NativeWhisperProvider {
+    /// Load the GGML model at `model_path` into a reusable context. Errors if the
+    /// file can't be loaded as a Whisper model.
     pub fn new(model_path: &Path) -> Result<Self> {
         let params = WhisperContextParameters::default();
         let context =
