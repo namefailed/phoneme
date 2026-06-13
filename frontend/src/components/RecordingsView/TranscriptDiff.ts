@@ -1,5 +1,5 @@
 import { escapeHtml } from "../../utils/format";
-import { diffText, type DiffOp, type DiffOpType, type DiffMode } from "../../utils/diff";
+import { diffText, diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode } from "../../utils/diff";
 
 /**
  * Read-only side-by-side-ish DIFF of a recording's transcript layers
@@ -126,12 +126,21 @@ export class TranscriptDiff {
       return `<div class="tdiff-empty">Pick two different versions to compare.</div>`;
     }
 
-    const ops = diffText(leftVal ?? "", rightVal ?? "", this.mode);
+    // Size-guarded: hour-long transcripts can exceed the word-level LCS cap,
+    // in which case the diff arrives at a coarser granularity — say so rather
+    // than letting the view silently look less precise than the mode toggle.
+    const { ops, fallback } = diffTextDetailed(leftVal ?? "", rightVal ?? "", this.mode);
+    const note =
+      fallback === "line"
+        ? `<div class="tdiff-empty">These versions are too long for a word-level diff — showing line-level changes instead.</div>`
+        : fallback === "block"
+          ? `<div class="tdiff-empty">These versions are too long for a detailed diff — showing the changed region as one block.</div>`
+          : "";
     if (ops.every((o) => o.type === "equal")) {
-      return `<div class="tdiff-same">These two versions are identical.</div>
+      return `${note}<div class="tdiff-same">These two versions are identical.</div>
         <div class="tdiff-text tdiff-text--numbered">${this.renderUnified(ops)}</div>`;
     }
-    return `<div class="tdiff-text tdiff-text--numbered">${this.renderUnified(ops)}</div>`;
+    return `${note}<div class="tdiff-text tdiff-text--numbered">${this.renderUnified(ops)}</div>`;
   }
 
   /** Render a unified, line-numbered diff: an old + new line-number gutter, a

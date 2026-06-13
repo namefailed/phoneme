@@ -70,7 +70,9 @@ impl Client {
     /// Use this for read-only or inspection commands — `status`, `doctor`,
     /// `list`, `show`, `search`, `queue list/counts/status`, `watch`, `tag
     /// list/for/usage`, `profile list`, `meeting tracks` — where the daemon
-    /// not running is itself the answer rather than a fixable obstacle. A
+    /// not running is itself the answer rather than a fixable obstacle.
+    /// `queue skip` rides this path too: it mutates, but only a live daemon
+    /// mid-stage has anything to skip, so spawning one would mask reality. A
     /// clear error is printed and [`exit::DAEMON_NOT_REACHABLE`] is returned
     /// when the daemon is unreachable, letting the caller surface the fact
     /// that the daemon is down without masking it with a silent start.

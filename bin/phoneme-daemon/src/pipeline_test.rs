@@ -1037,3 +1037,70 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
     // Nothing to type, nothing typed.
     assert!(!pipeline_should_type(&full, true, ""));
 }
+
+/// `parse_tag_names` must find the first VALID JSON string-array even when the
+/// model wraps it in bracket-bearing prose. The old first-'['..last-']' slice
+/// spanned the prose, failed to parse, and comma-split the whole reply into
+/// junk candidates instead.
+#[test]
+fn parse_tag_names_ignores_prose_brackets_around_the_json_array() {
+    use crate::pipeline::parse_tag_names;
+
+    // Brackets BEFORE the array (a citation marker).
+    assert_eq!(
+        parse_tag_names(
+            "Sure! Based on the transcript [1], here are the tags: [\"meeting\", \"budget\"]",
+            5,
+        ),
+        vec!["meeting", "budget"],
+    );
+    // ... and AFTER it.
+    assert_eq!(
+        parse_tag_names("[\"alpha\"] is my final answer [hope that helps]", 5),
+        vec!["alpha"],
+    );
+    // A non-string JSON array earlier in the reply is skipped, not fatal.
+    assert_eq!(
+        parse_tag_names("scores: [1, 2] tags: [\"deep work\"]", 5),
+        vec!["deep work"],
+    );
+    // Code-fenced replies keep working.
+    assert_eq!(
+        parse_tag_names("```json\n[\"a\", \"b\"]\n```", 5),
+        vec!["a", "b"],
+    );
+}
+
+/// Replies with no JSON array at all still go through the comma/newline
+/// fallback, and the cap + case-insensitive dedupe hold on every path.
+#[test]
+fn parse_tag_names_fallback_split_cap_and_dedupe() {
+    use crate::pipeline::parse_tag_names;
+
+    assert_eq!(
+        parse_tag_names("alpha, beta\ngamma", 5),
+        vec!["alpha", "beta", "gamma"],
+    );
+    // First casing wins; the cap stops the list after `max` names.
+    assert_eq!(
+        parse_tag_names("[\"Code\", \"code\", \"ops\", \"extra\"]", 2),
+        vec!["Code", "ops"],
+    );
+    assert!(parse_tag_names("", 5).is_empty());
+}
+
+/// A user skip must stay distinguishable from a real stage failure all the way
+/// to the wire — the GUI matches the sentinel to toast "skipped" instead of an
+/// error (notifications.ts pins the other half of this contract).
+#[test]
+fn stage_skip_errors_are_recognizable() {
+    use crate::pipeline::{stage_skipped, STAGE_SKIPPED_REASON};
+
+    let skip = phoneme_core::Error::Internal(STAGE_SKIPPED_REASON.into());
+    assert!(stage_skipped(&skip));
+    assert!(!stage_skipped(&phoneme_core::Error::Internal(
+        "connection refused".into()
+    )));
+    // The phrase the frontend regex keys on must survive in the sentinel.
+    assert!(STAGE_SKIPPED_REASON.contains("skipped by user"));
+}

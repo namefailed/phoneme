@@ -166,6 +166,18 @@ async fn wait_for_whisper_ready(base_url: impl Fn() -> String, timeout: Duration
     }
 }
 
+/// Reason string carried by the `Err` a user-initiated stage skip produces
+/// (the queue panel's ⏭ button / `phoneme queue skip`). It reaches the GUI
+/// verbatim inside `SummaryFailed.error`, where the toast layer matches on
+/// the phrase to report "skipped" instead of a failure — keep
+/// `frontend/src/services/notifications.ts` in sync if it ever changes.
+pub(crate) const STAGE_SKIPPED_REASON: &str = "step skipped by user";
+
+/// True when an LLM-stage error is the user's skip, not a real failure.
+pub(crate) fn stage_skipped(e: &phoneme_core::Error) -> bool {
+    matches!(e, phoneme_core::Error::Internal(m) if m == STAGE_SKIPPED_REASON)
+}
+
 /// Run one LLM stage (cleanup or summary) through the streaming path, emitting
 /// `DaemonEvent::LlmActivity` so the GUI can show the exact prompt and the
 /// response as it streams. Returns the final (normalized) text.
@@ -222,7 +234,7 @@ pub(crate) async fn run_llm_stage(
             r = provider.process_streaming(prompt, text, &mut on_delta) => r,
             _ = state.skip_stage.notified() => {
                 tracing::info!(?stage, "stage skipped by user");
-                Err(phoneme_core::Error::Internal("step skipped by user".into()))
+                Err(phoneme_core::Error::Internal(STAGE_SKIPPED_REASON.into()))
             }
         }
     };
@@ -385,6 +397,13 @@ pub async fn generate_summary(
             tracing::warn!("summary LLM returned empty output");
             Err(format!("the model ({model}) returned empty output"))
         }
+        Err(e) if stage_skipped(&e) => {
+            // The user hit "skip" — not a failure. Pass the bare sentinel
+            // through (no "internal error:" wrapper, no endpoint hint) so the
+            // GUI's toast layer can tell a skip from a broken provider.
+            tracing::info!("summary stage skipped by user");
+            Err(STAGE_SKIPPED_REASON.to_string())
+        }
         Err(e) => {
             tracing::error!(error = %e, "summary generation failed");
             // Name the endpoint when one is overridden — a stale per-step URL
@@ -496,20 +515,30 @@ pub fn auto_tag_llm_config(cfg: &Config) -> LlmPostProcessConfig {
 /// and case-insensitive duplicates, and caps the list at `max`.
 fn parse_tag_names(raw: &str, max: usize) -> Vec<String> {
     let cleaned = raw.trim();
-    let jsonish = cleaned.find('[').and_then(|s| {
-        cleaned
-            .rfind(']')
-            .filter(|e| *e > s)
-            .map(|e| &cleaned[s..=e])
-    });
-    let candidates: Vec<String> = jsonish
-        .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
-        .unwrap_or_else(|| {
-            cleaned
-                .split([',', '\n', ';'])
-                .map(str::to_string)
-                .collect()
+    // Find the FIRST valid JSON string-array anywhere in the reply. Scanning
+    // every '[' (instead of slicing first-'[' .. last-']') matters because
+    // chatty models wrap the array in bracket-bearing prose — "[1] as cited"
+    // before it, "[hope that helps]" after — and the old greedy slice spanned
+    // the prose, failed to parse, and comma-split the whole reply into junk
+    // candidates. The stream deserializer parses exactly one value starting
+    // at each '[' and ignores whatever follows, so trailing prose can't break
+    // a well-formed array; a non-string array (e.g. "[1]") just fails fast
+    // and the scan moves to the next bracket.
+    let jsonish = cleaned
+        .char_indices()
+        .filter(|(_, c)| *c == '[')
+        .find_map(|(start, _)| {
+            serde_json::Deserializer::from_str(&cleaned[start..])
+                .into_iter::<Vec<String>>()
+                .next()?
+                .ok()
         });
+    let candidates: Vec<String> = jsonish.unwrap_or_else(|| {
+        cleaned
+            .split([',', '\n', ';'])
+            .map(str::to_string)
+            .collect()
+    });
     let mut seen: Vec<String> = Vec::new();
     let mut out: Vec<String> = Vec::new();
     for c in candidates {

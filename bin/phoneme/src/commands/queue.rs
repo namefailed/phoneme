@@ -3,9 +3,10 @@
 //! Each subcommand maps 1:1 to a queue IPC request (see `phoneme-ipc`):
 //! list (`ListQueue`), counts (`QueueCounts`), pause/resume (`SetQueuePaused`),
 //! status (`QueuePaused`), reorder (`ReorderQueue`), cancel (`CancelQueued`),
-//! cancel-processing (`CancelProcessing`), cancel-all (`CancelAllQueued`), and
-//! clear-failed (`ClearFailed`). With no subcommand, defaults to `list` so a
-//! bare `phoneme queue` shows what's in flight — mirroring the GUI queue panel.
+//! cancel-processing (`CancelProcessing`), skip (`SkipCurrentStage`),
+//! cancel-all (`CancelAllQueued`), and clear-failed (`ClearFailed`). With no
+//! subcommand, defaults to `list` so a bare `phoneme queue` shows what's in
+//! flight — mirroring the GUI queue panel.
 
 use crate::args::{QueueAction, QueueArgs};
 use crate::client::Client;
@@ -17,12 +18,18 @@ use std::process::ExitCode;
 
 pub async fn run(args: QueueArgs, cfg: &Config, json: bool) -> ExitCode {
     // Read-only inspection actions (list, counts, status) use the observe-only
-    // path — if the daemon is down that is itself the answer. Mutating actions
-    // (pause, resume, cancel, reorder, clear-failed) use the spawning path
-    // because they require an active daemon to make the change.
+    // path — if the daemon is down that is itself the answer. Skip rides the
+    // same path even though it mutates: it only means anything against a live
+    // daemon mid-stage, so auto-spawning a daemon just to skip nothing would
+    // hide the real situation. The other mutating actions (pause, resume,
+    // cancel, reorder, clear-failed) use the spawning path because they require
+    // an active daemon to make the change.
     let observe_only = matches!(
         args.action,
-        None | Some(QueueAction::List) | Some(QueueAction::Counts) | Some(QueueAction::Status)
+        None | Some(QueueAction::List)
+            | Some(QueueAction::Counts)
+            | Some(QueueAction::Status)
+            | Some(QueueAction::Skip)
     );
     let mut client = if observe_only {
         match Client::connect_observe(cfg).await {
@@ -125,6 +132,21 @@ pub async fn run(args: QueueArgs, cfg: &Config, json: bool) -> ExitCode {
                 Err(code) => code,
             }
         }
+        QueueAction::Skip => match client.send(Request::SkipCurrentStage).await {
+            Ok(_) => {
+                if !json {
+                    // The daemon can't report whether anything was actually
+                    // skipped (the signal is a no-op when no LLM stage is
+                    // streaming), so the wording stays conditional rather than
+                    // claiming a skip that may not have happened.
+                    println!(
+                        "skip requested — if an LLM step (cleanup / summary / tagging) is running, it stops and the pipeline moves on"
+                    );
+                }
+                ExitCode::SUCCESS
+            }
+            Err(code) => code,
+        },
         QueueAction::CancelAll => match client.send(Request::CancelAllQueued).await {
             Ok(value) => {
                 if json {

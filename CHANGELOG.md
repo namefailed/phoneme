@@ -231,6 +231,10 @@ trust boundary. Verified against current code.*
   progress count, and the quarantine **Clear failed** moved into the footer (the
   recordings keep their Failed status and stay in the library)
   (`QueuePanel.ts`, `FailedPanel.ts`).
+- [x] **`phoneme queue skip`** — CLI parity for the queue panel's ⏭: skips the
+  LLM step (cleanup / summary / tagging) currently running for the active item
+  (`SkipCurrentStage` IPC). Observe-only — it never auto-spawns a daemon just
+  to skip nothing.
 - [x] **Import audio** button in Settings → Storage (`SectionStorage.ts`).
 
 ### Dictation (transcribe in place)
@@ -261,6 +265,18 @@ trust boundary. Verified against current code.*
   suggested tags across the library (`ClearAllTagSuggestions`).
 - [x] **FLAC import** — wav / mp3 / m4a / flac, end to end (decoder feature,
   CLI + GUI filters, docs).
+- [x] **Saved-search rename collision guard** — renaming a saved search to a
+  name another one already uses is refused with a clear toast (the rename editor
+  stays open) instead of silently leaving two same-named searches where the next
+  save overwrites whichever sits first (`savedSearches.ts`).
+- [x] **Compare versions survives hour-long transcripts** — the version diff
+  peels off the common prefix/suffix and caps the LCS table (`MAX_LCS_CELLS`);
+  an oversize word diff degrades to line then block granularity with an in-view
+  notice instead of freezing the webview (`utils/diff.ts`, `TranscriptDiff.ts`).
+- [x] **Sturdier tag-suggestion parsing** — the tagger finds the first *valid*
+  JSON array in a chatty model reply; bracket-bearing prose around it ("[1] as
+  cited…", "[hope that helps]") no longer derails parsing into junk tag
+  candidates (`pipeline.rs parse_tag_names`).
 
 ### Status, notifications & pickers
 
@@ -269,6 +285,14 @@ trust boundary. Verified against current code.*
 - [x] **Toast overhaul + step notifications** — errors time out (10 s), hover
   pauses with a countdown bar, stack capped; opt-in per-step completion toasts
   (`interface.step_notifications`), errors always surface.
+- [x] **Skipping a step no longer reads as a failure** — the queue panel's ⏭
+  (and `phoneme queue skip`) used to end in an error toast ("Summary failed:
+  …step skipped by user"); a user skip now toasts "Summary skipped" (info,
+  step-gated) while real summary failures keep erroring (skip sentinel in
+  `pipeline.rs`, toast routing centralized in `notifications.ts`).
+- [x] **Health pill polls only while visible** — the header's 30-second Doctor
+  poll probes backends, so it now pauses while the window is hidden/minimized
+  and re-checks the moment the window shows again (`HeaderBar.ts`).
 - [x] **One provider/model picker everywhere** — the preset-vs-provider duality is
   gone: a single named-provider connection block (On this computer / Cloud /
   Custom, key row only when needed, "Get a key ↗", Test button, URL under

@@ -68,6 +68,20 @@ function onEvent(event: DaemonEvent) {
     case "hook_failed":
       showToast(`Hook failed: ${e.error}`, "error");
       return;
+    case "summary_failed": {
+      // A user-initiated skip (the queue panel's ⏭ / `phoneme queue skip`)
+      // arrives as a summary failure carrying the daemon's skip sentinel —
+      // report it as the skip it is, never as an error. The phrase is pinned
+      // by the daemon (pipeline.rs `STAGE_SKIPPED_REASON`).
+      const error = String(e.error ?? "");
+      if (/skipped by user/i.test(error)) {
+        if (stepsEnabled) showToast("Summary skipped", "info");
+        return;
+      }
+      // Real summary failures always surface, like the other *_failed events.
+      showToast(`Summary failed: ${error || "check the AI provider in Settings"}`, "error");
+      return;
+    }
     case "summary_updated":
       if (stepsEnabled) showToast("Summary ready", "success");
       return;
