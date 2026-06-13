@@ -373,6 +373,7 @@ export class TranscriptEditorElement extends LitElement {
           Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
         <div class="header-actions">
+          ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
           ${this.isDirty()
             ? ""
             : html`<button
@@ -381,7 +382,6 @@ export class TranscriptEditorElement extends LitElement {
                 aria-label="Copy transcript"
                 @click=${this.requestCopy}
               >${this.copied ? "✅" : "📋"}</button>`}
-          ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
           <button class="btn-save" style="display: ${this.isDirty() ? 'inline-flex' : 'none'};" @click=${this.save}>Save Changes</button>
         </div>
       </div>
