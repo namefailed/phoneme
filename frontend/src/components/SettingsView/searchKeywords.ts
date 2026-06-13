@@ -35,6 +35,8 @@ const PATTERNS: Pattern[] = [
   { test: (k) => k.includes("diariz") || k.includes("speaker"), words: ["diarization", "speakers", "who spoke", "speaker labels", "voice separation", "speaker names"] },
   { test: (k) => k.includes("preview") || k.includes("stream"), words: ["live preview", "real time", "streaming", "captions", "as you speak", "overlay"] },
   { test: (k) => k.includes("hook") || k.includes("command"), words: ["hooks", "automation", "run command", "script", "trigger", "webhook", "on transcribe"] },
+  { test: (k) => k.includes("rest_api") || k.includes("mcp") || k.includes("integration"), words: ["rest api", "http api", "http server", "rest bridge", "sse", "mcp", "model context protocol", "claude desktop", "integration", "automation api", "endpoint", "port", "localhost api"] },
+  { test: (k) => k.includes("hmac") || k.includes("custom_headers") || k.includes("webhook"), words: ["webhook", "http headers", "custom headers", "authorization header", "bearer token", "hmac", "signature", "signing secret", "x-api-key"] },
   {
     test: (k) => k.includes("post_process") || k.includes("postprocess") || k.includes("cleanup") || k.includes("llm") || k.includes("summary"),
     words: ["post processing", "cleanup", "ai polish", "grammar", "rewrite", "summarize", "summary", "llm", "tidy up"],

@@ -165,6 +165,14 @@ trust boundary. Verified against current code.*
 - [x] **Webhook safety toggles** — Settings now exposes
   `webhook.allow_private_network` and `webhook.allow_http` (previously
   TOML-only) with plain-language warnings.
+- [x] **Every new backend surface is configurable in the GUI** — the webhook
+  **signing secret** (`webhook.hmac_secret`, a masked/DPAPI password field) and
+  **custom headers** (`webhook.custom_headers`, an add/remove row editor) join
+  the safety toggles in Post-Processing → Destination & Integrations; and a new
+  **System → Integrations** section turns on the **REST API bridge**
+  (`rest_api.enabled` / `rest_api.port`) and documents the **MCP server**
+  (`phoneme-mcp`, its five tools, and how to wire it into an MCP client). No more
+  features that only existed in `config.toml`.
 - [x] **Whole-library backup zip** — Settings → Storage → "Back up to .zip…"
   writes the same portable catalog+audio archive as `phoneme export <file>`
   (the old text-only Export is relabeled).

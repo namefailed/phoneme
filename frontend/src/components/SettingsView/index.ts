@@ -25,6 +25,7 @@ import { SectionProfiles } from "./SectionProfiles";
 import { SectionSavedSearches } from "./SectionSavedSearches";
 import { SectionAutoTag } from "./SectionAutoTag";
 import { SectionInPlace } from "./SectionInPlace";
+import { SectionIntegrations } from "./SectionIntegrations";
 import "./styles.css";
 
 // ── Settings-search helpers ────────────────────────────────────────────────
@@ -272,6 +273,7 @@ export class SettingsViewElement extends LitElement {
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionSemantic(h, this.config); } },
+      { tab: "system", label: "System", mount: (h) => { new SectionIntegrations(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, this.config); } },
       { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, this.config, this.onNavigateToWizard); } },
     ];
@@ -327,6 +329,7 @@ export class SettingsViewElement extends LitElement {
         case "system":
           new SectionStorage(createSubHost(), this.config);
           new SectionSemantic(createSubHost(), this.config);
+          new SectionIntegrations(createSubHost(), this.config);
           new SectionTray(createSubHost(), this.config);
           new SectionAdvanced(createSubHost(), this.config, this.onNavigateToWizard);
           break;
