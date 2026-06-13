@@ -360,6 +360,9 @@ pub enum QueueAction {
     Cancel { id: String },
     /// Cancel the item currently being processed (abort the in-flight work).
     CancelProcessing { id: String },
+    /// Skip the LLM step (cleanup / summary / tagging) currently running for
+    /// the active item; the pipeline continues with whatever comes next.
+    Skip,
     /// Remove ALL still-pending items from the queue at once.
     CancelAll,
     /// Empty the inbox `failed/` quarantine ("dismiss failed").

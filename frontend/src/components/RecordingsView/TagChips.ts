@@ -398,7 +398,7 @@ export class TagChipsElement extends LitElement {
           ` : null}
         </div>
         <button class="tag-manage" title="Create, rename, recolor, and delete tags" @click=${this.onManageClick}>🏷 Manage tags</button>
-        <button class="tag-manage tag-suggest" title="Ask the AI to suggest tags for this recording (you approve before they apply)"
+        <button class="tag-manage tag-suggest" title="Ask the AI to suggest tags for this recording. New tag names wait for your approval; with auto-apply on (Settings → Auto-Tagging), tags you already use attach immediately."
           ?disabled=${this.suggesting} @click=${() => void this.runSuggest()}>${this.suggesting ? "✨ Suggesting…" : "✨ Suggest"}</button>
         ${this.suggestions.length ? html`
           <span class="tag-suggestions" title="AI-suggested tags — ✓ applies one, ✕ dismisses it">

@@ -13,9 +13,14 @@
  *   • line-level — splits on newlines (keeping the trailing "\n"). Better when
  *     whole paragraphs were rewritten, where a word diff would look like noise.
  *
- * Complexity is O(n·m) in time and memory (full DP table). Transcripts are at
- * most a few thousand tokens, so this is fine; the caller caps the granularity
- * (word vs line) to keep it modest.
+ * Complexity is O(n·m) in time and memory (full DP table) — fine for prose-
+ * sized inputs but lethal on hour-long meeting transcripts (tens of thousands
+ * of words per side → billions of DP cells → a frozen webview). `diffText` /
+ * `diffTextDetailed` therefore peel off the common prefix/suffix first (cheap,
+ * and most edits are local) and cap the remaining table at [`MAX_LCS_CELLS`];
+ * past the cap a word diff degrades to a line diff, and past that to a single
+ * coarse "block" delete+insert of the differing middle. `diffTextDetailed`
+ * reports which fallback (if any) was taken so the UI can say so.
  */
 
 export type DiffOpType = "equal" | "insert" | "delete";
@@ -46,8 +51,19 @@ export function tokenizeLines(text: string): string[] {
 }
 
 /**
+ * Hard ceiling on the LCS DP table (left tokens × right tokens), applied by
+ * `diffTextDetailed` to the post-trim middles. ~4M cells stays well under
+ * 100ms and a few tens of MB; the unbounded table on long meeting transcripts
+ * (e.g. 20k × 20k words = 400M cells) froze the webview outright.
+ */
+export const MAX_LCS_CELLS = 4_000_000;
+
+/**
  * Diff two already-tokenized sequences via LCS and return a flat op list with
  * runs of the same type already coalesced. Equality is by exact token string.
+ * NOTE: raw and uncapped — O(a.length · b.length) time AND memory. Text-sized
+ * inputs should go through `diffText`/`diffTextDetailed`, which trim shared
+ * edges and enforce [`MAX_LCS_CELLS`].
  */
 export function diffTokens(a: string[], b: string[]): DiffOp[] {
   const n = a.length;
@@ -99,12 +115,92 @@ function coalesce(ops: DiffOp[]): DiffOp[] {
 
 export type DiffMode = "word" | "line";
 
+/** Length of the common prefix and suffix of two token lists (exact token
+ *  equality); the suffix scan stops before it would overlap the prefix. */
+function commonEdges(a: string[], b: string[]): { pre: number; suf: number } {
+  const max = Math.min(a.length, b.length);
+  let pre = 0;
+  while (pre < max && a[pre] === b[pre]) pre++;
+  let suf = 0;
+  while (suf < max - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+  return { pre, suf };
+}
+
+/**
+ * LCS diff with the shared edges peeled off first: the common prefix/suffix
+ * become plain equal ops and only the differing middle pays for the O(n·m)
+ * table. Returns null when even that middle would exceed `maxCells`.
+ */
+function diffTrimmed(a: string[], b: string[], maxCells: number): DiffOp[] | null {
+  const { pre, suf } = commonEdges(a, b);
+  const midA = a.slice(pre, a.length - suf);
+  const midB = b.slice(pre, b.length - suf);
+  if (midA.length * midB.length > maxCells) return null;
+  const ops: DiffOp[] = [];
+  if (pre) ops.push({ type: "equal", value: a.slice(0, pre).join("") });
+  ops.push(...diffTokens(midA, midB));
+  if (suf) ops.push({ type: "equal", value: a.slice(a.length - suf).join("") });
+  return coalesce(ops);
+}
+
+/** Coarsest possible diff — shared edges kept, the whole differing middle as
+ *  one delete + one insert. Always linear; the last-resort fallback. */
+function blockDiff(a: string[], b: string[]): DiffOp[] {
+  const { pre, suf } = commonEdges(a, b);
+  const ops: DiffOp[] = [];
+  if (pre) ops.push({ type: "equal", value: a.slice(0, pre).join("") });
+  const delMid = a.slice(pre, a.length - suf).join("");
+  const insMid = b.slice(pre, b.length - suf).join("");
+  if (delMid) ops.push({ type: "delete", value: delMid });
+  if (insMid) ops.push({ type: "insert", value: insMid });
+  if (suf) ops.push({ type: "equal", value: a.slice(a.length - suf).join("") });
+  return coalesce(ops);
+}
+
+export interface DiffOutcome {
+  ops: DiffOp[];
+  /**
+   * Which size guard kicked in, if any: "line" = the requested word diff was
+   * too large and a line diff was rendered instead; "block" = even the line
+   * version blew the cap and the differing middle is one coarse delete+insert.
+   * null = the requested granularity ran exactly.
+   */
+  fallback: "line" | "block" | null;
+}
+
+/**
+ * Size-guarded diff: tokenize at the requested granularity, trim the shared
+ * prefix/suffix, and run the LCS only when the remaining table fits in
+ * `maxCells` (see [`MAX_LCS_CELLS`]). A too-large word diff retries at line
+ * granularity (1–2 orders fewer tokens); a too-large line diff degrades to a
+ * single block. Every path keeps the rebuild invariant: equal+delete ops
+ * concatenate to `a`, equal+insert ops to `b`.
+ */
+export function diffTextDetailed(
+  a: string,
+  b: string,
+  mode: DiffMode = "word",
+  maxCells: number = MAX_LCS_CELLS,
+): DiffOutcome {
+  const tok = mode === "line" ? tokenizeLines : tokenizeWords;
+  const exact = diffTrimmed(tok(a), tok(b), maxCells);
+  if (exact) return { ops: exact, fallback: null };
+  if (mode === "word") {
+    const la = tokenizeLines(a);
+    const lb = tokenizeLines(b);
+    const byLine = diffTrimmed(la, lb, maxCells);
+    if (byLine) return { ops: byLine, fallback: "line" };
+    return { ops: blockDiff(la, lb), fallback: "block" };
+  }
+  return { ops: blockDiff(tok(a), tok(b)), fallback: "block" };
+}
+
 /**
  * Convenience entry point: tokenize both sides at the requested granularity and
  * diff them. `a` is the "before"/left side, `b` is the "after"/right side, so
  * `delete` ops are text only in `a` and `insert` ops are text only in `b`.
+ * Size-guarded — see [`diffTextDetailed`] to learn whether a fallback ran.
  */
 export function diffText(a: string, b: string, mode: DiffMode = "word"): DiffOp[] {
-  const tok = mode === "line" ? tokenizeLines : tokenizeWords;
-  return diffTokens(tok(a), tok(b));
+  return diffTextDetailed(a, b, mode).ops;
 }

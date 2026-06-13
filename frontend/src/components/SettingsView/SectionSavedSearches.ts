@@ -142,8 +142,17 @@ export class SectionSavedSearches {
       const commitRename = () => {
         const input = row.querySelector<HTMLInputElement>(".ssm-rename-input");
         const name = input?.value.trim() ?? "";
+        if (name) {
+          const { list, conflict } = renameSavedSearch(id, name);
+          if (conflict) {
+            // Keep the rename editor open (and the typed text intact) so the
+            // user can pick another name instead of silently dropping it.
+            showToast(`A saved search named "${conflict.name}" already exists — pick another name.`, "error");
+            return;
+          }
+          this.items = list;
+        }
         this.renamingId = null;
-        if (name) this.items = renameSavedSearch(id, name);
         this.render();
       };
       row.querySelector<HTMLButtonElement>(".ssm-rename-save")?.addEventListener("click", commitRename);

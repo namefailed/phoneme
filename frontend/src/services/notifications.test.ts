@@ -125,6 +125,44 @@ describe("errors always surface, regardless of the step setting", () => {
     emit({ event: "transcription_failed", id: "r1", error: "model file missing" });
     expect(toast).toHaveBeenCalledWith("Transcription failed: model file missing", "error");
   });
+
+  it("summary_failed toasts an error even with steps OFF", () => {
+    setStepNotifications(false);
+    emit({ event: "summary_failed", id: "r1", error: "connection refused" });
+    expect(toast).toHaveBeenCalledWith("Summary failed: connection refused", "error");
+  });
+
+  it("an empty summary_failed reason falls back to actionable wording", () => {
+    emit({ event: "summary_failed", id: "r1", error: "" });
+    expect(toast).toHaveBeenCalledWith(
+      "Summary failed: check the AI provider in Settings",
+      "error",
+    );
+  });
+});
+
+describe("a user skip is never reported as a failure", () => {
+  // The exact wire string the daemon sends for a user-initiated stage skip
+  // (pipeline.rs `STAGE_SKIPPED_REASON`) — this test pins the cross-layer
+  // contract the toast matcher keys on.
+  const SKIPPED = "step skipped by user";
+
+  it("summary_failed carrying the skip sentinel shows an info toast, not an error", () => {
+    emit({ event: "summary_failed", id: "r1", error: SKIPPED });
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("Summary skipped", "info");
+  });
+
+  it("the skip notice follows the step gate (errors wouldn't)", () => {
+    setStepNotifications(false);
+    emit({ event: "summary_failed", id: "r1", error: SKIPPED });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("a reason merely mentioning other text still errors", () => {
+    emit({ event: "summary_failed", id: "r1", error: "user cancelled the request" });
+    expect(toast).toHaveBeenCalledWith("Summary failed: user cancelled the request", "error");
+  });
 });
 
 describe("summary / tag-suggestion toasts follow the step gate", () => {

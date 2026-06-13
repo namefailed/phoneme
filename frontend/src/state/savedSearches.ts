@@ -78,16 +78,29 @@ export function removeSavedSearch(id: string): SavedSearch[] {
   return list;
 }
 
-/** Rename a saved search in place (no-op on a blank name or unknown id). */
-export function renameSavedSearch(id: string, name: string): SavedSearch[] {
+/** Outcome of a rename attempt: the (possibly unchanged) list, plus the entry
+ *  whose name blocked the rename when one did. */
+export type RenameResult = { list: SavedSearch[]; conflict: SavedSearch | null };
+
+/**
+ * Rename a saved search in place (no-op on a blank name or unknown id).
+ * Names are unique case-insensitively (`addSavedSearch` upserts by name), so
+ * a rename that collides with a DIFFERENT entry is refused and the blocking
+ * entry returned via `conflict` — silently letting two searches share a name
+ * would make the next same-name save overwrite whichever one happens to sit
+ * first. Renaming an entry to its own name (e.g. a casing change) is allowed.
+ */
+export function renameSavedSearch(id: string, name: string): RenameResult {
   const trimmed = name.trim();
   const list = loadSavedSearches();
   const s = list.find((x) => x.id === id);
-  if (s && trimmed) {
-    s.name = trimmed;
-    persist(list);
-  }
-  return list;
+  if (!s || !trimmed) return { list, conflict: null };
+  const conflict =
+    list.find((x) => x.id !== id && x.name.toLowerCase() === trimmed.toLowerCase()) ?? null;
+  if (conflict) return { list, conflict };
+  s.name = trimmed;
+  persist(list);
+  return { list, conflict: null };
 }
 
 /** Overwrite a saved search's filter snapshot (e.g. "update to current"). */

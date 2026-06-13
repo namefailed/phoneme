@@ -13,11 +13,12 @@ These apply to any subcommand:
 | `-v`, `--verbose` | Verbose tracing to stderr |
 
 The CLI auto-spawns the daemon when needed. **Read-only or inspection commands
-(`list`, `show`, `search`, `doctor`, `queue list/counts/status`, `daemon status`,
-`watch`)** never start a daemon automatically — if the daemon is not running,
-they report that clearly and exit non-zero. Commands that create work (`record`,
-`import`, `retranscribe`, `cleanup`, `summarize`, `export --captions`, …) do
-auto-spawn.
+(`list`, `show`, `search`, `doctor`, `queue list/counts/status/skip`,
+`daemon status`, `watch`)** never start a daemon automatically — if the daemon
+is not running, they report that clearly and exit non-zero (`queue skip` joins
+them because only a live daemon mid-stage has anything to skip). Commands that
+create work (`record`, `import`, `retranscribe`, `cleanup`, `summarize`,
+`export --captions`, …) do auto-spawn.
 
 ## ⚙️ Core Commands
 
@@ -273,6 +274,12 @@ phoneme queue cancel 20260519T143500823
 
 # Cancel the item currently being processed (abort the in-flight work)
 phoneme queue cancel-processing 20260519T143500823
+
+# Skip the LLM step (cleanup / summary / tagging) currently running for the
+# active item — the pipeline continues with whatever comes next. A no-op when
+# no LLM stage is streaming (transcription and hooks aren't skippable; use
+# cancel-processing for those). Mirrors the queue panel's ⏭ button.
+phoneme queue skip
 
 # Remove ALL still-pending items at once
 phoneme queue cancel-all

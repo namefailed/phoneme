@@ -47,6 +47,16 @@ export class HeaderBarElement extends LitElement {
   @state() private healthIssues: { name: string; fix: string | null }[] = [];
   @state() private bannerDismissed = false;
   private healthTimer: number | null = null;
+  /** Set when a scheduled health check came due while the window was hidden
+   *  (minimized / in the tray) — it runs the moment the window shows again. */
+  private healthCheckDue = false;
+  /** Re-run a deferred health check as soon as the window becomes visible. */
+  private visibilityHandler = () => {
+    if (document.visibilityState === "visible" && this.healthCheckDue) {
+      this.healthCheckDue = false;
+      void this.checkHealth();
+    }
+  };
   @state() private settingsMenuOpen = false;
   @state() private previewText: string | null = null;
   /** When the system-wide desktop preview overlay is on, the in-app live-preview
@@ -108,10 +118,21 @@ export class HeaderBarElement extends LitElement {
     void this.syncStatusFromDaemon();
     void this.initSemanticDefault();
     void this.loadConfigPrefs();
-    // Health: run the Doctor checks now and every 30s (cheap local IPC); the
-    // whisper_status_changed event below re-checks immediately on a transition.
+    // Health: run the Doctor checks now and every 30s — but only while the
+    // window is actually visible. The checks include backend probes (Whisper /
+    // provider reachability), so a tray-minimized window shouldn't keep paying
+    // for them; a check that comes due while hidden runs the moment the window
+    // shows again (visibilityHandler). The whisper_status_changed event below
+    // still re-checks immediately on a transition, hidden or not.
     void this.checkHealth();
-    this.healthTimer = window.setInterval(() => void this.checkHealth(), 30000);
+    this.healthTimer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") {
+        this.healthCheckDue = true;
+        return;
+      }
+      void this.checkHealth();
+    }, 30000);
+    document.addEventListener("visibilitychange", this.visibilityHandler);
     // Re-read the overlay pref on every settings save so toggling it takes effect
     // immediately (no reload).
     window.addEventListener("config:saved", this.onConfigSavedOverlay);
@@ -155,8 +176,9 @@ export class HeaderBarElement extends LitElement {
       } else if (eventName === "whisper_status_changed") {
         // A reachability flip — refresh the health pill/banner right away.
         void this.checkHealth();
-      } else if (eventName === "summary_failed") {
-        showToast(`Summary failed: ${p.error ?? "check the AI provider in Settings"}`, "error");
+        // (summary_failed toasts — including the "skipped by user" case — are
+        // handled centrally in services/notifications.ts with the other
+        // pipeline step/failure toasts.)
       } else if (eventName === "retention_warning") {
         try {
           const { isPermissionGranted, requestPermission, sendNotification } = await import("@tauri-apps/plugin-notification");
@@ -237,6 +259,7 @@ export class HeaderBarElement extends LitElement {
       clearInterval(this.healthTimer);
       this.healthTimer = null;
     }
+    document.removeEventListener("visibilitychange", this.visibilityHandler);
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }

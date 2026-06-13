@@ -4,6 +4,8 @@ import {
   tokenizeLines,
   diffTokens,
   diffText,
+  diffTextDetailed,
+  MAX_LCS_CELLS,
   type DiffOp,
 } from "./diff";
 
@@ -114,5 +116,75 @@ describe("diffText", () => {
     const ops = diffText(a, b, "line");
     expect(rebuildA(ops)).toBe(a);
     expect(rebuildB(ops)).toBe(b);
+  });
+});
+
+describe("diffTextDetailed size guard", () => {
+  it("runs the requested granularity exactly while under the cap", () => {
+    const out = diffTextDetailed("hello world", "hello there", "word");
+    expect(out.fallback).toBeNull();
+    expect(out.ops.some((o) => o.type === "delete" && o.value.includes("world"))).toBe(true);
+  });
+
+  it("trims a long shared prefix/suffix so only the differing middle is charged", () => {
+    // 12 shared words around a 1-word change: the middle is 1×1, so even a
+    // 4-cell budget runs the exact word diff with no fallback.
+    const pre = "alpha beta gamma delta epsilon zeta ";
+    const suf = " eta theta iota kappa lambda mu";
+    const a = `${pre}OLD${suf}`;
+    const b = `${pre}NEW${suf}`;
+    const out = diffTextDetailed(a, b, "word", 4);
+    expect(out.fallback).toBeNull();
+    expect(rebuildA(out.ops)).toBe(a);
+    expect(rebuildB(out.ops)).toBe(b);
+    expect(out.ops.some((o) => o.type === "delete" && o.value.includes("OLD"))).toBe(true);
+    expect(out.ops.some((o) => o.type === "insert" && o.value.includes("NEW"))).toBe(true);
+  });
+
+  it("downgrades a too-large word diff to a line diff and says so", () => {
+    // One differing 3-word line (3×3 = 9 cells > the 4-cell budget for words)
+    // plus a shared line; as LINES the middle is 1×1, which fits.
+    const a = "aaa bbb ccc\nsame line";
+    const b = "xxx yyy zzz\nsame line";
+    const out = diffTextDetailed(a, b, "word", 4);
+    expect(out.fallback).toBe("line");
+    expect(rebuildA(out.ops)).toBe(a);
+    expect(rebuildB(out.ops)).toBe(b);
+  });
+
+  it("falls back to one coarse block when even lines exceed the cap", () => {
+    // Force the block path with a zero budget; the shared first/last lines
+    // must still come through as equal context around the block.
+    const a = "same head\nold one\nold two\nsame tail";
+    const b = "same head\nnew one\nnew two\nnew three\nsame tail";
+    const out = diffTextDetailed(a, b, "line", 0);
+    expect(out.fallback).toBe("block");
+    expect(rebuildA(out.ops)).toBe(a);
+    expect(rebuildB(out.ops)).toBe(b);
+    expect(out.ops[0]).toEqual({ type: "equal", value: "same head\n" });
+    expect(out.ops[out.ops.length - 1]).toEqual({ type: "equal", value: "same tail" });
+    // Exactly one delete + one insert between the shared edges.
+    expect(out.ops.filter((o) => o.type === "delete")).toHaveLength(1);
+    expect(out.ops.filter((o) => o.type === "insert")).toHaveLength(1);
+  });
+
+  it("identical inputs stay a pure equal diff even with a zero budget", () => {
+    const text = "nothing changed here\nat all";
+    const out = diffTextDetailed(text, text, "word", 0);
+    expect(out.fallback).toBeNull();
+    expect(out.ops).toEqual([{ type: "equal", value: text }]);
+  });
+
+  it("meeting-length transcripts degrade instead of freezing (default cap)", () => {
+    // Two ~3000-word texts with no overlap: 9M word-pairs > MAX_LCS_CELLS, so
+    // the word diff must refuse the table. As single lines the middle is 1×1 —
+    // the run degrades to a (here block-shaped) line diff and returns fast.
+    const a = Array.from({ length: 3000 }, (_, i) => `left${i}`).join(" ");
+    const b = Array.from({ length: 3000 }, (_, i) => `right${i}`).join(" ");
+    expect(3000 * 3000).toBeGreaterThan(MAX_LCS_CELLS);
+    const out = diffTextDetailed(a, b, "word");
+    expect(out.fallback).toBe("line");
+    expect(rebuildA(out.ops)).toBe(a);
+    expect(rebuildB(out.ops)).toBe(b);
   });
 });

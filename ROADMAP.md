@@ -243,7 +243,7 @@ The CLI-parity pass predates several newer features. CLI is missing:
   (`ApproveTagSuggestion` / `DismissTagSuggestion`); only clear-all exists.
 - [ ] **Record pause/resume** — `RecordPause` / `RecordResume` have no CLI
   verbs (start/stop/toggle/cancel do).
-- [ ] **Queue skip** — `SkipCurrentStage` missing from `phoneme queue`.
+- [x] **Queue skip** — `phoneme queue skip` sends `SkipCurrentStage` (observe-only: never auto-spawns a daemon just to skip nothing).
 - [ ] **Re-run tag suggestions** — `SuggestTags` missing beside the existing
   rerun cleanup/summary verbs.
 
@@ -605,6 +605,18 @@ alongside the feature releases above.*
 - [x] Frontend: ESLint + Prettier (*shipped — flat config, 0-error baseline, lint in CI*); still open: stricter TS (`noUnusedLocals`/`noUnusedParameters`); `types/` + `constants/` dirs.
 
 **Performance**
+- [ ] **Saved searches in the catalog** — today they live in webview
+  localStorage only (lost on profile reset/reinstall, invisible to the CLI
+  and `phoneme export`). Migration `saved_searches` (id, name UNIQUE COLLATE
+  NOCASE, filter_json, timestamps) + List/Upsert/Rename/Delete IPC +
+  `saved_searches_changed` event; one-time localStorage import on first GUI
+  run; store tag NAMES beside numeric ids so snapshots survive export/import;
+  CLI `phoneme list --saved <name>`. Effort S/M — the UI already isolates
+  storage behind `state/savedSearches.ts`, and the rename-conflict API
+  carries over as the fast path.
+- [ ] Toast cosmetics: real summary failures still carry thiserror's
+  "internal error:" prefix; TranscriptDiff computes the (now-capped) diff
+  twice per refresh (body + stats).
 - [ ] Persist `error_kind`/`error_message` onto the catalog row at failure
   time — the columns exist but no daemon path writes them; real error text
   only travels in events + the failed/ quarantine JSON. Writing them makes
