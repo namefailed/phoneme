@@ -191,6 +191,14 @@ trust boundary. Verified against current code.*
   event; notifications toasted on both. The `summarizing`/`tagging` stages now
   stay quiet (still tracked, so a later "done" still reads "Summarized ✓ —
   recording ready") and their dedicated event owns the single toast.
+- [x] **Every optional step now reports its failures.** Previously only
+  transcription and hooks had failure visibility; cleanup, auto-title, and
+  auto-tag failed silently (log-only). The daemon now emits `CleanupFailed` /
+  `TitleFailed` / `TagFailed` events (joining the existing `SummaryFailed`), and
+  the UI toasts them ("Cleanup failed: …", "Title generation failed: …",
+  "Auto-tagging failed: …"). These stay **best-effort** — the recording keeps its
+  transcript and stays "done"; the toast just tells you an optional step didn't
+  land. A user-skipped stage reads as "skipped", not an error.
 
 ### GUI parity
 

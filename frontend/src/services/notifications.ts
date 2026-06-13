@@ -88,22 +88,22 @@ function onEvent(event: DaemonEvent) {
     case "hook_failed":
       showToast(`Hook failed: ${stripInternalPrefix(String(e.error ?? ""))}`, "error");
       return;
-    case "summary_failed": {
-      // A user-initiated skip (the queue panel's ⏭ / `phoneme queue skip`)
-      // arrives as a summary failure carrying the daemon's skip sentinel —
-      // report it as the skip it is, never as an error. The phrase is pinned
-      // by the daemon (pipeline.rs `STAGE_SKIPPED_REASON`).
-      const error = String(e.error ?? "");
-      if (/skipped by user/i.test(error)) {
-        if (stepsEnabled) showToast("Summary skipped", "info");
-        return;
-      }
-      // Real summary failures always surface, like the other *_failed events.
-      // Strip the daemon's `internal error:` wrapper so only the reason shows.
-      const reason = stripInternalPrefix(error);
-      showToast(`Summary failed: ${reason || "check the AI provider in Settings"}`, "error");
+    // The optional post-transcription steps are best-effort: the recording
+    // stays usable ("done"), so a failure here is surfaced as a toast rather
+    // than a terminal status. Each carries the daemon's skip sentinel when the
+    // user skipped the stage, which reads as "skipped", not an error.
+    case "summary_failed":
+      stepFailedToast("Summary", String(e.error ?? ""), stepsEnabled);
       return;
-    }
+    case "cleanup_failed":
+      stepFailedToast("Cleanup", String(e.error ?? ""), stepsEnabled);
+      return;
+    case "title_failed":
+      stepFailedToast("Title generation", String(e.error ?? ""), stepsEnabled);
+      return;
+    case "tag_failed":
+      stepFailedToast("Auto-tagging", String(e.error ?? ""), stepsEnabled);
+      return;
     case "summary_updated":
       if (stepsEnabled) showToast("Summary ready", "success");
       return;
@@ -111,6 +111,21 @@ function onEvent(event: DaemonEvent) {
       if (stepsEnabled) showToast("New tag suggestions to review", "info");
       return;
   }
+}
+
+/** Toast for a best-effort step (`*_failed` event). A user-initiated skip (the
+ *  queue panel's ⏭ / `phoneme queue skip`) arrives carrying the daemon's skip
+ *  sentinel (`STAGE_SKIPPED_REASON`) and reads as "skipped" — only when step
+ *  notifications are on. A REAL failure always surfaces (the recording is still
+ *  fine; only this optional step failed), with the `internal error:` wrapper
+ *  stripped so just the reason shows. */
+function stepFailedToast(label: string, error: string, stepsEnabled: boolean): void {
+  if (/skipped by user/i.test(error)) {
+    if (stepsEnabled) showToast(`${label} skipped`, "info");
+    return;
+  }
+  const reason = stripInternalPrefix(error);
+  showToast(`${label} failed: ${reason || "check the AI provider in Settings"}`, "error");
 }
 
 /** Subscribe to daemon events for the app's lifetime. Call once at startup. */

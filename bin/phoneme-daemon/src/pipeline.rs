@@ -729,7 +729,15 @@ pub async fn suggest_tags(state: &AppState, cfg: &Config, id: &RecordingId, tran
                 Err(e) => tracing::warn!(error = %e, "failed to persist tag suggestions"),
             }
         }
-        Err(e) => tracing::warn!(error = %e, "tag suggestion LLM call failed"),
+        Err(e) => {
+            tracing::warn!(error = %e, "tag suggestion LLM call failed");
+            // Best-effort: no suggestions added; surface the failure for a toast
+            // without failing the recording. (Carries the skip sentinel on skip.)
+            state.events.emit(DaemonEvent::TagFailed {
+                id: id.clone(),
+                error: e.to_string(),
+            });
+        }
     }
 }
 
@@ -830,7 +838,13 @@ async fn maybe_auto_title(
                     }
                 },
                 Err(e) => {
-                    tracing::warn!(error = %e, "title LLM call failed; keeping the heuristic")
+                    tracing::warn!(error = %e, "title LLM call failed; keeping the heuristic");
+                    // Best-effort: the heuristic title (or none) is kept; surface
+                    // the LLM failure for a toast without failing the recording.
+                    state.events.emit(DaemonEvent::TitleFailed {
+                        id: id.clone(),
+                        error: e.to_string(),
+                    });
                 }
             }
         }
@@ -1156,6 +1170,13 @@ pub async fn run(
             }
             Err(e) => {
                 tracing::error!(error = %e, "LLM post-processing failed, falling back to raw transcript");
+                // Best-effort step: the raw transcript is kept and the recording
+                // stays usable — surface the failure for a toast without flipping
+                // to a terminal status. (Carries the skip sentinel when skipped.)
+                state.events.emit(DaemonEvent::CleanupFailed {
+                    id: id.clone(),
+                    error: e.to_string(),
+                });
             }
         }
     }

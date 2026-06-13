@@ -1076,6 +1076,31 @@ pub enum DaemonEvent {
         /// Human-readable reason (endpoint, model, empty output, skip).
         error: String,
     },
+    /// LLM post-processing (cleanup) failed. Best-effort, like the other
+    /// optional steps: the recording keeps its raw transcript and stays usable
+    /// (no terminal status flip) — this only surfaces the failure for the toast.
+    CleanupFailed {
+        /// The recording whose cleanup step failed.
+        id: RecordingId,
+        /// Human-readable reason (endpoint, model, empty output, skip).
+        error: String,
+    },
+    /// Auto-title generation failed. Best-effort: the recording stays usable
+    /// (the heuristic title or none is kept); this only surfaces the failure.
+    TitleFailed {
+        /// The recording whose auto-title step failed.
+        id: RecordingId,
+        /// Human-readable reason (endpoint, model, empty output).
+        error: String,
+    },
+    /// Auto-tag suggestion generation failed. Best-effort: the recording stays
+    /// usable (no suggestions added); this only surfaces the failure.
+    TagFailed {
+        /// The recording whose auto-tag step failed.
+        id: RecordingId,
+        /// Human-readable reason (endpoint, model, parse error).
+        error: String,
+    },
     /// A recording's free-form notes were replaced (`UpdateNotes`).
     NotesUpdated {
         /// The recording whose notes changed.
