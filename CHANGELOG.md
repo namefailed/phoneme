@@ -173,6 +173,13 @@ trust boundary. Verified against current code.*
   fs.write_text_file not allowed" — the WebView no longer needs the fs plugin's
   write permission for an arbitrary save-dialog path. The merged-meeting Export
   was on the same broken path and is fixed too.
+- [x] **Detail-pane action row tidied.** ✨ Similar and 🗑 Delete moved up into
+  the recording's title bar (beside fullscreen/close; Delete hovers red); the
+  Reveal button is gone — the file path in the footer is now clickable to reveal
+  it in the OS explorer. The footer's model line became real **pipeline
+  provenance**: what actually happened to this file, in order (capture →
+  transcription + diarization → LLM steps → hook), omitting steps that didn't run
+  and grouping LLM steps that share one model.
 - [x] **Webhook safety toggles** — Settings now exposes
   `webhook.allow_private_network` and `webhook.allow_http` (previously
   TOML-only) with plain-language warnings.

@@ -508,6 +508,12 @@ mark.search-hit {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
+/* Delete lives in the title bar now — tint its hover red so a destructive
+   action reads as one. */
+.detail-focus-btn--danger:hover {
+  background: color-mix(in srgb, var(--err) 16%, transparent);
+  color: var(--err);
+}
 .detail-focus-btn.active {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);

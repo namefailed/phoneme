@@ -53,6 +53,9 @@ export type Recording = {
   cleanup_model?: string | null;
   /** Whether speaker diarization was applied */
   diarized?: boolean;
+  /** Whether this recording was captured via in-place dictation (typed into the
+   *  focused window) rather than the normal record→transcribe flow. */
+  in_place?: boolean;
   /** Whether the user hand-edited the transcript (independent of `model`). */
   user_edited?: boolean;
   /** Whether the user has starred this recording (the Favorites view). */

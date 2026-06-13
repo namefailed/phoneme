@@ -18,6 +18,8 @@ import {
   escapeAttr,
 } from "../../utils/format";
 import { showToast } from "../../utils/toast";
+import { invoke } from "@tauri-apps/api/core";
+import { applyMoreLikeThis } from "../../state/filter";
 import { speakerDisplayName, speakersForRename, renameSpeakerInTranscript } from "./mergeMeeting";
 import { ActionRow } from "./ActionRow";
 import { TagChips } from "./TagChips";
@@ -118,9 +120,6 @@ export class RecordingDetail {
       statusEl.className = `status-pill ${statusToClass(r.status)}`;
       statusEl.textContent = statusLabel(r.status);
     }
-
-    const hookEl = this.container.querySelector<HTMLElement>("#detail-hook-exit");
-    if (hookEl) hookEl.textContent = `Hook exit: ${r.hook_exit_code ?? "—"}`;
 
     // The title can change underneath us (the title editor's own save, an
     // auto title landing after transcription) — but never clobber an edit in
@@ -246,6 +245,9 @@ export class RecordingDetail {
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+            <button class="detail-focus-btn" id="detail-similar" aria-label="More like this" title="More like this — fill the list with recordings about similar things">✨</button>
+            <button class="detail-focus-btn detail-focus-btn--danger" id="detail-delete" aria-label="Delete recording" title="Delete this recording">🗑</button>
+            <span aria-hidden="true" style="width: 1px; align-self: stretch; margin: 2px 2px; background: var(--border-subtle);"></span>
             <button class="detail-focus-btn" id="detail-focus" aria-label="Toggle focus mode" title="Focus mode — hide the recordings list and edit full-width">${EXPAND_SVG}</button>
             <button class="detail-focus-btn" id="detail-close" aria-label="Close recording" title="Close — back to the recordings list">${CLOSE_SVG}</button>
           </div>
@@ -280,8 +282,7 @@ export class RecordingDetail {
         <div class="detail-footer">
           <span id="detail-stats">${stats}</span>
           <span id="detail-models">${modelsLine(r)}</span>
-          <span id="detail-hook-exit">Hook exit: ${r.hook_exit_code ?? "—"}</span>
-          <span class="detail-path" title="${escapeHtml(r.audio_path)}">${escapeHtml(r.audio_path)}</span>
+          <span class="detail-path" id="detail-reveal-path" role="button" tabindex="0" style="cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px;" title="Reveal in file explorer — ${escapeAttr(r.audio_path)}">${escapeHtml(r.audio_path)}</span>
         </div>
       </div>
     `;
@@ -294,9 +295,7 @@ export class RecordingDetail {
         onTogglePlay: () => this.player.togglePlay(),
         onRefresh: () => this.onRefresh(),
         getTranscript: () => this.recording?.transcript ?? "",
-        getAudioPath: () => this.recording?.audio_path ?? "",
         getSpeakerNames: () => this.recording?.speaker_names ?? [],
-        getTitle: () => this.recording?.title ?? null,
       });
       this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
     }
@@ -513,6 +512,34 @@ export class RecordingDetail {
     if (closeBtn) {
       closeBtn.onclick = () => window.dispatchEvent(new CustomEvent("phoneme:close-detail"));
     }
+
+    // ✨ Similar / 🗑 Delete — moved up from the action row into the title bar.
+    this.container
+      .querySelector<HTMLButtonElement>("#detail-similar")
+      ?.addEventListener("click", () => applyMoreLikeThis(r.id, r.title ?? null));
+    this.container
+      .querySelector<HTMLButtonElement>("#detail-delete")
+      ?.addEventListener("click", () =>
+        window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids: [r.id] } })),
+      );
+
+    // The footer file path is clickable — reveal it in the OS file explorer
+    // (replaces the old Reveal action-row button).
+    const revealPath = this.container.querySelector<HTMLElement>("#detail-reveal-path");
+    const reveal = async () => {
+      try {
+        await invoke("reveal_file", { path: r.audio_path });
+      } catch (e) {
+        showToast(`Reveal failed: ${errText(e)}`, "error");
+      }
+    };
+    revealPath?.addEventListener("click", () => void reveal());
+    revealPath?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        void reveal();
+      }
+    });
 
     // Click-to-edit title in the header.
     this.container
@@ -848,11 +875,40 @@ function formatDate(iso: string): string {
   return `${dateObj} at ${timeObj}`;
 }
 
-/** Compact "transcription · cleanup · summary" model line for the detail footer. */
+/** Per-file pipeline provenance for the detail footer: what actually happened to
+ *  THIS recording, in pipeline order — capture → transcription (+ diarization)
+ *  → LLM post-processing → hook. Steps that didn't run are omitted, and
+ *  consecutive LLM steps sharing one model are grouped ("cleanup + summary:
+ *  gemma3"), so a single-model setup reads as one entry instead of repeating. */
 function modelsLine(r: Recording): string {
-  const parts: string[] = [];
-  if (r.model) parts.push(`🗣 ${escapeHtml(r.model)}`);
-  if (r.cleanup_model) parts.push(`✨ ${escapeHtml(r.cleanup_model)}`);
-  if (r.summary_model) parts.push(`📝 ${escapeHtml(r.summary_model)}`);
-  return parts.join("  ·  ");
+  const steps: string[] = [];
+
+  // 1. Capture source.
+  if (r.in_place) steps.push("⌨️ In-place");
+  else steps.push(r.track === "system" ? "🔊 System audio" : "🎤 Mic");
+
+  // 2. Transcription, with diarization noted when it ran.
+  if (r.model) {
+    steps.push(`🗣 ${escapeHtml(r.model)}${r.diarized ? " · 🧑‍🤝‍🧑 diarized" : ""}`);
+  }
+
+  // 3. LLM post-processing (cleanup, then summary) in order, grouping adjacent
+  //    steps that used the same model so it shows once.
+  const llm: { label: string; model: string }[] = [];
+  if (r.cleanup_model) llm.push({ label: "cleanup", model: r.cleanup_model });
+  if (r.summary_model) llm.push({ label: "summary", model: r.summary_model });
+  for (let i = 0; i < llm.length; ) {
+    let j = i;
+    while (j + 1 < llm.length && llm[j + 1].model === llm[i].model) j++;
+    const labels = llm.slice(i, j + 1).map((s) => s.label).join(" + ");
+    steps.push(`✨ ${labels}: ${escapeHtml(llm[i].model)}`);
+    i = j + 1;
+  }
+
+  // 4. Hook, when it ran (exit code recorded).
+  if (r.hook_exit_code != null) {
+    steps.push(r.hook_exit_code === 0 ? "🪝 hook ✓" : `🪝 hook ✗ (exit ${r.hook_exit_code})`);
+  }
+
+  return steps.join("  →  ");
 }

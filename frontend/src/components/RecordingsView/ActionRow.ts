@@ -3,10 +3,8 @@ import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { exportCaptions, exportRecordingJson, saveTextExport, type CaptionFormat, type SpeakerName } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { invoke } from "@tauri-apps/api/core";
 import { applySpeakerNames } from "./mergeMeeting";
 import { getOpenRecordingId } from "../../state/openRecording";
-import { applyMoreLikeThis } from "../../state/filter";
 
 /** Callbacks the host detail pane injects — the row deliberately reads the
  *  CURRENT transcript/audio through getters (not snapshots) so copy/export
@@ -15,22 +13,18 @@ export type ActionRowCallbacks = {
   onTogglePlay: () => void;
   onRefresh: () => void;
   getTranscript: () => string;
-  getAudioPath: () => string;
   /** Custom speaker names for the current recording, applied to copy/export so
    *  renamed speakers carry through. Optional — omitted/empty leaves the raw
    *  `[Speaker N]` markers in place. */
   getSpeakerNames?: () => SpeakerName[];
-  /** The recording's display title, used to label the "More like this" pill in
-   *  the header. Optional — the pill falls back to the recording id. */
-  getTitle?: () => string | null;
 };
 
 /**
- * The detail pane's button strip: Play/Pause · Re-run… (opens the Models
- * modal in "Run once" mode) · Copy · Export (.txt save dialog) · ✨ Similar
- * (flips the list into More-like-this mode) · Reveal · Delete (requests the
- * view's undoable-delete flow via `phoneme:request-delete`). Copy/export
- * apply custom speaker names before emitting text.
+ * The detail pane's action strip: Play/Pause · Re-run… (opens the Models modal
+ * in "Run once" mode) · Copy · Export ▾ (transcript / captions / all-data, via a
+ * save dialog). Copy/export apply custom speaker names before emitting text.
+ * (✨ Similar and 🗑 Delete now live in the detail title bar, and Reveal is the
+ * clickable footer path — all owned by RecordingDetail.)
  *
  * Stateless beyond the transient "Copied!" label — everything it acts on
  * comes through {@link ActionRowCallbacks}. Keyboard: implements the global
@@ -201,30 +195,6 @@ export class ActionRowElement extends LitElement {
     }
   }
 
-  private async handleReveal() {
-    try {
-      await invoke("reveal_file", { path: this.cbs.getAudioPath() });
-    } catch (e) {
-      showToast(`Reveal failed: ${errText(e)}`, "error");
-    }
-  }
-
-  private handleDelete() {
-    // RecordingsView runs the grace-period Undo flow: it hides the row, closes
-    // this detail pane (the open recording is the one being deleted), and only
-    // deletes for real when the Undo toast lapses.
-    window.dispatchEvent(new CustomEvent("phoneme:request-delete", { detail: { ids: [this.recordingId] } }));
-  }
-
-  /** "More like this": flip the recordings list into similarity mode seeded by
-   *  this recording — the list re-queries by its stored vectors and the header
-   *  search box becomes a `~similar:` pill (its ✕ restores the normal list).
-   *  The detail pane stays on this recording so source and neighbours sit side
-   *  by side. */
-  private handleMoreLikeThis() {
-    applyMoreLikeThis(this.recordingId, this.cbs.getTitle?.() ?? null);
-  }
-
   render() {
     return html`
       <div class="action-row">
@@ -242,9 +212,6 @@ export class ActionRowElement extends LitElement {
               </div>`
             : null}
         </span>
-        <button class="similar-trigger" title="More like this — fill the list with recordings about similar things, found from this recording's semantic index" @click=${this.handleMoreLikeThis}>✨ Similar</button>
-        <button @click=${this.handleReveal}>📂 Reveal</button>
-        <button class="danger" @click=${this.handleDelete}>🗑 Delete</button>
       </div>
     `;
   }
