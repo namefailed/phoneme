@@ -616,9 +616,6 @@ pub async fn export_recording_json(bridge: Br<'_>, id: String) -> Result<String,
 /// files were packed so the caller can report it.
 #[tauri::command]
 pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, CommandError> {
-    use std::io::{Read, Write};
-    use zip::write::SimpleFileOptions;
-
     let recordings = forward(
         &bridge,
         Request::ListRecordings {
@@ -639,60 +636,71 @@ pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, Com
     let json_bytes = serde_json::to_vec_pretty(&export_data)
         .map_err(|e| CommandError::new("internal", format!("serializing catalog: {e}")))?;
 
-    let file = std::fs::File::create(&dest)
-        .map_err(|e| CommandError::new("io", format!("creating {dest}: {e}")))?;
-    let mut zip = zip::ZipWriter::new(file);
-    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    // The zip packing is synchronous file I/O (create + per-WAV read/deflate),
+    // which on a large library would block an async worker thread — run it
+    // off-runtime via spawn_blocking and await the result.
+    tokio::task::spawn_blocking(move || -> Result<u64, CommandError> {
+        use std::io::{Read, Write};
+        use zip::write::SimpleFileOptions;
 
-    zip.start_file("catalog.json", options)
-        .map_err(|e| CommandError::new("io", format!("writing catalog.json: {e}")))?;
-    zip.write_all(&json_bytes)
-        .map_err(|e| CommandError::new("io", format!("writing catalog bytes: {e}")))?;
+        let file = std::fs::File::create(&dest)
+            .map_err(|e| CommandError::new("io", format!("creating {dest}: {e}")))?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    // The audio dir is resolved tray-side (env-var/`~` expansion), the same way
-    // the CLI does it — so the GUI backup packs the same files.
-    let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
-    let audio_dir_raw = cfg
-        .expanded()
-        .map(|c| c.recording.audio_dir)
-        .unwrap_or_else(|_| cfg.recording.audio_dir.clone());
-    let audio_dir = std::path::PathBuf::from(&audio_dir_raw);
+        zip.start_file("catalog.json", options)
+            .map_err(|e| CommandError::new("io", format!("writing catalog.json: {e}")))?;
+        zip.write_all(&json_bytes)
+            .map_err(|e| CommandError::new("io", format!("writing catalog bytes: {e}")))?;
 
-    let mut packed: u64 = 0;
-    if audio_dir.exists() {
-        let mut stack = vec![audio_dir];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        // The audio dir is resolved tray-side (env-var/`~` expansion), the same
+        // way the CLI does it — so the GUI backup packs the same files.
+        let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
+        let audio_dir_raw = cfg
+            .expanded()
+            .map(|c| c.recording.audio_dir)
+            .unwrap_or_else(|_| cfg.recording.audio_dir.clone());
+        let audio_dir = std::path::PathBuf::from(&audio_dir_raw);
+
+        let mut packed: u64 = 0;
+        if audio_dir.exists() {
+            let mut stack = vec![audio_dir];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
                     continue;
                 };
-                if !name.ends_with(".wav") {
-                    continue;
-                }
-                if zip.start_file(format!("audio/{name}"), options).is_err() {
-                    continue;
-                }
-                if let Ok(mut f) = std::fs::File::open(&path) {
-                    let mut buf = Vec::new();
-                    if f.read_to_end(&mut buf).is_ok() && zip.write_all(&buf).is_ok() {
-                        packed += 1;
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                        continue;
+                    }
+                    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+                    if !name.ends_with(".wav") {
+                        continue;
+                    }
+                    if zip.start_file(format!("audio/{name}"), options).is_err() {
+                        continue;
+                    }
+                    if let Ok(mut f) = std::fs::File::open(&path) {
+                        let mut buf = Vec::new();
+                        if f.read_to_end(&mut buf).is_ok() && zip.write_all(&buf).is_ok() {
+                            packed += 1;
+                        }
                     }
                 }
             }
         }
-    }
 
-    zip.finish()
-        .map_err(|e| CommandError::new("io", format!("finalizing zip: {e}")))?;
-    Ok(packed)
+        zip.finish()
+            .map_err(|e| CommandError::new("io", format!("finalizing zip: {e}")))?;
+        Ok(packed)
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", format!("spawn_blocking error: {e}")))?
 }
 
 /// Persist every window's position/size NOW. tauri-plugin-window-state only
@@ -2327,45 +2335,51 @@ pub async fn wizard_ping_ollama() -> Result<bool, CommandError> {
 
 #[tauri::command]
 pub async fn wizard_detect_deps() -> Result<serde_json::Value, CommandError> {
-    let mut has_ollama = false;
+    // Spawns the `ollama` CLI and stats the filesystem — both blocking — so run
+    // it off the async runtime instead of holding a worker thread.
+    tokio::task::spawn_blocking(|| -> Result<serde_json::Value, CommandError> {
+        let mut has_ollama = false;
 
-    // Check if `ollama` CLI is in PATH
-    if let Ok(output) = std::process::Command::new("ollama")
-        .arg("--version")
-        .output()
-    {
-        if output.status.success() {
-            has_ollama = true;
-        }
-    }
-
-    // Check default Windows installation paths
-    if !has_ollama {
-        let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
-        if !localappdata.is_empty() {
-            let ollama_path = std::path::Path::new(&localappdata)
-                .join("Programs")
-                .join("Ollama")
-                .join("ollama.exe");
-            if ollama_path.exists() {
+        // Check if `ollama` CLI is in PATH
+        if let Ok(output) = std::process::Command::new("ollama")
+            .arg("--version")
+            .output()
+        {
+            if output.status.success() {
                 has_ollama = true;
             }
         }
-    }
 
-    if !has_ollama {
-        let userprofile = std::env::var("USERPROFILE").unwrap_or_default();
-        if !userprofile.is_empty() {
-            let ollama_dir = std::path::Path::new(&userprofile).join(".ollama");
-            if ollama_dir.exists() {
-                has_ollama = true;
+        // Check default Windows installation paths
+        if !has_ollama {
+            let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+            if !localappdata.is_empty() {
+                let ollama_path = std::path::Path::new(&localappdata)
+                    .join("Programs")
+                    .join("Ollama")
+                    .join("ollama.exe");
+                if ollama_path.exists() {
+                    has_ollama = true;
+                }
             }
         }
-    }
 
-    Ok(serde_json::json!({
-        "ollama": has_ollama,
-    }))
+        if !has_ollama {
+            let userprofile = std::env::var("USERPROFILE").unwrap_or_default();
+            if !userprofile.is_empty() {
+                let ollama_dir = std::path::Path::new(&userprofile).join(".ollama");
+                if ollama_dir.exists() {
+                    has_ollama = true;
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "ollama": has_ollama,
+        }))
+    })
+    .await
+    .map_err(|e| CommandError::new("internal", format!("spawn_blocking error: {e}")))?
 }
 
 #[derive(serde::Serialize, Clone)]

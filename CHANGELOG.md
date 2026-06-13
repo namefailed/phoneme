@@ -156,6 +156,13 @@ trust boundary. Verified against current code.*
   blocked the shared event loop and hung the whole app (often permanently). It
   now drags via manual `setPosition` (coalesced to one move per frame), which
   never enters the move-loop.
+- [x] **Library backup + dependency-detection no longer block the UI thread.**
+  `export_library_zip` (zip create + per-WAV read/deflate) and `wizard_detect_deps`
+  (spawns the `ollama` CLI + stats the filesystem) were `async` Tauri commands
+  doing heavy synchronous work on an async worker; they now run inside
+  `tokio::task::spawn_blocking`. (The two confirmed fix-now items from the
+  external-audit validation pass — the rest were false, already-optimized,
+  intentional, or large refactors deferred to the roadmap.)
 - [x] **Favorites star is a ⭐ emoji** in the list column (and its header) instead
   of the flat `★`/`☆` glyphs — bright when starred, a faded ghost (dimmed +
   grayscaled) when not, brightening on hover.
