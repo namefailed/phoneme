@@ -986,6 +986,9 @@ export class RecordingsView {
       this.unsub = null;
     }
     this.splitter.dispose();
+    // splitter2 also installs document-level mousemove/mouseup listeners during
+    // a drag; without disposing it they leak on every view revisit.
+    this.splitter2.dispose();
     document.removeEventListener("keydown", this.keydownHandler);
     if (this.selectHandler) window.removeEventListener("phoneme:select-recording", this.selectHandler);
     if (this.focusHandler) window.removeEventListener("phoneme:toggle-focus-mode", this.focusHandler);
