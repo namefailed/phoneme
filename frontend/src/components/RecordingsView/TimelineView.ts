@@ -2,7 +2,14 @@
  * The per-recording timeline: the machine transcript segments rendered as a
  * clickable, time-coded list (the "Timeline" peek in the detail pane).
  *
- * Clicking a line seeks the host pane's waveform to that segment. When two
+ * Raw whisper segments break at the model's own boundaries — often mid-sentence
+ * or as tiny fragments — which read as illogical splits. So before rendering,
+ * `groupSegments` merges consecutive same-speaker segments into coherent turns
+ * (breaking on a sentence end, a >2s gap, a speaker change, or a length cap);
+ * each row is one such turn. The merged time span keeps click-seek and the
+ * playhead-follow highlight landing on real audio.
+ *
+ * Clicking a line seeks the host pane's waveform to that row's start. When two
  * panes show the two tracks of one meeting (the dual-timeline split), the
  * views share a `syncGroup` (the meeting id) and coordinate over window
  * events, so a click seeks BOTH waveforms and scrolling one list scrolls the
@@ -31,6 +38,69 @@ export function activeSegmentIndex(segments: TranscriptSegment[], ms: number): n
   return active;
 }
 
+/** One displayed timeline row: consecutive raw segments merged into a coherent
+ *  turn. Whisper emits segments at its own boundaries — often mid-sentence or as
+ *  tiny fragments — which read as illogical splits; grouping them into
+ *  sentence/speaker-bounded turns is much easier to scan. Carries the merged
+ *  time span (so click-seek + playhead-follow still land on real audio). */
+export type TlGroup = {
+  startMs: number;
+  endMs: number;
+  speaker: string | null;
+  text: string;
+};
+
+/** A silence longer than this between two same-speaker segments starts a new
+ *  row — a real pause is a natural boundary even mid-thought. */
+const TL_GAP_MS = 2000;
+/** Hard cap so one row can't grow unwieldy when a speaker never pauses and the
+ *  model never emits sentence punctuation. */
+const TL_MAX_CHARS = 240;
+/** Whether text ends on sentence-final punctuation (allowing a trailing quote
+ *  / bracket), i.e. a natural place to break to the next row. */
+function tlEndsSentence(text: string): boolean {
+  return /[.!?…]["'”’)\]]*\s*$/.test(text);
+}
+
+/** Merge raw segments into display rows: keep appending to the current row
+ *  while it's the SAME speaker and the row hasn't reached a natural boundary —
+ *  a sentence end, a >2s gap, or the length cap. A speaker change always starts
+ *  a new row. Blank segments are dropped. The result reads as turns/sentences
+ *  instead of raw whisper fragments. */
+export function groupSegments(segments: TranscriptSegment[]): TlGroup[] {
+  const groups: TlGroup[] = [];
+  for (const seg of segments) {
+    const text = seg.text.trim();
+    if (!text) continue;
+    const speaker = seg.speaker != null && seg.speaker !== "" ? seg.speaker : null;
+    const cur = groups[groups.length - 1];
+    const canMerge =
+      !!cur &&
+      cur.speaker === speaker &&
+      seg.start_ms - cur.endMs <= TL_GAP_MS &&
+      !tlEndsSentence(cur.text) &&
+      cur.text.length < TL_MAX_CHARS;
+    if (canMerge) {
+      cur.text = `${cur.text} ${text}`;
+      cur.endMs = seg.end_ms;
+    } else {
+      groups.push({ startMs: seg.start_ms, endMs: seg.end_ms, speaker, text });
+    }
+  }
+  return groups;
+}
+
+/** Index of the group containing `ms` (or the last one started before it); -1
+ *  before the first. Groups are in timeline order. */
+export function activeGroupIndex(groups: TlGroup[], ms: number): number {
+  let active = -1;
+  for (let i = 0; i < groups.length; i++) {
+    if (groups[i].startMs <= ms) active = i;
+    else break;
+  }
+  return active;
+}
+
 type SeekDetail = { group: string; source: string; ms: number };
 
 /** The Timeline peek's controller (see the file-top comment). Plain class:
@@ -45,6 +115,8 @@ export class TimelineView {
   private syncGroup: string | null;
   private onSeek: (seconds: number) => void;
   private segments: TranscriptSegment[] = [];
+  /** Display rows — raw `segments` merged into coherent turns (see groupSegments). */
+  private groups: TlGroup[] = [];
   private activeIdx = -1;
   private disposed = false;
   /** Suppresses the scroll broadcast while WE are scrolling programmatically
@@ -75,7 +147,7 @@ export class TimelineView {
       const d = (e as CustomEvent<SeekDetail>).detail;
       if (!this.syncGroup || d?.group !== this.syncGroup || d.source === this.recordingId) return;
       this.onSeek(d.ms / 1000);
-      this.highlight(activeSegmentIndex(this.segments, d.ms), true);
+      this.highlight(activeGroupIndex(this.groups, d.ms), true);
     };
     this.scrollHandler = (e: Event) => {
       const d = (e as CustomEvent<SeekDetail>).detail;
@@ -96,6 +168,7 @@ export class TimelineView {
   private async load() {
     try {
       this.segments = await getSegments(this.recordingId);
+      this.groups = groupSegments(this.segments);
     } catch (e) {
       if (!this.disposed) {
         this.container.innerHTML = `<div class="tl-empty">Couldn't load the timeline: ${escapeHtml(errText(e))}</div>`;
@@ -115,22 +188,22 @@ export class TimelineView {
         </div>`;
       return;
     }
-    const rows = this.segments
-      .map((seg, i) => {
+    const rows = this.groups
+      .map((g, i) => {
         // Numeric speaker labels map onto this recording's custom names
         // ("Speaker 2" → "Sarah"); non-numeric ones (cloud "A"/"B") show as-is.
-        const label = seg.speaker != null && seg.speaker !== "" ? Number(seg.speaker) : null;
+        const label = g.speaker != null && g.speaker !== "" ? Number(g.speaker) : null;
         const name =
           label != null && Number.isFinite(label)
             ? speakerDisplayName(this.speakerNames, label)
-            : seg.speaker
-              ? `Speaker ${seg.speaker}`
+            : g.speaker
+              ? `Speaker ${g.speaker}`
               : null;
         return `
-          <button class="tl-row" data-idx="${i}" title="Jump playback to ${fmtClock(seg.start_ms)}">
-            <span class="tl-time">${fmtClock(seg.start_ms)}</span>
+          <button class="tl-row" data-idx="${i}" title="Jump playback to ${fmtClock(g.startMs)}">
+            <span class="tl-time">${fmtClock(g.startMs)}</span>
             ${name ? `<span class="tl-speaker">${escapeHtml(name)}</span>` : ""}
-            <span class="tl-text">${escapeHtml(seg.text)}</span>
+            <span class="tl-text">${escapeHtml(g.text)}</span>
           </button>`;
       })
       .join("");
@@ -141,25 +214,25 @@ export class TimelineView {
       const row = (e.target as HTMLElement).closest<HTMLElement>(".tl-row");
       if (!row) return;
       const idx = Number(row.dataset.idx);
-      const seg = this.segments[idx];
-      if (!seg) return;
-      this.onSeek(seg.start_ms / 1000);
+      const g = this.groups[idx];
+      if (!g) return;
+      this.onSeek(g.startMs / 1000);
       this.highlight(idx, false);
-      this.broadcast("phoneme:timeline-seek", seg.start_ms);
+      this.broadcast("phoneme:timeline-seek", g.startMs);
     });
     // Scroll sync: a USER scroll mirrors to the peer pane by time. Programmatic
     // scrolls (mirroring / follow) are flagged off so they don't echo.
     list?.addEventListener("scroll", () => {
       if (this.programmaticScroll || !this.syncGroup) return;
-      const top = this.topVisibleSegment();
-      if (top != null) this.broadcast("phoneme:timeline-scroll", top.start_ms);
+      const top = this.topVisibleGroup();
+      if (top != null) this.broadcast("phoneme:timeline-scroll", top.startMs);
     });
   }
 
   /** Playback follower: highlight the segment under the playhead and keep it
    *  in view. Called by the host on waveform time updates. */
   setPlaybackTime(seconds: number) {
-    const idx = activeSegmentIndex(this.segments, seconds * 1000);
+    const idx = activeGroupIndex(this.groups, seconds * 1000);
     if (idx !== this.activeIdx) this.highlight(idx, true);
   }
 
@@ -178,9 +251,9 @@ export class TimelineView {
     }
   }
 
-  /** Scroll so the segment containing `ms` sits at the top (peer mirroring). */
+  /** Scroll so the row containing `ms` sits at the top (peer mirroring). */
   private scrollToTime(ms: number) {
-    const idx = Math.max(0, activeSegmentIndex(this.segments, ms));
+    const idx = Math.max(0, activeGroupIndex(this.groups, ms));
     const row = this.container.querySelector<HTMLElement>(`.tl-row[data-idx="${idx}"]`);
     const list = this.container.querySelector<HTMLElement>(".tl-list");
     if (!row || !list) return;
@@ -189,15 +262,15 @@ export class TimelineView {
     window.setTimeout(() => (this.programmaticScroll = false), 50);
   }
 
-  /** The first segment whose row is at/below the viewport top — what "where
-   *  the user has scrolled to" means in time. */
-  private topVisibleSegment(): TranscriptSegment | null {
+  /** The first row at/below the viewport top — what "where the user has
+   *  scrolled to" means in time. */
+  private topVisibleGroup(): TlGroup | null {
     const list = this.container.querySelector<HTMLElement>(".tl-list");
     if (!list) return null;
     const rows = list.querySelectorAll<HTMLElement>(".tl-row");
     for (const row of rows) {
       if (row.offsetTop - list.offsetTop + row.offsetHeight > list.scrollTop) {
-        return this.segments[Number(row.dataset.idx)] ?? null;
+        return this.groups[Number(row.dataset.idx)] ?? null;
       }
     }
     return null;

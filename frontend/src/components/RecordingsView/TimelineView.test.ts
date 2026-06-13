@@ -5,7 +5,13 @@ vi.mock("../../services/ipc", () => ({
 }));
 
 import { getSegments, type TranscriptSegment } from "../../services/ipc";
-import { TimelineView, fmtClock, activeSegmentIndex } from "./TimelineView";
+import {
+  TimelineView,
+  fmtClock,
+  activeSegmentIndex,
+  groupSegments,
+  activeGroupIndex,
+} from "./TimelineView";
 
 const SEGMENTS: TranscriptSegment[] = [
   { start_ms: 0, end_ms: 1500, text: "hello there", speaker: "1" },
@@ -45,7 +51,78 @@ describe("activeSegmentIndex", () => {
   });
 });
 
+describe("groupSegments", () => {
+  it("merges consecutive same-speaker fragments up to a sentence end", () => {
+    const groups = groupSegments([
+      { start_ms: 0, end_ms: 1000, text: "the quick brown", speaker: "1" },
+      { start_ms: 1000, end_ms: 2000, text: "fox jumps over.", speaker: "1" },
+      { start_ms: 2000, end_ms: 3000, text: "Then it ran", speaker: "1" },
+    ]);
+    expect(groups.length).toBe(2);
+    expect(groups[0].text).toBe("the quick brown fox jumps over.");
+    expect(groups[0].startMs).toBe(0);
+    expect(groups[0].endMs).toBe(2000);
+    expect(groups[1].text).toBe("Then it ran"); // prev row ended a sentence → new row
+    expect(groups[1].startMs).toBe(2000);
+  });
+
+  it("starts a new row on a speaker change", () => {
+    const groups = groupSegments([
+      { start_ms: 0, end_ms: 1000, text: "hello", speaker: "1" },
+      { start_ms: 1000, end_ms: 2000, text: "hi", speaker: "2" },
+    ]);
+    expect(groups.map((g) => g.speaker)).toEqual(["1", "2"]);
+  });
+
+  it("starts a new row after a >2s gap, even for the same speaker", () => {
+    const groups = groupSegments([
+      { start_ms: 0, end_ms: 1000, text: "hello", speaker: "1" },
+      { start_ms: 4000, end_ms: 5000, text: "world", speaker: "1" },
+    ]);
+    expect(groups.length).toBe(2);
+  });
+
+  it("drops blank segments and keeps the no-speaker case", () => {
+    const groups = groupSegments([
+      { start_ms: 0, end_ms: 500, text: "  ", speaker: null },
+      { start_ms: 500, end_ms: 1500, text: "real words", speaker: null },
+    ]);
+    expect(groups.length).toBe(1);
+    expect(groups[0].speaker).toBeNull();
+    expect(groups[0].text).toBe("real words");
+  });
+});
+
+describe("activeGroupIndex", () => {
+  it("finds the group containing (or last started before) a time", () => {
+    const groups = groupSegments([
+      { start_ms: 0, end_ms: 1000, text: "a.", speaker: "1" },
+      { start_ms: 2000, end_ms: 3000, text: "b.", speaker: "1" },
+    ]);
+    expect(activeGroupIndex(groups, -1)).toBe(-1);
+    expect(activeGroupIndex(groups, 0)).toBe(0);
+    expect(activeGroupIndex(groups, 1999)).toBe(0);
+    expect(activeGroupIndex(groups, 2000)).toBe(1);
+    expect(activeGroupIndex([], 5)).toBe(-1);
+  });
+});
+
 describe("TimelineView", () => {
+  it("merges same-speaker fragments into one row in the rendered list", async () => {
+    vi.mocked(getSegments).mockResolvedValue([
+      { start_ms: 0, end_ms: 1000, text: "the quick brown", speaker: "1" },
+      { start_ms: 1000, end_ms: 2000, text: "fox jumps over", speaker: "1" },
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = new TimelineView(host, "rec-1", { onSeek: vi.fn() });
+    await tick();
+    const rows = host.querySelectorAll(".tl-row");
+    expect(rows.length).toBe(1);
+    expect(rows[0].querySelector(".tl-text")?.textContent).toBe("the quick brown fox jumps over");
+    view.dispose();
+  });
+
   it("renders one clickable row per segment with time + speaker + text", async () => {
     vi.mocked(getSegments).mockResolvedValue(SEGMENTS);
     const host = document.createElement("div");

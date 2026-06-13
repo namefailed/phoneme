@@ -245,6 +245,12 @@ trust boundary. Verified against current code.*
   the post-processing connection). "Save as default" writes `[title]`; **Run
   once** carries a one-time title-model override (new `title_model` field on the
   re-run-all IPC) that enables the LLM title step for that run.
+- [x] **Timeline peek reads as turns, not whisper fragments.** The 🕒 Timeline
+  list rendered one row per raw whisper segment, which breaks mid-sentence and
+  emits tiny fragments — illogical splits. It now merges consecutive same-speaker
+  segments into coherent rows (breaking on a sentence end, a >2s gap, a speaker
+  change, or a length cap). Click-to-seek and the playhead-follow highlight still
+  land on real audio, and the dual-timeline meeting sync is unchanged.
 - [x] **Webhook safety toggles** — Settings now exposes
   `webhook.allow_private_network` and `webhook.allow_http` (previously
   TOML-only) with plain-language warnings.
