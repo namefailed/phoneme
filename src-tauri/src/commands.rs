@@ -573,6 +573,61 @@ fn render_captions(segments: &[TranscriptSegment], format: CaptionFormat) -> Str
     }
 }
 
+/// Reject export destinations whose extension is an executable/script. The
+/// per-recording + library exports are always text / captions / JSON / zip, so an
+/// `.exe`/`.bat`/`.ps1`/`.lnk`/… destination can only be an attempt — e.g. from a
+/// compromised WebView — to drop an auto-run payload (a Startup-folder script, a
+/// sideloaded binary). Defense-in-depth behind the WebView trust boundary; a
+/// legitimate export never targets one of these.
+fn reject_executable_dest(dest: &str) -> Result<(), CommandError> {
+    const BLOCKED: &[&str] = &[
+        "exe",
+        "bat",
+        "cmd",
+        "com",
+        "scr",
+        "pif",
+        "ps1",
+        "psm1",
+        "psd1",
+        "vbs",
+        "vbe",
+        "js",
+        "jse",
+        "wsf",
+        "wsh",
+        "msi",
+        "msp",
+        "msc",
+        "lnk",
+        "cpl",
+        "hta",
+        "reg",
+        "jar",
+        "gadget",
+        "sct",
+        "shb",
+        "dll",
+        "sys",
+        "application",
+    ];
+    let ext = std::path::Path::new(dest)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    if let Some(ext) = ext {
+        if BLOCKED.contains(&ext.as_str()) {
+            return Err(CommandError::new(
+                "invalid_config",
+                format!(
+                    "refusing to export to a .{ext} file — exports are text/zip, not executables"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Write `contents` to `dest` (a path the WebView picked via the save dialog).
 ///
 /// The single write path behind every per-recording export — transcript text,
@@ -581,8 +636,11 @@ fn render_captions(segments: &[TranscriptSegment], format: CaptionFormat) -> Str
 /// daemon-side bridge process owns the actual file write, exactly like
 /// [`export_library_zip`]. That means the WebView never needs the `fs` plugin's
 /// write permission for an arbitrary save-dialog path (which `fs:default` denies).
+/// The dest is screened by [`reject_executable_dest`] so the write can't be
+/// abused to drop an auto-run payload.
 #[tauri::command]
 pub fn save_text_export(dest: String, contents: String) -> Result<(), CommandError> {
+    reject_executable_dest(&dest)?;
     std::fs::write(&dest, contents)
         .map_err(|e| CommandError::new("io", format!("writing {dest}: {e}")))
 }
@@ -616,6 +674,7 @@ pub async fn export_recording_json(bridge: Br<'_>, id: String) -> Result<String,
 /// files were packed so the caller can report it.
 #[tauri::command]
 pub async fn export_library_zip(bridge: Br<'_>, dest: String) -> Result<u64, CommandError> {
+    reject_executable_dest(&dest)?;
     let recordings = forward(
         &bridge,
         Request::ListRecordings {
