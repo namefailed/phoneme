@@ -88,6 +88,16 @@ trust boundary. Verified against current code.*
   segment path uses. Cloud and segments-only transcripts are unchanged: they fall
   back to the existing segment-level attribution, and a single-voice recording
   still reads as plain prose.
+- [x] **Word-turn smoothing — fixes solo recordings splitting on "it"/"if".**
+  Per-word attribution had no temporal smoothing, so when the diarizer flickered a
+  single short word onto a phantom second speaker, a one-voice recording fragmented
+  into bogus `[Speaker 2]: it` turns (and over-split the timeline). Attribution now
+  runs median-style minimum-turn smoothing: a contiguous speaker run shorter than
+  `WORD_MIN_TURN_SECS` (0.6 s) is absorbed into its longer adjacent speaker
+  (bridging silence), so a lone flicker disappears — and a genuinely single-voice
+  recording collapses back to one speaker and renders as plain prose, the way it
+  did before word-level attribution. Real, sustained multi-speaker turns are well
+  above the threshold and untouched.
 - [x] **Audio normalization** — optionally boost a quiet recording's gain to a
   consistent peak level before transcribing, so a soft microphone still hands
   Whisper a healthy signal (Settings → Capture → Recording; off by default,

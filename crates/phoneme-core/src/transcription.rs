@@ -730,7 +730,9 @@ pub(crate) async fn diarize_transcript(
     // and we use the legacy segment-level path so those transcripts are byte-for
     // -byte unchanged.
     if !words.is_empty() {
-        if let Some(diarized) = diarize_per_word(&words, &diar) {
+        if let Some(diarized) =
+            diarize_per_word(&words, &diar, crate::diarization::WORD_MIN_TURN_SECS)
+        {
             return diarized;
         }
         // `diarize_per_word` returns `None` for the ≤1-speaker gate; fall through
@@ -833,6 +835,7 @@ fn diarize_per_segment(
 fn diarize_per_word(
     words: &[TranscriptWord],
     diar: &crate::diarization::LocalDiarization,
+    min_turn: f64,
 ) -> Option<Transcription> {
     use crate::diarization::{assign_words, WordSpan};
 
@@ -851,6 +854,7 @@ fn diarize_per_word(
         &diar.discrete_diarization,
         speakrs::pipeline::FRAME_STEP_SECONDS,
         speakrs::pipeline::FRAME_DURATION_SECONDS,
+        min_turn,
     );
     tracing::info!(
         turns = diar.spans.len(),
@@ -2238,7 +2242,7 @@ mod tests {
             at(3.0, "delta", None),      // frame 3 → speaker 1
         ];
 
-        let out = diarize_per_word(&words, &diar).expect("two speakers → labeled");
+        let out = diarize_per_word(&words, &diar, 0.0).expect("two speakers → labeled");
         assert_eq!(
             out.text,
             "[Speaker 1]: alpha beta\n\n[Speaker 2]: gamma delta"
@@ -2281,6 +2285,61 @@ mod tests {
             confidence: None,
         };
         let words = vec![at(0.0, "one"), at(1.0, "two")];
-        assert!(diarize_per_word(&words, &diar).is_none());
+        assert!(diarize_per_word(&words, &diar, 0.0).is_none());
+    }
+
+    #[test]
+    fn per_word_lone_short_flip_collapses_to_plain_prose() {
+        // The exact regression the user hit: a one-voice recording where a single
+        // short word ("it") momentarily scores to a 2nd speaker column. With
+        // realistic word durations, the WORD_MIN_TURN_SECS smoothing absorbs the
+        // flip, the speaker count collapses to 1, and `diarize_per_word` returns
+        // None → the caller renders plain prose instead of "[Speaker 2]: it".
+        let step = speakrs::pipeline::FRAME_STEP_SECONDS;
+        let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
+        let wms = |s: f64, e: f64, t: &str| TranscriptWord {
+            start_ms: (s * 1000.0).round() as i64,
+            end_ms: (e * 1000.0).round() as i64,
+            text: t.to_string(),
+            speaker: None,
+            confidence: None,
+        };
+        // Five ~0.4 s words; the middle one ("it") is a 0.2 s flip.
+        let words = vec![
+            wms(0.0, 0.4, "i"),
+            wms(0.4, 0.8, "really"),
+            wms(0.8, 1.0, "it"),
+            wms(1.0, 1.4, "think"),
+            wms(1.4, 1.9, "so"),
+        ];
+        // Column 1 active only on frames whose middle lands in the flip [0.8,1.0);
+        // column 0 active everywhere else — so raw attribution sees two speakers.
+        let num_frames = ((2.0 - 0.5 * dur) / step).ceil() as usize + 1;
+        let m = Array2::from_shape_fn((num_frames, 2), |(f, s)| {
+            let mid = f as f64 * step + 0.5 * dur;
+            let flip = (0.8..1.0).contains(&mid);
+            match (s, flip) {
+                (1, true) => 1.0,
+                (0, false) => 1.0,
+                _ => 0.0,
+            }
+        });
+        let diar = LocalDiarization {
+            spans: vec![],
+            discrete_diarization: m,
+            embeddings: ndarray::Array3::zeros((0, 0, 0)),
+            hard_clusters: Array2::zeros((0, 0)),
+            segmentations: ndarray::Array3::zeros((0, 0, 0)),
+        };
+        // Raw (smoothing off) DOES split — the flip is genuinely in the matrix.
+        assert!(
+            diarize_per_word(&words, &diar, 0.0).is_some(),
+            "raw per-word attribution sees the flip as a 2nd speaker"
+        );
+        // Production smoothing absorbs the lone short flip → single speaker → None.
+        assert!(
+            diarize_per_word(&words, &diar, crate::diarization::WORD_MIN_TURN_SECS).is_none(),
+            "smoothing collapses the one-word flip → plain prose"
+        );
     }
 }

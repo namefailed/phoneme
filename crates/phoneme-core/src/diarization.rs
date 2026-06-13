@@ -331,30 +331,54 @@ fn dominant_column(
 ///   is excluded from the speaker count, mirroring the segment-level `None`.
 /// - Empty/whitespace words are skipped (as empty segments are).
 ///
+/// - Sub-`min_turn` speaker islands are smoothed away before numbering: a single
+///   short word the diarizer momentarily scored to another speaker (the classic
+///   "[Speaker 2]: it" flicker) is absorbed into its dominant neighbour, so a
+///   one-voice recording collapses back to a single speaker (and the caller's
+///   ≤1-speaker gate renders it as plain prose) instead of fragmenting. See
+///   [`smooth_word_speaker_runs`]. Pass `min_turn = 0.0` to disable it.
+///
 /// `frame_step` / `frame_duration` are `speakrs::pipeline::FRAME_STEP_SECONDS` /
-/// `FRAME_DURATION_SECONDS` in production; they are parameters so the mapping is
-/// unit-testable with a synthetic matrix.
+/// `FRAME_DURATION_SECONDS` in production; `min_turn` is [`WORD_MIN_TURN_SECS`].
+/// All three are parameters so the mapping + smoothing are unit-testable with a
+/// synthetic matrix (the geometry tests pass `min_turn = 0.0`).
 pub fn assign_words<'a>(
     words: &'a [WordSpan],
     activations: &Array2<f32>,
     frame_step: f64,
     frame_duration: f64,
+    min_turn: f64,
 ) -> (Vec<(&'a WordSpan, usize)>, usize) {
     use std::collections::HashMap;
 
+    // Non-empty words only, mirroring `label_segments` skipping empty segments.
+    let kept: Vec<&WordSpan> = words.iter().filter(|w| !w.text.trim().is_empty()).collect();
+
+    // Raw per-word dominant speaker column (None = silence / no activation).
+    let mut cols: Vec<Option<usize>> = kept
+        .iter()
+        .map(|w| {
+            let start_frame = frame_for_time(w.start, frame_step, frame_duration);
+            let end_frame = frame_for_time(w.end, frame_step, frame_duration);
+            dominant_column(activations, start_frame, end_frame)
+        })
+        .collect();
+
+    // Absorb sub-`min_turn` speaker flips so a monologue doesn't fragment.
+    if min_turn > 0.0 {
+        smooth_word_speaker_runs(&kept, &mut cols, min_turn);
+    }
+
+    // Map columns → stable 1-based indices in first-appearance order, via the
+    // same `SPEAKER_{k:02}` label `label_segments` keys on, so word- and
+    // segment-level transcripts number identical speakers identically.
     let mut label_to_idx: HashMap<String, usize> = HashMap::new();
     let mut next_idx = 1usize;
-    let mut out = Vec::with_capacity(words.len());
-
-    for word in words {
-        if word.text.trim().is_empty() {
-            continue;
-        }
-        let start_frame = frame_for_time(word.start, frame_step, frame_duration);
-        let end_frame = frame_for_time(word.end, frame_step, frame_duration);
-        let idx = match dominant_column(activations, start_frame, end_frame) {
-            Some(col) => {
-                let label = column_label(col);
+    let mut out = Vec::with_capacity(kept.len());
+    for (word, col) in kept.iter().zip(cols.iter()) {
+        let idx = match col {
+            Some(c) => {
+                let label = column_label(*c);
                 *label_to_idx.entry(label).or_insert_with(|| {
                     let i = next_idx;
                     next_idx += 1;
@@ -363,10 +387,122 @@ pub fn assign_words<'a>(
             }
             None => 0, // word in silence / empty matrix → unattributed
         };
-        out.push((word, idx));
+        out.push((*word, idx));
     }
 
     (out, next_idx - 1)
+}
+
+/// A per-word speaker turn shorter than this (seconds) is treated as a diarizer
+/// flicker — a single short word ("it", "if") momentarily scored to a second
+/// speaker — and absorbed into the dominant neighbouring speaker. So a one-voice
+/// recording collapses back to a single speaker (and renders as plain prose)
+/// instead of fragmenting into phantom `[Speaker 2]` islands, while genuine
+/// turns (comfortably longer than this) are untouched. The segment path's coarse
+/// granularity rarely flips a whole sentence, so this guards the finer word
+/// granularity that word-level attribution introduced; its segment-level analogue
+/// is [`SPEAKER_MERGE_GAP_SECS`].
+pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
+
+/// A contiguous run of same-speaker words inside the per-word column sequence.
+struct SpeakerRun {
+    /// First word index in the run (into the `cols` / `words` slices).
+    start: usize,
+    /// Last word index in the run (inclusive).
+    end: usize,
+    /// The speaker column the run is assigned to.
+    col: usize,
+    /// Wall-clock span of the run in seconds (`last.end - first.start`).
+    span: f64,
+}
+
+/// The speaker runs in `cols`, in order. `None` (silence) words belong to no run
+/// and split runs, but two runs separated only by silence are still adjacent in
+/// the returned list — so a flip bracketed by silence still smooths against its
+/// real neighbours.
+fn speaker_runs(words: &[&WordSpan], cols: &[Option<usize>]) -> Vec<SpeakerRun> {
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i < cols.len() {
+        if let Some(c) = cols[i] {
+            let start = i;
+            while i + 1 < cols.len() && cols[i + 1] == Some(c) {
+                i += 1;
+            }
+            let span = (words[i].end - words[start].start).max(0.0);
+            runs.push(SpeakerRun {
+                start,
+                end: i,
+                col: c,
+                span,
+            });
+        }
+        i += 1;
+    }
+    runs
+}
+
+/// In-place median-style smoothing of the per-word speaker columns: repeatedly
+/// absorb the shortest speaker run whose span is below `min_turn` into its longer
+/// adjacent speaker run (tie → the previous run), until every surviving run is
+/// long enough or only one speaker remains. Only absorptions that actually flip a
+/// column count as progress (a run already matching its chosen neighbour — e.g.
+/// the same speaker either side of a silence — is skipped), so it always
+/// terminates. Silence words stay `None`.
+///
+/// This removes the single-word speaker flips that whole-segment attribution
+/// never produced: the regression where a solo recording split on words like
+/// "it"/"if" into a phantom second speaker.
+fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min_turn: f64) {
+    loop {
+        let runs = speaker_runs(words, cols);
+        if runs.len() < 2 {
+            break; // 0 or 1 speaker run — nothing to absorb into.
+        }
+        // Shortest sub-threshold runs first; take the first whose absorption
+        // would actually flip a column.
+        let mut order: Vec<usize> = (0..runs.len())
+            .filter(|&i| runs[i].span < min_turn)
+            .collect();
+        order.sort_by(|&a, &b| {
+            runs[a]
+                .span
+                .partial_cmp(&runs[b].span)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut changed = false;
+        for ri in order {
+            let run = &runs[ri];
+            let prev = ri.checked_sub(1).map(|i| &runs[i]);
+            let next = runs.get(ri + 1);
+            let target = match (prev, next) {
+                (Some(p), Some(n)) => {
+                    if n.span > p.span {
+                        n.col
+                    } else {
+                        p.col
+                    }
+                }
+                (Some(p), None) => p.col,
+                (None, Some(n)) => n.col,
+                (None, None) => continue,
+            };
+            if target == run.col {
+                continue; // already this speaker (same voice across a silence) → no-op.
+            }
+            for c in cols[run.start..=run.end].iter_mut() {
+                if c.is_some() {
+                    *c = Some(target);
+                }
+            }
+            changed = true;
+            break; // runs are stale after a change — recompute from scratch.
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 /// Load a WAV as mono f32, asserting it is already in the canonical 16 kHz mono
@@ -1163,7 +1299,7 @@ mod tests {
             word(frame_mid(3), frame_mid(4), "gamma"), // frames 3..=4 → speaker 1
             word(frame_mid(5), frame_mid(5), "delta"), // frame 5      → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 2, "two distinct speakers used");
         let idxs: Vec<usize> = labeled.iter().map(|(_, i)| *i).collect();
         // First-appearance order: speaker 0 → index 1, speaker 1 → index 2.
@@ -1186,7 +1322,7 @@ mod tests {
             [0.0, 1.0], // 5
         ];
         let words = vec![word(frame_mid(1), frame_mid(5), "straddle")]; // frames 1..=5
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 1);
         // Only one word, so it's the first-appearing speaker → index 1, but it is
         // speaker column 1 (the dominant one), not column 0 where it started.
@@ -1207,7 +1343,7 @@ mod tests {
             word(frame_mid(1), frame_mid(1), "voiced"), // frame 1 → speaker 0
             word(frame_mid(2), frame_mid(2), "silent"), // frame 2 → all-zero → unattributed
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 1, "only the voiced word counts toward speaker count");
         assert_eq!(labeled[0].1, 1);
         assert_eq!(labeled[1].1, 0, "silent word is unattributed");
@@ -1221,7 +1357,7 @@ mod tests {
             word(frame_mid(0), frame_mid(0), "a"),  // frame 0 → speaker 0
             word(frame_mid(1), frame_mid(1), "b"),  // frame 1 → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(labeled.len(), 2, "the whitespace word is dropped");
         assert_eq!(n, 2);
         assert_eq!(labeled[0].0.text, "a");
@@ -1249,9 +1385,116 @@ mod tests {
     fn empty_matrix_attributes_nothing() {
         let m: Array2<f32> = Array2::zeros((0, 0));
         let words = vec![word(frame_mid(0), frame_mid(1), "x")];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR);
+        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 0);
         assert_eq!(labeled[0].1, 0, "no columns → unattributed");
+    }
+
+    // ── Word-turn smoothing (the "[Speaker 2]: it" regression guard) ─────────
+    //
+    // `smooth_word_speaker_runs` operates on a column sequence + the words' real
+    // timings, so these tests hand it realistic-duration words directly (the
+    // micro-second frame geometry of the tests above is orthogonal to it).
+
+    /// The exact bug the user hit: a one-voice recording where a single short
+    /// word ("it") momentarily scored to a second speaker. Smoothing absorbs the
+    /// island back into the surrounding speaker, collapsing to one column — which
+    /// makes the caller's ≤1-speaker gate render it as plain prose.
+    #[test]
+    fn lone_short_word_flip_is_absorbed_into_the_surrounding_speaker() {
+        let words = [
+            word(0.0, 0.4, "i"),
+            word(0.4, 0.8, "really"),
+            word(0.8, 1.0, "it"), // the 0.2 s flip
+            word(1.0, 1.4, "think"),
+            word(1.4, 1.9, "so"),
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), Some(0), Some(1), Some(0), Some(0)];
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert!(
+            cols.iter().all(|c| *c == Some(0)),
+            "the lone short flip is absorbed: {cols:?}"
+        );
+    }
+
+    /// A genuine, sustained second-speaker turn (well over the threshold) is left
+    /// alone — smoothing must not flatten real multi-speaker audio.
+    #[test]
+    fn sustained_second_speaker_turn_survives_smoothing() {
+        let words = [
+            word(0.0, 0.6, "hello"),
+            word(0.6, 1.2, "there"), // spk0: 1.2 s
+            word(1.2, 1.8, "hi"),
+            word(1.8, 2.5, "back"),
+            word(2.5, 3.2, "atcha"), // spk1: 2.0 s
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), Some(0), Some(1), Some(1), Some(1)];
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert_eq!(
+            cols,
+            vec![Some(0), Some(0), Some(1), Some(1), Some(1)],
+            "balanced turns are untouched"
+        );
+    }
+
+    /// A short flip between two different speakers goes to the LONGER neighbour.
+    #[test]
+    fn short_flip_is_absorbed_into_the_longer_neighbour() {
+        let words = [
+            word(0.0, 0.5, "a"),
+            word(0.5, 1.0, "b"),  // spk0: 1.0 s
+            word(1.0, 1.15, "x"), // spk1: 0.15 s flip
+            word(1.15, 1.8, "c"),
+            word(1.8, 2.5, "d"),
+            word(2.5, 3.3, "e"), // spk2: 2.3 s (longer than spk0)
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), Some(0), Some(1), Some(2), Some(2), Some(2)];
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert_eq!(
+            cols[2],
+            Some(2),
+            "flip absorbed into the longer (spk2) side"
+        );
+    }
+
+    /// Smoothing bridges a silence: a flip surrounded by the same speaker across
+    /// an unattributed (silence) word still collapses, and the silence stays.
+    #[test]
+    fn smoothing_bridges_silence_and_leaves_it_unattributed() {
+        let words = [
+            word(0.0, 0.6, "one"),
+            word(0.6, 1.2, "two"),
+            word(1.2, 1.35, "it"),  // short flip
+            word(1.35, 1.6, "..."), // silence (None)
+            word(1.6, 2.2, "three"),
+            word(2.2, 2.8, "four"),
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), Some(0), Some(1), None, Some(0), Some(0)];
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert_eq!(
+            cols,
+            vec![Some(0), Some(0), Some(0), None, Some(0), Some(0)],
+            "flip absorbed across the silence; the silence word stays None"
+        );
+    }
+
+    /// A single speaker (one run, rest silence) has nothing to absorb into and is
+    /// left untouched — smoothing never invents or drops the lone speaker.
+    #[test]
+    fn smoothing_leaves_a_single_speaker_alone() {
+        let words = [
+            word(0.0, 0.2, "a"),
+            word(0.2, 0.45, "b"),
+            word(0.45, 0.7, "c"),
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), None, Some(0)];
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert_eq!(cols, vec![Some(0), None, Some(0)], "lone speaker untouched");
     }
 
     // ── Pipeline cache: lazy init / invalidation / no double load ────────────
