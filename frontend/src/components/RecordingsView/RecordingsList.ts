@@ -900,10 +900,11 @@ export class RecordingsListElement extends LitElement {
       diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span><span class="rec-source-label">${sourceLabel}</span></span>`,
       // A titled recording gets the title as a bold first line of the
-      // transcript cell (block-level, so the snippet wraps under it); untitled
-      // rows render exactly as before.
+      // transcript cell — but ONLY as a fallback when the dedicated Title column
+      // is off. With the Title column on, that column owns the title, so showing
+      // it here too would duplicate it. Untitled rows render exactly as before.
       transcript: html`<span class="rec-preview">${
-        r.title
+        r.title && !visibleCols.includes("title")
           ? html`<span class="rec-title" style="display:block; font-weight:600; color:var(--fg-default); overflow:hidden; text-overflow:ellipsis;">${r.title}</span>`
           : nothing
       }${relevanceChip}${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
