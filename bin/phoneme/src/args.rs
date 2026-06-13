@@ -102,7 +102,7 @@ pub struct RecordArgs {
     pub action: Option<RecordAction>,
 
     /// One-shot: stop on silence (modifies the blocking default; no subcommand).
-    #[arg(long, conflicts_with_all = ["duration", "start", "stop", "cancel"])]
+    #[arg(long, conflicts_with = "duration")]
     pub oneshot: bool,
     /// Record exactly N seconds (modifies the blocking default; no subcommand).
     #[arg(long, value_name = "SECS")]
@@ -111,23 +111,6 @@ pub struct RecordArgs {
     /// simulated keystrokes (the blocking default, or `record start -i`).
     #[arg(long, short = 'i')]
     pub in_place: bool,
-
-    // ── Deprecated flag forms, superseded by the subcommands above. Hidden from
-    //    --help but still accepted so existing hotkey bindings and scripts keep
-    //    working unchanged. Each maps to the matching subcommand in `record::run`
-    //    (with a one-line stderr note). ──
-    #[arg(long, hide = true, conflicts_with_all = ["stop", "cancel", "oneshot", "duration"])]
-    pub start: bool,
-    #[arg(long, hide = true, conflicts_with_all = ["start", "cancel", "oneshot", "duration"])]
-    pub stop: bool,
-    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "cancel", "oneshot", "duration"])]
-    pub toggle: bool,
-    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "oneshot", "duration"])]
-    pub cancel: bool,
-    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "toggle", "cancel", "resume", "oneshot", "duration"])]
-    pub pause: bool,
-    #[arg(long, hide = true, conflicts_with_all = ["start", "stop", "toggle", "cancel", "pause", "oneshot", "duration"])]
-    pub resume: bool,
 }
 
 #[derive(Debug, Subcommand)]

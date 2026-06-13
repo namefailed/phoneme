@@ -89,13 +89,11 @@ phoneme record --duration 10
 
 Each non-blocking subcommand sends a single request (`RecordStart`,
 `RecordStop`, `RecordToggle`, `RecordCancel`, `RecordPause`, `RecordResume`) and
-exits 0. `--oneshot` / `--duration` modify the blocking default and are mutually
-exclusive with the subcommands.
+exits 0. `--oneshot` / `--duration` modify the blocking default.
 
-> **Back-compat:** the pre-1.8 flag spellings — `record --start`, `--stop`,
-> `--toggle`, `--cancel`, `--pause`, `--resume` — still work as hidden,
-> deprecated aliases (so existing hotkey bindings keep running); they print a
-> one-line note nudging you to the subcommand. Prefer the subcommand form.
+> **Breaking change:** the pre-1.8 flag spellings (`record --start`, `--stop`,
+> `--toggle`, `--cancel`, `--pause`, `--resume`) were **removed** — use the
+> subcommands. Update any hotkey bindings or scripts accordingly.
 
 ### 👥 `phoneme meeting`
 

@@ -153,19 +153,19 @@ fn meeting_parity_subcommands_are_recognized() {
     }
 }
 
-/// `record --toggle` must be an accepted flag (and mutually exclusive with the
-/// other mode flags, which clap enforces from the `conflicts_with_all` spec).
+/// `record toggle` must be an accepted subcommand; the pre-1.8 `--toggle` flag
+/// was removed (clean break, no back-compat alias) and must now be rejected.
 #[test]
-fn record_toggle_flag_is_recognized() {
+fn record_toggle_subcommand_is_recognized() {
     Command::cargo_bin("phoneme")
         .unwrap()
-        .args(["record", "--toggle", "--help"])
+        .args(["record", "toggle", "--help"])
         .assert()
         .success();
-    // --toggle conflicts with --start: clap should reject the combo (exit 2).
+    // The removed `--toggle` flag must be an error now (unknown argument, exit 2).
     Command::cargo_bin("phoneme")
         .unwrap()
-        .args(["record", "--toggle", "--start"])
+        .args(["record", "--toggle"])
         .assert()
         .failure();
 }
@@ -201,20 +201,22 @@ fn completions_all_shells_are_recognized() {
     }
 }
 
-/// `record --pause` / `--resume` must parse, and be mutually exclusive with
-/// each other and the other mode flags (clap enforces `conflicts_with_all`).
+/// Every `record` non-blocking control is a subcommand now; the removed
+/// `--pause` / `--resume` flags must be rejected.
 #[test]
-fn record_pause_resume_flags_are_recognized() {
-    for flag in ["--pause", "--resume"] {
+fn record_control_subcommands_are_recognized() {
+    for sub in ["start", "stop", "toggle", "cancel", "pause", "resume"] {
         Command::cargo_bin("phoneme")
             .unwrap()
-            .args(["record", flag, "--help"])
+            .args(["record", sub, "--help"])
             .assert()
             .success();
     }
-    Command::cargo_bin("phoneme")
-        .unwrap()
-        .args(["record", "--pause", "--resume"])
-        .assert()
-        .failure();
+    for flag in ["--pause", "--resume", "--start", "--stop", "--cancel"] {
+        Command::cargo_bin("phoneme")
+            .unwrap()
+            .args(["record", flag])
+            .assert()
+            .failure();
+    }
 }

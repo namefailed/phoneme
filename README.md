@@ -86,7 +86,7 @@ flowchart TD
 - **⌨️ Keyboard everything**: Opt-in vim-style navigation drives all three panes (and the queue), `g`-chords jump anywhere, the list zooms with `Ctrl+=`/`-`, and `?` shows the full cheat sheet.
 - **🩺 Provider-aware Self-healing**: A header health pill + Doctor watch the local servers and follow the *effective* connection each feature uses (cloud keys included); one click (or `phoneme doctor --fix`) sweeps a hung/orphaned whisper-server and respawns it from config.
 - **♻️ Clean lifecycle**: The daemon owns the work and outlives any window. Quit stops it cleanly (finalizing an in-flight take, killing its whisper/Ollama children) — or leave it running headless. A Phoneme-launched Ollama is started on demand and never touches an Ollama you already had running.
-- **💻 CLI is a Peer**: Every GUI action is a CLI command (`phoneme record --start`). Bind it to AutoHotkey, Stream Deck, or Kanata.
+- **💻 CLI is a Peer**: Every GUI action is a CLI command (`phoneme record start`). Bind it to AutoHotkey, Stream Deck, or Kanata.
 
 ---
 
@@ -141,8 +141,8 @@ Download the latest MSI from the [Releases](https://github.com/namefailed/phonem
 
 ```bash
 # Power users can bypass the UI entirely and use the CLI:
-phoneme record --start
-phoneme record --stop
+phoneme record start
+phoneme record stop
 phoneme list
 ```
 

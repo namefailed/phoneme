@@ -89,7 +89,7 @@ pub enum Request {
     /// Atomic start-if-idle / stop-if-active, for hotkey bindings — one
     /// request, so a double-tap can't race a check-then-act client. Replies
     /// and events match whichever of start/stop it performed (a started
-    /// toggle uses `hold` mode). GUI/tray hotkeys, `phoneme record --toggle`.
+    /// toggle uses `hold` mode). GUI/tray hotkeys, `phoneme record toggle`.
     RecordToggle {
         /// Forwarded to [`Request::RecordStart`] when the toggle starts.
         #[serde(default)]
@@ -105,7 +105,7 @@ pub enum Request {
     /// Discard the active recording or meeting: capture stops, no WAV is
     /// kept, the catalog row(s) are deleted, nothing is enqueued. Ok
     /// `{"id":"<recording id>"}`; emits [`DaemonEvent::RecordingCancelled`].
-    /// GUI cancel, `phoneme record --cancel`.
+    /// GUI cancel, `phoneme record cancel`.
     RecordCancel,
     /// Read-only capture status — lets a freshly-(re)loaded UI re-sync its
     /// record/meeting buttons, since the daemon outlives the window. Ok

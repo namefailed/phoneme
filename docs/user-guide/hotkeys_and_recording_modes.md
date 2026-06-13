@@ -92,8 +92,6 @@ A microphone left turned down captures the same words far quieter than the trans
 
 The `record toggle` / `meeting toggle` variants are atomic (start-or-stop in one
 call), which makes them the cleanest thing to bind to a single external hotkey.
-(The pre-1.8 flag spellings — `record --start`, `--stop`, … — still work as
-deprecated aliases, so existing bindings don't break.)
 
 ## Tips
 
