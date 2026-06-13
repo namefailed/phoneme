@@ -64,6 +64,14 @@ function onEvent(event: DaemonEvent) {
         showToast(`${tail}recording ready`, "success");
         return;
       }
+      // `summarizing` and `tagging` each have a dedicated completion event
+      // (summary_updated / tag_suggestions_updated) that toasts on its own. A
+      // standalone re-run (✨ Summary, suggest tags) emits the stage event too —
+      // for the queue's active-item display — so toasting it here as well is the
+      // double-toast users see. Stay quiet for those two stages (lastStage is
+      // already tracked above, so a later transition can still say
+      // "Summarized ✓ — …"); the dedicated event owns the toast.
+      if (stage === "summarizing" || stage === "tagging") return;
       // A mid-pipeline transition: announce what just finished and what's
       // next ("Transcribed ✓ — cleaning up…"). The very first stage has no
       // predecessor and announces itself ("Transcribing…").

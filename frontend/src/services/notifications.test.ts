@@ -95,6 +95,17 @@ describe("step-notification gating", () => {
     expect(toast).toHaveBeenCalledWith("Summarized ✓ — recording ready", "success");
   });
 
+  it("the summarizing/tagging stages stay quiet — their *_updated events toast", () => {
+    // A standalone re-run (✨ Summary / suggest tags) emits the stage event for
+    // the queue's active-item display AND the dedicated summary_updated /
+    // tag_suggestions_updated event. Toasting the stage too is the double-toast
+    // users saw — so these stages don't toast (but are still tracked, so a later
+    // 'done' can read "Summarized ✓ — recording ready", asserted above).
+    emit(stage("rsum", "summarizing"));
+    emit(stage("rtag", "tagging"));
+    expect(toast).not.toHaveBeenCalled();
+  });
+
   it("a 'done' with no remembered predecessor still reads 'recording ready'", () => {
     // No prior stage for this id (e.g. notifications started mid-run).
     emit(stage("r2", "done"));

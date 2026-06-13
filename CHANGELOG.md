@@ -156,6 +156,12 @@ trust boundary. Verified against current code.*
   blocked the shared event loop and hung the whole app (often permanently). It
   now drags via manual `setPosition` (coalesced to one move per frame), which
   never enters the move-loop.
+- [x] **No more double toasts on summary / tag re-runs.** A standalone ✨ Summary
+  or suggest-tags run emits a pipeline-stage event (for the queue's active-item
+  display) AND the step's dedicated `summary_updated` / `tag_suggestions_updated`
+  event; notifications toasted on both. The `summarizing`/`tagging` stages now
+  stay quiet (still tracked, so a later "done" still reads "Summarized ✓ —
+  recording ready") and their dedicated event owns the single toast.
 
 ### GUI parity
 
