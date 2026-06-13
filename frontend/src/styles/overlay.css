@@ -8,7 +8,11 @@ body {
   padding: 0;
   width: 100%;
   height: 100%;
-  background: transparent;
+  /* Opaque, NOT transparent: a transparent always-on-top WebView2 window
+     hard-crashes the frontend on some Windows/WebView2 builds (see overlay.rs).
+     The window is a solid themed panel; the body matches the card so the card's
+     rounded corners blend into the window. */
+  background: var(--bg-elevated, #1e1e2e);
   overflow: hidden;
   /* The whole window is the card; the card handles its own pointer events. */
   user-select: none;
@@ -20,9 +24,11 @@ body {
    so the drop shadow isn't clipped by the window edge. */
 .ov-card {
   box-sizing: border-box;
-  width: calc(100% - 12px);
-  height: calc(100% - 12px);
-  margin: 6px;
+  /* Fill the (opaque) window edge-to-edge. The window itself is the floating
+     card now — no transparent gap, no desktop blur (both crash WebView2). */
+  width: 100%;
+  height: 100%;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -30,12 +36,9 @@ body {
   font-size: 13px;
   line-height: 1.45;
   color: var(--fg-default, #cdd6f4);
-  background: color-mix(in srgb, var(--bg-elevated, #1e1e2e) 88%, transparent);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
+  background: var(--bg-elevated, #1e1e2e);
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
   border-radius: 13px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
   cursor: grab; /* the whole card is the drag region */
   transition: opacity 0.4s ease;
 }

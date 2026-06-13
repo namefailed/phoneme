@@ -83,7 +83,10 @@ pub fn ensure(app: &AppHandle) {
         // are the window edges.
         .resizable(true)
         .decorations(false)
-        .transparent(true)
+        // NOT transparent: a transparent + always-on-top + frameless WebView2
+        // window (especially with a desktop `backdrop-filter: blur`) hard-crashes
+        // the whole app on some Windows/WebView2 builds when shown. The overlay
+        // is an opaque themed panel instead — see overlay.css.
         .always_on_top(true)
         .skip_taskbar(true)
         // Don't steal focus when it pops up mid-recording.
