@@ -48,6 +48,13 @@ trust boundary. Verified against current code.*
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
 
+### Reliability & polish
+
+- [x] Failures record their reason on the recording (survives a restart);
+  cloud/custom transcriptions store the real model id instead of "unknown";
+  failure toasts drop the internal "internal error:" prefix; the transcript
+  diff computes once per refresh instead of twice.
+
 ### CLI parity
 
 - [x] **CLI reaches the GUI's per-recording actions** — `phoneme edit <id>

@@ -620,14 +620,12 @@ alongside the feature releases above.*
   CLI `phoneme list --saved <name>`. Effort S/M — the UI already isolates
   storage behind `state/savedSearches.ts`, and the rename-conflict API
   carries over as the fast path.
-- [ ] Toast cosmetics: real summary failures still carry thiserror's
-  "internal error:" prefix; TranscriptDiff computes the (now-capped) diff
-  twice per refresh (body + stats).
-- [ ] Persist `error_kind`/`error_message` onto the catalog row at failure
-  time — the columns exist but no daemon path writes them; real error text
-  only travels in events + the failed/ quarantine JSON. Writing them makes
-  failure reasons survive restarts and retires the queue panel's session
-  cache.
+- [x] Toast cosmetics: failure toasts strip the thiserror "internal error:"
+  prefix; TranscriptDiff computes the (capped) diff once per refresh now.
+- [x] Persist `error_kind`/`error_message` onto the catalog row at failure
+  time — both failure paths now write them (a retry clears them); failure
+  reasons survive a restart and the queue panel's cache is the live-event
+  fallback.
 - [ ] Per-item failed-quarantine dismiss — the inbox failed/ store only
   supports all-or-nothing ClearFailed; the failure panel wants per-recording
   dismiss IPC.
@@ -638,7 +636,7 @@ alongside the feature releases above.*
   RunDoctor handler and tray-side backend checks still build URLs from
   config; rewrite via the published effective ports and say "running on
   51234 (fallback from 5809)" when they differ.
-- [ ] Record the request model id for cloud STT — the catalog/webhook `model` field is the file-stem of `whisper.model_path`, so cloud transcriptions record "unknown" (pinned by the pipeline integration test).
+- [x] Record the request model id for cloud STT — cloud/custom backends now store the requested `whisper.model`; local keeps the file-stem.
 - [ ] Doctor: decide whether local whisper model/server checks should skip (or downgrade) when a cloud STT provider is configured — today they run regardless (behavior parity kept on purpose).
 - [ ] Trim redundant `http.clone()` (transcription.rs ×7, llm.rs ×4); avoid the `attention_mask` clone in `embed.rs`.
 

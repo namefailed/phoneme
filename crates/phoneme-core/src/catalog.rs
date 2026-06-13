@@ -157,6 +157,28 @@ impl Catalog {
         Ok(())
     }
 
+    /// Record why a recording failed, on the row itself.
+    ///
+    /// `kind` is the short machine label the failed path already uses for the
+    /// inbox quarantine (e.g. `"whisper_error"`, `"hook_failed"`) and `message`
+    /// is the human-readable reason. Storing them here makes the failure reason
+    /// survive a daemon restart: the live failure events and the `failed/`
+    /// quarantine JSON are otherwise the only places it lives, and neither is
+    /// readable once the app session that saw the event is gone. The status
+    /// itself is set separately by [`Self::update_status`]; this only fills the
+    /// two error columns.
+    pub async fn update_error(&self, id: &RecordingId, kind: &str, message: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE recordings SET error_kind = ?, error_message = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(kind)
+        .bind(message)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Update both status and duration in a single query.
     pub async fn update_status_and_duration(
         &self,
@@ -182,7 +204,9 @@ impl Catalog {
     /// cleaned text. `original_transcript` is **always** the raw Whisper
     /// output, so the "View original" feature shows the pre-LLM version even
     /// when post-processing is active. Re-transcription overwrites both
-    /// columns (fresh baseline).
+    /// columns (fresh baseline) and clears any stored failure reason
+    /// (`error_kind`/`error_message`), so a successful retry of a previously
+    /// failed recording doesn't keep showing the old error.
     pub async fn update_transcript(
         &self,
         id: &RecordingId,
@@ -193,7 +217,7 @@ impl Catalog {
         sqlx::query(
             r#"UPDATE recordings
                SET transcript = ?, original_transcript = ?, clean_transcript = ?, model = ?,
-                   user_edited = 0,
+                   user_edited = 0, error_kind = NULL, error_message = NULL,
                    transcribed_at = datetime('now'), updated_at = datetime('now')
                WHERE id = ?"#,
         )
@@ -1739,6 +1763,37 @@ mod tests {
                 "status {s} did not round-trip through parse_status/as_str"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn update_error_persists_kind_and_message_and_a_retry_clears_them() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let r = embedded_recording(None);
+        db.insert(&r).await.unwrap();
+
+        // A failure writes both columns on the row itself, so the reason
+        // survives a restart (not just the live event / quarantine JSON).
+        db.update_error(&r.id, "whisper_error", "the model file is missing")
+            .await
+            .unwrap();
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.error_kind.as_deref(), Some("whisper_error"));
+        assert_eq!(
+            got.error_message.as_deref(),
+            Some("the model file is missing")
+        );
+
+        // A later successful (re-)transcription clears the stale failure reason
+        // so the recording no longer reads as failed.
+        db.update_transcript(&r.id, "clean text", "raw text", "tiny")
+            .await
+            .unwrap();
+        let got = db.get(&r.id).await.unwrap().unwrap();
+        assert_eq!(got.error_kind, None, "a successful retry clears error_kind");
+        assert_eq!(
+            got.error_message, None,
+            "a successful retry clears error_message"
+        );
     }
 
     #[tokio::test]

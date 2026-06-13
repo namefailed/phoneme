@@ -29,6 +29,7 @@ import { showToast } from "../utils/toast";
 import {
   initStepNotifications,
   setStepNotifications,
+  stripInternalPrefix,
 } from "./notifications";
 
 const toast = showToast as unknown as Mock;
@@ -137,6 +138,40 @@ describe("errors always surface, regardless of the step setting", () => {
     expect(toast).toHaveBeenCalledWith(
       "Summary failed: check the AI provider in Settings",
       "error",
+    );
+  });
+
+  it("strips the daemon's 'internal error:' wrapper from a summary failure", () => {
+    emit({ event: "summary_failed", id: "r1", error: "internal error: empty reply from the model" });
+    expect(toast).toHaveBeenCalledWith("Summary failed: empty reply from the model", "error");
+  });
+
+  it("strips the 'internal error:' wrapper from transcription + hook failures", () => {
+    emit({ event: "transcription_failed", id: "r1", error: "internal error: decode failed" });
+    expect(toast).toHaveBeenCalledWith("Transcription failed: decode failed", "error");
+    toast.mockClear();
+    emit({ event: "hook_failed", id: "r1", error: "internal error: command not found" });
+    expect(toast).toHaveBeenCalledWith("Hook failed: command not found", "error");
+  });
+});
+
+describe("stripInternalPrefix", () => {
+  it("drops a single leading 'internal error:' wrapper, case-insensitively", () => {
+    expect(stripInternalPrefix("internal error: boom")).toBe("boom");
+    expect(stripInternalPrefix("Internal Error:   spaced")).toBe("spaced");
+  });
+
+  it("leaves real error content untouched", () => {
+    expect(stripInternalPrefix("connection refused")).toBe("connection refused");
+    // Only the LEADING wrapper goes; a later mention stays.
+    expect(stripInternalPrefix("decode failed (internal error: nested)")).toBe(
+      "decode failed (internal error: nested)",
+    );
+  });
+
+  it("strips only the first wrapper, preserving the rest verbatim", () => {
+    expect(stripInternalPrefix("internal error: internal error: doubled")).toBe(
+      "internal error: doubled",
     );
   });
 });

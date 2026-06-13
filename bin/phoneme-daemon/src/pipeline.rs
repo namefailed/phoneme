@@ -998,6 +998,17 @@ pub async fn run(
                         .catalog
                         .update_status(&id, RecordingStatus::TranscribeFailed)
                         .await?;
+                    // Persist the reason on the row so it survives a restart —
+                    // best-effort, since the status + quarantine below are what
+                    // actually fail the recording. Same kind label the inbox
+                    // quarantine uses.
+                    if let Err(err) = state
+                        .catalog
+                        .update_error(&id, "whisper_error", &e.to_string())
+                        .await
+                    {
+                        tracing::warn!(error = %err, "failed to persist transcribe error reason");
+                    }
                     state
                         .inbox
                         .finish_failed(&id, "whisper_error", &e.to_string())
@@ -1104,14 +1115,34 @@ pub async fn run(
     }
 
     payload.transcript = transcript.clone();
-    // Record the model that actually ran. Use the per-job whisper config so a
-    // one-time model-override re-transcription stores the override's model file
-    // stem (for the local backend) rather than the configured default.
-    payload.model = std::path::Path::new(&whisper_cfg.model_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
+    // Record the model that actually ran, from the per-job whisper config so a
+    // one-time model override is reflected. The local bundled backend talks to
+    // whisper.cpp over HTTP and only knows its model as a file on disk, so its
+    // id is the `model_path` stem; the cloud/custom backends send a model id in
+    // the request, so theirs is the REQUESTED `whisper.model` (falling back to
+    // the path stem only when no model was set, which keeps the old behavior
+    // for a misconfigured cloud backend rather than recording an empty string).
+    payload.model = {
+        use phoneme_core::config::TranscriptionBackend as TB;
+        let path_stem = || {
+            std::path::Path::new(&whisper_cfg.model_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        };
+        match whisper_cfg.provider {
+            TB::Local => path_stem(),
+            _ => {
+                let requested = whisper_cfg.model.trim();
+                if requested.is_empty() {
+                    path_stem()
+                } else {
+                    requested.to_string()
+                }
+            }
+        }
+    };
 
     // `transcript` = LLM-processed (or raw if LLM is disabled/failed).
     // `raw_transcript` = raw Whisper output, always preserved as the original.
@@ -1259,6 +1290,16 @@ pub async fn run(
                     .catalog
                     .update_status(&id, RecordingStatus::HookFailed)
                     .await?;
+                // Persist the reason on the row so it survives a restart (see the
+                // transcribe-failed path). Best-effort; the quarantine below is
+                // what actually fails the recording.
+                if let Err(err) = state
+                    .catalog
+                    .update_error(&id, "hook_failed", &e.to_string())
+                    .await
+                {
+                    tracing::warn!(error = %err, "failed to persist hook error reason");
+                }
                 state
                     .inbox
                     .finish_failed(&id, "hook_failed", &e.to_string())
