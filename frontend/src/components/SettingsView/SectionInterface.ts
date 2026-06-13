@@ -15,6 +15,9 @@ const COLUMN_CATALOG: { value: string; label: string }[] = [
   { value: "model", label: "Transcription Model" },
   { value: "cleanup_model", label: "Post-Processing Model" },
   { value: "summary_model", label: "Summary Model" },
+  { value: "title_model", label: "Title Model" },
+  { value: "tag_model", label: "Auto-Tag Model" },
+  { value: "diarization_model", label: "Diarization Model" },
   { value: "diarized", label: "Diarized" },
   { value: "user_edited", label: "Edited" },
   { value: "source", label: "Source" },
@@ -91,10 +94,9 @@ export class SectionInterface {
       cols.push("transcript");
     }
     this.config.interface.visible_columns = cols;
-    // Saved widths are positional, so dropping/reordering columns would
-    // misalign them. Clear them so the list recomputes per-column widths in the
-    // new order (the user can re-drag widths afterward).
-    if (this.config.interface.column_widths) delete this.config.interface.column_widths;
+    // Column widths are persisted per-column-NAME in localStorage (see
+    // RecordingsList), so adding/removing/reordering columns no longer disturbs
+    // them — nothing to clear here.
     // Bubbling change so SettingsView enables the Save button.
     this.container.dispatchEvent(new Event("change", { bubbles: true }));
   }

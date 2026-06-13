@@ -45,6 +45,27 @@ function saveExpandedMeetings(set: Set<string>): void {
   }
 }
 
+/** Column widths, keyed by COLUMN NAME (per device). Stored here rather than in
+ *  the synced config because the config array was positional and reset whenever
+ *  a column was added/removed/reordered — a name-keyed map survives all three. */
+const LS_COL_WIDTHS = "phoneme.recordings.colWidths";
+function loadColWidths(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LS_COL_WIDTHS);
+    const obj = raw ? JSON.parse(raw) : {};
+    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
+  } catch {
+    return {};
+  }
+}
+function saveColWidths(map: Record<string, string>): void {
+  try {
+    localStorage.setItem(LS_COL_WIDTHS, JSON.stringify(map));
+  } catch {
+    /* private mode / quota — non-fatal */
+  }
+}
+
 /** Per-meeting display icon (a cosmetic per-device pref, like the meeting name
  *  is in the catalog). Keyed by meeting id. */
 const LS_MEETING_ICONS = "phoneme.meetingIcons";
@@ -603,7 +624,7 @@ export class RecordingsListElement extends LitElement {
     this.requestUpdate();
   }
 
-  private startResize(e: MouseEvent, colIdx: number) {
+  private startResize(e: MouseEvent, colIdx: number, visibleCols: string[]) {
     e.preventDefault();
     e.stopPropagation();
 
@@ -622,10 +643,16 @@ export class RecordingsListElement extends LitElement {
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      if (this.config && this.currentWidths) {
-        this.config.interface = this.config.interface || {};
-        this.config.interface.column_widths = this.currentWidths;
-        invoke("write_config", { config: this.config }).catch(console.error);
+      // Persist widths keyed by COLUMN NAME (localStorage) so they survive
+      // adding, removing, or reordering columns. The old positional config
+      // array misaligned on any column change, which forced a full reset.
+      if (this.currentWidths) {
+        const map = loadColWidths();
+        visibleCols.forEach((c, i) => {
+          const w = this.currentWidths![i];
+          if (w) map[c] = w;
+        });
+        saveColWidths(map);
       }
     };
 
@@ -678,8 +705,7 @@ export class RecordingsListElement extends LitElement {
     }
     let activeWidths = this.currentWidths;
     if (!activeWidths || activeWidths.length !== visibleCols.length) {
-      activeWidths = transcriptMoved ? null : this.config?.interface?.column_widths || null;
-      const colWidths: Record<string, string> = {
+      const defaults: Record<string, string> = {
         favorite: "40px",
         day: "85px",
         time: "94px",
@@ -690,14 +716,18 @@ export class RecordingsListElement extends LitElement {
         model: "120px",
         cleanup_model: "120px",
         summary_model: "120px",
+        title_model: "120px",
+        tag_model: "120px",
+        diarization_model: "120px",
         diarized: "60px",
         user_edited: "60px",
-        source: "124px",
+        source: "70px",
         transcript: "1fr",
       };
-      if (!activeWidths || activeWidths.length !== visibleCols.length) {
-        activeWidths = visibleCols.map((c) => colWidths[c] || "auto");
-      }
+      // Widths are keyed by column NAME (localStorage), so each column keeps its
+      // size across add/remove/reorder; fall back to the per-column default.
+      const saved = loadColWidths();
+      activeWidths = visibleCols.map((c) => saved[c] || defaults[c] || "auto");
       this.currentWidths = activeWidths;
     }
 
@@ -752,6 +782,9 @@ export class RecordingsListElement extends LitElement {
       model: "Transcript Model",
       cleanup_model: "Post-Process Model",
       summary_model: "Summary Model",
+      title_model: "Title Model",
+      tag_model: "Auto-Tag Model",
+      diarization_model: "Diarization Model",
       diarized: "Diarized",
       user_edited: "Edited",
       source: "Source",
@@ -761,7 +794,7 @@ export class RecordingsListElement extends LitElement {
     const headSpans = visibleCols.map((c, i) => html`
       <span class="col-head" data-col="${i + 1}">
         ${colLabels[c] || c}
-        ${i < visibleCols.length - 1 ? html`<div class="resizer" data-col="${i + 1}" @mousedown=${(e: MouseEvent) => this.startResize(e, i)}></div>` : nothing}
+        ${i < visibleCols.length - 1 ? html`<div class="resizer" data-col="${i + 1}" @mousedown=${(e: MouseEvent) => this.startResize(e, i, visibleCols)}></div>` : nothing}
       </span>
     `);
 
@@ -896,9 +929,12 @@ export class RecordingsListElement extends LitElement {
       model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.model || ""}</span>`,
       cleanup_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.cleanup_model || ""}</span>`,
       summary_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.summary_model || ""}</span>`,
+      title_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.title_model || ""}</span>`,
+      tag_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.tag_model || ""}</span>`,
+      diarization_model: html`<span class="rec-model" style="color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.diarization_model || ""}</span>`,
       user_edited: html`<span class="rec-check" title=${r.user_edited ? "You edited this transcript" : ""}>${r.user_edited ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
       diarized: html`<span class="rec-check" title=${r.diarized ? "Speaker diarization applied" : ""}>${r.diarized ? html`<span class="rec-check-mark">✓</span>` : nothing}</span>`,
-      source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span><span class="rec-source-label">${sourceLabel}</span></span>`,
+      source: html`<span class="rec-source ${sourceIsSystem ? "rec-source--system" : "rec-source--mic"}" title=${sourceLabel}><span class="rec-source-ico">${sourceIcon}</span></span>`,
       // A titled recording gets the title as a bold first line of the
       // transcript cell — but ONLY as a fallback when the dedicated Title column
       // is off. With the Title column on, that column owns the title, so showing
