@@ -1443,6 +1443,12 @@ body.phoneme-hide-header ph-header-bar {
   flex-shrink: 0;
   opacity: 0.85;
 }
+/* In the recordings list the Source cell is now icon-only — center it in its
+   column (grid item). `justify-self` is grid-only, so the detail header's
+   flex-laid-out source pill is unaffected. */
+.rec-row .rec-source {
+  justify-self: center;
+}
 .rec-source-label {
   overflow: hidden;
   text-overflow: ellipsis;
