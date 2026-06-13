@@ -17,11 +17,12 @@ import "./styles/theme.css";
 import "./styles/overlay.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 
 const root = document.getElementById("overlay-root")!;
 root.innerHTML = `
-  <div class="ov-card" data-tauri-drag-region>
+  <div class="ov-card">
     <span class="ov-pulse" aria-hidden="true"></span>
     <span class="ov-label">LIVE</span>
     <span class="ov-body" id="ov-body"></span>
@@ -301,3 +302,78 @@ function queueStateSave() {
 }
 void win.onMoved(() => queueStateSave());
 void win.onResized(() => queueStateSave());
+
+// ── Manual window dragging ───────────────────────────────────────────────────
+// The card used to be a `data-tauri-drag-region`, which calls the OS
+// `startDragging` and enters Windows' modal move-loop. For a transparent,
+// always-on-top, frameless WebView2 window that move-loop blocks the shared
+// Tauri event loop and freezes the WHOLE app (the main window included) until
+// the drag ends — and on a transparent window it can wedge permanently, which
+// is the "live preview hangs the app when I move it" crash. Instead we drag
+// manually: track the pointer and reposition the window with `setPosition`,
+// which never enters the move-loop. Repositions are coalesced to one per
+// animation frame so a fast drag can't flood the IPC channel.
+const card = root.querySelector<HTMLElement>(".ov-card")!;
+let dragging = false;
+let originX = 0; // window's logical-x at grab time
+let originY = 0; // window's logical-y at grab time
+let grabX = 0; // pointer screen-x at grab time (logical/CSS px)
+let grabY = 0; // pointer screen-y at grab time (logical/CSS px)
+let nextX = 0;
+let nextY = 0;
+let rafPending = false;
+
+function flushDrag() {
+  rafPending = false;
+  if (!dragging) return;
+  void win.setPosition(new LogicalPosition(nextX, nextY)).catch(() => {});
+}
+
+card.addEventListener("pointerdown", async (e) => {
+  // Left button only; never start a drag from the source/close buttons.
+  if (e.button !== 0) return;
+  if ((e.target as HTMLElement).closest("button")) return;
+  // Capture the grab point synchronously, before any await, so the reference
+  // is the true press location even if the position read below is slow.
+  grabX = e.screenX;
+  grabY = e.screenY;
+  e.preventDefault();
+  try {
+    const scale = await win.scaleFactor();
+    const pos = await win.outerPosition(); // physical px → logical
+    originX = pos.x / scale;
+    originY = pos.y / scale;
+  } catch {
+    return; // window mid-teardown — leave it be
+  }
+  dragging = true;
+  try {
+    card.setPointerCapture(e.pointerId);
+  } catch {
+    /* capture is best-effort */
+  }
+});
+
+card.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  // screenX/Y are logical (CSS) px, matching LogicalPosition — no DPR math.
+  nextX = originX + (e.screenX - grabX);
+  nextY = originY + (e.screenY - grabY);
+  if (!rafPending) {
+    rafPending = true;
+    requestAnimationFrame(flushDrag);
+  }
+});
+
+function endDrag(e: PointerEvent) {
+  if (!dragging) return;
+  dragging = false;
+  try {
+    card.releasePointerCapture(e.pointerId);
+  } catch {
+    /* may already be released */
+  }
+  queueStateSave(); // persist the final resting position
+}
+card.addEventListener("pointerup", endDrag);
+card.addEventListener("pointercancel", endDrag);

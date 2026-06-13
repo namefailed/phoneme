@@ -150,6 +150,12 @@ trust boundary. Verified against current code.*
   clicks during a daemon outage no longer spawn-storms. A successful connect
   resets the backoff, and a daemon started later still heals on its own once
   the window elapses (the cap holds; it never permanently gives up).
+- [x] **Live-preview overlay no longer freezes the app when dragged.** The
+  caption card was a `data-tauri-drag-region`, so moving it entered Windows'
+  modal move-loop — which, on this transparent always-on-top WebView2 window,
+  blocked the shared event loop and hung the whole app (often permanently). It
+  now drags via manual `setPosition` (coalesced to one move per frame), which
+  never enters the move-loop.
 
 ### GUI parity
 

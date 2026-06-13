@@ -25,11 +25,13 @@
 //!   manual ✕ hide is respected until the next recording.
 //!
 //! ## Position persistence
-//! The window is draggable (its whole card is a `data-tauri-drag-region`). Its
-//! position is remembered across runs by `tauri-plugin-window-state`, which
-//! saves/restores geometry per window label automatically — so we don't persist
-//! anything by hand here. On first ever creation (no saved state) we place it
-//! bottom-center of the primary monitor.
+//! The window is draggable (`overlay.ts` repositions it manually with
+//! `setPosition` on pointer drag — deliberately NOT a `data-tauri-drag-region`,
+//! whose OS modal move-loop freezes this transparent always-on-top window's
+//! shared event loop). Its position is remembered across runs by
+//! `tauri-plugin-window-state`, which saves/restores geometry per window label
+//! automatically — so we don't persist anything by hand here. On first ever
+//! creation (no saved state) we place it bottom-center of the primary monitor.
 
 use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 
@@ -58,9 +60,10 @@ pub fn exists(app: &AppHandle) -> bool {
 /// Create the overlay window (hidden) if it doesn't already exist. Idempotent.
 ///
 /// The window is frameless, transparent, always-on-top, skips the taskbar, and
-/// is not resizable — it is a floating caption, not an app window. It starts
-/// **hidden**; `overlay.ts` reveals it when a recording starts. Returns early
-/// (and logs) on failure so a broken overlay never blocks the app.
+/// is resizable (the frameless edges are the resize grips) — a floating caption,
+/// not an app window. It starts **hidden**; `overlay.ts` reveals it when a
+/// recording starts. Returns early (and logs) on failure so a broken overlay
+/// never blocks the app.
 pub fn ensure(app: &AppHandle) {
     if exists(app) {
         return;
