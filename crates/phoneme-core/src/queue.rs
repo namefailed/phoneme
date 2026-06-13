@@ -232,6 +232,25 @@ impl InboxQueue {
         Ok(())
     }
 
+    /// Archive a cancelled item's processing payload to `done/` as-is.
+    ///
+    /// A cancel is the user's own action, not a failure — the payload must
+    /// not land in the `failed/` quarantine (the queue badge counts that
+    /// directory). Moving the file unchanged into `done/` keeps crash
+    /// recovery idempotent: a `processing/` file orphaned mid-cancel pairs
+    /// with the done marker and is dropped instead of re-run.
+    pub async fn finish_cancelled(&self, id: &RecordingId) -> Result<()> {
+        let processing = self.root.join("processing").join(format!("{id}.json"));
+        let done = self.root.join("done").join(format!("{id}.json"));
+        if fs::try_exists(&done).await.unwrap_or(false) {
+            fs::remove_file(&done).await?;
+        }
+        if fs::try_exists(&processing).await.unwrap_or(false) {
+            fs::rename(&processing, &done).await?;
+        }
+        Ok(())
+    }
+
     /// Move a processing payload to `failed/`, writing a failure record.
     pub async fn finish_failed(
         &self,
@@ -269,6 +288,15 @@ impl InboxQueue {
 
     /// Move any files left in `processing/` back to `pending/`. Returns the
     /// list of ids recovered. Called by the daemon at startup.
+    ///
+    /// ### Crash-recovery note
+    ///
+    /// [`Self::finish_done`] writes the done payload atomically and then removes the
+    /// processing file. A crash in the window between those two steps leaves
+    /// both `done/<id>.json` and `processing/<id>.json`. This method detects
+    /// that pair and drops the stale processing file rather than re-queuing the
+    /// already-complete item — making recovery idempotent across that crash
+    /// window.
     pub async fn recover_orphans(&self) -> Result<Vec<RecordingId>> {
         let mut recovered = vec![];
         let mut dir = fs::read_dir(self.root.join("processing")).await?;
@@ -289,6 +317,19 @@ impl InboxQueue {
                 tracing::warn!(file = %path.display(), "quarantined orphan with malformed id");
                 continue;
             };
+            // A done/ file for this id means finish_done completed but the
+            // subsequent remove_file on the processing/ copy crashed. The work
+            // is already recorded as done — drop the stale processing file
+            // instead of re-queuing the job and running the pipeline again.
+            let done_path = self.root.join("done").join(format!("{}.json", id.as_str()));
+            if fs::try_exists(&done_path).await.unwrap_or(false) {
+                tracing::info!(
+                    id = %id.as_str(),
+                    "recovery: dropping stale processing file (done copy already exists)"
+                );
+                let _ = fs::remove_file(&path).await;
+                continue;
+            }
             let dest = self
                 .root
                 .join("pending")
@@ -439,4 +480,262 @@ async fn count_json(dir: &Path) -> Result<usize> {
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::id::RecordingId;
+    use crate::types::{HookMetadata, HookPayload};
+
+    fn make_payload() -> HookPayload {
+        HookPayload {
+            id: RecordingId::new(),
+            timestamp: chrono::Local::now(),
+            transcript: "test transcript".to_string(),
+            audio_path: "test.wav".into(),
+            duration_ms: 5000,
+            model: "test-model".into(),
+            metadata: HookMetadata::current(),
+        }
+    }
+
+    async fn open_inbox(dir: &std::path::Path) -> InboxQueue {
+        InboxQueue::new(dir).await.expect("open inbox")
+    }
+
+    // -------------------------------------------------------------------------
+    // Basic lifecycle
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn enqueue_and_claim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+
+        let counts = inbox.counts().await.unwrap();
+        assert_eq!(counts.pending, 1);
+        assert_eq!(counts.processing, 0);
+
+        let claimed = inbox.claim_next().await.unwrap();
+        assert!(claimed.is_some());
+        let claimed = claimed.unwrap();
+        assert_eq!(claimed.id, p.id);
+
+        let counts = inbox.counts().await.unwrap();
+        assert_eq!(counts.pending, 0);
+        assert_eq!(counts.processing, 1);
+    }
+
+    #[tokio::test]
+    async fn finish_done_moves_to_done_and_removes_processing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+        inbox.claim_next().await.unwrap();
+
+        inbox.finish_done(&p.id, &p).await.unwrap();
+
+        let counts = inbox.counts().await.unwrap();
+        assert_eq!(counts.processing, 0, "processing file must be removed");
+        assert_eq!(counts.done, 1, "done file must exist");
+
+        // No stale processing file.
+        let proc = tmp
+            .path()
+            .join("processing")
+            .join(format!("{}.json", p.id.as_str()));
+        assert!(
+            !proc.exists(),
+            "processing file must not survive finish_done"
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_failed_moves_to_failed_and_removes_processing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+        inbox.claim_next().await.unwrap();
+
+        inbox
+            .finish_failed(&p.id, "test_error", "it failed")
+            .await
+            .unwrap();
+
+        let counts = inbox.counts().await.unwrap();
+        assert_eq!(counts.processing, 0);
+        assert_eq!(counts.failed, 1);
+    }
+
+    #[tokio::test]
+    async fn requeue_moves_back_to_pending() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+        inbox.claim_next().await.unwrap();
+
+        inbox.requeue(&p.id).await.unwrap();
+
+        let counts = inbox.counts().await.unwrap();
+        assert_eq!(counts.pending, 1);
+        assert_eq!(counts.processing, 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Pause / resume
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn pause_resume_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        assert!(!inbox.is_paused().await);
+        inbox.set_paused(true).await.unwrap();
+        assert!(inbox.is_paused().await);
+        inbox.set_paused(false).await.unwrap();
+        assert!(!inbox.is_paused().await);
+    }
+
+    // -------------------------------------------------------------------------
+    // L12 — crash-recovery idempotence
+    //
+    // Simulate the crash window between finish_done writing the done/ payload
+    // and the subsequent remove_file on the processing/ copy. Recovery must
+    // detect the done+processing pair and discard the stale processing file
+    // instead of re-queuing the already-completed item.
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn finish_cancelled_archives_to_done_not_failed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+        inbox.claim_next().await.unwrap();
+        inbox.finish_cancelled(&p.id).await.unwrap();
+        let counts = inbox.counts().await.unwrap();
+        assert_eq!(counts.failed, 0, "a cancel must never hit the quarantine");
+        assert_eq!(counts.processing, 0);
+        assert_eq!(counts.done, 1);
+    }
+
+    #[tokio::test]
+    async fn recover_orphans_skips_already_done_items() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+
+        // Simulate a normal enqueue + claim.
+        inbox.enqueue(&p).await.unwrap();
+        inbox.claim_next().await.unwrap();
+
+        // Simulate finish_done completing its atomic rename to done/ but
+        // crashing before it removes the processing/ file.
+        let done_path = tmp
+            .path()
+            .join("done")
+            .join(format!("{}.json", p.id.as_str()));
+        let json = serde_json::to_vec_pretty(&p).unwrap();
+        tokio::fs::write(&done_path, &json).await.unwrap();
+        // processing/ file is intentionally left in place.
+
+        let counts_before = inbox.counts().await.unwrap();
+        assert_eq!(
+            counts_before.processing, 1,
+            "setup: processing file must exist"
+        );
+        assert_eq!(counts_before.done, 1, "setup: done file must exist");
+
+        // Recovery must drop the stale processing file, not re-queue the item.
+        let recovered = inbox.recover_orphans().await.unwrap();
+        assert!(
+            recovered.is_empty(),
+            "already-done item must not be recovered to pending"
+        );
+
+        let counts_after = inbox.counts().await.unwrap();
+        assert_eq!(counts_after.pending, 0, "nothing should land in pending");
+        assert_eq!(
+            counts_after.processing, 0,
+            "stale processing file must be removed"
+        );
+        assert_eq!(counts_after.done, 1, "done file must survive");
+    }
+
+    #[tokio::test]
+    async fn recover_orphans_requeues_genuinely_interrupted_items() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+
+        // A claim with no done/ means the pipeline was interrupted mid-run.
+        inbox.enqueue(&p).await.unwrap();
+        inbox.claim_next().await.unwrap();
+        // No finish_done call — leave it in processing/.
+
+        let recovered = inbox.recover_orphans().await.unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0], p.id);
+
+        let counts = inbox.counts().await.unwrap();
+        assert_eq!(counts.pending, 1);
+        assert_eq!(counts.processing, 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_removes_item() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+
+        let removed = inbox.cancel_pending(&p.id).await.unwrap();
+        assert!(removed);
+        assert_eq!(inbox.counts().await.unwrap().pending, 0);
+
+        // A second cancel on a gone item returns false (not an error).
+        let removed2 = inbox.cancel_pending(&p.id).await.unwrap();
+        assert!(!removed2);
+    }
+
+    #[tokio::test]
+    async fn cancel_all_pending_clears_the_queue() {
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        for _ in 0..3 {
+            inbox.enqueue(&make_payload()).await.unwrap();
+        }
+        assert_eq!(inbox.counts().await.unwrap().pending, 3);
+
+        let removed = inbox.cancel_all_pending().await.unwrap();
+        assert_eq!(removed.len(), 3);
+        assert_eq!(inbox.counts().await.unwrap().pending, 0);
+    }
+
+    #[tokio::test]
+    async fn enqueue_uses_atomic_write_no_final_without_rename() {
+        // The enqueue path must write via a .tmp file — the final .json must
+        // not exist if the process crashes before the rename. We can't inject a
+        // fault here, but we can assert that no stale .tmp remains after a
+        // clean enqueue (the rename moved it).
+        let tmp = tempfile::tempdir().unwrap();
+        let inbox = open_inbox(tmp.path()).await;
+        let p = make_payload();
+        inbox.enqueue(&p).await.unwrap();
+
+        let stale_tmp = tmp
+            .path()
+            .join("pending")
+            .join(format!("{}.json.tmp", p.id.as_str()));
+        assert!(
+            !stale_tmp.exists(),
+            "tmp file must not survive a clean enqueue"
+        );
+    }
 }

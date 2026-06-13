@@ -2,6 +2,7 @@ use crate::args::ListArgs;
 use crate::client::Client;
 use crate::exit;
 use crate::output;
+use phoneme_core::types::ListKind;
 use phoneme_core::{Config, ListFilter, Recording, RecordingStatus};
 use phoneme_ipc::Request;
 use std::process::ExitCode;
@@ -21,13 +22,9 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
         .await;
     }
 
-    // Capture the type-filter before `build_filter` consumes `args`. Applied
-    // client-side on `meeting_id` (single = none, meeting = present) to mirror
-    // the GUI Library filter; the daemon's list shape stays unchanged.
-    let kind = args.kind.clone();
     let tag = args.tag.clone();
 
-    let mut client = match Client::connect(cfg).await {
+    let mut client = match Client::connect_observe(cfg).await {
         Ok(c) => c,
         Err(code) => return code,
     };
@@ -39,23 +36,21 @@ pub async fn run(args: ListArgs, cfg: &Config, json: bool) -> ExitCode {
         Err(code) => return code,
     };
 
+    // The `kind` filter is now applied in SQL by the daemon (before LIMIT /
+    // OFFSET) so pagination works correctly — filtering client-side after
+    // pagination caused pages to be mostly empty for the non-default kind.
     let filter = build_filter(args, tag_id);
     let value = match client.send(Request::ListRecordings { filter }).await {
         Ok(v) => v,
         Err(code) => return code,
     };
-    let mut rows: Vec<Recording> = match serde_json::from_value(value) {
+    let rows: Vec<Recording> = match serde_json::from_value(value) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: parsing list response: {e}");
             return ExitCode::from(exit::GENERIC_FAIL);
         }
     };
-    match kind.as_deref() {
-        Some("single") => rows.retain(|r| r.meeting_id.is_none()),
-        Some("meeting") => rows.retain(|r| r.meeting_id.is_some()),
-        _ => {}
-    }
     if json {
         output::print_json_lines(&rows);
     } else {
@@ -92,6 +87,7 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         "done" => Some(RecordingStatus::Done),
         "transcribe_failed" => Some(RecordingStatus::TranscribeFailed),
         "hook_failed" => Some(RecordingStatus::HookFailed),
+        "cancelled" => Some(RecordingStatus::Cancelled),
         _ => None,
     });
     let parse_date = |s: String| {
@@ -101,6 +97,12 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
     };
     let since = args.since.and_then(parse_date);
     let until = args.until.and_then(parse_date);
+    // `kind` is applied in SQL (before LIMIT/OFFSET) so pagination stays correct.
+    let kind = args.kind.as_deref().and_then(|k| match k {
+        "single" => Some(ListKind::Single),
+        "meeting" => Some(ListKind::Meeting),
+        _ => None, // "all" or unrecognised → no filter
+    });
     ListFilter {
         limit: args.limit,
         offset: args.offset,
@@ -110,5 +112,7 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         tag_id,
         sort_desc: None,
         until,
+        kind,
+        favorite: None, // no CLI flag for this yet
     }
 }

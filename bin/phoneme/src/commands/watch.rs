@@ -5,7 +5,8 @@ use phoneme_core::Config;
 use std::process::ExitCode;
 
 pub async fn run(cfg: &Config) -> ExitCode {
-    let mut client = match Client::connect(cfg).await {
+    // Observe-only: there is nothing to watch without a running daemon.
+    let mut client = match Client::connect_observe(cfg).await {
         Ok(c) => c,
         Err(code) => return code,
     };

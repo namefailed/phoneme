@@ -8,7 +8,7 @@ use crate::app_state::AppState;
 use crate::pipeline;
 use phoneme_core::Error;
 use phoneme_ipc::DaemonEvent;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::sync::watch;
 
 /// Give up on an item after this many consecutive TRANSIENT transcribe
@@ -24,6 +24,10 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
     // failing item eventually lands in failed/ instead of looping forever.
     let mut attempts: std::collections::HashMap<phoneme_core::RecordingId, u32> =
         std::collections::HashMap::new();
+    // Last-seen mtime of the config file. Config is only re-parsed from disk
+    // when this changes — a stat() is orders of magnitude cheaper than a full
+    // TOML parse + validation on every pipeline run (the common hot path).
+    let mut config_mtime: Option<SystemTime> = None;
 
     loop {
         if *shutdown.borrow() {
@@ -127,30 +131,41 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                     }
                 }
 
-                // Restore any temporarily overridden config settings layered in
-                // by a re-run (one-time hook toggle / cleanup / summary overrides
-                // from RetranscribeRecording). NOTE: this no longer touches the
-                // whisper MODEL — a model override is now applied per-job in the
-                // pipeline via `whisper_model_override`, never via the global
-                // config, so reloading here can't trigger a whisper-server restart
-                // (the double-restart that thrashed the server, #49). It only
-                // reverts the server-independent temp settings.
-                match crate::load_config() {
-                    Ok(cfg) => {
-                        // Config (re)applied: drop the cached local diarization
-                        // pipeline if `[diarization]` changed on disk since it
-                        // was loaded (backend switch / model path). One of the
-                        // two daemon invalidation points — the other is the
-                        // ReloadConfig IPC handler. A same-config reload (the
-                        // common case here) keeps the warm pipeline.
-                        state
-                            .transcription
-                            .diarizer_cache()
-                            .invalidate_if_stale(&cfg.diarization);
-                        state.config.store(std::sync::Arc::new(cfg));
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to reload config after pipeline run");
+                // Reload config from disk only when the file was modified since
+                // the last check. A stat() is far cheaper than a full TOML parse
+                // + validation on every pipeline run, and the common case (no
+                // change) does zero work. This preserves both invalidation points:
+                // the ReloadConfig IPC (instant, triggered by the user) and this
+                // post-run path (catches background edits between IPC calls).
+                let current_mtime = phoneme_core::config::resolved_config_path()
+                    .and_then(|p| std::fs::metadata(p).ok())
+                    .and_then(|m| m.modified().ok());
+                let changed = match (config_mtime, current_mtime) {
+                    (Some(prev), Some(cur)) => cur != prev,
+                    // No previous mtime recorded yet — treat as changed so the
+                    // first post-run pass always validates the live config.
+                    (None, _) => true,
+                    // Config file missing (e.g. default in-memory config); skip.
+                    (_, None) => false,
+                };
+                if changed {
+                    config_mtime = current_mtime;
+                    match crate::load_config() {
+                        Ok(cfg) => {
+                            // Config changed on disk: drop the cached local
+                            // diarization pipeline if `[diarization]` changed
+                            // (backend switch / model path). One of the two daemon
+                            // invalidation points — the other is the ReloadConfig
+                            // IPC handler. A same-config reload never reaches here.
+                            state
+                                .transcription
+                                .diarizer_cache()
+                                .invalidate_if_stale(&cfg.diarization);
+                            state.config.store(std::sync::Arc::new(cfg));
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "failed to reload config after pipeline run");
+                        }
                     }
                 }
                 emit_queue_depth(&state).await;

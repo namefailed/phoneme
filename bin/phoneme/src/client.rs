@@ -2,6 +2,20 @@
 //!
 //! Resolves the pipe name from config (or default), connects with retry,
 //! and exposes `send_request` returning a Result<serde_json::Value, ExitCode>.
+//!
+//! ## Spawning behaviour
+//!
+//! Two connection variants exist:
+//!
+//! - [`Client::connect`] — the **spawning** path used by commands that create
+//!   work (record, import, retranscribe, …). If the daemon is not running it is
+//!   started automatically before the request is sent.
+//! - [`Client::connect_observe`] — the **observe-only** path used by read-only
+//!   or inspection commands (`status`, `doctor`, `list`, `show`, `search`,
+//!   `queue`, `watch`, …). If the daemon is not running the command fails
+//!   immediately with a clear message instead of silently starting one — a
+//!   daemon-is-down state is itself useful diagnostic information for those
+//!   commands, and there is nothing to observe without one.
 
 use crate::auto_spawn;
 use crate::exit;
@@ -21,6 +35,16 @@ pub struct Client {
 impl Client {
     /// Connect to the daemon. If absent, auto-spawn and retry. Returns an
     /// ExitCode if we ultimately can't reach the daemon.
+    ///
+    /// Use this for commands that create work (`record`, `import`,
+    /// `retranscribe`, `cleanup`, `summarize`, `reembed`, `refire-hook`,
+    /// `delete`, `edit`, `notes`, `queue pause/resume/cancel/reorder`, `tag
+    /// attach/detach/add/update/delete`, `profile use`, `hook test`, `export
+    /// --captions`, `config reload/set`, `meeting start/stop/toggle`). These
+    /// commands need a daemon to be running; starting one automatically on
+    /// their behalf is the right behavior.
+    ///
+    /// For read-only or inspection commands use [`Client::connect_observe`].
     pub async fn connect(cfg: &Config) -> Result<Self, ExitCode> {
         let pipe_name = &cfg.daemon.pipe_name;
         match NamedPipeTransport::connect(pipe_name).await {
@@ -39,6 +63,29 @@ impl Client {
                     })
             }
         }
+    }
+
+    /// Connect to the daemon without spawning it if absent.
+    ///
+    /// Use this for read-only or inspection commands — `status`, `doctor`,
+    /// `list`, `show`, `search`, `queue list/counts/status`, `watch`, `tag
+    /// list/for/usage`, `profile list`, `meeting tracks` — where the daemon
+    /// not running is itself the answer rather than a fixable obstacle. A
+    /// clear error is printed and [`exit::DAEMON_NOT_REACHABLE`] is returned
+    /// when the daemon is unreachable, letting the caller surface the fact
+    /// that the daemon is down without masking it with a silent start.
+    pub async fn connect_observe(cfg: &Config) -> Result<Self, ExitCode> {
+        let pipe_name = &cfg.daemon.pipe_name;
+        NamedPipeTransport::connect(pipe_name)
+            .await
+            .map(|t| Self { transport: t })
+            .map_err(|e| {
+                eprintln!(
+                    "error: daemon not reachable: {e}\n\
+                     hint: start it with `phoneme daemon start`"
+                );
+                ExitCode::from(exit::DAEMON_NOT_REACHABLE)
+            })
     }
 
     /// Send a request and decode the response. On `Response::Err`, prints the

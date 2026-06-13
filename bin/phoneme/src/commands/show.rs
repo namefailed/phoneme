@@ -25,7 +25,7 @@ pub async fn run(args: ShowArgs, cfg: &Config, json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut client = match Client::connect(cfg).await {
+    let mut client = match Client::connect_observe(cfg).await {
         Ok(c) => c,
         Err(code) => return code,
     };
