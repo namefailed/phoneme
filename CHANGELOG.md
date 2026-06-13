@@ -48,6 +48,13 @@ trust boundary. Verified against current code.*
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
 
+### Performance
+
+- [x] Semantic search holds the deserialized embedding corpus in memory, so
+  repeated queries (and the upcoming RAG retrieval) skip re-reading and
+  re-decoding every vector BLOB from SQLite; invalidated on any re-embed or
+  delete, bounded for large libraries.
+
 ### Reliability & polish
 
 - [x] Settings/wizard hints name the **effective** whisper port after a

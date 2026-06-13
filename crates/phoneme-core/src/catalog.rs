@@ -32,15 +32,88 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::{Arc, RwLock};
+
+/// One stored embedding vector, deserialized once and held in memory: the
+/// recording it belongs to, its meeting (for the meeting-stable dedupe key), and
+/// the L2-normalized vector itself. Both the chunk path (`embedding_chunks`) and
+/// the legacy whole-recording path (`embeddings`) produce these.
+#[derive(Debug, Clone)]
+struct CachedVector {
+    /// Recording id this vector belongs to, as stored (the row's text id).
+    id: String,
+    /// The recording's `meeting_id`, if it is a meeting track — the dedupe key.
+    meeting_id: Option<String>,
+    /// The deserialized, L2-normalized embedding. `None` marks a blob that
+    /// failed the 4-byte-alignment guard at load time, so the ranking paths can
+    /// skip it without re-reading SQLite (preserving the warn-and-skip behavior).
+    vector: Option<Vec<f32>>,
+}
+
+/// The deserialized embedding corpus, cached in memory so a search doesn't
+/// re-read and re-decode every BLOB from SQLite on every query.
+///
+/// Two flat lists mirror the two SQL queries the ranking paths used to run on
+/// each search: the per-chunk vectors (the primary, high-recall path) and the
+/// legacy whole-recording vectors (the backfill fallback). The ranking code
+/// keeps its own dimension/precedence logic; the corpus only removes the disk
+/// read + decode, never changes which vectors are considered.
+#[derive(Debug, Clone, Default)]
+struct EmbeddingCorpus {
+    /// Every row of `embedding_chunks`, decoded once.
+    chunks: Vec<CachedVector>,
+    /// Every row of `embeddings` (legacy whole-recording), decoded once.
+    legacy: Vec<CachedVector>,
+}
 
 /// SQLite-backed recordings catalog.
 ///
 /// All methods are async (Tokio). The pool is configured for WAL mode with
 /// a small connection cap suitable for desktop usage (one writer at a time).
+///
+/// ## Embedding cache
+///
+/// Semantic search (`hybrid_search` → `vector_ranking`, `semantic_search`,
+/// `more_like_this`) is a brute-force cosine scan over every stored vector. The
+/// vectors live as little-endian f32 BLOBs in `embedding_chunks` / `embeddings`,
+/// so each query used to `SELECT` and decode the *entire* corpus from disk — the
+/// hot cost grows with the library and dominates a typed query / RAG turn.
+///
+/// `embedding_cache` holds the decoded corpus in memory so repeated queries
+/// reuse it. The design is deliberately simple and pessimistic about staleness:
+///
+/// - **One whole-corpus snapshot**, not a per-id map. The ranking loops iterate
+///   the full corpus anyway, so a snapshot mirrors them exactly and needs no
+///   partial-miss reconciliation. It is rebuilt lazily on the first query after
+///   any invalidation.
+/// - **Coarse invalidation.** Every embedding write — `upsert_embedding`,
+///   `upsert_chunk_embeddings`, `clear_all_embeddings` — and a recording
+///   `delete` (which cascade-drops its embeddings) drops the snapshot. The next
+///   query rebuilds it from SQLite. A stale vector returning a wrong ranking is
+///   far worse than rebuilding, so invalidation never tries to be clever.
+/// - **Bounded.** If the corpus exceeds a fixed vector-count cap it is *not*
+///   cached; those (rare, very large) libraries fall back to reading from SQLite
+///   each query, keeping memory bounded regardless of archive size.
+/// - **Shared across clones.** The cache sits behind `Arc<RwLock<…>>`, so the
+///   derived `Clone` (the daemon hands clones to its workers) shares one cache
+///   and one set of invalidations rather than diverging per clone.
 #[derive(Debug, Clone)]
 pub struct Catalog {
     pool: SqlitePool,
+    /// The decoded embedding corpus, or `None` when nothing is cached yet (cold,
+    /// invalidated, or over the cache cap). Shared across clones; see the
+    /// type-level "Embedding cache" notes.
+    embedding_cache: Arc<RwLock<Option<EmbeddingCorpus>>>,
 }
+
+/// Upper bound on how many vectors the in-memory embedding cache will hold.
+///
+/// A 384-dim MiniLM vector is ~1.5 KB decoded; 200k vectors is ~300 MB, a
+/// generous ceiling for a desktop archive (tens of chunks per recording ⇒ on the
+/// order of 5–10k recordings). Above this the corpus is left uncached and the
+/// ranking paths read from SQLite per query — slower, but memory stays bounded
+/// no matter how large the library grows.
+const MAX_CACHED_VECTORS: usize = 200_000;
 
 /// Sanitizes a user-provided string for use in an FTS5 MATCH query.
 ///
@@ -96,7 +169,99 @@ impl Catalog {
             .await?;
 
         sqlx::migrate!("./migrations").run(&pool).await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            embedding_cache: Arc::new(RwLock::new(None)),
+        })
+    }
+
+    /// Drop the in-memory embedding snapshot. Called from every path that
+    /// mutates a stored vector so the next search rebuilds from SQLite. A
+    /// poisoned lock is recovered (cleared) rather than propagated: failing to
+    /// invalidate is the dangerous outcome (stale rankings), so we always clear.
+    fn invalidate_embedding_cache(&self) {
+        match self.embedding_cache.write() {
+            Ok(mut guard) => *guard = None,
+            Err(poisoned) => *poisoned.into_inner() = None,
+        }
+    }
+
+    /// The decoded embedding corpus, loaded once and held until the next write
+    /// invalidates it.
+    ///
+    /// On a hit, returns a clone of the cached corpus (the vectors themselves are
+    /// behind an `Arc`-shared lock, but the ranking loops consume them by
+    /// reference, so a clone of the snapshot is a shallow copy of the `Vec`
+    /// headers + their contents — cheap relative to re-decoding from disk). On a
+    /// miss, reads both embedding tables, decodes every BLOB once, and caches the
+    /// result unless it exceeds [`MAX_CACHED_VECTORS`] (in which case the corpus
+    /// is returned but not stored, bounding memory).
+    async fn embedding_corpus(&self) -> Result<EmbeddingCorpus> {
+        // Fast path: a warm snapshot. Read lock only.
+        if let Ok(guard) = self.embedding_cache.read() {
+            if let Some(corpus) = guard.as_ref() {
+                return Ok(corpus.clone());
+            }
+        }
+
+        // Miss: rebuild from SQLite. Decode happens outside any lock.
+        let chunk_rows = sqlx::query(
+            "SELECT ec.recording_id AS id, ec.vector AS vector, r.meeting_id AS meeting_id \
+             FROM embedding_chunks ec JOIN recordings r ON r.id = ec.recording_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut chunks = Vec::with_capacity(chunk_rows.len());
+        for row in chunk_rows {
+            chunks.push(row_to_cached_vector(&row)?);
+        }
+
+        let legacy_rows = sqlx::query(
+            "SELECT e.id AS id, e.vector AS vector, r.meeting_id AS meeting_id \
+             FROM embeddings e JOIN recordings r ON r.id = e.id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut legacy = Vec::with_capacity(legacy_rows.len());
+        for row in legacy_rows {
+            legacy.push(row_to_cached_vector(&row)?);
+        }
+
+        let corpus = EmbeddingCorpus { chunks, legacy };
+
+        // Store unless the corpus is over the cap — large libraries stay
+        // uncached so memory can't grow without bound. An invalidation may have
+        // raced in between the read miss and here; that's fine — we overwrite
+        // with a fresh, consistent snapshot read after that write committed, and
+        // any write *after* this store will invalidate again.
+        if Self::cap_allows_caching(corpus.chunks.len() + corpus.legacy.len()) {
+            match self.embedding_cache.write() {
+                Ok(mut guard) => *guard = Some(corpus.clone()),
+                Err(poisoned) => *poisoned.into_inner() = Some(corpus.clone()),
+            }
+        }
+
+        Ok(corpus)
+    }
+
+    /// Whether a corpus of `total_vectors` is small enough to cache in memory.
+    /// The single source of truth for the [`MAX_CACHED_VECTORS`] bound, so the
+    /// loader and the test that proves boundedness agree by construction.
+    fn cap_allows_caching(total_vectors: usize) -> bool {
+        total_vectors <= MAX_CACHED_VECTORS
+    }
+
+    /// Test-only view of the embedding cache: the number of vectors currently
+    /// held in the warm snapshot, or `None` when the snapshot is cold (never
+    /// loaded, invalidated, or skipped for being over the cap). Lets the cache
+    /// tests assert warm/cold state and the bound without exposing internals.
+    #[cfg(test)]
+    fn cached_vector_count(&self) -> Option<usize> {
+        self.embedding_cache
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|c| c.chunks.len() + c.legacy.len())
     }
 
     /// Insert a new recording row. The pipeline calls this once, when capture
@@ -498,6 +663,9 @@ impl Catalog {
         .execute(&self.pool)
         .await?;
 
+        // A vector changed on disk — drop the in-memory snapshot so the next
+        // search rebuilds it (a stale cached vector would rank wrongly).
+        self.invalidate_embedding_cache();
         Ok(())
     }
 
@@ -546,6 +714,8 @@ impl Catalog {
             .await?;
         }
         tx.commit().await?;
+        // A recording's chunk vectors were replaced — drop the snapshot.
+        self.invalidate_embedding_cache();
         Ok(())
     }
 
@@ -564,6 +734,8 @@ impl Catalog {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        // Whole library wiped for a re-embed — drop the snapshot.
+        self.invalidate_embedding_cache();
         Ok(())
     }
 
@@ -633,12 +805,9 @@ impl Catalog {
         limit: usize,
         min_score: f32,
     ) -> Result<Vec<(RecordingId, f32)>> {
-        let rows = sqlx::query(
-            "SELECT e.id AS id, e.vector AS vector, r.meeting_id AS meeting_id \
-             FROM embeddings e JOIN recordings r ON r.id = e.id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        // Reads the legacy whole-recording vectors from the shared decoded
+        // corpus, so a query doesn't re-read and re-decode the BLOBs each time.
+        let corpus = self.embedding_corpus().await?;
 
         let dim = query_vec.len();
         // Best (id, score) per result key — meeting_id when present, else the
@@ -646,32 +815,23 @@ impl Catalog {
         let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
             std::collections::HashMap::new();
 
-        for row in rows {
-            let id: String = row.try_get("id")?;
-            let bytes: Vec<u8> = row.try_get("vector")?;
-            let meeting_id: Option<String> = row.try_get("meeting_id")?;
-
-            if !bytes.len().is_multiple_of(4) {
-                tracing::warn!(id = %id, len = bytes.len(), "skipping embedding: not 4-byte aligned");
-                continue;
-            }
-            let vec: Vec<f32> = bytes
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-                .collect();
+        for cv in &corpus.legacy {
+            let Some(vec) = cv.vector.as_deref() else {
+                continue; // corrupt blob, already warned at load
+            };
             if vec.len() != dim {
-                tracing::warn!(id = %id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
+                tracing::warn!(id = %cv.id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
                 continue;
             }
 
-            let score = crate::embed::Embedder::cosine_similarity(query_vec, &vec);
+            let score = crate::embed::Embedder::cosine_similarity(query_vec, vec);
             if score < min_score {
                 continue;
             }
-            let Some(rec_id) = RecordingId::parse(id.clone()) else {
+            let Some(rec_id) = RecordingId::parse(cv.id.clone()) else {
                 continue;
             };
-            let key = meeting_id.unwrap_or(id);
+            let key = cv.meeting_id.clone().unwrap_or_else(|| cv.id.clone());
             best.entry(key)
                 .and_modify(|e| {
                     if score > e.1 {
@@ -708,24 +868,21 @@ impl Catalog {
         let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
             std::collections::HashMap::new();
 
-        let mut consider = |id: String, meeting_id: Option<String>, bytes: Vec<u8>| {
-            if !bytes.len().is_multiple_of(4) {
-                tracing::warn!(id = %id, len = bytes.len(), "skipping embedding: not 4-byte aligned");
-                return;
-            }
-            let vec: Vec<f32> = bytes
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-                .collect();
+        // Score one pre-decoded vector into `best`. A corrupt blob (vector None)
+        // or a dimension mismatch is skipped, exactly as the inline decode did.
+        let mut consider = |cv: &CachedVector| {
+            let Some(vec) = cv.vector.as_deref() else {
+                return; // corrupt blob, already warned at load
+            };
             if vec.len() != dim {
-                tracing::warn!(id = %id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
+                tracing::warn!(id = %cv.id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
                 return;
             }
-            let score = crate::embed::Embedder::cosine_similarity(query_vec, &vec);
-            let Some(rec_id) = RecordingId::parse(id.clone()) else {
+            let score = crate::embed::Embedder::cosine_similarity(query_vec, vec);
+            let Some(rec_id) = RecordingId::parse(cv.id.clone()) else {
                 return;
             };
-            let key = meeting_id.unwrap_or(id);
+            let key = cv.meeting_id.clone().unwrap_or_else(|| cv.id.clone());
             best.entry(key)
                 .and_modify(|e| {
                     if score > e.1 {
@@ -735,38 +892,23 @@ impl Catalog {
                 .or_insert((rec_id, score));
         };
 
+        // The decoded corpus (cached across queries; rebuilt after any write).
+        let corpus = self.embedding_corpus().await?;
+
         // Per-chunk vectors (the primary, high-recall path).
-        let chunk_rows = sqlx::query(
-            "SELECT ec.recording_id AS id, ec.vector AS vector, r.meeting_id AS meeting_id \
-             FROM embedding_chunks ec JOIN recordings r ON r.id = ec.recording_id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        let mut have_chunks: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for row in chunk_rows {
-            let id: String = row.try_get("id")?;
-            let bytes: Vec<u8> = row.try_get("vector")?;
-            let meeting_id: Option<String> = row.try_get("meeting_id")?;
-            have_chunks.insert(id.clone());
-            consider(id, meeting_id, bytes);
+        let mut have_chunks: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for cv in &corpus.chunks {
+            have_chunks.insert(cv.id.as_str());
+            consider(cv);
         }
 
         // Legacy whole-recording vectors, only for recordings not yet chunked, so
         // the library stays searchable while the backfill runs.
-        let legacy_rows = sqlx::query(
-            "SELECT e.id AS id, e.vector AS vector, r.meeting_id AS meeting_id \
-             FROM embeddings e JOIN recordings r ON r.id = e.id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        for row in legacy_rows {
-            let id: String = row.try_get("id")?;
-            if have_chunks.contains(&id) {
+        for cv in &corpus.legacy {
+            if have_chunks.contains(cv.id.as_str()) {
                 continue; // chunks supersede the legacy whole-recording vector
             }
-            let bytes: Vec<u8> = row.try_get("vector")?;
-            let meeting_id: Option<String> = row.try_get("meeting_id")?;
-            consider(id, meeting_id, bytes);
+            consider(cv);
         }
 
         let mut ranking: Vec<(String, RecordingId, f32)> = best
@@ -1189,6 +1331,9 @@ impl Catalog {
             .bind(id.as_str())
             .execute(&self.pool)
             .await?;
+        // The cascade took this recording's embeddings with it — drop the
+        // snapshot so a deleted recording can't keep surfacing in search.
+        self.invalidate_embedding_cache();
         Ok(())
     }
 
@@ -1650,6 +1795,34 @@ impl Catalog {
             })
             .collect()
     }
+}
+
+/// Decode one `(id, vector, meeting_id)` embedding row into a [`CachedVector`].
+///
+/// The vector is stored as little-endian f32 bytes; a blob whose length isn't a
+/// multiple of 4 is kept as `vector: None` (and warned) so the ranking paths
+/// skip it exactly as they did when decoding inline — the cache must not silently
+/// resurrect a corrupt blob as a zero-length vector.
+fn row_to_cached_vector(row: &sqlx::sqlite::SqliteRow) -> Result<CachedVector> {
+    let id: String = row.try_get("id")?;
+    let meeting_id: Option<String> = row.try_get("meeting_id")?;
+    let bytes: Vec<u8> = row.try_get("vector")?;
+    let vector = if bytes.len().is_multiple_of(4) {
+        Some(
+            bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                .collect(),
+        )
+    } else {
+        tracing::warn!(id = %id, len = bytes.len(), "skipping embedding: not 4-byte aligned");
+        None
+    };
+    Ok(CachedVector {
+        id,
+        meeting_id,
+        vector,
+    })
 }
 
 fn row_to_recording(row: sqlx::sqlite::SqliteRow) -> Result<Recording> {
@@ -2179,6 +2352,198 @@ mod tests {
         assert!(
             (legacy_score - 0.8).abs() < 1e-6,
             "legacy-only recording scored from its whole-recording vector"
+        );
+    }
+
+    #[tokio::test]
+    async fn embedding_cache_warms_and_returns_identical_results() {
+        // (a) The cache must be transparent: a query warms the snapshot, and a
+        // repeated query against the warm cache returns byte-identical rankings.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        let c = embedded_recording(None);
+        for r in [&a, &b, &c] {
+            db.insert(r).await.unwrap();
+        }
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&b.id, &[vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&c.id, &[vec![0.0, 0.0, 1.0]])
+            .await
+            .unwrap();
+
+        // Writes leave the cache cold; the first query warms it.
+        assert_eq!(db.cached_vector_count(), None, "cold after writes");
+        let first = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(
+            db.cached_vector_count(),
+            Some(3),
+            "first query warms the snapshot with all three chunk vectors"
+        );
+
+        // A second query reads from the warm cache and must produce the same
+        // per-recording cosine scores. (The order *between equal scores* is not
+        // a guarantee of either path — both build from a HashMap and sort
+        // unstably — so compare on id→score, the contract that actually matters.)
+        let second = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        let as_scores = |r: &[(String, RecordingId, f32)]| {
+            r.iter()
+                .map(|(_k, id, s)| (id.as_str().to_string(), *s))
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        assert_eq!(
+            as_scores(&first),
+            as_scores(&second),
+            "a cached query returns the same per-recording scores as the cold one"
+        );
+        assert_eq!(first[0].1.as_str(), a.id.as_str(), "best match still first");
+        assert!(
+            (first[0].2 - 1.0).abs() < 1e-6,
+            "the on-axis recording scores ~1.0 from the warm cache"
+        );
+
+        // hybrid_search shares the same cache; its top hit must be stable.
+        let h1 = db
+            .hybrid_search("x", &[1.0, 0.0, 0.0], 10, -1.0)
+            .await
+            .unwrap();
+        let h2 = db
+            .hybrid_search("x", &[1.0, 0.0, 0.0], 10, -1.0)
+            .await
+            .unwrap();
+        let scores1: std::collections::HashMap<_, _> = h1
+            .iter()
+            .map(|(id, s)| (id.as_str().to_string(), *s))
+            .collect();
+        let scores2: std::collections::HashMap<_, _> = h2
+            .iter()
+            .map(|(id, s)| (id.as_str().to_string(), *s))
+            .collect();
+        assert_eq!(
+            scores1, scores2,
+            "hybrid_search yields the same per-recording relevance over the warm cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn reembed_invalidates_cache_and_changes_ranking() {
+        // (b) The correctness invariant: a re-embed must invalidate the cache so
+        // the changed vector takes effect. A stale cached vector returning the
+        // old ranking would be the worst possible bug.
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        let b = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        db.insert(&b).await.unwrap();
+
+        // Initially `a` is on the query axis and wins; `b` is orthogonal.
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&b.id, &[vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+
+        let before = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(
+            before[0].1.as_str(),
+            a.id.as_str(),
+            "a wins before re-embed"
+        );
+        assert!(db.cached_vector_count().is_some(), "warm after the query");
+
+        // Re-embed `b` so it now nails the query and `a` becomes orthogonal —
+        // this is the re-transcribe / ReembedAll write path.
+        db.upsert_chunk_embeddings(&b.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.upsert_chunk_embeddings(&a.id, &[vec![0.0, 1.0, 0.0]])
+            .await
+            .unwrap();
+        assert_eq!(
+            db.cached_vector_count(),
+            None,
+            "the re-embed invalidated the snapshot"
+        );
+
+        let after = db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        assert_eq!(
+            after[0].1.as_str(),
+            b.id.as_str(),
+            "the changed vector flips the ranking — no stale cache"
+        );
+
+        // clear_all_embeddings (ReembedAll) must also invalidate.
+        db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap(); // re-warm
+        assert!(db.cached_vector_count().is_some());
+        db.clear_all_embeddings().await.unwrap();
+        assert_eq!(
+            db.cached_vector_count(),
+            None,
+            "clear_all_embeddings invalidates the snapshot"
+        );
+        // And the legacy whole-recording path (semantic_search) invalidates too.
+        db.upsert_embedding(&a.id, &[1.0, 0.0, 0.0]).await.unwrap();
+        db.semantic_search(&[1.0, 0.0, 0.0], 10, -1.0)
+            .await
+            .unwrap();
+        assert!(
+            db.cached_vector_count().is_some(),
+            "semantic_search warms it"
+        );
+        db.upsert_embedding(&a.id, &[0.0, 1.0, 0.0]).await.unwrap();
+        assert_eq!(
+            db.cached_vector_count(),
+            None,
+            "upsert_embedding invalidates the snapshot"
+        );
+        // A delete cascades embeddings away, so it must invalidate as well.
+        db.semantic_search(&[1.0, 0.0, 0.0], 10, -1.0)
+            .await
+            .unwrap();
+        assert!(db.cached_vector_count().is_some());
+        db.delete(&a.id).await.unwrap();
+        assert_eq!(
+            db.cached_vector_count(),
+            None,
+            "delete invalidates the snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn embedding_cache_is_bounded_by_the_vector_cap() {
+        // (c) The cache must not grow without bound. The loader stores a corpus
+        // only when `chunks + legacy <= MAX_CACHED_VECTORS`; an over-cap corpus
+        // takes the else branch and stays uncached (queries fall back to SQLite),
+        // so memory is bounded no matter how large the library grows. We exercise
+        // that decision through `cap_allows_caching`, then confirm a real small
+        // corpus is in fact cached and never exceeds the cap — without inserting
+        // hundreds of thousands of rows.
+        assert!(
+            Catalog::cap_allows_caching(MAX_CACHED_VECTORS),
+            "a corpus exactly at the cap is still cached"
+        );
+        assert!(
+            !Catalog::cap_allows_caching(MAX_CACHED_VECTORS + 1),
+            "a corpus one over the cap is NOT cached, so the cache is bounded"
+        );
+
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        let a = embedded_recording(None);
+        db.insert(&a).await.unwrap();
+        // A small corpus (1 vector) is comfortably under the cap and IS cached.
+        db.upsert_chunk_embeddings(&a.id, &[vec![1.0, 0.0, 0.0]])
+            .await
+            .unwrap();
+        db.vector_ranking(&[1.0, 0.0, 0.0]).await.unwrap();
+        let count = db.cached_vector_count().expect("a small corpus is cached");
+        assert!(
+            count <= MAX_CACHED_VECTORS,
+            "a cached corpus never exceeds the cap"
         );
     }
 

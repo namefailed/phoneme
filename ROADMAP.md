@@ -406,8 +406,9 @@ explicit roadmap line here saying why not).
   `catalog.rs::hybrid_search`, and raw cosine is calibrated to a 0–100% relevance
   for display (`calibrate_cosine`). The legacy one-vector-per-recording `embeddings`
   table is kept as a fallback until the background re-embed pass backfills chunks.
-  *Still open:* an in-memory embedding cache (every query re-reads the chunk BLOBs)
-  and a CI job that can run the ONNX model.
+  *Still open:* a CI job that can run the ONNX model. *(The in-memory
+  embedding cache shipped — the decoded corpus is held in RAM, invalidated
+  on any re-embed/delete, bounded for large libraries.)*
 - [ ] **"Ask my archive" (local RAG chat)** — "What did we decide about the API
   redesign?" → answer with citations/links to recordings. Builds on chunking +
   retrieval; needs a chat UI + citation UX. The headline differentiated feature
