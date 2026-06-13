@@ -17,6 +17,7 @@ const DEFAULT_SKIP_KEY = "phoneme_skip_delete_confirm";
  *  doing what the user last asked for instead of silently reverting. */
 const DELETE_MODE_KEY = "phoneme_delete_mode";
 
+/** Per-call dialog text + skip-key overrides for {@link confirmDelete}. */
 export type ConfirmDeleteOpts = {
   title?: string;
   body?: string;
@@ -25,6 +26,19 @@ export type ConfirmDeleteOpts = {
   skipKey?: string;
 };
 
+/**
+ * The destructive-confirm dialog behind every delete in the app (recordings,
+ * tags, profiles). Renders the shared `.modal-overlay` idiom with a danger
+ * header, an optional delete-mode radio group (recording deletes only:
+ * "everything" vs "keep the audio"), and a "Don't ask again" toggle that
+ * writes `skipKey` to localStorage — each delete flavor passes its own key,
+ * so skipping recording confirms never skips tag confirms.
+ *
+ * Not used directly: the promise wrappers below ({@link confirmDelete},
+ * {@link confirmRecordingDelete}) create it, await its `resolved`
+ * CustomEvent (`{ confirmed, mode }`), and remove it. Escape, overlay click,
+ * and Cancel all resolve unconfirmed; focus starts on Cancel.
+ */
 @customElement('ph-confirm-delete')
 export class ConfirmDeleteElement extends LitElement {
   protected createRenderRoot() { return this; }

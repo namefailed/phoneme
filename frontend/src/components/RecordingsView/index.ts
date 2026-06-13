@@ -1,4 +1,29 @@
-// RecordingsView — the home view's split layout, live updates, keyboard.
+// RecordingsView — the home view. This file owns the library's split layout
+// (sidebar | list | detail, plus the optional second detail pane of split
+// mode) and everything that spans those panes; App mounts one per visit to
+// the "recordings" route and calls dispose() on leave.
+//
+// Plain class, not a Lit component: it composes the panes (Sidebar,
+// RecordingsList, RecordingDetail ×2, MergedConversationDetail,
+// BulkActionBar, ThinkingPopout) imperatively and owns cross-pane behavior:
+//  * Layout: splitter positions, sidebar width/visibility, list zoom, focus
+//    mode and list zen — each persisted per device (the phoneme.layout.* keys
+//    below) except the session-only zen states.
+//  * Live updates: ONE daemon-event subscription that refreshes the list and
+//    the open detail as recordings change (see subscribeToEvents) — panes
+//    don't poll, and most don't subscribe themselves.
+//  * Selection: single select (detail pane, `phoneme.layout.selectedId`
+//    restore-on-reload), multi-select (bulk bar), and the merged-meeting
+//    selection (`session:<meeting_id>`).
+//  * Keyboard: the list's own arrow/Enter/Space handling lives in
+//    RecordingsList; THIS class handles the pane-level vim layer by acting on
+//    `phoneme:vim` actions dispatched by services/keyboard.ts (h/l pane
+//    moves, the sidebar/detail 2D grids, dd delete, zz center), tracking the
+//    focused pane + grid cursors itself.
+//  * Window events in: phoneme:select-recording, phoneme:toggle-focus-mode,
+//    phoneme:vim, phoneme:request-delete (the undoable-delete flow with the
+//    grace-period toast), phoneme:close-detail, phoneme:open-split.
+//    Out: phoneme:sidebar-changed (so the AI-activity FAB re-anchors).
 
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { Store } from "../../state/store";
@@ -65,6 +90,12 @@ function readStoredSidebar(): boolean {
  *  `editor` focuses the editable area inside its block (transcript / notes). */
 type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" };
 
+/** The home view (see the file-top comment for the full picture). Public
+ *  surface: `refresh()` re-queries the list; `toggleSidebar()` /
+ *  `toggleDetail()` / `toggleFocusMode()` drive the chrome (header button,
+ *  keyboard shortcuts); `openSplit`/`closeSplit` manage the second pane;
+ *  `dispose()` MUST be called on unmount (App does) — it detaches the
+ *  document/window listeners and the daemon-event subscription. */
 export class RecordingsView {
   private container: HTMLElement;
   private list: RecordingsList;
@@ -272,6 +303,9 @@ export class RecordingsView {
     window.addEventListener("phoneme:open-split", this.openSplitHandler);
   }
 
+  /** Re-query the recordings list (the daemon-event handler and the panes'
+   *  onRefresh callbacks funnel through here). The detail panes refresh
+   *  themselves; this also runs the one-time selection restore on first load. */
   async refresh() {
     await this.list.refresh();
 
@@ -373,6 +407,8 @@ export class RecordingsView {
     }, dur + 60);
   }
 
+  /** Show/hide the detail pane (Ctrl+\). Hiding also clears the selection so
+   *  the pane doesn't silently reopen on the next list refresh. */
   toggleDetail() {
     this.detailVisible = !this.detailVisible;
     this.animateLayout();
@@ -936,6 +972,10 @@ export class RecordingsView {
 
   private disposed = false;
 
+  /** Tear down on view unmount: unhook every document/window listener, the
+   *  daemon-event subscription, and the splitters' drag listeners; restore
+   *  the header if a zen mode had hidden it. Skipping this leaks listeners
+   *  that act on a dead view (App always calls it from mount()). */
   dispose() {
     this.disposed = true;
     // Don't leave the header hidden if we're torn down while in focus mode
@@ -1105,6 +1145,8 @@ export class RecordingsView {
     });
   }
 
+  /** Show/hide the sidebar (Ctrl+B / the header ☰). Persists the choice and
+   *  announces `phoneme:sidebar-changed` so anchored floats re-position. */
   toggleSidebar() {
     this.sidebarVisible = !this.sidebarVisible;
     try { localStorage.setItem(LS_SIDEBAR, String(this.sidebarVisible)); } catch { /* private mode */ }

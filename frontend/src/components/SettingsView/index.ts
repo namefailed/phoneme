@@ -74,6 +74,28 @@ function bestKeywordScore(query: string, words: string[]): number | null {
   return best;
 }
 
+/**
+ * The Settings view (the "settings" route): a tab rail + one mounted section
+ * per tab, a fuzzy settings search (with per-field intent keywords from
+ * searchKeywords.ts, ↑/↓ result navigation, and in-place filtering of the
+ * mounted sections), and the floating ⚙/Save controls (the ⚙ snaps to where
+ * the header button was, via shared/settingsAnchor).
+ *
+ * The config-editing contract every section participates in: this view loads
+ * ONE mutable `config` object (`read_config`) and hands the SAME reference to
+ * each section it mounts; sections bind their inputs to dotted config paths
+ * (see form.ts) and mutate that object in place as the user types. Nothing
+ * persists until Save, which `write_config`s the whole object, dispatches
+ * `config:saved` (detail = the config) so live listeners re-apply (theme,
+ * keyboard, list columns, sections re-mount), and closes the view.
+ *
+ * Unsaved-edits guard: `confirmClose()` (themed dialog) compares the JSON
+ * snapshot taken at load — EVERY leave path App controls funnels through it.
+ * Deep links: `activeTab` may arrive from openers ("post_processing",
+ * "managers/profiles", …) via the `phoneme:navigate` event's section field.
+ * Mounted by App via the `SettingsView` wrapper; the header bar is hidden
+ * while this view is up.
+ */
 @customElement('ph-settings-view')
 export class SettingsViewElement extends LitElement {
   protected createRenderRoot() {
@@ -630,7 +652,10 @@ export class SettingsViewElement extends LitElement {
   }
 }
 
-// Legacy wrapper
+/** Imperative mount wrapper App uses for the settings route. Re-exposes the
+ *  unsaved-edits gates (`canClose` sync/legacy, `confirmClose` themed async)
+ *  that App's `tryNavigate` checks before leaving; `initialTab` deep-links a
+ *  tab (or "managers/<sub>" composite) on mount. */
 export class SettingsView {
   private element: SettingsViewElement;
   constructor(container: HTMLElement, onClose: () => void, onNavigateToWizard?: () => void, initialTab?: string | null) {

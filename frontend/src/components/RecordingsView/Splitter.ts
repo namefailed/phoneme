@@ -1,5 +1,13 @@
-// Drag-to-resize divider between two panes.
+// Drag-to-resize divider between two panes (the list↔detail and the
+// split-mode pane↔pane dividers). Owns nothing but the drag.
 
+/**
+ * Renders a drag handle into `container` and reports the left pane's share
+ * as a percentage, clamped 20–80, via `onChange` on every mouse move while
+ * dragging — the OWNER applies it to the layout (and persists it). Listens
+ * on `document` so dragging keeps tracking outside the handle; the owning
+ * view MUST call `dispose()` on teardown or each remount leaks listeners.
+ */
 export class Splitter {
   private container: HTMLElement;
   private leftPercent: number;

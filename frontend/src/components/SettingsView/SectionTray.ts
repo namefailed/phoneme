@@ -3,6 +3,13 @@ import { renderField, bindFieldEvents } from "./form";
 import { check } from "@tauri-apps/plugin-updater";
 import { message, confirm } from "@tauri-apps/plugin-dialog";
 
+/**
+ * Settings → System: app lifecycle around the tray — the "Check for Updates"
+ * button (tauri-plugin-updater: check, confirm, download+install, relaunch)
+ * and the `config.tray` toggles (show window on startup, minimize-to-tray,
+ * autostart with Windows, …). Plain section class on the form.ts binding;
+ * the tray process applies the toggles when the saved config reloads.
+ */
 export class SectionTray {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(container: HTMLElement, private config: any) {

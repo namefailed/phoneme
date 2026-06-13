@@ -20,8 +20,10 @@ import { diffText, diffTextDetailed, type DiffOp, type DiffOpType, type DiffMode
  * (RecordingDetail) fetches `original`/`clean` once via IPC before mounting.
  */
 
+/** One of the three comparable transcript layers (see the file-top comment). */
 export type LayerKey = "original" | "clean" | "current";
 
+/** The already-resolved text of each layer, as the host fetched it. */
 export interface TranscriptLayers {
   /** Raw machine transcript, or null/empty if none was preserved. */
   original: string | null;
@@ -39,6 +41,10 @@ const LAYER_LABELS: Record<LayerKey, string> = {
 
 const LAYER_ORDER: LayerKey[] = ["original", "clean", "current"];
 
+/** The diff view's controller. Plain class: RecordingDetail mounts one with
+ *  the pre-fetched layers; it owns the layer pickers, the word↔line mode
+ *  toggle, and re-rendering — fully self-contained and read-only from there
+ *  (no IPC, no events). Unmount by clearing the container. */
 export class TranscriptDiff {
   private container: HTMLElement;
   private layers: TranscriptLayers;

@@ -35,6 +35,7 @@ export type ResourceTier = "low" | "mid" | "high";
 /** What the model is best optimised for, as a one-word use-case hint. */
 export type UseCase = "fast" | "balanced" | "most-accurate";
 
+/** One shipped model recommendation, as the shared model field renders it. */
 export interface CuratedModel {
   /** Exact value written to config (model id, or a local .bin filename). */
   id: string;

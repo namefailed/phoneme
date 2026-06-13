@@ -30,6 +30,7 @@ function prettyPreviewModel(path: string): string {
 }
 
 
+/** A wizard page id. Express mode skips most of them; see ALL_STEPS for order. */
 export type WizardStep = "welcome" | "mode" | "configure" | "connect" | "mic" | "preview" | "summary" | "hook" | "hotkey" | "review" | "done";
 const ALL_STEPS: WizardStep[] = ["welcome", "mode", "configure", "connect", "mic", "preview", "summary", "hook", "hotkey", "review", "done"];
 
@@ -51,6 +52,23 @@ const STEP_LABELS: Record<WizardStep, string> = {
 const DEFAULT_SUMMARY_PROMPT =
   "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.";
 
+/**
+ * The first-run setup wizard (the "wizard" route). Auto-entered by App when
+ * no config.toml exists; re-runnable from Settings → Advanced. Walks the
+ * steps in {@link ALL_STEPS} — express mode (default) short-circuits to the
+ * recommended local setup (download whisper-server + a RAM-appropriate
+ * model, then mic → hotkey → review), while "Customize setup" opens the full
+ * per-feature flow (engine choice, AI cleanup connection, live preview,
+ * auto-summary, destination hook, hotkeys).
+ *
+ * It drives the tray's `wizard_*` commands: `wizard_get_system_info` (RAM →
+ * recommended model), `wizard_list_downloaded_models`, the checksum-verified
+ * `wizard_download_*` downloads (progress streamed via the
+ * `download_progress` / `server_download_progress` / `ollama_pull_progress`
+ * Tauri events), and the Ollama detect/install/pull helpers. State is one
+ * draft config assembled across the steps and persisted with the ordinary
+ * `write_config` command; `onComplete` (from App) routes to the library.
+ */
 @customElement('ph-first-run-wizard')
 export class FirstRunWizardElement extends LitElement {
   protected createRenderRoot() { return this; }
@@ -1469,7 +1487,7 @@ export class FirstRunWizardElement extends LitElement {
   }
 }
 
-// Temporary compatibility export until App.ts is migrated
+/** Imperative mount wrapper App uses to mount/dispose the wizard route. */
 export class FirstRunWizard {
   private element: FirstRunWizardElement;
   constructor(container: HTMLElement, onComplete: () => void) {

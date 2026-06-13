@@ -5,6 +5,8 @@
 
 import type { UiFilter } from "./filter";
 
+/** One saved search: a user-chosen name over a filter snapshot. Names are
+ *  unique case-insensitively (saving an existing name overwrites). */
 export type SavedSearch = {
   id: string;
   name: string;
@@ -12,8 +14,11 @@ export type SavedSearch = {
   filter: UiFilter;
 };
 
+/** localStorage key holding the saved-search list (a JSON array). */
 const KEY = "phoneme.savedSearches";
 
+/** Read the saved-search list from localStorage. Malformed storage (hand
+ *  edits, stale shapes, private mode) degrades to `[]`, never a throw. */
 export function loadSavedSearches(): SavedSearch[] {
   try {
     const raw = localStorage.getItem(KEY);
@@ -72,6 +77,7 @@ export function addSavedSearch(name: string, filter: UiFilter): SavedSearch[] {
   return list;
 }
 
+/** Delete a saved search by id (unknown ids are a no-op). Returns the new list. */
 export function removeSavedSearch(id: string): SavedSearch[] {
   const list = loadSavedSearches().filter((s) => s.id !== id);
   persist(list);

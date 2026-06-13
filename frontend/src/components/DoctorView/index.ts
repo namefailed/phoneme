@@ -16,6 +16,20 @@ import "./styles.css";
 /** Sentinel for `runningFix` while the Fix All sweep runs. */
 const FIX_ALL = "__all__";
 
+/**
+ * The full-page Doctor (the "doctor" route — tray menu, `g D`, header pill
+ * deep links). Same triage UI as DoctorModal — health strip, category counts,
+ * Fix All, failing-first rows, folded passing checks (all shared via
+ * doctorChecks.ts) — but as a routed view with a ← Back header instead of an
+ * overlay, so it can be linked to and survives longer triage sessions.
+ *
+ * One difference from the modal: it assembles checks from three sources
+ * itself — its own `daemon_status` probe (the daemon row must work when the
+ * daemon is DOWN) plus the tray's `doctor_local_checks` and
+ * `doctor_backend_checks` commands — where the modal uses the aggregate
+ * `runDoctor()`. Mounted by App via the `DoctorView` wrapper; `onClose`
+ * routes back to the library.
+ */
 @customElement('ph-doctor-view')
 export class DoctorViewElement extends LitElement {
   protected createRenderRoot() { return this; }
@@ -257,7 +271,7 @@ export class DoctorViewElement extends LitElement {
   }
 }
 
-// Temporary wrapper for App.ts until App.ts is fully migrated
+/** Imperative mount wrapper App uses to mount/dispose the routed view. */
 export class DoctorView {
   private element: DoctorViewElement;
   constructor(container: HTMLElement, onClose: () => void) {

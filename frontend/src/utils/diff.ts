@@ -23,8 +23,11 @@
  * reports which fallback (if any) was taken so the UI can say so.
  */
 
+/** The three diff operations. "delete" = only in the left/before text,
+ *  "insert" = only in the right/after text. */
 export type DiffOpType = "equal" | "insert" | "delete";
 
+/** One coalesced run of same-typed tokens in the diff output. */
 export interface DiffOp {
   type: DiffOpType;
   /** The reconstructed text for this op (tokens joined back together). */
@@ -113,6 +116,7 @@ function coalesce(ops: DiffOp[]): DiffOp[] {
   return out;
 }
 
+/** Diff granularity (see the tokenizer notes in the module comment). */
 export type DiffMode = "word" | "line";
 
 /** Length of the common prefix and suffix of two token lists (exact token
@@ -157,6 +161,7 @@ function blockDiff(a: string[], b: string[]): DiffOp[] {
   return coalesce(ops);
 }
 
+/** A size-guarded diff result: the ops plus which fallback (if any) ran. */
 export interface DiffOutcome {
   ops: DiffOp[];
   /**

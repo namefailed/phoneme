@@ -3,10 +3,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
 
+/** One keyword routing rule (`hook.keyword_rules[i]`): when the transcript
+ *  matches `pattern`, run `command` instead of the default hook commands. */
 type KeywordRule = { pattern: string; command: string; case_sensitive: boolean };
 
+/**
+ * Settings → Destination & Integrations: the post-transcription hook(s). An
+ * editable list of `hook.commands` (each gets the recording as JSON on
+ * stdin) with a preset dropdown (clipboard, append-to-file, Obsidian,
+ * Discord/Slack webhooks, …), keyword routing rules, the `hook.webhook_url`
+ * POST target, the timeout, the auto-run toggle (hooks on every
+ * transcription vs. only the manual ⚡ Re-fire), and a per-command "Test"
+ * button (`wizard_test_hook`, run against a sample payload with secrets
+ * redacted from the echoed output).
+ *
+ * Migration note: the constructor normalizes legacy configs (a single
+ * `hook.command` string) into the `commands` array before rendering, so the
+ * section can edit the array directly without dropping extra commands.
+ * Plain section class on the form.ts binding.
+ */
 export class SectionHook {
-   
+
   constructor(
     container: HTMLElement,
     private config: any,

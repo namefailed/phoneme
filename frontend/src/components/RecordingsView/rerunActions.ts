@@ -17,6 +17,8 @@ export type RerunAllParams = {
   summaryPrompt: string | null;
 };
 
+/** What the Re-run form asked for: which step to re-run, with that step's
+ *  one-time overrides (never persisted). Null fields = configured defaults. */
 export type RerunPayload =
   | { step: "transcribe"; model: string | null; runHooks: boolean; postProcess: boolean }
   | { step: "cleanup"; model: string | null; provider: string | null; prompt: string | null; apiUrl: string | null; apiKey: string | null }

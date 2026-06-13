@@ -8,6 +8,9 @@ import { applySpeakerNames } from "./mergeMeeting";
 import { getOpenRecordingId } from "../../state/openRecording";
 import { applyMoreLikeThis } from "../../state/filter";
 
+/** Callbacks the host detail pane injects — the row deliberately reads the
+ *  CURRENT transcript/audio through getters (not snapshots) so copy/export
+ *  always act on what's on screen, even after edits. */
 export type ActionRowCallbacks = {
   onTogglePlay: () => void;
   onRefresh: () => void;
@@ -22,6 +25,19 @@ export type ActionRowCallbacks = {
   getTitle?: () => string | null;
 };
 
+/**
+ * The detail pane's button strip: Play/Pause · Re-run… (opens the Models
+ * modal in "Run once" mode) · Copy · Export (.txt save dialog) · ✨ Similar
+ * (flips the list into More-like-this mode) · Reveal · Delete (requests the
+ * view's undoable-delete flow via `phoneme:request-delete`). Copy/export
+ * apply custom speaker names before emitting text.
+ *
+ * Stateless beyond the transient "Copied!" label — everything it acts on
+ * comes through {@link ActionRowCallbacks}. Keyboard: implements the global
+ * p/c/e/r shortcuts by listening for `phoneme:action` (keyboard.ts dispatches
+ * them), acting only when ITS recording is the open one so split mode never
+ * double-fires. Failures toast; nothing throws to the caller.
+ */
 @customElement('ph-action-row')
 export class ActionRowElement extends LitElement {
   protected createRenderRoot() {
@@ -146,7 +162,9 @@ export class ActionRowElement extends LitElement {
   }
 }
 
-// Temporary vanilla wrapper
+/** Imperative mount wrapper: RecordingDetail creates one per render and
+ *  forwards play-state changes through `setPlayState` so the ▶/⏸ label
+ *  tracks the waveform player. */
 export class ActionRow {
   private element: ActionRowElement;
   constructor(container: HTMLElement, id: string, cbs: ActionRowCallbacks) {

@@ -5,6 +5,14 @@ import { customElement } from 'lit/decorators.js';
 
 import './SettingsView/SectionTags'; // Make sure the custom element is registered
 
+/**
+ * The quick Tag Manager modal (`g T` / Shift+T, or the chips' Manage
+ * button): a thin `.modal-overlay` shell around `<ph-section-tags bare>` —
+ * the SAME element as Settings → Managers → Tags, in its lightweight "bare"
+ * mode (quick CRUD without the stats/merge toolbar). All tag behavior lives
+ * in SectionTags; this owns only the dialog chrome, Escape/overlay-click
+ * dismissal, and focusing the name box on open.
+ */
 @customElement('ph-tag-manager')
 export class TagManagerElement extends LitElement {
   protected createRenderRoot() { return this; }
@@ -57,6 +65,8 @@ export class TagManagerElement extends LitElement {
   }
 }
 
+/** Open the Tag Manager modal; resolves when it closes. Surfaces refresh via
+ *  the `tag_*` daemon events, so nothing needs the result. */
 export function openTagManager(): Promise<void> {
   return new Promise((resolve) => {
     const el = document.createElement('ph-tag-manager') as TagManagerElement;

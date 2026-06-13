@@ -8,10 +8,14 @@
  */
 let openId: string | null = null;
 
+/** Record which recording the detail pane now shows (`null` = none / a
+ *  meeting view). Called by RecordingsView on every select/deselect. */
 export function setOpenRecordingId(id: string | null): void {
   openId = id;
 }
 
+/** The id of the recording open in the detail pane, or `null` when nothing
+ *  (or a merged meeting view) is open. */
 export function getOpenRecordingId(): string | null {
   return openId;
 }

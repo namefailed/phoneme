@@ -1,5 +1,13 @@
 import { renderField, bindFieldEvents } from "./form";
 
+/**
+ * Settings → Global Hotkey: the system-wide record hotkey the TRAY registers
+ * (works while the app is hidden) — enable toggle (`hotkey.enabled`; users
+ * binding externally via Kanata/AHK turn it off), the combo string
+ * (`hotkey.combo`), and the mode (`hotkey.mode`: hold = push-to-talk on key
+ * release, toggle = tap to start/stop). Plain section class on the form.ts
+ * binding; the tray re-registers the hotkey when the saved config reloads.
+ */
 export class SectionHotkey {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(container: HTMLElement, config: any) {

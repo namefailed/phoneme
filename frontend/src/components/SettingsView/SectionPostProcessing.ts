@@ -2,6 +2,20 @@ import { renderField, bindFieldEvents } from "./form";
 import { mountModelField } from "./modelField";
 import { mountConnectionField, deriveConnectionEntry } from "./connectionField";
 
+/**
+ * Settings → Post-Processing: every LLM-over-the-transcript feature in one
+ * tab — cleanup (`config.llm_post_process`: enable, the shared
+ * connection/model fields, prompt, timeout, Ollama autostart), auto-summary
+ * (`config.summary`), and auto titles (`config.title`, heuristic vs LLM).
+ * The summary/title connection fields INHERIT the cleanup connection when
+ * left blank — mirroring the daemon's fallback — so most users configure one
+ * provider here and everything else rides it.
+ *
+ * The constructor seeds any missing config tables with the documented
+ * defaults before rendering (older configs predate these features). Plain
+ * section class composing the shared connectionField/modelField mounts over
+ * the form.ts binding.
+ */
 export class SectionPostProcessing {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(container: HTMLElement, config: any) {

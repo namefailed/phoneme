@@ -11,6 +11,19 @@ import { confirmDelete } from "../ConfirmDelete";
 type SortMode = "name" | "most" | "least";
 type StatusFilter = "all" | "used" | "unused";
 
+/**
+ * The tag-management surface, used in TWO places: Settings → Managers → Tags
+ * (full mode) and the quick Tag Manager modal (`bare` mode — see TagManager
+ * and the `bare` property). Full mode: create (name + color), search, sort
+ * by name/usage, used/unused filter, inline rename/recolor, per-tag usage
+ * counts (`tagUsageCounts`), merge-into (re-tags everything, then deletes
+ * the source), and delete with the shared confirm (its own
+ * "don't ask again" key, `phoneme_skip_tag_delete_confirm`).
+ *
+ * Loads ALL tags (`listAllTags` — including orphans, unlike the sidebar);
+ * mutations broadcast `tag_*` daemon events, which is how every other tag
+ * surface finds out. Errors toast.
+ */
 @customElement('ph-section-tags')
 export class SectionTagsElement extends LitElement {
   // Light DOM: relies on global SettingsView/styles.css + tag-manager.css.
@@ -374,6 +387,8 @@ export class SectionTagsElement extends LitElement {
   }
 }
 
+/** Imperative mount wrapper in the plain-section constructor shape; `bare`
+ *  selects the quick-CRUD variant (see the element doc). */
 export class SectionTags {
   private element: SectionTagsElement;
   constructor(container: HTMLElement, _config: any, opts?: { bare?: boolean }) {

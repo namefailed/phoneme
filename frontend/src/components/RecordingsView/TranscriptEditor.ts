@@ -10,6 +10,23 @@ import { standardKeymap, history, historyKeymap } from "@codemirror/commands";
 import { vim, Vim, getCM } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
+/**
+ * The transcript editor: a CodeMirror 6 instance over the recording's live
+ * transcript, with optional vim keybindings (`editor.vim_mode` config, plus
+ * the user's `editor.vimrc`/`vimrc_path` mappings and a mode badge).
+ *
+ * Save model: explicit only — the "Save Changes" button, Ctrl+S, or vim
+ * `:w`/`:wq` (the global VIM_SAVE_EVENT, answered only by the focused
+ * editor). Saving calls `updateTranscript` (the daemon preserves the machine
+ * original separately and broadcasts `transcript_updated`). Dirtiness is
+ * reported via the `dirty-change` CustomEvent — RecordingDetail uses it for
+ * the unsaved-edits guards — and a refresh with new upstream text only
+ * replaces the buffer when the editor is CLEAN, so live pipeline updates
+ * never clobber typing.
+ *
+ * Keyboard: Shift+Esc (and vim `:q`) leave the editor back to the pane nav
+ * (`phoneme:vim` "exit-editor"); plain Esc stays inside (vim mode needs it).
+ */
 @customElement('ph-transcript-editor')
 export class TranscriptEditorElement extends LitElement {
   protected createRenderRoot() { return this; }
@@ -320,9 +337,12 @@ export class TranscriptEditorElement extends LitElement {
   }
 }
 
-// Temporary vanilla wrapper
+/** Imperative mount wrapper (RecordingDetail's handle on the editor). */
 export class TranscriptEditor {
   private element: TranscriptEditorElement;
+  /** Mounts `<ph-transcript-editor>` into `container` and adapts the
+   *  `dirty-change` event to the `onDirtyChange` callback RecordingDetail
+   *  passes. `dispose()` unmounts (CodeMirror tears down with the element). */
   constructor(
     container: HTMLElement,
     id: string,

@@ -20,6 +20,8 @@ export function setHeaderHidden(hide: boolean) {
   body.classList.toggle("phoneme-hide-header", hide);
 }
 
+/** Whether the top bar is currently hidden (the `<body>` class is the single
+ *  source of truth — zen modes snapshot this to restore the user's choice). */
 export function isHeaderHidden(): boolean {
   return document.body.classList.contains("phoneme-hide-header");
 }

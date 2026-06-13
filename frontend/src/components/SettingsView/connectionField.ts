@@ -22,6 +22,8 @@ import { LLM_PRESETS } from "../../services/llmProviders";
 import { STT_NAMED_PROVIDERS, matchNamedSttProvider } from "../../services/sttProviders";
 import { errText } from "../../utils/error";
 
+/** What a caller wires into {@link mountConnectionField}: which provider
+ *  catalog to offer, and live getters/setters onto its config shape. */
 export interface ConnectionFieldOpts {
   catalog: "llm" | "stt";
   // Each reads/writes the LIVE config shape for the step:
@@ -156,6 +158,10 @@ function hostOf(url: string): string {
  */
 const mountTokens = new WeakMap<HTMLElement, object>();
 
+/** Render the connection block into `host` (owning host.innerHTML) and keep
+ *  it live: selections/edits write straight through the opts setters, and
+ *  provider changes re-render + call `onProviderChanged`. See the file-top
+ *  comment for the full contract. */
 export function mountConnectionField(host: HTMLElement, opts: ConnectionFieldOpts): void {
   const token = {};
   mountTokens.set(host, token);

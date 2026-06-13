@@ -286,6 +286,9 @@ export class SectionProfilesElement extends LitElement {
   }
 }
 
+/** Imperative mount wrapper, matching the plain-section constructor shape
+ *  SettingsView mounts everything with (the element ignores `config` — it
+ *  talks to the profile commands directly). */
 export class SectionProfiles {
   private element: SectionProfilesElement;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

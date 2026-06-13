@@ -5,6 +5,18 @@ import Timeline from "wavesurfer.js/dist/plugins/timeline.js";
 import Hover from "wavesurfer.js/dist/plugins/hover.js";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+/**
+ * The audio player: a wavesurfer.js waveform (with timeline + hover plugins,
+ * themed from the CSS variables) over the recording's audio file, loaded
+ * through Tauri's `convertFileSrc` asset protocol. Re-mounts whenever
+ * `audioPath` changes and destroys the wavesurfer instance on disconnect.
+ *
+ * Owns playback state; reports outward via two CustomEvents —
+ * `play-state-change` (boolean; drives the ActionRow's ▶/⏸ label and the
+ * `p` shortcut feedback) and `time-update` (seconds; drives the timeline
+ * peek's active-segment highlight, firing on seeks too). `togglePlay()` and
+ * `seekTo()` are the imperative controls the host calls.
+ */
 @customElement('ph-waveform-player')
 export class WaveformPlayerElement extends LitElement {
   protected createRenderRoot() { return this; }
@@ -110,7 +122,9 @@ export class WaveformPlayerElement extends LitElement {
   }
 }
 
-// Temporary vanilla wrapper until parent components are migrated
+/** Imperative mount wrapper: RecordingDetail constructs ONE per pane and
+ *  re-`mount`s it on each render so the element (and its wavesurfer) is
+ *  reused rather than rebuilt; callbacks adapt the element's CustomEvents. */
 export class WaveformPlayer {
   private element: WaveformPlayerElement;
   constructor() {

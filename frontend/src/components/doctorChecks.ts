@@ -7,6 +7,7 @@
  * fields are additive (older daemons simply don't send them).
  */
 
+/** Severity of a check result: drives the badge color and the strip counts. */
 export type DoctorCategory = "critical" | "warning" | "info";
 
 /** One Doctor check with the category/explanation/fix-hint extensions. */
@@ -56,6 +57,7 @@ export function fixAllPlan(checks: DoctorCheckInfo[]): string[] {
 
 /** Display order of the subsystem groups in the collapsed passing section. */
 export const CHECK_GROUPS = ["Servers", "Models", "Storage", "Configuration", "Other"] as const;
+/** One subsystem bucket of {@link CHECK_GROUPS}. */
 export type CheckGroup = (typeof CHECK_GROUPS)[number];
 
 /**

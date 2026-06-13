@@ -1,5 +1,12 @@
 import { bindFieldEvents, renderField } from "./form";
 
+/**
+ * Settings → Editor: the transcript/notes editors' vim mode
+ * (`editor.vim_mode`), an external .vimrc path with a Browse picker
+ * (`editor.vimrc_path`), and an inline vimrc text block (`editor.vimrc`).
+ * Both CodeMirror editors read these on mount (see utils/vimrc.ts for what
+ * the vimrc parser supports). Plain section class on the form.ts binding.
+ */
 export class SectionEditor {
   private config: any;
 

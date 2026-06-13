@@ -4,8 +4,16 @@ import { listRecordings, IMPORT_AUDIO_EXTENSIONS } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { pickAndImportAudio } from "../../utils/import";
 
+/**
+ * Settings → Storage: where audio lives and how long it's kept — the audio
+ * directory (`recording.audio_dir`, with Browse/Open buttons), the retention
+ * policy (`retention.max_age_days` / `max_count`, blank = disabled), the
+ * "Import audio…" button (the shared utils/import picker — same path as
+ * window drag-drop), and a whole-library export (json/csv via a save
+ * dialog). Plain section class on the form.ts binding.
+ */
 export class SectionStorage {
-   
+
   constructor(
     container: HTMLElement,
     private config: any,

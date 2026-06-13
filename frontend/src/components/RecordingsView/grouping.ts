@@ -21,6 +21,7 @@ export type GroupItem = {
   tracks: Recording[];
 };
 
+/** One display row of the grouped list: a standalone recording or a meeting. */
 export type GroupedItem = SingleItem | GroupItem;
 
 /**

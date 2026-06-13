@@ -20,8 +20,19 @@ const MODELS = [
   { id: "large-v3", filename: "ggml-large-v3.bin", url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin", name: "Large v3", size: "3.1 GB", desc: "Slowest, best accuracy. High-end hardware only." }
 ];
 
+/**
+ * Settings → Transcription: the main speech-to-text engine (`config.whisper`).
+ * Provider choice via the shared connection block (local whisper.cpp / the
+ * cloud providers / custom endpoint — see services/sttProviders), the shared
+ * model field with curated per-provider suggestions, and — for the local
+ * engine — downloadable whisper model cards with size/accuracy notes, a
+ * "recommended for your RAM" pick (`wizard_get_system_info`), download
+ * progress, and the currently-downloaded check
+ * (`wizard_list_downloaded_models`). Plain section class composing the
+ * shared connectionField/modelField mounts over the form.ts binding.
+ */
 export class SectionWhisper {
-   
+
   constructor(
     private container: HTMLElement,
     private config: any,

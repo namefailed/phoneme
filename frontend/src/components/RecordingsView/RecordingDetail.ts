@@ -27,6 +27,26 @@ import { NotesEditor } from "./NotesEditor";
 import { WaveformPlayer } from "./WaveformPlayer";
 import { TimelineView } from "./TimelineView";
 
+/**
+ * The right pane: one recording, fully editable. This file owns the detail
+ * layout and composes the per-recording widgets — title editor, status pill,
+ * WaveformPlayer, ActionRow, TagChips, the TranscriptEditor and NotesEditor
+ * (CodeMirror), the summary/original/clean "peek" views, TranscriptDiff, the
+ * Timeline peek (TimelineView), and the speaker-rename popover.
+ *
+ * Plain class: RecordingsView constructs one per detail slot (two in split
+ * mode) and drives it imperatively — `show(id)` loads + renders, `clear()`
+ * empties, `showTimeline()`/`setSyncGroup()` serve the dual-timeline split,
+ * `hasDirtyEdits()` backs the view's unsaved-edits guards, `togglePlay()`
+ * forwards to the player. Refreshes for the SAME recording update text in
+ * place instead of remounting, so the waveform never flickers; `onRefresh`
+ * (injected) asks the view to re-query the list after mutations.
+ *
+ * Keyboard: the open-recording keys (p/c/e/r…) arrive at the embedded
+ * ActionRow via `phoneme:action`; the vim layer's detail-pane grid is driven
+ * by RecordingsView, which walks THIS pane's buttons/editors as grid cells.
+ * Dispatches `phoneme:toggle-focus-mode` (⛶) and `phoneme:close-detail` (✕).
+ */
 export class RecordingDetail {
   private container: HTMLElement;
   private recording: Recording | null = null;
