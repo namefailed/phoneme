@@ -1201,7 +1201,11 @@ impl TranscriptionProvider for DeepgramProvider {
                 if let Some(seg) = segments.last_mut() {
                     seg.text.push(' ');
                     seg.text.push_str(&w.word);
-                    if let Some(end) = end_ms {
+                    // Advance the segment end even when this word lacks an `end`
+                    // (fall back to its `start`, mirroring the segment-creation
+                    // site) so a same-speaker turn's end never sticks at the prior
+                    // word's time and mis-aligns later seeks.
+                    if let Some(end) = end_ms.or(start_ms) {
                         seg.end_ms = end.max(seg.end_ms);
                     }
                 }

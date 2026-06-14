@@ -224,6 +224,16 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Audit hardening (verified findings)** — a whole-app audit pass; the
+  confirmed-real items fixed: a Deepgram speaker turn now advances its segment end
+  time even when a word lacks an `end` timestamp (falls back to the word's start,
+  matching the segment-creation site) so later seeks don't mis-align; webhook
+  `custom_headers` are redacted to **names only** in `Debug` so a header secret
+  (e.g. an `Authorization` token) can't leak into logs; the tray menu record/stop
+  listeners catch `invoke` failures instead of raising an unhandled rejection.
+  (Several flashy "findings" were false positives — no `start`/`start_meeting`
+  deadlock, no `tag_id` SQL injection (it's an `i64`), and `showOverlay()` already
+  self-catches — left unchanged with a clarifying comment where useful.)
 - [x] **Docs caught up to the v1.8 work** — the user + developer guides now cover
   the diarization quality passes (word-level attribution, coherent-turn smoothing,
   voiceprint merge, orphan back-fill, atomic words/spacing) and `solo_one_speaker`,

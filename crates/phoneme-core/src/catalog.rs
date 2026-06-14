@@ -1374,6 +1374,9 @@ impl Catalog {
             sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?))");
         }
         if let Some(tag_id) = filter.tag_id {
+            // `tag_id` is `i64`, so direct formatting is injection-safe (an
+            // integer can't carry SQL) — same rationale as the `u32` LIMIT/OFFSET
+            // below. String filters (FTS, status) use bound `?` parameters.
             sql.push_str(&format!(" AND rt.tag_id = {tag_id}"));
         }
         if filter.status.is_some() {

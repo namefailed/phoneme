@@ -1089,7 +1089,12 @@ impl std::fmt::Debug for WebhookConfig {
             .field("allow_private_network", &self.allow_private_network)
             .field("allow_http", &self.allow_http)
             .field("hmac_secret", &redact_key(self.hmac_secret.expose_secret()))
-            .field("custom_headers", &self.custom_headers)
+            // Header *values* can be secrets (e.g. an `Authorization` token), so
+            // Debug shows only the header NAMES — never the values.
+            .field(
+                "custom_headers",
+                &self.custom_headers.keys().collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

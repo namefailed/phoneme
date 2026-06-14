@@ -88,12 +88,21 @@ export class App {
     // Pipeline progress + error toasts (lifetime subscription).
     void initStepNotifications();
 
-    // Tray menu recording commands.
+    // Tray menu recording commands. Catch invoke failures so a backend error
+    // surfaces in the console instead of becoming an unhandled promise rejection.
     void listen("menu:record", async () => {
-      await invoke("record_start", { mode: "oneshot" });
+      try {
+        await invoke("record_start", { mode: "oneshot" });
+      } catch (e) {
+        console.error("menu:record — record_start failed:", e);
+      }
     });
     void listen("menu:stop", async () => {
-      await invoke("record_stop");
+      try {
+        await invoke("record_stop");
+      } catch (e) {
+        console.error("menu:stop — record_stop failed:", e);
+      }
     });
 
     // Auto-launch the first-run wizard if no config exists yet.
