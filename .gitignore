@@ -10,6 +10,11 @@ scratch/
 replace_session.py
 .dev-data/
 
+# Local MCP server registration — points at a machine-specific built binary
+# path, so it stays out of the shared repo (see docs/developer-guide/mcp_server.md
+# for the template).
+.mcp.json
+
 # ---------------------------------------------------------------------------
 # Build / runtime artifacts
 # ---------------------------------------------------------------------------
