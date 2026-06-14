@@ -1062,6 +1062,12 @@ pub async fn run(
     let is_meeting_mic = meeting_id.is_some() && track.as_deref() == Some("mic");
     let diar_track = if is_meeting_mic {
         DiarizationTrack::FixedSpeaker("You")
+    } else if meeting_id.is_none() && cfg.diarization.solo_one_speaker {
+        // A solo (non-meeting) recording and the user opted in to "treat single
+        // recordings as one speaker": skip diarization so one voice is never
+        // split into phantom `[Speaker N]` turns. Meeting tracks are excluded
+        // (a meeting's system track still diarizes its multiple participants).
+        DiarizationTrack::Plain
     } else {
         DiarizationTrack::Diarize
     };

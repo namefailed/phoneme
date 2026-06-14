@@ -404,6 +404,21 @@ pub fn assign_words<'a>(
 /// is [`SPEAKER_MERGE_GAP_SECS`].
 pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 
+/// A speaker run no longer than this many words, when it sits as an "island"
+/// bracketed by the SAME speaker on both sides, is treated as per-frame flicker
+/// and absorbed into that surrounding speaker. This is the primary guard against
+/// the mid-sentence choppy splits the wall-clock-only [`WORD_MIN_TURN_SECS`]
+/// missed: a 2–5 word island inside one continuous speaker's territory (e.g.
+/// "...the fact that women / [Speaker 2] going to do what they / [Speaker 1]
+/// want...") is almost always noise from per-word argmax over short, noisy frame
+/// windows, not a real turn. Genuine turns survive because they are either longer
+/// than this OR sit at a real transition (a DIFFERENT speaker on each side, not
+/// the same one) — only same-speaker-bracketed islands are absorbed. A lone
+/// single word is absorbed regardless of position (one word is never a real
+/// turn). Per-word attribution is kept, so a genuine hand-off INSIDE a whisper
+/// segment is still split — only the noise islands are smoothed.
+const MAX_ISLAND_WORDS: usize = 5;
+
 /// A contiguous run of same-speaker words inside the per-word column sequence.
 struct SpeakerRun {
     /// First word index in the run (into the `cols` / `words` slices).
@@ -442,41 +457,63 @@ fn speaker_runs(words: &[&WordSpan], cols: &[Option<usize>]) -> Vec<SpeakerRun> 
     runs
 }
 
-/// In-place median-style smoothing of the per-word speaker columns: repeatedly
-/// absorb the shortest speaker run whose span is below `min_turn` into its longer
-/// adjacent speaker run (tie → the previous run), until every surviving run is
-/// long enough or only one speaker remains. Only absorptions that actually flip a
-/// column count as progress (a run already matching its chosen neighbour — e.g.
-/// the same speaker either side of a silence — is skipped), so it always
-/// terminates. Silence words stay `None`.
+/// In-place smoothing of the per-word speaker columns: repeatedly absorb a
+/// "flicker island" speaker run into a neighbour until none remain or only one
+/// speaker is left. A run is an island to absorb when it is:
 ///
-/// This removes the single-word speaker flips that whole-segment attribution
-/// never produced: the regression where a solo recording split on words like
-/// "it"/"if" into a phantom second speaker.
+/// - a LONE single word (one word is never a real turn);
+/// - a short run bracketed by the SAME speaker on both sides and no longer than
+///   [`MAX_ISLAND_WORDS`] (a noise island inside one continuous speaker's
+///   territory — the mid-sentence-flip case); or
+/// - shorter than `min_turn` wall-clock seconds (a brief blip).
+///
+/// It is absorbed into the surrounding speaker when bracketed, otherwise into the
+/// longer neighbour (tie → the previous run). Genuine turns survive: they are
+/// either longer than the island bounds OR sit at a real transition (a different
+/// speaker on each side, so not "bracketed by the same speaker"). Smallest
+/// islands smooth first; only absorptions that actually flip a column count as
+/// progress (a run already matching its chosen neighbour is skipped), so it
+/// always terminates. Silence words stay `None`.
+///
+/// This restores coherent turns — like the older whole-segment attribution —
+/// while KEEPING per-word attribution, so a genuine speaker hand-off inside one
+/// whisper segment is still split (only noise islands are removed). It fixes the
+/// regression where a recording was chopped into per-word `[Speaker N]` flips
+/// mid-sentence.
 fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min_turn: f64) {
+    let words_in = |r: &SpeakerRun| r.end - r.start + 1;
     loop {
         let runs = speaker_runs(words, cols);
         if runs.len() < 2 {
             break; // 0 or 1 speaker run — nothing to absorb into.
         }
-        // Shortest sub-threshold runs first; take the first whose absorption
-        // would actually flip a column.
-        let mut order: Vec<usize> = (0..runs.len())
-            .filter(|&i| runs[i].span < min_turn)
-            .collect();
-        order.sort_by(|&a, &b| {
-            runs[a]
-                .span
-                .partial_cmp(&runs[b].span)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // Same-speaker bracket = a genuine island (one voice either side), as
+        // opposed to a real transition (different voices each side).
+        let bracketed_same = |ri: usize| -> bool {
+            match (ri.checked_sub(1), runs.get(ri + 1)) {
+                (Some(p), Some(n)) => runs[p].col == n.col,
+                _ => false,
+            }
+        };
+        let absorbable = |ri: usize| -> bool {
+            let r = &runs[ri];
+            words_in(r) == 1
+                || (bracketed_same(ri) && words_in(r) <= MAX_ISLAND_WORDS)
+                || r.span < min_turn
+        };
+        // Smallest islands first (by word count) — deterministic.
+        let mut order: Vec<usize> = (0..runs.len()).filter(|&i| absorbable(i)).collect();
+        order.sort_by_key(|&i| words_in(&runs[i]));
 
         let mut changed = false;
         for ri in order {
             let run = &runs[ri];
             let prev = ri.checked_sub(1).map(|i| &runs[i]);
             let next = runs.get(ri + 1);
+            // Bracketed → absorb into the surrounding speaker; otherwise into the
+            // longer neighbour (tie → previous).
             let target = match (prev, next) {
+                (Some(p), Some(n)) if p.col == n.col => p.col,
                 (Some(p), Some(n)) => {
                     if n.span > p.span {
                         n.col
@@ -1497,6 +1534,105 @@ mod tests {
         assert_eq!(cols, vec![Some(0), None, Some(0)], "lone speaker untouched");
     }
 
+    /// The mid-sentence-flip regression: a MULTI-word run bracketed by the SAME
+    /// speaker (a noise island inside one voice's continuous speech) is absorbed,
+    /// even though every word is well over the 0.6s wall-clock threshold — so the
+    /// word-count island rule, not the old span guard, does the work.
+    #[test]
+    fn multi_word_island_bracketed_by_same_speaker_is_absorbed() {
+        let words = [
+            word(0.0, 0.5, "respect"),
+            word(0.5, 1.0, "the"),
+            word(1.0, 1.5, "fact"),
+            word(1.5, 2.0, "going"), // 4-word island start (each word 0.5 s)
+            word(2.0, 2.5, "to"),
+            word(2.5, 3.0, "do"),
+            word(3.0, 3.5, "what"),
+            word(3.5, 4.0, "they"), // island end
+            word(4.0, 4.5, "want"),
+            word(4.5, 5.0, "now"),
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        // [0 0 0] [1 1 1 1] [0 0 0] — the four 1s span ~2 s, far above 0.6 s.
+        let mut cols = vec![
+            Some(0),
+            Some(0),
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(0),
+            Some(0),
+            Some(0),
+        ];
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert!(
+            cols.iter().all(|c| *c == Some(0)),
+            "the bracketed multi-word noise island is absorbed: {cols:?}"
+        );
+    }
+
+    /// A genuinely long second-speaker run bracketed by another speaker (a real
+    /// in-the-middle turn, longer than MAX_ISLAND_WORDS) is NOT absorbed — only
+    /// short islands are flicker.
+    #[test]
+    fn long_bracketed_turn_above_island_max_survives() {
+        let words: Vec<WordSpan> = (0..14)
+            .map(|i| word(i as f64 * 0.5, (i as f64 + 1.0) * 0.5, "w"))
+            .collect();
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        // [0 ×3] [1 ×8] [0 ×3] — the 1-run is 8 words (> MAX_ISLAND_WORDS = 5).
+        let mut cols = vec![
+            Some(0),
+            Some(0),
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(0),
+            Some(0),
+            Some(0),
+        ];
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert!(
+            cols[3..11].iter().all(|c| *c == Some(1)),
+            "a long bracketed turn survives: {cols:?}"
+        );
+    }
+
+    /// A real transition between two long turns (a DIFFERENT speaker each side,
+    /// both long) is left intact — coherent two-speaker output, never over-merged.
+    #[test]
+    fn genuine_transition_between_two_long_turns_survives() {
+        let words: Vec<WordSpan> = (0..12)
+            .map(|i| word(i as f64 * 0.5, (i as f64 + 1.0) * 0.5, "w"))
+            .collect();
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![
+            Some(0),
+            Some(0),
+            Some(0),
+            Some(0),
+            Some(0),
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+        ];
+        let before = cols.clone();
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert_eq!(cols, before, "two genuine long turns are untouched");
+    }
+
     // ── Pipeline cache: lazy init / invalidation / no double load ────────────
     //
     // Exercised through `DiarizerCache<&str>` with counting fake loaders. The
@@ -1511,6 +1647,7 @@ mod tests {
         DiarizationConfig {
             provider,
             local_model_path: model_path.to_string(),
+            ..DiarizationConfig::default()
         }
     }
 

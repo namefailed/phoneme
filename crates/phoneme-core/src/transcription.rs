@@ -92,6 +92,12 @@ pub enum DiarizationTrack {
     /// `diarized` detection and the merged-meeting view — keeps working; the
     /// daemon then writes a `speaker_names` row naming label 1 after `label`.
     FixedSpeaker(&'static str),
+    /// Skip diarization entirely and leave the transcript as plain prose — no
+    /// `[Speaker N]` markers at all. The opt-in "treat single recordings as one
+    /// speaker" setting (`[diarization].solo_one_speaker`) selects this for a
+    /// solo, non-meeting recording so a single voice is never split into phantom
+    /// speakers, regardless of what the diarizer would have found.
+    Plain,
 }
 
 /// A transcription backend: turns an audio file into text.
@@ -585,16 +591,21 @@ impl TranscriptionProvider for OpenAiCompatProvider {
             }
         }
 
-        if let Some(diarizer) = &self.local_diarize {
-            if !segs.is_empty() {
-                // Hand the per-word timing to diarization too: when whisper
-                // returned words, the diarizer attributes speakers per word off
-                // the frame matrix and threads the speaker labels back into
-                // these words; with no words it falls back to segment-level
-                // attribution and returns the words untouched.
-                return Ok(
-                    diarize_transcript(audio_path, segs, words, parsed.text, diarizer).await,
-                );
+        // `Plain` opts a solo recording out of diarization entirely (the
+        // `solo_one_speaker` setting): fall through to the undiarized path below
+        // so it reads as plain prose, never split into `[Speaker N]` turns.
+        if track != DiarizationTrack::Plain {
+            if let Some(diarizer) = &self.local_diarize {
+                if !segs.is_empty() {
+                    // Hand the per-word timing to diarization too: when whisper
+                    // returned words, the diarizer attributes speakers per word off
+                    // the frame matrix and threads the speaker labels back into
+                    // these words; with no words it falls back to segment-level
+                    // attribution and returns the words untouched.
+                    return Ok(
+                        diarize_transcript(audio_path, segs, words, parsed.text, diarizer).await,
+                    );
+                }
             }
         }
 
@@ -1824,6 +1835,7 @@ mod tests {
             crate::config::DiarizationConfig {
                 provider: crate::config::DiarizationBackend::Local,
                 local_model_path: String::new(),
+                ..crate::config::DiarizationConfig::default()
             },
         );
         let provider = OpenAiCompatProvider::new(

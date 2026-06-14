@@ -167,6 +167,16 @@ pub struct DiarizationConfig {
     /// Absolute path to the local Pyannote ONNX model file.
     #[serde(default)]
     pub local_model_path: String,
+    /// Treat a single (non-meeting) recording as ONE speaker — skip diarization
+    /// for it entirely so it reads as plain prose, never split into `[Speaker N]`
+    /// turns. Off by default. Solo dictation is almost always one voice, but the
+    /// model can still hear two "speakers" when you change your voice (quoting)
+    /// or there is background audio; this guarantees a solo note stays one
+    /// speaker. Meetings (separate mic/system tracks) and genuinely multi-speaker
+    /// files are unaffected — only single recordings are forced to one speaker.
+    /// (Honored on the local diarization path.)
+    #[serde(default)]
+    pub solo_one_speaker: bool,
 }
 
 impl DiarizationConfig {

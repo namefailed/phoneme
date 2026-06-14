@@ -88,16 +88,28 @@ trust boundary. Verified against current code.*
   segment path uses. Cloud and segments-only transcripts are unchanged: they fall
   back to the existing segment-level attribution, and a single-voice recording
   still reads as plain prose.
-- [x] **Word-turn smoothing — fixes solo recordings splitting on "it"/"if".**
-  Per-word attribution had no temporal smoothing, so when the diarizer flickered a
-  single short word onto a phantom second speaker, a one-voice recording fragmented
-  into bogus `[Speaker 2]: it` turns (and over-split the timeline). Attribution now
-  runs median-style minimum-turn smoothing: a contiguous speaker run shorter than
-  `WORD_MIN_TURN_SECS` (0.6 s) is absorbed into its longer adjacent speaker
-  (bridging silence), so a lone flicker disappears — and a genuinely single-voice
-  recording collapses back to one speaker and renders as plain prose, the way it
-  did before word-level attribution. Real, sustained multi-speaker turns are well
-  above the threshold and untouched.
+- [x] **Coherent diarization turns — no more mid-sentence speaker flips.**
+  Per-word attribution scored each word independently off the diarizer's per-frame
+  matrix, which over short word windows is dominated by noise — so a single
+  continuous voice was chopped into `[Speaker 1] … the fact that women / [Speaker 2]
+  going to do what they / [Speaker 1] want …`, flipping speakers mid-phrase (no real
+  turn-taking does that). The wall-clock smoothing only caught sub-0.6 s flickers, so
+  multi-word noise islands slipped through. Attribution now smooths **word-count
+  islands**: a lone word (never a real turn), or a short run (≤ `MAX_ISLAND_WORDS`,
+  5) bracketed by the SAME speaker on both sides (a noise island inside one voice's
+  territory), is absorbed into the surrounding speaker. Per-word attribution is
+  kept, so a genuine hand-off *inside* a whisper segment still splits, and real
+  sustained turns and true speaker transitions survive — but the mid-sentence chop
+  is gone and a solo recording collapses to one speaker (plain prose). Restores the
+  coherent turns the segment-level era had, without losing word-level precision.
+- [x] **"Treat single recordings as one speaker" option** (`[diarization]
+  solo_one_speaker`, off by default). When the local diarizer genuinely hears two
+  voices in a one-person recording — a big tonal shift when quoting, or background
+  audio — no clustering setting can merge them. This opt-in skips diarization
+  entirely for single (non-meeting) recordings, so a solo note is never split into
+  `[Speaker N]` turns. Meetings (separate mic/system tracks) and genuinely
+  multi-speaker files are unaffected; the mic track's "You" labeling and the
+  coherent-turn smoothing above both still apply where relevant.
 - [x] **Audio normalization** — optionally boost a quiet recording's gain to a
   consistent peak level before transcribing, so a soft microphone still hands
   Whisper a healthy signal (Settings → Capture → Recording; off by default,
