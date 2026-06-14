@@ -642,12 +642,16 @@ impl DaemonRecorder {
                     Err(_) => break,
                 };
                 let level = rms_level_01(&samples);
-                state
-                    .events
-                    .emit(DaemonEvent::AudioLevelSample { id: id.clone(), level });
+                state.events.emit(DaemonEvent::AudioLevelSample {
+                    id: id.clone(),
+                    level,
+                });
             }
         });
-        self.preview.lock().await.push(PreviewTask { stop_tx, task });
+        self.preview
+            .lock()
+            .await
+            .push(PreviewTask { stop_tx, task });
     }
 
     /// Stop the streaming-preview loop (if running) and wait for it to exit so
@@ -863,7 +867,8 @@ impl DaemonRecorder {
         // in-place dictation), gated only on `recording.preview_waveform`. It's
         // cheap (RMS of a tiny tail, no whisper permit) so it never reintroduces
         // the preview's record-time lag.
-        self.start_level_loop(state, id.clone(), level_snapshot).await;
+        self.start_level_loop(state, id.clone(), level_snapshot)
+            .await;
 
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
@@ -1412,6 +1417,20 @@ impl DaemonRecorder {
         // get the same opt-in live caption single recordings do.
         let mode = state.config.load().recording.meeting_preview.clone();
         *self.meeting_preview_sources.lock().await = sources.clone();
+        // The cheap audio-level waveform ("it hears me") follows ONE track for the
+        // whole meeting — the mic (the voice the user watches), else the first
+        // track. It's independent of which caption track is shown and never
+        // touches whisper, so a single loop is enough. Gated on `preview_waveform`
+        // inside start_level_loop; pushed into `self.preview` so stop_meeting's
+        // stop_preview() tears it down with the caption loops.
+        if let Some((id, _, snapshot)) = sources
+            .iter()
+            .find(|(_, t, _)| t == "mic")
+            .or_else(|| sources.first())
+            .cloned()
+        {
+            self.start_level_loop(state, id, snapshot).await;
+        }
         if mode == "both" {
             for (id, _, snapshot) in sources {
                 self.start_preview(state, id, snapshot).await;
