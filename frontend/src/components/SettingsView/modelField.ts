@@ -102,8 +102,11 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
   let error: string | null = null;
   let freeText = false;
 
+  // Cap the control width to match the .cf connection blocks (580px) that sit
+  // directly above each model field, so model pickers line up with their
+  // provider/key rows instead of stretching the full 1fr column (A).
   const inputStyle =
-    "flex:1; min-width:0; border-radius:6px; padding:8px 10px; font-size:13px; background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);";
+    "flex:1; min-width:0; max-width:580px; border-radius:6px; padding:8px 10px; font-size:13px; background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);";
 
   const render = () => {
     if (mountTokens.get(host) !== token) return; // superseded by a newer mount
