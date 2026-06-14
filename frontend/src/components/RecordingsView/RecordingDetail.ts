@@ -21,7 +21,7 @@ import { showToast } from "../../utils/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { applyMoreLikeThis } from "../../state/filter";
 import { speakerDisplayName, speakersForRename, renameSpeakerInTranscript, applySpeakerNames } from "./mergeMeeting";
-import { ActionRow } from "./ActionRow";
+import { ActionRow, readPlaybackSpeed } from "./ActionRow";
 import { TagChips } from "./TagChips";
 import { TranscriptDiff } from "./TranscriptDiff";
 import { TranscriptEditor } from "./TranscriptEditor";
@@ -296,7 +296,10 @@ export class RecordingDetail {
       </div>
     `;
     const wf = this.container.querySelector<HTMLElement>(`#wf-${r.id}`);
-    if (wf) this.player.mount(wf, r.audio_path);
+    if (wf) {
+      this.player.mount(wf, r.audio_path);
+      this.player.setPlaybackRate(readPlaybackSpeed());
+    }
 
     const actions = this.container.querySelector<HTMLElement>("#actions");
     if (actions) {
@@ -305,6 +308,7 @@ export class RecordingDetail {
         onRefresh: () => this.onRefresh(),
         getTranscript: () => this.recording?.transcript ?? "",
         getSpeakerNames: () => this.recording?.speaker_names ?? [],
+        onSetSpeed: (rate) => this.player.setPlaybackRate(rate),
       });
       this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
     }

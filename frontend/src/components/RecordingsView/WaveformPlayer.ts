@@ -94,10 +94,20 @@ export class WaveformPlayerElement extends LitElement {
     this.wavesurfer.on("timeupdate", (t: number) => {
       this.dispatchEvent(new CustomEvent('time-update', { detail: t }));
     });
+    // A fresh wavesurfer resets to 1× — re-apply the chosen rate once ready.
+    this.wavesurfer.on("ready", () => this.wavesurfer?.setPlaybackRate(this.playbackRate));
   }
 
   togglePlay() {
     this.wavesurfer?.playPause();
+  }
+
+  /** Playback speed (S). Stored so it survives the wavesurfer rebuild on each
+   *  mount; applied immediately if audio is already loaded, else on `ready`. */
+  private playbackRate = 1;
+  setPlaybackRate(rate: number) {
+    this.playbackRate = rate;
+    this.wavesurfer?.setPlaybackRate(rate);
   }
 
   /** Move the playhead to `seconds` (clamped by wavesurfer); playback state is
@@ -159,6 +169,10 @@ export class WaveformPlayer {
 
   togglePlay() {
     this.element.togglePlay();
+  }
+
+  setPlaybackRate(rate: number) {
+    this.element.setPlaybackRate(rate);
   }
 
   destroy() {

@@ -801,6 +801,14 @@ mark.search-hit {
 }
 .thinking-pre--prompt { max-height: 200px; overflow-y: auto; color: var(--fg-muted); }
 .thinking-pre--response { max-height: 240px; overflow-y: auto; }
+/* Playback-speed toggle (S) in the waveform action row — compact, fixed-width
+   so cycling 0.5×…2× doesn't shift the row. */
+.action-row .speed-btn {
+  min-width: 46px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Pipeline provenance: a compact button in the detail footer that opens a
    popover listing each processing step (G), replacing the old cramped chain. */
 .detail-pipeline-wrap { position: relative; display: inline-flex; }

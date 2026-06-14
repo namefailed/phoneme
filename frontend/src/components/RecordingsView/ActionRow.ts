@@ -17,7 +17,18 @@ export type ActionRowCallbacks = {
    *  renamed speakers carry through. Optional — omitted/empty leaves the raw
    *  `[Speaker N]` markers in place. */
   getSpeakerNames?: () => SpeakerName[];
+  /** Set the waveform playback speed (S). */
+  onSetSpeed?: (rate: number) => void;
 };
+
+/** Playback-speed cycle (S) — the button steps through these; the choice is
+ *  remembered across recordings in localStorage. */
+export const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+const SPEED_KEY = "phoneme.playbackRate";
+export function readPlaybackSpeed(): number {
+  const n = Number(localStorage.getItem(SPEED_KEY));
+  return PLAYBACK_SPEEDS.includes(n as (typeof PLAYBACK_SPEEDS)[number]) ? n : 1;
+}
 
 /**
  * The detail pane's action strip: Play/Pause · Re-run… (opens the Models modal
@@ -44,6 +55,7 @@ export class ActionRowElement extends LitElement {
   @property({ type: String }) recordingId = "";
   @property({ type: Boolean }) playing = false;
   @property({ type: Object }) cbs!: ActionRowCallbacks;
+  @state() private speed = readPlaybackSpeed();
 
   /** Global keyboard-shortcut bridge (keyboard.ts dispatches phoneme:action). */
   private actionHandler = (e: Event) => {
@@ -207,10 +219,20 @@ export class ActionRowElement extends LitElement {
     }
   }
 
+  /** Step to the next playback speed, remember it, and tell the player. */
+  private cycleSpeed = () => {
+    const i = PLAYBACK_SPEEDS.indexOf(this.speed as (typeof PLAYBACK_SPEEDS)[number]);
+    const next = PLAYBACK_SPEEDS[(i + 1) % PLAYBACK_SPEEDS.length];
+    this.speed = next;
+    try { localStorage.setItem(SPEED_KEY, String(next)); } catch { /* localStorage may be unavailable */ }
+    this.cbs.onSetSpeed?.(next);
+  };
+
   render() {
     return html`
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
+        <button class="speed-btn" title="Playback speed — click to cycle" aria-label="Playback speed ${this.speed}×" @click=${this.cycleSpeed}>${this.speed}×</button>
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <span class="export-trigger-wrap" style="position: relative; display: inline-block;">
           <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ▾</button>
