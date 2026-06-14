@@ -199,6 +199,19 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Local LLM post-processing no longer times out mid-generation** — the
+  cleanup/summary/title steps applied the `[llm_post_process].timeout_secs`
+  (default **30 s**) as a *total* deadline on the request, including a **streaming**
+  Ollama response. A healthy but slow local generation on a CPU box (or a cold
+  model load under memory pressure) blew past 30 s and was aborted mid-stream,
+  surfacing as the opaque `Ollama stream error: error decoding response body` and
+  a `cleanup_failed` / `summary_failed` recording. The streaming path now bounds
+  the **idle** time between chunks (floored to ≥120 s, also covering the first-token
+  cold load) and lets total generation run as long as tokens keep arriving; the
+  non-streaming Ollama call gets the same ≥120 s floor. A genuine stall now fails
+  with an actionable message ("the model may be loading/swapping under memory
+  pressure — try a smaller model or raise `timeout_secs`") instead of a decode
+  error.
 - [x] Doctor's local whisper-server probes follow the port the server bound
   after a fallback (and say "running on 51234, fallback from 5809") instead
   of probing the dead configured port — fixed on both the daemon-side and

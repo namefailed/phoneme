@@ -202,8 +202,12 @@ impl LlmProvider for OllamaProvider {
             "prompt": combine(prompt, text),
             "stream": false,
         });
+        // Floor the deadline well above the 30 s default: a cold local model on a
+        // CPU box needs time to load before it emits the (whole, non-streamed)
+        // response, and 30 s reliably aborts that on a slow machine.
+        let deadline = self.timeout.max(Duration::from_secs(120));
         let parsed: OllamaResponse = send_json(
-            self.http.post(&self.url).timeout(self.timeout).json(&body),
+            self.http.post(&self.url).timeout(deadline).json(&body),
             "Ollama",
         )
         .await?;
@@ -224,14 +228,27 @@ impl LlmProvider for OllamaProvider {
             "prompt": combine(prompt, text),
             "stream": true,
         });
-        let resp = self
-            .http
-            .post(&self.url)
-            .timeout(self.timeout)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| Error::Internal(format!("Ollama request failed: {e}")))?;
+        // A streaming generation legitimately runs far longer than a single
+        // request deadline. `RequestBuilder::timeout` is a TOTAL cap on the whole
+        // response body, so on a slow/CPU box it aborts a *healthy* long
+        // generation mid-stream — reqwest then surfaces it as the opaque "error
+        // decoding response body". Instead bound the *idle* time: how long we wait
+        // for the next chunk (and for the first one, which also covers a cold
+        // model load), letting total generation take as long as it needs while
+        // tokens keep arriving. Floor it well above the 30 s default, which is
+        // meant for a whole non-streaming response, not a per-token gap.
+        let idle = self.timeout.max(Duration::from_secs(120));
+        let resp =
+            match tokio::time::timeout(idle, self.http.post(&self.url).json(&body).send()).await {
+                Err(_) => {
+                    return Err(Error::Internal(format!(
+                        "Ollama did not respond within {}s — the model may be loading under \
+                     memory pressure; try a smaller model or raise [llm_post_process].timeout_secs",
+                        idle.as_secs()
+                    )))
+                }
+                Ok(r) => r.map_err(|e| Error::Internal(format!("Ollama request failed: {e}")))?,
+            };
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -242,15 +259,25 @@ impl LlmProvider for OllamaProvider {
 
         // NDJSON: one JSON object per line. reqwest hands us arbitrary byte
         // chunks, so buffer and split on '\n' rather than assuming a chunk is a
-        // whole line.
+        // whole line. Each chunk read is bounded by `idle` so a genuinely stalled
+        // stream fails fast while a slow-but-progressing one keeps going.
         let mut acc = String::new();
         let mut buf = String::new();
         let mut resp = resp;
-        while let Some(chunk) = resp
-            .chunk()
-            .await
-            .map_err(|e| Error::Internal(format!("Ollama stream error: {e}")))?
-        {
+        loop {
+            let chunk = match tokio::time::timeout(idle, resp.chunk()).await {
+                Err(_) => {
+                    return Err(Error::Internal(format!(
+                        "Ollama stream stalled: no data for {}s — the model may be swapping \
+                         under memory pressure; try a smaller model or raise \
+                         [llm_post_process].timeout_secs",
+                        idle.as_secs()
+                    )))
+                }
+                Ok(Ok(Some(c))) => c,
+                Ok(Ok(None)) => break,
+                Ok(Err(e)) => return Err(Error::Internal(format!("Ollama stream error: {e}"))),
+            };
             buf.push_str(&String::from_utf8_lossy(&chunk));
             while let Some(nl) = buf.find('\n') {
                 let line: String = buf.drain(..=nl).collect();
