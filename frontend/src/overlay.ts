@@ -24,7 +24,8 @@ const root = document.getElementById("overlay-root")!;
 root.innerHTML = `
   <div class="ov-card">
     <span class="ov-pulse" aria-hidden="true"></span>
-    <span class="ov-label">LIVE</span>
+    <span class="ov-wave" id="ov-wave" aria-hidden="true"></span>
+    <span class="ov-label" id="ov-label">LIVE</span>
     <span class="ov-body" id="ov-body"></span>
     <button class="ov-src" id="ov-src" hidden title="Switch which audio the caption follows"></button>
     <button class="ov-close" id="ov-close" title="Hide overlay (re-shows on the next recording)" aria-label="Hide overlay">✕</button>
@@ -33,6 +34,48 @@ root.innerHTML = `
 
 const bodyEl = document.getElementById("ov-body") as HTMLElement;
 const srcBtn = document.getElementById("ov-src") as HTMLButtonElement;
+const labelEl = document.getElementById("ov-label") as HTMLElement;
+
+// ── "It hears me" waveform pill (1e) + listening/active state (1d) ───────────
+// A row of bars driven by the daemon's AudioLevelSample events (cheap mic RMS,
+// no transcription). Built once; heights animate via CSS transform. Independent
+// of the caption — shows during any capture when `recording.preview_waveform`.
+const WAVE_BARS = 7;
+const waveEl = document.getElementById("ov-wave") as HTMLElement;
+for (let i = 0; i < WAVE_BARS; i++) {
+  const b = document.createElement("span");
+  b.className = "ov-wave-bar";
+  waveEl.appendChild(b);
+}
+const waveBars = Array.from(waveEl.querySelectorAll<HTMLElement>(".ov-wave-bar"));
+const waveRing: number[] = new Array(WAVE_BARS).fill(0);
+let waveEnabled = true;
+let idleMs = 2500;
+let lastCaptionAt = 0;
+let revealWps = 12; // token-bucket reveal speed (words/sec); 0 = instant. See queueText.
+
+function pushLevel(level: number) {
+  if (!waveEnabled) return;
+  waveRing.push(Math.max(0, Math.min(1, Number.isFinite(level) ? level : 0)));
+  waveRing.shift();
+  for (let i = 0; i < waveBars.length; i++) {
+    // 0.15 floor so the bars are always visible while active.
+    waveBars[i].style.transform = `scaleY(${(0.15 + waveRing[i] * 0.85).toFixed(3)})`;
+  }
+}
+function resetWave() {
+  waveRing.fill(0);
+  waveBars.forEach((b) => (b.style.transform = "scaleY(0.15)"));
+}
+resetWave();
+
+// Listening vs active: the label reads "LISTENING" when no new caption text has
+// arrived for `idleMs` (a calm state instead of a frozen caption), "LIVE" while
+// words are flowing. Only meaningful while the overlay is shown.
+window.setInterval(() => {
+  if (lastCaptionAt === 0) return;
+  labelEl.textContent = Date.now() - lastCaptionAt > idleMs ? "LISTENING" : "LIVE";
+}, 500);
 const win = getCurrentWindow();
 
 /** Placeholder shown by the Settings "Preview" button so the overlay can be
@@ -55,6 +98,10 @@ void (async () => {
       document.documentElement.setAttribute("data-theme", cfg.interface.theme);
     }
     meetingMode = cfg?.recording?.meeting_preview === "both" ? "both" : "toggle";
+    waveEnabled = cfg?.recording?.preview_waveform !== false;
+    if (typeof cfg?.recording?.preview_idle_ms === "number") idleMs = cfg.recording.preview_idle_ms;
+    if (typeof cfg?.recording?.preview_reveal_words_per_sec === "number")
+      revealWps = cfg.recording.preview_reveal_words_per_sec;
   } catch {
     /* keep CSS defaults */
   }
@@ -123,14 +170,20 @@ srcBtn.addEventListener("click", () => {
   });
 });
 
-// ── Live-text rendering (throttled per target element) ──────────────────────
-// Coalesce partials into a steady render cadence and keep each caption pinned
-// to its newest words. The daemon stitches captions so they grow forward; here
-// we just throttle DOM writes.
-const RENDER_MS = 150;
+// ── Live-text rendering: token-bucket reveal (1d) ───────────────────────────
+// The daemon stitches partials so the caption grows forward, but it arrives in
+// bursts — one chunk per preview tick, and on a slow box (adaptive backoff) the
+// ticks are seconds apart, so the old code dumped a paragraph at once. Instead
+// we reveal toward the latest text at a steady ~`revealWps` words/sec so words
+// stream in like speech. Two rules keep it honest:
+//   • Corrections never lag: if a new partial diverges from what we've shown
+//     (whisper revised earlier words), we snap the reveal cursor back to the
+//     common prefix so the fix appears immediately.
+//   • No infinite backlog: if we're more than ~1.5s of reveal behind, we jump
+//     forward so a big burst can't crawl for ages.
+// Set `preview_reveal_words_per_sec` to 0 to disable smoothing (instant text).
 const MAX_CHARS = 600;
-type Pending = { text: string | null; timer: number | null; lastAt: number };
-const pendings = new Map<HTMLElement, Pending>();
+const CHARS_PER_WORD = 5.5; // rough average incl. the trailing space
 
 function renderText(el: HTMLElement | null, text: string | null) {
   if (!el) return;
@@ -138,32 +191,80 @@ function renderText(el: HTMLElement | null, text: string | null) {
   if (text) el.scrollTop = el.scrollHeight;
 }
 
+/** Per-element reveal state: the full text we're heading toward and how many
+ *  characters of it are currently shown (float, so sub-character budget carries
+ *  between frames). */
+type Reveal = { target: string; shown: number };
+const reveals = new Map<HTMLElement, Reveal>();
+let revealRaf: number | null = null;
+let lastFrame = 0;
+
+/** Length of the shared leading prefix of two strings. */
+function commonPrefixLen(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  return i;
+}
+
+function stepReveal(now: number) {
+  revealRaf = null;
+  const dt = Math.min(0.25, (now - lastFrame) / 1000); // clamp tab-stall gaps
+  lastFrame = now;
+  const budget = Math.max(1, revealWps * CHARS_PER_WORD * dt);
+  const maxLag = revealWps * CHARS_PER_WORD * 1.5; // ≤1.5s of reveal behind
+  let anyPending = false;
+  reveals.forEach((r, el) => {
+    if (r.shown >= r.target.length) return;
+    const behind = r.target.length - r.shown;
+    // If we've fallen too far behind, leap most of the way, then keep streaming.
+    const step = behind > maxLag ? behind - maxLag + budget : budget;
+    r.shown = Math.min(r.target.length, r.shown + step);
+    renderText(el, r.target.slice(0, Math.floor(r.shown)));
+    if (r.shown < r.target.length) anyPending = true;
+  });
+  if (anyPending) revealRaf = requestAnimationFrame(stepReveal);
+}
+
+function ensureRevealLoop() {
+  if (revealRaf !== null) return;
+  lastFrame = performance.now();
+  revealRaf = requestAnimationFrame(stepReveal);
+}
+
 function queueText(el: HTMLElement | null, text: string | null) {
   if (!el) return;
-  let p = pendings.get(el);
-  if (!p) {
-    p = { text: null, timer: null, lastAt: 0 };
-    pendings.set(el, p);
+  const target = text ?? "";
+  // Instant mode (smoothing off) or an explicit clear: render straight away.
+  if (revealWps <= 0 || target === "") {
+    reveals.set(el, { target, shown: target.length });
+    renderText(el, target);
+    return;
   }
-  p.text = text;
-  const flush = () => {
-    if (p!.timer !== null) {
-      clearTimeout(p!.timer);
-      p!.timer = null;
-    }
-    p!.lastAt = Date.now();
-    renderText(el, p!.text);
-  };
-  const since = Date.now() - p.lastAt;
-  if (since >= RENDER_MS) flush();
-  else if (p.timer === null) p.timer = window.setTimeout(flush, RENDER_MS - since);
+  let r = reveals.get(el);
+  if (!r) {
+    r = { target: "", shown: 0 };
+    reveals.set(el, r);
+  }
+  const shownStr = r.target.slice(0, Math.floor(r.shown));
+  if (target.startsWith(shownStr)) {
+    // Pure forward growth — keep revealing from where we are.
+    r.target = target;
+  } else {
+    // Divergence: whisper revised earlier words. Rewind the cursor to the common
+    // prefix so the correction reveals immediately instead of showing stale text.
+    r.shown = commonPrefixLen(shownStr, target);
+    r.target = target;
+  }
+  ensureRevealLoop();
 }
 
 function clearAllText() {
-  pendings.forEach((p) => {
-    if (p.timer !== null) clearTimeout(p.timer);
-  });
-  pendings.clear();
+  if (revealRaf !== null) {
+    cancelAnimationFrame(revealRaf);
+    revealRaf = null;
+  }
+  reveals.clear();
   if (singleEl) renderText(singleEl, null);
   trackEls.forEach((el) => renderText(el, null));
 }
@@ -239,6 +340,9 @@ void listen<any>("daemon-event", async (e) => {
         setShape("single");
       }
       await showOverlay();
+      lastCaptionAt = Date.now();
+      labelEl.textContent = "LIVE";
+      resetWave();
       break;
     }
     case "preview_source_changed":
@@ -254,11 +358,16 @@ void listen<any>("daemon-event", async (e) => {
       if (userHidden) break; // respect a manual hide until the next start
       const t = typeof p.text === "string" ? p.text.trim() : "";
       const text = t ? t.slice(-MAX_CHARS) : null;
+      if (text) lastCaptionAt = Date.now(); // words flowing → "LIVE", not idle
       const track = meetingTracks.get(p.id);
       if (shape === "both" && track) queueText(trackEls.get(track) ?? null, text);
       else queueText(singleEl, text);
       break;
     }
+    case "audio_level_sample":
+      // Drive the "it hears me" waveform bars. Cheap; runs for any capture.
+      if (!userHidden) pushLevel(typeof p.level === "number" ? p.level : 0);
+      break;
     case "recording_stopped":
     case "recording_cancelled":
     case "recording_deleted":
@@ -267,7 +376,13 @@ void listen<any>("daemon-event", async (e) => {
       // while the other is still live. Only schedule the dim/hide once no track
       // remains (single recordings have no tracks registered, so they hide as
       // before); a fresh recording_started cancels it by re-showing.
-      if (meetingTracks.size === 0) scheduleHide();
+      if (meetingTracks.size === 0) {
+        scheduleHide();
+        // Settle the waveform and stop the listening/active flip — capture is over.
+        lastCaptionAt = 0;
+        labelEl.textContent = "LIVE";
+        resetWave();
+      }
       break;
   }
 });

@@ -76,6 +76,18 @@ export class SectionPreview {
     return (this.config.whisper?.bundled_server_port ?? 5809) as number;
   }
 
+  /** True when the FINAL transcription model is a heavy local model (medium /
+   *  large). Sharing it for the preview ("same as final") is what makes the live
+   *  text lag on a modest machine — so we nudge toward a dedicated tiny model.
+   *  A cloud final model has no local CPU cost to share, so it's never "heavy"
+   *  here. */
+  private mainModelIsHeavy(): boolean {
+    const w = this.config.whisper;
+    if (!w) return false;
+    if (w.provider && w.provider !== "local") return false;
+    return /medium|large/i.test(String(w.model_path ?? ""));
+  }
+
   /** The small downloaded model the local branch starts on: prefer a preview-
    *  sized one (Tiny/Base/Small), else any downloaded model, else blank (the
    *  daemon waits until one is picked — downloads happen in the Whisper
@@ -123,6 +135,11 @@ export class SectionPreview {
     const src = this.source();
     const enabled = !!this.config.recording?.streaming_preview;
     const overlay = !!this.config.interface?.preview_overlay;
+    // Feel/perf knobs (defaults mirror the daemon's serde defaults).
+    const adaptive = this.config.recording?.preview_adaptive !== false;
+    const waveform = this.config.recording?.preview_waveform !== false;
+    const revealWps = this.config.recording?.preview_reveal_words_per_sec ?? 12;
+    const idleMs = this.config.recording?.preview_idle_ms ?? 2500;
 
     this.container.innerHTML = `
       <div class="settings-section">
@@ -176,6 +193,52 @@ export class SectionPreview {
         </div>
 
         <div id="prev-detail"></div>
+
+        <h4 style="margin:14px 0 6px; font-size:13px; color:var(--fg-muted);">Feel &amp; performance</h4>
+
+        <div class="settings-field">
+          <label>Auto-throttle on slow machines
+            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+              When a preview update takes too long, the daemon automatically slows the cadence so
+              recording never lags. Leave on unless you want a fixed update rate.
+            </span>
+          </label>
+          <div><input type="checkbox" class="toggle-switch" id="prev-adaptive" ${adaptive ? "checked" : ""} ${enabled ? "" : "disabled"} /></div>
+        </div>
+
+        <div class="settings-field">
+          <label>Reveal speed
+            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+              How fast live words stream in. <b>0</b> shows each update instantly (no smoothing).
+            </span>
+          </label>
+          <div>
+            <input type="number" id="prev-reveal-wps" min="0" max="60" step="1" value="${revealWps}" style="width:90px;" ${enabled ? "" : "disabled"} />
+            <span style="color:var(--fg-muted); font-size:12px; margin-left:6px;">words / sec</span>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label>Overlay waveform
+            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+              Show the “it hears me” bars in the desktop overlay so you can see audio is being captured,
+              even between words.
+            </span>
+          </label>
+          <div><input type="checkbox" class="toggle-switch" id="prev-waveform" ${waveform ? "checked" : ""} ${overlay ? "" : "disabled"} /></div>
+        </div>
+
+        <div class="settings-field">
+          <label>“Listening” after
+            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+              When no new words arrive for this long, the overlay label calms from <b>LIVE</b> to <b>LISTENING</b>.
+            </span>
+          </label>
+          <div>
+            <input type="number" id="prev-idle-ms" min="500" max="20000" step="250" value="${idleMs}" style="width:110px;" ${overlay ? "" : "disabled"} />
+            <span style="color:var(--fg-muted); font-size:12px; margin-left:6px;">ms</span>
+          </div>
+        </div>
       </div>
     `;
 
@@ -186,6 +249,22 @@ export class SectionPreview {
       // alongside the preview. Turning the preview off also clears the overlay
       // flag and re-renders to disable its controls.
       if (!on && this.config.interface) this.config.interface.preview_overlay = false;
+      // One-time nudge: enabling preview while it shares a heavy final model is
+      // the classic "live preview lags my recording" trap. Steer toward a
+      // dedicated tiny model once, then never nag again.
+      if (on && this.source() === "same" && this.mainModelIsHeavy()) {
+        try {
+          if (!localStorage.getItem("phoneme.previewHeavyNudgeShown")) {
+            showToast(
+              "Live preview will share your heavy final model — for a smooth overlay, give it a dedicated Tiny model below.",
+              "info",
+            );
+            localStorage.setItem("phoneme.previewHeavyNudgeShown", "1");
+          }
+        } catch {
+          /* localStorage may be unavailable — the inline nudge below still shows */
+        }
+      }
       this.render();
     });
 
@@ -217,6 +296,24 @@ export class SectionPreview {
       this.render();
     });
 
+    // Feel/perf knobs. Toggles/number fields write straight through to
+    // config.recording (persisted by the global Settings Save) and deliberately
+    // do NOT re-render — re-rendering a focused number input would lose the caret.
+    this.container.querySelector<HTMLInputElement>("#prev-adaptive")?.addEventListener("change", (e) => {
+      this.config.recording.preview_adaptive = (e.target as HTMLInputElement).checked;
+    });
+    this.container.querySelector<HTMLInputElement>("#prev-waveform")?.addEventListener("change", (e) => {
+      this.config.recording.preview_waveform = (e.target as HTMLInputElement).checked;
+    });
+    this.container.querySelector<HTMLInputElement>("#prev-reveal-wps")?.addEventListener("change", (e) => {
+      const n = Number((e.target as HTMLInputElement).value);
+      this.config.recording.preview_reveal_words_per_sec = Number.isFinite(n) ? Math.max(0, Math.min(60, n)) : 12;
+    });
+    this.container.querySelector<HTMLInputElement>("#prev-idle-ms")?.addEventListener("change", (e) => {
+      const n = Number((e.target as HTMLInputElement).value);
+      this.config.recording.preview_idle_ms = Number.isFinite(n) ? Math.max(500, Math.min(20000, Math.round(n))) : 2500;
+    });
+
     this.renderDetail(src);
   }
 
@@ -242,6 +339,7 @@ export class SectionPreview {
     if (!host) return;
 
     if (src === "same") {
+      const heavy = this.mainModelIsHeavy();
       host.innerHTML = `
         <div class="settings-field">
           <label></label>
@@ -249,7 +347,25 @@ export class SectionPreview {
             Preview reuses your final model on the same server. Simplest, but on a heavy model the
             live text can lag — pick a dedicated local model or a cloud API for a snappy overlay.
           </div>
-        </div>`;
+        </div>
+        ${heavy ? `
+        <div class="settings-field">
+          <label></label>
+          <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--accent, #89b4fa) 35%, transparent); background:color-mix(in srgb, var(--accent, #89b4fa) 10%, transparent); border-radius:8px; font-size:12px; color:var(--fg-default); line-height:1.5;">
+            <span>⚡ Your final model looks heavy for live preview. Give the preview its own Tiny model so recording stays smooth.</span>
+            <div><button class="inline-button" id="prev-use-tiny">Use a dedicated Tiny model</button></div>
+          </div>
+        </div>` : ""}`;
+      if (heavy) {
+        host.querySelector<HTMLButtonElement>("#prev-use-tiny")?.addEventListener("click", () => {
+          // Prefer an already-downloaded Tiny; else the lightest model on hand
+          // (Whisper section handles downloads). Switching source re-renders into
+          // the local branch where they can confirm/change the pick.
+          const tiny = this.downloadedPath("ggml-tiny.en.bin") ?? this.firstLocalModel();
+          this.setLocal(tiny);
+          this.render();
+        });
+      }
       return;
     }
 

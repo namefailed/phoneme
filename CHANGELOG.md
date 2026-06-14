@@ -61,6 +61,31 @@ trust boundary. Verified against current code.*
   desktop window that floats the live caption over any app, even when the main
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
+- [x] **Live-preview wave 1 — smooth, adaptive & it-hears-me.** The biggest live
+  preview pass yet, all under the Beta pill until verified:
+  - **Adaptive cadence (the record-time crash fix).** When a preview tick takes
+    longer than the interval (a heavy model on a modest box), the daemon
+    automatically backs the cadence off toward the tick's own cost (clamped to
+    8 s) instead of thrashing the machine and wedging the recording. Toggle
+    `recording.preview_adaptive` (on by default) to keep a fixed rate instead.
+  - **Token-bucket reveal.** The overlay streams words toward the latest text at
+    `recording.preview_reveal_words_per_sec` (default 12; `0` = show each update
+    instantly) so captions flow like speech instead of jumping a paragraph at a
+    time — with an instant correction-snap when whisper revises earlier words.
+  - **LIVE ↔ LISTENING state.** The overlay label calms from **LIVE** to
+    **LISTENING** after `recording.preview_idle_ms` (default 2500) with no new
+    words, instead of showing a frozen caption.
+  - **"It hears me" waveform pill.** The overlay shows live audio-level bars
+    driven by a cheap daemon RMS loop (a tiny trailing tail at ~15 Hz, no
+    transcription, no whisper permit) for single recordings, in-place dictation,
+    and meetings — visible proof audio is being captured even between words.
+    Toggle `recording.preview_waveform` (on by default).
+  - **Heavy-model nudge.** Enabling preview while it shares a heavy local final
+    model shows a one-time notice and a one-click **Use a dedicated Tiny model**
+    button (Settings → Transcription → Live Preview), steering toward a snappy
+    overlay without silently changing your final transcription model.
+  - All knobs live in **Settings → Transcription → Live Preview → Feel &
+    performance** and are searchable.
 - [x] **Word-level timestamps** — transcription providers now capture per-word
   timing (and per-word confidence from Deepgram/AssemblyAI) into a new
   `transcript_words` table, exposed via the `get_words` IPC request / Tauri

@@ -896,10 +896,38 @@ pub struct RecordingConfig {
     /// accepted but offer no headroom.
     #[serde(default = "default_normalize_target_dbfs")]
     pub normalize_target_dbfs: f32,
+    /// Live preview: adaptively slow the transcription cadence when a tick
+    /// overruns the current interval, so a heavy model on a weak box
+    /// self-throttles instead of piling up and thrashing. **Default true.**
+    #[serde(default = "default_true")]
+    pub preview_adaptive: bool,
+    /// Live preview: meter newly-transcribed words onto the caption at this many
+    /// words/second for a steady reveal, instead of dumping a whole chunk per
+    /// tick. `0.0` reveals everything immediately. **Default 12.0.**
+    #[serde(default = "default_preview_reveal_wps")]
+    pub preview_reveal_words_per_sec: f32,
+    /// Live preview: after this many milliseconds with no new committed words,
+    /// the overlay shows a calm "listening" state instead of a frozen caption.
+    /// **Default 2500.**
+    #[serde(default = "default_preview_idle_ms")]
+    pub preview_idle_ms: u32,
+    /// Live preview: show the live mic-level waveform pill in the desktop overlay
+    /// while recording/dictating. **Default true.** Independent of the caption
+    /// text; only visible when the overlay window itself is enabled.
+    #[serde(default = "default_true")]
+    pub preview_waveform: bool,
 }
 
 fn default_meeting_preview() -> String {
     "toggle".into()
+}
+
+fn default_preview_reveal_wps() -> f32 {
+    12.0
+}
+
+fn default_preview_idle_ms() -> u32 {
+    2500
 }
 
 fn default_normalize_target_dbfs() -> f32 {
@@ -1495,6 +1523,10 @@ impl Default for Config {
                 meeting_preview: default_meeting_preview(),
                 normalize: false,
                 normalize_target_dbfs: default_normalize_target_dbfs(),
+                preview_adaptive: true,
+                preview_reveal_words_per_sec: 12.0,
+                preview_idle_ms: 2500,
+                preview_waveform: true,
             },
             hook: HookConfig {
                 commands: vec![

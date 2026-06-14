@@ -174,3 +174,14 @@ fn all_error_kinds_have_distinct_serialized_form() {
         assert!(seen.insert(s.clone()), "duplicate serialization: {s}");
     }
 }
+
+#[test]
+fn audio_level_sample_event_roundtrips() {
+    let ev = DaemonEvent::AudioLevelSample {
+        id: RecordingId::new(),
+        level: 0.42,
+    };
+    roundtrip(&ev);
+    let json = serde_json::to_string(&ev).unwrap();
+    assert!(json.contains("\"event\":\"audio_level_sample\""), "{json}");
+}

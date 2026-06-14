@@ -78,6 +78,41 @@ const PREVIEW_MIN_NEW_SAMPLES: usize = 16_000;
 /// preview, not the final result. 15 s at 16 kHz.
 const PREVIEW_WINDOW_SAMPLES: usize = 16_000 * 15;
 
+/// Adaptive-cadence ceiling: even when ticks keep overrunning (a heavy model on
+/// a weak box), never wait longer than this between preview transcriptions so the
+/// caption still advances. The floor is the per-tick base interval.
+const PREVIEW_INTERVAL_CEIL: Duration = Duration::from_millis(8000);
+
+/// Pick the wait before the next preview tick. With `adaptive`, never schedule
+/// faster than the last tick actually took — so a slow box/model self-throttles
+/// instead of piling onto the single serial whisper-server and thrashing the
+/// machine (the live-preview record-time crash) — clamped to `[base, ceil]`.
+/// Without it, always `base` (the historical fixed cadence).
+fn next_preview_interval(
+    base: Duration,
+    last_cost: Duration,
+    ceil: Duration,
+    adaptive: bool,
+) -> Duration {
+    if !adaptive {
+        return base;
+    }
+    last_cost.clamp(base, ceil)
+}
+
+/// Normalized 0.0..=1.0 loudness of a sample block for the overlay's waveform
+/// pill: RMS over the `i16` samples scaled by full scale, then a `sqrt` curve so
+/// ordinary speech still visibly moves the bars (linear RMS sits very low for
+/// voice). Empty input is silence.
+fn rms_level_01(samples: &[i16]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
+    let rms = (sum_sq / samples.len() as f64).sqrt() / 32768.0;
+    (rms.sqrt() as f32).clamp(0.0, 1.0)
+}
+
 /// Stitch a freshly-transcribed trailing window onto the preview text already
 /// shown, producing a stable, forward-growing caption instead of a text that
 /// "rewinds" every time the rolling audio window slides.
@@ -456,20 +491,22 @@ impl DaemonRecorder {
             // drop the interval to 1000ms for real-time streaming without worrying
             // about HTTP/file-write overhead. Cloud providers get longer intervals
             // to avoid overwhelming the API.
-            let interval_duration = if is_native {
+            let base_interval = if is_native {
                 std::time::Duration::from_millis(1000)
             } else {
                 PREVIEW_INTERVAL
             };
+            // Adaptive cadence: when a tick's transcription overruns the base
+            // interval (heavy model on a weak box), wait at least that long
+            // before the next one so the preview self-throttles instead of
+            // piling onto the single serial whisper-server and thrashing the
+            // machine. Starts at the base cadence; the first sleep also doubles
+            // as the "don't transcribe near-empty audio" warm-up.
+            let adaptive = cfg.recording.preview_adaptive;
+            let mut current_wait = base_interval;
 
             let tmp_wav =
                 std::env::temp_dir().join(format!("phoneme-preview-{}.wav", id.file_stem()));
-            let mut interval = tokio::time::interval(interval_duration);
-            // If a transcription overruns the interval, skip missed ticks rather
-            // than firing a burst — this is the "never two at once" throttle.
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            // Burn the immediate first tick so we don't transcribe near-empty audio.
-            interval.tick().await;
             let mut last_len = 0usize;
             // The stable, forward-growing caption shown so far. While the
             // recording is shorter than the audio window each transcription is of
@@ -481,7 +518,7 @@ impl DaemonRecorder {
             loop {
                 tokio::select! {
                     _ = &mut stop_rx => break,
-                    _ = interval.tick() => {}
+                    _ = tokio::time::sleep(current_wait) => {}
                 }
 
                 // Snapshot only the trailing window of audio captured so far (the
@@ -519,6 +556,7 @@ impl DaemonRecorder {
 
                 // Use the cached provider to avoid re-resolving on every tick.
                 // Config changes during recording will take effect on the next recording.
+                let tick_start = std::time::Instant::now();
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim();
@@ -549,6 +587,15 @@ impl DaemonRecorder {
                         tracing::debug!(error = %e, "streaming preview: transcription tick failed");
                     }
                 }
+                // Adapt the next wait to how long this tick actually took, so a
+                // heavy model on a weak box self-throttles instead of trying to
+                // run every base-interval and thrashing (the record-time crash).
+                current_wait = next_preview_interval(
+                    base_interval,
+                    tick_start.elapsed(),
+                    PREVIEW_INTERVAL_CEIL,
+                    adaptive,
+                );
             }
 
             // Clean up temp file even if loop exits early
@@ -560,6 +607,51 @@ impl DaemonRecorder {
             .await
             .push(PreviewTask { stop_tx, task });
         tracing::info!(id = %log_id, "streaming transcription preview started");
+    }
+
+    /// Spawn the cheap live audio-level loop that feeds the overlay's waveform
+    /// "it hears me" pill: snapshot a tiny trailing tail at ~15 Hz, compute a
+    /// normalized RMS level, emit `AudioLevelSample`. It never acquires the
+    /// whisper permit or transcribes, so it adds negligible load and runs for any
+    /// capture (including in-place dictation). No-op unless `preview_waveform` is
+    /// on. Stored in `self.preview` so `stop_preview` tears it down too.
+    async fn start_level_loop(
+        &self,
+        state: &AppState,
+        id: RecordingId,
+        snapshot: phoneme_audio::recorder::SnapshotHandle,
+    ) {
+        if !state.config.load().recording.preview_waveform {
+            return;
+        }
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let state = state.clone();
+        let task = tokio::spawn(async move {
+            // ~100 ms tail at 16 kHz, sampled ~15×/s — lively without measurable cost.
+            const LEVEL_TAIL_SAMPLES: usize = 1600;
+            let mut interval = tokio::time::interval(Duration::from_millis(66));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => break,
+                    _ = interval.tick() => {}
+                }
+                // Recorder gone (race with stop) → exit, like the preview loop.
+                let (_total, samples) = match snapshot.snapshot_tail(LEVEL_TAIL_SAMPLES).await {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
+                let level = rms_level_01(&samples);
+                state.events.emit(DaemonEvent::AudioLevelSample {
+                    id: id.clone(),
+                    level,
+                });
+            }
+        });
+        self.preview
+            .lock()
+            .await
+            .push(PreviewTask { stop_tx, task });
     }
 
     /// Stop the streaming-preview loop (if running) and wait for it to exit so
@@ -741,6 +833,9 @@ impl DaemonRecorder {
         // Clone a snapshot handle before moving the recorder into the slot, so
         // the preview loop can read this recording's audio.
         let preview_snapshot = recorder.snapshot_handle();
+        // A second handle for the cheap audio-level loop (waveform pill); it
+        // never touches whisper, so it runs independently of the caption preview.
+        let level_snapshot = recorder.snapshot_handle();
         *self.handle.lock().await = Some(recorder);
 
         // If it's a self-terminating mode, spawn a task to auto-stop when the recorder task finishes natively.
@@ -768,6 +863,12 @@ impl DaemonRecorder {
             self.start_preview(state, id.clone(), preview_snapshot)
                 .await;
         }
+        // The live audio-level waveform runs for every capture (including
+        // in-place dictation), gated only on `recording.preview_waveform`. It's
+        // cheap (RMS of a tiny tail, no whisper permit) so it never reintroduces
+        // the preview's record-time lag.
+        self.start_level_loop(state, id.clone(), level_snapshot)
+            .await;
 
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
@@ -1316,6 +1417,20 @@ impl DaemonRecorder {
         // get the same opt-in live caption single recordings do.
         let mode = state.config.load().recording.meeting_preview.clone();
         *self.meeting_preview_sources.lock().await = sources.clone();
+        // The cheap audio-level waveform ("it hears me") follows ONE track for the
+        // whole meeting — the mic (the voice the user watches), else the first
+        // track. It's independent of which caption track is shown and never
+        // touches whisper, so a single loop is enough. Gated on `preview_waveform`
+        // inside start_level_loop; pushed into `self.preview` so stop_meeting's
+        // stop_preview() tears it down with the caption loops.
+        if let Some((id, _, snapshot)) = sources
+            .iter()
+            .find(|(_, t, _)| t == "mic")
+            .or_else(|| sources.first())
+            .cloned()
+        {
+            self.start_level_loop(state, id, snapshot).await;
+        }
         if mode == "both" {
             for (id, _, snapshot) in sources {
                 self.start_preview(state, id, snapshot).await;
@@ -1625,6 +1740,53 @@ mod tests {
         assert_eq!(stitch_preview("", ""), "");
         // Whitespace-only window is treated as empty.
         assert_eq!(stitch_preview("keep me", "   "), "keep me");
+    }
+
+    // ── next_preview_interval (adaptive cadence — the record-time crash fix) ──
+
+    #[test]
+    fn adaptive_off_keeps_fixed_cadence() {
+        let base = Duration::from_millis(1000);
+        let ceil = Duration::from_millis(8000);
+        // Even a long tick keeps the base cadence when adaptive is off.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(5000), ceil, false),
+            base
+        );
+    }
+
+    #[test]
+    fn adaptive_backs_off_to_tick_cost_clamped() {
+        let base = Duration::from_millis(1000);
+        let ceil = Duration::from_millis(8000);
+        // Fast tick → stays at the base floor.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(200), ceil, true),
+            base
+        );
+        // Slow tick → wait at least as long as it actually took.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(3000), ceil, true),
+            Duration::from_millis(3000)
+        );
+        // Pathologically slow tick → capped at the ceiling so the caption still advances.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(20000), ceil, true),
+            ceil
+        );
+    }
+
+    // ── rms_level_01 (waveform pill loudness) ─────────────────────────────
+
+    #[test]
+    fn rms_level_01_silence_and_full_scale() {
+        assert_eq!(rms_level_01(&[]), 0.0);
+        assert_eq!(rms_level_01(&[0, 0, 0, 0]), 0.0);
+        // A full-scale square wave reads near the top of the range.
+        assert!(rms_level_01(&[i16::MAX, i16::MIN, i16::MAX, i16::MIN]) > 0.99);
+        // A mid-level block sits strictly between silence and full scale.
+        let m = rms_level_01(&[8000, -8000, 8000, -8000]);
+        assert!(m > 0.0 && m < 1.0, "mid level was {m}");
     }
 
     #[test]

@@ -3,11 +3,12 @@
 Two recording-quality features that address opposite ends of a capture: **pre-roll** saves the *start* of your speech; **streaming preview** shows progress *while* you are still talking.
 
 > [!IMPORTANT]
-> Streaming preview is a **beta** feature and ships **off by default**. It
-> works, but it isn't as smooth as the rest of the app yet (live partial
-> transcription is genuinely hard), and a dedicated overhaul is planned on the
-> [roadmap](../../ROADMAP.md). Turn it on in **Settings → Transcription →
-> Live Preview** if you want it today.
+> Streaming preview is a **beta** feature and ships **off by default**. The
+> *wave 1* overhaul landed a big smoothness/stability pass — adaptive cadence
+> so a heavy model can't wedge your recording, word-by-word reveal, a
+> LIVE/LISTENING state, and the "it hears me" waveform (see **Feel &
+> performance** below). The Beta label stays on until it's verified across a
+> long dictation. Turn it on in **Settings → Transcription → Live Preview**.
 
 ## Pre-roll buffer
 
@@ -72,6 +73,31 @@ Or **Settings → Capture → Streaming preview** (and the **System-wide overlay
 ### System-wide overlay
 
 With `interface.preview_overlay = true`, the live caption also appears in a frameless, always-on-top window that floats over any app — useful during a meeting or screen share when the main window is hidden. It auto-shows when a recording or meeting starts, can be dragged anywhere (its position is remembered), and dims/hides shortly after capture stops. Off by default.
+
+### Feel & performance
+
+**Settings → Transcription → Live Preview → Feel & performance** tunes how the
+preview reads. The defaults are designed to stay smooth on a modest machine.
+
+| Setting | Config key | Default | What it does |
+|---------|-----------|---------|--------------|
+| Auto-throttle on slow machines | `recording.preview_adaptive` | `true` | When a preview update takes longer than its interval (a heavy model on a modest box), the daemon automatically slows the cadence toward the update's own cost (capped at 8 s) instead of thrashing the machine — the fix for "live preview makes recording lag/crash". Turn it off for a fixed update rate. |
+| Reveal speed | `recording.preview_reveal_words_per_sec` | `12` | How fast live words stream into the overlay. Words flow in like speech instead of the caption jumping a whole chunk per update; a correction (when Whisper revises earlier words) still appears instantly. **`0`** = show each update the moment it arrives (no smoothing). |
+| Overlay waveform | `recording.preview_waveform` | `true` | Shows the **"it hears me"** bars in the desktop overlay — live audio levels so you can see your voice is being captured, even between words. Cheap (an audio-level reading, no extra transcription), and it runs for single recordings, in-place dictation, and meetings. |
+| "Listening" after | `recording.preview_idle_ms` | `2500` | When no new words arrive for this long, the overlay label calms from **LIVE** to **LISTENING** instead of leaving a frozen caption. |
+
+> [!TIP]
+> **Heavy final model?** If you enable preview while it's set to *Same as final
+> model* and your final model is a heavy local one (medium / large), Phoneme
+> shows a one-time nudge and a one-click **Use a dedicated Tiny model** button.
+> A small dedicated preview model (Tiny / Base) on its own thread-limited server
+> keeps the overlay snappy without changing the model that produces your
+> authoritative transcript. See the **Preview source** options above.
+
+> [!NOTE]
+> The waveform bars run even during [in-place dictation](transcribe_in_place.md)
+> (where the caption preview itself is skipped) — so you still get the "it hears
+> me" feedback while dictating.
 
 ## Using both together
 
