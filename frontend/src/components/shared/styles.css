@@ -16,6 +16,20 @@ body.phoneme-hide-header #hdr {
   outline-offset: 2px;
   border-radius: 8px;
 }
+/* Roving cursor on a split-button group (Record / Settings): ring the whole
+   group from the INSIDE so it hugs the group's outer edge and never paints over
+   the split seam between the main and caret halves (M). */
+.headerbar .hb-rec-group.kbd-group-cursor,
+.headerbar .hb-settings-group.kbd-group-cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+/* …and suppress the per-half ring while the group ring is showing. */
+.headerbar .hb-rec-group .kbd-cursor,
+.headerbar .hb-settings-group .kbd-cursor {
+  outline: none;
+}
 /* Status <select> in keyboard "cycle" mode (Enter pressed): a bolder, glowing
    border so it's obvious you can j/k through the options — its native dropdown
    can't pop open from JS, so this is the affordance instead. */

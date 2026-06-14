@@ -613,6 +613,17 @@ export class RecordingsView {
       case "pane-right": this.movePaneFocus("right"); break;
       case "list-top": this.list.focusEdge("top"); this.focusPane("list"); break;
       case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
+      // gg/G inside the sidebar — jump to the first/last sidebar row (X). The
+      // overflowing tag list and a long queue share this grid, so scrollIntoView
+      // in highlightSidebar() scrolls them into view.
+      case "sidebar-top": this.sidebarRow = 0; this.sidebarCol = 0; this.highlightSidebar(); break;
+      case "sidebar-bottom": {
+        const rows = this.sidebarGrid();
+        this.sidebarRow = Math.max(0, rows.length - 1);
+        this.sidebarCol = 0;
+        this.highlightSidebar();
+        break;
+      }
       // zz — center the list viewport on the cursor row.
       case "list-center": this.list.centerCursor(); break;
       // g d — jump the keyboard into the detail pane (no-op when nothing open).
@@ -731,12 +742,13 @@ export class RecordingsView {
     el.scrollIntoView({ block: "nearest" });
   }
 
-  /** First landing in the sidebar: start on the active filter row, else the top. */
+  /** First landing in the sidebar: always start on the very first row (the
+   *  Library section header) so `h` lands at the top of the list, not on the
+   *  active filter (T — user preference). */
   private enterSidebarNav() {
     const rows = this.sidebarGrid();
     if (!rows.length) return;
-    const active = rows.findIndex((r) => r[0].classList.contains("sidebar-item") && r[0].classList.contains("active"));
-    this.sidebarRow = active >= 0 ? active : 0;
+    this.sidebarRow = 0;
     this.sidebarCol = 0;
     this.highlightSidebar();
   }

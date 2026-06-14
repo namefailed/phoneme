@@ -207,6 +207,18 @@ function headerControls(): HTMLElement[] {
   return [...bar.querySelectorAll<HTMLElement>(sel)].filter((el) => el.offsetParent !== null);
 }
 
+/** Mirror the roving header cursor onto the whole split-button group (Record /
+ *  Settings) so the ring hugs the group's outer edge instead of one half — a
+ *  rounded outline on a single half collides with the split seam (M). Pass null
+ *  (or a control outside any group) to clear it. */
+function setGroupCursor(el: HTMLElement | null) {
+  document
+    .querySelectorAll(".headerbar .kbd-group-cursor")
+    .forEach((g) => g.classList.remove("kbd-group-cursor"));
+  const grp = el?.closest(".hb-rec-group, .hb-settings-group");
+  if (grp) grp.classList.add("kbd-group-cursor");
+}
+
 /** Index of the header control the vim cursor is on; -1 when not in header nav. */
 let headerCursor = -1;
 
@@ -230,6 +242,9 @@ function highlightHeaderSub() {
       el.classList.add("kbd-cursor");
       el.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
+    // Keep the group ring on the opener (Record/Settings) while its dropdown
+    // is open, so the split button still reads as the active group (M).
+    setGroupCursor(headerSub.opener);
   } else {
     // A native <select> can't pop its options from JS, so signal "you're now
     // cycling this" with a bolder border (.kbd-cycle) on top of the cursor ring.
@@ -253,11 +268,13 @@ function highlightHeaderCursor() {
     el.classList.add("kbd-cursor");
     el.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
+  setGroupCursor(el ?? null);
 }
 
 function exitHeaderNav() {
   closeHeaderSub(true);
   document.querySelectorAll(".headerbar .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+  setGroupCursor(null);
   headerCursor = -1;
 }
 
@@ -429,6 +446,13 @@ function onKeyDown(e: KeyboardEvent) {
     if (vimNav && e.key === "g" && activeWithin(".rv-list")) {
       e.preventDefault();
       dispatchVim("list-top");
+      return;
+    }
+    // gg also jumps to the top of any other focused scroll container (the
+    // sidebar — its tag list / queue live in the same grid) (X).
+    if (vimNav && e.key === "g" && activeWithin("ph-sidebar")) {
+      e.preventDefault();
+      dispatchVim("sidebar-top");
       return;
     }
     return;
@@ -652,6 +676,11 @@ function onKeyDown(e: KeyboardEvent) {
         if (activeWithin(".rv-list")) {
           e.preventDefault();
           dispatchVim("list-bottom");
+          return;
+        }
+        if (activeWithin("ph-sidebar")) {
+          e.preventDefault();
+          dispatchVim("sidebar-bottom");
           return;
         }
         break;
