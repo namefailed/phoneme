@@ -224,6 +224,19 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Edited transcripts re-sync the Synced & Timeline views** — when you edit
+  and save a transcript, the per-word and per-segment timing layers are re-flowed
+  onto your new text (`phoneme_core::realign`), so the **Synced** (per-word) and
+  **Timeline** views and click-to-seek follow the edit instead of drifting:
+  unchanged words keep their exact timing, inserted words are interpolated into the
+  gap between the surrounding anchors, deleted words drop out. A monotonic word diff
+  means the timeline never runs backwards even after a reorder, and speaker
+  attribution is preserved (the `[Speaker N]` marker when numeric, else the matched
+  word's index — so renamed speakers keep mapping). **No model run** — it reuses the
+  audio's known timings, so it's instant and offline. On by default; **Settings →
+  Editor → "Re-sync … views when you edit"** turns it off to keep the original
+  machine timings. (True forced re-alignment of edited words against the audio is a
+  roadmap item — it needs an aligner model.)
 - [x] **Security pass + audit follow-ups** — a deep security audit; the one real
   finding fixed: `SemanticSearch`/`MoreLikeThis` now clamp the client-supplied
   result `limit` (≤1000) so a huge value can't force an unbounded allocation over

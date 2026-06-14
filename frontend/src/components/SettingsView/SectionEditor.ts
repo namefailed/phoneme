@@ -17,13 +17,30 @@ export class SectionEditor {
 
   private render(container: HTMLElement) {
     if (!this.config.editor) {
-      this.config.editor = { vim_mode: false, vimrc: "", vimrc_path: "" };
+      this.config.editor = { vim_mode: false, vimrc: "", vimrc_path: "", resync_views_on_edit: true };
     }
 
     container.innerHTML = `
       <div class="settings-section">
         <h3>Editor Settings</h3>
-        
+
+        <div class="settings-field" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 12px; width: 100%;">
+            <label style="margin: 0;">Re-sync Synced &amp; Timeline views when you edit</label>
+            <div>${renderField(
+              { key: "editor.resync_views_on_edit", label: "", kind: "checkbox" },
+              this.config.editor.resync_views_on_edit !== false,
+            )}</div>
+          </div>
+          <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
+            When you save a transcript edit, re-flow the per-word/segment timings onto your
+            new text so the <strong>Synced</strong> and <strong>Timeline</strong> views (and
+            click-to-seek) follow the edit — unchanged words keep their exact timing, new words
+            are interpolated into the gap. No model run. Turn off to keep the original machine
+            timings untouched on edit.
+          </span>
+        </div>
+
         <div class="settings-field">
           <label>Vim keybindings in Editor</label>
           <div>${renderField(

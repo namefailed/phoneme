@@ -62,6 +62,13 @@ const EXACT: Record<string, string[]> = {
   "recording.audio_dir": ["where recordings are saved", "save location", "output folder"],
   "interface.format_24h": ["military time"],
   "editor.vim_mode": ["text editing", "transcript editor keys"],
+  "editor.resync_views_on_edit": [
+    "synced view",
+    "timeline view",
+    "re-align timings on edit",
+    "word timings after editing",
+    "click to seek after edit",
+  ],
 };
 
 /** All intent keywords for a field's config path (`data-key`). */

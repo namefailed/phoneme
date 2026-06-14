@@ -1259,7 +1259,7 @@ fn default_column_widths() -> Vec<String> {
 }
 
 /// Settings specifically for the transcript editor.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EditorConfig {
     /// Whether the CodeMirror editor uses Vim keybindings.
     #[serde(default)]
@@ -1270,6 +1270,29 @@ pub struct EditorConfig {
     /// Absolute path to an external .vimrc file to load automatically.
     #[serde(default)]
     pub vimrc_path: String,
+    /// When you edit and save a transcript, re-flow the per-word / per-segment
+    /// timing layers onto the new text so the **Synced** and **Timeline** views
+    /// (and click-to-seek) follow the edit: unchanged words keep their exact
+    /// timing, inserted words are interpolated into the gap, deleted words drop
+    /// out. No model run — it reuses the audio's already-known timings.
+    /// **Default true.** Set false to leave the original machine timings/segments
+    /// untouched on edit (a "forensic" preference — the views may then show the
+    /// pre-edit words). See `phoneme_core::realign`.
+    #[serde(default = "default_true")]
+    pub resync_views_on_edit: bool,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            vim_mode: false,
+            vimrc: String::new(),
+            vimrc_path: String::new(),
+            // Re-sync the Synced/Timeline timing layers on edit by default; the
+            // serde field default agrees so an absent key also stays on.
+            resync_views_on_edit: true,
+        }
+    }
 }
 
 fn default_theme() -> String {
@@ -1522,6 +1545,7 @@ impl Default for Config {
                 vim_mode: false,
                 vimrc: String::new(),
                 vimrc_path: String::new(),
+                resync_views_on_edit: true,
             },
             diarization: DiarizationConfig::default(),
             daemon: DaemonConfig {

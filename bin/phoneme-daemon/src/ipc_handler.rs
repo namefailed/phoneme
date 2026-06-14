@@ -454,6 +454,34 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::UpdateTranscript { id, text } => {
             match state.catalog.update_user_transcript(&id, &text).await {
                 Ok(()) => {
+                    // Re-flow the per-word / per-segment timing layers onto the
+                    // edited text so the Synced + Timeline views (and click-to-seek)
+                    // follow the edit. Best-effort: a failure here must not fail the
+                    // save — the prose is already persisted. Gated by an opt-out so
+                    // users who prefer the original machine timings can disable it.
+                    if state.config.load().editor.resync_views_on_edit {
+                        match state.catalog.words_for(&id).await {
+                            Ok(old_words) => {
+                                if let Some(r) =
+                                    phoneme_core::realign::realign_transcript(&text, &old_words)
+                                {
+                                    if let Err(e) = state.catalog.replace_words(&id, &r.words).await
+                                    {
+                                        tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed words");
+                                    }
+                                    if let Err(e) =
+                                        state.catalog.replace_segments(&id, &r.segments).await
+                                    {
+                                        tracing::warn!(id = %id, error = %e, "re-align: failed to store re-flowed segments");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(id = %id, error = %e, "re-align: could not load words; leaving timing layers untouched");
+                            }
+                        }
+                    }
+
                     let embedder_guard = state.embedder.read().await;
                     if let Some(embedder) = embedder_guard.as_ref() {
                         crate::pipeline::embed_and_store(embedder, &state.catalog, &id, &text)

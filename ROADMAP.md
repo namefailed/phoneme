@@ -413,6 +413,16 @@ explicit roadmap line here saying why not).
   *Still open:* a CI job that can run the ONNX model. *(The in-memory
   embedding cache shipped — the decoded corpus is held in RAM, invalidated
   on any re-embed/delete, bounded for large libraries.)*
+- [ ] **Forced re-alignment of edited transcripts** — when you edit a transcript,
+  the Synced/Timeline timings are currently re-derived by *interpolating* the
+  existing word timings onto the edited text (token-diff re-align — shipped as the
+  default). True forced alignment would re-time the *edited* words against the
+  audio for frame-accurate Synced/Timeline after heavy edits. Needs a forced-aligner
+  model (CTC / wav2vec / WhisperX-style) — whisper.cpp only does audio→text, not
+  text→audio. Would ship as an opt-in Settings toggle ("re-align edits to audio")
+  for users who want maximum accuracy and don't mind the extra model run; the
+  interpolating default stays for everyone else. *(deferred from #174-C — needs the
+  aligner dependency first.)*
 - [ ] **"Ask my archive" (local RAG chat)** — "What did we decide about the API
   redesign?" → answer with citations/links to recordings. Builds on chunking +
   retrieval; needs a chat UI + citation UX. The headline differentiated feature
