@@ -345,16 +345,21 @@ export class TranscriptEditorElement extends LitElement {
           padding: 0;
           font-size: 13px;
           line-height: 1;
-          border: 1px solid var(--border-subtle);
+          /* Faded by default — only the glyph, no chrome — and lights up to a
+             full bordered button on hover. */
+          border: 1px solid transparent;
           border-radius: 4px;
-          background: var(--bg-elevated);
+          background: transparent;
           color: var(--fg-muted);
+          opacity: 0.45;
           cursor: pointer;
-          transition: color 0.15s ease, border-color 0.15s ease;
+          transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
         }
         ph-transcript-editor .btn-copy:hover {
+          opacity: 1;
           color: var(--accent);
           border-color: var(--accent);
+          background: var(--bg-elevated);
         }
         ph-transcript-editor .btn-copy.copied {
           color: var(--ok);

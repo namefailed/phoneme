@@ -798,6 +798,15 @@ mark.search-hit {
 }
 .thinking-pre--prompt { max-height: 200px; overflow-y: auto; color: var(--fg-muted); }
 .thinking-pre--response { max-height: 240px; overflow-y: auto; }
+/* Notes Copy button: faded by default (inline style), lights up on hover.
+   !important beats the element's inline base style for the hover state. */
+#notes-copy-btn:hover {
+  opacity: 1 !important;
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  background: var(--bg-elevated) !important;
+}
+
 /* Three stacked rows: applied chips / controls / suggestions (I). Each row
    wraps internally; the outer container stacks them. */
 .tags { display: flex; flex-direction: column; gap: 8px; padding: 0 18px 12px; }

@@ -208,22 +208,27 @@ mark.settings-hit {
 }
 /* Floating ⚙ Settings button (top-right) — the only header control kept in the
    Settings view, since the header bar itself is hidden. Closes Settings. */
-.settings-float-toggle {
+/* In-panel ⚙ Settings split button (L): main half closes Settings, caret opens
+   the quick menu — mirrors the header's split button. The GROUP carries the
+   positioning so it sits exactly where the header's split-button was (the
+   floatAnchorStyle inline override may switch it to position:fixed for a
+   pixel-exact match). right:14px hugs the corner like the header group. */
+.settings-float-group {
   position: absolute;
-  /* Sit exactly where the header's ⚙ Settings split-button was AND look
-     identical to it (.headerbar .icon-btn / .hb-settings-main) so opening
-     Settings doesn't make the button appear to jump or restyle. right:42px
-     lands on the header main-button's right edge — the header group hugs the
-     corner at 14px and the dropdown caret to its right is ~28px wide. */
   top: 18px;
-  right: 42px;
+  right: 14px;
   z-index: 5;
+  display: inline-flex;
+  align-items: stretch;
+}
+.settings-float-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   background: var(--bg-deep);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
-  border-radius: 6px;
+  border-right: none;
+  border-radius: 6px 0 0 6px;
   padding: 4px 11px;
   font-size: 16px;
   color: var(--fg-muted);
@@ -235,6 +240,64 @@ mark.settings-hit {
   background: var(--border-subtle);
   color: var(--fg-default);
   border-color: var(--accent);
+}
+.settings-float-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 0 6px 6px 0;
+  padding: 4px 7px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: all 0.15s ease-out;
+}
+.settings-float-caret:hover,
+.settings-float-caret.active {
+  background: var(--border-subtle);
+  color: var(--fg-default);
+  border-color: var(--accent);
+}
+.settings-float-caret .ph-caret-ico { transition: transform 0.15s ease; }
+.settings-float-caret .ph-caret-ico.open { transform: rotate(180deg); }
+/* Self-contained menu styling (don't depend on the header's inline <style>). */
+.settings-float-group .hb-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--fg-default);
+  padding: 8px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.settings-float-group .hb-menu-item:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.settings-float-group .hb-menu-ico {
+  flex-shrink: 0;
+  width: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+}
+.settings-float-group .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
+.settings-float-group .hb-menu-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-faded);
+  padding: 4px 12px 2px;
 }
 .settings-float-actions {
   position: absolute;

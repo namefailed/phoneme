@@ -114,6 +114,8 @@ export class SettingsViewElement extends LitElement {
   private managersSub: "tags" | "profiles" | "saved" = "tags";
   @state() private config: any = null;
   @state() private searchQuery: string = "";
+  /** In-panel ⚙ Settings split-button dropdown (mirrors the header's) (L). */
+  @state() private floatMenuOpen = false;
   private originalConfigStr: string = "";
   /** Cursor index into the visible result fields for ↑/↓ keyboard nav. */
   private searchCursor = -1;
@@ -143,6 +145,7 @@ export class SettingsViewElement extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("config:saved", this.onConfigSaved);
+    document.removeEventListener("mousedown", this.onFloatOutside, true);
   }
 
   private searchDebounce?: ReturnType<typeof setTimeout>;
@@ -543,6 +546,39 @@ export class SettingsViewElement extends LitElement {
     }
   }
 
+  // ── In-panel ⚙ Settings split-button dropdown (L) ─────────────────────────
+  // Mirrors the header's quick-settings menu (HeaderBar) so the button behaves
+  // the same inside the Settings view: main half closes; the caret opens a
+  // jump-to-section + Quick-model-switch menu. "Jump" switches the tab here
+  // (we're already in Settings) rather than firing a navigate event.
+  private toggleFloatMenu = (e: Event) => {
+    e.stopPropagation();
+    this.floatMenuOpen = !this.floatMenuOpen;
+    if (this.floatMenuOpen) document.addEventListener("mousedown", this.onFloatOutside, true);
+    else document.removeEventListener("mousedown", this.onFloatOutside, true);
+  };
+
+  private onFloatOutside = (e: MouseEvent) => {
+    const grp = this.renderRoot.querySelector(".settings-float-group");
+    if (grp && !grp.contains(e.target as Node)) this.closeFloatMenu();
+  };
+
+  private closeFloatMenu() {
+    this.floatMenuOpen = false;
+    document.removeEventListener("mousedown", this.onFloatOutside, true);
+  }
+
+  private jumpFloat(tab: string) {
+    this.closeFloatMenu();
+    this.switchTab(tab);
+  }
+
+  private openFloatModels = async () => {
+    this.closeFloatMenu();
+    const { openModelPicker } = await import("../ModelPicker");
+    await openModelPicker("transcription");
+  };
+
   private handleSearch(e: Event) {
     const value = (e.target as HTMLInputElement).value;
     // Debounce so each keystroke doesn't trigger a reactive update; ~140ms
@@ -643,7 +679,24 @@ export class SettingsViewElement extends LitElement {
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
         <div class="settings-main">
-          <button class="settings-float-toggle" style=${this.floatAnchorStyle()} title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
+          <div class="settings-float-group" style=${this.floatAnchorStyle()}>
+            <button class="settings-float-toggle" title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
+            <button class="settings-float-caret ${this.floatMenuOpen ? "active" : ""}" aria-label="Quick settings &amp; actions" aria-haspopup="menu" aria-expanded=${this.floatMenuOpen} title="Quick settings &amp; actions" @click=${this.toggleFloatMenu}>
+              <svg class="ph-caret-ico ${this.floatMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div class="hb-settings-menu" role="menu" ?hidden=${!this.floatMenuOpen}
+              style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border, 1px solid rgba(255,255,255,0.12)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+              <button class="hb-menu-item" role="menuitem" @click=${this.openFloatModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
+              <div class="hb-menu-sep"></div>
+              <div class="hb-menu-label">Jump to section</div>
+              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("transcription")}><span class="hb-menu-ico">🗣️</span>Transcription</button>
+              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("capture")}><span class="hb-menu-ico">🎙️</span>Capture</button>
+              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("postprocessing")}><span class="hb-menu-ico">✨</span>Post-Processing</button>
+              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("appearance")}><span class="hb-menu-ico">🎨</span>Appearance</button>
+              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("managers")}><span class="hb-menu-ico">🗂️</span>Managers</button>
+              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("system")}><span class="hb-menu-ico">⚙️</span>System</button>
+            </div>
+          </div>
           <div class="settings-body" id="settings-body"></div>
           <div class="settings-float-actions">
             <button id="settings-close" @click=${this.handleClose}>Close</button>
