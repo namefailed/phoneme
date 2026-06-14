@@ -693,8 +693,8 @@ export class HeaderBarElement extends LitElement {
           ${f.like_id
             ? html`<div class="filter-pill hb-like-pill" style="flex:1; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"
                 title="Showing recordings similar to “${f.like_label || f.like_id}” — ranked by meaning, from its stored index">
-                <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">~similar: ${f.like_label || f.like_id}</span>
-                <button class="icon-btn hb-like-clear" style="flex-shrink:0;" aria-label="Back to all recordings"
+                <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">~similar: ${f.like_label || f.like_id}</span>
+                <button class="hb-like-clear" aria-label="Back to all recordings"
                   title="Back to all recordings" @click=${() => clearMoreLikeThis()}>✕</button>
               </div>`
             : html`<input type="search" class="search" style="flex:1;" placeholder="Search transcripts…"

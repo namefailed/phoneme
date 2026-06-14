@@ -801,13 +801,20 @@ mark.search-hit {
 }
 .thinking-pre--prompt { max-height: 200px; overflow-y: auto; color: var(--fg-muted); }
 .thinking-pre--response { max-height: 240px; overflow-y: auto; }
-/* Playback-speed toggle (S) in the waveform action row — compact, fixed-width
-   so cycling 0.5×…2× doesn't shift the row. */
-.action-row .speed-btn {
-  min-width: 46px;
-  text-align: center;
+/* Playback-speed selector (S) in the waveform action row — a compact dropdown
+   styled to sit alongside the action-row buttons. */
+.action-row .speed-select {
   font-variant-numeric: tabular-nums;
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
 }
+.action-row .speed-select:hover { border-color: var(--accent); }
 
 /* Views / Versions dropdowns — the consolidated transcript-peek buttons. */
 .th-dropdown { position: relative; display: inline-flex; }
@@ -903,20 +910,22 @@ mark.search-hit {
   color: var(--fg-faded);
   padding: 4px 8px 6px;
 }
-/* One step: icon · plain-English label · model/detail value. */
+/* One step: icon · plain-English label · model/detail value, aligned in three
+   columns so every row reads cleanly down the popover. */
 .dp-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 20px 96px 1fr;
   align-items: baseline;
-  gap: 9px;
-  padding: 6px 8px;
+  gap: 3px 10px;
+  padding: 6px 10px;
   border-radius: 7px;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 .dp-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.dp-ico { flex: 0 0 18px; text-align: center; align-self: center; }
-.dp-label { flex: 0 0 88px; color: var(--fg-muted); font-weight: 600; }
-.dp-value { flex: 1; min-width: 0; color: var(--fg-default); word-break: break-word; }
+.dp-ico { align-self: center; text-align: center; font-size: 13px; }
+.dp-label { color: var(--fg-muted); }
+.dp-value { min-width: 0; color: var(--fg-default); font-weight: 600; word-break: break-word; }
 
 /* Notes Copy button: faded by default (inline style), lights up on hover.
    !important beats the element's inline base style for the hover state. */

@@ -219,10 +219,9 @@ export class ActionRowElement extends LitElement {
     }
   }
 
-  /** Step to the next playback speed, remember it, and tell the player. */
-  private cycleSpeed = () => {
-    const i = PLAYBACK_SPEEDS.indexOf(this.speed as (typeof PLAYBACK_SPEEDS)[number]);
-    const next = PLAYBACK_SPEEDS[(i + 1) % PLAYBACK_SPEEDS.length];
+  /** Apply the picked playback speed, remember it, and tell the player. */
+  private onSpeedChange = (e: Event) => {
+    const next = Number((e.target as HTMLSelectElement).value);
     this.speed = next;
     try { localStorage.setItem(SPEED_KEY, String(next)); } catch { /* localStorage may be unavailable */ }
     this.cbs.onSetSpeed?.(next);
@@ -232,7 +231,9 @@ export class ActionRowElement extends LitElement {
     return html`
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
-        <button class="speed-btn" title="Playback speed — click to cycle" aria-label="Playback speed ${this.speed}×" @click=${this.cycleSpeed}>${this.speed}×</button>
+        <select class="speed-select" title="Playback speed" aria-label="Playback speed" @change=${this.onSpeedChange}>
+          ${PLAYBACK_SPEEDS.map((s) => html`<option value=${s} ?selected=${s === this.speed}>${s}×</option>`)}
+        </select>
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <span class="export-trigger-wrap" style="position: relative; display: inline-block;">
           <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ▾</button>
