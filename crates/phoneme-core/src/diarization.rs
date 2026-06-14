@@ -417,7 +417,14 @@ pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 /// single word is absorbed regardless of position (one word is never a real
 /// turn). Per-word attribution is kept, so a genuine hand-off INSIDE a whisper
 /// segment is still split — only the noise islands are smoothed.
-const MAX_ISLAND_WORDS: usize = 5;
+///
+/// NOTE: this counts the diarization layer's word units, which for local
+/// whisper.cpp are SUBWORD tokens ("over ste pped", "don 't" each split into
+/// several), so the bound is roughly twice the spoken-word count it implies
+/// (~10 tokens ≈ ~5 spoken words). It only ever applies to runs bracketed by the
+/// SAME speaker (one voice either side), where even a longish island is almost
+/// always that voice continuing, not a real interjection.
+const MAX_ISLAND_WORDS: usize = 10;
 
 /// A contiguous run of same-speaker words inside the per-word column sequence.
 struct SpeakerRun {
@@ -1578,30 +1585,23 @@ mod tests {
     /// short islands are flicker.
     #[test]
     fn long_bracketed_turn_above_island_max_survives() {
-        let words: Vec<WordSpan> = (0..14)
+        let words: Vec<WordSpan> = (0..20)
             .map(|i| word(i as f64 * 0.5, (i as f64 + 1.0) * 0.5, "w"))
             .collect();
         let kept: Vec<&WordSpan> = words.iter().collect();
-        // [0 ×3] [1 ×8] [0 ×3] — the 1-run is 8 words (> MAX_ISLAND_WORDS = 5).
-        let mut cols = vec![
-            Some(0),
-            Some(0),
-            Some(0),
-            Some(1),
-            Some(1),
-            Some(1),
-            Some(1),
-            Some(1),
-            Some(1),
-            Some(1),
-            Some(1),
-            Some(0),
-            Some(0),
-            Some(0),
-        ];
+        // [0 ×3] [1 ×14] [0 ×3] — the 1-run is 14 words (> MAX_ISLAND_WORDS = 10).
+        let mut cols: Vec<Option<usize>> = (0..20)
+            .map(|i| {
+                if (3..17).contains(&i) {
+                    Some(1)
+                } else {
+                    Some(0)
+                }
+            })
+            .collect();
         smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
         assert!(
-            cols[3..11].iter().all(|c| *c == Some(1)),
+            cols[3..17].iter().all(|c| *c == Some(1)),
             "a long bracketed turn survives: {cols:?}"
         );
     }
