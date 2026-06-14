@@ -78,6 +78,28 @@ const PREVIEW_MIN_NEW_SAMPLES: usize = 16_000;
 /// preview, not the final result. 15 s at 16 kHz.
 const PREVIEW_WINDOW_SAMPLES: usize = 16_000 * 15;
 
+/// Adaptive-cadence ceiling: even when ticks keep overrunning (a heavy model on
+/// a weak box), never wait longer than this between preview transcriptions so the
+/// caption still advances. The floor is the per-tick base interval.
+const PREVIEW_INTERVAL_CEIL: Duration = Duration::from_millis(8000);
+
+/// Pick the wait before the next preview tick. With `adaptive`, never schedule
+/// faster than the last tick actually took — so a slow box/model self-throttles
+/// instead of piling onto the single serial whisper-server and thrashing the
+/// machine (the live-preview record-time crash) — clamped to `[base, ceil]`.
+/// Without it, always `base` (the historical fixed cadence).
+fn next_preview_interval(
+    base: Duration,
+    last_cost: Duration,
+    ceil: Duration,
+    adaptive: bool,
+) -> Duration {
+    if !adaptive {
+        return base;
+    }
+    last_cost.clamp(base, ceil)
+}
+
 /// Stitch a freshly-transcribed trailing window onto the preview text already
 /// shown, producing a stable, forward-growing caption instead of a text that
 /// "rewinds" every time the rolling audio window slides.
@@ -456,20 +478,22 @@ impl DaemonRecorder {
             // drop the interval to 1000ms for real-time streaming without worrying
             // about HTTP/file-write overhead. Cloud providers get longer intervals
             // to avoid overwhelming the API.
-            let interval_duration = if is_native {
+            let base_interval = if is_native {
                 std::time::Duration::from_millis(1000)
             } else {
                 PREVIEW_INTERVAL
             };
+            // Adaptive cadence: when a tick's transcription overruns the base
+            // interval (heavy model on a weak box), wait at least that long
+            // before the next one so the preview self-throttles instead of
+            // piling onto the single serial whisper-server and thrashing the
+            // machine. Starts at the base cadence; the first sleep also doubles
+            // as the "don't transcribe near-empty audio" warm-up.
+            let adaptive = cfg.recording.preview_adaptive;
+            let mut current_wait = base_interval;
 
             let tmp_wav =
                 std::env::temp_dir().join(format!("phoneme-preview-{}.wav", id.file_stem()));
-            let mut interval = tokio::time::interval(interval_duration);
-            // If a transcription overruns the interval, skip missed ticks rather
-            // than firing a burst — this is the "never two at once" throttle.
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            // Burn the immediate first tick so we don't transcribe near-empty audio.
-            interval.tick().await;
             let mut last_len = 0usize;
             // The stable, forward-growing caption shown so far. While the
             // recording is shorter than the audio window each transcription is of
@@ -481,7 +505,7 @@ impl DaemonRecorder {
             loop {
                 tokio::select! {
                     _ = &mut stop_rx => break,
-                    _ = interval.tick() => {}
+                    _ = tokio::time::sleep(current_wait) => {}
                 }
 
                 // Snapshot only the trailing window of audio captured so far (the
@@ -519,6 +543,7 @@ impl DaemonRecorder {
 
                 // Use the cached provider to avoid re-resolving on every tick.
                 // Config changes during recording will take effect on the next recording.
+                let tick_start = std::time::Instant::now();
                 match provider.transcribe(&tmp_wav, language.as_deref()).await {
                     Ok(text) => {
                         let text = text.trim();
@@ -549,6 +574,15 @@ impl DaemonRecorder {
                         tracing::debug!(error = %e, "streaming preview: transcription tick failed");
                     }
                 }
+                // Adapt the next wait to how long this tick actually took, so a
+                // heavy model on a weak box self-throttles instead of trying to
+                // run every base-interval and thrashing (the record-time crash).
+                current_wait = next_preview_interval(
+                    base_interval,
+                    tick_start.elapsed(),
+                    PREVIEW_INTERVAL_CEIL,
+                    adaptive,
+                );
             }
 
             // Clean up temp file even if loop exits early
@@ -1625,6 +1659,40 @@ mod tests {
         assert_eq!(stitch_preview("", ""), "");
         // Whitespace-only window is treated as empty.
         assert_eq!(stitch_preview("keep me", "   "), "keep me");
+    }
+
+    // ── next_preview_interval (adaptive cadence — the record-time crash fix) ──
+
+    #[test]
+    fn adaptive_off_keeps_fixed_cadence() {
+        let base = Duration::from_millis(1000);
+        let ceil = Duration::from_millis(8000);
+        // Even a long tick keeps the base cadence when adaptive is off.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(5000), ceil, false),
+            base
+        );
+    }
+
+    #[test]
+    fn adaptive_backs_off_to_tick_cost_clamped() {
+        let base = Duration::from_millis(1000);
+        let ceil = Duration::from_millis(8000);
+        // Fast tick → stays at the base floor.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(200), ceil, true),
+            base
+        );
+        // Slow tick → wait at least as long as it actually took.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(3000), ceil, true),
+            Duration::from_millis(3000)
+        );
+        // Pathologically slow tick → capped at the ceiling so the caption still advances.
+        assert_eq!(
+            next_preview_interval(base, Duration::from_millis(20000), ceil, true),
+            ceil
+        );
     }
 
     #[test]
