@@ -132,8 +132,11 @@ export class RecordingDetail {
       if (dateEl) dateEl.style.display = r.title ? "" : "none";
     }
 
-    const modelsEl = this.container.querySelector<HTMLElement>("#detail-models");
-    if (modelsEl) modelsEl.innerHTML = modelsLine(r);
+    const pipeHost = this.container.querySelector<HTMLElement>("#detail-pipeline-host");
+    if (pipeHost) {
+      pipeHost.innerHTML = pipelineHtml(r);
+      this.wirePipeline();
+    }
 
     const statsEl = this.container.querySelector<HTMLElement>("#detail-stats");
     if (statsEl) statsEl.textContent = wordCountSummary(r.transcript ?? "");
@@ -287,7 +290,7 @@ export class RecordingDetail {
         </div>
         <div class="detail-footer">
           <span id="detail-stats">${stats}</span>
-          <span id="detail-models">${modelsLine(r)}</span>
+          <span id="detail-pipeline-host">${pipelineHtml(r)}</span>
           <span class="detail-path" id="detail-reveal-path" role="button" tabindex="0" style="cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px;" title="Reveal in file explorer — ${escapeAttr(r.audio_path)}">${escapeHtml(r.audio_path)}</span>
         </div>
       </div>
@@ -308,6 +311,8 @@ export class RecordingDetail {
 
     const tagsRoot = this.container.querySelector<HTMLElement>("#tags");
     if (tagsRoot) new TagChips(tagsRoot, r.id);
+
+    this.wirePipeline();
 
     const editorRoot = this.container.querySelector<HTMLElement>("#editor");
     if (editorRoot) {
@@ -549,6 +554,33 @@ export class RecordingDetail {
       ?.addEventListener("click", () => this.beginTitleEdit());
 
     this.renderSpeakers(r);
+  }
+
+  /** Wire the footer "⛓ Pipeline" button → popover (G). Toggles the popover and
+   *  closes it on an outside click; the document listener is added only while
+   *  open and removed on close, so re-renders don't accumulate listeners. */
+  private wirePipeline() {
+    const btn = this.container.querySelector<HTMLButtonElement>("#detail-pipeline-btn");
+    const pop = this.container.querySelector<HTMLElement>("#detail-pipeline-pop");
+    if (!btn || !pop) return;
+    const close = () => {
+      pop.setAttribute("hidden", "");
+      btn.setAttribute("aria-expanded", "false");
+      document.removeEventListener("click", onDoc, true);
+    };
+    const onDoc = (e: MouseEvent) => {
+      if (!pop.contains(e.target as Node) && e.target !== btn) close();
+    };
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (pop.hasAttribute("hidden")) {
+        pop.removeAttribute("hidden");
+        btn.setAttribute("aria-expanded", "true");
+        document.addEventListener("click", onDoc, true);
+      } else {
+        close();
+      }
+    });
   }
 
   /** Swap the header title for an inline input. Enter saves — a non-empty
@@ -884,7 +916,7 @@ function formatDate(iso: string): string {
  *  its model when the daemon recorded one per-recording — transcription,
  *  cleanup, and summary always do; diarization/title/tag models fill in once the
  *  daemon persists them (until then those steps show the bare action). */
-function modelsLine(r: Recording): string {
+function modelsSteps(r: Recording): string[] {
   const steps: string[] = [];
 
   // 1. Capture source.
@@ -923,5 +955,22 @@ function modelsLine(r: Recording): string {
   if (r.tag_model) steps.push(`🏷 tags: ${escapeHtml(r.tag_model)}`);
   else if (r.tag_suggestions && r.tag_suggestions.length) steps.push("🏷 auto-tag");
 
-  return steps.join("  →  ");
+  return steps;
+}
+
+/** The pipeline-provenance footer control (G): a compact "⛓ Pipeline" button
+ *  that opens a popover listing each processing step its file went through —
+ *  replacing the old cramped inline chain. Returns "" when no steps ran. Step
+ *  labels already contain escaped HTML (built by modelsSteps), so inlining them
+ *  here is safe. */
+function pipelineHtml(r: Recording): string {
+  const steps = modelsSteps(r);
+  if (!steps.length) return "";
+  return `<span class="detail-pipeline-wrap">
+    <button class="detail-pipeline-btn" id="detail-pipeline-btn" title="Show the processing each step went through" aria-haspopup="true" aria-expanded="false">⛓ Pipeline <span class="detail-pipeline-count">${steps.length}</span></button>
+    <div class="detail-pipeline-pop" id="detail-pipeline-pop" role="menu" hidden>
+      <div class="detail-pipeline-title">Processing pipeline</div>
+      ${steps.map((s) => `<div class="detail-pipeline-step">${s}</div>`).join("")}
+    </div>
+  </span>`;
 }

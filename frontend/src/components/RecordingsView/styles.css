@@ -798,6 +798,67 @@ mark.search-hit {
 }
 .thinking-pre--prompt { max-height: 200px; overflow-y: auto; color: var(--fg-muted); }
 .thinking-pre--response { max-height: 240px; overflow-y: auto; }
+/* Pipeline provenance: a compact button in the detail footer that opens a
+   popover listing each processing step (G), replacing the old cramped chain. */
+.detail-pipeline-wrap { position: relative; display: inline-flex; }
+.detail-pipeline-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.detail-pipeline-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.detail-pipeline-count {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-weight: 700;
+  font-size: 10px;
+}
+.detail-pipeline-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  min-width: 220px;
+  max-width: 380px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.detail-pipeline-pop[hidden] { display: none; }
+.detail-pipeline-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-faded);
+  padding: 2px 4px 4px;
+}
+.detail-pipeline-step {
+  font-size: 12px;
+  color: var(--fg-default);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+}
+
 /* Notes Copy button: faded by default (inline style), lights up on hover.
    !important beats the element's inline base style for the hover state. */
 #notes-copy-btn:hover {
