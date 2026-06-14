@@ -2018,8 +2018,8 @@ impl Catalog {
             .await?;
         for (idx, word) in words.iter().enumerate() {
             sqlx::query(
-                "INSERT INTO transcript_words (recording_id, idx, start_ms, end_ms, text, speaker, confidence) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO transcript_words (recording_id, idx, start_ms, end_ms, text, speaker, confidence, leading_space) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(recording_id.as_str())
             .bind(idx as i64)
@@ -2028,6 +2028,7 @@ impl Catalog {
             .bind(&word.text)
             .bind(&word.speaker)
             .bind(word.confidence)
+            .bind(word.leading_space)
             .execute(&mut *tx)
             .await?;
         }
@@ -2040,7 +2041,7 @@ impl Catalog {
     /// timing — callers must treat "no words" as a normal state, not an error.
     pub async fn words_for(&self, recording_id: &RecordingId) -> Result<Vec<TranscriptWord>> {
         let rows = sqlx::query(
-            "SELECT start_ms, end_ms, text, speaker, confidence FROM transcript_words \
+            "SELECT start_ms, end_ms, text, speaker, confidence, leading_space FROM transcript_words \
              WHERE recording_id = ? ORDER BY idx",
         )
         .bind(recording_id.as_str())
@@ -2052,10 +2053,8 @@ impl Catalog {
                     start_ms: r.try_get("start_ms")?,
                     end_ms: r.try_get("end_ms")?,
                     text: r.try_get("text")?,
-                    // Not persisted (a stored word is already space-trimmed); only
-                    // the live whisper path needs the marker. Default to a normal
-                    // space-separated word for anything read back from the DB.
-                    leading_space: true,
+                    // Stored as INTEGER (0/1); powers the Synced view's spacing.
+                    leading_space: r.try_get::<i64, _>("leading_space")? != 0,
                     speaker: r.try_get("speaker")?,
                     confidence: r.try_get("confidence")?,
                 })
@@ -3950,7 +3949,7 @@ mod tests {
             start_ms: 0,
             end_ms: 500,
             text: "rerun".into(),
-            leading_space: true,
+            leading_space: false, // a continuation token — must round-trip as false
             speaker: None,
             confidence: Some(0.5),
         }];

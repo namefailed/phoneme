@@ -124,11 +124,15 @@ export class SyncedTranscript {
               ? `Speaker ${group.speaker}`
               : null;
         const spans = group.words
-          .map(
-            (w) =>
-              `<span class="st-word" data-idx="${w.idx}" title="Jump playback to ${fmtClock(w.start_ms)}">${escapeHtml(w.text)}</span>`,
-          )
-          .join(" ");
+          .map((w, i) => {
+            // No space before the first token, or before one that did not start a
+            // new word (punctuation / clitic / subword piece — `leading_space`
+            // false), so chips read "don't" / "overstepped" / "weapon?" rather
+            // than "don 't" / "weapon ?". The space is a text node between chips.
+            const sep = i > 0 && w.leading_space !== false ? " " : "";
+            return `${sep}<span class="st-word" data-idx="${w.idx}" title="Jump playback to ${fmtClock(w.start_ms)}">${escapeHtml(w.text)}</span>`;
+          })
+          .join("");
         return `
           <p class="st-para">
             ${name ? `<span class="st-speaker">${escapeHtml(name)}</span>` : ""}

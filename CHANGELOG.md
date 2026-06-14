@@ -134,9 +134,15 @@ trust boundary. Verified against current code.*
   "ban ning", and a space before every `.`/`,`/`?`. Phoneme now captures whisper's
   leading-space marker per token (`TranscriptWord::leading_space`) and rejoins by
   it, so subword tokens fuse ("over"+"ste"+"pped" → "overstepped") and punctuation
-  attaches cleanly ("weapon?", "don't"). The marker is transient (not persisted,
-  not sent over IPC); cloud providers, which emit clean words, default to normal
-  spacing.
+  attaches cleanly ("weapon?", "don't"). Cloud providers, which emit clean words,
+  default to normal spacing.
+- [x] **Synced (per-word) view honours the same spacing** — the Synced view rebuilds
+  its text from the per-word layer, which space-joined every token and so still
+  showed "I don 't" / "over ste pped" even after the turn-text fix above. The
+  leading-space marker is now **persisted** per word (`transcript_words.leading_space`,
+  new migration) and sent over IPC, and the Synced view joins by it — so it reads
+  "overstepped" / "don't" / "weapon?" too. **Re-transcribe** to backfill the flag
+  on existing recordings (older rows default to space-separated until then).
 - [x] **Written words stay atomic across a speaker hand-off** — per-word argmax
   places the speaker boundary on a ~17 ms frame grid, so a token at a hand-off
   could land on the wrong side: a `.` stranded onto the next speaker's turn, or
@@ -147,6 +153,15 @@ trust boundary. Verified against current code.*
   divided between speakers and a turn never begins with orphaned punctuation. The
   coarser whole-word boundary placement at a hand-off is unchanged (an inherent
   limit of word-level argmax).
+- [x] **A monologue's mis-scored island is absorbed, not shown as a phantom turn**
+  — the diarizer can mis-score a short stretch *inside* one person's monologue to
+  the other speaker (the real case: a 16-token "cyber weapon? I mean, I mean,
+  because you don't" stranded between a 31-token question and a 144-token monologue,
+  all the same speaker). The island-smoothing now absorbs a same-speaker-bracketed
+  run when it is **shorter than both neighbours and under a ~24-token ceiling**, not
+  just the old flat 10-token cap — so that phantom collapses into the monologue.
+  Genuine turns (the recording's real 100-200-token exchanges) are well above the
+  ceiling and never merged.
 - [x] **"Treat single recordings as one speaker" option** (`[diarization]
   solo_one_speaker`, off by default). When the local diarizer genuinely hears two
   voices in a one-person recording — a big tonal shift when quoting, or background

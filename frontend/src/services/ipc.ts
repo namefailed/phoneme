@@ -175,6 +175,12 @@ export type TranscriptWord = {
   text: string;
   speaker?: string | null;
   confidence?: number | null;
+  /** Whether this token starts a new written word (whisper's leading-space
+   *  marker). When false — punctuation, a clitic ("'s"), or a subword piece —
+   *  the Synced view joins it to the previous word WITHOUT a space, so
+   *  "over"+"ste"+"pped" renders "overstepped" and "weapon"+"?" renders
+   *  "weapon?". Absent on older words → treated as true (space-separated). */
+  leading_space?: boolean;
 };
 
 /** A recording's machine transcript words in timeline order. Like segments, an

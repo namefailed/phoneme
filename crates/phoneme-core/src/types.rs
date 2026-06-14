@@ -359,12 +359,13 @@ pub struct TranscriptWord {
     /// Whether this token began a new word in the provider's output — i.e. the
     /// raw token carried a leading space (whisper's BPE convention: `" over"`
     /// starts a word, the continuations `"ste"`/`"pped"` and punctuation do not).
-    /// Used only transiently while assembling the diarized turn text so subword
-    /// tokens rejoin without spurious spaces ("over ste pped" → "overstepped");
-    /// it is neither persisted (the `transcript_words` table omits it) nor sent
-    /// over IPC (`skip`), and defaults to `true` — a plain space-separated word —
-    /// for providers that emit clean words and for any reconstructed word.
-    #[serde(skip, default = "default_leading_space")]
+    /// Used while assembling the diarized turn text so subword tokens rejoin
+    /// without spurious spaces ("over ste pped" → "overstepped"), and persisted in
+    /// `transcript_words` + sent over IPC so the **Synced (per-word) view** can
+    /// render the same correct spacing instead of space-joining every token.
+    /// Defaults to `true` — a plain space-separated word — for providers that emit
+    /// clean words and for any reconstructed/older word.
+    #[serde(default = "default_leading_space")]
     pub leading_space: bool,
     /// Speaker label as it appears in the `[Speaker …]` marker, or `None` for an
     /// undiarized word (see the type doc for how numeric labels join names).

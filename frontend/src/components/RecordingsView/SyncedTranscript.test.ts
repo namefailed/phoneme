@@ -66,6 +66,24 @@ describe("SyncedTranscript", () => {
     view.dispose();
   });
 
+  it("joins subword/punctuation tokens without a leading space", async () => {
+    // whisper emits subword + punctuation tokens; only word-starts carry
+    // leading_space. The flow must read "I overstepped?" not "I over ste pped ?".
+    vi.mocked(getWords).mockResolvedValue([
+      { idx: 0, start_ms: 0, end_ms: 300, text: "I", speaker: "1", leading_space: true },
+      { idx: 1, start_ms: 300, end_ms: 600, text: "over", speaker: "1", leading_space: true },
+      { idx: 2, start_ms: 600, end_ms: 700, text: "ste", speaker: "1", leading_space: false },
+      { idx: 3, start_ms: 700, end_ms: 800, text: "pped", speaker: "1", leading_space: false },
+      { idx: 4, start_ms: 800, end_ms: 850, text: "?", speaker: "1", leading_space: false },
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = new SyncedTranscript(host, "rec-1", { onSeek: vi.fn() });
+    await tick();
+    expect(host.querySelector(".st-words")?.textContent).toBe("I overstepped?");
+    view.dispose();
+  });
+
   it("maps numeric speaker labels through the recording's custom names", async () => {
     vi.mocked(getWords).mockResolvedValue(WORDS);
     const host = document.createElement("div");
