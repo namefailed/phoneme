@@ -66,6 +66,26 @@ body.ov-dim .ov-card {
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
+/* "It hears me" waveform — a row of bars driven by mic RMS (AudioLevelSample),
+   not by transcription. Pure reassurance that audio is being captured. Heights
+   animate via transform (GPU-cheap); overlay.ts sets each bar's scaleY. */
+.ov-wave {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+.ov-wave-bar {
+  width: 2.5px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent, #89b4fa);
+  transform: scaleY(0.15);
+  transform-origin: center bottom;
+  transition: transform 0.08s ease-out;
+}
+
 .ov-label {
   flex: 0 0 auto;
   font-size: 10px;

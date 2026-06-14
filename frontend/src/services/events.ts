@@ -58,6 +58,7 @@ export type DaemonEvent =
   | { event: "recording_stopped"; id: string; duration_ms: number; audio_path: string; meeting_id?: string | null }
   | { event: "transcription_started"; id: string }
   | { event: "transcription_partial"; id: string; text: string }
+  | { event: "audio_level_sample"; id: string; level: number }
   | { event: "transcription_done"; id: string; transcript: string }
   | { event: "transcription_failed"; id: string; error: string }
   | { event: "pipeline_stage_changed"; id: string; stage: PipelineStage }
