@@ -224,6 +224,17 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Security pass + audit follow-ups** — a deep security audit; the one real
+  finding fixed: `SemanticSearch`/`MoreLikeThis` now clamp the client-supplied
+  result `limit` (≤1000) so a huge value can't force an unbounded allocation over
+  the IPC pipe. (Rejected as not-applicable after review: "SSRF" on the
+  transcription/LLM URLs — those are user-set and legitimately point at localhost
+  Ollama/whisper, so blocking private ranges would break local-first; `export
+  --out` "traversal" is just the user's own CLI output path; `UpdateTranscript`
+  is already bounded by the 8 MiB IPC frame cap.) Plus: a transiently-failed
+  recording now shows **Queued** while it waits to retry (not a frozen
+  "Transcribing"), and a re-run that overrides the cleanup provider/endpoint logs
+  an audit line (never the key).
 - [x] **Synced view spacing — the last mile** — the per-word `leading_space` marker
   was persisted and serialized, but the `GetWords` IPC built a hand-rolled JSON
   object that *omitted* it, so the Synced view never received it and still

@@ -135,29 +135,48 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                                 id: rec_id.clone(),
                                 error: format!("{e} (after {MAX_TRANSIENT_ATTEMPTS} attempts)"),
                             });
-                        } else if let Err(rq) = state.inbox.requeue(&rec_id).await {
-                            // Requeue itself failed — the item would otherwise sit
-                            // in processing/ until the next daemon restart's
-                            // orphan recovery. Mark it failed (like the give-up
-                            // branch above) so it surfaces in the UI as a failed
-                            // recording instead of silently stalling.
-                            tracing::error!(id = %rec_id.as_str(), error = %rq, "failed to requeue after transient error; marking failed");
-                            attempts.remove(&rec_id);
-                            let _ = state
-                                .catalog
-                                .update_status(
-                                    &rec_id,
-                                    phoneme_core::RecordingStatus::TranscribeFailed,
-                                )
-                                .await;
-                            let _ = state
-                                .inbox
-                                .finish_failed(&rec_id, "requeue_failed", &rq.to_string())
-                                .await;
-                            state.events.emit(DaemonEvent::TranscriptionFailed {
-                                id: rec_id.clone(),
-                                error: format!("could not requeue after a transient error: {rq}"),
-                            });
+                        } else {
+                            match state.inbox.requeue(&rec_id).await {
+                                // Reflect "waiting to retry" in the UI as Queued
+                                // rather than leaving a frozen "Transcribing"
+                                // through the backoff; the pipeline flips it back to
+                                // Transcribing when the worker re-claims it.
+                                Ok(()) => {
+                                    let _ = state
+                                        .catalog
+                                        .update_status(
+                                            &rec_id,
+                                            phoneme_core::RecordingStatus::Queued,
+                                        )
+                                        .await;
+                                }
+                                // Requeue itself failed — the item would otherwise
+                                // sit in processing/ until the next daemon restart's
+                                // orphan recovery. Mark it failed (like the give-up
+                                // branch above) so it surfaces in the UI instead of
+                                // silently stalling.
+                                Err(rq) => {
+                                    tracing::error!(id = %rec_id.as_str(), error = %rq, "failed to requeue after transient error; marking failed");
+                                    attempts.remove(&rec_id);
+                                    let _ = state
+                                        .catalog
+                                        .update_status(
+                                            &rec_id,
+                                            phoneme_core::RecordingStatus::TranscribeFailed,
+                                        )
+                                        .await;
+                                    let _ = state
+                                        .inbox
+                                        .finish_failed(&rec_id, "requeue_failed", &rq.to_string())
+                                        .await;
+                                    state.events.emit(DaemonEvent::TranscriptionFailed {
+                                        id: rec_id.clone(),
+                                        error: format!(
+                                            "could not requeue after a transient error: {rq}"
+                                        ),
+                                    });
+                                }
+                            }
                         }
                         tracing::warn!(?backoff, "Whisper unreachable; sleeping before retry");
                         tokio::select! {

@@ -274,6 +274,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Err(e) => err_response(&e),
         },
         Request::SemanticSearch { query, limit } => {
+            // Clamp the client-supplied limit so a huge value can't force an
+            // unbounded result allocation + JSON serialization over the pipe.
+            let limit = limit.min(MAX_SEARCH_RESULTS);
             let embedder_guard = state.embedder.read().await;
             if let Some(embedder) = embedder_guard.as_ref() {
                 match embedder.embed_query(&query) {
@@ -309,6 +312,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::MoreLikeThis { id, limit } => {
+            // Clamp the client-supplied limit (see SemanticSearch) so it can't
+            // force an unbounded allocation.
+            let limit = limit.min(MAX_SEARCH_RESULTS);
             // No embedder needed: the source recording's STORED vectors are the
             // query (that's the whole point — recall is free once indexed), so
             // this works even while the embedding model isn't loaded. The
@@ -1260,6 +1266,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
     }
 }
 
+/// Hard cap on how many results a single `SemanticSearch` / `MoreLikeThis` request
+/// may return. The client picks the limit, so this bounds the result Vec + the
+/// JSON serialized back over the pipe — a huge `limit` can't force an unbounded
+/// allocation. Far above any real UI/CLI page size.
+const MAX_SEARCH_RESULTS: usize = 1000;
+
 /// Hard cap on the on-disk size of an importable file. The Tauri file dialog is
 /// the intended sole producer, but `ImportRecording` accepts an arbitrary client
 /// path — this bounds a bypass that could otherwise feed the decoder a
@@ -1403,6 +1415,16 @@ async fn rerun_cleanup(
             llm_cfg.set_api_key(k.to_string());
         }
     }
+    // Audit trail: a one-time override can point this run's cleanup at a different
+    // provider/endpoint. Log the resolved target (never the API key) so a
+    // redirect is visible in the logs rather than silent.
+    tracing::info!(
+        id = %id,
+        provider = %llm_cfg.provider,
+        api_url = %llm_cfg.api_url,
+        model = %llm_cfg.model,
+        "re-run cleanup resolved (one-time overrides applied; API key never logged)"
+    );
 
     // Require post-processing to actually be configured. `provider()` returns
     // None when disabled or the provider is `none`/unrecognized — in that case
