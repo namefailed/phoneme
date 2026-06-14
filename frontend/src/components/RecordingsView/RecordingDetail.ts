@@ -920,61 +920,68 @@ function formatDate(iso: string): string {
  *  its model when the daemon recorded one per-recording — transcription,
  *  cleanup, and summary always do; diarization/title/tag models fill in once the
  *  daemon persists them (until then those steps show the bare action). */
-function modelsSteps(r: Recording): string[] {
-  const steps: string[] = [];
+/** One row in the pipeline-provenance popover: an icon, a plain-English step
+ *  name, and its detail (model name, status, or source). `value` may contain
+ *  escaped HTML (model names run through escapeHtml); labels/icons are static. */
+type PipelineStep = { icon: string; label: string; value: string };
+
+function modelsSteps(r: Recording): PipelineStep[] {
+  const steps: PipelineStep[] = [];
 
   // 1. Capture source.
-  if (r.in_place) steps.push("⌨️ In-place");
-  else steps.push(r.track === "system" ? "🔊 System audio" : "🎤 Mic");
+  if (r.in_place) steps.push({ icon: "⌨️", label: "Source", value: "In-place dictation" });
+  else steps.push({ icon: r.track === "system" ? "🔊" : "🎤", label: "Source", value: r.track === "system" ? "System audio" : "Microphone" });
 
-  // 2. Transcription, with diarization noted (its model when recorded).
+  // 2. Transcription, with diarization as its own row (model when recorded).
   if (r.model) {
-    let t = `🗣 ${escapeHtml(r.model)}`;
+    steps.push({ icon: "🗣", label: "Transcribed", value: escapeHtml(r.model) });
     if (r.diarized) {
-      t += r.diarization_model
-        ? ` · 🧑‍🤝‍🧑 ${escapeHtml(r.diarization_model)}`
-        : " · 🧑‍🤝‍🧑 diarized";
+      steps.push({ icon: "🧑‍🤝‍🧑", label: "Diarized", value: r.diarization_model ? escapeHtml(r.diarization_model) : "speakers labeled" });
     }
-    steps.push(t);
   }
 
   // 3. LLM cleanup.
-  if (r.cleanup_model) steps.push(`✨ cleanup: ${escapeHtml(r.cleanup_model)}`);
+  if (r.cleanup_model) steps.push({ icon: "✨", label: "Cleaned up", value: escapeHtml(r.cleanup_model) });
 
   // 4. Auto-title — only a pipeline-generated title is a step (a user-set title
   //    isn't). Names the model once persisted; otherwise the bare action.
-  if (r.title_model) steps.push(`🔖 title: ${escapeHtml(r.title_model)}`);
-  else if (r.title_is_auto && r.title) steps.push("🔖 auto-title");
+  if (r.title_model) steps.push({ icon: "🔖", label: "Titled", value: escapeHtml(r.title_model) });
+  else if (r.title_is_auto && r.title) steps.push({ icon: "🔖", label: "Titled", value: "auto-generated" });
 
   // 5. Hook, when it ran (exit code recorded).
   if (r.hook_exit_code != null) {
-    steps.push(r.hook_exit_code === 0 ? "🪝 hook ✓" : `🪝 hook ✗ (exit ${r.hook_exit_code})`);
+    steps.push({ icon: "🪝", label: "Hook", value: r.hook_exit_code === 0 ? "✓ ran successfully" : `✗ failed (exit ${r.hook_exit_code})` });
   }
 
   // 6. Auto-summary.
-  if (r.summary_model) steps.push(`✨ summary: ${escapeHtml(r.summary_model)}`);
+  if (r.summary_model) steps.push({ icon: "📝", label: "Summarized", value: escapeHtml(r.summary_model) });
 
   // 7. Auto-tagging — names the model once persisted; until then infer the step
   //    from pending suggestions (the only per-recording signal the tagger ran).
-  if (r.tag_model) steps.push(`🏷 tags: ${escapeHtml(r.tag_model)}`);
-  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push("🏷 auto-tag");
+  if (r.tag_model) steps.push({ icon: "🏷", label: "Tagged", value: escapeHtml(r.tag_model) });
+  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push({ icon: "🏷", label: "Tagged", value: "suggestions pending" });
 
   return steps;
 }
 
 /** The pipeline-provenance footer control (G): a compact "⛓ Pipeline" button
- *  that opens a popover listing each processing step its file went through —
- *  replacing the old cramped inline chain. Returns "" when no steps ran. Step
- *  labels already contain escaped HTML (built by modelsSteps), so inlining them
- *  here is safe. */
+ *  that opens a popover spelling out, in order, each step the recording went
+ *  through and the model/detail behind it. Returns "" when no steps ran. Values
+ *  are pre-escaped in modelsSteps; labels/icons are static. */
 function pipelineHtml(r: Recording): string {
   const steps = modelsSteps(r);
   if (!steps.length) return "";
+  const rows = steps
+    .map(
+      (s) =>
+        `<div class="dp-row"><span class="dp-ico" aria-hidden="true">${s.icon}</span><span class="dp-label">${s.label}</span><span class="dp-value">${s.value}</span></div>`,
+    )
+    .join("");
   return `<span class="detail-pipeline-wrap">
-    <button class="detail-pipeline-btn" id="detail-pipeline-btn" title="Show the processing each step went through" aria-haspopup="true" aria-expanded="false">⛓ Pipeline <span class="detail-pipeline-count">${steps.length}</span></button>
+    <button class="detail-pipeline-btn" id="detail-pipeline-btn" title="See everything that ran on this recording" aria-haspopup="true" aria-expanded="false">⛓ Pipeline <span class="detail-pipeline-count">${steps.length}</span></button>
     <div class="detail-pipeline-pop" id="detail-pipeline-pop" role="menu" hidden>
-      <div class="detail-pipeline-title">Processing pipeline</div>
-      ${steps.map((s) => `<div class="detail-pipeline-step">${s}</div>`).join("")}
+      <div class="detail-pipeline-title">How this recording was processed</div>
+      ${rows}
     </div>
   </span>`;
 }
