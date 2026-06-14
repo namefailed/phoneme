@@ -922,6 +922,112 @@ pub struct LocalDiarization {
     pub segmentations: Array3<f32>,
 }
 
+/// Two speaker clusters whose centroid voiceprints have at least this cosine
+/// similarity are merged into one. speakrs' clustering (AHC seed → VBx) sometimes
+/// over-splits a SINGLE voice into several clusters — a 2-person recording can
+/// come back as 3 "speakers" — and the two fragments of one voice score far
+/// higher against each other than two genuinely-different voices do. Calibrated
+/// on real recordings: a same-voice over-split pair measured ~0.57 cosine, while
+/// genuinely-different voices sat ~0.33–0.46, so 0.5 merges the former and keeps
+/// the latter apart. (Distinct from `clean_speaker_spans`/smoothing, which fix
+/// turn TIMING; this fixes the speaker COUNT.)
+const SPEAKER_MERGE_COSINE: f32 = 0.5;
+
+/// L2-normalized centroid embedding per speaker column (cluster id == column
+/// index), aggregated from the per-`(chunk, speaker)` embeddings over the cells
+/// whose `hard_clusters` id matches. `None` for a column with no finite
+/// embeddings. `embeddings` is `(chunks, speakers, dim)`, `hard_clusters` is
+/// `(chunks, speakers)`.
+fn cluster_centroids(
+    embeddings: &Array3<f32>,
+    hard_clusters: &Array2<i32>,
+    num_cols: usize,
+) -> Vec<Option<Vec<f32>>> {
+    let (chunks, speakers, dim) = embeddings.dim();
+    let mut sums: Vec<(Vec<f64>, usize)> = vec![(vec![0.0; dim], 0); num_cols];
+    for c in 0..chunks {
+        for s in 0..speakers {
+            let cid = hard_clusters[[c, s]];
+            if cid < 0 || cid as usize >= num_cols {
+                continue;
+            }
+            let e = embeddings.slice(ndarray::s![c, s, ..]);
+            if !e.iter().all(|v| v.is_finite()) {
+                continue;
+            }
+            let (sum, cnt) = &mut sums[cid as usize];
+            for (i, v) in e.iter().enumerate() {
+                sum[i] += *v as f64;
+            }
+            *cnt += 1;
+        }
+    }
+    sums.into_iter()
+        .map(|(sum, cnt)| {
+            if cnt == 0 {
+                return None;
+            }
+            let mut v: Vec<f32> = sum.iter().map(|x| (x / cnt as f64) as f32).collect();
+            let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm > 0.0 {
+                for x in &mut v {
+                    *x /= norm;
+                }
+            }
+            Some(v)
+        })
+        .collect()
+}
+
+/// Map each speaker column to its canonical (merged) column via single-linkage
+/// agglomerative merging on centroid cosine ≥ `threshold` (see
+/// [`SPEAKER_MERGE_COSINE`]). The smallest column index in a merged group is the
+/// canonical one (so first-appearance numbering stays sensible). Columns with no
+/// centroid never merge. A no-op (identity map) when nothing is similar enough.
+fn merge_similar_clusters(
+    embeddings: &Array3<f32>,
+    hard_clusters: &Array2<i32>,
+    num_cols: usize,
+    threshold: f32,
+) -> Vec<usize> {
+    let centroids = cluster_centroids(embeddings, hard_clusters, num_cols);
+    let mut parent: Vec<usize> = (0..num_cols).collect();
+    fn find(parent: &mut [usize], x: usize) -> usize {
+        let mut root = x;
+        while parent[root] != root {
+            root = parent[root];
+        }
+        let mut cur = x;
+        while parent[cur] != root {
+            let next = parent[cur];
+            parent[cur] = root;
+            cur = next;
+        }
+        root
+    }
+    for i in 0..num_cols {
+        for j in (i + 1)..num_cols {
+            if let (Some(ci), Some(cj)) = (&centroids[i], &centroids[j]) {
+                let cos: f32 = ci.iter().zip(cj).map(|(a, b)| a * b).sum();
+                if cos >= threshold {
+                    let ri = find(&mut parent, i);
+                    let rj = find(&mut parent, j);
+                    if ri != rj {
+                        let (keep, drop) = if ri < rj { (ri, rj) } else { (rj, ri) };
+                        parent[drop] = keep;
+                    }
+                }
+            }
+        }
+    }
+    (0..num_cols).map(|c| find(&mut parent, c)).collect()
+}
+
+/// Parse a `SPEAKER_{k:02}` label back to its column index `k`.
+fn parse_speaker_column(label: &str) -> Option<usize> {
+    label.strip_prefix("SPEAKER_").and_then(|n| n.parse().ok())
+}
+
 /// Run local diarization on a 16 kHz mono WAV, returning the cleaned speaker
 /// turns alongside the raw model arrays (see [`LocalDiarization`]). The pipeline
 /// comes from `cache` — loaded on first use, then reused across recordings (the
@@ -969,6 +1075,48 @@ pub fn run_local_diarization(
     // ours alone, for the per-word argmax, not a reproduction of how
     // `result.segments` was built.)
     result.discrete_diarization.make_exclusive();
+
+    // Voiceprint merge: speakrs' clustering can over-split ONE voice into several
+    // clusters (a 2-person recording returned as 3 "speakers"), which both
+    // inflates the speaker count and chops a single speaker's turn as the model
+    // flip-flops between that voice's fragments. Merge clusters whose centroid
+    // voiceprints are similar enough to be the same voice (see
+    // `SPEAKER_MERGE_COSINE`); genuinely-distinct voices stay separate. Fold each
+    // merged column of the per-frame matrix into its canonical column and relabel
+    // the segment spans, so BOTH word-level (argmax over the matrix) and
+    // segment-level (overlap vs spans) attribution see the merged speakers.
+    let num_cols = result.discrete_diarization.0.ncols();
+    let canon = merge_similar_clusters(
+        &result.embeddings.0,
+        &result.hard_clusters.0,
+        num_cols,
+        SPEAKER_MERGE_COSINE,
+    );
+    if (0..num_cols).any(|c| canon[c] != c) {
+        for (c, &p) in canon.iter().enumerate() {
+            if p == c {
+                continue;
+            }
+            let dropped = result.discrete_diarization.0.column(c).to_owned();
+            {
+                let mut keep = result.discrete_diarization.0.column_mut(p);
+                keep += &dropped;
+            }
+            result.discrete_diarization.0.column_mut(c).fill(0.0);
+        }
+        for seg in result.segments.iter_mut() {
+            if let Some(k) = parse_speaker_column(&seg.speaker) {
+                if k < num_cols && canon[k] != k {
+                    seg.speaker = column_label(canon[k]);
+                }
+            }
+        }
+        tracing::info!(
+            from = num_cols,
+            to = (0..num_cols).filter(|&c| canon[c] == c).count(),
+            "voiceprint merge collapsed over-clustered speakers"
+        );
+    }
 
     // `result.segments` carries correctly-scaled (seconds) turns — that part of
     // the prior fix was right; the old `to_segments(1.0, 1.0)` had passed a frame
@@ -1631,6 +1779,109 @@ mod tests {
         let before = cols.clone();
         smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
         assert_eq!(cols, before, "two genuine long turns are untouched");
+    }
+
+    /// Over-clustering fix: when speakrs splits one voice into two clusters
+    /// (centroids very similar), they merge into the lowest-index canonical
+    /// column; a genuinely-distinct third voice stays separate. Mirrors the real
+    /// "US Government" recording (3 clusters, c1≈c2) collapsing to 2.
+    #[test]
+    fn voiceprint_merge_collapses_an_over_split_voice() {
+        // cluster 0 = [1,0]; clusters 1,2 ≈ [0,1] (same voice). At 0.5: {1,2} merge.
+        let embeddings =
+            ndarray::Array3::from_shape_vec((3, 1, 2), vec![1.0, 0.0, 0.0, 1.0, 0.1, 0.99])
+                .unwrap();
+        let hard = ndarray::Array2::from_shape_vec((3, 1), vec![0, 1, 2]).unwrap();
+        let canon = merge_similar_clusters(&embeddings, &hard, 3, 0.5);
+        assert_eq!(
+            canon,
+            vec![0, 1, 1],
+            "the over-split voice (c2) folds into c1"
+        );
+    }
+
+    /// Genuinely-distinct voices (the real 'Preferences' 2-speaker case, ~0.32
+    /// cosine) are NOT merged at the 0.5 threshold.
+    #[test]
+    fn voiceprint_merge_keeps_distinct_voices_separate() {
+        let embeddings =
+            ndarray::Array3::from_shape_vec((2, 1, 2), vec![1.0, 0.0, 0.32, 0.947]).unwrap();
+        let hard = ndarray::Array2::from_shape_vec((2, 1), vec![0, 1]).unwrap();
+        let canon = merge_similar_clusters(&embeddings, &hard, 2, 0.5);
+        assert_eq!(canon, vec![0, 1], "two distinct voices stay separate");
+    }
+
+    /// Diagnostic (ignored): for each WAV in CAL_WAV1/CAL_WAV2, print speakrs'
+    /// final speaker count + the pairwise cosine between per-cluster centroid
+    /// voiceprints. Tells whether an over-clustered recording (N speakers for
+    /// fewer real voices) has clusters similar enough to merge, and at what
+    /// cosine. Run:
+    ///   $env:CAL_WAV1="...us_govt.wav"; $env:CAL_WAV2="...prefs.wav";
+    ///   cargo test -p phoneme-core diag_cluster_cosines -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual diagnostic; needs the ~500MB speakrs models + CAL_WAV1/2"]
+    fn diag_cluster_cosines() {
+        use speakrs::{ExecutionMode, OwnedDiarizationPipeline};
+        let wavs = [
+            std::env::var("CAL_WAV1").unwrap_or_default(),
+            std::env::var("CAL_WAV2").unwrap_or_default(),
+        ];
+        let mut pipeline =
+            OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu).expect("load pipeline");
+        for wav in wavs.iter().filter(|w| !w.is_empty()) {
+            let audio = load_audio_mono_16khz(std::path::Path::new(wav)).expect("load wav");
+            let cfg = pipeline.pipeline_config();
+            let r = pipeline
+                .run_with_config(&audio, "diag", &cfg)
+                .expect("diarize");
+            let speakers: std::collections::BTreeSet<String> =
+                r.segments.iter().map(|s| s.speaker.clone()).collect();
+            let emb = &r.embeddings.0;
+            let hc = &r.hard_clusters.0;
+            let (chunks, spk, dim) = emb.dim();
+            let mut sums: std::collections::BTreeMap<i32, (Vec<f64>, usize)> =
+                std::collections::BTreeMap::new();
+            for c in 0..chunks {
+                for s in 0..spk {
+                    let cid = hc[[c, s]];
+                    if cid < 0 {
+                        continue;
+                    }
+                    let e = emb.slice(ndarray::s![c, s, ..]);
+                    if !e.iter().all(|v| v.is_finite()) {
+                        continue;
+                    }
+                    let ent = sums.entry(cid).or_insert_with(|| (vec![0.0; dim], 0));
+                    for (i, v) in e.iter().enumerate() {
+                        ent.0[i] += *v as f64;
+                    }
+                    ent.1 += 1;
+                }
+            }
+            let cents: Vec<(i32, Vec<f64>)> = sums
+                .iter()
+                .map(|(cid, (s, n))| {
+                    let mut v: Vec<f64> = s.iter().map(|x| x / *n as f64).collect();
+                    let nrm = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+                    if nrm > 0.0 {
+                        for x in &mut v {
+                            *x /= nrm;
+                        }
+                    }
+                    (*cid, v)
+                })
+                .collect();
+            eprintln!(
+                "DIAG {wav}: segment_speakers={speakers:?} clusters={}",
+                cents.len()
+            );
+            for i in 0..cents.len() {
+                for j in i + 1..cents.len() {
+                    let cos: f64 = cents[i].1.iter().zip(&cents[j].1).map(|(a, b)| a * b).sum();
+                    eprintln!("DIAG   cos(c{}, c{}) = {cos:.3}", cents[i].0, cents[j].0);
+                }
+            }
+        }
     }
 
     // ── Pipeline cache: lazy init / invalidation / no double load ────────────

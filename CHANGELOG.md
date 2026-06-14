@@ -96,12 +96,24 @@ trust boundary. Verified against current code.*
   turn-taking does that). The wall-clock smoothing only caught sub-0.6 s flickers, so
   multi-word noise islands slipped through. Attribution now smooths **word-count
   islands**: a lone word (never a real turn), or a short run (≤ `MAX_ISLAND_WORDS`,
-  5) bracketed by the SAME speaker on both sides (a noise island inside one voice's
+  10 — whisper.cpp emits subword tokens, so a 10-token island is ~5 words)
+  bracketed by the SAME speaker on both sides (a noise island inside one voice's
   territory), is absorbed into the surrounding speaker. Per-word attribution is
   kept, so a genuine hand-off *inside* a whisper segment still splits, and real
   sustained turns and true speaker transitions survive — but the mid-sentence chop
   is gone and a solo recording collapses to one speaker (plain prose). Restores the
   coherent turns the segment-level era had, without losing word-level precision.
+- [x] **Over-split voices collapsed (voiceprint merge)** — the smoothing above fixes
+  *mid-sentence* chop, but it can't fix a wrong speaker *count*: speakrs' VBx stage
+  sometimes splits one real voice across two clusters, so a two-person recording
+  reported three speakers and the conversation flip-flopped between the phantom pair.
+  After the diarizer runs, Phoneme now computes an L2-normalized voiceprint centroid
+  per cluster from the per-chunk embeddings and single-linkage-merges any pair whose
+  cosine similarity is ≥ 0.50 (calibrated against real recordings: the same voice
+  over-splits at ~0.57, genuinely distinct voices sit at 0.33–0.46). The merged
+  cluster's per-frame activations are folded into its canonical column and the
+  segment spans relabelled, so **both** word-level and segment-level attribution see
+  the corrected speaker set. A two-person note now reports two speakers, not three.
 - [x] **"Treat single recordings as one speaker" option** (`[diarization]
   solo_one_speaker`, off by default). When the local diarizer genuinely hears two
   voices in a one-person recording — a big tonal shift when quoting, or background
