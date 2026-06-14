@@ -352,7 +352,7 @@ explicit roadmap line here saying why not).
   rename shipped; automatic recognition via speaker embeddings is the separate
   item above.)*
 - [ ] **Meeting capture profiles** — one click "Standup" (tag + summarize preset + Obsidian hook) vs "Interview" (diarize on, different prompt). Config profiles exist; tie them to capture intent.
-- [ ] **Post-meeting digest** — meeting ends → optional "Summarize now?" with a one-click LLM preset.
+- *(Per-recording "summarize on meeting end" was considered and dropped — auto-summary (#53) + on-demand per-recording summary already cover it. The genuinely-new **whole-meeting digest** moved to v1.10.)*
 
 ### 🔎 Recall
 
@@ -381,12 +381,22 @@ explicit roadmap line here saying why not).
   lands: immediately from a type-only fast pass (cleanup/summary/tags catch up
   in the library), or only after the full pipeline finishes. `[in_place]` in
   the config reference; user guide: `transcribe_in_place.md`.
-- [ ] **Live preview overhaul (a whole phase)** — execution scope, concrete:
-  **(a)** token-bucket reveal — words stream in at a steady cadence instead of
-  replace-per-tick jumps; **(b)** stable stitch — committed text is append-only
-  (provisional tail styled lighter, never rewriting what's already shown);
-  **(c)** idle behavior — hold + gentle decay when the speaker pauses, a
-  "listening" state instead of flicker; **(d)** per-tick perf budget with
+- [x] **Live preview overhaul (a whole phase)** — *shipped (wave 1, branch
+  `feat/live-preview-wave1`): **(a)** token-bucket reveal in the overlay —
+  words stream toward the latest text at `preview_reveal_words_per_sec`
+  (0 = instant), with a correction-snap so whisper revisions appear at once;
+  **(c)** LIVE↔LISTENING idle state (`preview_idle_ms`) instead of a frozen
+  caption; **(d)** adaptive per-tick cadence (`preview_adaptive`) so a heavy
+  model on a weak box self-throttles instead of wedging the recording — the
+  original record-time crash. **(b)** stable stitch: the daemon's
+  forward-growing stitch plus the overlay's common-prefix snap keep shown text
+  append-only in the normal case. **(e)** the Beta pill stays until the
+  10-minute stitch/pacing verification pass confirms it.* Execution scope,
+  concrete: **(a)** token-bucket reveal — words stream in at a steady cadence
+  instead of replace-per-tick jumps; **(b)** stable stitch — committed text is
+  append-only (provisional tail styled lighter, never rewriting what's already
+  shown); **(c)** idle behavior — hold + gentle decay when the speaker pauses,
+  a "listening" state instead of flicker; **(d)** per-tick perf budget with
   adaptive window (skip a tick under load rather than stutter); **(e)** exit
   criteria for dropping the Beta label: measured stitch stability + pacing on
   a 10-minute dictation. Original framing: the current streaming
@@ -397,12 +407,16 @@ explicit roadmap line here saying why not).
   window boundary, smarter idle behavior, and a real perf budget per tick.
   Wispr Flow ships NO live preview at all — that's how hard this is; ours has
   to feel right or stay off.
-- [ ] **Waveform capture overlay** — a small bottom-center pill while
-  dictating/recording showing the LIVE waveform of your own speech (plus
-  state: listening / transcribing / ✍ typed). The interactive "it hears me"
-  feedback Wispr Flow nails. Builds on the existing overlay window; do this
-  AFTER the live-preview overhaul (or independent of it — the waveform needs
-  only audio levels, not transcription).
+- [x] **Waveform capture overlay** — *shipped (wave 1): the desktop overlay
+  shows a live "it hears me" bar pill driven by a cheap daemon audio-level loop
+  (RMS of a tiny trailing tail at ~15 Hz, no whisper permit, so it never
+  reintroduces record-time lag), for single recordings, in-place dictation, and
+  meetings. Toggle `recording.preview_waveform`; pairs with the LIVE/LISTENING
+  label above.* Was: a small bottom-center pill while dictating/recording
+  showing the LIVE waveform of your own speech (plus state: listening /
+  transcribing / ✍ typed). The interactive "it hears me" feedback Wispr Flow
+  nails. Builds on the existing overlay window; the waveform needs only audio
+  levels, not transcription.
 
 - [ ] **In-place dictation, phase 2** — the fast lane shipped; now the feel:
   **(a)** voice commands in the polish pass — "new line", "new paragraph",
@@ -429,6 +443,13 @@ explicit roadmap line here saying why not).
 
 **Theme: make Recall a moat.** Bigger, model-touching work that builds on v1.9.
 
+- [ ] **Whole-meeting digest** — one summary across **both tracks / the merged You↔Meeting
+  conversation**, stored on the meeting and viewable from the merged view. *(Moved here
+  from v1.9: per-recording summaries are already covered by auto-summary (#53) + on-demand
+  Regenerate; the genuinely-new piece is summarizing the **merged** transcript, which needs
+  a real backend path — `RerunSummary` is per-recording and there's no merged-meeting id
+  today. Assemble the merged chronological transcript → summarize → persist a meeting-level
+  summary + surface it in `MergedConversationDetail`.)*
 - [x] **Transcript chunking + hybrid search** — *shipped.* Transcripts are split
   into overlapping, sentence-aware chunks (`chunk.rs`), each embedded into the new
   `embedding_chunks` table (migration `…_add_embedding_chunks.sql`); a recording is
