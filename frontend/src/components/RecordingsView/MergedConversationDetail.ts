@@ -288,7 +288,7 @@ export class MergedConversationDetail extends LitElement {
                 : nothing}
               <button class="inline-button" @click=${this.handleCopy}>${this.copyLabel}</button>
               <button class="inline-button" @click=${this.handleExport}>⬇ Export</button>
-              <button class="inline-button" title="More like this — fill the list with recordings about similar things, found from this meeting's semantic index" @click=${this.handleMoreLikeThis}>✨ Similar</button>
+              <button class="inline-button" style="display:inline-flex; align-items:center; gap:5px;" title="More like this — fill the list with recordings about similar things, found from this meeting's semantic index" @click=${this.handleMoreLikeThis}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>Similar</button>
             </div>
           </div>
           <div class="merged-meta">
