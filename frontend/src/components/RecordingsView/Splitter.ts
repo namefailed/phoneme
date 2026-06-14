@@ -52,6 +52,13 @@ export class Splitter {
     document.addEventListener("mousemove", this.onMouseMove);
   }
 
+  /** Sync the handle's stored position when the owner sets it programmatically
+   *  (e.g. resetting a split to 50/50) — so the next drag resumes from here, not
+   *  a stale value. */
+  setPercent(pct: number) {
+    this.leftPercent = pct;
+  }
+
   /** Remove the document-level drag listeners. Must be called when the owning
    *  view is torn down, otherwise each remount leaks a pair of listeners. */
   dispose() {

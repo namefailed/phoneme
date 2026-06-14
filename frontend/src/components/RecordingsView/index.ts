@@ -1023,7 +1023,9 @@ export class RecordingsView {
     }
 
     const sidebarWidth = this.sidebarVisible ? `${this.sidebarWidth}px` : "0px";
-    const resizerWidth = this.sidebarVisible ? "6px" : "0px";
+    // Thin resizer track (3px) — its ::after gives a wider grab area — so it
+    // doesn't read as a gap between the sidebar and the list (U).
+    const resizerWidth = this.sidebarVisible ? "3px" : "0px";
     // The sidebar CONTENT stays laid out at this width even while its grid
     // column animates to/from 0 — the slide clips it instead of squishing it.
     shell.style.setProperty("--sidebar-w", `${this.sidebarWidth}px`);
@@ -1083,6 +1085,10 @@ export class RecordingsView {
     this.listZen = false;
     this.splitId = id;
     this.splitReturnTo = opts.returnTo ?? null;
+    // Always open an even 50/50 split; the divider can still be dragged from
+    // there (double-click it to recentre). Keep the splitter widget in sync.
+    this.splitRatio = 50;
+    this.splitter2?.setPercent(50);
     void this.detail2.show(id);
     this.animateLayout();
     this.applyLayout();

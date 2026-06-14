@@ -39,10 +39,10 @@
      tracks — and the per-column separators — start at the same x as the rows
      (F2: rows have border-left:3px solid transparent for the meeting rail). */
   border-left: 3px solid transparent;
-  /* Tighter left inset (8px vs 16px) so the columns hug the sidebar instead of
-     leaving a vertical strip of empty space between them (U). Right padding kept
-     at 16px; rows use the same left value to stay aligned. */
-  padding: 12px 16px 12px 8px;
+  /* Tight left inset so the columns hug the sidebar instead of leaving a
+     vertical strip of empty space (U). Right padding kept at 16px; rows use the
+     same left value to stay aligned. */
+  padding: 12px 16px 12px 6px;
   display: grid;
   gap: 0;
   font-size: 11px;
@@ -55,7 +55,7 @@
 }
 .rec-row {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  padding: 10px 16px 10px 8px;
+  padding: 10px 16px 10px 6px;
   border-bottom: 1px solid var(--border-subtle);
   display: grid;
   gap: 0;
@@ -1912,7 +1912,7 @@ ph-sidebar {
 
 /* Sidebar resize handle (between the sidebar and the recordings list). */
 .rv-sidebar-resizer {
-  width: 6px;
+  width: 3px;
   height: 100%;
   cursor: col-resize;
   background: transparent;
@@ -1924,7 +1924,7 @@ ph-sidebar {
 .rv-sidebar-resizer::after {
   content: "";
   position: absolute;
-  inset: 0 -4px;
+  inset: 0 -5px;
 }
 .rv-sidebar-resizer:hover { background: var(--accent); }
 .sidebar-header {
