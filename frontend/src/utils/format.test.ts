@@ -51,6 +51,10 @@ describe("statusToClass", () => {
     expect(statusToClass("cancelled")).toBe("cancelled");
   });
 
+  it("maps 'queued' to its own orange class — distinct from in-progress 'pending'", () => {
+    expect(statusToClass("queued")).toBe("queued");
+  });
+
   it("maps all in-progress statuses to 'pending'", () => {
     expect(statusToClass("recording")).toBe("pending");
     expect(statusToClass("transcribing")).toBe("pending");

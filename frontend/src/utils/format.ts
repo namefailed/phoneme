@@ -28,11 +28,15 @@ export function formatDuration(ms: number): string {
 
 /**
  * Returns the CSS class for a recording status pill.
- * Maps the backend statuses to 4 visual states: done / failed / cancelled /
- * pending. Cancelled gets its own neutral pill — the user chose it, so the
- * red "failed" treatment would be a lie.
+ * Maps the backend statuses to 5 visual states: done / failed / cancelled /
+ * queued / pending. Cancelled gets its own neutral pill — the user chose it, so
+ * the red "failed" treatment would be a lie. Queued gets its own orange pill so
+ * a recording WAITING in the queue reads differently from one actively
+ * processing (the amber "pending" stages).
  */
-export function statusToClass(status: string): "done" | "failed" | "cancelled" | "pending" {
+export function statusToClass(
+  status: string,
+): "done" | "failed" | "cancelled" | "queued" | "pending" {
   if (status === "done") return "done";
   if (
     status === "transcribe_failed" ||
@@ -44,6 +48,7 @@ export function statusToClass(status: string): "done" | "failed" | "cancelled" |
   )
     return "failed";
   if (status === "cancelled") return "cancelled";
+  if (status === "queued") return "queued";
   return "pending";
 }
 

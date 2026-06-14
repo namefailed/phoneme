@@ -152,6 +152,9 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
 .status-pill.done    { background: rgba(166,227,161,0.15); color: var(--ok); }
 .status-pill.failed  { background: rgba(243,139,168,0.15); color: var(--err); }
 .status-pill.pending { background: rgba(249,226,175,0.15); color: var(--warn); }
+/* Queued = waiting in the transcription queue: orange, distinct from the amber
+   "pending" the actively-processing stages use. Theme-adaptive via `--peach`. */
+.status-pill.queued  { background: color-mix(in srgb, var(--peach) 15%, transparent); color: var(--peach); }
 /* Cancelled is the user's own action, not an error — a quiet neutral pill. */
 .status-pill.cancelled { background: rgba(147,153,178,0.15); color: var(--fg-muted); }
 .status-dot {

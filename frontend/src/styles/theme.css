@@ -13,6 +13,10 @@
   --warn: #f9e2af;
   --err: #f38ba8;
   --info: #89b4fa;
+  /* Orange — distinct from the amber `--warn`; used by the Queued status pill.
+     Defined on :root so every dark theme inherits a readable orange; the light
+     themes override it below for contrast. */
+  --peach: #fab387;
   /* Shared border for popups/dropdowns/modals — matches the subtle accent-tinted
      border the buttons use. Defined once on :root; resolves var(--accent) per
      theme at use time, so it stays correct across all themes. */
@@ -173,6 +177,7 @@ html[data-theme="catppuccin-latte"] {
   --warn: #df8e1d;
   --err: #d20f39;
   --info: #1e66f5;
+  --peach: #fe640b;
 }
 
 /* ── Light: Solarized Light ─────────────────────────────────────────────── */
@@ -191,5 +196,6 @@ html[data-theme="solarized-light"] {
   --warn: #b58900;
   --err: #dc322f;
   --info: #2aa198;
+  --peach: #cb4b16;
 }
 
