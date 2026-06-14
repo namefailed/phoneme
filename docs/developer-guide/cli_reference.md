@@ -217,10 +217,24 @@ transcript, without re-transcribing the audio. The preserved original transcript
 is always the input, so cleanup is idempotent. Overrides apply to this run only
 and are never written to config; passing `--provider` also forces cleanup on.
 
+| Flag | Effect |
+|------|--------|
+| `--provider <PROVIDER>` | Use this cleanup provider for this run (also forces cleanup on). |
+| `--model <MODEL>` | Use this cleanup model for this run. |
+| `--prompt <PROMPT>` | Use this cleanup prompt for this run. |
+| `--api-url <URL>` | Point cleanup at this endpoint for this run. |
+| `--api-key <KEY>` | Authenticate cleanup with this key for this run. |
+
 ```bash
 phoneme cleanup 20260519T143500823
 phoneme cleanup 20260519T143500823 --provider ollama --model llama3.1
 phoneme cleanup 20260519T143500823 --prompt "Fix grammar only"
+
+# Point this run at a different OpenAI-compatible endpoint + credentials
+phoneme cleanup 20260519T143500823 \
+  --provider openai \
+  --api-url https://api.example.com/v1 \
+  --api-key sk-...
 ```
 
 ### 📝 `phoneme summarize <ID>`

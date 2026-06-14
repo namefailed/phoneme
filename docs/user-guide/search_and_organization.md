@@ -54,6 +54,27 @@ recording as a favorite. The Library sidebar's **Favorites** filter shows only
 starred recordings, alongside All / Voice Notes / Meetings. Stars are stored in
 the catalog, so they survive restarts and travel with exports.
 
+## 🎭 Named speakers
+
+When a recording is [diarized](diarization_and_whisper.md), its transcript reads
+as `[Speaker 1]: …` / `[Speaker 2]: …`. You can rename any `Speaker N` to a real
+name — **Sarah**, **Alex**, **You** — and the name sticks to that recording.
+
+| Where | How |
+|-------|-----|
+| **Detail / merged view** | Click a speaker chip and type a name. Renaming there updates the speaker everywhere in that recording at once. |
+| **CLI** | `phoneme speaker rename <id> <label> "<name>"` — `<label>` is the 1-based `[Speaker N]` index. Clear a name with `phoneme speaker clear <id> <label>`. |
+
+The name is stored per recording and applied everywhere that speaker appears —
+the **transcript**, the **timeline**, the **synced** view, and the **merged**
+meeting conversation — so one rename relabels them all.
+
+> [!NOTE]
+> Names are applied at display and export time; the stored transcript keeps its
+> canonical `[Speaker N]` markers. A rename is therefore reversible — clear it
+> and the label reverts to `Speaker N` — and you can re-rename a speaker as often
+> as you like.
+
 ## 🔖 Saved searches
 
 A saved search snapshots **everything** the library is filtered by — search
@@ -84,9 +105,56 @@ per device.
 You can drill down into your catalog using the Filter pills above the recordings list.
 
 - **Library filter**: switch between **All**, **Voice Notes** (single recordings), **Meetings** (multi-track meeting recordings), and **Favorites** (starred). This mirrors the CLI `phoneme list --kind all|single|meeting`. The filter is applied by the daemon before pagination, so every page is full of the chosen kind — including Favorites pages deep into a large library.
-- **Status filter**: the header's status dropdown narrows the list to one processing state — **Recording**, **Transcribing**, **Cleaning Up**, **Summarizing**, **Tagging**, **Hook Running**, **Done**, **Transcription Failed**, **Hook Failed**, or **Cancelled** (a run you cancelled yourself — terminal like the failed states, but never treated as a failure).
+- **Status filter**: the header's status dropdown narrows the list to one processing state. The full set is below.
 - **Tag Filters**: Click "Filter by Tag" to only show recordings that have specific tags attached. You can select multiple tags to narrow your view.
 - **Date Filters**: Click the Date pill to restrict your view to "Today", "This Week", or select a custom date range from the calendar.
+
+### 🚦 Recording statuses
+
+Every recording carries exactly one status — its place in the pipeline, or where
+it came to rest. The status dropdown filters by any one of these, and each value
+is searchable. Statuses fall into three groups: **in-flight** (the pipeline is
+still working), **at rest** (Done), and **terminal failures / cancellation**.
+
+| Status | Group | What it means |
+|--------|-------|---------------|
+| **Recording** | In-flight | Live capture is happening right now — audio is still being added. |
+| **Queued** | In-flight | Claimed for processing but waiting in the queue; the worker hasn't started it yet. Distinct from **Transcribing** so you can tell waiting from working. |
+| **Paused** | In-flight | Capture is paused — no audio is being added until you resume. |
+| **Transcribing** | In-flight | Whisper (or your cloud provider) is producing the transcript. |
+| **Cleaning Up** | In-flight | The optional AI cleanup step is rewriting the transcript. |
+| **Summarizing** | In-flight | The optional auto-summary step is running. |
+| **Tagging** | In-flight | The optional auto-tag step is suggesting tags. |
+| **Hook Running** | In-flight | Your post-transcription hook (or webhook) is running. |
+| **Done** | At rest | Fully processed — the terminal success state. |
+| **Cancelled** | Terminal | You cancelled the run yourself (a queued item removed, or an in-flight transcription aborted). Terminal like the failures, but nothing broke — it is **never** counted or surfaced as a failure. |
+
+> [!NOTE]
+> A recording's status is independent of its [Library kind](#-filtering-views) and
+> tags — you can combine a status filter with a tag, a date range, and Voice
+> Notes / Meetings / Favorites at the same time.
+
+#### Failure states
+
+Failures split into two kinds, and only the terminal ones leave you without a
+usable transcript:
+
+| Status | Kind | What failed |
+|--------|------|-------------|
+| **Transcription Failed** | Terminal | Transcription itself didn't produce a transcript. The core step failed — re-transcribe to retry. |
+| **Hook Failed** | Terminal | The post-transcription hook (or webhook) returned an error. |
+| **Cleanup Failed** | Optional-step | The transcript is intact and usable — only the AI cleanup didn't land. |
+| **Summary Failed** | Optional-step | The transcript is intact — only the auto-summary step failed. |
+| **Title Failed** | Optional-step | The transcript is intact — only the auto-title step failed. |
+| **Tagging Failed** | Optional-step | The transcript is intact — only the auto-tag step failed. |
+
+> [!IMPORTANT]
+> **Optional-step failures don't mean a broken recording.** When cleanup,
+> summary, title, or tagging fails, the transcript is complete and searchable —
+> only that one enrichment is missing. These statuses are filterable and
+> searchable so you can find them and re-run just the failed step from the
+> [Re-run menu](#-the-re-run-menu), instead of having a failure quietly swallowed.
+> Only **Transcription Failed** and **Hook Failed** are true terminal failures.
 
 ## 🔁 The Re-run menu
 

@@ -6,32 +6,65 @@ Whether you want a 100% offline, privacy-first setup that runs entirely on your 
 
 ## 🧙‍♂️ The First Run Wizard
 
-When you launch Phoneme for the first time, you will be greeted by the First Run Wizard. It walks you through a multi-step setup so you land with a working configuration tuned to your hardware. The steps are:
+When you launch Phoneme for the first time, you are greeted by the First Run Wizard. It inspects your hardware, downloads what you need, and lands you on a working configuration. There are **two paths**, and the welcome screen lets you pick:
 
-1. **Welcome** — what Phoneme is and how the wizard works.
-2. **Mode** — choose Local & Private, Cloud Speed, or Advanced (skip + configure later).
-3. **Setup / downloads** — install local dependencies for your chosen path (the recommended whisper.cpp model + server, Ollama for AI cleanup, the diarization model, semantic-search models).
-4. **Connect AI** — a unified step to paste any cloud API keys you want to use (OpenAI, Anthropic, Groq, Deepgram, AssemblyAI, ElevenLabs, and more).
-5. **Mic** — pick and test your microphone.
-6. **Live Preview** — optionally enable live partial transcripts while recording.
-7. **Auto Summary** — optionally have an AI summary generated for every recording.
-8. **Destination** — where finished transcripts go (apps and hook scripts).
-9. **Hotkeys** — set global shortcuts for record, transcribe-in-place, and meeting mode.
-10. **Review** — confirm your choices.
-11. **Done** — start recording.
+- **Express setup (the quick default)** — one button installs and configures the recommended *local* stack for your detected RAM/VRAM, then asks only the few things it can't decide for you.
+- **Customize setup** — click **Customize setup** on the welcome screen to open the full per-feature flow (engine choice, AI cleanup connection, live preview, auto-summary, destination hook).
+
+> [!NOTE]
+> Express isn't a stripped-down setup — it still installs whisper.cpp, a hardware-matched model, and (on capable machines) local AI cleanup, diarization, and semantic search. It just *applies* the recommendations for you instead of walking you through each toggle. Everything is changeable later in Settings.
+
+### ⚡ Express setup (default)
+
+The express path is **6 steps**:
+
+| # | Step | What happens |
+|---|------|--------------|
+| 1 | **Welcome** | Shows the *Recommended local setup* plan for your detected RAM/VRAM (whisper.cpp + a model, plus Ollama / diarization / semantic search on capable hardware). Pick a theme, then **Set it all up automatically →**. |
+| 2 | **Setting up** | Downloads and configures everything in the plan — the Whisper model and server, and any local AI / diarization / semantic-search models — with a live progress bar. |
+| 3 | **Microphone** | Pick the input device Phoneme records from. |
+| 4 | **Hotkeys** | Set the global record, meeting, and in-place transcription combos. |
+| 5 | **Review** | Confirm what Phoneme will use. Inline toggles let you flip individual features on/off without going back. |
+| 6 | **Done** | Make your first recording. |
+
+### 🛠️ Customize setup (the full flow)
+
+Choosing **Customize setup** reveals all **11 steps**:
+
+| # | Step | What it covers |
+|---|------|----------------|
+| 1 | **Welcome** | Phoneme intro, plus theme and interface preferences (vim navigation, 24-hour time). |
+| 2 | **Features** | Per-feature toggles, pre-selected for your hardware: Speech-to-Text (with model picker + real-time streaming), AI Cleanup & Summaries (Ollama model), Speaker Diarization, and Semantic Search. |
+| 3 | **Setting up** | Downloads whatever you left enabled on the Features step. |
+| 4 | **Connect AI** | Shown only when a chosen feature needs a cloud key — paste a transcription provider key (no local Whisper) and/or an AI cleanup provider key (no local Ollama). Fully skippable. |
+| 5 | **Microphone** | Pick the input device. |
+| 6 | **Live Preview** | Optionally watch words appear while you record, and choose where the live text comes from (a dedicated local model, your final model, or a cloud API) plus the system-wide overlay. |
+| 7 | **Auto Summary** | Choose whether an AI summary is generated for every recording, or on demand only (the recommended default). |
+| 8 | **Destination** | Where finished transcripts go — an integration script/app, with a timeout. The default just shows the text in Phoneme. |
+| 9 | **Hotkeys** | Global record, meeting, and in-place transcription combos. |
+| 10 | **Review** | Confirm your choices, with inline toggles to adjust. |
+| 11 | **Done** | Make your first recording. |
+
+> [!NOTE]
+> Steps adapt to your choices. **Connect AI** only appears if you turned a feature off and need a cloud key for it; **Setting up** skips straight through if nothing is left to download.
 
 You can re-run the wizard any time from **Settings → System → Advanced**. Screenshots of each settings area live in [Settings Overview](settings_overview.md).
 
-### Choosing your mode
+### Choosing your features
 
-Phoneme will ask you how you intend to use the application. You can choose from:
-1. **🏠 Local & Private (Recommended)**: Phoneme downloads an optimized `whisper.cpp` model and runs a local server. Your audio never leaves your computer.
-2. **☁️ Cloud Speed**: If you have an API key for a cloud transcription provider (OpenAI, Groq, Deepgram, AssemblyAI, ElevenLabs, or a custom OpenAI-compatible endpoint), plug it in for fast cloud transcription.
-3. **⚙️ Advanced Setup**: Skip the guided flow and configure everything manually in Settings.
+On the **Features** step (customize path), Phoneme pre-selects what runs best on your machine — everything **local** by default. Toggle any of these:
+
+- **🎙️ Speech-to-Text (required)**: downloads an optimized `whisper.cpp` model and runs a local server; your audio never leaves your computer. Turn it off only if you plan to use a cloud transcription provider (set up on the **Connect AI** step or later in Settings). Includes a model picker and a **real-time streaming** toggle.
+- **🧠 AI Cleanup & Summaries**: pulls a local Ollama model to polish transcripts and power summaries. Off means cleanup/summaries can use a cloud LLM instead.
+- **👥 Speaker Diarization**: downloads the local speakrs model to label who-spoke-when in meetings.
+- **🔍 Semantic Search**: downloads a small embedding model so you can search transcripts by meaning, not just keywords.
+
+> [!NOTE]
+> If you turn Speech-to-Text or AI Cleanup off here, the **Connect AI** step appears so you can paste a cloud provider key (OpenAI, Anthropic, Groq, Deepgram, AssemblyAI, ElevenLabs, or a custom OpenAI-compatible endpoint). You can always wire up a cloud API later in Settings instead.
 
 ### Hardware auto-detection
 
-If you chose the Local & Private route, Phoneme analyzes your system's RAM and VRAM and recommends an optimal Whisper model size:
+On both paths, Phoneme analyzes your system's RAM and VRAM and recommends an optimal Whisper model size — express applies it automatically, and the **Features** step pre-selects it in the model picker:
 - **Tiny / Base**: Best for older laptops or systems with less than 8 GB of RAM. Extremely fast, slightly less accurate.
 - **Small / Medium**: The sweet spot for most modern computers. Excellent accuracy and good speed.
 - **Large-v3**: Requires significant RAM/VRAM, but offers state-of-the-art accuracy across many languages.

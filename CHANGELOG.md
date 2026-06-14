@@ -224,6 +224,14 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Docs caught up to the v1.8 work** — the user + developer guides now cover
+  the diarization quality passes (word-level attribution, coherent-turn smoothing,
+  voiceprint merge, orphan back-fill, atomic words/spacing) and `solo_one_speaker`,
+  the full recording-status set (incl. Queued, Paused, and the optional-step
+  failures vs terminal failures), named speakers, the Ollama streaming idle-timeout
+  + small-model-for-low-RAM guidance, that live preview is skipped during in-place
+  dictation, the `phoneme cleanup --api-url/--api-key` overrides, and a Claude Code
+  `.mcp.json` MCP setup section.
 - [x] **Live preview no longer breaks in-place dictation** — an in-place (quick)
   dictation started the streaming-preview loop too (it was gated only on
   `streaming_preview`, not on the dictation flag). The loop's per-second

@@ -144,6 +144,13 @@ Together AI, xAI (Grok), Cerebras, Fireworks AI, DeepInfra, Perplexity,
 Nebius AI, and Hyperbolic are all available as one-click presets. Each prefills a
 sensible default model; you just add your key.
 
+> [!NOTE]
+> Apart from Anthropic (which has its own `/v1/messages` format), every cloud
+> preset above is **OpenAI-compatible under the hood** — picking "Gemini" or
+> "DeepSeek" just points the `openai` chat-completions protocol at that
+> provider's endpoint with its default model. They all work the same way; the
+> friendly name is there so you don't have to wire up the URL yourself.
+
 ### Model fields (LLM)
 
 LLM providers do expose a model list, so the model field can **fetch the live

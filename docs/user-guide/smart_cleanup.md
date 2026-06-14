@@ -46,6 +46,22 @@ For the ultimate privacy-respecting, local-first experience, run the LLM locally
 
 The model field has a **Refresh** button that fetches your installed Ollama models.
 
+#### Picking a cleanup model for your RAM
+
+Cleanup runs *alongside* the local Whisper model, so the two share your memory
+at the same time. On a tight machine, pick a small cleanup model so they fit
+together:
+
+| Your RAM | Suggested cleanup model | Roughly |
+|----------|-------------------------|---------|
+| **Tight (≤ 8 GB)** | `llama3.2:3b` or `phi3:mini` | ~2 GB — runs comfortably next to Whisper |
+| **Comfortable (16 GB+)** | `llama3.1:8b` or larger | ~4 GB+ — better reasoning, more headroom needed |
+
+> [!TIP]
+> If cleanup feels slow or your machine starts swapping, drop to the ~2 GB tier
+> first — a smaller model that finishes beats a larger one that stalls. The
+> default `llama3.2:3b` is the safe starting point on most hardware.
+
 You don't have to keep Ollama running yourself: when an AI step needs your
 local Ollama and it isn't up, Phoneme launches `ollama serve` on demand and
 stops it again when the engine shuts down (**Start Ollama automatically** in
@@ -62,7 +78,18 @@ If you don't have the hardware to run a local model, or want the best reasoning 
 2. Enter the **Model Name** (the model field can fetch the live list via **Refresh**, or type any model).
 3. Enter your **API Key**.
 
-A **timeout** (seconds) controls how long Phoneme waits for the LLM before falling back to the un-cleaned transcript.
+A **timeout** (`[llm_post_process].timeout_secs`, default 30) controls how long Phoneme waits for a *cloud* LLM before falling back to the un-cleaned transcript.
+
+> [!NOTE]
+> **Local Ollama gets extra headroom.** A local model often needs to load into
+> memory before it answers, and the first run after a reboot can be slow. For
+> the local Ollama path Phoneme floors the wait at **at least ~120 seconds** —
+> even when `timeout_secs` is the default 30 — and it measures *idle* time (how
+> long it goes without new output), not total generation time. So a slow first
+> run still finishes: as long as the model keeps producing tokens, it is given
+> all the time it needs. The timeout only fires on a genuine stall, and when it
+> does the message tells you what to do — *try a smaller model or raise
+> `timeout_secs`*.
 
 ## 📝 Prompts & Presets
 

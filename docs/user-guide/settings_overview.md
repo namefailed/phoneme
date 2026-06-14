@@ -37,7 +37,7 @@ An independent transcription provider just for the live partial-transcript previ
 
 ### Diarization
 
-Speaker diarization backend: `none`, local ONNX, Deepgram, or AssemblyAI, plus the local model path. See [Whisper & Diarization](diarization_and_whisper.md).
+Speaker diarization backend: `none`, local ONNX, Deepgram, or AssemblyAI, plus the local model path. See [Whisper & Diarization](diarization_and_whisper.md). Once a recording is diarized you can rename each `Speaker N` to a real name (persisted per recording, applied across every view) — see [Named speakers](search_and_organization.md#-named-speakers).
 
 ## 🎙️ Capture
 

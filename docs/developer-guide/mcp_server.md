@@ -90,6 +90,27 @@ On macOS/Linux use the POSIX path instead:
 }
 ```
 
+### Claude Code
+
+Claude Code reads a project-level `.mcp.json` at the repo root. Add a `phoneme`
+entry whose `command` points at the built binary:
+
+```json
+{
+  "mcpServers": {
+    "phoneme": {
+      "command": "C:\\path\\to\\phoneme\\target\\release\\phoneme-mcp.exe"
+    }
+  }
+}
+```
+
+On a dev build the binary is under `target\\debug` instead of `target\\release`;
+on macOS/Linux use the POSIX path (`/path/to/phoneme/target/release/phoneme-mcp`).
+Like the Desktop entry it takes **no arguments**, and it is observe-only — make
+sure the daemon is running (the tray app or `phoneme daemon start`) before
+invoking a tool. Restart Claude Code and approve the new server so it connects.
+
 Restart the client; "phoneme" appears in its tool list and the five tools above
 become callable. The MCP server needs **no arguments** — it reads the same
 config the daemon and CLI read (honoring `PHONEME_CONFIG`) to find the daemon's

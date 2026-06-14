@@ -41,6 +41,13 @@ hotkey, the recording takes a **dedicated fast lane**:
    closed, the text is still in Phoneme. Turn "Keep dictations in the library"
    off for fully ephemeral dictation.
 
+> [!NOTE]
+> In-place runs its own fast path, so the [live streaming
+> preview](streaming_preview_and_preroll.md) is **skipped** during dictation —
+> there's no overlay to feed, and skipping it means the preview's per-second
+> transcription ticks never compete with your dictation for the single whisper
+> permit, so live preview never adds latency to the paste.
+
 Summaries, auto-tags, and hooks do **not** run for dictations on the fast
 lane. If you want dictations to behave exactly like normal recordings, enable
 **Run the full pipeline** in Settings → Capture → Dictation. With it on,

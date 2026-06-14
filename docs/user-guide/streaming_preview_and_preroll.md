@@ -51,6 +51,7 @@ Enable `recording.streaming_preview = true`. While recording, the daemon periodi
 - This is a **preview**, not the final transcript. After stop, the normal pipeline runs again for the authoritative result.
 - whisper.cpp's `/v1/audio/transcriptions` returns a **full** transcript per request — not token streaming. Phoneme simulates "live" feel via incremental re-transcription, roughly every **2 s** (a fast local/native provider tightens this to ~1 s).
 - The preview yields to the final transcription (it only runs a tick when the single whisper permit is free), so it can never starve the authoritative pass.
+- **Preview does not run during [in-place dictation](transcribe_in_place.md).** A quick dictation has no overlay to feed, and the per-second preview ticks would contend with the dictation's own latency-critical transcribe-and-paste on the single whisper permit — so Phoneme skips the preview loop entirely for in-place recordings.
 - Preview costs extra CPU/GPU while recording. Disable on low-end hardware.
 - Optionally use a separate, faster provider just for the preview — see the `[preview_whisper]` section in the [Configuration Reference](../developer-guide/config_reference.md).
 

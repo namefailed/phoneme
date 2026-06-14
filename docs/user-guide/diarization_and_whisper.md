@@ -91,13 +91,52 @@ Pick the backend in **Settings → Transcription → Speaker Diarization**
 
 ### How local diarization works
 
-1. **Capture:** a meeting records `mic` and `system` as two linked tracks.
-2. **Segment:** the **system** track is run through the local ONNX segmentation
-   model, which emits timestamps of who spoke when. The **mic** track is a single
-   voice — yours — so it is *not* diarized; it is labelled **You** directly,
-   which halves the diarizer's work per meeting.
-3. **Transcribe:** Whisper transcribes the time-slices.
-4. **Merge:** the transcript identifies the distinct speakers.
+1. **Capture.** A meeting records `mic` and `system` as two linked tracks. A
+   single recording is just one track.
+2. **Transcribe.** Whisper transcribes the audio, with per-word timestamps.
+3. **Segment.** The track is run through the local ONNX segmentation +
+   embedding models (**speakrs**), which decide who is speaking at each moment.
+   The **mic** track in a meeting is a single voice — yours — so it skips the
+   diarizer entirely and is labelled **You** directly, which halves the work per
+   meeting.
+4. **Attribute per word.** Each transcribed *word* is assigned to a speaker from
+   the segmentation, then consecutive same-speaker words are grouped into turns.
+   Attributing per word (instead of per whole segment) is what lets a word that
+   lands right on a hand-off go to the speaker who actually said it.
+5. **Clean up the turns.** A few passes turn the raw per-word labels into natural
+   turns — see [Diarization quality](#-diarization-quality) below — and the
+   result is rendered as `[Speaker 1]: …` / `[Speaker 2]: …` blocks you can
+   rename.
+
+### ✨ Diarization quality
+
+Raw speaker models are noisy — they flip speakers mid-sentence, miscount voices,
+and chop words apart. Phoneme runs several cleanup passes so the transcript reads
+like a real conversation instead of a jittery machine dump. You don't configure
+any of this; it just happens on the local word-level path.
+
+| What you'd otherwise see | What Phoneme does |
+|---|---|
+| A wrong **speaker count** — a 2-person chat labelled as 3, because the model split one voice into two clusters | **Voiceprint merge.** After diarizing, Phoneme compares a voice "fingerprint" for each detected speaker and merges ones that are clearly the same person, so two people stay two speakers. |
+| **Mid-sentence flips** — `[Speaker 1] the fact that women / [Speaker 2] going to do what they / [Speaker 1] want` | **Coherent turns.** A short run the model briefly mis-scored to another speaker, sitting inside one person's longer stretch, is absorbed back — real turns and genuine hand-offs survive. |
+| A turn **chopped by a floating word** — `…the company itself is a / cyber / [Speaker 2] weapon?` | **Orphan back-fill.** A word the segmenter left unattributed (common right at a hand-off) is assigned to its neighbouring speaker, so a turn renders as one clean block. |
+| **Mangled spacing** — `I don 't know`, `over ste pped`, a space before every `.`/`,` | **Faithful spacing.** Whisper emits sub-word pieces; Phoneme rejoins them so you get `I don't know`, `overstepped`, and clean punctuation. |
+| A word **split across speakers** — `That` [Speaker 1] / `'s` [Speaker 2] | **Atomic words.** Punctuation, contractions, and sub-word pieces always inherit their word's speaker, so a single written word is never divided. |
+
+> [!NOTE]
+> These run on the **local** word-level path (the bundled whisper + speakrs).
+> They re-run whenever you **Re-transcribe** a recording, so an older recording
+> made before an update gets the improvements the next time you re-transcribe it.
+
+### 🙋 Treat a solo recording as one speaker
+
+A solo voice note is sometimes heard as two people — a big tonal shift when you
+quote someone, or background audio — and no clustering setting can merge genuinely
+different-sounding audio. Turn on **Treat single recordings as one speaker**
+(`[diarization] solo_one_speaker`, off by default) and Phoneme skips diarization
+entirely for **single** (non-meeting) recordings: a solo note reads as plain prose
+and is never split into `[Speaker N]` turns. Meetings (separate mic/system tracks)
+and genuinely multi-speaker files are unaffected.
 
 ### The local diarization models
 
