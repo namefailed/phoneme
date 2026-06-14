@@ -127,6 +127,16 @@ trust boundary. Verified against current code.*
   back-fill only ever copies an existing neighbour, so the speaker count is
   untouched. Local word-level path only for now; the cloud/segment path keeps its
   existing behaviour (tracked separately).
+- [x] **Diarized text no longer mangles spacing** — the word-level path rebuilt a
+  turn's text by trimming each whisper token and re-joining with a single space,
+  but whisper emits *subword* and punctuation tokens whose word boundaries live in
+  a leading space it strips. The result was "I don 't know", "over ste pped",
+  "ban ning", and a space before every `.`/`,`/`?`. Phoneme now captures whisper's
+  leading-space marker per token (`TranscriptWord::leading_space`) and rejoins by
+  it, so subword tokens fuse ("over"+"ste"+"pped" → "overstepped") and punctuation
+  attaches cleanly ("weapon?", "don't"). The marker is transient (not persisted,
+  not sent over IPC); cloud providers, which emit clean words, default to normal
+  spacing.
 - [x] **"Treat single recordings as one speaker" option** (`[diarization]
   solo_one_speaker`, off by default). When the local diarizer genuinely hears two
   voices in a one-person recording — a big tonal shift when quoting, or background

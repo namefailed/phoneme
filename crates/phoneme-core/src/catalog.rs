@@ -2052,6 +2052,10 @@ impl Catalog {
                     start_ms: r.try_get("start_ms")?,
                     end_ms: r.try_get("end_ms")?,
                     text: r.try_get("text")?,
+                    // Not persisted (a stored word is already space-trimmed); only
+                    // the live whisper path needs the marker. Default to a normal
+                    // space-separated word for anything read back from the DB.
+                    leading_space: true,
                     speaker: r.try_get("speaker")?,
                     confidence: r.try_get("confidence")?,
                 })
@@ -3921,6 +3925,7 @@ mod tests {
                 start_ms: 0,
                 end_ms: 400,
                 text: "hello".into(),
+                leading_space: true,
                 speaker: Some("1".into()),
                 confidence: Some(0.97),
             },
@@ -3928,6 +3933,7 @@ mod tests {
                 start_ms: 400,
                 end_ms: 900,
                 text: "there".into(),
+                leading_space: true,
                 speaker: Some("1".into()),
                 confidence: None,
             },
@@ -3944,6 +3950,7 @@ mod tests {
             start_ms: 0,
             end_ms: 500,
             text: "rerun".into(),
+            leading_space: true,
             speaker: None,
             confidence: Some(0.5),
         }];

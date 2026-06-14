@@ -325,6 +325,13 @@ pub struct TranscriptSegment {
     pub speaker: Option<String>,
 }
 
+/// Serde/default value for [`TranscriptWord::leading_space`]: a word reconstructed
+/// from the DB or deserialized from IPC is treated as space-separated, the safe
+/// default for everything but the live whisper word path that sets it explicitly.
+fn default_leading_space() -> bool {
+    true
+}
+
 /// One machine transcript word with its audio-relative timing — the finest
 /// timing layer beneath [`TranscriptSegment`].
 ///
@@ -345,8 +352,20 @@ pub struct TranscriptWord {
     pub start_ms: i64,
     /// Word end, in milliseconds from the start of the track's audio.
     pub end_ms: i64,
-    /// The single word/token as the provider emitted it.
+    /// The single word/token as the provider emitted it, trimmed of the
+    /// whitespace whisper uses to mark word starts (that marker is captured in
+    /// [`leading_space`](Self::leading_space) instead).
     pub text: String,
+    /// Whether this token began a new word in the provider's output — i.e. the
+    /// raw token carried a leading space (whisper's BPE convention: `" over"`
+    /// starts a word, the continuations `"ste"`/`"pped"` and punctuation do not).
+    /// Used only transiently while assembling the diarized turn text so subword
+    /// tokens rejoin without spurious spaces ("over ste pped" → "overstepped");
+    /// it is neither persisted (the `transcript_words` table omits it) nor sent
+    /// over IPC (`skip`), and defaults to `true` — a plain space-separated word —
+    /// for providers that emit clean words and for any reconstructed word.
+    #[serde(skip, default = "default_leading_space")]
+    pub leading_space: bool,
     /// Speaker label as it appears in the `[Speaker …]` marker, or `None` for an
     /// undiarized word (see the type doc for how numeric labels join names).
     #[serde(default)]

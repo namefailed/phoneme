@@ -657,6 +657,10 @@ fn words_from_response(
         .map(|w| TranscriptWord {
             start_ms: secs_to_ms(w.start as f64),
             end_ms: secs_to_ms(w.end as f64),
+            // whisper marks word starts with a leading space; capture it before
+            // trimming so the diarized turn text can rejoin subword tokens
+            // ("over"+"ste"+"pped") without inserting spurious spaces.
+            leading_space: w.word.starts_with(|c: char| c.is_whitespace()),
             text: w.word.trim().to_string(),
             speaker: None,
             confidence: w.probability,
@@ -906,12 +910,15 @@ fn diarize_per_word(
         let speaker = (idx > 0).then(|| idx.to_string());
 
         if current != Some(idx) {
+            // New turn: blank-line separator, optional speaker prefix, then the
+            // first token with no leading space (the turn starts clean).
             if !text.is_empty() {
                 text.push_str("\n\n");
             }
             if idx > 0 {
                 text.push_str(&format!("[Speaker {idx}]: "));
             }
+            text.push_str(trimmed);
             current = Some(idx);
             out_segments.push(TranscriptSegment {
                 start_ms,
@@ -920,14 +927,21 @@ fn diarize_per_word(
                 speaker: speaker.clone(),
             });
         } else {
-            text.push(' ');
+            // Same speaker: rejoin with a space only when whisper marked this
+            // token as a word start, so subword tokens ("over"+"ste"+"pped") and
+            // punctuation ("weapon"+"?") don't gain spurious spaces.
+            if src.leading_space {
+                text.push(' ');
+            }
+            text.push_str(trimmed);
             if let Some(seg) = out_segments.last_mut() {
-                seg.text.push(' ');
+                if src.leading_space {
+                    seg.text.push(' ');
+                }
                 seg.text.push_str(trimmed);
                 seg.end_ms = end_ms.max(seg.end_ms);
             }
         }
-        text.push_str(trimmed);
 
         out_words.push(TranscriptWord {
             speaker,
@@ -1115,6 +1129,7 @@ impl TranscriptionProvider for DeepgramProvider {
                 start_ms: w.start.map(secs_to_ms).unwrap_or(0),
                 end_ms: w.end.or(w.start).map(secs_to_ms).unwrap_or(0),
                 text: w.word.clone(),
+                leading_space: true,
                 speaker: None,
                 confidence: w.confidence,
             })
@@ -1163,6 +1178,7 @@ impl TranscriptionProvider for DeepgramProvider {
                 start_ms: start_ms.unwrap_or(fallback),
                 end_ms: end_ms.or(start_ms).unwrap_or(fallback),
                 text: w.word.clone(),
+                leading_space: true,
                 speaker: Some(spk.to_string()),
                 confidence: w.confidence,
             });
@@ -1426,6 +1442,7 @@ impl TranscriptionProvider for AssemblyAiProvider {
                                 start_ms: w.start.unwrap_or(fallback),
                                 end_ms: w.end.or(w.start).unwrap_or(fallback),
                                 text: w.text,
+                                leading_space: true,
                                 speaker: w.speaker,
                                 confidence: w.confidence,
                             });
@@ -2205,6 +2222,7 @@ mod tests {
             start_ms: 0,
             end_ms: 2000,
             text: "just".to_string(),
+            leading_space: true,
             speaker: Some("stale".to_string()),
             confidence: Some(0.9),
         }];
@@ -2244,6 +2262,7 @@ mod tests {
             start_ms: center_ms(frame),
             end_ms: center_ms(frame),
             text: text.to_string(),
+            leading_space: true,
             speaker: None,
             confidence: conf,
         };
@@ -2275,6 +2294,50 @@ mod tests {
     }
 
     #[test]
+    fn per_word_rejoins_subword_tokens_with_whisper_spacing() {
+        // whisper emits subword + punctuation tokens; only word-starts carry a
+        // leading space. The turn builder must rejoin by that flag, NOT insert a
+        // space before every token (the bug that produced "over ste pped ?").
+        let step = speakrs::pipeline::FRAME_STEP_SECONDS;
+        let dur = speakrs::pipeline::FRAME_DURATION_SECONDS;
+        // frames 0-1 → speaker 0, frames 2-3 → speaker 1.
+        let m: Array2<f32> = ndarray::array![[1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0],];
+        let diar = LocalDiarization {
+            spans: vec![
+                sspan(0.0, 2.0 * step, "SPEAKER_00"),
+                sspan(2.0 * step, 4.0 * step, "SPEAKER_01"),
+            ],
+            discrete_diarization: m,
+            embeddings: ndarray::Array3::zeros((0, 0, 0)),
+            hard_clusters: Array2::zeros((0, 0)),
+            segmentations: ndarray::Array3::zeros((0, 0, 0)),
+        };
+        let center_ms = |frame: f64| ((frame * step + 0.5 * dur) * 1000.0).round() as i64;
+        let tok = |frame: f64, text: &str, lead: bool| TranscriptWord {
+            start_ms: center_ms(frame),
+            end_ms: center_ms(frame),
+            text: text.to_string(),
+            leading_space: lead,
+            speaker: None,
+            confidence: None,
+        };
+        let words = vec![
+            tok(0.0, "I", true),    // word start
+            tok(0.0, "over", true), // word start
+            tok(1.0, "ste", false), // subword continuation
+            tok(1.0, "pped", false),
+            tok(1.0, "?", false),   // punctuation, no leading space
+            tok(2.0, "yeah", true), // speaker 1
+        ];
+        let out = diarize_per_word(&words, &diar, 0.0).expect("two speakers → labeled");
+        assert_eq!(out.text, "[Speaker 1]: I overstepped?\n\n[Speaker 2]: yeah");
+        assert_eq!(
+            out.segments[0].text, "I overstepped?",
+            "the segment text rejoins the same way as the turn text"
+        );
+    }
+
+    #[test]
     fn per_word_single_speaker_gates_to_none() {
         // One speaker across all words → the ≤1-speaker gate returns None so the
         // caller emits plain text (reads better as prose).
@@ -2293,6 +2356,7 @@ mod tests {
             start_ms: center_ms(frame),
             end_ms: center_ms(frame),
             text: text.to_string(),
+            leading_space: true,
             speaker: None,
             confidence: None,
         };
@@ -2313,6 +2377,7 @@ mod tests {
             start_ms: (s * 1000.0).round() as i64,
             end_ms: (e * 1000.0).round() as i64,
             text: t.to_string(),
+            leading_space: true,
             speaker: None,
             confidence: None,
         };
