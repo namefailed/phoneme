@@ -943,6 +943,17 @@ pub enum DaemonEvent {
         /// The latest best-effort transcript of the audio captured so far.
         text: String,
     },
+    /// A live microphone-level sample for the "it hears me" waveform pill in the
+    /// desktop overlay, emitted by a lightweight per-recording level loop at a
+    /// few Hz while capturing. Independent of `streaming_preview` and the
+    /// transcription work — the level loop never holds the whisper permit, so it
+    /// can't reintroduce the record-time lag the preview guards against.
+    AudioLevelSample {
+        /// The recording/track being captured.
+        id: RecordingId,
+        /// Normalized 0.0..=1.0 loudness for the current instant.
+        level: f32,
+    },
     /// The final transcript (after LLM cleanup, when enabled) is stored and
     /// the recording reached a presentable state. Carries the full text so a
     /// blocking CLI `record`/import flow can print it without a re-fetch;
