@@ -351,7 +351,12 @@ explicit roadmap line here saying why not).
 - [x] **Show semantic relevance scores in the list** — hybrid search now returns a
   calibrated 0–100% relevance per hit (`fusion.rs::calibrate_cosine`) and the
   recordings list renders it as a chip during a semantic query.
-- [ ] **"More like this"** — open a recording → find semantically similar ones. Nearly free: search by an existing recording's stored vector instead of a fresh query embedding. (Promoted from "medium" — embeddings already exist.)
+- [x] **"More like this"** — *shipped.* Open a recording → find semantically similar
+  ones from its already-stored chunk vectors (no fresh embedding;
+  `catalog::more_like_this`, `MoreLikeThis` IPC), excluding the source and its own
+  meeting's other track. **✨ Similar** button in the detail action row + merged
+  view; `~similar:` pill returns to the normal list; CLI parity via
+  `phoneme search --like <RECORDING_ID>`.
 - [x] **Saved searches / smart filters** — saves capture the *complete* filter
   state (query, kind, tags, dates, favorites, semantic mode), applied from the
   header dropdown and managed in Settings → Managers (also `g S`).
