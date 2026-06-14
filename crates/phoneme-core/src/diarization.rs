@@ -438,6 +438,17 @@ pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 /// always that voice continuing, not a real interjection.
 const MAX_ISLAND_WORDS: usize = 10;
 
+/// The larger ceiling for a same-speaker-bracketed island that is also strictly
+/// shorter than BOTH of its (same-speaker) neighbours. Between [`MAX_ISLAND_WORDS`]
+/// and this, a run is absorbed only when one voice clearly dominates on both
+/// sides — a brief blip mid-monologue the diarizer mis-scored to the other
+/// speaker (the real case: a ~16-token "cyber weapon? I mean, I mean, because you
+/// don't" stranded inside a 31-token question and a 144-token monologue, both the
+/// same speaker). Above this ceiling a run is treated as a genuine turn and never
+/// silently merged, even if it happens to be shorter than two very long
+/// monologues. ~24 tokens ≈ ~12 spoken words (whisper emits subword tokens).
+const MAX_BRACKETED_ISLAND_WORDS: usize = 24;
+
 /// A contiguous run of same-speaker words inside the per-word column sequence.
 struct SpeakerRun {
     /// First word index in the run (into the `cols` / `words` slices).
@@ -516,9 +527,23 @@ fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min
         };
         let absorbable = |ri: usize| -> bool {
             let r = &runs[ri];
-            words_in(r) == 1
-                || (bracketed_same(ri) && words_in(r) <= MAX_ISLAND_WORDS)
-                || r.span < min_turn
+            if words_in(r) == 1 || r.span < min_turn {
+                return true;
+            }
+            if bracketed_same(ri) {
+                // ri-1 and ri+1 both exist (that's what bracketed_same checks).
+                let prev = words_in(&runs[ri - 1]);
+                let next = words_in(&runs[ri + 1]);
+                // A small island is always flicker; a MEDIUM one is absorbed only
+                // when the SAME speaker dwarfs it on both sides — a brief blip
+                // inside one continuous monologue, not a real interjection. Large
+                // islands (a genuine turn) are never silently merged.
+                return words_in(r) <= MAX_ISLAND_WORDS
+                    || (words_in(r) <= MAX_BRACKETED_ISLAND_WORDS
+                        && words_in(r) < prev
+                        && words_in(r) < next);
+            }
+            false
         };
         // Smallest islands first (by word count) — deterministic.
         let mut order: Vec<usize> = (0..runs.len()).filter(|&i| absorbable(i)).collect();
@@ -1276,6 +1301,21 @@ mod tests {
             ..word(start, end, text)
         }
     }
+    /// Build (words, cols) from `(column, token_count)` runs, with realistic 0.3 s
+    /// words back-to-back — for exercising the run-level smoothing thresholds.
+    fn seq(spec: &[(usize, usize)]) -> (Vec<WordSpan>, Vec<Option<usize>>) {
+        let mut words = Vec::new();
+        let mut cols = Vec::new();
+        let mut t = 0.0;
+        for &(col, n) in spec {
+            for _ in 0..n {
+                words.push(word(t, t + 0.3, "x"));
+                cols.push(Some(col));
+                t += 0.3;
+            }
+        }
+        (words, cols)
+    }
 
     #[test]
     fn non_numeric_labels_map_to_distinct_speakers() {
@@ -1903,6 +1943,48 @@ mod tests {
             cols,
             vec![Some(0), Some(0), Some(0), Some(0)],
             "all of 'overstepped?' is one speaker"
+        );
+    }
+
+    /// The US-Govt opening: a 16-token island scored to speaker 1 sits inside a
+    /// 31-token and a 144-token run of speaker 0 — over MAX_ISLAND_WORDS but
+    /// dwarfed by the SAME speaker on both sides, so it's absorbed (a brief blip
+    /// mid-monologue the diarizer mis-scored, not a real interjection).
+    #[test]
+    fn medium_island_dwarfed_by_same_speaker_is_absorbed() {
+        let (words, mut cols) = seq(&[(0, 31), (1, 16), (0, 144)]);
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert!(
+            cols.iter().all(|c| *c == Some(0)),
+            "16-token island dwarfed by 31 & 144 same-speaker runs is absorbed: {cols:?}"
+        );
+    }
+
+    /// A medium island that is NOT shorter than both neighbours (one side is
+    /// comparable) is a real turn and survives.
+    #[test]
+    fn medium_island_not_dwarfed_on_both_sides_survives() {
+        let (words, mut cols) = seq(&[(0, 12), (1, 16), (0, 144)]);
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert!(
+            cols.contains(&Some(1)),
+            "island not dwarfed on both sides survives"
+        );
+    }
+
+    /// A large run (a genuine turn) between two longer same-speaker runs is never
+    /// silently merged, even though it is shorter than both.
+    #[test]
+    fn large_bracketed_turn_survives_even_if_shorter_than_both() {
+        let (words, mut cols) = seq(&[(0, 144), (1, 113), (0, 226)]);
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
+        assert_eq!(
+            cols.iter().filter(|c| **c == Some(1)).count(),
+            113,
+            "a 113-token turn is above the bracketed ceiling and is never absorbed"
         );
     }
 
