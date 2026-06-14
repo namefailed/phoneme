@@ -218,12 +218,17 @@ persona actually wants — still needs the alignment + timestamp substrate below
 
 ### ⚠️ Prerequisites / shared infrastructure (do these first)
 
-- [ ] **Meeting-track alignment correctness** — the merged timeline is *not* pure UI
-  wiring; it depends on the two tracks being truly time-aligned. The current
-  `meeting_align.rs` heuristic is fragile (it can collapse internal silence when the
-  system-audio loopback drops gaps). An interleaved timeline built on mis-aligned
-  tracks is *worse* than two stacked panes. **Solidify alignment before the merged
-  view.**
+- [x] **Meeting-track alignment correctness + chronological merged timeline** ✓
+  *(shipped)*. The merged timeline depends on the two tracks being truly
+  time-aligned — that's now solid: `meeting_align.rs::align_one_track`
+  (crates/phoneme-audio) classifies a sparse loopback track without mis-flagging a
+  dense mic track, so internal silence is preserved on the timeline rather than
+  collapsed (regression-tested). On top of it, `mergeMeeting.ts::mergeChronological`
+  interleaves both tracks' persisted `transcript_segments` by `start_ms` into a true
+  chronological "You / Meeting" reading (coalescing same-track/same-speaker runs
+  within a 5 s gap; mic left / system right; 🕒 badge), with graceful fallback to
+  the coarse source-sectioned merge when any track has no segments. *(8 tests in
+  `mergeMeeting.test.ts`; `GetSegments` IPC + `getSegments`; `MergedConversationDetail.ts`.)*
 - [x] **Word-level timestamps** — shared substrate for transcript↔waveform sync,
   confidence highlighting, *and* tighter diarization boundaries. *Shipped:*
   providers capture per-word timing + confidence into `transcript_words`
@@ -282,7 +287,10 @@ explicit roadmap line here saying why not).
   prefixes), plus a **Re-embed all recordings** action (`ReembedAll` IPC) that
   clears every vector and re-indexes the library in the background. It lives under
   the **System** tab (and is also surfaced via Settings **search**).
-- [ ] **IPC reconnect after Doctor "Fix"** — today users must close/reopen the window after a daemon restart.
+- [x] **IPC reconnect after Doctor "Fix"** ✓ *(shipped)* — the tray's `BridgeSlot`
+  (src-tauri/src/bridge.rs) lazily reconnects with bounded backoff and re-attaches
+  the event stream the moment the daemon reappears, so a Doctor restart no longer
+  needs a window close/reopen.
 - [ ] **In-app hook log tail** — hook debugging means opening `%LOCALAPPDATA%\phoneme\logs\hook.log` by hand.
 - [x] **Import file picker** — wired as an **Import audio** button in Settings →
   Storage (`SectionStorage.ts` → `pickAndImportAudio`), alongside drag-drop.
@@ -296,14 +304,14 @@ explicit roadmap line here saying why not).
 
 ### 🎙️ Meetings
 
-- [x] **Merged meeting view (coarse — chronological interleave still pending)** — a
-  source-sectioned, speaker-aware merge shipped
-  (`MergedConversationDetail.ts` / `mergeMeeting.ts`): selecting a meeting's
-  group header renders every track as one read-only document, labelled 🎤 Microphone
-  / 🔊 System audio with the pipeline's `[Speaker N]` turns surfaced, plus Copy /
-  Export. It does **not** yet interleave the tracks *chronologically* — per-line
-  timestamps aren't persisted, so a true "You / Meeting" timeline still depends on
-  the alignment + word-timestamp prerequisites above.
+- [x] **Merged meeting view — coarse AND chronological** ✓ *(both shipped)*. The
+  source-sectioned, speaker-aware merge (`MergedConversationDetail.ts` /
+  `mergeMeeting.ts`) renders every track as one read-only document (🎤 Microphone /
+  🔊 System audio, `[Speaker N]` turns, Copy / Export). The true *chronological*
+  interleave also shipped: per-segment timestamps are persisted
+  (`transcript_segments`) and `mergeChronological` weaves both tracks by `start_ms`
+  into a "You / Meeting" timeline (🕒 badge), falling back to the coarse view when a
+  track lacks segments. *(See the prerequisites section above.)*
 - [ ] **Diarization quality** *(prereq for named speakers — don't build naming UX on wrong labels)*. Each item below was verified against `diarization.rs` / `transcription.rs` and the `speakrs 0.4.2` source; verdicts noted inline.
   - [x] **Fix the `to_segments` frame scaling, then coalesce the turns** ✓ *(shipped)*. #23 first dropped the old manual `result.discrete_diarization.to_segments(1.0, 1.0)`, whose `(1.0, 1.0)` `frame_step`/`frame_duration` (vs speakrs' real `FRAME_STEP_SECONDS = 0.016875` / `FRAME_DURATION_SECONDS = 0.0619375`) inflated every turn ~59× and scrambled `assign_speakers`. But `result.segments` is **not** usable raw: speakrs builds it via `to_segments(…) + merge_segments(merge_gap)` with `PipelineConfig::default().merge_gap == 0.0` — a no-op merge — and emits **per-speaker** spans sorted only by start, so one speaker's speech fragments on every micro-pause and different speakers' spans interleave → flickering `[Speaker N]` labels. Now `clean_speaker_spans` sorts, drops zero-length spans, and merges adjacent same-speaker turns under 0.25 s, and `speaker_for_segment` attributes each transcript line by **max temporal overlap** (the old midpoint-first-covering-match could collapse an overlapped line onto whichever turn merely started first). *(diarization.rs; 7 new unit tests, one verified to fail under the old logic.)*
   - [x] **Cache the pipeline in `AppState`** — *shipped* (lazily, config-keyed, inside `Transcriber`; loads once on first diarized run instead of at startup). Was: `run_local_diarization` calls `OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)` on *every* transcription (`diarization.rs:157`), reloading the ~500 MB seg+emb ONNX models each time; `AppState` (`app_state.rs`) holds no diarizer. Hold one long-lived pipeline fed via speakrs' background queue — `OwnedDiarizationPipeline::into_queued()` returns a `(QueueSender, QueueReceiver)` (`pipeline.rs:179`) — so model load happens once at startup. *(transcription.rs:352 `diarize_transcript` → diarization.rs:154)*
