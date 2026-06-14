@@ -224,6 +224,16 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Live preview no longer breaks in-place dictation** — an in-place (quick)
+  dictation started the streaming-preview loop too (it was gated only on
+  `streaming_preview`, not on the dictation flag). The loop's per-second
+  transcription ticks then contended with the dictation's own latency-critical
+  transcribe-and-paste on the single serial whisper permit — and `stop()` waited
+  out an in-flight preview tick before the dictation could transcribe — so the
+  paste was delayed or never happened ("it's constantly listening, it never pastes
+  the quick transcription"). In-place dictation now skips live preview entirely: a
+  quick dictation has no preview overlay to feed, so it goes straight to
+  transcribe → paste with the whisper permit free.
 - [x] **Local LLM post-processing no longer times out mid-generation** — the
   cleanup/summary/title steps applied the `[llm_post_process].timeout_secs`
   (default **30 s**) as a *total* deadline on the request, including a **streaming**

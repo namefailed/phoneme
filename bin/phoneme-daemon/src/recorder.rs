@@ -757,9 +757,17 @@ impl DaemonRecorder {
         }
 
         // Spawn the live streaming-preview loop. No-op unless
-        // `recording.streaming_preview` is enabled (default: off).
-        self.start_preview(state, id.clone(), preview_snapshot)
-            .await;
+        // `recording.streaming_preview` is enabled (default: off). Skipped
+        // entirely for in-place dictation: a quick dictation has no preview
+        // overlay to feed, and the preview loop's per-second transcription ticks
+        // contend with the dictation's own latency-critical transcribe-and-paste
+        // on the single serial whisper permit — and `stop()` waits out an
+        // in-flight preview tick before the dictation can transcribe, which
+        // delayed or dropped the paste ("constantly listening, never pastes").
+        if !in_place {
+            self.start_preview(state, id.clone(), preview_snapshot)
+                .await;
+        }
 
         state.events.emit(DaemonEvent::RecordingStarted {
             id: id.clone(),
