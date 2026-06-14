@@ -364,9 +364,13 @@ pub fn assign_words<'a>(
         })
         .collect();
 
-    // Absorb sub-`min_turn` speaker flips so a monologue doesn't fragment.
+    // Absorb sub-`min_turn` speaker flips so a monologue doesn't fragment, then
+    // back-fill any word the geometry left unattributed into a neighbouring
+    // speaker so it doesn't orphan and split its turn. Both are production
+    // cleanup gated off when `min_turn == 0.0` (the geometry-test "raw" knob).
     if min_turn > 0.0 {
         smooth_word_speaker_runs(&kept, &mut cols, min_turn);
+        backfill_unattributed_words(&kept, &mut cols);
     }
 
     // Map columns → stable 1-based indices in first-appearance order, via the
@@ -546,6 +550,73 @@ fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min
         if !changed {
             break;
         }
+    }
+}
+
+/// Back-fill every still-unattributed (`None`) word into a neighbouring speaker.
+///
+/// `dominant_column` returns `None` for a word whose frame window carries no
+/// activation in the diarizer's segmentation matrix — i.e. whisper heard a word
+/// where the segmentation model saw no active speaker. This happens routinely at
+/// turn boundaries and during overlaps, NOT only in real silence, so a `None`
+/// word is almost always a genuinely-spoken word the geometry just missed.
+///
+/// Left untouched, such a word renders with no `[Speaker N]:` prefix AND splits
+/// the surrounding turn in two (the transcript builder starts a fresh turn on any
+/// speaker change, and `0`/unattributed counts as a change) — the orphaned-word
+/// chop the user sees as "all chopped up". [`smooth_word_speaker_runs`] can't fix
+/// it: it only ever rewrites `Some` runs and treats `None` as a gap.
+///
+/// So after smoothing we assign each `None` word the speaker it most likely
+/// belongs to, using the surrounding attributed words as anchors (computed from
+/// the pre-backfill columns, so the result is order-independent):
+///
+/// - bracketed by the SAME speaker on both sides → that speaker (a momentary
+///   non-speech frame inside one continuous turn);
+/// - at a hand-off (a DIFFERENT speaker each side) → the temporally nearest
+///   neighbour (smallest inter-word gap), so the boundary word lands with whoever
+///   it abuts;
+/// - leading words (before the first attributed word) → the first speaker;
+///   trailing words (after the last) → the last speaker.
+///
+/// No-op when no word is attributed at all (the caller's ≤1-speaker gate then
+/// renders plain prose). Never introduces a new speaker column — it only ever
+/// copies an existing neighbour's — so the speaker count is unchanged.
+fn backfill_unattributed_words(words: &[&WordSpan], cols: &mut [Option<usize>]) {
+    let n = cols.len();
+    // Nearest attributed neighbour to the left of each index (carry forward).
+    let mut left: Vec<Option<(usize, usize)>> = vec![None; n];
+    let mut last: Option<(usize, usize)> = None;
+    for i in 0..n {
+        left[i] = last;
+        if let Some(c) = cols[i] {
+            last = Some((i, c));
+        }
+    }
+    // Nearest attributed neighbour to the right (carry backward).
+    let mut right: Vec<Option<(usize, usize)>> = vec![None; n];
+    let mut next: Option<(usize, usize)> = None;
+    for i in (0..n).rev() {
+        right[i] = next;
+        if let Some(c) = cols[i] {
+            next = Some((i, c));
+        }
+    }
+    for i in 0..n {
+        if cols[i].is_some() {
+            continue;
+        }
+        cols[i] = match (left[i], right[i]) {
+            (Some((_, lc)), Some((_, rc))) if lc == rc => Some(lc),
+            (Some((lj, lc)), Some((rj, rc))) => {
+                let dl = (words[i].start - words[lj].end).abs();
+                let dr = (words[rj].start - words[i].end).abs();
+                Some(if dr < dl { rc } else { lc })
+            }
+            (Some((_, lc)), None) => Some(lc),
+            (None, Some((_, rc))) => Some(rc),
+            (None, None) => None,
+        };
     }
 }
 
@@ -1687,6 +1758,77 @@ mod tests {
         let mut cols = vec![Some(0), None, Some(0)];
         smooth_word_speaker_runs(&kept, &mut cols, WORD_MIN_TURN_SECS);
         assert_eq!(cols, vec![Some(0), None, Some(0)], "lone speaker untouched");
+    }
+
+    // ── Unattributed-word back-fill (the orphaned-fragment chop guard) ───────
+    //
+    // After smoothing, a word the segmentation left `None` is assigned to a
+    // neighbour so it never renders prefix-less and splits its turn in two.
+
+    /// A `None` word inside one speaker's turn (a frame the segmentation missed)
+    /// is back-filled to that speaker, so the turn stays one contiguous block
+    /// instead of being broken by an orphaned, prefix-less word.
+    #[test]
+    fn backfill_fills_a_same_speaker_gap() {
+        let words = [
+            word(0.0, 0.5, "the"),
+            word(0.5, 1.0, "fact"),
+            word(1.0, 1.2, "that"), // segmentation saw no active speaker here
+            word(1.2, 1.7, "women"),
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), Some(0), None, Some(0)];
+        backfill_unattributed_words(&kept, &mut cols);
+        assert_eq!(cols, vec![Some(0), Some(0), Some(0), Some(0)]);
+    }
+
+    /// A `None` word at a hand-off (a different speaker each side) goes to the
+    /// temporally nearest neighbour — here the right speaker, which it abuts.
+    #[test]
+    fn backfill_sends_a_handoff_gap_to_the_nearest_speaker() {
+        let words = [
+            word(0.0, 0.6, "is"),
+            word(0.6, 0.7, "a"),      // left speaker ends at 0.7
+            word(2.0, 2.1, "weapon"), // None gap, abuts the right speaker
+            word(2.1, 2.6, "i"),
+            word(2.6, 3.1, "mean"), // right speaker
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), Some(0), None, Some(1), Some(1)];
+        backfill_unattributed_words(&kept, &mut cols);
+        assert_eq!(
+            cols[2],
+            Some(1),
+            "the boundary word lands with the nearer (right) speaker"
+        );
+    }
+
+    /// Leading words (before the first attributed word) attach to the first
+    /// speaker; trailing words (after the last) attach to the last.
+    #[test]
+    fn backfill_attaches_leading_and_trailing_gaps_to_the_edges() {
+        let words = [
+            word(0.0, 0.3, "i"),
+            word(0.3, 0.6, "don't"), // leading None
+            word(0.6, 1.1, "know"),  // first speaker
+            word(1.1, 1.6, "yeah"),  // last speaker
+            word(1.6, 1.9, "you"),   // trailing None
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![None, None, Some(0), Some(1), None];
+        backfill_unattributed_words(&kept, &mut cols);
+        assert_eq!(cols, vec![Some(0), Some(0), Some(0), Some(1), Some(1)]);
+    }
+
+    /// With nothing attributed there is no anchor to copy — every word stays
+    /// `None` and the caller's ≤1-speaker gate renders plain prose.
+    #[test]
+    fn backfill_with_no_anchor_is_a_noop() {
+        let words = [word(0.0, 0.5, "a"), word(0.5, 1.0, "b")];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![None, None];
+        backfill_unattributed_words(&kept, &mut cols);
+        assert_eq!(cols, vec![None, None]);
     }
 
     /// The mid-sentence-flip regression: a MULTI-word run bracketed by the SAME

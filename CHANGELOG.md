@@ -114,6 +114,19 @@ trust boundary. Verified against current code.*
   cluster's per-frame activations are folded into its canonical column and the
   segment spans relabelled, so **both** word-level and segment-level attribution see
   the corrected speaker set. A two-person note now reports two speakers, not three.
+- [x] **Orphaned boundary words no longer chop a turn** — whisper transcribes a
+  word wherever it hears speech, but the diarizer's segmentation sometimes scores
+  no active speaker for that word's exact frames (common at turn boundaries and
+  overlaps). Such a word was left unattributed: it rendered with no `[Speaker N]:`
+  prefix AND split the surrounding turn into two blocks — the floating-fragment
+  "all chopped up" look (`…the company itself is a / cyber / [Speaker 2] weapon?`).
+  After smoothing, every unattributed word is now back-filled to a neighbouring
+  speaker — a gap inside one turn inherits that speaker, a gap at a hand-off goes
+  to the temporally nearest speaker, and leading/trailing gaps attach to the
+  first/last speaker — so a turn renders as one clean contiguous block. The
+  back-fill only ever copies an existing neighbour, so the speaker count is
+  untouched. Local word-level path only for now; the cloud/segment path keeps its
+  existing behaviour (tracked separately).
 - [x] **"Treat single recordings as one speaker" option** (`[diarization]
   solo_one_speaker`, off by default). When the local diarizer genuinely hears two
   voices in a one-person recording — a big tonal shift when quoting, or background
