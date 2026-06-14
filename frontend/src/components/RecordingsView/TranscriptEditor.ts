@@ -296,11 +296,15 @@ export class TranscriptEditorElement extends LitElement {
         }
         ph-transcript-editor .header {
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-start;
+          gap: 8px;
           align-items: center;
           margin-bottom: 8px;
           flex: 0 0 auto;
         }
+        /* Spacer pushes the Edited/Save actions to the right while Copy stays
+           anchored beside the title on the left (H1). */
+        ph-transcript-editor .header-spacer { flex: 1; }
         ph-transcript-editor .title {
           font-size: 11px;
           font-weight: bold;
@@ -372,16 +376,17 @@ export class TranscriptEditorElement extends LitElement {
         <span class="title">
           Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
+        ${this.isDirty()
+          ? ""
+          : html`<button
+              class="btn-copy ${this.copied ? "copied" : ""}"
+              title="Copy the transcript to the clipboard"
+              aria-label="Copy transcript"
+              @click=${this.requestCopy}
+            >${this.copied ? "✅" : "📋"}</button>`}
+        <span class="header-spacer"></span>
         <div class="header-actions">
           ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
-          ${this.isDirty()
-            ? ""
-            : html`<button
-                class="btn-copy ${this.copied ? "copied" : ""}"
-                title="Copy the transcript to the clipboard"
-                aria-label="Copy transcript"
-                @click=${this.requestCopy}
-              >${this.copied ? "✅" : "📋"}</button>`}
           <button class="btn-save" style="display: ${this.isDirty() ? 'inline-flex' : 'none'};" @click=${this.save}>Save Changes</button>
         </div>
       </div>

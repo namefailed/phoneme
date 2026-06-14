@@ -335,7 +335,7 @@ export class TagChipsElement extends LitElement {
     
     return html`
       <div class="tags">
-        ${this.attached.map((t) => {
+        ${this.attached.length ? html`<div class="tags-row tags-applied">${this.attached.map((t) => {
           const contrast = t.color ? getContrastColor(t.color) : '';
           const style = t.color ? `--tag-color: ${t.color}; color: ${contrast};` : '';
           const editing = this.editingTagId === t.id;
@@ -375,7 +375,8 @@ export class TagChipsElement extends LitElement {
               ` : null}
             </span>
           `;
-        })}
+        })}</div>` : ""}
+        <div class="tags-row tags-controls">
         <div class="tag-input-wrapper">
           <input
             class="tag-add"
@@ -409,19 +410,22 @@ export class TagChipsElement extends LitElement {
         <button class="tag-manage tag-suggest" title="Ask the AI to suggest tags for this recording. New tag names wait for your approval; with auto-apply on (Settings → Auto-Tagging), tags you already use attach immediately."
           ?disabled=${this.suggesting} @click=${() => void this.runSuggest()}>${this.suggesting ? "✨ Suggesting…" : "✨ Suggest"}</button>
         ${this.suggestions.length ? html`
-          <span class="tag-suggestions" title="AI-suggested tags — ✓ applies one, ✕ dismisses it">
-            ${this.suggestions.map((name) => html`
-              <span class="tag-chip tag-chip--suggested">
-                ${name}
-                <button class="tag-x tag-ok" title="Apply this tag" @click=${(e: Event) => { e.stopPropagation(); void this.approveSuggestion(name); }}>✓</button>
-                <button class="tag-x" title="Dismiss this suggestion" @click=${(e: Event) => { e.stopPropagation(); void this.dismissSuggestion(name); }}>×</button>
-              </span>
-            `)}
-            ${this.suggestions.length > 1 ? html`
-              <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>✓ All</button>
-              <button class="tag-manage tag-suggest-all" title="Dismiss every suggested tag" @click=${() => void this.dismissAllSuggestions()}>✕ Clear</button>
-            ` : null}
-          </span>
+          <button class="tag-manage tag-suggest-all" title="Apply every suggested tag" @click=${() => void this.approveAllSuggestions()}>✓ All</button>
+          <button class="tag-manage tag-suggest-all" title="Dismiss every suggested tag" @click=${() => void this.dismissAllSuggestions()}>✕ Clear</button>
+        ` : null}
+        </div>
+        ${this.suggestions.length ? html`
+          <div class="tags-row tags-suggest-row">
+            <span class="tag-suggestions" title="AI-suggested tags — ✓ applies one, ✕ dismisses it">
+              ${this.suggestions.map((name) => html`
+                <span class="tag-chip tag-chip--suggested">
+                  ${name}
+                  <button class="tag-x tag-ok" title="Apply this tag" @click=${(e: Event) => { e.stopPropagation(); void this.approveSuggestion(name); }}>✓</button>
+                  <button class="tag-x" title="Dismiss this suggestion" @click=${(e: Event) => { e.stopPropagation(); void this.dismissSuggestion(name); }}>×</button>
+                </span>
+              `)}
+            </span>
+          </div>
         ` : null}
       </div>
     `;

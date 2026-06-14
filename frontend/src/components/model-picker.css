@@ -1,7 +1,13 @@
 /* Model-picker modal — extends the shared .modal-* styles. */
 
 .mp-dialog {
-  width: 480px;
+  /* Wide enough that the 7-tab strip fits on one row, with a height cap +
+     scroll so tall panels (Transcription/Post-processing) never clip their
+     footer on short viewports (J1). The anchored-dropdown variant below sets
+     its own width/height and is unaffected. */
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
 }
 
 /* Anchored (dropdown) mode — opened from the "Re-transcribe ▾" caret. The

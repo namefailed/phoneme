@@ -13,7 +13,7 @@ import { applyRerun, rerunToastMessage, type RerunPayload } from './RecordingsVi
 import { getOpenRecordingId } from '../state/openRecording';
 
 /** Every surface where a model can be switched from the quick picker. */
-type MpTab = "transcription" | "postprocessing" | "summary" | "title" | "autotag" | "preview" | "semantic";
+type MpTab = "transcription" | "postprocessing" | "title" | "summary" | "autotag" | "preview" | "semantic";
 
 /** Size/speed rank for ordering whisper models smallest→largest. Turbo (a
  *  distilled large model, faster than Large v3) sorts just before Large v3. */
@@ -591,8 +591,8 @@ export class ModelPickerElement extends LitElement {
           <div class="mp-tabs" role="tablist">
             <button class="mp-tab ${this.activeTab === 'transcription' ? 'active' : ''}" @click=${() => this.activeTab = 'transcription'} role="tab">Transcription</button>
             <button class="mp-tab ${this.activeTab === 'postprocessing' ? 'active' : ''}" @click=${() => this.activeTab = 'postprocessing'} role="tab">Post-processing</button>
-            <button class="mp-tab ${this.activeTab === 'summary' ? 'active' : ''}" @click=${() => this.activeTab = 'summary'} role="tab">Summary</button>
             <button class="mp-tab ${this.activeTab === 'title' ? 'active' : ''}" @click=${() => this.activeTab = 'title'} role="tab">Title</button>
+            <button class="mp-tab ${this.activeTab === 'summary' ? 'active' : ''}" @click=${() => this.activeTab = 'summary'} role="tab">Summary</button>
             <button class="mp-tab ${this.activeTab === 'autotag' ? 'active' : ''}" @click=${() => this.activeTab = 'autotag'} role="tab">Auto-tag</button>
             <button class="mp-tab ${this.activeTab === 'preview' ? 'active' : ''}" @click=${() => this.activeTab = 'preview'} role="tab">Live preview</button>
             <button class="mp-tab ${this.activeTab === 'semantic' ? 'active' : ''}" @click=${() => this.activeTab = 'semantic'} role="tab">Semantic</button>
@@ -636,17 +636,6 @@ export class ModelPickerElement extends LitElement {
             <p class="mp-hint">Optional LLM clean-up of your transcript. <b>None</b> disables it; <b>Ollama</b> keeps everything offline.</p>
           </div>
 
-          <div class="mp-panel" ?hidden=${this.activeTab !== 'summary'}>
-            <label class="mp-label">Provider</label>
-            <div class="mp-conn-host" id="mp-sum-conn-host"></div>
-
-            <div style="display:${this.sumProvider ? '' : 'none'}">
-              <label class="mp-label">Model</label>
-              <div class="mp-model-host" id="mp-sum-model-host"></div>
-            </div>
-            <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
-          </div>
-
           <div class="mp-panel" ?hidden=${this.activeTab !== 'title'}>
             <label class="mp-label">Provider</label>
             <div class="mp-conn-host" id="mp-tit-conn-host"></div>
@@ -656,6 +645,17 @@ export class ModelPickerElement extends LitElement {
               <div class="mp-model-host" id="mp-tit-model-host"></div>
             </div>
             <p class="mp-hint">Model for auto-generating recording titles. <b>Same as post-processing</b> reuses your cleanup connection. Turn auto-titles + the AI-title option on/off in <b>Settings → Post-Processing</b>.</p>
+          </div>
+
+          <div class="mp-panel" ?hidden=${this.activeTab !== 'summary'}>
+            <label class="mp-label">Provider</label>
+            <div class="mp-conn-host" id="mp-sum-conn-host"></div>
+
+            <div style="display:${this.sumProvider ? '' : 'none'}">
+              <label class="mp-label">Model</label>
+              <div class="mp-model-host" id="mp-sum-model-host"></div>
+            </div>
+            <p class="mp-hint">Model for the auto-summary. <b>Same as post-processing</b> reuses your cleanup connection. Turn the auto-summary itself on/off in <b>Settings → Post-Processing</b>.</p>
           </div>
 
           <div class="mp-panel" ?hidden=${this.activeTab !== 'autotag'}>
