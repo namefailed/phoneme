@@ -57,6 +57,13 @@ pub struct WordSpan {
     pub end: f64,
     /// The single word/token text.
     pub text: String,
+    /// Whether this token starts a new written word (whisper's leading-space
+    /// marker; see [`crate::types::TranscriptWord::leading_space`]). A token that
+    /// does NOT — punctuation, a clitic (`'s`/`'t`), or a subword continuation —
+    /// must share its host word's speaker, so [`assign_words`] never strands a
+    /// `.` on the next turn or splits `That's` across speakers. Defaults to `true`
+    /// (a normal space-separated word) for callers/tests that don't set it.
+    pub leading_space: bool,
 }
 
 /// Distance from instant `t` to the `[start, end]` interval (0 when inside).
@@ -371,6 +378,7 @@ pub fn assign_words<'a>(
     if min_turn > 0.0 {
         smooth_word_speaker_runs(&kept, &mut cols, min_turn);
         backfill_unattributed_words(&kept, &mut cols);
+        coalesce_subword_tokens(&kept, &mut cols);
     }
 
     // Map columns → stable 1-based indices in first-appearance order, via the
@@ -617,6 +625,24 @@ fn backfill_unattributed_words(words: &[&WordSpan], cols: &mut [Option<usize>]) 
             (None, Some((_, rc))) => Some(rc),
             (None, None) => None,
         };
+    }
+}
+
+/// Keep written words atomic across speaker attribution: a token that did NOT
+/// start a new word — punctuation, a clitic (`'s`/`'t`), or a subword
+/// continuation (`ste`/`pped`) — inherits the speaker of the word-start it
+/// attaches to. A single written word can't have two speakers, so without this a
+/// turn boundary that falls mid-word strands a `.` on the next speaker's turn or
+/// splits `That's` across two (the "cut into each other" artifact the per-word
+/// argmax produces at hand-offs). Applied left-to-right so a run of continuations
+/// all chain back to their word-start's column. Word-start tokens
+/// (`leading_space`) keep their own attribution; a leading continuation token
+/// (index 0, no preceding word) is left as-is.
+fn coalesce_subword_tokens(words: &[&WordSpan], cols: &mut [Option<usize>]) {
+    for i in 1..words.len() {
+        if !words[i].leading_space {
+            cols[i] = cols[i - 1];
+        }
     }
 }
 
@@ -1240,6 +1266,14 @@ mod tests {
             start,
             end,
             text: text.to_string(),
+            leading_space: true,
+        }
+    }
+    /// Like [`word`] but a non-word-start token (punctuation/clitic/subword).
+    fn cont(start: f64, end: f64, text: &str) -> WordSpan {
+        WordSpan {
+            leading_space: false,
+            ..word(start, end, text)
         }
     }
 
@@ -1829,6 +1863,47 @@ mod tests {
         let mut cols = vec![None, None];
         backfill_unattributed_words(&kept, &mut cols);
         assert_eq!(cols, vec![None, None]);
+    }
+
+    /// A clitic / punctuation / subword token inherits its word-start's speaker,
+    /// so a turn boundary never strands a "." on the next speaker or splits
+    /// "That's" across two — the boundary "cut into each other" artifact.
+    #[test]
+    fn coalesce_pulls_continuations_into_their_word_start() {
+        let words = [
+            word(0.0, 0.5, "Yeah"), // word start → speaker 0
+            cont(0.5, 0.6, "."),    // punctuation argmaxed to speaker 1
+            word(0.6, 1.1, "It"),   // speaker 1's real turn starts
+            cont(1.1, 1.2, "'s"),   // clitic argmaxed back to speaker 0
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        let mut cols = vec![Some(0), Some(1), Some(1), Some(0)];
+        coalesce_subword_tokens(&kept, &mut cols);
+        assert_eq!(
+            cols,
+            vec![Some(0), Some(0), Some(1), Some(1)],
+            "'.' joins 'Yeah' (spk0); \"'s\" joins 'It' (spk1)"
+        );
+    }
+
+    /// A run of consecutive continuations all chain back to one word-start.
+    #[test]
+    fn coalesce_chains_a_run_of_continuations() {
+        let words = [
+            word(0.0, 0.4, "over"),
+            cont(0.4, 0.5, "ste"),
+            cont(0.5, 0.6, "pped"),
+            cont(0.6, 0.7, "?"),
+        ];
+        let kept: Vec<&WordSpan> = words.iter().collect();
+        // Every continuation argmaxed to a different/noisy speaker.
+        let mut cols = vec![Some(0), Some(1), Some(0), Some(1)];
+        coalesce_subword_tokens(&kept, &mut cols);
+        assert_eq!(
+            cols,
+            vec![Some(0), Some(0), Some(0), Some(0)],
+            "all of 'overstepped?' is one speaker"
+        );
     }
 
     /// The mid-sentence-flip regression: a MULTI-word run bracketed by the SAME

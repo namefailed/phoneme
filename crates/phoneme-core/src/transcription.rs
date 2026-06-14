@@ -861,6 +861,7 @@ fn diarize_per_word(
             start: w.start_ms as f64 / 1000.0,
             end: w.end_ms as f64 / 1000.0,
             text: w.text.clone(),
+            leading_space: w.leading_space,
         })
         .collect();
 

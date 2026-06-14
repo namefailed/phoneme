@@ -137,6 +137,16 @@ trust boundary. Verified against current code.*
   attaches cleanly ("weapon?", "don't"). The marker is transient (not persisted,
   not sent over IPC); cloud providers, which emit clean words, default to normal
   spacing.
+- [x] **Written words stay atomic across a speaker hand-off** — per-word argmax
+  places the speaker boundary on a ~17 ms frame grid, so a token at a hand-off
+  could land on the wrong side: a `.` stranded onto the next speaker's turn, or
+  `That's` split as `That` [A] / `'s` [B] — the "cut into each other" look. The
+  attribution now forces every non-word-start token (punctuation, a clitic like
+  `'s`, a subword piece) to inherit the speaker of the word-start it attaches to
+  (reusing the same leading-space marker), so a single written word is never
+  divided between speakers and a turn never begins with orphaned punctuation. The
+  coarser whole-word boundary placement at a hand-off is unchanged (an inherent
+  limit of word-level argmax).
 - [x] **"Treat single recordings as one speaker" option** (`[diarization]
   solo_one_speaker`, off by default). When the local diarizer genuinely hears two
   voices in a one-person recording — a big tonal shift when quoting, or background
