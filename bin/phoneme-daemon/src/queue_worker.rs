@@ -136,7 +136,28 @@ pub async fn run(state: AppState, mut shutdown: watch::Receiver<bool>) -> anyhow
                                 error: format!("{e} (after {MAX_TRANSIENT_ATTEMPTS} attempts)"),
                             });
                         } else if let Err(rq) = state.inbox.requeue(&rec_id).await {
-                            tracing::error!(id = %rec_id.as_str(), error = %rq, "failed to requeue after transient error");
+                            // Requeue itself failed — the item would otherwise sit
+                            // in processing/ until the next daemon restart's
+                            // orphan recovery. Mark it failed (like the give-up
+                            // branch above) so it surfaces in the UI as a failed
+                            // recording instead of silently stalling.
+                            tracing::error!(id = %rec_id.as_str(), error = %rq, "failed to requeue after transient error; marking failed");
+                            attempts.remove(&rec_id);
+                            let _ = state
+                                .catalog
+                                .update_status(
+                                    &rec_id,
+                                    phoneme_core::RecordingStatus::TranscribeFailed,
+                                )
+                                .await;
+                            let _ = state
+                                .inbox
+                                .finish_failed(&rec_id, "requeue_failed", &rq.to_string())
+                                .await;
+                            state.events.emit(DaemonEvent::TranscriptionFailed {
+                                id: rec_id.clone(),
+                                error: format!("could not requeue after a transient error: {rq}"),
+                            });
                         }
                         tracing::warn!(?backoff, "Whisper unreachable; sleeping before retry");
                         tokio::select! {

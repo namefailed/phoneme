@@ -1035,7 +1035,14 @@ pub async fn run(
     // path (success, error, cancel) via Drop, so the override can never leak
     // onto a later job or persist in config. `whisper_cfg` is the per-job
     // transcription config the provider is built from.
-    let requested_override = state.pending_overrides.lock().unwrap().remove(&id);
+    // Recover from a poisoned mutex (take the inner map) rather than panicking —
+    // this runs on every pipeline job, so an `.unwrap()` here would turn one
+    // unrelated panic-while-locked into a daemon-wide crash loop.
+    let requested_override = state
+        .pending_overrides
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     let (whisper_cfg, override_guard) =
         apply_model_override(state, &cfg.whisper, requested_override).await;
     // Dial the port the bundled server is ACTUALLY listening on: the

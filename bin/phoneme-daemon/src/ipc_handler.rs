@@ -260,6 +260,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             "start_ms": w.start_ms,
                             "end_ms": w.end_ms,
                             "text": w.text,
+                            // Powers the Synced view's spacing (whisper's word-start
+                            // marker); without it the view space-joins every token
+                            // and shows "I don 't know" / "over ste pped".
+                            "leading_space": w.leading_space,
                             "speaker": w.speaker,
                             "confidence": w.confidence,
                         })
@@ -645,7 +649,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     if m.is_empty() {
                         // Empty = "use the configured model"; clear any stale
                         // request so a prior override can't leak onto this run.
-                        state.pending_overrides.lock().unwrap().remove(&id);
+                        state
+                            .pending_overrides
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&id);
                     } else {
                         state
                             .pending_overrides

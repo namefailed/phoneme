@@ -224,6 +224,17 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Synced view spacing — the last mile** — the per-word `leading_space` marker
+  was persisted and serialized, but the `GetWords` IPC built a hand-rolled JSON
+  object that *omitted* it, so the Synced view never received it and still
+  space-joined every token ("I don 't know"). `GetWords` now includes
+  `leading_space`, so the Synced view renders the same clean spacing as the
+  transcript ("I don't know", "overstepped", "weapon?").
+- [x] **Queue requeue can't silently stall** — if requeuing a transiently-failed
+  recording itself fails, the worker now marks it failed (surfaced in the UI)
+  instead of leaving it stuck in `processing/` until the next daemon restart.
+  The hot-path `pending_overrides` mutex also recovers from poisoning instead of
+  panicking the daemon.
 - [x] **Audit hardening (verified findings)** — a whole-app audit pass; the
   confirmed-real items fixed: a Deepgram speaker turn now advances its segment end
   time even when a word lacks an `end` timestamp (falls back to the word's start,
