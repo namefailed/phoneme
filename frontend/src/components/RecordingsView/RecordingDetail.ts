@@ -274,14 +274,24 @@ export class RecordingDetail {
           <div class="transcript-history">
             <div class="th-group th-left">
               <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
-              <button class="view-btn" id="view-summary" title="AI summary of this recording">✨ Summary</button>
-              <button class="view-btn" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
-              <button class="view-btn" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
+              <span class="th-dropdown">
+                <button class="view-btn th-trigger" id="views-trigger" aria-haspopup="menu" aria-expanded="false" title="Alternate views of this recording — summary, timeline, synced words">👁 Views ▾</button>
+                <div class="th-menu" id="views-menu" role="menu" hidden>
+                  <button class="view-btn th-menu-item" id="view-summary" title="AI summary of this recording">✨ Summary</button>
+                  <button class="view-btn th-menu-item" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
+                  <button class="view-btn th-menu-item" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
+                </div>
+              </span>
             </div>
             <div class="th-group th-right">
-              <button class="view-btn" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
-              <button class="view-btn" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
-              <button class="view-btn" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
+              <span class="th-dropdown">
+                <button class="view-btn th-trigger" id="versions-trigger" aria-haspopup="menu" aria-expanded="false" title="Other versions of this transcript — compare, raw machine, pre-edit">🗂 Versions ▾</button>
+                <div class="th-menu th-menu--right" id="versions-menu" role="menu" hidden>
+                  <button class="view-btn th-menu-item" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
+                  <button class="view-btn th-menu-item" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
+                  <button class="view-btn th-menu-item" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
+                </div>
+              </span>
             </div>
           </div>
         </div>
@@ -363,6 +373,9 @@ export class RecordingDetail {
       },
     };
 
+    // Reassigned once the Views/Versions dropdown triggers are wired (below) so
+    // openPeek/resetPeek keep each trigger's active "← <view>" state in sync.
+    let updateTriggers: () => void = () => {};
     let activePeek: PeekKind | null = null;
     const resetPeek = () => {
       (Object.keys(peeks) as PeekKind[]).forEach((k) => {
@@ -372,6 +385,7 @@ export class RecordingDetail {
       if (editorEl) editorEl.style.display = "flex";
       activePeek = null;
       this.summaryPeeking = false;
+      updateTriggers();
     };
     const openPeek = (kind: PeekKind) => {
       const { btn, el } = peeks[kind];
@@ -382,6 +396,7 @@ export class RecordingDetail {
       if (btn) btn.textContent = "← Back";
       activePeek = kind;
       if (kind === "summary") this.summaryPeeking = true;
+      updateTriggers();
     };
 
     peeks.original.btn?.addEventListener("click", async () => {
@@ -492,6 +507,74 @@ export class RecordingDetail {
     this.container
       .querySelector<HTMLButtonElement>("#view-compare")
       ?.addEventListener("click", () => this.openCompareModal(r));
+
+    // ── Views / Versions dropdowns ───────────────────────────────────────────
+    // Collapse the six peek buttons into two menus: Views (Summary/Timeline/
+    // Synced) and Versions (Compare/Original/Unedited). The per-view buttons
+    // above keep their handlers; these triggers just open/close the menus and,
+    // when a peek in the group is active, turn into a "← <view>" close button.
+    {
+      const viewsTrigger = this.container.querySelector<HTMLButtonElement>("#views-trigger");
+      const viewsMenu = this.container.querySelector<HTMLElement>("#views-menu");
+      const versionsTrigger = this.container.querySelector<HTMLButtonElement>("#versions-trigger");
+      const versionsMenu = this.container.querySelector<HTMLElement>("#versions-menu");
+      const historyRow = this.container.querySelector<HTMLElement>(".transcript-history");
+      const VIEWS: PeekKind[] = ["summary", "timeline", "synced"];
+      const VERSIONS: PeekKind[] = ["original", "unedited"]; // Compare is a modal, not a peek
+      const LABELS: Record<PeekKind, string> = { summary: "Summary", timeline: "Timeline", synced: "Synced", original: "Original", unedited: "Unedited" };
+
+      const onDocClick = (e: MouseEvent) => {
+        if (!historyRow?.contains(e.target as Node)) closeMenus();
+      };
+      const closeMenus = () => {
+        viewsMenu?.setAttribute("hidden", "");
+        versionsMenu?.setAttribute("hidden", "");
+        viewsTrigger?.setAttribute("aria-expanded", "false");
+        versionsTrigger?.setAttribute("aria-expanded", "false");
+        document.removeEventListener("click", onDocClick, true);
+      };
+      const openMenu = (menu: HTMLElement | null, trigger: HTMLButtonElement | null) => {
+        if (!menu || !trigger) return;
+        const wasHidden = menu.hasAttribute("hidden");
+        closeMenus();
+        if (wasHidden) {
+          menu.removeAttribute("hidden");
+          trigger.setAttribute("aria-expanded", "true");
+          document.addEventListener("click", onDocClick, true);
+        }
+      };
+
+      updateTriggers = () => {
+        const inViews = !!activePeek && VIEWS.includes(activePeek);
+        const inVersions = !!activePeek && VERSIONS.includes(activePeek);
+        if (viewsTrigger) {
+          viewsTrigger.classList.toggle("active", inViews);
+          viewsTrigger.textContent = inViews ? `← ${LABELS[activePeek!]}` : "👁 Views ▾";
+        }
+        if (versionsTrigger) {
+          versionsTrigger.classList.toggle("active", inVersions);
+          versionsTrigger.textContent = inVersions ? `← ${LABELS[activePeek!]}` : "🗂 Versions ▾";
+        }
+      };
+
+      // A group trigger toggles its menu — unless a peek in that group is active,
+      // in which case it closes the peek (back to the editor).
+      viewsTrigger?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (activePeek && VIEWS.includes(activePeek)) { resetPeek(); return; }
+        openMenu(viewsMenu, viewsTrigger);
+      });
+      versionsTrigger?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (activePeek && VERSIONS.includes(activePeek)) { resetPeek(); return; }
+        openMenu(versionsMenu, versionsTrigger);
+      });
+      // Picking any option runs its existing handler, then closes the menu.
+      viewsMenu?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => closeMenus()));
+      versionsMenu?.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => closeMenus()));
+
+      updateTriggers();
+    }
 
     // Notes: CodeMirror editor (respects editor.vim_mode like the transcript
     // editor). Auto-saves on change (debounced) and on blur.
