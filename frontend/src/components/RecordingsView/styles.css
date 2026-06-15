@@ -917,7 +917,7 @@ mark.search-hit {
   right: auto;
   z-index: 60;
   min-width: 280px;
-  max-width: min(420px, 80vw);
+  max-width: min(480px, 90vw);
   background: var(--bg-elevated);
   /* Match every other popup in the app. */
   border: var(--popup-border, 1px solid var(--border-subtle));
@@ -954,7 +954,10 @@ mark.search-hit {
 .dp-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .dp-ico { align-self: center; text-align: center; font-size: 13px; }
 .dp-label { color: var(--fg-muted); }
-.dp-value { min-width: 0; color: var(--fg-default); font-weight: 600; word-break: break-word; }
+/* overflow-wrap:anywhere lets a long model name (or path) wrap to a second line
+   WITHIN its column and, crucially, lets the 1fr track shrink instead of forcing
+   the grid wider than the popover — so values never crowd or spill past the edge. */
+.dp-value { min-width: 0; color: var(--fg-default); font-weight: 600; overflow-wrap: anywhere; }
 
 /* Notes Copy button: faded by default (inline style), lights up on hover.
    !important beats the element's inline base style for the hover state. */

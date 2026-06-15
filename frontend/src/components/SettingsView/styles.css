@@ -1,12 +1,12 @@
 /* The Settings custom-element host must fill #main, or `.settings-layout`'s
-   height:100% resolves against an auto-height (inline) host and collapses to
-   content height — which is why a SHORT tab (e.g. Managers/Profiles) left the
-   pinned Save/Close footer floating mid-window with dead space below, while tall
-   tabs overflowed #main and pushed the footer past the fold. */
+   height:100% collapses to content height — which left a SHORT tab (e.g.
+   Managers) with the pinned Save/Close footer floating mid-window and dead space
+   below. A plain `height:100%` on the (custom-element) host didn't resolve, so
+   pin it to #main's box directly (#main is position:relative) — bulletproof. */
 ph-settings-view {
+  position: absolute;
+  inset: 0;
   display: block;
-  height: 100%;
-  min-height: 0;
 }
 .settings-layout {
   height: 100%;

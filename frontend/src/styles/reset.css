@@ -5,6 +5,12 @@ html, body, #app {
   margin: 0;
   padding: 0;
   height: 100%;
+  /* The app is a fixed-viewport layout — every scrollable region is internal
+     (the list, the settings body, editors). The root must never scroll. This
+     also clips the harmless layout-footprint overflow the zoom width/height
+     compensation can leave at non-1.0 UI scales, so lowering the font no longer
+     "unlocks the canvas" into a scrollable page. */
+  overflow: hidden;
   background: var(--bg-deep);
   color: var(--fg-default);
   /* Base typeface for the whole UI, driven by the Appearance setting

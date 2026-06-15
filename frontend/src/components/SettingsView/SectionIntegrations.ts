@@ -64,7 +64,7 @@ export class SectionIntegrations {
           </span>
         </div>
 
-        <div class="settings-field stacked">
+        <div class="settings-field conn-field">
           <label>MCP server</label>
           <div style="display: block; font-size: 12px; color: var(--fg-muted); line-height: 1.5; max-width: 760px;">
             <p style="margin: 0 0 8px;">
