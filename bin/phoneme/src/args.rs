@@ -360,9 +360,16 @@ pub struct DeleteArgs {
 
 #[derive(Debug, clap::Args)]
 pub struct DoctorArgs {
-    /// Rebuild the catalog from inbox + audio_dir.
+    /// DESTRUCTIVE: delete catalog.db so the daemon starts an empty catalog.
+    /// Transcripts, tags, notes and titles are DB-only and are LOST; audio
+    /// files are kept. To recover recordings non-destructively, use --reimport.
     #[arg(long)]
     pub rebuild_catalog: bool,
+    /// Non-destructive: scan the audio directory and re-link any .wav file that
+    /// has no catalog row (re-create the row from the file and re-transcribe it).
+    /// Never deletes or overwrites anything.
+    #[arg(long)]
+    pub reimport: bool,
     /// Attempt repairs for failed checks (currently: restart the bundled
     /// whisper-server(s) when the Whisper / live-preview probe fails).
     #[arg(long)]

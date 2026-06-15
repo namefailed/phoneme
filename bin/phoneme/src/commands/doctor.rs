@@ -11,12 +11,18 @@
 //!
 //! `--fix` asks the daemon to `RestartWhisper` when a failed check carries
 //! the `restart_whisper` fix action, waits for the respawn, and re-probes.
-//! `--rebuild-catalog` is the heavy hammer: it shuts the daemon down
-//! (`Shutdown`), waits — bounded — for the pipe to actually vanish (the
-//! dying daemon holds the SQLite handles while finalizing), then deletes
-//! catalog.db and its WAL sidecars so the next daemon start rebuilds from
-//! the inbox + audio files. It refuses to touch the files if the daemon
-//! won't exit.
+//! `--rebuild-catalog` is the heavy, DESTRUCTIVE hammer: it shuts the daemon
+//! down (`Shutdown`), waits — bounded — for the pipe to actually vanish (the
+//! dying daemon holds the SQLite handles while finalizing), then DELETES
+//! catalog.db and its WAL sidecars so the next daemon start begins with an
+//! empty catalog. Transcripts, tags, notes and titles are DB-only and are
+//! lost; audio files are kept (the daemon does NOT reconstruct rows from audio
+//! on startup). It refuses to touch the files if the daemon won't exit.
+//!
+//! `--reimport` is the NON-destructive recovery path: it asks the running
+//! daemon to scan the audio directory and re-link any `.wav` that has no
+//! catalog row (`ReimportFromDisk`) — re-creating the row from the file and
+//! re-transcribing it. Nothing is ever deleted.
 
 use crate::args::DoctorArgs;
 use crate::client::Client;
@@ -90,8 +96,32 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
             return ExitCode::from(exit::GENERIC_FAIL);
         }
 
-        println!("catalog rebuilt; restart the daemon with: phoneme daemon start");
+        println!(
+            "catalog deleted — start the daemon for a fresh, empty catalog: phoneme daemon start. \
+             Your audio is intact; run `phoneme doctor --reimport` to re-link it."
+        );
         return ExitCode::SUCCESS;
+    }
+
+    if args.reimport {
+        // Non-destructive recovery: ask the running daemon to re-link any audio
+        // file with no catalog row. Observe-only — there's no point spawning a
+        // daemon just to scan; if one isn't up, tell the user.
+        let mut client = match Client::connect_observe(cfg).await {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("error: daemon not reachable — start it first: phoneme daemon start");
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
+        };
+        match client.send(Request::ReimportFromDisk { dry_run: false }).await {
+            Ok(v) => {
+                let n = v.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+                println!("re-imported {n} recording(s) from disk");
+                return ExitCode::SUCCESS;
+            }
+            Err(code) => return code,
+        }
     }
 
     let mut checks: Vec<CheckResult> = Vec::new();

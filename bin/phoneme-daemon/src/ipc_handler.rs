@@ -669,6 +669,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
         }
         Request::ImportRecording { path } => import_recording(state, path).await,
+        Request::ReimportFromDisk { dry_run } => reimport_from_disk(state, dry_run).await,
         Request::RetranscribeRecording {
             id,
             model,
@@ -1828,6 +1829,197 @@ async fn import_recording(state: &AppState, path: String) -> Response {
     Response::Ok(serde_json::json!({ "id": id.to_string() }))
 }
 
+/// A `.wav` on disk whose RecordingId has no catalog row — a candidate to
+/// re-link in [`reimport_from_disk`].
+struct ReimportCandidate {
+    id: phoneme_core::RecordingId,
+    path: std::path::PathBuf,
+    duration_ms: i64,
+    started_at: chrono::DateTime<chrono::Local>,
+}
+
+/// Reconstruct a RecordingId from a day folder (`YYYY-MM-DD`) + a file stem
+/// (`HHmmssNNN`) — the inverse of the `audio_dir/<day>/<stem>.wav` layout that
+/// `RecordingId::day_folder()`/`file_stem()` produce. `None` for anything that
+/// isn't a valid id (e.g. a user-dropped file with a different name).
+fn id_from_path_parts(day_name: &str, stem: &str) -> Option<phoneme_core::RecordingId> {
+    let date_digits: String = day_name.chars().filter(|c| *c != '-').collect();
+    phoneme_core::RecordingId::parse(format!("{date_digits}T{stem}"))
+}
+
+/// The original wall-clock time encoded in a RecordingId (`YYYYMMDDTHHmmssNNN`),
+/// so a re-imported row keeps its real timestamp instead of "now". Falls back to
+/// the current time only if the slices somehow don't parse (the id is already
+/// shape-validated by `parse`).
+fn started_at_from_id(id: &phoneme_core::RecordingId) -> chrono::DateTime<chrono::Local> {
+    use chrono::{Local, NaiveDate, NaiveTime, TimeZone};
+    let s = id.as_str();
+    let build = || -> Option<chrono::DateTime<Local>> {
+        let y: i32 = s.get(0..4)?.parse().ok()?;
+        let mo: u32 = s.get(4..6)?.parse().ok()?;
+        let d: u32 = s.get(6..8)?.parse().ok()?;
+        let h: u32 = s.get(9..11)?.parse().ok()?;
+        let mi: u32 = s.get(11..13)?.parse().ok()?;
+        let se: u32 = s.get(13..15)?.parse().ok()?;
+        let dt = NaiveDate::from_ymd_opt(y, mo, d)?.and_time(NaiveTime::from_hms_opt(h, mi, se)?);
+        Local.from_local_datetime(&dt).single()
+    };
+    build().unwrap_or_else(Local::now)
+}
+
+/// Synchronously walk `audio_dir/<YYYY-MM-DD>/<HHmmssNNN>.wav`, collecting every
+/// `.wav` whose path reconstructs to a valid RecordingId. Blocking std::fs (run
+/// off the runtime by the caller); no new crate dependency. Unreadable dirs are
+/// skipped rather than failing the whole scan.
+fn scan_audio_dir(audio_dir: &std::path::Path) -> Vec<ReimportCandidate> {
+    let mut out = Vec::new();
+    let Ok(days) = std::fs::read_dir(audio_dir) else {
+        return out;
+    };
+    for day in days.flatten() {
+        let day_path = day.path();
+        if !day_path.is_dir() {
+            continue;
+        }
+        let Some(day_name) = day_path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Ok(files) = std::fs::read_dir(&day_path) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("wav") {
+                continue;
+            }
+            let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Some(id) = id_from_path_parts(day_name, stem) else {
+                continue;
+            };
+            let duration_ms = phoneme_audio::wav::duration_ms(&p).unwrap_or(0);
+            let started_at = started_at_from_id(&id);
+            out.push(ReimportCandidate {
+                id,
+                path: p,
+                duration_ms,
+                started_at,
+            });
+        }
+    }
+    out
+}
+
+/// Re-link audio files that have no catalog row — the SAFE counterpart to the
+/// destructive `doctor --rebuild-catalog`. Scans the audio dir, and for every
+/// `.wav` whose RecordingId isn't already in the catalog inserts a `Queued` row
+/// pointing at the EXISTING file (no copy, original id + timestamp preserved)
+/// and enqueues it for the normal pipeline. Never deletes or mutates existing
+/// rows. `dry_run` returns the count + paths without writing anything.
+async fn reimport_from_disk(state: &AppState, dry_run: bool) -> Response {
+    let existing: std::collections::HashSet<phoneme_core::RecordingId> =
+        match state.catalog.all_ids().await {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => return err_response(&e),
+        };
+
+    let audio_dir = state.paths.audio_dir.clone();
+    let candidates = match tokio::task::spawn_blocking(move || scan_audio_dir(&audio_dir)).await {
+        Ok(c) => c,
+        Err(e) => {
+            return Response::Err(IpcError {
+                kind: IpcErrorKind::Internal,
+                message: format!("re-import scan task panicked: {e}"),
+            });
+        }
+    };
+
+    let orphans: Vec<ReimportCandidate> = candidates
+        .into_iter()
+        .filter(|c| !existing.contains(&c.id))
+        .collect();
+
+    if dry_run {
+        let paths: Vec<String> = orphans
+            .iter()
+            .map(|c| c.path.to_string_lossy().into_owned())
+            .collect();
+        return Response::Ok(serde_json::json!({ "count": orphans.len(), "paths": paths }));
+    }
+
+    let mut count = 0usize;
+    for c in orphans {
+        let audio_path = c.path.to_string_lossy().into_owned();
+        let row = phoneme_core::Recording {
+            id: c.id.clone(),
+            started_at: c.started_at,
+            duration_ms: c.duration_ms,
+            audio_path: audio_path.clone(),
+            in_place: false,
+            transcript: None,
+            model: None,
+            // Queued (not Transcribing): it rides the serial inbox; the worker
+            // flips it to Transcribing when it claims the job — same as import.
+            status: RecordingStatus::Queued,
+            error_kind: None,
+            error_message: None,
+            hook_command: None,
+            hook_exit_code: None,
+            hook_duration_ms: None,
+            transcribed_at: None,
+            hook_ran_at: None,
+            notes: None,
+            meeting_id: None,
+            meeting_name: None,
+            track: None,
+            cleanup_model: None,
+            diarized: false,
+            user_edited: false,
+            favorite: false,
+            tag_suggestions: vec![],
+            summary: None,
+            summary_model: None,
+            title: None,
+            title_is_auto: true,
+            title_model: None,
+            tag_model: None,
+            diarization_model: None,
+            tags: vec![],
+            speaker_names: vec![],
+        };
+        if let Err(e) = state.catalog.insert(&row).await {
+            tracing::warn!(id = %c.id, "re-import: failed to insert row, skipping: {e}");
+            continue;
+        }
+        let payload = HookPayload {
+            id: c.id.clone(),
+            timestamp: c.started_at,
+            transcript: String::new(),
+            audio_path: audio_path.clone(),
+            duration_ms: c.duration_ms,
+            model: String::new(),
+            metadata: HookMetadata::current(),
+        };
+        if let Err(e) = state.inbox.enqueue(&payload).await {
+            // No queue entry means it'd sit stuck on Queued forever — roll the
+            // row back (the file is untouched, so a later re-import retries it).
+            let _ = state.catalog.delete(&c.id).await;
+            tracing::warn!(id = %c.id, "re-import: failed to enqueue, rolled back: {e}");
+            continue;
+        }
+        state.events.emit(DaemonEvent::RecordingStopped {
+            id: c.id.clone(),
+            duration_ms: c.duration_ms,
+            audio_path,
+            meeting_id: None,
+        });
+        count += 1;
+    }
+    tracing::info!(count, "re-imported orphaned recordings from disk");
+    Response::Ok(serde_json::json!({ "count": count }))
+}
+
 fn error_to_kind(e: &phoneme_core::Error) -> IpcErrorKind {
     use phoneme_core::Error::*;
     match e {
@@ -1883,6 +2075,27 @@ fn serialize_response<T: serde::Serialize>(val: T) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reimport_id_from_path_parts_round_trips() {
+        // The real audio_dir layout: day folder + 9-char time stem -> 18-char id.
+        let id = id_from_path_parts("2026-06-15", "014341016").unwrap();
+        assert_eq!(id.as_str(), "20260615T014341016");
+        assert_eq!(id.day_folder(), "2026-06-15");
+        assert_eq!(id.file_stem(), "014341016");
+        // A user-dropped file with a non-id name is skipped, not mis-relinked.
+        assert!(id_from_path_parts("2026-06-15", "my-notes").is_none());
+        assert!(id_from_path_parts("not-a-day", "014341016").is_none());
+    }
+
+    #[test]
+    fn reimport_started_at_decodes_the_id_timestamp() {
+        use chrono::{Datelike, Timelike};
+        let id = phoneme_core::RecordingId::parse("20260615T014341016").unwrap();
+        let dt = started_at_from_id(&id);
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2026, 6, 15));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (1, 43, 41));
+    }
 
     #[test]
     fn import_size_cap_rejects_oversized_files() {

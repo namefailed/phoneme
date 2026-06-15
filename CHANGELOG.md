@@ -301,6 +301,16 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Safe "Re-import recordings from disk"** — a NON-destructive recovery path
+  (`ReimportFromDisk` IPC, `phoneme doctor --reimport`): scans the audio directory
+  and re-links any `.wav` whose RecordingId has no catalog row — re-creating the
+  row from the file (original id + timestamp preserved, **no copy**) at `queued`
+  and re-running the pipeline. Never deletes or touches existing rows; files whose
+  names aren't valid ids are skipped. This is the safe counterpart to the
+  DESTRUCTIVE `doctor --rebuild-catalog`, whose help text now states plainly that
+  it deletes the catalog (transcripts/tags/notes/titles are DB-only and lost; the
+  daemon does **not** reconstruct rows from audio) and points at `--reimport` for
+  recovery.
 - [x] **UI font size is a real font size now** — the Appearance → font-size setting
   drives the root `font-size` (`--ui-font-size`), and every text size across the app
   is expressed in `rem`, so changing it scales the interface text up/down cleanly.

@@ -232,6 +232,21 @@ pub enum Request {
         path: String,
     },
 
+    /// Scan the audio directory for `.wav` files whose RecordingId has no
+    /// catalog row and re-link each: insert a `queued` row pointing at the
+    /// EXISTING file and enqueue it for the normal pipeline — recovering
+    /// recordings after a lost/rebuilt catalog. Strictly **non-destructive**:
+    /// never deletes or copies audio, never touches existing rows; files whose
+    /// names aren't valid RecordingIds are skipped. The safe counterpart to the
+    /// destructive `doctor --rebuild-catalog`. Ok `{"count":N}`, or
+    /// `{"count":N,"paths":[...]}` when `dry_run`. `phoneme doctor --reimport`,
+    /// Settings → Doctor.
+    ReimportFromDisk {
+        /// Scan and count only — don't insert rows or enqueue anything.
+        #[serde(default)]
+        dry_run: bool,
+    },
+
     // ── Library: re-runs ─────────────────────────────────────────────────
     // Re-execute pipeline stages for an already-stored recording. All four
     // reply Ok `null` immediately and report progress/results through the

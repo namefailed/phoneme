@@ -186,6 +186,9 @@ fn is_retry_safe(req: &Request) -> bool {
         // call, so a re-send duplicates the recording (the motivating bug).
         | DeleteRecording { .. }
         | ImportRecording { .. }
+        // Re-import inserts catalog rows + enqueues; a blind re-send could
+        // double-enqueue freshly-relinked files, so single-attempt only.
+        | ReimportFromDisk { .. }
         // Re-runs (re-enqueue work / fire hooks).
         | RetranscribeRecording { .. }
         | RefireHook { .. }

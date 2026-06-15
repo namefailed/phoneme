@@ -1694,6 +1694,22 @@ impl Catalog {
         Ok(())
     }
 
+    /// Every recording id currently in the catalog — for de-duping a disk
+    /// re-import (`ReimportFromDisk`) against rows that already exist. Ids that
+    /// somehow fail the canonical shape check are skipped rather than panicking.
+    pub async fn all_ids(&self) -> Result<Vec<RecordingId>> {
+        let rows = sqlx::query("SELECT id FROM recordings")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let s: String = r.try_get("id").ok()?;
+                RecordingId::parse(s)
+            })
+            .collect())
+    }
+
     /// Returns ALL tags including ones not attached to any recording.
     /// Used by the Tag Manager settings UI.
     pub async fn list_all_tags(&self) -> Result<Vec<Tag>> {
