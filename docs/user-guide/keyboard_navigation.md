@@ -20,6 +20,8 @@ vim-style pane navigation is opt-in: **Settings → Appearance → Vim navigatio
 | `g` then `T` | Open the Tag Manager (quick popup) |
 | `g` then `P` | Settings → Managers → Profiles |
 | `g` then `S` | Settings → Managers → Saved searches |
+| `x` then `b` | Toggle the sidebar (vim twin of `Ctrl + B`) |
+| `x` then `/` | Toggle the top (search/header) bar (vim twin of `Ctrl + /`) |
 | `Ctrl + ,` | Open Settings |
 | `Ctrl + B` | Toggle the sidebar |
 | `Ctrl + \` | Toggle the detail pane |

@@ -797,6 +797,13 @@ export class RecordingsView {
         this.focusPane("sidebar");
         break;
       }
+      // x b — show/hide the sidebar (vim twin of the header ☰ / Ctrl+B). If it
+      // gets hidden while the cursor was in it, fall back to the list so the
+      // keyboard isn't stranded on a gone pane.
+      case "toggle-sidebar":
+        this.toggleSidebar();
+        if (!this.sidebarVisible && this.focusedPane === "sidebar") this.focusPane("list");
+        break;
       // k at the top of the list → up into the header search box.
       case "focus-search": this.focusSearchBar(); break;
       // t → focus the open recording's tag box; Shift+T → Tag Manager.

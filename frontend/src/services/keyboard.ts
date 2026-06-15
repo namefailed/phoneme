@@ -106,6 +106,7 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "g g", label: "Jump to the top (list · sidebar · detail)" },
     { combo: "G", label: "Jump to the bottom (list · sidebar · detail)" },
     { combo: "z z", label: "Center the list on the cursor row" },
+    { combo: "x b   x /", label: "Toggle the sidebar / top bar (vim twins of Ctrl+B / Ctrl+/)" },
     { combo: "Enter", label: "Open recording · apply sidebar filter" },
     { combo: "j  k (sidebar)", label: "Filters · section headers · the queue's items" },
     { combo: "h  l (sidebar)", label: "Across a queue row's buttons (l past the end → list)" },
@@ -141,6 +142,8 @@ let pendingD = false;
 let pendingDTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingZ = false;
 let pendingZTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingX = false;
+let pendingXTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Whether the system-wide vim navigation layer is active (`interface.vim_nav`). */
 let vimNav = false;
@@ -375,6 +378,14 @@ function clearPendingZ() {
   }
 }
 
+function clearPendingX() {
+  pendingX = false;
+  if (pendingXTimer) {
+    clearTimeout(pendingXTimer);
+    pendingXTimer = null;
+  }
+}
+
 function openHelp() {
   if (helpOpen) return;
   helpOpen = true;
@@ -568,6 +579,15 @@ function onKeyDown(e: KeyboardEvent) {
       dispatchVim("list-center");
       return;
     }
+  }
+
+  // "x" prefix (vim): a leader for the chrome toggles — `x b` toggles the
+  // sidebar and `x /` toggles the top (search) bar, the keyboard-only twins of
+  // the Ctrl+B / Ctrl+/ buttons. A non-matching follow-up falls through.
+  if (pendingX) {
+    clearPendingX();
+    if (vimNav && e.key === "b") { e.preventDefault(); dispatchVim("toggle-sidebar"); return; }
+    if (vimNav && e.key === "/") { e.preventDefault(); toggleHeaderBar(); return; }
   }
 
   // System-wide vim navigation layer. These keys are inert unless vim_nav is on,
@@ -886,6 +906,14 @@ function onKeyDown(e: KeyboardEvent) {
     case "g":
       pendingG = true;
       pendingGTimer = setTimeout(clearPendingG, 1000);
+      return;
+    case "x":
+      // x is a vim-only leader for the chrome toggles (x b / x /); inert without
+      // vim nav so it never eats a stray keystroke.
+      if (!vimNav) break;
+      e.preventDefault();
+      pendingX = true;
+      pendingXTimer = setTimeout(clearPendingX, 1000);
       return;
     // Actions on the currently-open recording (no-op when none is open). These
     // letters don't collide with the list's arrow/Enter/Space navigation.

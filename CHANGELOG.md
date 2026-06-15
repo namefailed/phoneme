@@ -271,6 +271,9 @@ trust boundary. Verified against current code.*
   now cross between them at a row's edge (the detail grid's per-row `h`/`l` still
   walks a row's buttons in the middle), and `g 1` / `g 2` jump straight to the
   left / right pane.
+- [x] **`x b` / `x /` toggle the sidebar / top bar** — vim-mode twins of the
+  `Ctrl+B` / `Ctrl+/` chrome toggles, on a new `x` prefix leader. (`x b` falls
+  back to the list if it hides the sidebar while your cursor was in it.)
 - [x] **Pane cursor memory everywhere** — every pane now remembers where your
   cursor was and restores it on return, not just the detail pane: leave the
   **sidebar** or the **header strip** (e.g. down to the list, back up with `k`)
