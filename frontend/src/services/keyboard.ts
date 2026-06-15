@@ -441,9 +441,11 @@ function onKeyDown(e: KeyboardEvent) {
     clearPendingG();
     if (e.key === "l") { e.preventDefault(); navigate("recordings"); return; }
     if (e.key === "s") { e.preventDefault(); navigate("settings"); return; }
-    // g d — keyboard into the open recording's detail pane; g D — the Doctor.
+    // g d — keyboard into the open recording's detail pane.
     if (e.key === "d") { e.preventDefault(); dispatchVim("focus-detail"); return; }
-    if (e.key === "D") { e.preventDefault(); navigate("doctor"); return; }
+    // g D — open the Doctor POPUP (same modal the header status pill opens), not
+    // the full-page Doctor view.
+    if (e.key === "D") { e.preventDefault(); void import("../components/DoctorModal").then((m) => m.openDoctor()); return; }
     // Capital chords jump to the managers: g T = quick Tag Manager popup,
     // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches.
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
