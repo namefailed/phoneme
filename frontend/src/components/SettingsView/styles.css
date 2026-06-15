@@ -638,15 +638,15 @@ select[data-key="daemon.log_level"] {
 .settings-field.ai-prompt-field > label {
   padding-top: 10px;
 }
-.ai-prompt-controls {
+/* Child combinator so this beats `.settings-field > div { align-items: center }`
+   on specificity — otherwise the wrapper inherits horizontal centering and the
+   preset row + textarea drift to the middle instead of lining up with the rest
+   of the UI (the "center aligned" bug). */
+.settings-field > .ai-prompt-controls {
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 100%;
-  /* Left-align/fill children. Without this the wrapper inherits `align-items:
-     center` from `.settings-field > div`, which — with `flex-direction: column`
-     — centres the preset row and textarea horizontally (the "not lined up with
-     our UI" bug). Same fix as `.settings-field.stacked > div` above. */
   align-items: stretch;
 }
 .ai-preset-row {
@@ -667,9 +667,10 @@ select[data-key="daemon.log_level"] {
 }
 .ai-prompt-controls textarea {
   width: 100%;
-  /* Constrain to the panel's wide-field width instead of spanning the whole
-     row, so the prompt boxes match the other settings fields. */
-  max-width: 580px;
+  /* Fill the control column so the prompt boxes line up with the rest of the
+     settings UI (same right edge as the other full-width fields), rather than
+     being capped narrower and looking inset. */
+  max-width: 100%;
   min-height: 220px;
   resize: vertical;
   font-size: 0.9286rem;
