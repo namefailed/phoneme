@@ -7,7 +7,6 @@ import { showToast } from "../../utils/toast";
 import { fuzzyScore } from "../../utils/fuzzy";
 import { keywordsForKey } from "./searchKeywords";
 import { getSettingsAnchor } from "../shared/settingsAnchor";
-import { getHealth } from "../shared/healthState";
 
 import { SectionWhisper } from "./SectionWhisper";
 import { SectionPreview } from "./SectionPreview";
@@ -164,11 +163,6 @@ export class SettingsViewElement extends LitElement {
       console.error(e);
       showToast(`Failed to load settings: ${errText(e)}`, "error");
     }
-    // Seed the floating pill's dot from the header's last-known health so it
-    // paints the right colour immediately (no grey→green flash), then refresh.
-    const seed = getHealth();
-    this.doctorHealth = seed.health;
-    this.doctorIssueCount = seed.issueCount;
     void this.checkDoctorHealth();
   }
 
