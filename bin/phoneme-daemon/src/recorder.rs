@@ -202,6 +202,16 @@ pub struct ActiveRecording {
     pub started_at: chrono::DateTime<Local>,
     pub paused: bool,
     pub in_place: bool,
+    /// Lowercased executable stem of the window focused when the recording
+    /// started (e.g. `"code"`), captured only for in-place dictations. Drives
+    /// the per-app type/paste/off override at typing time. `None` off Windows,
+    /// when no window was focused, or when this isn't a dictation.
+    pub focused_app: Option<String>,
+    /// Title of the focused window at start, captured only for in-place
+    /// dictations AND only when `[in_place].app_context` is on and the app
+    /// isn't denylisted. Potentially sensitive — used solely in the LLM cleanup
+    /// prompt, never logged or persisted. `None` whenever context is off.
+    pub focused_window_title: Option<String>,
 }
 
 /// A running idle pre-roll pre-capture: a background task pulls canonical
@@ -721,6 +731,26 @@ impl DaemonRecorder {
             .join(id.day_folder())
             .join(format!("{}.wav", id.file_stem()));
 
+        // Capture the foreground app for in-place dictations, at START — this is
+        // the window the user is dictating into, before the brief recording can
+        // shift focus. The process stem keys the per-app type/paste/off override;
+        // the window title is read ONLY when app-aware context is opted in and
+        // the app isn't denylisted (privacy-first — off by default reads nothing).
+        // Both Win32 calls and `config.load()` are synchronous (no await), so
+        // doing this under the `active` guard is sound.
+        let (focused_app, focused_window_title) = if in_place {
+            let cfg = state.config.load();
+            let app = phoneme_core::foreground::foreground_app();
+            let exe = app.as_ref().map(|a| a.exe_name.clone());
+            let title = app.filter(|a| {
+                !a.window_title.is_empty()
+                    && cfg.in_place.may_read_window_title(Some(a.exe_name.as_str()))
+            });
+            (exe, title.map(|a| a.window_title))
+        } else {
+            (None, None)
+        };
+
         // Reserve the active slot immediately so concurrent starts fail.
         *active = Some(ActiveRecording {
             id: id.clone(),
@@ -729,6 +759,8 @@ impl DaemonRecorder {
             started_at,
             paused: false,
             in_place,
+            focused_app,
+            focused_window_title,
         });
         drop(active);
 
@@ -928,6 +960,8 @@ impl DaemonRecorder {
                 state.clone(),
                 active.id.clone(),
                 active.audio_path.clone(),
+                active.focused_app.clone(),
+                active.focused_window_title.clone(),
             );
         } else {
             // Full-pipeline dictation with `type_first`: the text shouldn't
@@ -940,6 +974,8 @@ impl DaemonRecorder {
                     state.clone(),
                     active.id.clone(),
                     active.audio_path.clone(),
+                    active.focused_app.clone(),
+                    active.focused_window_title.clone(),
                 );
             }
             let payload = HookPayload {
@@ -2029,6 +2065,8 @@ mod tests {
             started_at: Local::now(),
             paused: false,
             in_place: false,
+            focused_app: None,
+            focused_window_title: None,
         });
 
         let err = state
