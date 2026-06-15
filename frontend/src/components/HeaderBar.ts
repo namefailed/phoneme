@@ -13,6 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
 import { setSettingsAnchor } from './shared/settingsAnchor';
+import { setHealth } from './shared/healthState';
 import './SavedSearches';
 
 /** Callbacks App threads in: the ⚙ button (toggles Settings open/closed) and
@@ -254,9 +255,11 @@ export class HeaderBarElement extends LitElement {
       const next: "ok" | "bad" = failing.length ? "bad" : "ok";
       if (next === "ok") this.bannerDismissed = false;
       this.health = next;
+      setHealth(next, this.healthIssues.length);
     } catch {
       this.healthIssues = [{ name: "Daemon not reachable", fix: "start_daemon" }];
       this.health = "bad";
+      setHealth("bad", this.healthIssues.length);
     }
   }
 

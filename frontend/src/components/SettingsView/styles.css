@@ -240,24 +240,25 @@ mark.settings-hit {
 }
 
 /* Floating Doctor health pill, sitting beside the ⚙ button while Settings is
-   open (the header — which owns the live pill — is unmounted then). Self-styled
-   because the header's `.hb-health` rules aren't present on this view. */
+   open (the header — which owns the live pill — is unmounted then). Mirrors the
+   header's `.hb-health` EXACTLY (bare dot, transparent, same padding/hover/glow/
+   blink) so it looks identical in both views; only margin-left differs (the
+   header gets its gap from the top bar's flex layout). */
 .settings-float-doctor {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   margin-left: 6px;
-  background: var(--bg-deep);
+  background: none;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 5px 9px;
+  padding: 5px 8px;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .settings-float-doctor:hover {
-  background: var(--border-subtle);
-  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-subtle);
 }
 .settings-float-doctor .sfd-dot {
   width: 9px;
@@ -272,12 +273,14 @@ mark.settings-hit {
 .settings-float-doctor.bad .sfd-dot {
   background: var(--err, #f38ba8);
   box-shadow: 0 0 8px color-mix(in srgb, var(--err, #f38ba8) 70%, transparent);
+  animation: hbHealthBlink 1.2s ease-in-out infinite;
 }
 .settings-float-doctor .sfd-n {
   font-size: 0.7857rem;
   font-weight: 700;
   color: var(--err, #f38ba8);
 }
+@keyframes hbHealthBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .settings-float-toggle {
   display: inline-flex;
   align-items: center;
