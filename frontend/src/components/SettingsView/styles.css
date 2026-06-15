@@ -1,3 +1,13 @@
+/* The Settings custom-element host must fill #main, or `.settings-layout`'s
+   height:100% resolves against an auto-height (inline) host and collapses to
+   content height — which is why a SHORT tab (e.g. Managers/Profiles) left the
+   pinned Save/Close footer floating mid-window with dead space below, while tall
+   tabs overflowed #main and pushed the footer past the fold. */
+ph-settings-view {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
 .settings-layout {
   height: 100%;
   display: flex;
@@ -374,6 +384,9 @@ mark.settings-hit {
 }
 .settings-body {
   flex: 1;
+  /* min-height:0 lets this flex child actually scroll instead of growing past
+     the footer (the classic flex-column overflow gotcha). */
+  min-height: 0;
   overflow-y: auto;
   /* The Save/Close footer is its own bar now (no floating overlay to clear). */
   padding: 24px;
