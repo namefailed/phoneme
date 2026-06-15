@@ -20,26 +20,36 @@ body {
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-/* The floating caption card fills the (small) overlay window with a little inset
-   so the drop shadow isn't clipped by the window edge. */
+/* The caption card fills the (small, one-line) overlay window edge-to-edge.
+   Everything lives on a SINGLE tight row: the live dot + label fold together on
+   the left, then the one-line caption takes the slack, with the waveform +
+   controls on the right. The window height is locked in overlay.rs, so this card
+   never grows with text. */
 .ov-card {
   box-sizing: border-box;
   /* Fill the (opaque) window edge-to-edge. The window itself is the floating
-     card now — no transparent gap, no desktop blur (both crash WebView2). A
-     column: a fixed chrome bar on top, the caption filling the rest. */
+     card — no transparent gap, no desktop blur (both crash WebView2). A single
+     horizontal row, vertically centered. */
   width: 100%;
   height: 100%;
   margin: 0;
   display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 9px 13px 11px;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
   font-size: 0.9286rem;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--fg-default, #cdd6f4);
   background: var(--bg-elevated, #1e1e2e);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
-  border-radius: 12px;
+  /* A slightly stronger border + radius, plus a subtle inset top sheen and inner
+     hairline at the bottom, give the flat opaque panel a little depth WITHOUT a
+     drop shadow (we can't go transparent — that crashes WebView2). */
+  border: 1px solid color-mix(in srgb, var(--accent, #89b4fa) 28%, var(--border, #45475a));
+  border-radius: 11px;
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, #fff 7%, transparent),
+    inset 0 -1px 0 0 color-mix(in srgb, #000 18%, transparent);
   cursor: grab; /* the whole card is the drag region */
   transition: opacity 0.4s ease;
 }
@@ -47,19 +57,19 @@ body {
   cursor: grabbing;
 }
 
-/* Top chrome row: the record dot + LIVE/LISTENING label + waveform on the left,
-   the meeting source toggle + close on the right. Fixed height; a hairline
-   separates it from the caption below, which takes all the remaining space. */
+/* The status cluster: the live dot + LIVE/LISTENING label folded together as one
+   compact unit on the left. Fixed width; never shrinks. */
 .ov-bar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle, rgba(255, 255, 255, 0.12)) 65%, transparent);
+  gap: 6px;
 }
 .ov-spacer {
-  flex: 1 1 auto;
+  /* No longer used for layout (the caption itself takes the slack); kept as a
+     zero-size no-op so the markup stays stable. */
+  flex: 0 0 0;
+  width: 0;
 }
 
 /* Dimmed state shortly after a recording stops, before the window auto-hides. */
@@ -67,30 +77,48 @@ body.ov-dim .ov-card {
   opacity: 0.35;
 }
 
-/* Pulsing record indicator. */
+/* Live indicator. Calm by default: a small accent dot that only PULSES while
+   words are flowing (body.ov-live); when merely listening it settles to a
+   static, slightly dimmed dot — no alarm-y throb. Uses the theme accent, never
+   the error red. */
 .ov-pulse {
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--err, #f38ba8);
-  animation: ovPulse 1.5s ease-out infinite;
+  background: color-mix(in srgb, var(--accent, #89b4fa) 60%, var(--fg-faded, #6c7086));
+  transition: background 0.4s ease;
+}
+body.ov-live .ov-pulse {
+  background: var(--accent, #89b4fa);
+  animation: ovPulse 1.6s ease-out infinite;
 }
 @keyframes ovPulse {
-  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--err, #f38ba8) 55%, transparent); }
-  70%  { box-shadow: 0 0 0 7px transparent; }
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #89b4fa) 45%, transparent); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
+}
+/* Respect reduced-motion: no pulsing ring at all. */
+@media (prefers-reduced-motion: reduce) {
+  body.ov-live .ov-pulse { animation: none; }
 }
 
 /* "It hears me" waveform — a row of bars driven by mic RMS (AudioLevelSample),
    not by transcription. Pure reassurance that audio is being captured. Heights
-   animate via transform (GPU-cheap); overlay.ts sets each bar's scaleY. */
+   animate via transform (GPU-cheap); overlay.ts sets each bar's scaleY. Faded
+   until hover so it doesn't compete with the caption. */
 .ov-wave {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 16px;
+  height: 15px;
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+.ov-card:hover .ov-wave,
+body.ov-live .ov-wave {
+  opacity: 0.85;
 }
 .ov-wave-bar {
   width: 2.5px;
@@ -101,32 +129,33 @@ body.ov-dim .ov-card {
   transform-origin: center bottom;
   transition: transform 0.08s ease-out;
 }
+@media (prefers-reduced-motion: reduce) {
+  .ov-wave-bar { transition: none; }
+}
 
 .ov-label {
   flex: 0 0 auto;
-  font-size: 0.7143rem;
+  font-size: 0.6786rem;
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   color: var(--accent, #89b4fa);
 }
 
-/* The caption fills the card's remaining height and wraps; the newest words
-   stay pinned to the bottom (overlay.ts sets scrollTop), so older text scrolls
-   up out of view as you speak. Long or odd tokens break instead of spilling
-   past the card edge. The scrollbar is hidden for a clean look — it's
-   tail-anchored, so there's nothing to scroll to by hand. Resize the window
-   taller to see more lines at once. */
+/* The one-line caption. It takes all the slack between the status cluster and the
+   right-hand controls and shows exactly ONE line: text never wraps and never
+   scrolls vertically; overlay.ts fits the newest words by dropping words off the
+   LEFT, and anchors the tail with scrollLeft so the latest word stays visible.
+   No scrollbars (it's tail-anchored programmatically). */
 .ov-text {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   width: 100%;
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
+  height: 1.4em;
+  line-height: 1.4em;
+  white-space: nowrap;
   overflow-x: hidden;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-y: hidden;
   color: var(--fg-default, #cdd6f4);
-  scroll-behavior: smooth;
   scrollbar-width: none;
 }
 .ov-text::-webkit-scrollbar {
@@ -134,29 +163,38 @@ body.ov-dim .ov-card {
   height: 0;
 }
 
-/* The caption area: a single .ov-text block, or (meetings in "both" mode) two
-   stacked .ov-row lines, one per track, splitting the height evenly. */
+/* The caption area: a single .ov-text block on the row (single recordings /
+   meeting "toggle"), or (meetings in "both" mode) two stacked .ov-row lines.
+   In the single case it stretches to fill the row; in "both" it falls back to a
+   small column (see the note on "both" below). */
 .ov-body {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  justify-content: center;
+  gap: 2px;
 }
+/* "Both" meeting mode keeps two horizontally-scrolling one-line rows. It can't
+   fit the strict one-line window height (see overlay.ts / overlay.rs note); the
+   single/toggle case is the priority. Each row is its own one-line caption with
+   a small track icon. */
 .ov-row {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
-  gap: 7px;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  min-height: 0;
+}
+.ov-row .ov-text {
+  height: 1.25em;
+  line-height: 1.25em;
+  font-size: 0.8571rem;
 }
 .ov-row .ov-row-ico {
   flex: 0 0 auto;
   font-size: 0.7857rem;
-  line-height: 1.5;
-  padding-top: 1px;
+  line-height: 1.25;
 }
 
 /* Meeting source toggle (🎤/🔊) — "toggle" mode only. Shows which track the

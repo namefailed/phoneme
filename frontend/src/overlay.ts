@@ -21,22 +21,22 @@ import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 
 const root = document.getElementById("overlay-root")!;
-// Layout: a compact chrome bar on top (status + waveform + controls) and a
-// roomy caption area below that fills the rest of the window — so the live text
-// gets the full width and height, wraps cleanly, and the newest words stay
-// pinned to the bottom. The window is resizable; the bar stays fixed-height
-// while the caption grows/shrinks with it.
+// Layout: a single tight row. On the left, the live dot + LIVE/LISTENING label
+// fold together into one compact status cluster; the one-line caption takes all
+// the slack in the middle; the waveform + source/close controls sit on the
+// right. The window is a FIXED one line tall (height locked in overlay.rs) and
+// horizontally resizable only — the caption never wraps, the newest words stay
+// visible and older text scrolls off the left.
 root.innerHTML = `
   <div class="ov-card">
     <div class="ov-bar">
       <span class="ov-pulse" aria-hidden="true"></span>
       <span class="ov-label" id="ov-label">LIVE</span>
-      <span class="ov-wave" id="ov-wave" aria-hidden="true"></span>
-      <span class="ov-spacer"></span>
-      <button class="ov-src" id="ov-src" hidden title="Switch which audio the caption follows"></button>
-      <button class="ov-close" id="ov-close" title="Hide overlay (re-shows on the next recording)" aria-label="Hide overlay">✕</button>
     </div>
     <div class="ov-body" id="ov-body"></div>
+    <span class="ov-wave" id="ov-wave" aria-hidden="true"></span>
+    <button class="ov-src" id="ov-src" hidden title="Switch which audio the caption follows"></button>
+    <button class="ov-close" id="ov-close" title="Hide overlay (re-shows on the next recording)" aria-label="Hide overlay">✕</button>
   </div>
 `;
 
@@ -79,10 +79,16 @@ resetWave();
 
 // Listening vs active: the label reads "LISTENING" when no new caption text has
 // arrived for `idleMs` (a calm state instead of a frozen caption), "LIVE" while
-// words are flowing. Only meaningful while the overlay is shown.
+// words are flowing. The `ov-live` body class follows the same signal — it's
+// what makes the dot pulse only while live and settle (static) while listening.
+// Only meaningful while the overlay is shown.
+function setLive(live: boolean) {
+  labelEl.textContent = live ? "LIVE" : "LISTENING";
+  document.body.classList.toggle("ov-live", live);
+}
 window.setInterval(() => {
   if (lastCaptionAt === 0) return;
-  labelEl.textContent = Date.now() - lastCaptionAt > idleMs ? "LISTENING" : "LIVE";
+  setLive(Date.now() - lastCaptionAt <= idleMs);
 }, 500);
 const win = getCurrentWindow();
 
@@ -129,6 +135,11 @@ void (async () => {
 // Settings dummy preview). "both": one labeled row per meeting track.
 type Shape = "single" | "both";
 let shape: Shape = "single";
+/** Whether the current capture is a MEETING (has a meeting_id + track). The
+ *  source-swap button shows for meetings only — never for single recordings or
+ *  the Settings dummy preview. Set on recording_started, cleared when the last
+ *  track stops and on the dummy preview. */
+let isMeeting = false;
 /** Active meeting tracks: recording id → track label ("mic"/"system"). */
 const meetingTracks = new Map<string, string>();
 /** Which track the (single) preview loop follows in toggle mode. */
@@ -166,16 +177,22 @@ function trackLabels(): string[] {
   return [...new Set(meetingTracks.values())];
 }
 
-/** The 🎤/🔊 source button: visible only for a meeting in toggle mode. Shows
- *  the track currently being followed; clicking switches to the other. */
+/** The 🎤/🔊 source button: visible only for a MEETING in toggle mode. Shows the
+ *  track currently being followed; clicking switches to the other. When hidden
+ *  it's fully reset (no label/title, re-enabled) so no stale state leaks into a
+ *  later single recording. */
 function updateSrcButton() {
-  const meetingLive = meetingTracks.size > 0;
-  const show = meetingLive && meetingMode === "toggle";
+  const show = isMeeting && meetingMode === "toggle";
   srcBtn.hidden = !show;
   if (show) {
     srcBtn.textContent = TRACK_ICON[activeTrack] ?? "🎙";
     const other = activeTrack === "mic" ? "system" : "mic";
     srcBtn.title = `Following the ${activeTrack === "mic" ? "microphone" : "system audio"} — click for ${other === "mic" ? "microphone" : "system audio"}`;
+  } else {
+    // Fully reset so a stale icon/disabled state never carries over.
+    srcBtn.textContent = "";
+    srcBtn.title = "";
+    srcBtn.disabled = false;
   }
 }
 
@@ -187,49 +204,120 @@ srcBtn.addEventListener("click", () => {
   });
 });
 
-// ── Live-text rendering: token-bucket reveal (1d) ───────────────────────────
+// ── Live-text rendering: word-by-word, single-line reveal (1d) ──────────────
 // The daemon stitches partials so the caption grows forward, but it arrives in
 // bursts — one chunk per preview tick, and on a slow box (adaptive backoff) the
-// ticks are seconds apart, so the old code dumped a paragraph at once. Instead
-// we reveal toward the latest text at a steady ~`revealWps` words/sec so words
-// stream in like speech. Two rules keep it honest:
+// ticks are seconds apart, so a naive render dumps a paragraph at once. Instead
+// we reveal toward the latest text WORD by WORD at a steady ~`revealWps`
+// words/sec so words pop in one at a time, like speech. The caption is ONE line:
+// only the newest words that fit the element's width are shown; older words
+// scroll off the LEFT. Two rules keep it honest:
 //   • Corrections never lag: if a new partial diverges from what we've shown
 //     (whisper revised earlier words), we snap the reveal cursor back to the
-//     common prefix so the fix appears immediately.
+//     common WORD prefix so the fix appears immediately.
 //   • No infinite backlog: if we're more than ~1.5s of reveal behind, we jump
 //     forward so a big burst can't crawl for ages.
 // Set `preview_reveal_words_per_sec` to 0 to disable smoothing (instant text).
 const MAX_CHARS = 600;
-const CHARS_PER_WORD = 5.5; // rough average incl. the trailing space
 
-function renderText(el: HTMLElement | null, text: string | null) {
-  if (!el) return;
-  el.textContent = text ?? "";
-  if (text) el.scrollTop = el.scrollHeight;
+/** Tokenize into words (whitespace-separated). Empty/whitespace → []. */
+function toWords(text: string): string[] {
+  const t = text.trim();
+  return t ? t.split(/\s+/) : [];
 }
 
-/** Per-element reveal state: the full text we're heading toward and how many
- *  characters of it are currently shown (float, so sub-character budget carries
+/** Defense-in-depth dedup: if the text ends with an exact adjacent repetition of
+ *  a trailing K-word phrase (the last K words equal the K words immediately
+ *  before them), drop the duplicate copy. Checks the longest repeat first and
+ *  compares case-insensitively. Conservative: only EXACT adjacent repeats, so a
+ *  legitimately repeated word ("very very good") with differing surrounding
+ *  context is left alone unless the whole tail phrase is duplicated. */
+function dedupTrailingRepeat(text: string): string {
+  const words = toWords(text);
+  const n = words.length;
+  if (n < 2) return text;
+  const lc = words.map((w) => w.toLowerCase());
+  // Largest possible repeated block is half the words; try longest first.
+  for (let k = Math.floor(n / 2); k >= 1; k--) {
+    let match = true;
+    for (let i = 0; i < k; i++) {
+      if (lc[n - k + i] !== lc[n - 2 * k + i]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return words.slice(0, n - k).join(" ");
+  }
+  return text;
+}
+
+/** Length of the shared leading run of two word arrays. */
+function commonWordPrefixLen(a: string[], b: string[]): number {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return i;
+}
+
+// ── One-line fitting: drop words from the LEFT until the tail fits ───────────
+// Measure with a single offscreen canvas (cheap, no reflow) using the element's
+// computed font, then keep only as many trailing words as fit its clientWidth.
+const measureCanvas = document.createElement("canvas");
+const measureCtx = measureCanvas.getContext("2d");
+
+/** The trailing slice of `words` that fits one line of `el`, measured against
+ *  its clientWidth. Always keeps at least the last word so the newest word is
+ *  never dropped (even if a single token is wider than the box — it just clips
+ *  via overflow:hidden, with the tail anchored by scrollLeft in renderText). */
+function fitTail(el: HTMLElement, words: string[]): string {
+  if (words.length === 0) return "";
+  const avail = el.clientWidth;
+  if (!measureCtx || avail <= 0) return words.join(" "); // can't measure → render all
+  const cs = getComputedStyle(el);
+  measureCtx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  // Walk from the end, accumulating words until the next one would overflow.
+  let start = words.length - 1;
+  for (let i = words.length - 1; i >= 0; i--) {
+    const candidate = words.slice(i).join(" ");
+    if (measureCtx.measureText(candidate).width <= avail) {
+      start = i;
+    } else {
+      break;
+    }
+  }
+  return words.slice(start).join(" ");
+}
+
+/** Render a one-line caption: fit the revealed words to the element width
+ *  (dropping from the left) and anchor the tail so the newest word is visible. */
+function renderWords(el: HTMLElement | null, words: string[]) {
+  if (!el) return;
+  el.textContent = fitTail(el, words);
+  // Horizontal tail anchor — keep the latest words pinned to the right edge.
+  el.scrollLeft = el.scrollWidth;
+}
+
+/** Plain render (no reveal animation): the Settings dummy preview and instant
+ *  mode. Still fits to one line and anchors the tail. */
+function renderText(el: HTMLElement | null, text: string | null) {
+  if (!el) return;
+  renderWords(el, toWords(text ?? ""));
+}
+
+/** Per-element reveal state: the full word list we're heading toward and how
+ *  many words of it are currently shown (float, so sub-word budget carries
  *  between frames). */
-type Reveal = { target: string; shown: number };
+type Reveal = { target: string[]; shown: number };
 const reveals = new Map<HTMLElement, Reveal>();
 let revealRaf: number | null = null;
 let lastFrame = 0;
-
-/** Length of the shared leading prefix of two strings. */
-function commonPrefixLen(a: string, b: string): number {
-  const n = Math.min(a.length, b.length);
-  let i = 0;
-  while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
-  return i;
-}
 
 function stepReveal(now: number) {
   revealRaf = null;
   const dt = Math.min(0.25, (now - lastFrame) / 1000); // clamp tab-stall gaps
   lastFrame = now;
-  const budget = Math.max(1, revealWps * CHARS_PER_WORD * dt);
-  const maxLag = revealWps * CHARS_PER_WORD * 1.5; // ≤1.5s of reveal behind
+  const budget = Math.max(0.0001, revealWps * dt); // words this frame
+  const maxLag = Math.max(1, revealWps * 1.5); // ≤1.5s of reveal behind (words)
   let anyPending = false;
   reveals.forEach((r, el) => {
     if (r.shown >= r.target.length) return;
@@ -237,7 +325,7 @@ function stepReveal(now: number) {
     // If we've fallen too far behind, leap most of the way, then keep streaming.
     const step = behind > maxLag ? behind - maxLag + budget : budget;
     r.shown = Math.min(r.target.length, r.shown + step);
-    renderText(el, r.target.slice(0, Math.floor(r.shown)));
+    renderWords(el, r.target.slice(0, Math.floor(r.shown)));
     if (r.shown < r.target.length) anyPending = true;
   });
   if (anyPending) revealRaf = requestAnimationFrame(stepReveal);
@@ -251,26 +339,29 @@ function ensureRevealLoop() {
 
 function queueText(el: HTMLElement | null, text: string | null) {
   if (!el) return;
-  const target = text ?? "";
+  const target = toWords(text ?? "");
   // Instant mode (smoothing off) or an explicit clear: render straight away.
-  if (revealWps <= 0 || target === "") {
+  if (revealWps <= 0 || target.length === 0) {
     reveals.set(el, { target, shown: target.length });
-    renderText(el, target);
+    renderWords(el, target);
     return;
   }
   let r = reveals.get(el);
   if (!r) {
-    r = { target: "", shown: 0 };
+    r = { target: [], shown: 0 };
     reveals.set(el, r);
   }
-  const shownStr = r.target.slice(0, Math.floor(r.shown));
-  if (target.startsWith(shownStr)) {
-    // Pure forward growth — keep revealing from where we are.
+  const shownWords = r.target.slice(0, Math.floor(r.shown));
+  const sharedWithShown = commonWordPrefixLen(shownWords, target);
+  if (sharedWithShown === shownWords.length) {
+    // Pure forward growth — everything we've shown is still a prefix of the new
+    // target; keep revealing from where we are.
     r.target = target;
   } else {
     // Divergence: whisper revised earlier words. Rewind the cursor to the common
-    // prefix so the correction reveals immediately instead of showing stale text.
-    r.shown = commonPrefixLen(shownStr, target);
+    // word prefix so the correction reveals immediately instead of showing stale
+    // text.
+    r.shown = sharedWithShown;
     r.target = target;
   }
   ensureRevealLoop();
@@ -346,17 +437,19 @@ void listen<any>("daemon-event", async (e) => {
         applyPreviewTuning(await invoke<any>("read_config"));
       } catch { /* keep last-known tuning */ }
       if (p.meeting_id && typeof p.track === "string") {
+        isMeeting = true;
         meetingTracks.set(p.id, p.track);
         clearAllText();
         setShape(meetingMode === "both" ? "both" : "single");
       } else {
+        isMeeting = false;
         meetingTracks.clear();
         clearAllText();
         setShape("single");
       }
       await showOverlay();
       lastCaptionAt = Date.now();
-      labelEl.textContent = "LIVE";
+      setLive(true);
       resetWave();
       break;
     }
@@ -372,7 +465,12 @@ void listen<any>("daemon-event", async (e) => {
     case "transcription_partial": {
       if (userHidden) break; // respect a manual hide until the next start
       const t = typeof p.text === "string" ? p.text.trim() : "";
-      const text = t ? t.slice(-MAX_CHARS) : null;
+      // Defense-in-depth dedup: the daemon already collapses repeats, but as a
+      // guard drop an exact adjacent repeated trailing phrase (if the last K
+      // words equal the K words before them). Conservative — only exact adjacent
+      // repeats — so it never mangles legitimately repeated words.
+      const deduped = t ? dedupTrailingRepeat(t).slice(-MAX_CHARS) : "";
+      const text = deduped || null;
       if (text) lastCaptionAt = Date.now(); // words flowing → "LIVE", not idle
       const track = meetingTracks.get(p.id);
       if (shape === "both" && track) queueText(trackEls.get(track) ?? null, text);
@@ -392,10 +490,14 @@ void listen<any>("daemon-event", async (e) => {
       // remains (single recordings have no tracks registered, so they hide as
       // before); a fresh recording_started cancels it by re-showing.
       if (meetingTracks.size === 0) {
+        // No track left → this is no longer a meeting; hide the source button
+        // immediately rather than waiting for the auto-hide a few seconds later.
+        isMeeting = false;
+        updateSrcButton();
         scheduleHide();
         // Settle the waveform and stop the listening/active flip — capture is over.
         lastCaptionAt = 0;
-        labelEl.textContent = "LIVE";
+        setLive(false);
         resetWave();
       }
       break;
@@ -409,6 +511,7 @@ void listen("overlay-preview", async () => {
   previewPinned = true;
   userHidden = false;
   clearTimers();
+  isMeeting = false; // the dummy preview is never a meeting — no source button
   meetingTracks.clear();
   setShape("single");
   await showOverlay();

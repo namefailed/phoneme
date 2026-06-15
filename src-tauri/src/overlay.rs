@@ -46,15 +46,22 @@ pub const OVERLAY_LABEL: &str = "preview-overlay";
 /// live recording. See `frontend/src/overlay.ts`.
 pub const OVERLAY_PREVIEW_EVENT: &str = "overlay-preview";
 
-/// Default overlay size (logical px): a compact caption card — the chrome bar
-/// plus room for ~4 wrapped lines. Sensible default, resizable from there;
-/// `tauri-plugin-window-state` then remembers whatever size the user picks.
+/// Default overlay width (logical px). Sensible default, horizontally resizable
+/// from there; `tauri-plugin-window-state` then remembers whatever width the
+/// user picks.
 const OVERLAY_W: f64 = 540.0;
-const OVERLAY_H: f64 = 150.0;
-/// Minimum size so the window can't be dragged down to a useless sliver — still
-/// enough for the bar plus a line or two of caption.
+/// The overlay is a strict ONE-LINE caption: a single tight row holding the live
+/// dot + label + waveform + controls and exactly one line of caption text. This
+/// height is fixed (see the builder: min height == max height pins the vertical
+/// axis so only the width is draggable). Tuned to fit the chrome row plus one
+/// line of `.ov-text` at the current font + the card's vertical padding.
+const OVERLAY_H: f64 = 54.0;
+/// Minimum width so the window can't be dragged down to a useless sliver — still
+/// enough for the dot/label/controls plus a few words of caption.
 const OVERLAY_MIN_W: f64 = 300.0;
-const OVERLAY_MIN_H: f64 = 96.0;
+/// Maximum width — effectively unbounded (a very wide caption is fine); paired
+/// with `OVERLAY_W`-equal min/max HEIGHT so the window resizes horizontally only.
+const OVERLAY_MAX_W: f64 = 4000.0;
 /// Inset from the bottom of the work area for the first-run placement.
 const BOTTOM_MARGIN: f64 = 96.0;
 
@@ -84,10 +91,16 @@ pub fn ensure(app: &AppHandle) {
     let builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
         .title("Phoneme Live Preview")
         .inner_size(OVERLAY_W, OVERLAY_H)
-        .min_inner_size(OVERLAY_MIN_W, OVERLAY_MIN_H)
-        // Resizable so the caption can be sized to taste; position AND size are
+        // Tauri has no per-axis resizable flag. We pin the VERTICAL axis by making
+        // the min and max inner HEIGHT equal (OVERLAY_H), while leaving the width
+        // free between OVERLAY_MIN_W and OVERLAY_MAX_W. Net effect: the user can
+        // drag the left/right edges to widen the caption, but the window stays
+        // exactly one line tall — never grows or shrinks vertically with text.
+        .min_inner_size(OVERLAY_MIN_W, OVERLAY_H)
+        .max_inner_size(OVERLAY_MAX_W, OVERLAY_H)
+        // Resizable so the WIDTH can be sized to taste; position AND width are
         // remembered by tauri-plugin-window-state. Frameless, so the resize grips
-        // are the window edges.
+        // are the window edges. (Height is locked by the equal min/max above.)
         .resizable(true)
         .decorations(false)
         // NOT transparent: a transparent + always-on-top + frameless WebView2
@@ -107,6 +120,21 @@ pub fn ensure(app: &AppHandle) {
             return;
         }
     };
+
+    // Force-correct legacy/restored geometry: an earlier build allowed a tall,
+    // vertically-resizable overlay, so `tauri-plugin-window-state` may restore a
+    // height far larger than the new one-line OVERLAY_H. The equal min/max height
+    // on the builder only constrains user resizes, not a programmatic restore, so
+    // clamp the height back to OVERLAY_H here while KEEPING the restored/default
+    // width. Best-effort: any failure just leaves the OS-chosen size.
+    if let Ok(scale) = window.scale_factor() {
+        if let Ok(size) = window.inner_size() {
+            let logical = size.to_logical::<f64>(scale);
+            if (logical.height - OVERLAY_H).abs() > 0.5 {
+                let _ = window.set_size(tauri::LogicalSize::new(logical.width, OVERLAY_H));
+            }
+        }
+    }
 
     // First-run placement: if `tauri-plugin-window-state` had a saved position
     // it has already been applied to the builder via its on-window-created hook,
