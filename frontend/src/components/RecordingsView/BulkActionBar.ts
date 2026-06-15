@@ -63,7 +63,10 @@ export class BulkActionBarElement extends LitElement {
    *  stopPropagation so it never reaches the list (which would clear the
    *  selection) or close the recording. */
   private onEsc = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && this.openMenu) {
+    // Only handle the mouse-opened case here; when the keyboard nav owns the bar
+    // (navIndex >= 0), onBulkNavKey closes the menu AND keeps the cursor on the
+    // opener button instead of falling through to "exit the bar".
+    if (e.key === "Escape" && this.openMenu && this.navIndex < 0) {
       e.preventDefault();
       e.stopPropagation();
       this.openMenu = null;
@@ -73,6 +76,8 @@ export class BulkActionBarElement extends LitElement {
   /** Roving keyboard cursor over the bar's buttons (Shift+Enter from the list
    *  enters this); -1 = not active. */
   @state() private navIndex = -1;
+  /** Cursor within an open Tag/Export dropdown's items (j/k cycle, Enter picks). */
+  @state() private menuIndex = 0;
 
   private bulkButtons(): HTMLElement[] {
     return [...this.querySelectorAll<HTMLElement>(".bulk-bar .bulk-btn")].filter((b) => b.offsetParent !== null);
@@ -81,6 +86,21 @@ export class BulkActionBarElement extends LitElement {
   private highlightBulkNav() {
     this.querySelectorAll(".bulk-btn.kbd-cursor").forEach((b) => b.classList.remove("kbd-cursor"));
     this.bulkButtons()[this.navIndex]?.classList.add("kbd-cursor");
+  }
+
+  /** The clickable items inside the currently-open Tag/Export dropdown. */
+  private menuItems(): HTMLElement[] {
+    return [...this.querySelectorAll<HTMLElement>(".bulk-menu .bulk-menu-item")].filter((b) => b.offsetParent !== null);
+  }
+
+  private highlightMenu() {
+    this.querySelectorAll(".bulk-menu-item.kbd-cursor").forEach((b) => b.classList.remove("kbd-cursor"));
+    const items = this.menuItems();
+    if (!items.length) return;
+    if (this.menuIndex >= items.length) this.menuIndex = items.length - 1;
+    if (this.menuIndex < 0) this.menuIndex = 0;
+    items[this.menuIndex].classList.add("kbd-cursor");
+    items[this.menuIndex].scrollIntoView({ block: "nearest" });
   }
 
   /** Shift+Enter from the list hands keyboard control to the bar. */
@@ -126,7 +146,34 @@ export class BulkActionBarElement extends LitElement {
       }
       return;
     }
-    if (this.navIndex < 0 || this.openMenu) return;
+    // A Tag/Export dropdown is open and the keyboard owns the bar: drive its
+    // items with j/k, pick with Enter, close with Esc/h/l (back to the opener).
+    if (this.openMenu && this.navIndex >= 0) {
+      const items = this.menuItems();
+      switch (e.key) {
+        case "j": case "ArrowDown":
+          e.preventDefault(); e.stopPropagation();
+          if (items.length) { this.menuIndex = (this.menuIndex + 1) % items.length; this.highlightMenu(); }
+          return;
+        case "k": case "ArrowUp":
+          e.preventDefault(); e.stopPropagation();
+          if (items.length) { this.menuIndex = (this.menuIndex - 1 + items.length) % items.length; this.highlightMenu(); }
+          return;
+        case "Enter": case " ":
+          e.preventDefault(); e.stopPropagation();
+          items[this.menuIndex]?.click(); // the item's own handler closes the menu
+          return;
+        case "Escape": case "h": case "l":
+          e.preventDefault(); e.stopPropagation();
+          this.openMenu = null;
+          void this.updateComplete.then(() => this.highlightBulkNav());
+          return;
+      }
+      // Swallow anything else so it can't leak to the list while a menu is open.
+      e.preventDefault(); e.stopPropagation();
+      return;
+    }
+    if (this.navIndex < 0) return;
     const btns = this.bulkButtons();
     if (!btns.length) return;
     switch (e.key) {
@@ -340,7 +387,15 @@ export class BulkActionBarElement extends LitElement {
 
   private toggleMenu(menu: "tag" | "export", e: Event) {
     e.stopPropagation();
-    this.openMenu = this.openMenu === menu ? null : menu;
+    if (this.openMenu === menu) {
+      this.openMenu = null;
+      return;
+    }
+    this.openMenu = menu;
+    this.menuIndex = 0;
+    // If the bar is being keyboard-driven (Enter opened this), highlight the
+    // first item once it renders so j/k pick up from there.
+    if (this.navIndex >= 0) void this.updateComplete.then(() => this.highlightMenu());
   }
 
   render() {
