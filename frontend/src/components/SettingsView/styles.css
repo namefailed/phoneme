@@ -302,12 +302,17 @@ mark.settings-hit {
   color: var(--fg-faded);
   padding: 4px 12px 2px;
 }
+/* A real footer bar pinned to the bottom of .settings-main (a flex column), so
+   the body fills the space above it and the Save/Close buttons never ride up
+   into empty space on a short tab like Managers (C). */
 .settings-float-actions {
-  position: absolute;
-  bottom: 18px;
-  right: 22px;
+  flex-shrink: 0;
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-deep);
   z-index: 5;
 }
 .settings-float-actions button {
@@ -318,7 +323,7 @@ mark.settings-hit {
   font-size: 13px;
   color: var(--fg-default);
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .settings-float-actions button:hover {
@@ -370,8 +375,8 @@ mark.settings-hit {
 .settings-body {
   flex: 1;
   overflow-y: auto;
-  /* Extra bottom padding so content scrolls clear of the floating Save/Close. */
-  padding: 24px 24px 84px;
+  /* The Save/Close footer is its own bar now (no floating overlay to clear). */
+  padding: 24px;
 }
 .settings-section {
   background: var(--bg-elevated);
