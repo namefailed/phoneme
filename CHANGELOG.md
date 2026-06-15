@@ -92,6 +92,12 @@ trust boundary. Verified against current code.*
   a **minimum** so it can't be shrunk to a useless sliver; resize it taller for more
   lines at once (size remembered across runs). Replaces the old cramped single-row
   card where text was squeezed into a narrow middle column.
+- [x] **Dictation rows show the real model + an in-place badge.** In-place recordings
+  stored the literal `"in-place"` in the Transcript model column instead of the model
+  that produced the text; they now store the actual model (e.g. `ggml-tiny.en`, via a
+  shared `WhisperConfig::model_label`) like every other recording, and the detail pane
+  shows a small **⌨ in-place** badge (keyed on the persisted `in_place` flag) so
+  dictations stay obvious at a glance.
 - [x] **Live-preview wave 1 — smooth, adaptive & it-hears-me.** The biggest live
   preview pass yet, all under the Beta pill until verified:
   - **Adaptive cadence (the record-time crash fix).** When a preview tick takes

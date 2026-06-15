@@ -1619,6 +1619,24 @@ body.phoneme-hide-header ph-header-bar {
   color: var(--fg-muted);
   transition: color 0.2s ease;
 }
+
+/* Dictation marker in the detail-pane header — a small accent pill next to the
+   source icon, shown when the recording was typed in place (`r.in_place`). */
+.detail-inplace-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--accent, #89b4fa);
+  background: color-mix(in srgb, var(--accent, #89b4fa) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #89b4fa) 35%, transparent);
+}
 .rec-source-ico {
   font-size: 0.8571rem;
   line-height: 1;

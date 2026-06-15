@@ -793,6 +793,33 @@ impl WhisperConfig {
             }
         }
     }
+
+    /// A human-readable id for the model this config runs, for storing/displaying
+    /// "which model produced this text". The local bundled backend talks to
+    /// whisper.cpp over HTTP and only knows its model as a file on disk, so its
+    /// id is the `model_path` stem; cloud/custom backends send a model id in the
+    /// request, so theirs is the requested `model` (falling back to the path stem
+    /// when none is set). Mirrors the pipeline's stored-model derivation.
+    pub fn model_label(&self) -> String {
+        let path_stem = || {
+            std::path::Path::new(&self.model_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        };
+        match self.provider {
+            TranscriptionBackend::Local => path_stem(),
+            _ => {
+                let requested = self.model.trim();
+                if requested.is_empty() {
+                    path_stem()
+                } else {
+                    requested.to_string()
+                }
+            }
+        }
+    }
 }
 
 /// Which audio source a recording captures.

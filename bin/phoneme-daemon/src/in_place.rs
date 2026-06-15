@@ -99,10 +99,15 @@ async fn run(state: &AppState, id: &RecordingId, audio_path: &PathBuf) -> Result
 
     if cfg.in_place.save_to_library {
         // Persist AFTER the text has landed — the user already has their
-        // words; none of this is on the latency path.
+        // words; none of this is on the latency path. Store the REAL model that
+        // produced the text (same derivation as the pipeline) so the Transcript
+        // model column reads like every other recording; the dictation marker is
+        // the persisted `in_place` flag (shown as a badge in the detail pane),
+        // not a fake model name.
+        let model_label = cfg.in_place_provider_config().model_label();
         state
             .catalog
-            .update_transcript(id, &polished, &raw, "in-place")
+            .update_transcript(id, &polished, &raw, &model_label)
             .await?;
         if let Err(e) = state
             .catalog

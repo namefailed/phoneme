@@ -264,6 +264,7 @@ export class RecordingDetail {
               <span id="detail-title-date" style="${r.title ? "" : "display: none;"}">${formatDate(r.started_at, this.use24h)}</span>
               <span>${formatDuration(r.duration_ms)}</span>
               <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="${r.track === "system" ? "System audio" : "Microphone"}"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span></span>
+              ${r.in_place ? `<span class="detail-inplace-badge" title="Dictation — typed straight in place at your cursor">⌨ in-place</span>` : ""}
             </div>
           </div>
           <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
