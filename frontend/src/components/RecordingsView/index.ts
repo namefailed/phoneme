@@ -661,6 +661,16 @@ export class RecordingsView {
       case "pane-right": this.movePaneFocus("right"); break;
       case "list-top": this.list.focusEdge("top"); this.focusPane("list"); break;
       case "list-bottom": this.list.focusEdge("bottom"); this.focusPane("list"); break;
+      // l from the list: with a detail pane already open, step focus into it
+      // (normal pane move); with none open, OPEN the cursor recording — same as
+      // pressing Enter on it. A meeting-header row has no single id, so it's left
+      // to Enter (which expands it) and l is a no-op there.
+      case "list-right": {
+        if (this.detailVisible) { this.movePaneFocus("right"); break; }
+        const id = this.list.getFocusedId();
+        if (id) this.onSelect(id);
+        break;
+      }
       // gg/G inside the sidebar — jump to the first/last sidebar row (X). The
       // overflowing tag list and a long queue share this grid, so scrollIntoView
       // in highlightSidebar() scrolls them into view.

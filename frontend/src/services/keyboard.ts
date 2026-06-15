@@ -433,6 +433,11 @@ function onKeyDown(e: KeyboardEvent) {
 
   // "g" prefix sequence (vim-style): g l / g s / g d, plus g g → top of list.
   if (pendingG) {
+    // A bare modifier keydown (the Shift that PRECEDES a capital chord letter —
+    // pressing g then Shift+D fires keydown for "Shift" first) must NOT consume
+    // the prefix, or g D / g T / g P / g S never fire. Keep pending-g armed and
+    // wait for the real letter.
+    if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
     clearPendingG();
     if (e.key === "l") { e.preventDefault(); navigate("recordings"); return; }
     if (e.key === "s") { e.preventDefault(); navigate("settings"); return; }
@@ -444,19 +449,16 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
     if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
     if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
-    // g / — HIGHLIGHT the search bar (roving header cursor, same as k at the
-    // top of the list) rather than focusing it like plain `/` does.
-    if (e.key === "/") { e.preventDefault(); enterHeaderNav(); return; }
-    if (vimNav && e.key === "g" && activeWithin(".rv-list")) {
+    // g / and g b both HIGHLIGHT the search bar (roving header cursor, same as k
+    // at the top of the list) rather than focusing it like plain `/` does.
+    if (e.key === "/" || e.key === "b") { e.preventDefault(); enterHeaderNav(); return; }
+    // g g — jump to the top of the focused list/sidebar. Defaults to the LIST
+    // when focus has drifted (e.g. onto <body>) so it's reliable from the
+    // recordings pane; the detail pane has no gg, so it's left alone there.
+    if (vimNav && e.key === "g") {
       e.preventDefault();
-      dispatchVim("list-top");
-      return;
-    }
-    // gg also jumps to the top of any other focused scroll container (the
-    // sidebar — its tag list / queue live in the same grid) (X).
-    if (vimNav && e.key === "g" && activeWithin("ph-sidebar")) {
-      e.preventDefault();
-      dispatchVim("sidebar-top");
+      if (activeWithin("ph-sidebar")) dispatchVim("sidebar-top");
+      else if (!activeWithin(".rv-detail")) dispatchVim("list-top");
       return;
     }
     return;
@@ -674,6 +676,9 @@ function onKeyDown(e: KeyboardEvent) {
         e.preventDefault();
         if (activeWithin(".rv-detail")) dispatchVim("detail-right");
         else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-right");
+        // From the list, l opens the cursor recording (like Enter) when no detail
+        // pane is open yet; if one's already open it just moves focus into it.
+        else if (activeWithin(".rv-list")) dispatchVim("list-right");
         else dispatchVim("pane-right");
         return;
       case "G":
