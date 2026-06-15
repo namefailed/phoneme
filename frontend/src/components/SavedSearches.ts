@@ -113,7 +113,7 @@ export class SavedSearchesElement extends LitElement {
           aria-haspopup="menu"
           aria-expanded=${this.open}
           @click=${this.toggle}
-        >🔖</button>
+        >📌</button>
         <div
           class="ss-menu"
           role="menu"

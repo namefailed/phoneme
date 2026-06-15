@@ -346,7 +346,7 @@ export class SettingsViewElement extends LitElement {
     const subs = [
       { id: "tags" as const, label: "🏷️ Tags" },
       { id: "profiles" as const, label: "👤 Profiles" },
-      { id: "saved" as const, label: "🔖 Saved searches" },
+      { id: "saved" as const, label: "📌 Saved searches" },
     ];
     host.innerHTML = `
       <div class="managers-subtabs">

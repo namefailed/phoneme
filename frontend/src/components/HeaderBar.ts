@@ -701,7 +701,7 @@ export class HeaderBarElement extends LitElement {
             .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />`}
           <button class="icon-btn ${f.semantic ? 'active' : ''}"
             title="Toggle Semantic Search (finds meaning, not exact words)"
-            @click=${this.toggleSemantic}>✨</button>
+            @click=${this.toggleSemantic}>🔮</button>
           <ph-saved-searches></ph-saved-searches>
         </div>
         <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">

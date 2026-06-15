@@ -1064,7 +1064,7 @@ function pipelineHtml(r: Recording): string {
     )
     .join("");
   return `<span class="detail-pipeline-wrap">
-    <button class="detail-pipeline-btn" id="detail-pipeline-btn" title="See everything that ran on this recording" aria-haspopup="true" aria-expanded="false">⛓ Pipeline <span class="detail-pipeline-count">${steps.length}</span></button>
+    <button class="detail-pipeline-btn" id="detail-pipeline-btn" title="See everything that ran on this recording" aria-haspopup="true" aria-expanded="false">🪈 Pipeline <span class="detail-pipeline-count">${steps.length}</span></button>
     <div class="detail-pipeline-pop" id="detail-pipeline-pop" role="menu" hidden>
       <div class="detail-pipeline-title">How this recording was processed</div>
       ${rows}
