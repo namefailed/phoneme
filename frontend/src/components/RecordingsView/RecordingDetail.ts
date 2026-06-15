@@ -286,6 +286,8 @@ export class RecordingDetail {
           <div class="transcript-history">
             <div class="th-group th-left">
               <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
+            </div>
+            <div class="th-group th-right">
               <span class="th-dropdown">
                 <button class="view-btn th-trigger" id="views-trigger" aria-haspopup="menu" aria-expanded="false" title="Alternate views of this recording — summary, timeline, synced words">Views ${CHEVRON_SVG}</button>
                 <div class="th-menu" id="views-menu" role="menu" hidden>

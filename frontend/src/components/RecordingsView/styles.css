@@ -376,6 +376,12 @@ mark.search-hit {
   align-items: center;
   gap: 6px;
 }
+/* Speakers (th-left) stays pinned left; Views/Versions (th-right) are pushed to
+   the right edge. The auto margin holds even when th-left is empty (no diarized
+   speakers), so the dropdowns sit right regardless. */
+.transcript-history .th-right {
+  margin-left: auto;
+}
 /* Compact, icon-led "view" buttons that wrap gracefully on a narrow pane
    (replacing the wide "View original transcript"-style labels). */
 .view-btn {

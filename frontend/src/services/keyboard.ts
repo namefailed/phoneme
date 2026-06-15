@@ -439,7 +439,16 @@ function onKeyDown(e: KeyboardEvent) {
     // wait for the real letter.
     if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
     clearPendingG();
-    if (e.key === "l") { e.preventDefault(); navigate("recordings"); return; }
+    if (e.key === "l") {
+      e.preventDefault();
+      // Already in the library? Don't re-mount the whole view (that's the abrupt
+      // "reload" — it re-creates RecordingsView and refetches). Just shift focus
+      // back to the list, so `g l` is a clean way to step out of the detail pane
+      // (or anywhere) into the recordings list. Only navigate from another view.
+      if (document.querySelector("#rv-shell")) dispatchVim("focus-list");
+      else navigate("recordings");
+      return;
+    }
     if (e.key === "s") { e.preventDefault(); navigate("settings"); return; }
     // g d — keyboard into the open recording's detail pane.
     if (e.key === "d") { e.preventDefault(); dispatchVim("focus-detail"); return; }
