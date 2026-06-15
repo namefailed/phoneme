@@ -50,6 +50,11 @@ import { SyncedTranscript } from "./SyncedTranscript";
  * by RecordingsView, which walks THIS pane's buttons/editors as grid cells.
  * Dispatches `phoneme:toggle-focus-mode` (⛶) and `phoneme:close-detail` (✕).
  */
+/** The app-wide dropdown chevron (matches the header split buttons), for the
+ *  Views/Versions triggers — instead of a stray "▾" glyph. */
+const CHEVRON_SVG =
+  '<svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
 export class RecordingDetail {
   private container: HTMLElement;
   private recording: Recording | null = null;
@@ -275,18 +280,16 @@ export class RecordingDetail {
             <div class="th-group th-left">
               <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
               <span class="th-dropdown">
-                <button class="view-btn th-trigger" id="views-trigger" aria-haspopup="menu" aria-expanded="false" title="Alternate views of this recording — summary, timeline, synced words">👁 Views ▾</button>
+                <button class="view-btn th-trigger" id="views-trigger" aria-haspopup="menu" aria-expanded="false" title="Alternate views of this recording — summary, timeline, synced words">Views ${CHEVRON_SVG}</button>
                 <div class="th-menu" id="views-menu" role="menu" hidden>
-                  <button class="view-btn th-menu-item" id="view-summary" title="AI summary of this recording">✨ Summary</button>
+                  <button class="view-btn th-menu-item" id="view-summary" title="AI summary of this recording">📝 Summary</button>
                   <button class="view-btn th-menu-item" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
                   <button class="view-btn th-menu-item" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
                 </div>
               </span>
-            </div>
-            <div class="th-group th-right">
               <span class="th-dropdown">
-                <button class="view-btn th-trigger" id="versions-trigger" aria-haspopup="menu" aria-expanded="false" title="Other versions of this transcript — compare, raw machine, pre-edit">🗂 Versions ▾</button>
-                <div class="th-menu th-menu--right" id="versions-menu" role="menu" hidden>
+                <button class="view-btn th-trigger" id="versions-trigger" aria-haspopup="menu" aria-expanded="false" title="Other versions of this transcript — compare, raw machine, pre-edit">Versions ${CHEVRON_SVG}</button>
+                <div class="th-menu" id="versions-menu" role="menu" hidden>
                   <button class="view-btn th-menu-item" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
                   <button class="view-btn th-menu-item" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
                   <button class="view-btn th-menu-item" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
@@ -359,7 +362,7 @@ export class RecordingDetail {
       summary: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-summary"),
         el: this.container.querySelector<HTMLElement>("#summary-peek"),
-        idle: "✨ Summary",
+        idle: "📝 Summary",
       },
       timeline: {
         btn: this.container.querySelector<HTMLButtonElement>("#view-timeline"),
@@ -549,11 +552,11 @@ export class RecordingDetail {
         const inVersions = !!activePeek && VERSIONS.includes(activePeek);
         if (viewsTrigger) {
           viewsTrigger.classList.toggle("active", inViews);
-          viewsTrigger.textContent = inViews ? `← ${LABELS[activePeek!]}` : "👁 Views ▾";
+          viewsTrigger.innerHTML = inViews ? `← ${LABELS[activePeek!]}` : `Views ${CHEVRON_SVG}`;
         }
         if (versionsTrigger) {
           versionsTrigger.classList.toggle("active", inVersions);
-          versionsTrigger.textContent = inVersions ? `← ${LABELS[activePeek!]}` : "🗂 Versions ▾";
+          versionsTrigger.innerHTML = inVersions ? `← ${LABELS[activePeek!]}` : `Versions ${CHEVRON_SVG}`;
         }
       };
 

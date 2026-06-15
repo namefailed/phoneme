@@ -30,6 +30,10 @@ export function readPlaybackSpeed(): number {
   return PLAYBACK_SPEEDS.includes(n as (typeof PLAYBACK_SPEEDS)[number]) ? n : 1;
 }
 
+/** App-wide dropdown chevron (matches the header split buttons) for the
+ *  Speed / Export triggers — no stray "▾" glyph. */
+const CARET_ICO = html`<svg class="ph-caret-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
 /**
  * The detail pane's action strip: Play/Pause · Re-run… (opens the Models modal
  * in "Run once" mode) · Export ▾ (transcript / captions / all-data, via a save
@@ -56,6 +60,7 @@ export class ActionRowElement extends LitElement {
   @property({ type: Boolean }) playing = false;
   @property({ type: Object }) cbs!: ActionRowCallbacks;
   @state() private speed = readPlaybackSpeed();
+  @state() private speedMenuOpen = false;
 
   /** Global keyboard-shortcut bridge (keyboard.ts dispatches phoneme:action). */
   private actionHandler = (e: Event) => {
@@ -72,12 +77,15 @@ export class ActionRowElement extends LitElement {
     }
   };
 
-  /** Close the export menu when the user clicks outside of it. */
+  /** Close the export / speed menus when the user clicks outside of them. */
   private outsideClickHandler = (e: MouseEvent) => {
-    if (!this.exportMenuOpen) return;
     const target = e.target as Node | null;
-    if (target && !this.querySelector(".export-trigger-wrap")?.contains(target)) {
+    if (!target) return;
+    if (this.exportMenuOpen && !this.querySelector(".export-trigger-wrap")?.contains(target)) {
       this.exportMenuOpen = false;
+    }
+    if (this.speedMenuOpen && !this.querySelector(".speed-dropdown")?.contains(target)) {
+      this.speedMenuOpen = false;
     }
   };
 
@@ -219,24 +227,31 @@ export class ActionRowElement extends LitElement {
     }
   }
 
+  private toggleSpeedMenu = (e: Event) => {
+    e.stopPropagation();
+    this.speedMenuOpen = !this.speedMenuOpen;
+  };
   /** Apply the picked playback speed, remember it, and tell the player. */
-  private onSpeedChange = (e: Event) => {
-    const next = Number((e.target as HTMLSelectElement).value);
+  private pickSpeed(next: number) {
     this.speed = next;
+    this.speedMenuOpen = false;
     try { localStorage.setItem(SPEED_KEY, String(next)); } catch { /* localStorage may be unavailable */ }
     this.cbs.onSetSpeed?.(next);
-  };
+  }
 
   render() {
     return html`
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
-        <select class="speed-select" title="Playback speed" aria-label="Playback speed" @change=${this.onSpeedChange}>
-          ${PLAYBACK_SPEEDS.map((s) => html`<option value=${s} ?selected=${s === this.speed}>${s}×</option>`)}
-        </select>
+        <span class="th-dropdown speed-dropdown">
+          <button class="speed-trigger" title="Playback speed" aria-haspopup="menu" aria-expanded=${this.speedMenuOpen} @click=${this.toggleSpeedMenu}>Speed ${this.speed}× ${CARET_ICO}</button>
+          <div class="th-menu" role="menu" ?hidden=${!this.speedMenuOpen}>
+            ${PLAYBACK_SPEEDS.map((s) => html`<button class="view-btn th-menu-item ${s === this.speed ? "active" : ""}" @click=${() => this.pickSpeed(s)}>${s}×</button>`)}
+          </div>
+        </span>
         <button class="rerun-trigger" title="Re-run this recording with chosen models, or save them as your default" @click=${this.openRerun}>↻ Re-run…</button>
         <span class="export-trigger-wrap" style="position: relative; display: inline-block;">
-          <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ▾</button>
+          <button class="export-trigger" title="Export this recording — transcript text, timed captions, or all of its data" @click=${this.toggleExportMenu}>⬇ Export ${CARET_ICO}</button>
           ${this.exportMenuOpen
             ? html`<div class="export-menu" role="menu" style="position: absolute; top: 100%; left: 0; z-index: 20; margin-top: 4px; display: flex; flex-direction: column; min-width: 210px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); overflow: hidden;">
                 <button role="menuitem" style="text-align: left; background: none; border: none; padding: 7px 12px;" title="The on-screen transcript as plain text" @click=${this.handleExport}>Transcript (.txt)</button>

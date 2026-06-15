@@ -357,7 +357,7 @@ mark.search-hit {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 6px;
 }
@@ -597,24 +597,26 @@ mark.search-hit {
   color: var(--fg-muted);
   font-size: 11px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: flex-end;
-  row-gap: 3px;
+  flex-wrap: nowrap;
+  align-items: center;
+  /* Wordcount + Pipeline anchored left; the path fills the rest of the single
+     row and truncates, so the footer never grows to two rows. */
+  justify-content: flex-start;
   column-gap: 14px;
   border-top: 1px solid var(--border-subtle);
   line-height: 1.5;
-  text-align: right;
+  text-align: left;
 }
-/* The metadata chunks stay on one line each but wrap as a group when the pane
-   is narrow, instead of squishing/overflowing. */
 .detail-footer > span { white-space: nowrap; }
-/* The file path is long — give it its own full-width line and let it break
-   anywhere so it never forces horizontal overflow. */
+/* The file path fills the remaining width on the same row and truncates with an
+   ellipsis (full path stays in its title / it's still click-to-reveal). */
 .detail-footer .detail-path {
-  flex-basis: 100%;
-  white-space: normal;
-  word-break: break-all;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
   opacity: 0.7;
   font-size: 10px;
 }
@@ -801,23 +803,24 @@ mark.search-hit {
 }
 .thinking-pre--prompt { max-height: 200px; overflow-y: auto; color: var(--fg-muted); }
 .thinking-pre--response { max-height: 240px; overflow-y: auto; }
-/* Playback-speed selector (S) in the waveform action row — a compact dropdown
-   styled to sit alongside the action-row buttons. */
-.action-row .speed-select {
+/* Playback-speed dropdown (S) in the waveform action row — a custom trigger
+   styled like the other action-row buttons (its menu reuses .th-menu). */
+.action-row .speed-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-variant-numeric: tabular-nums;
-  background: var(--bg-surface);
-  color: var(--fg-default);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 0.15s ease;
 }
-.action-row .speed-select:hover { border-color: var(--accent); }
+.action-row .speed-trigger .ph-caret-ico { flex-shrink: 0; opacity: 0.7; }
 
 /* Views / Versions dropdowns — the consolidated transcript-peek buttons. */
 .th-dropdown { position: relative; display: inline-flex; }
+.th-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.th-trigger .ph-caret-ico { flex-shrink: 0; opacity: 0.75; }
 .th-trigger.active {
   color: var(--accent);
   border-color: var(--accent);
@@ -831,7 +834,9 @@ mark.search-hit {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  min-width: 172px;
+  /* Hug the items — no stray right/bottom deadspace. */
+  width: max-content;
+  min-width: 132px;
   padding: 4px;
   background: var(--bg-elevated);
   border: var(--popup-border, 1px solid var(--border-subtle));
@@ -847,9 +852,22 @@ mark.search-hit {
   border: none;
   background: transparent;
   border-radius: 6px;
+  /* Neutralise the .action-row button chrome when a menu lives in the action row
+     (the speed menu) so items read as plain rows. */
+  box-shadow: none;
+  transform: none;
+  padding: 7px 10px;
+  font-size: 12px;
 }
 .th-menu .th-menu-item:hover {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: transparent;
+  transform: none;
+}
+.th-menu .th-menu-item.active {
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 /* Pipeline provenance: a compact button in the detail footer that opens a
@@ -884,14 +902,13 @@ mark.search-hit {
 .detail-pipeline-pop {
   position: absolute;
   bottom: calc(100% + 6px);
-  /* Anchor the popover's RIGHT edge to the button and open leftward — the footer
-     button sits near the right edge of the detail pane, so left:0 pushed it off
-     the window. */
-  right: 0;
-  left: auto;
+  /* The Pipeline button now sits on the LEFT of the footer, so open the popover
+     rightward into the pane. */
+  left: 0;
+  right: auto;
   z-index: 60;
-  min-width: 252px;
-  max-width: min(400px, 80vw);
+  min-width: 280px;
+  max-width: min(420px, 80vw);
   background: var(--bg-elevated);
   /* Match every other popup in the app. */
   border: var(--popup-border, 1px solid var(--border-subtle));
@@ -901,6 +918,9 @@ mark.search-hit {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* The footer is right-aligned; force the popover's own content left so rows
+     read normally. */
+  text-align: left;
 }
 .detail-pipeline-pop[hidden] { display: none; }
 .detail-pipeline-title {
@@ -1548,7 +1568,9 @@ body.phoneme-hide-header ph-header-bar {
    column (grid item). `justify-self` is grid-only, so the detail header's
    flex-laid-out source pill is unaffected. */
 .rec-row .rec-source {
-  justify-self: center;
+  /* Center the source icon within its full cell (matches .rec-fav/.rec-check)
+     so it lines up under the centered SOURCE header (F1). */
+  justify-content: center;
 }
 .rec-source-label {
   overflow: hidden;
