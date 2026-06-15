@@ -410,9 +410,13 @@ function scheduleHide() {
   // Keep the final caption up briefly, then dim, then hide.
   dimTimer = window.setTimeout(() => document.body.classList.add("ov-dim"), 2500);
   hideTimer = window.setTimeout(() => {
+    // Keep the hide as cheap as possible: ONLY hide the window. The DOM reset
+    // (clearAllText + setShape) is deferred to the next show — both show paths
+    // (recording_started and overlay-preview) clear + re-shape before calling
+    // showOverlay — so no layout/paint runs at the instant the window vanishes.
+    // That DOM churn during win.hide() added to the disappear stutter on weak
+    // boxes; deferring it makes the teardown a single window op.
     void win.hide().catch(() => {});
-    clearAllText();
-    setShape("single");
     document.body.classList.remove("ov-dim");
   }, 4000);
 }

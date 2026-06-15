@@ -90,12 +90,16 @@ body.ov-dim .ov-card {
 }
 body.ov-live .ov-pulse {
   background: var(--accent, #89b4fa);
-  animation: ovPulse 1.6s ease-out infinite;
+  animation: ovPulse 1.8s ease-in-out infinite;
 }
+/* Opacity-only pulse: opacity is GPU-composited, so it never forces a per-frame
+   repaint the way an animated box-shadow (a paint property) does — that animated
+   ring was saturating the shared WebView2 GPU process on weak boxes and making
+   the whole app stutter. Same "breathing dot" feel, a fraction of the cost. */
 @keyframes ovPulse {
-  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #89b4fa) 45%, transparent); }
-  70%  { box-shadow: 0 0 0 6px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
+  0%,
+  100% { opacity: 1; }
+  50%  { opacity: 0.45; }
 }
 /* Respect reduced-motion: no pulsing ring at all. */
 @media (prefers-reduced-motion: reduce) {
