@@ -291,7 +291,7 @@ export class RecordingDetail {
             <div class="th-group th-right">
               <span class="th-dropdown">
                 <button class="view-btn th-trigger" id="views-trigger" aria-haspopup="menu" aria-expanded="false" title="Alternate views of this recording — summary, timeline, synced words">Views ${CHEVRON_SVG}</button>
-                <div class="th-menu th-menu--up" id="views-menu" role="menu" hidden>
+                <div class="th-menu" id="views-menu" role="menu" hidden>
                   <button class="view-btn th-menu-item" id="view-summary" title="AI summary of this recording">📝 Summary</button>
                   <button class="view-btn th-menu-item" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
                   <button class="view-btn th-menu-item" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
@@ -299,7 +299,7 @@ export class RecordingDetail {
               </span>
               <span class="th-dropdown">
                 <button class="view-btn th-trigger" id="versions-trigger" aria-haspopup="menu" aria-expanded="false" title="Other versions of this transcript — compare, raw machine, pre-edit">Versions ${CHEVRON_SVG}</button>
-                <div class="th-menu th-menu--up th-menu--right" id="versions-menu" role="menu" hidden>
+                <div class="th-menu" id="versions-menu" role="menu" hidden>
                   <button class="view-btn th-menu-item" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
                   <button class="view-btn th-menu-item" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
                   <button class="view-btn th-menu-item" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
@@ -554,13 +554,26 @@ export class RecordingDetail {
         closeMenus();
         window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: null }));
       };
+      // Close on any scroll while a menu is open — a fixed-position popover
+      // doesn't follow the trigger when the pane scrolls, so dismiss instead of
+      // letting it float detached.
+      const onScroll = () => closeMenus();
+      const resetMenu = (m: HTMLElement | null) => {
+        if (!m) return;
+        m.setAttribute("hidden", "");
+        m.style.position = "";
+        m.style.top = "";
+        m.style.left = "";
+        m.style.right = "";
+      };
       const closeMenus = () => {
-        viewsMenu?.setAttribute("hidden", "");
-        versionsMenu?.setAttribute("hidden", "");
+        resetMenu(viewsMenu);
+        resetMenu(versionsMenu);
         viewsTrigger?.setAttribute("aria-expanded", "false");
         versionsTrigger?.setAttribute("aria-expanded", "false");
         document.removeEventListener("click", onDocClick, true);
         document.removeEventListener("keydown", onEscKey, true);
+        window.removeEventListener("scroll", onScroll, true);
       };
       const openMenu = (menu: HTMLElement | null, trigger: HTMLButtonElement | null) => {
         if (!menu || !trigger) return;
@@ -569,8 +582,22 @@ export class RecordingDetail {
         if (wasHidden) {
           menu.removeAttribute("hidden");
           trigger.setAttribute("aria-expanded", "true");
+          // Position as a FIXED popover anchored under the trigger. These
+          // triggers sit at the bottom of the transcript pane, whose
+          // `overflow-y:auto` would clip a normal absolute menu (the "it crushes
+          // the pane" bug); `fixed` escapes every overflow ancestor and overlays
+          // the app, opening downward. Clamp to the viewport so the rightmost
+          // (Versions) menu can't spill off the right edge.
+          const r = trigger.getBoundingClientRect();
+          const w = menu.offsetWidth || 160;
+          const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+          menu.style.position = "fixed";
+          menu.style.top = `${Math.round(r.bottom + 4)}px`;
+          menu.style.left = `${Math.round(left)}px`;
+          menu.style.right = "auto";
           document.addEventListener("click", onDocClick, true);
           document.addEventListener("keydown", onEscKey, true);
+          window.addEventListener("scroll", onScroll, true);
         }
       };
 

@@ -877,11 +877,6 @@ mark.search-hit {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 .th-menu--right { left: auto; right: 0; }
-/* Open UPWARD — for the Views/Versions triggers pinned at the bottom of the
-   transcript pane, where a downward menu would drop into the notes/footer and
-   get clipped at the window edge (crushing the layout). The Speed menu near the
-   top keeps the default downward open. */
-.th-menu--up { top: auto; bottom: calc(100% + 4px); }
 .th-menu[hidden] { display: none; }
 .th-menu .th-menu-item {
   width: 100%;
