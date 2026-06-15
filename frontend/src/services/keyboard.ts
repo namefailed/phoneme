@@ -449,9 +449,11 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
     if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
     if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
-    // g / and g b both HIGHLIGHT the search bar (roving header cursor, same as k
-    // at the top of the list) rather than focusing it like plain `/` does.
-    if (e.key === "/" || e.key === "b") { e.preventDefault(); enterHeaderNav(); return; }
+    // g / — HIGHLIGHT the search bar (roving header cursor, like k at the top of
+    // the list) rather than focusing it to type like plain `/` does.
+    if (e.key === "/") { e.preventDefault(); enterHeaderNav(); return; }
+    // g b — jump to the sidebar (like h from the list view); reveals it if hidden.
+    if (vimNav && e.key === "b") { e.preventDefault(); dispatchVim("focus-sidebar"); return; }
     // g g — jump to the top of the focused list/sidebar. Defaults to the LIST
     // when focus has drifted (e.g. onto <body>) so it's reliable from the
     // recordings pane; the detail pane has no gg, so it's left alone there.

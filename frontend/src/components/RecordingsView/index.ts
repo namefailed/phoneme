@@ -703,6 +703,22 @@ export class RecordingsView {
       case "exit-editor": this.focusPane(this.activeDetail()); break;
       // ArrowDown from the header search box → drop into the list.
       case "focus-list": this.focusPane("list"); break;
+      // g b → jump to the sidebar (like h from the list). Reveal it first if it's
+      // collapsed so the chord always gets you there; no-op in focus mode (no
+      // sidebar to land on).
+      case "focus-sidebar": {
+        if (this.focusMode) break;
+        if (!this.sidebarVisible) {
+          this.sidebarVisible = true;
+          try { localStorage.setItem(LS_SIDEBAR, "true"); } catch { /* private mode */ }
+          this.animateLayout();
+          this.applyLayout();
+          window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed"));
+          window.setTimeout(() => window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed")), 300);
+        }
+        this.focusPane("sidebar");
+        break;
+      }
       // k at the top of the list → up into the header search box.
       case "focus-search": this.focusSearchBar(); break;
       // t → focus the open recording's tag box; Shift+T → Tag Manager.
@@ -1074,7 +1090,11 @@ export class RecordingsView {
   private applyLayout() {
     const shell = this.container.querySelector<HTMLElement>("#rv-shell");
     if (!shell) return;
-    
+    // Split mode gets a marker class so split-only CSS (e.g. the detail panes'
+    // reserved scrollbar gutter, which keeps the two panes a true 50/50) applies
+    // without touching the single-pane layout.
+    shell.classList.toggle("rv-split", !!this.splitId);
+
     // Keep the sidebar clipped at all times so the grid-column width animation
     // reads as a smooth slide/collapse. Don't toggle `visibility` — that would
     // pop the content away instantly instead of letting it animate out with the

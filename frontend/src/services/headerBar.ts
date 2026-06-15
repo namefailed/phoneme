@@ -36,9 +36,9 @@ export function setHeaderHidden(hide: boolean) {
     bar.style.maxHeight = "0px";
   } else {
     bar.style.maxHeight = "0px";
+    void bar.offsetHeight; // commit the 0 start while still marked hidden
     body.classList.remove("phoneme-hide-header");
-    void bar.offsetHeight; // commit 0 before transitioning up to the real height
-    bar.style.maxHeight = `${full}px`;
+    bar.style.maxHeight = `${full}px`; // → transition 0 → real height
   }
   window.setTimeout(() => {
     body.classList.remove("phoneme-header-anim");
