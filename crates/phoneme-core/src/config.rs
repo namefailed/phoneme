@@ -795,6 +795,15 @@ pub struct WhisperConfig {
     /// gateways). Empty uses the provider's default endpoint. Ignored for `local`.
     #[serde(default)]
     pub api_url: String,
+    /// Opt-in (default false): when set on an `[in_place].stt` block that is a
+    /// LOCAL bundled model, the daemon supervises a dedicated third
+    /// whisper-server just for dictation, on this block's own port. When false
+    /// (the default, and the only sensible value on `[whisper]` /
+    /// `[preview_whisper]`), dictation reuses a server that is already running —
+    /// the main or the live-preview one. It costs extra RAM, so it's a
+    /// power-user / strong-box choice; the weak-box default never spawns it.
+    #[serde(default)]
+    pub use_own_bundled_server: bool,
 }
 
 impl std::fmt::Debug for WhisperConfig {
@@ -811,6 +820,7 @@ impl std::fmt::Debug for WhisperConfig {
             .field("api_key", &redact_key(self.api_key.expose_secret()))
             .field("model", &self.model)
             .field("api_url", &self.api_url)
+            .field("use_own_bundled_server", &self.use_own_bundled_server)
             .finish()
     }
 }
@@ -828,6 +838,7 @@ impl PartialEq for WhisperConfig {
             && self.api_key.expose_secret() == other.api_key.expose_secret()
             && self.model == other.model
             && self.api_url == other.api_url
+            && self.use_own_bundled_server == other.use_own_bundled_server
     }
 }
 
@@ -1515,6 +1526,48 @@ impl Default for TrayConfig {
     }
 }
 
+/// Which whisper-server a [`WhisperServerSpec`] is — the role the daemon
+/// supervises it under. The single source of truth for "what runs" is
+/// [`Config::needed_whisper_servers`]; this names each entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WhisperServerRole {
+    /// The always-on final-transcription server (`[whisper]`).
+    Main,
+    /// The dedicated live-preview server (`[preview_whisper]`), only when
+    /// [`Config::preview_needs_own_server`] is true.
+    Preview,
+    /// The optional dedicated in-place / dictation server
+    /// (`[in_place].stt` with `use_own_bundled_server`), only when
+    /// [`Config::in_place_needs_own_server`] is true. Default off.
+    InPlace,
+}
+
+impl WhisperServerRole {
+    /// A short label for logs and the Doctor's check names.
+    pub fn label(self) -> &'static str {
+        match self {
+            WhisperServerRole::Main => "Whisper server",
+            WhisperServerRole::Preview => "Live-preview server",
+            WhisperServerRole::InPlace => "Dictation server",
+        }
+    }
+}
+
+/// One whisper-server the live config requires: its role plus a clone of the
+/// `[whisper]`-shaped provider that drives it (model, port, args). Returned by
+/// [`Config::needed_whisper_servers`] — the ONE place that decides what runs,
+/// so the supervisor and Doctor never disagree about the set.
+#[derive(Debug, Clone)]
+pub struct WhisperServerSpec {
+    /// Which server this is.
+    pub role: WhisperServerRole,
+    /// The provider config to run it from. Always a local bundled config (the
+    /// only kind the daemon supervises); cloud/external providers never appear
+    /// here because they need no daemon-managed server.
+    pub config: WhisperConfig,
+}
+
 impl Config {
     /// Best-effort load of the active config (honors `PHONEME_CONFIG`), falling
     /// back to defaults on any error. Use when a missing/broken config should
@@ -1587,6 +1640,67 @@ impl Config {
             None => false,
         }
     }
+
+    /// True when the daemon must supervise a THIRD whisper-server dedicated to
+    /// in-place dictation: `[in_place].stt` is set, is a local bundled model,
+    /// AND the user opted in with `use_own_bundled_server`. Default off — the
+    /// weak-box default leaves `in_place.stt = None`, and even a custom local
+    /// dictation provider reuses the main/preview server unless the opt-in flag
+    /// is set. Mirrors [`preview_needs_own_server`] so the gate is consistent.
+    pub fn in_place_needs_own_server(&self) -> bool {
+        match &self.in_place.stt {
+            Some(s) => {
+                s.use_own_bundled_server
+                    && s.provider == TranscriptionBackend::Local
+                    && matches!(
+                        s.mode,
+                        WhisperMode::BundledModel | WhisperMode::BundledDownload
+                    )
+            }
+            None => false,
+        }
+    }
+
+    /// The EXACT set of whisper-servers the live config requires — the single
+    /// source of truth the supervisor spawns and the Doctor probes. "Never more
+    /// servers than needed": each entry is gated independently and only local
+    /// bundled providers (the only kind the daemon supervises) ever appear.
+    ///
+    /// - **Main** — always, whenever `[whisper].mode != External` (matching the
+    ///   supervisor's own gate). A cloud-provider bundled-mode config still
+    ///   needs the local server, so this gates on MODE, not provider.
+    /// - **Preview** — only when [`preview_needs_own_server`] is true.
+    /// - **InPlace** — only when [`in_place_needs_own_server`] is true (the
+    ///   power-user opt-in; default off).
+    ///
+    /// A default / unchanged config yields exactly `[Main]` (main server on
+    /// `[whisper].bundled_server_port`), preserving today's behavior.
+    pub fn needed_whisper_servers(&self) -> Vec<WhisperServerSpec> {
+        let mut out = Vec::new();
+        if self.whisper.mode != WhisperMode::External {
+            out.push(WhisperServerSpec {
+                role: WhisperServerRole::Main,
+                config: self.whisper.clone(),
+            });
+        }
+        if self.preview_needs_own_server() {
+            if let Some(pv) = &self.preview_whisper {
+                out.push(WhisperServerSpec {
+                    role: WhisperServerRole::Preview,
+                    config: pv.clone(),
+                });
+            }
+        }
+        if self.in_place_needs_own_server() {
+            if let Some(stt) = &self.in_place.stt {
+                out.push(WhisperServerSpec {
+                    role: WhisperServerRole::InPlace,
+                    config: stt.clone(),
+                });
+            }
+        }
+        out
+    }
 }
 
 impl Default for Config {
@@ -1604,6 +1718,7 @@ impl Default for Config {
                 api_key: SecretString::from(String::new()),
                 model: String::new(),
                 api_url: String::new(),
+                use_own_bundled_server: false,
             },
             // Default: live preview shares the main whisper provider (no separate
             // server). Users opt into a dedicated fast model / API via Settings.
@@ -1839,6 +1954,16 @@ impl Config {
         let mut out = self.clone();
         out.recording.audio_dir = expand_path(&out.recording.audio_dir)?;
         out.whisper.model_path = expand_path(&out.whisper.model_path)?;
+        // The preview and in-place model paths feed the same supervisor
+        // spawn/exists() flow as the main one, so they get the same `~` /
+        // `%APPDATA%` expansion — otherwise a tilde'd preview/dictation model
+        // silently fails the file-exists guard and the server idles forever.
+        if let Some(pv) = out.preview_whisper.as_mut() {
+            pv.model_path = expand_path(&pv.model_path)?;
+        }
+        if let Some(stt) = out.in_place.stt.as_mut() {
+            stt.model_path = expand_path(&stt.model_path)?;
+        }
         // Hook commands are arbitrary shell strings that may contain $variables
         // used at runtime by the shell (e.g. `$payload`, `$input` in PowerShell).
         // Only expand the known Phoneme path tokens (%APPDATA%, ~/) — do NOT
@@ -2191,6 +2316,135 @@ mod tests {
     #[test]
     fn defaults_validate() {
         Config::default().validate().expect("defaults are valid");
+    }
+
+    /// The NON-NEGOTIABLE invariant: a default config needs exactly the main
+    /// server on its configured port — no preview, no dictation server.
+    #[test]
+    fn default_config_needs_only_the_main_server() {
+        let cfg = Config::default();
+        let needed = cfg.needed_whisper_servers();
+        assert_eq!(needed.len(), 1, "default must run exactly one server");
+        assert_eq!(needed[0].role, WhisperServerRole::Main);
+        assert_eq!(needed[0].config.bundled_server_port, 5809);
+        assert!(!cfg.preview_needs_own_server());
+        assert!(!cfg.in_place_needs_own_server());
+    }
+
+    /// A cloud-provider config in bundled MODE still needs the local main
+    /// server: the gate is on `mode != External`, not on `provider == Local`,
+    /// matching the supervisor's own check — so cloud+bundled keeps today's
+    /// behavior of running the main server.
+    #[test]
+    fn cloud_provider_in_bundled_mode_still_needs_main_server() {
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Groq;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        let needed = cfg.needed_whisper_servers();
+        assert_eq!(needed.len(), 1);
+        assert_eq!(needed[0].role, WhisperServerRole::Main);
+    }
+
+    /// External main mode means no daemon-supervised server at all.
+    #[test]
+    fn external_main_mode_needs_no_servers() {
+        let mut cfg = Config::default();
+        cfg.whisper.mode = WhisperMode::External;
+        assert!(cfg.needed_whisper_servers().is_empty());
+    }
+
+    /// Enabling the live preview with a local bundled model adds the second
+    /// server — and only then.
+    #[test]
+    fn preview_enabled_adds_the_preview_server() {
+        let mut cfg = Config::default();
+        cfg.recording.streaming_preview = true;
+        let mut pv = cfg.whisper.clone();
+        pv.bundled_server_port = 5810;
+        cfg.preview_whisper = Some(pv);
+
+        let needed = cfg.needed_whisper_servers();
+        assert_eq!(needed.len(), 2);
+        assert_eq!(needed[0].role, WhisperServerRole::Main);
+        assert_eq!(needed[1].role, WhisperServerRole::Preview);
+        assert_eq!(needed[1].config.bundled_server_port, 5810);
+    }
+
+    /// The dedicated dictation server is OFF by default even when a custom
+    /// local `[in_place].stt` is set: it only runs with the explicit opt-in.
+    #[test]
+    fn in_place_local_without_optin_does_not_add_a_server() {
+        let mut cfg = Config::default();
+        let mut stt = cfg.whisper.clone();
+        stt.bundled_server_port = 5811;
+        // No use_own_bundled_server → reuses an existing server.
+        cfg.in_place.stt = Some(stt);
+        assert!(!cfg.in_place_needs_own_server());
+        assert_eq!(cfg.needed_whisper_servers().len(), 1);
+    }
+
+    /// All three servers run only when the user opts into the dedicated
+    /// dictation server with a distinct local bundled model.
+    #[test]
+    fn all_three_servers_when_opted_in() {
+        let mut cfg = Config::default();
+        cfg.recording.streaming_preview = true;
+        let mut pv = cfg.whisper.clone();
+        pv.bundled_server_port = 5810;
+        cfg.preview_whisper = Some(pv);
+        let mut stt = cfg.whisper.clone();
+        stt.bundled_server_port = 5811;
+        stt.use_own_bundled_server = true;
+        cfg.in_place.stt = Some(stt);
+
+        let needed = cfg.needed_whisper_servers();
+        let roles: Vec<_> = needed.iter().map(|s| s.role).collect();
+        assert_eq!(
+            roles,
+            vec![
+                WhisperServerRole::Main,
+                WhisperServerRole::Preview,
+                WhisperServerRole::InPlace,
+            ]
+        );
+        assert_eq!(needed[2].config.bundled_server_port, 5811);
+    }
+
+    /// A cloud dictation provider never spawns a dedicated server, even with
+    /// the opt-in flag set — the flag only applies to local bundled models.
+    #[test]
+    fn cloud_in_place_never_spawns_a_dedicated_server() {
+        let mut cfg = Config::default();
+        let mut stt = cfg.whisper.clone();
+        stt.provider = TranscriptionBackend::Groq;
+        stt.mode = WhisperMode::External;
+        stt.use_own_bundled_server = true;
+        cfg.in_place.stt = Some(stt);
+        assert!(!cfg.in_place_needs_own_server());
+        assert_eq!(cfg.needed_whisper_servers().len(), 1);
+    }
+
+    /// The new opt-in flag is serde-defaulted, so an OLD config that never wrote
+    /// the key parses unchanged with the flag false. Simulated by serializing a
+    /// real default config, deleting the line, and parsing it back.
+    #[test]
+    fn use_own_bundled_server_defaults_false_on_old_configs() {
+        let cfg = Config::default();
+        let serialized = toml::to_string(&cfg).unwrap();
+        // Drop every `use_own_bundled_server = ...` line, mimicking a config
+        // written before the field existed.
+        let old: String = serialized
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("use_own_bundled_server"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !old.contains("use_own_bundled_server"),
+            "the old-config fixture must omit the new key"
+        );
+        let parsed: Config = toml::from_str(&old).unwrap();
+        assert!(!parsed.whisper.use_own_bundled_server);
+        assert_eq!(parsed, cfg, "missing key parses identical to default");
     }
 
     #[test]

@@ -170,6 +170,7 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 whisper_ports = doctor::EffectiveWhisperPorts {
                     main: port("whisper_effective_port"),
                     preview: port("preview_whisper_effective_port"),
+                    in_place: port("dictation_whisper_effective_port"),
                 };
                 checks.push(CheckResult {
                     name: "daemon_pid".into(),

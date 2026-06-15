@@ -183,6 +183,21 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Third supervisor for the OPTIONAL dedicated dictation server. Idles unless
+    // the user opts in (`[in_place].stt` local bundled + use_own_bundled_server);
+    // the default/weak-box config never spawns it. Like the preview handle, kept
+    // so shutdown can await it and kill any child it owns — never in the
+    // crash-detect select (dictation is non-critical).
+    let dictation_sup_state = state.clone();
+    let dictation_sup_signal = state.shutdown.signal.clone();
+    let dictation_supervisor_handle = tokio::spawn(async move {
+        if let Err(e) =
+            whisper_supervisor::run_dictation(dictation_sup_state, dictation_sup_signal).await
+        {
+            tracing::error!(error = %e, "dictation whisper supervisor terminated");
+        }
+    });
+
     let retention_state = state.clone();
     let retention_shutdown = state.shutdown.signal.clone_receiver();
     tokio::spawn(async move {
@@ -244,6 +259,9 @@ async fn main() -> Result<()> {
     // Wait for the preview supervisor too, so its dedicated whisper-server (if
     // any) is killed before we exit — same cleanup guarantee as the main server.
     let _ = preview_supervisor_handle.await;
+    // And the dictation supervisor — its optional third server (if the user
+    // opted in) must be killed before exit too.
+    let _ = dictation_supervisor_handle.await;
     // Stop the Ollama this daemon launched, if any — a user-started one is
     // NotOurs and stays untouched (see `ollama_launcher`).
     state.ollama.shutdown().await;

@@ -219,6 +219,9 @@ pub struct WhisperEffectivePorts {
     main: AtomicU16,
     /// The dedicated live-preview server's port; 0 = not running.
     preview: AtomicU16,
+    /// The optional dedicated in-place / dictation server's port; 0 = not
+    /// running (the default — it only runs when the power-user opt-in is on).
+    dictation: AtomicU16,
 }
 
 impl WhisperEffectivePorts {
@@ -248,15 +251,50 @@ impl WhisperEffectivePorts {
         self.preview.store(port.unwrap_or(0), Ordering::Relaxed);
     }
 
+    /// The dictation server's live port, when it is running.
+    pub fn dictation(&self) -> Option<u16> {
+        match self.dictation.load(Ordering::Relaxed) {
+            0 => None,
+            p => Some(p),
+        }
+    }
+
+    /// Publish (`Some`) or clear (`None`) the dictation server's live port.
+    pub fn set_dictation(&self, port: Option<u16>) {
+        self.dictation.store(port.unwrap_or(0), Ordering::Relaxed);
+    }
+
     /// The port consumers should dial for `provider`: the matching server's
     /// published live port when there is one, else the configured port.
     ///
     /// Matching is by preferred port because `provider` may be `[whisper]`
-    /// itself, `[preview_whisper]`, or an `[in_place].stt` block the Settings
-    /// UI pointed at either server's configured port — all three must follow
-    /// the same server wherever it actually landed.
+    /// itself, `[preview_whisper]`, an `[in_place].stt` block the Settings UI
+    /// pointed at either server's configured port, or the DEDICATED dictation
+    /// server's own port — each must follow the same server wherever it landed.
+    ///
+    /// The dictation arm fires only when the config actually runs a dedicated
+    /// dictation server ([`Config::in_place_needs_own_server`]); otherwise an
+    /// `[in_place].stt` that reuses the main or preview port keeps falling
+    /// through to those arms (and a port matching none is returned unchanged),
+    /// preserving the reuse contract.
     pub fn resolve(&self, cfg: &Config, provider: &phoneme_core::config::WhisperConfig) -> u16 {
         let preferred = provider.bundled_server_port;
+        // The dedicated dictation server is checked FIRST, but only when it's
+        // actually running and its port is distinct — so it never shadows the
+        // main/preview reuse case (an in_place.stt pointing at 5809/5810).
+        if cfg.in_place_needs_own_server()
+            && preferred != cfg.whisper.bundled_server_port
+            && cfg
+                .in_place
+                .stt
+                .as_ref()
+                .is_some_and(|s| s.bundled_server_port == preferred)
+        {
+            if let Some(p) = self.dictation() {
+                return p;
+            }
+            return preferred;
+        }
         if preferred == cfg.whisper.bundled_server_port {
             if let Some(p) = self.main() {
                 return p;
@@ -470,5 +508,64 @@ mod tests {
         let mut cloud = cfg.whisper.clone();
         cloud.provider = TranscriptionBackend::Openai;
         assert_eq!(ports.apply(&cfg, &cloud).bundled_server_port, 5809);
+    }
+
+    /// A power-user config with all three local bundled servers on distinct
+    /// ports (5809 / 5810 / 5811) — the opted-in dictation layout.
+    fn three_server_config() -> Config {
+        let mut cfg = two_server_config();
+        cfg.recording.streaming_preview = true;
+        let mut stt = cfg.whisper.clone();
+        stt.bundled_server_port = 5811;
+        stt.use_own_bundled_server = true;
+        cfg.in_place.stt = Some(stt);
+        cfg
+    }
+
+    #[test]
+    fn dedicated_dictation_config_follows_its_own_port() {
+        // With the opt-in on, the dictation provider resolves to the THIRD
+        // server's live port — not the main or preview one.
+        let cfg = three_server_config();
+        assert!(cfg.in_place_needs_own_server());
+        let ports = WhisperEffectivePorts::default();
+        ports.set_main(Some(51234));
+        ports.set_preview(Some(52345));
+        ports.set_dictation(Some(53456));
+
+        let stt = cfg.in_place.stt.as_ref().unwrap();
+        assert_eq!(ports.resolve(&cfg, stt), 53456);
+        // Main and preview still route to their own servers, unaffected.
+        assert_eq!(ports.resolve(&cfg, &cfg.whisper), 51234);
+        assert_eq!(
+            ports.resolve(&cfg, cfg.preview_whisper.as_ref().unwrap()),
+            52345
+        );
+    }
+
+    #[test]
+    fn dictation_falls_back_to_configured_port_when_not_published() {
+        // The dictation server is needed but its port isn't published yet
+        // (mid-spawn) — consumers fall back to the configured 5811.
+        let cfg = three_server_config();
+        let ports = WhisperEffectivePorts::default();
+        let stt = cfg.in_place.stt.as_ref().unwrap();
+        assert_eq!(ports.resolve(&cfg, stt), 5811);
+    }
+
+    #[test]
+    fn without_optin_in_place_reuses_not_a_third_server() {
+        // The SAME stt port (5811), but the opt-in flag is OFF: the dictation
+        // arm must NOT fire — the port matches no running server and is left
+        // alone, exactly the reuse contract.
+        let mut cfg = three_server_config();
+        cfg.in_place.stt.as_mut().unwrap().use_own_bundled_server = false;
+        assert!(!cfg.in_place_needs_own_server());
+        let ports = WhisperEffectivePorts::default();
+        ports.set_dictation(Some(53456)); // stale/never-published in practice
+        let stt = cfg.in_place.stt.as_ref().unwrap();
+        // 5811 matches neither main nor preview, and the dictation arm is
+        // gated off → returns the configured port, never the dictation live one.
+        assert_eq!(ports.resolve(&cfg, stt), 5811);
     }
 }

@@ -152,6 +152,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 "preview_whisper_preferred_port":
                     cfg.preview_whisper.as_ref().map(|p| p.bundled_server_port),
                 "preview_whisper_effective_port": state.whisper_ports.preview(),
+                "dictation_whisper_preferred_port":
+                    cfg.in_place.stt.as_ref().map(|s| s.bundled_server_port),
+                "dictation_whisper_effective_port": state.whisper_ports.dictation(),
             }))
         }
         Request::RecordStatus => {
@@ -954,6 +957,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             let ports = phoneme_core::doctor::EffectiveWhisperPorts {
                 main: state.whisper_ports.main(),
                 preview: state.whisper_ports.preview(),
+                in_place: state.whisper_ports.dictation(),
             };
             let mut checks = phoneme_core::doctor::run_local_checks(&cfg);
             checks.extend(phoneme_core::doctor::run_backend_checks_with_ports(&cfg, &ports).await);

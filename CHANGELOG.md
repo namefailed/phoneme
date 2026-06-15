@@ -57,6 +57,21 @@ trust boundary. Verified against current code.*
 
 ### Recording
 
+- [x] **Adaptive whisper-server supervision** — the daemon now spawns *exactly*
+  the local whisper-servers the current config needs and no more, from a single
+  source of truth (`Config::needed_whisper_servers`): the main server, the live-
+  preview server only when preview is on with its own bundled model, and — new —
+  an optional **dedicated dictation server** when you opt in. The set reconciles
+  live: flip a setting and the matching server spins up or down within a second
+  or two, while the servers you didn't touch keep running. A default config still
+  runs exactly one server (the main one), so weak boxes are unaffected; power
+  users with the headroom can now run all three. Enable the dictation server via
+  **Settings → Capture → Dictation → "Dedicated dictation server"** (`[in_place]
+  .stt.use_own_bundled_server`); it isolates dictation onto its own process and
+  model so a main-server restart or model override can't starve it. Doctor now
+  health-checks **every** server it expects to be running, and gained a
+  **"dictation is on the slow model"** warning when in-place dictation resolves to
+  the heavy main model instead of a fast one.
 - [x] **Capture profiles on the Record button** — the Record split-button
   dropdown lists your saved profiles under **Capture profile**; one click swaps
   the whole config for that capture intent (Standup vs Interview, etc.) via the

@@ -1,10 +1,16 @@
 //! whisper-server supervisor — keeps the bundled STT server(s) alive so the
 //! pipeline and the live preview always have something local to dial.
 //!
-//! Two independent loops: [`run`] supervises the main (final-transcription)
-//! server from `[whisper]`, and [`run_preview`] a second, thread-capped
-//! server from `[preview_whisper]` when the preview needs its own (otherwise
-//! it idles). Each loop spawns the binary, then watches four wake sources at
+//! Three independent loops, one per supervised role — exactly the set
+//! `Config::needed_whisper_servers()` declares, never more: [`run`] supervises
+//! the main (final-transcription) server from `[whisper]` (always, unless that
+//! is External); [`run_preview`] a second, thread-capped server from
+//! `[preview_whisper]` when the preview needs its own; and [`run_dictation`] an
+//! optional third server from `[in_place].stt` ONLY when the user opts into a
+//! dedicated dictation server (`use_own_bundled_server`, default off). A loop
+//! whose role isn't needed idles on a 5 s poll and clears its port, so a config
+//! toggle adds or removes its server through the proven poll — no reconciler.
+//! Each loop spawns the binary, then watches four wake sources at
 //! once: child exit (respawn with 2 s → 60 s backoff, reset after a healthy
 //! minute), a spec change poll (model/port/mode differs from what the child
 //! was spawned with), an explicit `whisper_restart` notify (the Doctor's
@@ -232,6 +238,16 @@ pub async fn run_with(
                 exclude.push(pv.bundled_server_port);
             }
         }
+        // Also steer around the dedicated dictation server's port so a 3-way
+        // restart can't make the main server land on it.
+        if let Some(p) = state.whisper_ports.dictation() {
+            exclude.push(p);
+        }
+        if cfg.in_place_needs_own_server() {
+            if let Some(stt) = cfg.in_place.stt.as_ref() {
+                exclude.push(stt.bundled_server_port);
+            }
+        }
         let port = choose_listen_port(preferred_port, &exclude);
         if port != preferred_port {
             tracing::warn!(
@@ -453,6 +469,16 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         if cfg.whisper.mode != WhisperMode::External {
             exclude.push(cfg.whisper.bundled_server_port);
         }
+        // Steer around the dedicated dictation server's port too — without
+        // this reciprocal exclusion a 3-way restart could collide.
+        if let Some(p) = state.whisper_ports.dictation() {
+            exclude.push(p);
+        }
+        if cfg.in_place_needs_own_server() {
+            if let Some(stt) = cfg.in_place.stt.as_ref() {
+                exclude.push(stt.bundled_server_port);
+            }
+        }
         let port = choose_listen_port(preferred_port, &exclude);
         if port != preferred_port {
             tracing::warn!(
@@ -572,6 +598,217 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
         if exited {
             // Crash backoff outside the select — cancellable by a Doctor
             // restart or shutdown, mirroring the main supervisor loop.
+            match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                BackoffWake::Shutdown => return Ok(()),
+                BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+            }
+            continue;
+        }
+    }
+}
+
+/// Supervises an OPTIONAL THIRD whisper-server dedicated to in-place dictation
+/// — used only when the user opts in (`[in_place].stt` is a local bundled model
+/// with `use_own_bundled_server = true`, see
+/// [`phoneme_core::Config::in_place_needs_own_server`]). Otherwise (the default,
+/// and every weak-box config) this idles and dictation reuses the main or
+/// preview server.
+///
+/// A faithful sibling of [`run_preview`]: the same self-polling idle gate, spec
+/// poll, crash backoff, and Doctor-restart handling — so add/remove on a config
+/// toggle works through the proven 1 s poll, with NO new ReloadConfig wiring.
+/// Kept separate from [`run`]/[`run_preview`] so neither the critical final
+/// server nor the preview is ever bounced by a dictation change.
+pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
+    let mut backoff = RESTART_BACKOFF_INITIAL;
+
+    loop {
+        if shutdown.is_shutting_down() {
+            return Ok(());
+        }
+
+        // Unexpanded snapshot for stable change-detection; expanded copy for the
+        // actual paths we spawn with (so `~`/`%APPDATA%` model paths resolve).
+        let raw = state.config.load();
+        let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
+
+        // Idle gate: the dedicated dictation server runs ONLY when the user has
+        // opted in. When the flag flips off (or the stt block clears), the next
+        // poll clears the port and idles — the same add/remove-on-poll the
+        // preview supervisor uses.
+        if !cfg.in_place_needs_own_server() {
+            state.whisper_ports.set_dictation(None);
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                _ = shutdown.wait() => return Ok(()),
+            }
+        }
+        // Safe: in_place_needs_own_server() implies in_place.stt is Some.
+        let Some(stt) = cfg.in_place.stt.as_ref() else {
+            state.whisper_ports.set_dictation(None);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        };
+
+        let server_path = match locate_bundled_server() {
+            Ok(p) => p,
+            Err(e) => {
+                state.whisper_ports.set_dictation(None);
+                tracing::error!(error = %e, "dictation: whisper-server binary not found, waiting...");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                    _ = shutdown.wait() => return Ok(()),
+                }
+            }
+        };
+
+        if stt.model_path.is_empty() || !std::path::Path::new(&stt.model_path).exists() {
+            state.whisper_ports.set_dictation(None);
+            tracing::info!("dictation model_path empty or missing, waiting for download...");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                _ = shutdown.wait() => return Ok(()),
+            }
+        }
+
+        // Pre-flight port probe — exclude BOTH siblings' published + configured
+        // ports so the three servers can never collide.
+        let preferred_port = stt.bundled_server_port;
+        let mut exclude = Vec::new();
+        if let Some(p) = state.whisper_ports.main() {
+            exclude.push(p);
+        }
+        if cfg.whisper.mode != WhisperMode::External {
+            exclude.push(cfg.whisper.bundled_server_port);
+        }
+        if let Some(p) = state.whisper_ports.preview() {
+            exclude.push(p);
+        }
+        if cfg.preview_needs_own_server() {
+            if let Some(pv) = cfg.preview_whisper.as_ref() {
+                exclude.push(pv.bundled_server_port);
+            }
+        }
+        let port = choose_listen_port(preferred_port, &exclude);
+        if port != preferred_port {
+            tracing::warn!(
+                "preferred port {preferred_port} in use by another app — dictation whisper-server starting on {port}"
+            );
+        }
+        state.whisper_ports.set_dictation(Some(port));
+
+        let mut command = Command::new(&server_path);
+        command
+            .arg("-m")
+            .arg(&stt.model_path)
+            .arg("--port")
+            .arg(port.to_string())
+            .arg("--host")
+            .arg("127.0.0.1")
+            .arg("--inference-path")
+            .arg("/v1/audio/transcriptions")
+            // Discard stdout/stderr — a piped-but-undrained child wedges once the
+            // OS pipe buffer fills (audit A2-H1), same as the other servers.
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        // Cap threads unless the user explicitly set one — dictation is a fast
+        // model and must not starve the final transcription.
+        let mut args = stt.bundled_server_args.clone();
+        if !args.iter().any(|a| a == "-t" || a == "--threads") {
+            args.push("-t".into());
+            args.push(preview_thread_cap().to_string());
+        }
+        for extra in &args {
+            command.arg(extra);
+        }
+
+        let mut child = match command.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                state.whisper_ports.set_dictation(None);
+                tracing::error!(error = %e, "failed to spawn dictation whisper-server");
+                match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                    BackoffWake::Shutdown => return Ok(()),
+                    BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                    BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+                }
+                continue;
+            }
+        };
+        assign_to_daemon_job(&state, &child);
+        tracing::info!(
+            pid = child.id().unwrap_or(0),
+            port,
+            "dictation whisper-server spawned"
+        );
+        let spawned_at = Instant::now();
+        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
+        check_interval.tick().await;
+
+        // Watch the (unexpanded) in_place.stt fields for changes.
+        let watch = raw.in_place.stt.clone();
+
+        let mut exited = false;
+        loop {
+            tokio::select! {
+                wait = child.wait() => {
+                    match wait {
+                        Ok(status) => tracing::warn!(?status, "dictation whisper-server exited"),
+                        Err(e) => tracing::warn!(error = %e, "wait on dictation whisper-server failed"),
+                    }
+                    state.whisper_ports.set_dictation(None);
+                    if spawned_at.elapsed() >= Duration::from_secs(60) {
+                        backoff = RESTART_BACKOFF_INITIAL;
+                    }
+                    exited = true;
+                    break;
+                }
+                // Explicit restart (the Doctor's "Fix") — same semantics as the
+                // other supervisors.
+                _ = state.whisper_restart.notified() => {
+                    tracing::info!("dictation whisper-server restart requested; bouncing");
+                    let _ = kill_gracefully(&mut child).await;
+                    backoff = RESTART_BACKOFF_INITIAL;
+                    break;
+                }
+                _ = check_interval.tick() => {
+                    let cur = state.config.load();
+                    // Compare by direct field read (not PartialEq) so a pure
+                    // use_own_bundled_server / model / port / mode change is
+                    // caught, and self-stop when the opt-in flips off.
+                    let spec_changed = match (cur.in_place.stt.as_ref(), watch.as_ref()) {
+                        (Some(c), Some(w)) => {
+                            c.model_path != w.model_path
+                                || c.bundled_server_port != w.bundled_server_port
+                                || c.mode != w.mode
+                                || c.use_own_bundled_server != w.use_own_bundled_server
+                        }
+                        _ => true,
+                    };
+                    if spec_changed || !cur.in_place_needs_own_server() {
+                        tracing::info!("dictation whisper-server config changed; restarting");
+                        let _ = kill_gracefully(&mut child).await;
+                        backoff = RESTART_BACKOFF_INITIAL;
+                        break;
+                    }
+                }
+                _ = shutdown.wait() => {
+                    tracing::info!("shutdown — killing dictation whisper-server");
+                    let _ = kill_gracefully(&mut child).await;
+                    state.whisper_ports.set_dictation(None);
+                    return Ok(());
+                }
+            }
+        }
+        if exited {
             match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
                 BackoffWake::Shutdown => return Ok(()),
                 BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,

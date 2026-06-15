@@ -11,8 +11,10 @@ const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 /** How `[in_place].stt` is being edited: absent = Automatic (the daemon falls
  *  back preview → main `[whisper]`), present = a pinned custom provider. */
 type SttMode = "auto" | "custom";
-/** Which already-running whisper server a custom LOCAL config points at. */
-type LocalServer = "main" | "preview";
+/** Which whisper server a custom LOCAL config uses: an already-running one
+ *  (`main` / `preview`), or a `dedicated` third server the daemon supervises
+ *  just for dictation (the power-user opt-in — uses extra RAM). */
+type LocalServer = "main" | "preview" | "dedicated";
 
 /**
  * Dictation (transcription-in-place) settings — the fast lane.
@@ -94,12 +96,21 @@ export class SectionInPlace {
     return (port ?? this.mainPort() + 1) as number;
   }
 
-  /** Which server the saved local config points at, for the select. Anything
-   *  that isn't the preview server's port reads as "main" — both options
-   *  below rewrite the table, so the two ports are all this UI ever writes. */
+  /** Port for the dedicated dictation server — distinct from main and the
+   *  preview's (main+2 by convention, the documented 5811 next to 5809/5810).
+   *  resolve()/apply() route to it only when it differs from main/preview, so
+   *  the third server is actually dialed instead of reusing an existing one. */
+  private dedicatedPort(): number {
+    return (this.mainPort() + 2) as number;
+  }
+
+  /** Which server the saved local config points at, for the select. The opt-in
+   *  flag identifies a dedicated third server; otherwise the preview port reads
+   *  as "preview" and everything else as "main" (the reuse cases). */
   private sttServer(): LocalServer {
     const stt = this.config.in_place?.stt;
     if (!stt || stt.mode === "external") return "main";
+    if (stt.use_own_bundled_server) return "dedicated";
     return stt.bundled_server_port === this.previewPort() &&
       this.previewPort() !== this.mainPort()
       ? "preview"
@@ -117,9 +128,15 @@ export class SectionInPlace {
 
   /** Custom + local: a copy of the relevant server's `[whisper]`-shaped table
    *  (spread keeps every required field present, like SectionPreview does).
-   *  "main" copies the main config verbatim — pointing wherever it points,
-   *  bundled port or external URL alike. "preview" pins the preview server's
-   *  port/model. No third server is spawned for dictation either way. */
+   *
+   *  - "main"      — copies the main config verbatim, reusing the always-on
+   *                  server. Clears the opt-in flag.
+   *  - "preview"   — pins the preview server's port/model, reusing it. Clears
+   *                  the flag.
+   *  - "dedicated" — the power-user opt-in: a DISTINCT port (main+2) + its own
+   *                  model + `use_own_bundled_server = true`, so the daemon
+   *                  supervises a third server and dictation actually dials it.
+   *                  Uses extra RAM. */
   private setSttLocal(server: LocalServer) {
     const base = { ...(this.config.whisper ?? {}) };
     if (server === "preview") {
@@ -130,10 +147,34 @@ export class SectionInPlace {
         mode: "bundled_model",
         model_path: pv.model_path ?? "",
         bundled_server_port: this.previewPort(),
+        use_own_bundled_server: false,
+        api_key: "",
+      };
+    } else if (server === "dedicated") {
+      // Keep a model already chosen for the dictation server (so flipping the
+      // toggle back and forth doesn't wipe the pick); else start from the
+      // preview's fast model if there is one, falling back to blank.
+      const existing = this.config.in_place?.stt;
+      const seedModel =
+        existing?.use_own_bundled_server && existing?.model_path
+          ? existing.model_path
+          : (this.config.preview_whisper?.model_path ?? "");
+      this.config.in_place.stt = {
+        ...base,
+        provider: "local",
+        mode: "bundled_model",
+        model_path: seedModel,
+        bundled_server_port: this.dedicatedPort(),
+        use_own_bundled_server: true,
         api_key: "",
       };
     } else {
-      this.config.in_place.stt = { ...base, provider: "local", api_key: "" };
+      this.config.in_place.stt = {
+        ...base,
+        provider: "local",
+        use_own_bundled_server: false,
+        api_key: "",
+      };
     }
   }
 
@@ -149,6 +190,8 @@ export class SectionInPlace {
       provider,
       mode: "external",
       model_path: "",
+      // A cloud provider never has a daemon-supervised server.
+      use_own_bundled_server: false,
       api_key: existing.api_key ?? "",
       model: existing.model ?? "",
       api_url: existing.api_url ?? "",
@@ -359,14 +402,17 @@ export class SectionInPlace {
           <label>Local server</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <select id="ip-stt-server">
-              <option value="main" ${server === "main" ? "selected" : ""}>Main transcription server</option>
-              <option value="preview" ${server === "preview" ? "selected" : ""}>Live Preview's fast-model server</option>
+              <option value="main" ${server === "main" ? "selected" : ""}>Main transcription server (reuse)</option>
+              <option value="preview" ${server === "preview" ? "selected" : ""}>Live Preview's fast-model server (reuse)</option>
+              <option value="dedicated" ${server === "dedicated" ? "selected" : ""}>Dedicated dictation server (power user — extra RAM)</option>
             </select>
             <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
-              Dictation reuses a whisper server that's <b>already running</b> — the daemon never
-              starts a third one just for it. <b>Main</b> is the regular transcription server;
-              <b>Live Preview's</b> is the second, fast-model one, only alive while the preview
-              is enabled with a dedicated local model. Requests go to ${escHtml(hint.url)}${hint.note ? ` ${escHtml(hint.note)}` : ""}.
+              <b>Reuse</b> a whisper server that's <b>already running</b> — the daemon starts no
+              extra process. <b>Main</b> is the regular transcription server; <b>Live Preview's</b>
+              is the second, fast-model one (only alive while the preview is on with a local model).
+              <b>Dedicated</b> runs a <i>third</i> whisper-server just for dictation on its own
+              port — the fastest, most reliable dictation, but it loads another model into RAM.
+              Requests go to ${escHtml(hint.url)}${hint.note ? ` ${escHtml(hint.note)}` : ""}.
             </span>
             ${
               server === "preview" && !previewServerRuns
@@ -375,11 +421,24 @@ export class SectionInPlace {
             }
             ${
               server === "main" && this.mainModelIsHeavy()
-                ? `<div style="margin-top:8px; padding:8px 10px; border-left:3px solid var(--accent, #89b4fa); background:color-mix(in srgb, var(--accent, #89b4fa) 12%, transparent); border-radius:6px; font-size: 0.7857rem; color:var(--fg-default); line-height:1.5;">⚠️ Your main transcription model is large, so dictation through it will be slow. For fast dictation, switch to <b>Automatic</b> (above) or the Live Preview's fast-model server; for fast <i>and</i> accurate, point Custom at a cloud provider (e.g. Groq).</div>`
+                ? `<div style="margin-top:8px; padding:8px 10px; border-left:3px solid var(--accent, #89b4fa); background:color-mix(in srgb, var(--accent, #89b4fa) 12%, transparent); border-radius:6px; font-size: 0.7857rem; color:var(--fg-default); line-height:1.5;">⚠️ Your main transcription model is large, so dictation through it will be slow. For fast dictation, switch to <b>Automatic</b> (above), the Live Preview's fast-model server, or a <b>Dedicated</b> server with a small model; for fast <i>and</i> accurate, point Custom at a cloud provider (e.g. Groq).</div>`
+                : ""
+            }
+            ${
+              server === "dedicated"
+                ? `<div style="margin-top:8px; padding:8px 10px; border-left:3px solid var(--accent, #89b4fa); background:color-mix(in srgb, var(--accent, #89b4fa) 12%, transparent); border-radius:6px; font-size: 0.7857rem; color:var(--fg-default); line-height:1.5;">A third whisper-server runs alongside the main one (and the preview's, if on). Pick a <b>small, fast model</b> (tiny / base) below — running Turbo + Tiny + a heavy dictation model all at once needs plenty of free RAM. On a weak machine, prefer <b>Reuse</b> instead.</div>`
                 : ""
             }
           </div>
-        </div>`;
+        </div>
+        ${
+          server === "dedicated"
+            ? `<div class="settings-field">
+          <label>Dictation model</label>
+          <div id="ip-stt-dedicated-model-host"></div>
+        </div>`
+            : ""
+        }`;
     } else {
       host.innerHTML = `
         <div class="settings-field conn-field">
@@ -435,6 +494,30 @@ export class SectionInPlace {
       this.setSttLocal((e.target as HTMLSelectElement).value as LocalServer);
       this.render();
     });
+
+    // Dedicated dictation server: a model-path field for the third server. It
+    // must point at a downloaded GGML model (download in the Whisper section);
+    // a small model keeps dictation fast and the RAM cost down.
+    const dedicatedModelHost = host.querySelector<HTMLElement>("#ip-stt-dedicated-model-host");
+    if (dedicatedModelHost && this.config.in_place?.stt) {
+      dedicatedModelHost.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+          <div style="width:100%;">${renderField(
+            {
+              key: "in_place.stt.model_path",
+              label: "",
+              kind: "text",
+              placeholder: "Path to a downloaded GGML model (e.g. ggml-base.en.bin)",
+            },
+            this.config.in_place.stt.model_path ?? "",
+          )}</div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+            Download models in the <b>Whisper</b> section (Transcription). A small model
+            (Tiny / Base) is the right pick for snappy dictation on the dedicated server.
+          </span>
+        </div>`;
+      bindFieldEvents(dedicatedModelHost, this.config);
+    }
 
     const modelHost = host.querySelector<HTMLElement>("#ip-stt-model-host");
     if (modelHost) this.mountSttModel(modelHost);

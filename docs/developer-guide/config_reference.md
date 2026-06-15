@@ -27,6 +27,7 @@ A fully-commented `config.example.toml` and `.env.example` live at the **repo ro
 | `api_key` | string | `""` | Cloud provider key (redacted in logs) |
 | `model` | string | `""` | Cloud model id |
 | `api_url` | string | `""` | Custom provider base URL |
+| `use_own_bundled_server` | bool | `false` | Only meaningful on `[in_place].stt` — opt a **dedicated dictation whisper-server** into supervision (see `[in_place]` below). Ignored on the main `[whisper]` block (the main server always runs). |
 
 ---
 
@@ -258,7 +259,7 @@ Settings → Capture → Dictation, including the `stt` picker (Automatic ↔ Cu
 | `save_to_library` | `true` | Persist the dictation (transcript, segments, audio) after typing. `false` = ephemeral — row and WAV deleted once typed. |
 | `full_pipeline` | `false` | Route dictations through the normal queue and every configured step (cleanup, summary, tags, hooks) — the legacy behavior. `type_first` picks when the text is typed. |
 | `type_first` | `false` | Only meaningful with `full_pipeline`. `true` = a type-only fast pass types the quick transcription immediately while the pipeline continues in the background for the library copy (the typed text is the fast polish, not the LLM cleanup, and the pipeline skips its own end-of-run typing). `false` = the typed text waits for, and includes, every configured step. |
-| `stt` | *(unset)* | Optional dedicated STT provider table shaped like `[whisper]`. Unset: dictation follows the Live Preview's provider when the preview is enabled, else `[whisper]`. For a local model, point it at an already-running server — the daemon does not supervise a third server. |
+| `stt` | *(unset)* | Optional dedicated STT provider table shaped like `[whisper]`. Unset: dictation follows the Live Preview's provider when the preview is enabled, else `[whisper]`. For a local model you can point it at an already-running server (the daemon reuses it), **or** set `stt.use_own_bundled_server = true` to have the daemon supervise a **dedicated third whisper-server** just for dictation — its own process and model on its own port, so dictation is never starved by a main-server restart or model override. Default off (the weak-box default reuses the main/preview server); opt in via Settings → Capture → Dictation → "Dedicated dictation server". This is a power-user / multi-server option: a third local model means materially more RAM. Note: dictation still waits on the shared whisper permit, so the dedicated server buys reliability/isolation, not parallelism with final transcription. |
 
 
 ## `[semantic_search]`

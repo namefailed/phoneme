@@ -1298,6 +1298,7 @@ async fn effective_whisper_ports(bridge: &Br<'_>) -> crate::doctor::EffectiveWhi
     crate::doctor::EffectiveWhisperPorts {
         main: port("whisper_effective_port"),
         preview: port("preview_whisper_effective_port"),
+        in_place: port("dictation_whisper_effective_port"),
     }
 }
 

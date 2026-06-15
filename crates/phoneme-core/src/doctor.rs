@@ -119,6 +119,9 @@ pub struct EffectiveWhisperPorts {
     pub main: Option<u16>,
     /// The dedicated live-preview server's live port, when it is running.
     pub preview: Option<u16>,
+    /// The optional dedicated dictation server's live port, when it is running
+    /// (only when the user opted into `[in_place].stt.use_own_bundled_server`).
+    pub in_place: Option<u16>,
 }
 
 impl EffectiveWhisperPorts {
@@ -144,7 +147,20 @@ impl EffectiveWhisperPorts {
             return None;
         }
         let preferred = provider.bundled_server_port;
-        let live = if preferred == cfg.whisper.bundled_server_port {
+        // The dedicated dictation server is checked FIRST (only when it's
+        // actually running and on a distinct port), mirroring the daemon's
+        // `WhisperEffectivePorts::resolve` so neither shadows the main/preview
+        // reuse case.
+        let live = if cfg.in_place_needs_own_server()
+            && preferred != cfg.whisper.bundled_server_port
+            && cfg
+                .in_place
+                .stt
+                .as_ref()
+                .is_some_and(|s| s.bundled_server_port == preferred)
+        {
+            self.in_place
+        } else if preferred == cfg.whisper.bundled_server_port {
             self.main
         } else if cfg
             .preview_whisper
@@ -514,9 +530,10 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
 
     // Dedicated live-preview model (only when the preview runs its own
     // bundled server). Missing is a Warning — the final transcript still
-    // works through the main model.
-    if cfg.preview_needs_own_server() {
-        if let Some(pv) = cfg.preview_whisper.as_ref() {
+    // works through the main model. Use the expanded copy so a `~`/`%APPDATA%`
+    // preview path resolves to the real file.
+    if xcfg.preview_needs_own_server() {
+        if let Some(pv) = xcfg.preview_whisper.as_ref() {
             if !pv.model_path.is_empty() {
                 out.push(model_integrity_check(
                     "Live-preview model",
@@ -524,6 +541,23 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
                     CheckCategory::Warning,
                     "Verifies the live preview's own model file is present and intact — the live transcript stays blank without it.",
                     "Pick or download a preview model (Settings → Transcription → Live Preview), or fix preview_whisper.model_path.",
+                ));
+            }
+        }
+    }
+
+    // Dedicated dictation model (only when the user opted into a third
+    // supervised server). Missing is a Warning — capture and the main
+    // transcription keep working; only the dictation lane stalls.
+    if xcfg.in_place_needs_own_server() {
+        if let Some(stt) = xcfg.in_place.stt.as_ref() {
+            if !stt.model_path.is_empty() {
+                out.push(model_integrity_check(
+                    "Dictation model",
+                    Path::new(&stt.model_path),
+                    CheckCategory::Warning,
+                    "Verifies the dedicated dictation model file is present and intact — in-place dictation types nothing without it.",
+                    "Pick or download a dictation model (Settings → Capture → Dictation), or fix in_place.stt.model_path.",
                 ));
             }
         }
@@ -703,6 +737,21 @@ fn classify_stt(w: &WhisperConfig) -> SttConnection {
             cloud("elevenlabs", crate::endpoints::ELEVENLABS_STT_BASE)
         }
     }
+}
+
+/// Heuristic for "this is a heavy/slow whisper model" — used only to WARN that
+/// dictation will be sluggish, never to block. `WhisperConfig` has no size
+/// field, so we read the model file name: `large` / `medium` / `turbo` are the
+/// big ones; `tiny` / `base` / `small` are the fast ones. Case-insensitive,
+/// matched on the file stem so a parent dir named "medium-models" doesn't trip
+/// it. Unknown names are treated as not-heavy (no false alarm).
+fn model_path_looks_heavy(model_path: &str) -> bool {
+    let stem = Path::new(model_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    stem.contains("large") || stem.contains("medium") || stem.contains("turbo")
 }
 
 // ── LLM step connections ─────────────────────────────────────────────────────
@@ -1146,23 +1195,42 @@ pub async fn run_backend_checks_with_ports(
     // Warnings: a broken dictation lane types nothing, but capture and normal
     // transcription keep working.
     if let Some(stt) = cfg.in_place.stt.as_ref() {
+        let dedicated = cfg.in_place_needs_own_server();
         match classify_stt(stt) {
-            // Dictation never gets its own supervised server — a local
-            // connection must point at an ALREADY-RUNNING one (the main or
-            // preview bundled server), so the check is reachability of that
-            // URL, not a model file. When that server fell back off its
-            // configured port, follow it there.
+            // Two local shapes:
+            //  - DEDICATED (opt-in on): the daemon supervises a third server on
+            //    this block's own port, so a "Fix" can sweep + respawn it, and
+            //    a model-file check (above) covers the model. The probe follows
+            //    its live port after any startup fallback.
+            //  - REUSE (default): dictation must point at an ALREADY-RUNNING
+            //    server (the main or preview one), so it's a pure reachability
+            //    check with no Fix — there's nothing daemon-owned to restart.
             SttConnection::LocalBundled | SttConnection::LocalExternal => {
                 let (url, fallback_note) = bundled_probe_url(ports, cfg, stt);
-                let mut check = endpoint_check(
-                    &client,
-                    "Dictation STT endpoint",
-                    &url,
-                    CheckCategory::Warning,
-                    "Probes the STT endpoint dictation is pointed at — in-place dictation types nothing while it's unreachable.",
-                    "Dictation expects an already-running server here — point it at the main or preview server, or fix the URL (Settings → Capture → Dictation).",
-                )
-                .await;
+                let mut check = if dedicated {
+                    endpoint_check(
+                        &client,
+                        "Dictation STT endpoint",
+                        &url,
+                        CheckCategory::Warning,
+                        "Probes the dedicated dictation server — in-place dictation types nothing while it's down.",
+                        "Use Fix (or `phoneme doctor --fix`) to sweep and respawn the bundled server(s).",
+                    )
+                    .await
+                } else {
+                    endpoint_check(
+                        &client,
+                        "Dictation STT endpoint",
+                        &url,
+                        CheckCategory::Warning,
+                        "Probes the STT endpoint dictation is pointed at — in-place dictation types nothing while it's unreachable.",
+                        "Dictation expects an already-running server here — point it at the main or preview server, or fix the URL (Settings → Capture → Dictation).",
+                    )
+                    .await
+                };
+                if dedicated {
+                    check.fix_action = Some("restart_whisper".into());
+                }
                 check.detail.push_str(&fallback_note);
                 out.push(check);
             }
@@ -1204,6 +1272,38 @@ pub async fn run_backend_checks_with_ports(
                     .await,
                 );
             }
+        }
+    }
+
+    // ── Dictation on the slow model ─────────────────────────────────────────
+    // When in-place dictation resolves to a HEAVY local model (the main
+    // transcription one is typically large-v3-turbo), every dictation pays the
+    // big model's latency. A Warning — it still works, just slowly. Reuses
+    // `in_place_provider_config()` so this stays in lockstep with what the
+    // dictation fast lane actually dials.
+    {
+        let stt = cfg.in_place_provider_config();
+        if stt.provider == TranscriptionBackend::Local
+            && matches!(
+                stt.mode,
+                WhisperMode::BundledModel | WhisperMode::BundledDownload
+            )
+            && model_path_looks_heavy(&stt.model_path)
+        {
+            out.push(CheckResult {
+                name: "Dictation speed".into(),
+                ok: false,
+                detail: format!(
+                    "dictation resolves to a heavy model ({}) — every dictation pays its latency",
+                    stt.model_label()
+                ),
+                fix_action: None,
+                category: CheckCategory::Warning,
+                explanation: "Flags when in-place dictation rides a large/medium model — fast dictation wants a small model (tiny/base) or a cloud API.".into(),
+                fix_hint: Some(
+                    "Point dictation at the Live Preview's fast model, a small local model, or a cloud provider (Settings → Capture → Dictation).".into(),
+                ),
+            });
         }
     }
 
@@ -2007,6 +2107,7 @@ mod tests {
         let ports = EffectiveWhisperPorts {
             main: Some(live),
             preview: None,
+            in_place: None,
         };
         let results = run_backend_checks_with_ports(&cfg, &ports).await;
         let w = results.iter().find(|r| r.name == "Whisper server").unwrap();
@@ -2052,6 +2153,7 @@ mod tests {
         let ports = EffectiveWhisperPorts {
             main: Some(live),
             preview: None,
+            in_place: None,
         };
         let w = run_backend_checks_with_ports(&cfg, &ports)
             .await
@@ -2088,6 +2190,7 @@ mod tests {
         let ports = EffectiveWhisperPorts {
             main: Some(5809),
             preview: Some(preview_live),
+            in_place: None,
         };
         let p = run_backend_checks_with_ports(&cfg, &ports)
             .await
@@ -2115,6 +2218,7 @@ mod tests {
         let ports = EffectiveWhisperPorts {
             main: Some(51234),
             preview: None,
+            in_place: None,
         };
         let w = run_backend_checks_with_ports(&cfg, &ports)
             .await
@@ -2370,5 +2474,65 @@ mod tests {
         assert_eq!(ep.category, CheckCategory::Warning);
         assert!(ep.detail.contains("no LLM provider selected"));
         assert!(ep.fix_hint.is_some());
+    }
+
+    #[test]
+    fn heavy_model_heuristic_flags_big_models_only() {
+        assert!(model_path_looks_heavy("C:/models/ggml-large-v3-turbo.bin"));
+        assert!(model_path_looks_heavy("/m/medium.en.bin"));
+        assert!(model_path_looks_heavy("turbo.bin"));
+        assert!(!model_path_looks_heavy("C:/models/ggml-tiny.en.bin"));
+        assert!(!model_path_looks_heavy("base.bin"));
+        assert!(!model_path_looks_heavy(""));
+    }
+
+    #[tokio::test]
+    async fn dictation_speed_warns_when_riding_the_heavy_main_model() {
+        // Default: dictation falls back to the main provider. Make the main a
+        // heavy local model — the slow-model warning should fire.
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "C:/models/ggml-large-v3-turbo.bin".into();
+
+        let backend = run_backend_checks(&cfg).await;
+        let w = backend
+            .iter()
+            .find(|r| r.name == "Dictation speed")
+            .expect("slow-model warning present");
+        assert!(!w.ok);
+        assert_eq!(w.category, CheckCategory::Warning);
+
+        // A fast main model → no warning.
+        cfg.whisper.model_path = "C:/models/ggml-tiny.en.bin".into();
+        let backend = run_backend_checks(&cfg).await;
+        assert!(!backend.iter().any(|r| r.name == "Dictation speed"));
+    }
+
+    #[test]
+    fn dictation_server_live_port_is_followed_when_opted_in() {
+        // A dedicated dictation server on 5811 that fell back to a live port:
+        // the probe must follow it, but only when the opt-in is on.
+        let mut cfg = Config::default();
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.bundled_server_port = 5809;
+        let mut stt = cfg.whisper.clone();
+        stt.bundled_server_port = 5811;
+        stt.use_own_bundled_server = true;
+        cfg.in_place.stt = Some(stt);
+
+        let ports = EffectiveWhisperPorts {
+            main: Some(5809),
+            preview: None,
+            in_place: Some(54321),
+        };
+        let s = cfg.in_place.stt.as_ref().unwrap();
+        assert_eq!(ports.live_port_for(&cfg, s), Some(54321));
+
+        // Without the opt-in, the dictation arm doesn't fire — 5811 matches no
+        // running server and resolves to nothing (dial the configured port).
+        cfg.in_place.stt.as_mut().unwrap().use_own_bundled_server = false;
+        let s = cfg.in_place.stt.as_ref().unwrap();
+        assert_eq!(ports.live_port_for(&cfg, s), None);
     }
 }
