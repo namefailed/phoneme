@@ -415,7 +415,17 @@
   margin: 10px 0 4px;
   max-height: 64vh;
   overflow-y: auto;
+  /* Themed thin scrollbar instead of the default WebView2 one. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
 }
+.kbd-help-body::-webkit-scrollbar { width: 8px; }
+.kbd-help-body::-webkit-scrollbar-track { background: transparent; }
+.kbd-help-body::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 4px;
+}
+.kbd-help-body::-webkit-scrollbar-thumb:hover { background: var(--border); }
 .kbd-help-group {
   break-inside: avoid;
   margin-bottom: 12px;
@@ -457,6 +467,9 @@
 .kbd-help-label {
   font-size: 12.5px;
   color: var(--fg-default);
+  /* Long descriptions wrap cleanly instead of forcing the row wide / ragged. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .kbd-key {
   flex: 0 0 auto;
