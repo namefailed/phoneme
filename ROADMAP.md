@@ -267,12 +267,15 @@ explicit roadmap line here saying why not).
 
 - [x] **Webhook URL field in Settings** — the Hooks section now exposes the
   `hook.webhook_url` field (with empty-value guarding); the pipeline POSTs to it. (`SectionHook.ts`)
-- [x] **Failed-queue visibility + clear** — the queue panel now surfaces the
-  `failed/` count as a badge and lets the user dismiss it (`QueuePanel.ts`
-  `clearFailed` → `ClearFailed`/`getQueueCounts` IPC; the `queue_depth_changed`
-  event carries the failed count). *Per-file error detail + one-click **retry** is
-  still pending* — today clear only removes the failed marker; the recording and
-  its transcript are untouched.
+- [x] **Failed-queue visibility + per-file detail + retry** — the queue header's
+  ⚠ badge opens a **Failed recordings** panel (`FailedPanel.ts`): one row per
+  failed recording with which step failed, the stored reason
+  (`error_kind`/`error_message`, persisted on the row so it survives a restart;
+  live `transcription_failed`/`hook_failed` events fill the gap before the next
+  refresh), and when it happened. Per-row **Retry** (re-runs the whole pipeline
+  via `RetranscribeRecording`) and **Retry all** (sequential), plus **Open** and
+  the existing **Clear failed** quarantine action. A successful retry clears the
+  stored reason (`catalog::update_error` ↔ the transcribe path nulls it).
 - [ ] **Doctor: rebuild catalog** — `phoneme doctor --rebuild-catalog` is CLI-only.
 - [x] **Delete modes (keep-audio / transcript-only)** — the delete confirmation
   (single, bulk, `Delete` key, `dd`) now offers **Delete everything** (default) or
@@ -524,10 +527,11 @@ explicit roadmap line here saying why not).
   approve/dismiss UX, its own `[auto_tag]` provider config, and auto-accept for
   tags the library already has. Smart **titles** are the remaining half — tracked
   as the v1.9 auto-generated-titles item.
-- [x] **Transcription queue dashboard** — the queue panel now shows pending /
+- [x] **Transcription queue dashboard** — the queue panel shows pending /
   processing / failed (badge + clear), supports reorder, pause, cancel, and
-  skip-current-stage, and pins the active item. *Still open:* per-file error
-  detail + one-click retry on failed entries.
+  skip-current-stage, and pins the active item. The ⚠ failed badge opens a
+  **Failed recordings** panel (`FailedPanel.ts`) with per-file error detail and
+  one-click **Retry** / **Retry all**.
 - [ ] **Per-recording hook override** — this one goes to Discord, that one stays
   local. (Today hook config is global; re-fire is manual.)
 - [ ] **Confidence highlighting** — low-confidence words underlined; click to fix.
