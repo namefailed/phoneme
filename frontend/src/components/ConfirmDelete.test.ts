@@ -227,15 +227,30 @@ describe("confirmRecordingDelete — delete modes", () => {
     expect(getOverlay()).toBeNull();
   });
 
-  it("skip pref set replays a remembered keep-audio mode without a dialog", async () => {
+  it("skip pref NEVER silently replays keep-audio — resolves 'everything' and clears the stale mode", async () => {
+    // A user who once hit the old footgun has skip=true + a stale keep_audio mode.
     localStorage.setItem("phoneme_skip_delete_confirm", "true");
     localStorage.setItem("phoneme_delete_mode", "keep_audio");
     const result = await confirmRecordingDelete();
-    expect(result).toBe("keep_audio");
+    expect(result).toBe("everything"); // audio is removed again, as the user expects
+    expect(getOverlay()).toBeNull();
+    expect(localStorage.getItem("phoneme_delete_mode")).toBeNull(); // stale memory neutralized
+  });
+
+  it("'Don't ask again' with 'everything' pins the skip (always a full delete)", async () => {
+    const promise = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    const cb = queryEl<HTMLInputElement>("#dont-ask-again")!;
+    cb.checked = true; // mode is the default "everything"
+    queryEl<HTMLButtonElement>("#btn-confirm")?.click();
+    expect(await promise).toBe("everything");
+    expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBe("true");
+    // next call skips the dialog and stays "everything".
+    expect(await confirmRecordingDelete()).toBe("everything");
     expect(getOverlay()).toBeNull();
   });
 
-  it("'Don't ask again' remembers the mode chosen at that moment", async () => {
+  it("'Don't ask again' with 'keep audio' does NOT skip future dialogs (no silent orphaning)", async () => {
     const promise = confirmRecordingDelete();
     await new Promise(r => setTimeout(r, 0));
     const keepAudio = queryEl<HTMLInputElement>("#mode-keep-audio")!;
@@ -245,11 +260,14 @@ describe("confirmRecordingDelete — delete modes", () => {
     cb.checked = true;
     queryEl<HTMLButtonElement>("#btn-confirm")?.click();
     expect(await promise).toBe("keep_audio");
-    expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBe("true");
-    expect(localStorage.getItem("phoneme_delete_mode")).toBe("keep_audio");
-    // …and the next call replays that choice with no dialog.
-    expect(await confirmRecordingDelete()).toBe("keep_audio");
-    expect(getOverlay()).toBeNull();
+    // keep-audio must never become the silent default.
+    expect(localStorage.getItem("phoneme_skip_delete_confirm")).toBeNull();
+    // so the next delete shows the dialog again (deliberate per-delete choice).
+    const next = confirmRecordingDelete();
+    await new Promise(r => setTimeout(r, 0));
+    expect(getOverlay()).not.toBeNull();
+    queryEl<HTMLButtonElement>("#btn-cancel")?.click();
+    await next;
   });
 });
 

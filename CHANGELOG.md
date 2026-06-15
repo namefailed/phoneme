@@ -365,6 +365,19 @@ trust boundary. Verified against current code.*
   keyed on the whole `[diarization]` config so changing any knob reloads the
   pipeline with the new values. Defaults match today's implicit behavior
   (0.25 / 1e-7 / smoothed 0.1), so existing configs are unaffected.
+- [x] **Delete no longer silently keeps audio forever** — the delete dialog used
+  to remember a "keep the audio file" choice alongside "Don't ask again", so one
+  past keep-audio delete quietly turned *every* later delete into keep-audio: rows
+  vanished but `.wav` files piled up as orphans the user thought were gone. Now
+  "Don't ask again" only ever pins the safe full delete; keep-audio is always a
+  deliberate, per-delete choice, and any stale remembered keep-audio mode is
+  cleared on the next delete. (The daemon's delete was always correct — this was
+  the UI footgun.)
+- [x] **Doctor flags orphaned audio** — a new **"Orphaned audio"** check counts
+  `.wav` files on disk with no library entry (what accumulates from keep-audio
+  deletes, and what "Re-import from disk" would resurrect), so it can't grow
+  silently. Surfaced identically in the CLI (`phoneme doctor`), the Doctor view,
+  and the Doctor modal via a shared builder.
 - [x] **UI font size is a real font size now** — the Appearance → font-size setting
   drives the root `font-size` (`--ui-font-size`), and every text size across the app
   is expressed in `rem`, so changing it scales the interface text up/down cleanly.

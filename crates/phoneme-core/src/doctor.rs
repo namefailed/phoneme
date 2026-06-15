@@ -754,6 +754,47 @@ fn model_path_looks_heavy(model_path: &str) -> bool {
     stem.contains("large") || stem.contains("medium") || stem.contains("turbo")
 }
 
+/// Build the "Orphaned audio" Doctor check from an orphan count (audio files on
+/// disk with no catalog row). Shared by every Doctor surface so the wording and
+/// category stay identical; each caller supplies the count from where it can see
+/// the catalog (the daemon counts directly; the CLI/tray fetch it via a
+/// `ReimportFromDisk { dry_run: true }`). Orphans accumulate when recordings are
+/// deleted with "keep the audio file"; surfacing the count keeps that from
+/// growing silently (and a re-import would otherwise resurrect them).
+pub fn orphan_audio_check_result(count: usize) -> CheckResult {
+    if count == 0 {
+        CheckResult {
+            name: "Orphaned audio".into(),
+            ok: true,
+            detail: "none — every audio file has a library entry".into(),
+            fix_action: None,
+            category: CheckCategory::Info,
+            explanation:
+                "Audio files on disk with no library entry (e.g. left behind by a \"keep the audio\" delete)."
+                    .into(),
+            fix_hint: None,
+        }
+    } else {
+        CheckResult {
+            name: "Orphaned audio".into(),
+            ok: false,
+            detail: format!(
+                "{count} audio file{} on disk with no library entry",
+                if count == 1 { "" } else { "s" }
+            ),
+            fix_action: None,
+            category: CheckCategory::Warning,
+            explanation:
+                "Audio files left on disk after deleting recordings with \"keep the audio file\". They take up space, and a \"Re-import from disk\" would bring them back into the library."
+                    .into(),
+            fix_hint: Some(
+                "Re-import them with Doctor's \"\u{21bb} Re-import from disk\", or delete the stray .wav files from your audio folder to reclaim the space."
+                    .into(),
+            ),
+        }
+    }
+}
+
 // ── LLM step connections ─────────────────────────────────────────────────────
 
 /// One enabled LLM pipeline step and the connection it will actually use.
@@ -2520,6 +2561,23 @@ mod tests {
         assert!(!model_path_looks_heavy("C:/models/ggml-tiny.en.bin"));
         assert!(!model_path_looks_heavy("base.bin"));
         assert!(!model_path_looks_heavy(""));
+    }
+
+    #[test]
+    fn orphan_audio_check_reflects_the_count() {
+        let none = orphan_audio_check_result(0);
+        assert!(none.ok);
+        assert_eq!(none.category, CheckCategory::Info);
+        assert!(none.fix_hint.is_none());
+
+        let many = orphan_audio_check_result(3);
+        assert!(!many.ok);
+        assert_eq!(many.category, CheckCategory::Warning);
+        assert!(many.detail.contains("3 audio files"));
+        assert!(many.fix_hint.is_some());
+
+        // Singular grammar for exactly one.
+        assert!(orphan_audio_check_result(1).detail.contains("1 audio file on"));
     }
 
     #[tokio::test]

@@ -961,6 +961,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             };
             let mut checks = phoneme_core::doctor::run_local_checks(&cfg);
             checks.extend(phoneme_core::doctor::run_backend_checks_with_ports(&cfg, &ports).await);
+            // Daemon-side: needs the catalog + an audio-dir scan, so it can't live
+            // in phoneme-core's stateless checks.
+            checks.push(orphan_audio_check(state).await);
             serialize_response(checks)
         }
         Request::RestartWhisper => {
@@ -1356,6 +1359,27 @@ fn audio_path_is_ours(audio_path: &str, audio_dir: &std::path::Path) -> bool {
         return false;
     }
     p.starts_with(audio_dir)
+}
+
+/// Doctor check for ORPHANED AUDIO: `.wav` files on disk that have no catalog
+/// row. They accumulate when recordings are deleted with "keep the audio file",
+/// and a `--reimport` would resurrect them — so surface the count rather than
+/// let it grow silently and surprise the user later. Reuses the re-import scan
+/// + `all_ids`, so it counts exactly what "Re-import from disk" would re-link.
+async fn orphan_audio_check(state: &AppState) -> phoneme_core::doctor::CheckResult {
+    let existing: std::collections::HashSet<phoneme_core::RecordingId> = state
+        .catalog
+        .all_ids()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let audio_dir = state.paths.audio_dir.clone();
+    let count = tokio::task::spawn_blocking(move || scan_audio_dir(&audio_dir))
+        .await
+        .map(|cands| cands.into_iter().filter(|c| !existing.contains(&c.id)).count())
+        .unwrap_or(0);
+    phoneme_core::doctor::orphan_audio_check_result(count)
 }
 
 /// Re-run ONLY the LLM post-processing ("cleanup") step on a recording's

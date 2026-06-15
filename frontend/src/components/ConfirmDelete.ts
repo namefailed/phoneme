@@ -13,8 +13,9 @@ export function deleteModeKeepsAudio(mode: DeleteMode): boolean {
 }
 
 const DEFAULT_SKIP_KEY = "phoneme_skip_delete_confirm";
-/** Mode remembered when "Don't ask again" is checked, so skipped dialogs keep
- *  doing what the user last asked for instead of silently reverting. */
+/** Legacy key: a delete mode the old behavior remembered across deletes. No
+ *  longer written — kept only so a stale value can be cleared on the next
+ *  skipped delete (skipped deletes now always do the full "everything" delete). */
 const DELETE_MODE_KEY = "phoneme_delete_mode";
 
 /** Per-call dialog text + skip-key overrides for {@link confirmDelete}. */
@@ -80,11 +81,15 @@ export class ConfirmDeleteElement extends LitElement {
 
   private confirm() {
     if (this.checkbox?.checked) {
-      localStorage.setItem(this.skipKey, "true");
-      // Future skipped dialogs replay this exact choice — checking "don't ask
-      // again" while "keep the audio" is selected must not flip future deletes
-      // back to removing audio.
-      if (this.showModes) localStorage.setItem(DELETE_MODE_KEY, this.mode);
+      // "Don't ask again" only ever pins the SAFE full delete. Keep-audio is the
+      // deliberate exception: making it the silent, remembered default once meant
+      // every later delete quietly left the audio file behind, piling up orphaned
+      // WAVs that the user thought they'd deleted. So checking "don't ask again"
+      // while keeping audio does NOT skip future dialogs — keep-audio stays a
+      // per-delete choice.
+      if (!(this.showModes && this.mode === "keep_audio")) {
+        localStorage.setItem(this.skipKey, "true");
+      }
     }
     this.dispatchEvent(new CustomEvent('resolved', { detail: { confirmed: true, mode: this.mode } }));
   }
@@ -176,15 +181,18 @@ export function confirmDelete(opts?: ConfirmDeleteOpts): Promise<boolean> {
  * CLI's `phoneme delete --keep-audio`). Resolves the chosen mode, or `null`
  * when cancelled.
  *
- * "Don't ask again" also pins the mode selected at that moment: later deletes
- * skip the dialog and reuse it. A skip pref set before modes existed replays
- * the old behavior (delete everything).
+ * "Don't ask again" only pins the safe full delete: a skipped delete always
+ * resolves "everything". Keep-audio is never silently replayed — it's a
+ * deliberate per-delete choice — so a past keep-audio pick can't quietly leave
+ * orphaned audio on every later delete. Any stale remembered keep-audio mode
+ * from the old behavior is cleared on the next skipped delete.
  */
 export function confirmRecordingDelete(count = 1): Promise<DeleteMode | null> {
   return new Promise((resolve) => {
     if (localStorage.getItem(DEFAULT_SKIP_KEY) === "true") {
-      const remembered = localStorage.getItem(DELETE_MODE_KEY);
-      return resolve(remembered === "keep_audio" ? "keep_audio" : "everything");
+      // Neutralize any keep-audio mode remembered by the old (footgun) behavior.
+      localStorage.removeItem(DELETE_MODE_KEY);
+      return resolve("everything");
     }
 
     const el = document.createElement('ph-confirm-delete') as ConfirmDeleteElement;

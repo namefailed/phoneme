@@ -201,6 +201,17 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     checks.extend(doctor::run_local_checks(cfg));
     checks.extend(doctor::run_backend_checks_with_ports(cfg, &whisper_ports).await);
 
+    // Orphaned audio (audio on disk with no catalog row) needs the catalog, so
+    // ask the daemon — its dry-run re-import returns the count. Skipped when the
+    // daemon isn't reachable (the count is unknowable without it).
+    if let Ok(ref mut c) = client_result {
+        if let Ok(v) = c.send(Request::ReimportFromDisk { dry_run: true }).await {
+            if let Some(count) = v.get("count").and_then(|n| n.as_u64()) {
+                checks.push(doctor::orphan_audio_check_result(count as usize));
+            }
+        }
+    }
+
     // --fix: when a check the daemon can repair failed (the whisper / preview
     // server probes carry fix_action "restart_whisper"), ask the daemon to
     // sweep + respawn the server(s), wait for them to come up, and re-probe.

@@ -1275,7 +1275,16 @@ pub fn doctor_local_checks() -> Result<Vec<CheckResult>, CommandError> {
 pub async fn doctor_backend_checks(bridge: Br<'_>) -> Result<Vec<CheckResult>, CommandError> {
     let cfg = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
     let ports = effective_whisper_ports(&bridge).await;
-    Ok(crate::doctor::run_backend_checks_with_ports(&cfg, &ports).await)
+    let mut checks = crate::doctor::run_backend_checks_with_ports(&cfg, &ports).await;
+    // Orphaned audio (audio on disk with no catalog row) needs the catalog, so
+    // ask the daemon — the dry-run re-import returns the count. Best-effort:
+    // when the daemon is down, just omit the check (the count is unknowable).
+    if let Ok(v) = forward(&bridge, Request::ReimportFromDisk { dry_run: true }).await {
+        if let Some(count) = v.get("count").and_then(|n| n.as_u64()) {
+            checks.push(phoneme_core::doctor::orphan_audio_check_result(count as usize));
+        }
+    }
+    Ok(checks)
 }
 
 /// The bundled whisper-servers' live ports as published in `daemon_status`,
