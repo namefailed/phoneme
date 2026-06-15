@@ -719,17 +719,11 @@ export class RecordingsView {
         if (id) this.onSelect(id);
         break;
       }
-      // gg/G inside the sidebar — jump to the first/last sidebar row (X). The
-      // overflowing tag list and a long queue share this grid, so scrollIntoView
-      // in highlightSidebar() scrolls them into view.
-      case "sidebar-top": this.sidebarRow = 0; this.sidebarCol = 0; this.highlightSidebar(); break;
-      case "sidebar-bottom": {
-        const rows = this.sidebarGrid();
-        this.sidebarRow = Math.max(0, rows.length - 1);
-        this.sidebarCol = 0;
-        this.highlightSidebar();
-        break;
-      }
+      // gg/G inside the sidebar — jump to the top/bottom of the CURRENT section
+      // (Library filters · Tags · the Queue), not the whole sidebar, so a long
+      // tag list or queue stays put under your cursor.
+      case "sidebar-top": { const s = this.sidebarSectionBounds(); this.sidebarRow = s.top; this.sidebarCol = 0; this.highlightSidebar(); break; }
+      case "sidebar-bottom": { const s = this.sidebarSectionBounds(); this.sidebarRow = s.bottom; this.sidebarCol = 0; this.highlightSidebar(); break; }
       // zz — center the list viewport on the cursor row.
       case "list-center": this.list.centerCursor(); break;
       // g d — jump the keyboard into the detail pane (no-op when nothing open).
@@ -897,10 +891,53 @@ export class RecordingsView {
     this.highlightSidebar();
   }
 
+  /** The [top, bottom] row range of the sidebar SECTION the cursor is in —
+   *  Library filters · Tags · the Queue — so gg/G stay within the current
+   *  section instead of leaping the whole sidebar. */
+  private sidebarSectionBounds(): { top: number; bottom: number } {
+    const grid = this.sidebarGrid();
+    if (!grid.length) return { top: 0, bottom: 0 };
+    const row = this.sidebarRow < 0 ? 0 : Math.min(this.sidebarRow, grid.length - 1);
+    const isQueue = (r: number) =>
+      grid[r].some((c) =>
+        c.classList.contains("queue-item-main") ||
+        c.classList.contains("queue-move") ||
+        c.classList.contains("queue-cancel") ||
+        c.classList.contains("queue-action") ||
+        c.classList.contains("queue-failed") ||
+        c.classList.contains("queue-header"));
+    const isHeader = (r: number) => !!grid[r][0]?.classList.contains("sidebar-header");
+    if (isQueue(row)) {
+      let top = row, bottom = row;
+      while (top > 0 && isQueue(top - 1)) top--;
+      while (bottom < grid.length - 1 && isQueue(bottom + 1)) bottom++;
+      return { top, bottom };
+    }
+    // Library / Tags: from the nearest section header above (inclusive) down to
+    // the row before the next header or the queue block.
+    let top = row;
+    while (top > 0 && !isHeader(top)) top--;
+    let bottom = row;
+    while (bottom < grid.length - 1 && !isHeader(bottom + 1) && !isQueue(bottom + 1)) bottom++;
+    return { top, bottom };
+  }
+
   private moveSidebarRow(delta: number) {
     const rows = this.sidebarGrid();
     if (!rows.length) return;
     if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
+    // On a queue ▲/▼ move button, j/k step between that up/down PAIR (they read
+    // as vertical) rather than changing rows; h/l treats the pair as one stop.
+    const cur = rows[this.sidebarRow]?.[this.sidebarCol];
+    if (cur && cur.classList.contains("queue-move")) {
+      const moves = [...(cur.closest(".queue-item")?.querySelectorAll<HTMLElement>(".queue-move") ?? [])];
+      const ni = moves.indexOf(cur) + delta;
+      if (ni >= 0 && ni < moves.length) {
+        const nc = rows[this.sidebarRow].indexOf(moves[ni]);
+        if (nc >= 0) { this.sidebarCol = nc; this.highlightSidebar(); return; }
+      }
+      // Past the top/bottom of the pair → fall through to a normal row move.
+    }
     const next = this.sidebarRow + delta;
     // Up past the very top row → HIGHLIGHT the header search bar (roving mode),
     // exactly like k at the top of the list or detail pane. Release the sidebar
@@ -928,7 +965,17 @@ export class RecordingsView {
     if (!rows.length) return;
     if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
     const row = rows[Math.min(this.sidebarRow, rows.length - 1)];
-    const next = this.sidebarCol + delta;
+    let next = this.sidebarCol + delta;
+    // Skip the SECOND queue ▲/▼ button so h/l stops on the move pair once (j/k
+    // then pick up vs down) — the pair reads as a single horizontal stop.
+    while (next >= 0 && next < row.length) {
+      const cell = row[next];
+      if (cell.classList.contains("queue-move")) {
+        const moves = [...(cell.closest(".queue-item")?.querySelectorAll<HTMLElement>(".queue-move") ?? [])];
+        if (moves.indexOf(cell) > 0) { next += delta; continue; }
+      }
+      break;
+    }
     if (next >= row.length) { this.focusPane("list"); return; }
     this.sidebarCol = Math.max(0, next);
     this.highlightSidebar();
@@ -1742,8 +1789,13 @@ export class RecordingsView {
       // Hide / show the left sidebar (VS Code-style).
       e.preventDefault();
       this.toggleSidebar();
-    } else if (e.ctrlKey && e.key === "\\") {
-      // Hide / show the right detail pane.
+    } else if (
+      (e.ctrlKey && e.key === "\\") ||
+      (e.ctrlKey && (e.key === "d" || e.key === "D") && !target.isContentEditable)
+    ) {
+      // Hide / show the right detail pane (Ctrl+\ or Ctrl+D — "D for Details").
+      // The pane keeps the last-open recording mounted while hidden, so toggling
+      // it back re-reveals what was last open.
       e.preventDefault();
       this.toggleDetail();
     } else if (e.key === "Delete") {

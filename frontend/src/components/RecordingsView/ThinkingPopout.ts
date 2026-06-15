@@ -78,10 +78,14 @@ export class ThinkingPopoutElement extends LitElement {
     try { localStorage.setItem(ThinkingPopoutElement.OPEN_LS, String(v)); } catch { /* ignore */ }
   }
 
+  /** Toggle the panel from the keyboard (the `g A` chord dispatches this). */
+  private onToggleActivity = () => this.setOpen(!this.open);
+
   async connectedCallback() {
     super.connectedCallback();
     window.addEventListener("phoneme:sidebar-changed", this.onLayoutChange);
     window.addEventListener("resize", this.onLayoutChange);
+    window.addEventListener("phoneme:toggle-ai-activity", this.onToggleActivity);
     try {
       const raw = localStorage.getItem(ThinkingPopoutElement.FAB_LS);
       if (raw) {
@@ -168,6 +172,7 @@ export class ThinkingPopoutElement extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener("phoneme:sidebar-changed", this.onLayoutChange);
     window.removeEventListener("resize", this.onLayoutChange);
+    window.removeEventListener("phoneme:toggle-ai-activity", this.onToggleActivity);
     if (this.unsub) this.unsub();
   }
 

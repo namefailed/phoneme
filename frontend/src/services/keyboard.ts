@@ -40,6 +40,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "g then s", label: "Go to Settings" },
       { combo: "g then d", label: "Keyboard into the open recording" },
       { combo: "g then D", label: "Go to Doctor" },
+      { combo: "g then A", label: "Toggle the AI-activity panel" },
       { combo: "g then /", label: "Highlight the search bar (h/l roam the header)" },
       { combo: "g then T", label: "Open the Tag Manager" },
       { combo: "g then P", label: "Managers → Profiles" },
@@ -102,17 +103,20 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "h  l (header)", label: "Move across the header controls (wraps around)" },
     { combo: "Enter (header)", label: "Open the status / Record / Settings dropdown" },
     { combo: "j  k (in menu)", label: "Choose an option — Enter selects, Esc closes" },
-    { combo: "g g", label: "Jump to the first recording" },
-    { combo: "G", label: "Jump to the last recording" },
+    { combo: "g g", label: "Jump to the top (list · sidebar · detail)" },
+    { combo: "G", label: "Jump to the bottom (list · sidebar · detail)" },
     { combo: "z z", label: "Center the list on the cursor row" },
     { combo: "Enter", label: "Open recording · apply sidebar filter" },
     { combo: "j  k (sidebar)", label: "Filters · section headers · the queue's items" },
     { combo: "h  l (sidebar)", label: "Across a queue row's buttons (l past the end → list)" },
+    { combo: "j  k (queue ▲▼)", label: "On a queue item's move pair: pick move-up / move-down" },
     { combo: "Enter (sidebar)", label: "Apply filter · fold a section · press a queue button" },
     { combo: "l (into detail)", label: "Enter the open recording, on the transcript" },
     { combo: "j  k (detail)", label: "Top row · actions · tags · transcript · views · notes" },
     { combo: "h  l (detail)", label: "Across a row's buttons (h at the start → list)" },
-    { combo: "Enter (detail)", label: "Edit the box / press the button" },
+    { combo: "Enter (detail)", label: "Edit the box / press the button / open a dropdown" },
+    { combo: "j k · Enter · Esc", label: "Drive a detail dropdown (Speed/Export/Views/Pipeline)" },
+    { combo: "Enter (waveform)", label: "Scrub mode: h/l ±1s, H/L ±5s, Space play, Esc leaves" },
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
     { combo: "i", label: "Edit the transcript directly" },
     { combo: "d d", label: "Delete the focused recording (with Undo)" },
@@ -375,11 +379,22 @@ function onKeyDown(e: KeyboardEvent) {
     const active = document.activeElement as HTMLElement;
     const isSearch = active.classList.contains("search");
     if (e.key === "Escape") {
-      // Escape backs out of ANY header input (search box, the date filters) —
-      // blur it and drop to the list so the user is never trapped in a field.
+      // Escape backs out of a header input (search box, the date filters). With
+      // vim nav on, return the roving cursor TO that control so you can keep
+      // roaming the header — you just left a field, not the whole bar (a second
+      // Esc from roving then drops to the list). Without vim nav, blur straight
+      // to the list as before.
       if (active.closest(".headerbar")) {
+        const fromCtrl = active as HTMLElement;
         active.blur();
-        focusList();
+        if (vimNav) {
+          enterHeaderNav();
+          const items = headerControls();
+          const idx = items.findIndex((el) => el === fromCtrl || el.contains(fromCtrl));
+          if (idx >= 0) { headerCursor = idx; highlightHeaderCursor(); }
+        } else {
+          focusList();
+        }
       }
       return;
     }
@@ -447,6 +462,8 @@ function onKeyDown(e: KeyboardEvent) {
     // g D — open the Doctor POPUP (same modal the header status pill opens), not
     // the full-page Doctor view.
     if (e.key === "D") { e.preventDefault(); void import("../components/DoctorModal").then((m) => m.openDoctor()); return; }
+    // g A — toggle the AI-activity popout (the brain/FAB panel).
+    if (e.key === "A") { e.preventDefault(); window.dispatchEvent(new CustomEvent("phoneme:toggle-ai-activity")); return; }
     // Capital chords jump to the managers: g T = quick Tag Manager popup,
     // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches.
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
@@ -690,10 +707,18 @@ function onKeyDown(e: KeyboardEvent) {
             });
             return;
           }
-          // Everything else: the search box focuses to type; other buttons fire.
-          exitHeaderNav();
-          el.focus();
-          if (!el.classList.contains("search")) el.click();
+          // The search box focuses to type (leaving roving nav). EVERY other
+          // control just FIRES but keeps the roving cursor on it, so after
+          // sorting / toggling the sidebar / opening a popup you keep roaming the
+          // header with h/l instead of being dumped to the list. Re-highlight
+          // after the click (the action may re-render the header).
+          if (el.classList.contains("search")) {
+            exitHeaderNav();
+            el.focus();
+            return;
+          }
+          el.click();
+          requestAnimationFrame(() => { if (headerCursor >= 0) highlightHeaderCursor(); });
           return;
         }
         // Any other key falls through to the global shortcuts below.

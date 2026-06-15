@@ -404,17 +404,21 @@
 
 /* ── Keyboard shortcuts cheat-sheet ("?") ─────────────────────────────────── */
 .kbd-help-dialog {
-  width: 640px;
-  max-width: 92vw;
+  /* A big, near-full-window popup so EVERY shortcut group is visible at once
+     instead of being clipped behind a horizontal scrollbar. */
+  width: min(1200px, 95vw);
+  max-width: 95vw;
 }
-/* Masonry-style 2-column layout: each group is a self-contained card that never
-   splits across the column break. */
+/* Masonry layout: as many ~320px columns as fit the wide dialog, each group a
+   self-contained card that never splits across the column break. overflow-x is
+   hidden so a wide kbd row can never force a horizontal scrollbar. */
 .kbd-help-body {
-  column-count: 2;
-  column-gap: 14px;
+  columns: 320px;
+  column-gap: 18px;
   margin: 10px 0 4px;
-  max-height: 64vh;
+  max-height: 80vh;
   overflow-y: auto;
+  overflow-x: hidden;
   /* Themed thin scrollbar instead of the default WebView2 one. */
   scrollbar-width: thin;
   scrollbar-color: var(--border-subtle) transparent;
