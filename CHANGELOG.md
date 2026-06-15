@@ -57,6 +57,18 @@ trust boundary. Verified against current code.*
 
 ### Recording
 
+- [x] **Live preview now works during in-place dictation** — dictation previously
+  showed no overlay caption at all (the streaming-preview loop was hard-skipped for
+  dictation to protect paste latency). It now drives the overlay like any recording,
+  with an in-place-scoped teardown that aborts the preview on stop so the typed text
+  still lands instantly. Caption duplication is fixed at the source (the rolling-
+  window stitch no longer re-appends revised text).
+- [x] **Live-preview overlay redesigned as a one-line caption** — a strict single
+  line that never wraps or grows: fixed height, **horizontal-resize only** (drag it
+  wider/narrower for more/less text, never taller), words reveal one-at-a-time at
+  `preview_reveal_words_per_sec` with the newest words kept on the line (older ones
+  scroll off the left). The source-swap button now appears only for meetings, and
+  the laggy fade in/out is gone.
 - [x] **Adaptive whisper-server supervision** — the daemon now spawns *exactly*
   the local whisper-servers the current config needs and no more, from a single
   source of truth (`Config::needed_whisper_servers`): the main server, the live-

@@ -55,7 +55,7 @@ const OVERLAY_W: f64 = 540.0;
 /// height is fixed (see the builder: min height == max height pins the vertical
 /// axis so only the width is draggable). Tuned to fit the chrome row plus one
 /// line of `.ov-text` at the current font + the card's vertical padding.
-const OVERLAY_H: f64 = 54.0;
+const OVERLAY_H: f64 = 32.0;
 /// Minimum width so the window can't be dragged down to a useless sliver — still
 /// enough for the dot/label/controls plus a few words of caption.
 const OVERLAY_MIN_W: f64 = 300.0;
