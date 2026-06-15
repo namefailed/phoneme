@@ -737,6 +737,14 @@ export class RecordingsView {
       case "sidebar-activate": this.activateSidebarCell(); break;
       case "detail-down": this.moveDetailRow(1); break;
       case "detail-up": this.moveDetailRow(-1); break;
+      case "detail-top": this.detailRow = 0; this.detailCol = 0; this.highlightDetail(); break;
+      case "detail-bottom": {
+        const rows = this.detailGrid();
+        this.detailRow = Math.max(0, rows.length - 1);
+        this.detailCol = 0;
+        this.highlightDetail();
+        break;
+      }
       case "detail-left": this.moveDetailCol(-1); break;
       case "detail-right": this.moveDetailCol(1); break;
       case "detail-enter": this.activateDetail(false); break;

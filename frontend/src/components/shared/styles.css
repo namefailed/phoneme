@@ -19,19 +19,16 @@ body.phoneme-hide-header-instant #hdr {
   outline-offset: 2px;
   border-radius: 8px;
 }
-/* Roving cursor on a split-button group (Record / Settings): ring the whole
-   group from the INSIDE so it hugs the group's outer edge and never paints over
-   the split seam between the main and caret halves (M). */
-.headerbar .hb-rec-group.kbd-group-cursor,
-.headerbar .hb-settings-group.kbd-group-cursor {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-  border-radius: 8px;
-}
-/* …and suppress the per-half ring while the group ring is showing. */
+/* Roving cursor on EITHER half of a split button (Record / Settings: the action
+   button and its dropdown caret are independently selectable). Ring each half
+   from the INSIDE (outline-offset:-2px) so the cursor shows WHICH half you're on
+   without protruding across the split seam — the outline follows each half's own
+   border-radius. (Restores per-half selection; the earlier whole-group ring made
+   the two halves look like one control and you couldn't land on the caret to open
+   its menu.) */
 .headerbar .hb-rec-group .kbd-cursor,
 .headerbar .hb-settings-group .kbd-cursor {
-  outline: none;
+  outline-offset: -2px;
 }
 
 /* "More like this" pill clear-× — integrated into the pill (no boxy chrome),

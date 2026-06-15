@@ -211,18 +211,6 @@ function headerControls(): HTMLElement[] {
   return [...bar.querySelectorAll<HTMLElement>(sel)].filter((el) => el.offsetParent !== null);
 }
 
-/** Mirror the roving header cursor onto the whole split-button group (Record /
- *  Settings) so the ring hugs the group's outer edge instead of one half — a
- *  rounded outline on a single half collides with the split seam (M). Pass null
- *  (or a control outside any group) to clear it. */
-function setGroupCursor(el: HTMLElement | null) {
-  document
-    .querySelectorAll(".headerbar .kbd-group-cursor")
-    .forEach((g) => g.classList.remove("kbd-group-cursor"));
-  const grp = el?.closest(".hb-rec-group, .hb-settings-group");
-  if (grp) grp.classList.add("kbd-group-cursor");
-}
-
 /** Index of the header control the vim cursor is on; -1 when not in header nav. */
 let headerCursor = -1;
 
@@ -246,9 +234,9 @@ function highlightHeaderSub() {
       el.classList.add("kbd-cursor");
       el.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
-    // Keep the group ring on the opener (Record/Settings) while its dropdown
-    // is open, so the split button still reads as the active group (M).
-    setGroupCursor(headerSub.opener);
+    // Keep the cursor ring on the opener (e.g. the Record/Settings caret) while
+    // its dropdown is open, so the trigger still reads as the active control.
+    headerSub.opener.classList.add("kbd-cursor");
   } else {
     // A native <select> can't pop its options from JS, so signal "you're now
     // cycling this" with a bolder border (.kbd-cycle) on top of the cursor ring.
@@ -272,13 +260,11 @@ function highlightHeaderCursor() {
     el.classList.add("kbd-cursor");
     el.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
-  setGroupCursor(el ?? null);
 }
 
 function exitHeaderNav() {
   closeHeaderSub(true);
   document.querySelectorAll(".headerbar .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
-  setGroupCursor(null);
   headerCursor = -1;
 }
 
@@ -471,7 +457,8 @@ function onKeyDown(e: KeyboardEvent) {
     if (vimNav && e.key === "g") {
       e.preventDefault();
       if (activeWithin("ph-sidebar")) dispatchVim("sidebar-top");
-      else if (!activeWithin(".rv-detail")) dispatchVim("list-top");
+      else if (activeWithin(".rv-detail")) dispatchVim("detail-top");
+      else dispatchVim("list-top");
       return;
     }
     return;
@@ -647,7 +634,12 @@ function onKeyDown(e: KeyboardEvent) {
           // Split-button caret that opens a dropdown (Record / Settings): open
           // it, then j/k through its items. The menu paints on the next frame.
           if (el.getAttribute("aria-haspopup") === "menu") {
-            const group = el.closest(".hb-rec-group, .hb-settings-group");
+            // The menu lives in the trigger's group wrapper — Record/Settings
+            // split groups, the Saved-searches group, or (fallback) the button's
+            // immediate parent. Broadening this is what lets j/k drive the
+            // Saved-searches dropdown, not just Record/Settings.
+            const group =
+              el.closest(".hb-rec-group, .hb-settings-group, .ss-group") ?? el.parentElement;
             el.click();
             requestAnimationFrame(() => {
               if (headerCursor < 0) return; // header nav was left within the frame
@@ -703,6 +695,11 @@ function onKeyDown(e: KeyboardEvent) {
         if (activeWithin("ph-sidebar")) {
           e.preventDefault();
           dispatchVim("sidebar-bottom");
+          return;
+        }
+        if (activeWithin(".rv-detail")) {
+          e.preventDefault();
+          dispatchVim("detail-bottom");
           return;
         }
         break;
