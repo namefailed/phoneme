@@ -115,7 +115,16 @@ input[type="checkbox"].toggle-switch:disabled {
   grid-template-rows: auto 1fr;
   height: 100%;
 }
+/* Pin the rows explicitly. Settings/wizard hide #hdr with display:none; without
+   this, #main would become the first in-flow child and auto-place into the `auto`
+   track (collapsing to content height — zero for an absolutely-filled child, hence
+   a blank panel). Forcing #main into row 2 (1fr) keeps it full-height regardless
+   of whether the header is shown. */
+#hdr {
+  grid-row: 1;
+}
 #main {
+  grid-row: 2;
   overflow: hidden;
   /* Establish a stacking context so the recordings view's internal splitters
      (.rv-splitter / .rv-sidebar-resizer at z-index:100) stay trapped BELOW the
