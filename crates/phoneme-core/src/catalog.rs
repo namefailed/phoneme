@@ -27,7 +27,8 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    ListFilter, Recording, RecordingStatus, SpeakerName, TranscriptSegment, TranscriptWord,
+    AiActivityEntry, ListFilter, Recording, RecordingStatus, SpeakerName, TranscriptSegment,
+    TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -130,6 +131,11 @@ pub struct Catalog {
 /// ranking paths read from SQLite per query — slower, but memory stays bounded
 /// no matter how large the library grows.
 const MAX_CACHED_VECTORS: usize = 200_000;
+
+/// How many AI-activity sessions to keep. The log is a recent-history audit
+/// trail, not an archive — every insert prunes everything past this newest
+/// window so the table stays bounded no matter how much the AI runs.
+const AI_ACTIVITY_KEEP: i64 = 1_000;
 
 /// Sanitizes a user-provided string for use in an FTS5 MATCH query.
 ///
@@ -313,6 +319,82 @@ impl Catalog {
             .unwrap()
             .as_ref()
             .map(|c| c.chunks.len() + c.legacy.len())
+    }
+
+    /// Persist one completed AI-activity session (a finished streaming LLM
+    /// stage). Called by the daemon's `run_llm_stage` on success so the 🧠 popout
+    /// can show the prompt + response after an app restart, not just live. Every
+    /// insert prunes the table back to the newest [`AI_ACTIVITY_KEEP`] rows so it
+    /// can't grow without bound; `created_at` is stored as RFC3339 UTC.
+    pub async fn insert_ai_activity(
+        &self,
+        recording_id: &str,
+        stage: &str,
+        prompt: &str,
+        response: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO ai_activity (recording_id, stage, prompt, response, created_at) \
+             VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+        )
+        .bind(recording_id)
+        .bind(stage)
+        .bind(prompt)
+        .bind(response)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "DELETE FROM ai_activity WHERE id NOT IN \
+             (SELECT id FROM ai_activity ORDER BY id DESC LIMIT ?)",
+        )
+        .bind(AI_ACTIVITY_KEEP)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Recent AI-activity sessions, newest first. With `recording_id` set, only
+    /// that recording's sessions; otherwise the whole library's recent activity.
+    /// `limit` is clamped to `[1, AI_ACTIVITY_KEEP]`.
+    pub async fn list_ai_activity(
+        &self,
+        recording_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<AiActivityEntry>> {
+        let limit = limit.clamp(1, AI_ACTIVITY_KEEP);
+        let rows = match recording_id {
+            Some(rid) => {
+                sqlx::query(
+                    "SELECT id, recording_id, stage, prompt, response, created_at \
+                     FROM ai_activity WHERE recording_id = ? ORDER BY id DESC LIMIT ?",
+                )
+                .bind(rid)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query(
+                    "SELECT id, recording_id, stage, prompt, response, created_at \
+                     FROM ai_activity ORDER BY id DESC LIMIT ?",
+                )
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            out.push(AiActivityEntry {
+                id: row.try_get("id")?,
+                recording_id: row.try_get("recording_id")?,
+                stage: row.try_get("stage")?,
+                prompt: row.try_get("prompt")?,
+                response: row.try_get("response")?,
+                created_at: row.try_get("created_at")?,
+            });
+        }
+        Ok(out)
     }
 
     /// Insert a new recording row. The pipeline calls this once, when capture
@@ -2249,6 +2331,34 @@ mod tests {
             got.error_message, None,
             "a successful retry clears error_message"
         );
+    }
+
+    #[tokio::test]
+    async fn ai_activity_round_trips_filters_and_orders_newest_first() {
+        let db = Catalog::open(Path::new("sqlite::memory:")).await.unwrap();
+        // Migration applied: the table exists and starts empty.
+        assert!(db.list_ai_activity(None, 50).await.unwrap().is_empty());
+
+        // Two sessions for recording "a", one for "b".
+        db.insert_ai_activity("a", "cleaning_up", "p1", "r1").await.unwrap();
+        db.insert_ai_activity("b", "summarizing", "p2", "r2").await.unwrap();
+        db.insert_ai_activity("a", "summarizing", "p3", "r3").await.unwrap();
+
+        // Global list is newest-first (id DESC == insert order DESC).
+        let all = db.list_ai_activity(None, 50).await.unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].response, "r3", "most recent session first");
+        assert_eq!(all[2].response, "r1", "oldest session last");
+
+        // The per-recording filter returns only that recording's sessions.
+        let a = db.list_ai_activity(Some("a"), 50).await.unwrap();
+        assert_eq!(a.len(), 2);
+        assert!(a.iter().all(|e| e.recording_id == "a"));
+        assert_eq!(a[0].stage, "summarizing", "newest 'a' session first");
+        assert_eq!(a[1].stage, "cleaning_up");
+
+        // `limit` caps the result.
+        assert_eq!(db.list_ai_activity(None, 1).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

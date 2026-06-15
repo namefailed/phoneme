@@ -230,6 +230,17 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(None) => not_found(format!("recording {id} not found")),
             Err(e) => err_response(&e),
         },
+        Request::ListAiActivity {
+            recording_id,
+            limit,
+        } => match state
+            .catalog
+            .list_ai_activity(recording_id.as_deref(), limit as i64)
+            .await
+        {
+            Ok(rows) => serialize_response(rows),
+            Err(e) => err_response(&e),
+        },
         Request::ListMeeting { meeting_id } => {
             match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),

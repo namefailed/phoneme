@@ -226,11 +226,13 @@ pub(crate) async fn run_llm_stage(
     prompt: &str,
     text: &str,
 ) -> Result<String> {
-    // (1) Start event carrying the verbatim prompt.
+    // (1) Start event carrying the verbatim prompt. Kept in `exact` so the same
+    // text can be persisted to the durable AI-activity log once the session ends.
+    let exact = provider.exact_prompt(prompt, text);
     state.events.emit(DaemonEvent::LlmActivity {
         id: id.clone(),
         stage,
-        prompt: provider.exact_prompt(prompt, text),
+        prompt: exact.clone(),
         delta: String::new(),
         done: false,
     });
@@ -293,6 +295,20 @@ pub(crate) async fn run_llm_stage(
         delta: String::new(),
         done: true,
     });
+
+    // Persist the completed session so the 🧠 AI-activity log survives an app
+    // restart (the live event stream above is in-memory only). Best-effort: a
+    // log-write failure must never fail the actual stage. A skipped/errored stage
+    // is not persisted — only real prompt→response sessions are logged.
+    if let Ok(ref out) = result {
+        if let Err(e) = state
+            .catalog
+            .insert_ai_activity(id.as_str(), stage.as_str(), &exact, out)
+            .await
+        {
+            tracing::warn!(error = %e, ?stage, "failed to persist AI activity");
+        }
+    }
 
     result
 }

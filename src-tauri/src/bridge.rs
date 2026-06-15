@@ -154,6 +154,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | RecordStatus
         | ListRecordings { .. }
         | GetRecording { .. }
+        | ListAiActivity { .. }
         | ListMeeting { .. }
         | GetSegments { .. }
         | GetWords { .. }

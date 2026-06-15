@@ -169,6 +169,17 @@ pub async fn get_recording(bridge: Br<'_>, id: String) -> Result<Value, CommandE
     forward(&bridge, Request::GetRecording { id }).await
 }
 
+/// Recent persisted AI-activity sessions for the 🧠 popout. `recording_id` filters
+/// to one recording; omit it for the whole library's recent activity.
+#[tauri::command]
+pub async fn list_ai_activity(
+    bridge: Br<'_>,
+    recording_id: Option<String>,
+    limit: u32,
+) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListAiActivity { recording_id, limit }).await
+}
+
 /// Fetch all recordings belonging to a single meeting session (the two tracks
 /// linked by a shared `meeting_id`), ordered by track then start time. Used by
 /// the recordings list to render a meeting as one collapsible group.

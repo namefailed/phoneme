@@ -401,6 +401,14 @@ trust boundary. Verified against current code.*
 
 ### GUI parity
 
+- [x] **AI-activity log persists across restarts.** The 🧠 "AI Activity" popout
+  was in-memory only — every completed cleanup/summary prompt+response vanished
+  when the app reopened. The daemon now writes each finished streaming LLM
+  session (everything through `run_llm_stage`, incl. re-runs) to a durable
+  `ai_activity` table; the popout loads recent history on open (`list_ai_activity`
+  IPC) and the live stream appends to it. The table is pruned to a bounded recent
+  window (newest 1,000) so it never grows without limit, and `recording_id` is
+  kept unlinked so deleting a recording doesn't erase the audit trail.
 - [x] **Settings reorganized into nine focused tabs.** The old six-tab grouping
   (where **System** alone held five sections) is split so each concern is its
   own tab: **Transcription · Live Preview · Diarization · Capture ·

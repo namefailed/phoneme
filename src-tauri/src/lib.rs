@@ -322,6 +322,7 @@ pub fn run() {
             similar::more_like_this,
             commands::reembed_all,
             commands::get_recording,
+            commands::list_ai_activity,
             commands::list_meeting,
             commands::get_segments,
             commands::get_words,

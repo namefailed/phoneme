@@ -140,6 +140,31 @@ export async function getRecording(id: string): Promise<Recording> {
   return await tauriInvoke<Recording>("get_recording", { id });
 }
 
+/** One persisted AI-activity session (a completed cleanup/summary LLM run), as
+ *  stored in the durable log that survives app restarts. `stage` is the
+ *  PipelineStage wire value (snake_case) so `stageLabel()` renders it. */
+export type AiActivityEntry = {
+  id: number;
+  recording_id: string;
+  stage: string;
+  prompt: string;
+  response: string;
+  created_at: string;
+};
+
+/** Recent persisted AI-activity sessions, newest first. With `recordingId` set,
+ *  only that recording's sessions; otherwise the whole library's recent activity.
+ *  Powers the 🧠 popout's history so it isn't empty after an app restart. */
+export async function listAiActivity(
+  recordingId?: string,
+  limit = 200,
+): Promise<AiActivityEntry[]> {
+  return await tauriInvoke<AiActivityEntry[]>("list_ai_activity", {
+    recordingId: recordingId ?? null,
+    limit,
+  });
+}
+
 /** One machine transcript segment with its audio-relative timing.
  *  `start_ms`/`end_ms` are offsets into the track's audio file; `speaker` is
  *  the label exactly as it appears in the transcript's `[Speaker …]` marker

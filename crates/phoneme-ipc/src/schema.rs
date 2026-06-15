@@ -156,6 +156,17 @@ pub enum Request {
         /// The recording to fetch.
         id: RecordingId,
     },
+    /// Fetch recent persisted AI-activity sessions (completed cleanup/summary
+    /// LLM runs) for the 🧠 popout. With `recording_id` set, only that
+    /// recording's sessions; otherwise the whole library's recent activity. Ok =
+    /// JSON array of `AiActivityEntry`, newest first. GUI AI-activity popout.
+    ListAiActivity {
+        /// Limit to one recording's sessions, or `None` for global recent.
+        #[serde(default)]
+        recording_id: Option<String>,
+        /// Max rows to return (clamped server-side to a bounded window).
+        limit: u32,
+    },
     /// Fetch all recordings belonging to a single meeting session (the two
     /// tracks linked by a shared `meeting_id`), ordered by track then time.
     /// Additive to `ListRecordings` — grouping is a presentation concern, so
@@ -855,6 +866,24 @@ pub enum PipelineStage {
     Done,
     /// The work failed at some stage.
     Failed,
+}
+
+impl PipelineStage {
+    /// The stable snake_case wire string (matching the serde representation used
+    /// in events), e.g. `cleaning_up`. Stored verbatim in the persisted
+    /// AI-activity log so the frontend renders it with the same `stageLabel()`
+    /// it uses for the live `LlmActivity` events.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Transcribing => "transcribing",
+            Self::CleaningUp => "cleaning_up",
+            Self::Summarizing => "summarizing",
+            Self::Tagging => "tagging",
+            Self::RunningHook => "running_hook",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
 }
 
 /// Events broadcast by the daemon to every [`Request::SubscribeEvents`]

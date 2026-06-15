@@ -161,6 +161,29 @@ impl MeetingTrack {
     }
 }
 
+/// One persisted AI-activity session — a finished streaming LLM stage (cleanup,
+/// summary, or a re-run of either), as exposed by `Catalog` and shown in the
+/// GUI's 🧠 "AI Activity" popout. Mirrors the live `LlmActivity` event's content
+/// but for a completed session, so the log survives app restarts (the live
+/// stream was previously in-memory only).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiActivityEntry {
+    /// Auto-increment row id; also the stable list key for the UI.
+    pub id: i64,
+    /// The recording this session ran on.
+    pub recording_id: String,
+    /// The `PipelineStage` wire value (snake_case, e.g. `cleaning_up`,
+    /// `summarizing`) so the frontend renders it with the same `stageLabel()`
+    /// it uses for the live events.
+    pub stage: String,
+    /// The exact prompt sent to the model.
+    pub prompt: String,
+    /// The model's full response.
+    pub response: String,
+    /// RFC3339 UTC timestamp of when the session finished.
+    pub created_at: String,
+}
+
 /// The canonical Recording row as exposed by `Catalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recording {

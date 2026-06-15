@@ -2,6 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "../../services/events";
+import { listAiActivity } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 
 /** A right-pointing chevron that rotates to point down when its <details> is
@@ -26,11 +27,12 @@ type ActivityEntry = {
 };
 
 /**
- * A floating, resizable popout showing a COMPLETE running log of all AI
- * activity since the app opened — transcription, cleanup, and summary, for
- * every recording — with the exact prompt and the response as it streams. The
- * 🧠 button is drag-to-move (and pulses while anything is live); the panel
- * anchors to it and can be resized (size + position are remembered).
+ * A floating, resizable popout showing a running log of AI activity — the live
+ * transcription/cleanup/summary stream (exact prompt + streamed response) for
+ * every recording, PLUS the recent persisted sessions loaded on open so the log
+ * survives app restarts (`list_ai_activity`). The 🧠 button is drag-to-move (and
+ * pulses while anything is live); the panel anchors to it and can be resized
+ * (size + position are remembered).
  */
 @customElement("ph-thinking-popout")
 export class ThinkingPopoutElement extends LitElement {
@@ -97,6 +99,9 @@ export class ThinkingPopoutElement extends LitElement {
         if (["left", "top", "width", "height"].every((k) => typeof g?.[k] === "number")) this.geom = g;
       }
     } catch { /* ignore */ }
+    // Seed the log with persisted history so the panel isn't empty after a
+    // restart — the live stream below only carries what happens from now on.
+    await this.loadHistory();
     this.unsub = await subscribe((event: DaemonEvent) => {
       if (event.event !== "llm_activity") return;
       const key = `${event.id}|${event.stage}`;
@@ -131,6 +136,32 @@ export class ThinkingPopoutElement extends LitElement {
   private pushEntry(entry: ActivityEntry) {
     this.log.push(entry);
     if (this.log.length > ThinkingPopoutElement.MAX_ENTRIES) this.log.shift();
+  }
+
+  /** Seed the log from the durable AI-activity store so the panel isn't empty
+   *  after an app restart — the live event stream only carries what runs from
+   *  now on. Persisted sessions are completed (done), so they never count as
+   *  "live". Best-effort: if the daemon isn't reachable yet, stay live-only. */
+  private async loadHistory() {
+    try {
+      const rows = await listAiActivity(undefined, ThinkingPopoutElement.MAX_ENTRIES);
+      // The store returns newest-first; insert oldest-first so the log's order
+      // stays chronological (render() reverses it to show newest at the top).
+      for (const r of rows.reverse()) {
+        this.pushEntry({
+          id: r.recording_id,
+          stage: r.stage as PipelineStage,
+          prompt: r.prompt,
+          response: r.response,
+          done: true,
+          at: Date.parse(r.created_at) || Date.now(),
+          seq: this.seq++,
+        });
+      }
+      this.rev++;
+    } catch {
+      /* daemon not ready / no history — live-only is fine */
+    }
   }
 
   disconnectedCallback() {
@@ -405,14 +436,14 @@ export class ThinkingPopoutElement extends LitElement {
                     ? html`<span class="thinking-title-live" title="${live} stage${live === 1 ? "" : "s"} running now"><span class="thinking-title-live-dot"></span>${live} live</span>`
                     : ""}
                   ${this.log.length
-                    ? html`<span class="thinking-title-count" title="Total sessions logged since the app opened">${this.log.length} ${this.log.length === 1 ? "entry" : "entries"}</span>`
+                    ? html`<span class="thinking-title-count" title="Recent AI sessions (kept across restarts)">${this.log.length} ${this.log.length === 1 ? "entry" : "entries"}</span>`
                     : ""}
                 </span>
                 <button class="thinking-close" @click=${() => this.setOpen(false)} title="Close">✕</button>
               </div>
               <div class="thinking-body">
                 ${entries.length === 0
-                  ? html`<div class="thinking-empty">No AI activity yet. Transcribe, clean up, or summarize a recording (or re-run one) and the prompt + response will stream here. Everything since you opened the app is kept in this list.</div>`
+                  ? html`<div class="thinking-empty">No AI activity yet. Clean up or summarize a recording (or re-run one) and the prompt + response will stream here. Recent sessions are kept across restarts.</div>`
                   : repeat(entries, (e) => e.seq, (e) => this.renderEntry(e))}
               </div>
               <span class="thinking-rz thinking-rz-n" @mousedown=${(e: MouseEvent) => this.startResize(e, "n")}></span>
