@@ -75,6 +75,23 @@ function bestKeywordScore(query: string, words: string[]): number | null {
   return best;
 }
 
+/** The Settings tab rail, in display order. A single source of truth that drives
+ *  the sidebar buttons, the ⚙ float-menu jump list, and (via the section
+ *  registry's `tab` field) which sections mount under each tab. The trio at the
+ *  top mirrors the transcription pipeline; the heavier groups (Recall, System)
+ *  are their own tabs rather than one overloaded catch-all. */
+const SETTINGS_TABS: { id: string; label: string }[] = [
+  { id: "transcription", label: "🗣️ Transcription" },
+  { id: "preview", label: "👁️ Live Preview" },
+  { id: "diarization", label: "👥 Diarization" },
+  { id: "capture", label: "🎙️ Capture" },
+  { id: "postprocessing", label: "✨ Post-Processing" },
+  { id: "appearance", label: "🎨 Appearance" },
+  { id: "recall", label: "🔮 Recall" },
+  { id: "managers", label: "🗂️ Managers" },
+  { id: "system", label: "⚙️ System" },
+];
+
 /**
  * The Settings view (the "settings" route): a tab rail + one mounted section
  * per tab, a fuzzy settings search (with per-field intent keywords from
@@ -255,37 +272,15 @@ export class SettingsViewElement extends LitElement {
       return subHost;
     };
 
-    // For search we mount EVERY section once, each in its own tab-tagged host so
-    // a result can show which tab it lives in and offer a jump there. Later
-    // keystrokes only re-filter in place (see updated()), so typing stays
-    // instant and flicker-free. Order mirrors the per-tab layout below.
-    const searchSections: { tab: string; label: string; mount: (h: HTMLElement) => void }[] = [
-      { tab: "transcription", label: "Transcription", mount: (h) => { new SectionWhisper(h, this.config); } },
-      { tab: "transcription", label: "Transcription", mount: (h) => { new SectionPreview(h, this.config); } },
-      { tab: "transcription", label: "Transcription", mount: (h) => { new SectionDiarization(h, this.config); } },
-      { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, this.config); } },
-      { tab: "capture", label: "Capture", mount: (h) => { new SectionInPlace(h, this.config); } },
-      { tab: "capture", label: "Capture", mount: (h) => { new SectionHotkey(h, this.config); } },
-      { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, this.config); } },
-      { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, this.config); } },
-      { tab: "managers", label: "Managers", mount: (h) => { new SectionTags(h, this.config); } },
-      { tab: "managers", label: "Managers", mount: (h) => { new SectionProfiles(h, this.config); } },
-      { tab: "managers", label: "Managers", mount: (h) => { new SectionSavedSearches(h, this.config); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, this.config); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, this.config); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, this.config); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, this.config); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionSemantic(h, this.config); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionIntegrations(h, this.config); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionTray(h, this.config); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, this.config, this.onNavigateToWizard); } },
-    ];
-
     if (isSearching) {
+      // Search mounts EVERY section once, each in its own tab-tagged host so a
+      // result can show which tab it lives in and offer a jump there. Later
+      // keystrokes only re-filter in place (see updated()), so typing stays
+      // instant and flicker-free.
       const header = document.createElement("div");
       header.id = "settings-search-header";
       sectionHost.appendChild(header);
-      for (const s of searchSections) {
+      for (const s of this.sectionRegistry()) {
         const host = document.createElement("div");
         host.className = "sv-result-host";
         host.dataset.tab = s.tab;
@@ -296,48 +291,54 @@ export class SettingsViewElement extends LitElement {
       this.applySearchFilter();
     } else {
       // The tab may arrive as a composite deep-link ("managers/profiles") from
-      // the g-chords or another component — split off the sub-tab.
-      const [tab, sub] = this.activeTab.split("/");
+      // the g-chords or another component — split off the sub-tab. "tags" is a
+      // legacy alias for the standalone Tags tab, now a Managers sub-tab.
+      const [rawTab, sub] = this.activeTab.split("/");
       if (sub === "tags" || sub === "profiles" || sub === "saved") this.managersSub = sub;
-      switch (tab) {
-        case "transcription":
-          new SectionWhisper(createSubHost(), this.config);
-          // Live Preview sits directly under Whisper — it's a transcription
-          // concern and was previously only reachable via search.
-          new SectionPreview(createSubHost(), this.config);
-          new SectionDiarization(createSubHost(), this.config);
-          break;
-        case "capture":
-          new SectionRecording(createSubHost(), this.config);
-          new SectionInPlace(createSubHost(), this.config);
-          new SectionHotkey(createSubHost(), this.config);
-          break;
-        case "appearance":
-          new SectionInterface(createSubHost(), this.config);
-          new SectionEditor(createSubHost(), this.config);
-          break;
-        // Legacy deep-links to the old standalone Tags tab land on its new home.
-        case "tags":
-          this.managersSub = "tags";
-          this.mountManagers(createSubHost());
-          break;
-        case "managers":
-          this.mountManagers(createSubHost());
-          break;
-        case "postprocessing":
-          new SectionPostProcessing(createSubHost(), this.config);
-          new SectionAutoTag(createSubHost(), this.config);
-          new SectionHook(createSubHost(), this.config);
-          break;
-        case "system":
-          new SectionStorage(createSubHost(), this.config);
-          new SectionSemantic(createSubHost(), this.config);
-          new SectionIntegrations(createSubHost(), this.config);
-          new SectionTray(createSubHost(), this.config);
-          new SectionAdvanced(createSubHost(), this.config, this.onNavigateToWizard);
-          break;
+      const tab = rawTab === "tags" ? "managers" : rawTab;
+      if (rawTab === "tags") this.managersSub = "tags";
+      if (tab === "managers") {
+        // Managers keeps its own sub-tab strip (Tags · Profiles · Saved).
+        this.mountManagers(createSubHost());
+      } else {
+        // Every other tab is registry-driven: mount, in order, each section
+        // whose `tab` matches. One source of truth shared with search above.
+        for (const s of this.sectionRegistry()) {
+          if (s.tab === tab) s.mount(createSubHost());
+        }
       }
     }
+  }
+
+  /** The single source of truth for which sections exist and which tab each
+   *  belongs to (see {@link SETTINGS_TABS} for the tab order/labels). Drives
+   *  both the search index (all sections mounted at once) and per-tab rendering
+   *  (filtered by `tab`). `label` is the breadcrumb tab name shown on a search
+   *  result. Managers' three sections are listed here so they're individually
+   *  searchable, but the Managers TAB renders its own sub-tab strip instead. */
+  private sectionRegistry(): { tab: string; label: string; mount: (h: HTMLElement) => void }[] {
+    const c = this.config;
+    return [
+      { tab: "transcription", label: "Transcription", mount: (h) => { new SectionWhisper(h, c); } },
+      { tab: "preview", label: "Live Preview", mount: (h) => { new SectionPreview(h, c); } },
+      { tab: "diarization", label: "Diarization", mount: (h) => { new SectionDiarization(h, c); } },
+      { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, c); } },
+      { tab: "capture", label: "Capture", mount: (h) => { new SectionInPlace(h, c); } },
+      { tab: "capture", label: "Capture", mount: (h) => { new SectionHotkey(h, c); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, c); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, c); } },
+      { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
+      { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, c); } },
+      { tab: "recall", label: "Recall", mount: (h) => { new SectionSemantic(h, c); } },
+      { tab: "managers", label: "Managers", mount: (h) => { new SectionTags(h, c); } },
+      { tab: "managers", label: "Managers", mount: (h) => { new SectionProfiles(h, c); } },
+      { tab: "managers", label: "Managers", mount: (h) => { new SectionSavedSearches(h, c); } },
+      { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
+      { tab: "system", label: "System", mount: (h) => { new SectionIntegrations(h, c); } },
+      { tab: "system", label: "System", mount: (h) => { new SectionTray(h, c); } },
+      { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, c, this.onNavigateToWizard); } },
+    ];
   }
 
   /** The Managers tab: a top sub-tab strip (Tags · Profiles · Saved searches)
@@ -669,13 +670,13 @@ export class SettingsViewElement extends LitElement {
             <button type="button" class="sv-search-clear ${isSearching ? "" : "is-hidden"}" title="Clear search (Esc)" aria-label="Clear search" @click=${this.clearSearch}>✕</button>
           </div>
 
-          <div class="sv-tab ${tab === "transcription" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('transcription')}>🗣️ Transcription</div>
-          <div class="sv-tab ${tab === "capture" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('capture')}>🎙️ Capture</div>
-          <div class="sv-tab ${tab === "appearance" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('appearance')}>🎨 Appearance</div>
-          <div class="sv-tab ${(tab === "managers" || tab === "tags") && !isSearching ? "active" : ""}" @click=${() => this.switchTab('managers')}>🗂️ Managers</div>
-          <div class="sv-tab ${tab === "postprocessing" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('postprocessing')}>✨ Post-Processing</div>
-          <div class="sv-tab ${tab === "system" && !isSearching ? "active" : ""}" @click=${() => this.switchTab('system')}>⚙️ System</div>
-          
+          ${SETTINGS_TABS.map(
+            (t) => html`<div
+              class="sv-tab ${(tab === t.id || (t.id === "managers" && tab === "tags")) && !isSearching ? "active" : ""}"
+              @click=${() => this.switchTab(t.id)}
+            >${t.label}</div>`,
+          )}
+
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
         <div class="settings-main">
@@ -689,12 +690,13 @@ export class SettingsViewElement extends LitElement {
               <button class="hb-menu-item" role="menuitem" @click=${this.openFloatModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
               <div class="hb-menu-sep"></div>
               <div class="hb-menu-label">Jump to section</div>
-              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("transcription")}><span class="hb-menu-ico">🗣️</span>Transcription</button>
-              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("capture")}><span class="hb-menu-ico">🎙️</span>Capture</button>
-              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("postprocessing")}><span class="hb-menu-ico">✨</span>Post-Processing</button>
-              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("appearance")}><span class="hb-menu-ico">🎨</span>Appearance</button>
-              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("managers")}><span class="hb-menu-ico">🗂️</span>Managers</button>
-              <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat("system")}><span class="hb-menu-ico">⚙️</span>System</button>
+              ${SETTINGS_TABS.map((t) => {
+                // Split the leading emoji off the label so it sits in the icon slot.
+                const sp = t.label.indexOf(" ");
+                const ico = sp > 0 ? t.label.slice(0, sp) : "";
+                const name = sp > 0 ? t.label.slice(sp + 1) : t.label;
+                return html`<button class="hb-menu-item" role="menuitem" @click=${() => this.jumpFloat(t.id)}><span class="hb-menu-ico">${ico}</span>${name}</button>`;
+              })}
             </div>
           </div>
           <div class="settings-body" id="settings-body"></div>

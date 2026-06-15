@@ -401,6 +401,16 @@ trust boundary. Verified against current code.*
 
 ### GUI parity
 
+- [x] **Settings reorganized into nine focused tabs.** The old six-tab grouping
+  (where **System** alone held five sections) is split so each concern is its
+  own tab: **Transcription · Live Preview · Diarization · Capture ·
+  Post-Processing · Appearance · Recall · Managers · System**. A single
+  data-driven section registry is now the source of truth — it feeds the tab
+  rail, the per-tab mount order, the all-sections search index, and the ⚙
+  jump-to-section menu, so the three could never drift out of sync again. Search,
+  per-field keyword matching, result breadcrumbs, and the Managers sub-tabs are
+  unchanged; legacy deep-links (`tags`, `managers/profiles`, `postprocessing`, …)
+  still resolve.
 - [x] **Choose the interface font & size.** Settings → Interface gained an
   **Interface font** picker (Inter default, plus Windows-bundled and common
   cross-platform families incl. monospace options) and an **Interface font

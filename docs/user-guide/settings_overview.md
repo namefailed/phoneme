@@ -4,16 +4,19 @@ Phoneme stores all preferences in `%APPDATA%\phoneme\config.toml`. The Settings 
 
 Open Settings from the cog icon in the header or **Tray → Settings**.
 
-The settings are grouped into six tabs in the left sidebar, with a **search box** at the top: start typing and Settings shows every matching field across all sections, with a live results count.
+The settings are grouped into nine tabs in the left sidebar, with a **search box** at the top: start typing and Settings shows every matching field across all sections, with a live results count and a breadcrumb back to each result's home tab.
 
 | Tab | Sections it contains |
 |-----|----------------------|
-| 🗣️ **Transcription** | Whisper / transcription provider, Live Preview, Diarization |
-| 🎙️ **Capture** | Recording, Hotkeys |
-| 🎨 **Appearance** | Interface, Editor |
+| 🗣️ **Transcription** | Whisper / transcription provider |
+| 👁️ **Live Preview** | Live preview provider + system-wide overlay |
+| 👥 **Diarization** | Speaker diarization backend |
+| 🎙️ **Capture** | Recording, In-place dictation, Hotkeys |
+| ✨ **Post-Processing** | AI cleanup + Auto Summary, Auto-tagging, Hooks |
+| 🎨 **Appearance** | Interface (incl. font & size), Editor |
+| 🔮 **Recall** | Semantic search / embedding model |
 | 🗂️ **Managers** | Tags · Profiles · Saved searches (sub-tabs) |
-| ✨ **Post-Processing** | AI cleanup + Auto Summary, Hooks |
-| ⚙️ **System** | Storage & retention, Tray, Semantic search, Advanced |
+| ⚙️ **System** | Storage & retention, Integrations, Tray, Advanced |
 
 ---
 
