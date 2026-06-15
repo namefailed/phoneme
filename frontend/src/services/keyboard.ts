@@ -325,12 +325,16 @@ function exitHeaderNav() {
  *  with Enter/i (focus the box to type, or activate a button) or j/Esc (back to
  *  the list). Focus goes to the bar container, which isn't a typing target, so
  *  the global key handler keeps routing the keys. */
-function enterHeaderNav(opts?: { restore?: boolean }) {
+function enterHeaderNav(opts?: { restore?: boolean; reveal?: boolean }) {
   const bar = document.querySelector<HTMLElement>(".headerbar");
   if (!bar) return;
-  // Never roam INTO a hidden top bar (Ctrl+/, zen, focus mode) — landing a cursor
-  // on an invisible bar strands you. `/` still PEEKS it to type a search.
-  if (document.body.classList.contains("phoneme-hide-header")) return;
+  // A hidden top bar (Ctrl+/, zen, focus mode) can't be roamed PASSIVELY — k at
+  // the top of a pane would strand a cursor on an invisible bar. The deliberate
+  // `g /` jump (reveal:true) forces it open first; `/` peeks it to type.
+  if (document.body.classList.contains("phoneme-hide-header")) {
+    if (!opts?.reveal) return;
+    setHeaderHidden(false);
+  }
   headerSub = null;
   document.querySelectorAll(".rv-pane-focused").forEach((el) => el.classList.remove("rv-pane-focused"));
   const items = headerControls();
@@ -529,7 +533,7 @@ function onKeyDown(e: KeyboardEvent) {
     }
     // g / — HIGHLIGHT the search bar (roving header cursor, like k at the top of
     // the list) rather than focusing it to type like plain `/` does.
-    if (e.key === "/") { e.preventDefault(); enterHeaderNav(); return; }
+    if (e.key === "/") { e.preventDefault(); enterHeaderNav({ reveal: true }); return; }
     // g b — jump to the sidebar (like h from the list view); reveals it if hidden.
     if (vimNav && e.key === "b") { e.preventDefault(); dispatchVim("focus-sidebar"); return; }
     // g g — jump to the top of the focused list/sidebar. Defaults to the LIST

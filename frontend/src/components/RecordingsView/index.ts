@@ -782,10 +782,18 @@ export class RecordingsView {
       // collapsed so the chord always gets you there; no-op in focus mode (no
       // sidebar to land on).
       case "focus-sidebar": {
-        // Can't jump into the sidebar while it's hidden (focus mode or collapsed)
-        // — like the hidden top bar, vim nav won't enter a hidden pane. Reveal it
-        // yourself (the toggle) first.
-        if (this.focusMode || !this.sidebarVisible) break;
+        // g b is a deliberate "go to the sidebar" jump, so it FORCES a collapsed
+        // sidebar open then lands on it (unlike passive h/l, which skip a hidden
+        // pane). No-op in focus mode, where the sidebar is intentionally gone.
+        if (this.focusMode) break;
+        if (!this.sidebarVisible) {
+          this.sidebarVisible = true;
+          try { localStorage.setItem(LS_SIDEBAR, "true"); } catch { /* private mode */ }
+          this.animateLayout();
+          this.applyLayout();
+          window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed"));
+          window.setTimeout(() => window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed")), 300);
+        }
         this.focusPane("sidebar");
         break;
       }
