@@ -97,7 +97,10 @@ trust boundary. Verified against current code.*
   that produced the text; they now store the actual model (e.g. `ggml-tiny.en`, via a
   shared `WhisperConfig::model_label`) like every other recording, and the detail pane
   shows a small **⌨ in-place** badge (keyed on the persisted `in_place` flag) so
-  dictations stay obvious at a glance.
+  dictations stay obvious at a glance. Fast-lane dictations (which skip the
+  pipeline's LLM auto-title) now also get a cheap, no-LLM **snippet title** from
+  the dictated text, so the detail header reads like any other recording — title +
+  date + duration — instead of falling back to the bare date as the title.
 - [x] **Live-preview wave 1 — smooth, adaptive & it-hears-me.** The biggest live
   preview pass yet, all under the Beta pill until verified:
   - **Adaptive cadence (the record-time crash fix).** When a preview tick takes

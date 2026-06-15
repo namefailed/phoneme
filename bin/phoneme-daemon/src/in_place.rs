@@ -87,6 +87,36 @@ pub fn spawn_type_first(state: AppState, id: RecordingId, audio_path: PathBuf) {
     });
 }
 
+/// A short, single-line title from the dictation text — the first few words,
+/// capped to a sane length, trailing punctuation trimmed, with an ellipsis when
+/// truncated. Empty when the text is blank. Pure + LLM-free so it works on any
+/// box; the recordings list and detail header then show it like a normal title.
+fn dictation_title_snippet(text: &str) -> String {
+    const MAX_WORDS: usize = 8;
+    const MAX_CHARS: usize = 60;
+    let first_line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let all_words: Vec<&str> = first_line.split_whitespace().collect();
+    let mut s: String = all_words.iter().take(MAX_WORDS).copied().collect::<Vec<_>>().join(" ");
+    let mut truncated = all_words.len() > MAX_WORDS;
+    if s.chars().count() > MAX_CHARS {
+        s = s.chars().take(MAX_CHARS).collect();
+        if let Some(idx) = s.rfind(' ') {
+            s.truncate(idx);
+        }
+        truncated = true;
+    }
+    let s = s
+        .trim_end_matches(|c: char| c.is_ascii_punctuation() || c.is_whitespace())
+        .to_string();
+    if s.is_empty() {
+        String::new()
+    } else if truncated {
+        format!("{s}…")
+    } else {
+        s
+    }
+}
+
 async fn run(state: &AppState, id: &RecordingId, audio_path: &PathBuf) -> Result<(), Error> {
     let cfg = state.config.load();
     state.events.emit(DaemonEvent::PipelineStageChanged {
@@ -115,6 +145,19 @@ async fn run(state: &AppState, id: &RecordingId, audio_path: &PathBuf) -> Result
             .await
         {
             tracing::warn!(id = %id.as_str(), "failed to persist dictation segments: {e}");
+        }
+        // The fast lane skips the pipeline (and its LLM auto-title), so without a
+        // title a dictation would fall back to showing the bare date as its title
+        // — which hides the date from the detail meta line. Give it a cheap
+        // content snippet as the title (no LLM, so it's reliable even when the
+        // box can't run one); it reads like every other recording (title + date +
+        // duration), and `is_auto = true` lets a later auto-title or the user
+        // override it.
+        let snippet = dictation_title_snippet(&polished);
+        if !snippet.is_empty() {
+            if let Err(e) = state.catalog.set_title(id, Some(&snippet), true, None).await {
+                tracing::warn!(id = %id.as_str(), "failed to set dictation snippet title: {e}");
+            }
         }
         state
             .catalog
@@ -280,4 +323,35 @@ fn paste_blocking(text: &str) -> Result<(), String> {
         let _ = clipboard.set_text(prev);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dictation_title_snippet;
+
+    #[test]
+    fn short_text_is_used_verbatim() {
+        assert_eq!(dictation_title_snippet("buy milk and eggs"), "buy milk and eggs");
+    }
+
+    #[test]
+    fn long_text_is_truncated_to_words_with_ellipsis() {
+        let s = dictation_title_snippet("one two three four five six seven eight nine ten");
+        assert_eq!(s, "one two three four five six seven eight…");
+    }
+
+    #[test]
+    fn uses_the_first_nonblank_line_only() {
+        assert_eq!(dictation_title_snippet("\n  \nhello there\nsecond line"), "hello there");
+    }
+
+    #[test]
+    fn trailing_punctuation_is_trimmed_when_not_truncated() {
+        assert_eq!(dictation_title_snippet("note to self."), "note to self");
+    }
+
+    #[test]
+    fn blank_text_yields_empty() {
+        assert_eq!(dictation_title_snippet("   \n  "), "");
+    }
 }
