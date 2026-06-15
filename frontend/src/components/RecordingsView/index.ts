@@ -1045,7 +1045,11 @@ export class RecordingsView {
       // Split mode: the two recording panes share the whole window (fr-based,
       // ratio persisted); list and sidebar collapse, chrome is hidden by
       // openSplit via the zen snapshot.
-      shell.style.gridTemplateColumns = `0px 0px 0 0 ${this.splitRatio}fr 6px ${100 - this.splitRatio}fr`;
+      // minmax(0, …fr) — a bare `fr` track keeps its content's min-content width,
+      // so a pane with longer transcript lines would grow past its share and the
+      // split wouldn't be a true 50/50. minmax(0, …) lets both panes shrink to the
+      // exact ratio (content scrolls instead).
+      shell.style.gridTemplateColumns = `0px 0px 0 0 minmax(0, ${this.splitRatio}fr) 6px minmax(0, ${100 - this.splitRatio}fr)`;
     } else if (this.detailVisible && this.focusMode) {
       // Focus mode: collapse the sidebar, resizer, list, and splitter so the
       // detail pane fills the whole view for distraction-free, full-width editing.
