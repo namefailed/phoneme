@@ -1878,14 +1878,25 @@ pub fn tail_log(name: String, max_lines: usize) -> Result<String, CommandError> 
     let logs = dirs.data_local_dir().join("logs");
     let mut path = logs.join(&name);
     if !path.exists() {
-        // Newest rolled variant (e.g. daemon.log.2026-06-15), or nothing yet.
+        // Newest rolled variant, or nothing yet. Accept ONLY `<name>` or
+        // `<name>.<digits-and-dashes>` (the daily appender's
+        // `daemon.log.YYYY-MM-DD`) so an odd-suffixed or symlinked file dropped
+        // in the logs dir can't be selected and read.
         let newest = std::fs::read_dir(&logs).ok().and_then(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter(|e| {
-                    e.file_name()
-                        .to_str()
-                        .map(|f| f.starts_with(&name))
-                        .unwrap_or(false)
+                    let fname = e.file_name();
+                    let Some(f) = fname.to_str() else { return false };
+                    if f == name {
+                        return true;
+                    }
+                    match f.strip_prefix(&name).and_then(|r| r.strip_prefix('.')) {
+                        Some(suffix) => {
+                            !suffix.is_empty()
+                                && suffix.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+                        }
+                        None => false,
+                    }
                 })
                 .max_by_key(|e| e.file_name())
         });
@@ -1893,6 +1904,13 @@ pub fn tail_log(name: String, max_lines: usize) -> Result<String, CommandError> 
             Some(e) => path = e.path(),
             None => return Ok(String::new()),
         }
+    }
+    // Defense-in-depth: the resolved file must canonicalize to something inside
+    // the logs dir, so a symlink in the logs dir can't redirect the read
+    // elsewhere on disk. Treat any mismatch as "no log" rather than leaking.
+    match (std::fs::canonicalize(&path), std::fs::canonicalize(&logs)) {
+        (Ok(p), Ok(l)) if p.starts_with(&l) => {}
+        _ => return Ok(String::new()),
     }
     let content = std::fs::read_to_string(&path)
         .map_err(|e| CommandError::from(format!("failed to read {}: {}", path.display(), e)))?;

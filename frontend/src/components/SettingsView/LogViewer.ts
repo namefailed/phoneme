@@ -10,6 +10,11 @@ const LOGS: { name: string; label: string }[] = [
 
 const MAX_LINES = 400;
 
+/** Teardown for the currently-open viewer (removes its document keydown listener
+ *  and overlay). Ensures only one instance — and one listener — is ever live, so
+ *  rapid re-opens can't accumulate handlers on `document`. */
+let activeClose: (() => void) | null = null;
+
 /**
  * Read-only log viewer modal (Settings → Destination & Integrations). Tails the
  * last few hundred lines of `hook.log` (or the daemon log) so a hook that
@@ -18,6 +23,9 @@ const MAX_LINES = 400;
  * the viewer, never the recording behind it.
  */
 export function openLogViewer(initial: string = "hook.log"): void {
+  // Tear down any prior instance first (its listener + overlay), so opening the
+  // viewer twice can't leave a stale keydown handler bound to `document`.
+  activeClose?.();
   document.querySelector(".log-viewer-overlay")?.remove();
 
   const overlay = document.createElement("div");
@@ -47,7 +55,9 @@ export function openLogViewer(initial: string = "hook.log"): void {
   const close = () => {
     document.removeEventListener("keydown", onKey);
     overlay.remove();
+    if (activeClose === close) activeClose = null;
   };
+  activeClose = close;
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
