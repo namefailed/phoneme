@@ -220,6 +220,12 @@ mark.search-hit {
   overflow-y: auto;
   overflow-x: hidden;
   min-width: 0;
+  /* Always reserve the vertical scrollbar's gutter, even when no scrollbar shows.
+     The split panes' grid tracks are exactly 50/50, but a taller pane that
+     scrolls would otherwise lose ~15px of content width to its scrollbar while
+     the shorter pane keeps the full width — which read as an off-centre split.
+     Reserving the gutter on both keeps their content the same width. */
+  scrollbar-gutter: stable;
 }
 .detail-header {
   padding: 14px 18px;
