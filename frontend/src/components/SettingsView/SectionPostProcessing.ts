@@ -78,13 +78,10 @@ export class SectionPostProcessing {
           Automatically edit, reformat, and clean up your transcript using a local or remote LLM.
         </p>
 
-        <div style="background-color: var(--bg-deep); padding: 12px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 16px;">
-          <strong style="display: block; font-size: 0.9286rem; margin-bottom: 6px; color: var(--fg-default);">How to use this for free (Offline):</strong>
-          <ol style="margin: 0; padding-left: 20px; font-size: 0.8571rem; color: var(--fg-muted); line-height: 1.5;">
-            <li>Download and install <a href="#" id="ollama-download-link" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>
-            <li>Open your terminal and run <code>ollama run llama3.2:3b</code>.</li>
-            <li>Select <strong>Ollama</strong> below and use <code>llama3.2:3b</code> as your Model Name!</li>
-          </ol>
+        <div style="background-color: var(--bg-deep); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 16px; font-size: 0.8571rem; color: var(--fg-muted); line-height: 1.5;">
+          💡 <strong style="color: var(--fg-default);">Free &amp; offline:</strong> the first-run setup wizard installs
+          <a href="#" id="ollama-download-link" style="color: var(--accent); text-decoration: none;">Ollama</a> and pulls a model for
+          you — just pick <strong>Ollama</strong> as the provider below. Setting it up yourself? Install Ollama, then select it here.
         </div>
 
         <div class="settings-field">
