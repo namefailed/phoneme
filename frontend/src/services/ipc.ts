@@ -360,6 +360,15 @@ export async function importRecording(path: string): Promise<{ id: string }> {
   return await tauriInvoke<{ id: string }>("import_recording", { path });
 }
 
+/** Safe re-import: re-link audio files on disk that have no catalog row. With
+ *  `dryRun`, only counts (`{ count, paths }`); otherwise inserts + enqueues them
+ *  (`{ count }`). Non-destructive — never deletes or touches existing rows. */
+export async function reimportFromDisk(
+  dryRun: boolean,
+): Promise<{ count: number; paths?: string[] }> {
+  return await tauriInvoke<{ count: number; paths?: string[] }>("reimport_from_disk", { dryRun });
+}
+
 /** File extensions accepted by the import flow (no leading dot). */
 export const IMPORT_AUDIO_EXTENSIONS = ["wav", "mp3", "m4a", "flac"] as const;
 

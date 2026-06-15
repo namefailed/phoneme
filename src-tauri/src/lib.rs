@@ -337,6 +337,7 @@ pub fn run() {
             commands::record_status,
             commands::retranscribe_recording,
             commands::import_recording,
+            commands::reimport_from_disk,
             commands::refire_hook,
             commands::rerun_cleanup,
             commands::rerun_summary,

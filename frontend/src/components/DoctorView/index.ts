@@ -8,6 +8,8 @@ import {
   healthCounts,
   type DoctorCheckInfo,
 } from "../doctorChecks";
+import { showToast } from "../../utils/toast";
+import { reimportFromDisk } from "../../services/ipc";
 
 // Import styles
 import "../SettingsView/styles.css";
@@ -39,6 +41,10 @@ export class DoctorViewElement extends LitElement {
   @state() private checks: DoctorCheckInfo[] | null = null;
   @state() private loading = false;
   @state() private runningFix: string | null = null;
+  /** Safe re-import-from-disk flow: idle → checking (dry-run preview) → confirm
+   *  → running. Two clicks: the first counts orphaned files, the second runs it. */
+  @state() private reimport: "idle" | "checking" | "confirm" | "running" = "idle";
+  private reimportFound = 0;
 
   connectedCallback() {
     super.connectedCallback();
@@ -59,6 +65,40 @@ export class DoctorViewElement extends LitElement {
 
     this.checks = [...daemonChecks, ...localChecks, ...backendChecks];
     this.loading = false;
+  }
+
+  /** Safe re-import: first click dry-runs and reports how many audio files on
+   *  disk have no library entry; the second click re-links them. Non-destructive
+   *  (the daemon never deletes — see ReimportFromDisk). */
+  private async handleReimport() {
+    if (this.reimport === "idle") {
+      this.reimport = "checking";
+      try {
+        const { count } = await reimportFromDisk(true);
+        if (!count) {
+          showToast("No orphaned recordings on disk — nothing to re-import.", "info");
+          this.reimport = "idle";
+          return;
+        }
+        this.reimportFound = count;
+        this.reimport = "confirm";
+      } catch (e) {
+        showToast(`Re-import scan failed: ${e}`, "error");
+        this.reimport = "idle";
+      }
+      return;
+    }
+    if (this.reimport === "confirm") {
+      this.reimport = "running";
+      try {
+        const { count } = await reimportFromDisk(false);
+        showToast(`Re-imported ${count} recording(s) from disk.`, "success");
+      } catch (e) {
+        showToast(`Re-import failed: ${e}`, "error");
+      }
+      this.reimport = "idle";
+      void this.runChecks();
+    }
   }
 
   private async daemonChecks(): Promise<DoctorCheckInfo[]> {
@@ -257,6 +297,15 @@ export class DoctorViewElement extends LitElement {
                   </button>`
                 : ""}
               <button id="doctor-refresh" ?disabled=${busy} @click=${this.runChecks}>Re-run all</button>
+              <button id="doctor-reimport"
+                ?disabled=${this.reimport === "checking" || this.reimport === "running"}
+                title="Scan the audio folder and re-link recordings missing from the library. Safe — never deletes anything."
+                @click=${this.handleReimport}>
+                ${this.reimport === "checking" ? "Scanning…"
+                  : this.reimport === "running" ? "Re-importing…"
+                  : this.reimport === "confirm" ? `Re-import ${this.reimportFound} found?`
+                  : "↻ Re-import from disk"}
+              </button>
             </div>
           </div>
           ${this.checks === null

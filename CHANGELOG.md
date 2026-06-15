@@ -304,7 +304,9 @@ trust boundary. Verified against current code.*
   DESTRUCTIVE `doctor --rebuild-catalog`, whose help text now states plainly that
   it deletes the catalog (transcripts/tags/notes/titles are DB-only and lost; the
   daemon does **not** reconstruct rows from audio) and points at `--reimport` for
-  recovery.
+  recovery. Also surfaced as a **Doctor button** ("↻ Re-import from disk"): one
+  click dry-runs and reports how many orphaned files it found, a second confirms
+  and re-links them.
 - [x] **UI font size is a real font size now** — the Appearance → font-size setting
   drives the root `font-size` (`--ui-font-size`), and every text size across the app
   is expressed in `rem`, so changing it scales the interface text up/down cleanly.

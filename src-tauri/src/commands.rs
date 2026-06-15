@@ -328,6 +328,14 @@ pub async fn import_recording(bridge: Br<'_>, path: String) -> Result<Value, Com
     forward(&bridge, Request::ImportRecording { path }).await
 }
 
+/// Safe, non-destructive re-import: scan the audio dir and re-link any file with
+/// no catalog row (the counterpart to the destructive `doctor --rebuild-catalog`).
+/// `dry_run` returns `{ count, paths }` without writing; otherwise `{ count }`.
+#[tauri::command]
+pub async fn reimport_from_disk(bridge: Br<'_>, dry_run: bool) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ReimportFromDisk { dry_run }).await
+}
+
 /// Force the daemon to re-execute the post-processing hook for a given recording ID.
 #[tauri::command]
 pub async fn refire_hook(
