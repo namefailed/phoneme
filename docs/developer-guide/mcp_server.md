@@ -2,9 +2,11 @@
 
 `phoneme-mcp` is a thin [Model Context Protocol](https://modelcontextprotocol.io)
 bridge that exposes Phoneme to MCP-capable AI clients (Claude Desktop, the
-Claude CLI, and any other MCP host). It lets an assistant **start and stop
-recordings, fetch transcripts, and search your library** through the same
-daemon the GUI and `phoneme` CLI talk to.
+Claude CLI, and any other MCP host). It lets an assistant **record, search and
+read your library, and act on recordings** — set titles, star favorites,
+suggest & list tags, summarize, re-run cleanup, re-transcribe, find similar
+recordings, and pull word-level timings — through the same daemon the GUI and
+`phoneme` CLI talk to.
 
 It is deliberately a *translator*, not a brain: MCP is JSON-RPC 2.0 over stdio,
 and each tool call maps to exactly one `phoneme-ipc` `Request` over the existing
@@ -37,7 +39,9 @@ The JSON-RPC methods handled are the MCP lifecycle set: `initialize`,
 `notifications/initialized` (no-op), `ping`, `tools/list`, and `tools/call`.
 Any other method returns a JSON-RPC `-32601` (method not found).
 
-## 🧰 The five tools
+## 🧰 The tools
+
+**Record, search & read** (the original read-only core):
 
 | Tool | Arguments | Maps to | Returns |
 |------|-----------|---------|---------|
@@ -47,10 +51,34 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 | `search_recordings` | `query` (required), `limit?` (default 10) | `SemanticSearch` | Ranked hits: id, title, score, snippet |
 | `list_recent` | `limit?` (default 10) | `ListRecordings` (newest first) | Recent rows: id, status, title, snippet |
 
+**Act on it** (mutating and richer reads):
+
+| Tool | Arguments | Maps to | Returns |
+|------|-----------|---------|---------|
+| `set_title` | `id` (required), `title?` | `SetRecordingTitle` | Confirmation (omit/blank `title` reverts to auto) |
+| `set_favorite` | `id`, `favorite` (both required) | `SetFavorite` | Confirmation |
+| `suggest_tags` | `id` (required) | `SuggestTags` | Confirmation (LLM suggestions land for approval; awaits the model) |
+| `list_tags` | _(none)_ | `ListAllTags` | A bulleted list of every tag name |
+| `summarize` | `id` (required) | `RerunSummary` | Confirmation (regenerates + stores the summary) |
+| `rerun_cleanup` | `id` (required) | `RerunCleanup` | Confirmation (re-runs LLM cleanup on the preserved original transcript) |
+| `retranscribe` | `id` (required), `model?` | `RetranscribeRecording` | Confirmation — **heavy**: re-runs the whole pipeline |
+| `more_like_this` | `id` (required), `limit?` (default 10) | `MoreLikeThis` | Ranked similar recordings: id, title, score, snippet |
+| `get_words` | `id` (required) | `GetWords` | A count of word-level timings (start/end offsets, e.g. for caption/SRT export) |
+
 `start_recording`'s `oneshot` mode auto-stops on silence; `hold` records until
-an explicit `stop_recording`. `get_transcript` takes the recording id printed by
-`list_recent` / `search_recordings` (or by the `phoneme` CLI). Each tool result
-is MCP **text content**.
+an explicit `stop_recording`. The `id`-taking tools take the recording id
+printed by `list_recent` / `search_recordings` (or by the `phoneme` CLI). To
+tag a recording, run `suggest_tags` (the LLM proposes tags the user approves in
+the app) and `list_tags` to see the existing tag vocabulary. `summarize`,
+`rerun_cleanup` and `retranscribe` re-run pipeline steps; the model overrides
+they carry are kept per-run and never written to config (and `retranscribe` is
+the heavy one — it re-runs transcription **and** post-processing). Each tool
+result is MCP **text content**.
+
+This surface stays in lockstep with the in-tree `phoneme-agent-core` tool
+registry (`crates/phoneme-agent-core`) — same tool names mapped to the same IPC
+requests, pointed the opposite direction (an external agent calling in vs. the
+embedded panel calling out).
 
 ## 📋 Client configuration
 
@@ -111,7 +139,7 @@ Like the Desktop entry it takes **no arguments**, and it is observe-only — mak
 sure the daemon is running (the tray app or `phoneme daemon start`) before
 invoking a tool. Restart Claude Code and approve the new server so it connects.
 
-Restart the client; "phoneme" appears in its tool list and the five tools above
+Restart the client; "phoneme" appears in its tool list and the tools above
 become callable. The MCP server needs **no arguments** — it reads the same
 config the daemon and CLI read (honoring `PHONEME_CONFIG`) to find the daemon's
 pipe name. Make sure the daemon is running (the tray app or `phoneme daemon
@@ -134,7 +162,7 @@ printf '%s\n%s\n' \
 ```
 
 You should see two JSON-RPC response lines: the `initialize` result (with
-`serverInfo.name = "phoneme-mcp"`) and the five tools with their input schemas.
+`serverInfo.name = "phoneme-mcp"`) and the tools with their input schemas.
 
 ## 🗺️ Relationship to the rest of Phoneme
 

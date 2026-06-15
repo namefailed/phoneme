@@ -11,9 +11,12 @@
 //! The future in-app agent panel drives this registry directly; the standalone
 //! opencode-based agent reaches the same capabilities from outside via the
 //! `phoneme-mcp` server — "same registry, opposite direction" (see
-//! `docs/design/phoneme-agent-harness.md`). The registry intentionally mirrors
-//! the five tools `phoneme-mcp` exposes today; richer actions (tag, title,
-//! summarize, export, favorite) slot in here as their `Request`s are added.
+//! `docs/design/phoneme-agent-harness.md`). The registry stays in lockstep with
+//! `phoneme-mcp`'s external surface: the same tool names, mapped to the same
+//! `Request`s. Beyond the original five read-only tools (list/search/get/start/
+//! stop) it now exposes "act on it" capabilities — set title/favorite, suggest &
+//! list tags, summarize, re-run cleanup, retranscribe, more-like-this, and
+//! per-word timings.
 
 use phoneme_core::{ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::Request;
@@ -59,7 +62,10 @@ impl ToolRegistry {
     }
 
     /// The canonical Phoneme toolset — the same capabilities `phoneme-mcp`
-    /// exposes externally (list / search / get / start / stop).
+    /// exposes externally, in the same order. The read-only core (list / search /
+    /// get / start / stop) plus the "act on it" tools (set title/favorite,
+    /// suggest & list tags, summarize, re-run cleanup, retranscribe, more-like-
+    /// this, words).
     pub fn with_phoneme_tools() -> Self {
         let mut r = Self::new();
         r.register(Box::new(ListRecent));
@@ -67,6 +73,15 @@ impl ToolRegistry {
         r.register(Box::new(GetTranscript));
         r.register(Box::new(StartRecording));
         r.register(Box::new(StopRecording));
+        r.register(Box::new(SetTitle));
+        r.register(Box::new(SetFavorite));
+        r.register(Box::new(SuggestTags));
+        r.register(Box::new(ListTags));
+        r.register(Box::new(Summarize));
+        r.register(Box::new(RerunCleanup));
+        r.register(Box::new(Retranscribe));
+        r.register(Box::new(MoreLikeThis));
+        r.register(Box::new(GetWords));
         r
     }
 
@@ -115,6 +130,26 @@ fn opt_u32(args: &Value, key: &str, default: u32) -> u32 {
         .and_then(|v| v.as_u64())
         .map(|n| n as u32)
         .unwrap_or(default)
+}
+
+/// Pull the required `id` argument and parse it into a [`RecordingId`] — the
+/// shared validation every id-taking tool uses (same shape as `get_transcript`).
+fn require_recording_id(args: &Value, tool: &str) -> Result<RecordingId, ToolError> {
+    let raw = require_str(args, "id", tool)?;
+    RecordingId::parse(raw).ok_or_else(|| ToolError::BadArgs {
+        tool: tool.to_string(),
+        reason: "`id` is not a valid recording id".to_string(),
+    })
+}
+
+/// Read an optional string argument, normalized to `Some(non-empty)` or `None`
+/// (a missing key or a blank/whitespace-only value both map to `None`).
+fn opt_str(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 struct ListRecent;
@@ -174,11 +209,7 @@ impl Tool for GetTranscript {
         }
     }
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
-        let raw = require_str(args, "id", "get_transcript")?;
-        let id = RecordingId::parse(raw).ok_or_else(|| ToolError::BadArgs {
-            tool: "get_transcript".to_string(),
-            reason: "`id` is not a valid recording id".to_string(),
-        })?;
+        let id = require_recording_id(args, "get_transcript")?;
         Ok(Request::GetRecording { id })
     }
 }
@@ -224,6 +255,207 @@ impl Tool for StopRecording {
     }
 }
 
+struct SetTitle;
+impl Tool for SetTitle {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "set_title",
+            description: "Set or clear a recording's display title. Omit (or blank) the title to revert to the auto-generated one.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Recording id from list/search." },
+                    "title": { "type": "string", "description": "New title; omit or leave blank to return to auto-generation." }
+                },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "set_title")?;
+        let title = opt_str(args, "title");
+        Ok(Request::SetRecordingTitle { id, title })
+    }
+}
+
+struct SetFavorite;
+impl Tool for SetFavorite {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "set_favorite",
+            description: "Star or un-star a recording (the Favorites view).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Recording id from list/search." },
+                    "favorite": { "type": "boolean", "description": "true = starred, false = un-starred." }
+                },
+                "required": ["id", "favorite"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "set_favorite")?;
+        let favorite = args
+            .get("favorite")
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| ToolError::BadArgs {
+                tool: "set_favorite".to_string(),
+                reason: "missing required boolean `favorite`".to_string(),
+            })?;
+        Ok(Request::SetFavorite { id, favorite })
+    }
+}
+
+struct SuggestTags;
+impl Tool for SuggestTags {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "suggest_tags",
+            description: "Run LLM tag suggestion for a recording (awaits the model). Suggestions land on the recording for approval.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "suggest_tags")?;
+        Ok(Request::SuggestTags { id })
+    }
+}
+
+struct ListTags;
+impl Tool for ListTags {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "list_tags",
+            description: "List every tag in the library, including unused ones.",
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    fn to_request(&self, _args: &Value) -> Result<Request, ToolError> {
+        Ok(Request::ListAllTags)
+    }
+}
+
+struct Summarize;
+impl Tool for Summarize {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "summarize",
+            description: "Generate (or regenerate) and store an LLM summary of a recording's current transcript.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "summarize")?;
+        Ok(Request::RerunSummary { id, model: None, prompt: None })
+    }
+}
+
+struct RerunCleanup;
+impl Tool for RerunCleanup {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "rerun_cleanup",
+            description: "Re-run the LLM cleanup step on a recording's preserved original transcript (does not re-transcribe the audio).",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "rerun_cleanup")?;
+        Ok(Request::RerunCleanup {
+            id,
+            model: None,
+            provider: None,
+            prompt: None,
+            api_url: None,
+            api_key: None,
+        })
+    }
+}
+
+struct Retranscribe;
+impl Tool for Retranscribe {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "retranscribe",
+            description: "Re-transcribe a saved recording through the full pipeline (heavy: re-runs transcription + post-processing). Optional model override for this run only.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Recording id from list/search." },
+                    "model": { "type": "string", "description": "One-time transcription model override (model file path for local, model id for cloud)." }
+                },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "retranscribe")?;
+        let model = opt_str(args, "model");
+        Ok(Request::RetranscribeRecording {
+            id,
+            model,
+            run_hooks: None,
+            post_process: None,
+            all_overrides: None,
+        })
+    }
+}
+
+struct MoreLikeThis;
+impl Tool for MoreLikeThis {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "more_like_this",
+            description: "Find recordings semantically similar to a stored one (uses its existing vectors; no fresh query embedding).",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Recording id whose stored vectors are the query." },
+                    "limit": { "type": "integer", "minimum": 1, "description": "Max hits (default 10)." }
+                },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "more_like_this")?;
+        let limit = opt_u32(args, "limit", DEFAULT_LIMIT) as usize;
+        Ok(Request::MoreLikeThis { id, limit })
+    }
+}
+
+struct GetWords;
+impl Tool for GetWords {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "get_words",
+            description: "Fetch a recording's word-level timings (e.g. for caption/SRT export).",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "id": { "type": "string", "description": "Recording id from list/search." } },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "get_words")?;
+        Ok(Request::GetWords { id })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,7 +466,22 @@ mod tests {
         let names: Vec<&str> = r.specs().iter().map(|s| s.name).collect();
         assert_eq!(
             names,
-            ["list_recent", "search_recordings", "get_transcript", "start_recording", "stop_recording"]
+            [
+                "list_recent",
+                "search_recordings",
+                "get_transcript",
+                "start_recording",
+                "stop_recording",
+                "set_title",
+                "set_favorite",
+                "suggest_tags",
+                "list_tags",
+                "summarize",
+                "rerun_cleanup",
+                "retranscribe",
+                "more_like_this",
+                "get_words",
+            ]
         );
         // Every spec carries an object schema.
         assert!(r.specs().iter().all(|s| s.input_schema["type"] == "object"));
@@ -302,5 +549,130 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         assert_eq!(r.to_request("stop_recording", &json!({})).unwrap(), Request::RecordStop);
         assert!(matches!(r.to_request("nope", &json!({})), Err(ToolError::Unknown(_))));
+    }
+
+    #[test]
+    fn set_title_some_vs_none() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        // A real title → Some.
+        assert_eq!(
+            r.to_request("set_title", &json!({ "id": id.as_str(), "title": "Budget call" })).unwrap(),
+            Request::SetRecordingTitle { id: id.clone(), title: Some("Budget call".to_string()) }
+        );
+        // Omitted title → None (revert to auto).
+        assert_eq!(
+            r.to_request("set_title", &json!({ "id": id.as_str() })).unwrap(),
+            Request::SetRecordingTitle { id: id.clone(), title: None }
+        );
+        // Blank title → None.
+        assert_eq!(
+            r.to_request("set_title", &json!({ "id": id.as_str(), "title": "   " })).unwrap(),
+            Request::SetRecordingTitle { id, title: None }
+        );
+    }
+
+    #[test]
+    fn set_favorite_maps_and_requires_flag() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("set_favorite", &json!({ "id": id.as_str(), "favorite": true })).unwrap(),
+            Request::SetFavorite { id: id.clone(), favorite: true }
+        );
+        // Missing the required boolean → BadArgs.
+        assert!(matches!(
+            r.to_request("set_favorite", &json!({ "id": id.as_str() })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn suggest_tags_and_list_tags_map() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("suggest_tags", &json!({ "id": id.as_str() })).unwrap(),
+            Request::SuggestTags { id }
+        );
+        assert_eq!(r.to_request("list_tags", &json!({})).unwrap(), Request::ListAllTags);
+    }
+
+    #[test]
+    fn summarize_and_cleanup_default_their_overrides() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("summarize", &json!({ "id": id.as_str() })).unwrap(),
+            Request::RerunSummary { id: id.clone(), model: None, prompt: None }
+        );
+        assert_eq!(
+            r.to_request("rerun_cleanup", &json!({ "id": id.as_str() })).unwrap(),
+            Request::RerunCleanup {
+                id,
+                model: None,
+                provider: None,
+                prompt: None,
+                api_url: None,
+                api_key: None,
+            }
+        );
+    }
+
+    #[test]
+    fn retranscribe_model_override_some_vs_none() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        // No model → None override.
+        assert_eq!(
+            r.to_request("retranscribe", &json!({ "id": id.as_str() })).unwrap(),
+            Request::RetranscribeRecording {
+                id: id.clone(),
+                model: None,
+                run_hooks: None,
+                post_process: None,
+                all_overrides: None,
+            }
+        );
+        // A model → Some override.
+        assert_eq!(
+            r.to_request("retranscribe", &json!({ "id": id.as_str(), "model": "large-v3" })).unwrap(),
+            Request::RetranscribeRecording {
+                id,
+                model: Some("large-v3".to_string()),
+                run_hooks: None,
+                post_process: None,
+                all_overrides: None,
+            }
+        );
+    }
+
+    #[test]
+    fn more_like_this_defaults_limit() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("more_like_this", &json!({ "id": id.as_str() })).unwrap(),
+            Request::MoreLikeThis { id: id.clone(), limit: 10 }
+        );
+        assert_eq!(
+            r.to_request("more_like_this", &json!({ "id": id.as_str(), "limit": 3 })).unwrap(),
+            Request::MoreLikeThis { id, limit: 3 }
+        );
+    }
+
+    #[test]
+    fn get_words_maps_and_validates_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        assert_eq!(
+            r.to_request("get_words", &json!({ "id": id.as_str() })).unwrap(),
+            Request::GetWords { id }
+        );
+        // Invalid id → BadArgs (covers the new id-taking tools' shared path).
+        assert!(matches!(
+            r.to_request("get_words", &json!({ "id": "not-an-id" })),
+            Err(ToolError::BadArgs { .. })
+        ));
     }
 }

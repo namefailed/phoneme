@@ -2,7 +2,7 @@
 //!
 //! MCP is JSON-RPC 2.0 over stdio. This binary is a *translator*, not a brain
 //! (per the roadmap): it reads framed JSON-RPC requests from **stdin**, maps
-//! the five exposed tools onto `phoneme-ipc` [`Request`](phoneme_ipc::Request)s
+//! the exposed tools onto `phoneme-ipc` [`Request`](phoneme_ipc::Request)s
 //! over the existing daemon `Transport`, and writes JSON-RPC responses to
 //! **stdout**. All logging goes to **stderr** — stdout is the protocol channel
 //! and must never carry anything but framed JSON-RPC.
@@ -10,7 +10,7 @@
 //! Layout:
 //! - [`protocol`] — JSON-RPC envelopes + stdio framing (newline or
 //!   `Content-Length`), all pure / unit-tested.
-//! - [`tools`] — the five tools, their JSON schemas, the pure
+//! - [`tools`] — the tools, their JSON schemas, the pure
 //!   `build_request` dispatch, and result rendering.
 //! - [`server`] — the method dispatcher (`initialize`, `tools/list`,
 //!   `tools/call`, notifications) over a [`server::DaemonCall`] backend.
@@ -176,7 +176,7 @@ mod tests {
 
         let list: Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(list["id"], 2);
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 5);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 14);
     }
 
     /// A malformed JSON line is answered with a parse error and the loop keeps

@@ -293,14 +293,23 @@ trust boundary. Verified against current code.*
   basenames (no path traversal) that resolves the daily-rolled `daemon.log.*`
   automatically. `LogViewer.ts`.
 - [x] **MCP server (`phoneme-mcp`)** — a thin Model Context Protocol bridge
-  (JSON-RPC 2.0 over stdio) exposing five tools — `start_recording`,
-  `stop_recording`, `get_transcript`, `search_recordings`, `list_recent` — that
-  map straight onto the daemon's existing IPC requests with near-zero business
-  logic. Observe-only (never spawns a daemon); a down/erroring daemon and any
-  bad input surface as clean MCP tool errors, and the stdio framing is bounded
-  (8 MiB, mirroring the IPC codec) against oversized or unterminated frames.
-  Drop-in for Claude Desktop and other MCP hosts — see
-  [MCP Server](docs/developer-guide/mcp_server.md).
+  (JSON-RPC 2.0 over stdio) that maps tools straight onto the daemon's existing
+  IPC requests with near-zero business logic. Observe-only (never spawns a
+  daemon); a down/erroring daemon and any bad input surface as clean MCP tool
+  errors, and the stdio framing is bounded (8 MiB, mirroring the IPC codec)
+  against oversized or unterminated frames. Drop-in for Claude Desktop and other
+  MCP hosts — see [MCP Server](docs/developer-guide/mcp_server.md).
+- [x] **Agent toolset grows from read-only to "act on it"** — the `phoneme-mcp`
+  bridge and the in-tree agent registry (`crates/phoneme-agent-core`) now expose
+  fourteen tools, kept in lockstep (same names, same IPC requests, opposite
+  direction). Beyond the original read-only five (`start_recording`,
+  `stop_recording`, `get_transcript`, `search_recordings`, `list_recent`) an
+  agent can now act on recordings: `set_title`, `set_favorite`, `suggest_tags`,
+  `list_tags`, `summarize`, `rerun_cleanup`, `retranscribe` (heavy — re-runs the
+  whole pipeline, optional one-time model override), `more_like_this`, and
+  `get_words` (word-level timings, e.g. for caption/SRT export). Each stays a
+  pure args → `Request` mapping; the mutating ones answer with a short
+  confirmation and never persist their per-run model overrides to config.
 - [x] **Local REST API (`phoneme-rest`, off by default)** — a localhost `axum`
   bridge over the daemon, bound to `127.0.0.1` only (the loopback trust
   boundary). Each endpoint maps one HTTP call to one `phoneme-ipc` `Request`

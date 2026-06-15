@@ -245,10 +245,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_returns_five_tools() {
+    async fn tools_list_returns_all_tools() {
         let (srv, _) = server_with(|_| ok_null());
         let r = unwrap_response(srv.handle("tools/list", &json!({}), json!(2)).await);
-        assert_eq!(r.result["tools"].as_array().unwrap().len(), 5);
+        assert_eq!(r.result["tools"].as_array().unwrap().len(), 14);
     }
 
     #[tokio::test]
@@ -293,6 +293,64 @@ mod tests {
                 in_place: false
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn tools_call_dispatches_set_title_with_some() {
+        let (srv, seen) = server_with(|_| ok_null());
+        let id = phoneme_core::RecordingId::new();
+        let params = json!({
+            "name": "set_title",
+            "arguments": { "id": id.as_str(), "title": "Budget call" }
+        });
+        let r = unwrap_response(srv.handle("tools/call", &params, json!(10)).await);
+        assert_eq!(r.result["isError"], false);
+        assert!(r.result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Title updated"));
+        // The exact request reached the daemon.
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.as_slice(),
+            &[Request::SetRecordingTitle {
+                id,
+                title: Some("Budget call".to_string())
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_call_retranscribe_passes_model_override() {
+        let (srv, seen) = server_with(|_| ok_null());
+        let id = phoneme_core::RecordingId::new();
+        let params = json!({
+            "name": "retranscribe",
+            "arguments": { "id": id.as_str(), "model": "large-v3" }
+        });
+        let r = unwrap_response(srv.handle("tools/call", &params, json!(11)).await);
+        assert_eq!(r.result["isError"], false);
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.as_slice(),
+            &[Request::RetranscribeRecording {
+                id,
+                model: Some("large-v3".to_string()),
+                run_hooks: None,
+                post_process: None,
+                all_overrides: None,
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_call_invalid_id_is_tool_error_not_daemon_call() {
+        let (srv, seen) = server_with(|_| ok_null());
+        let params = json!({ "name": "get_words", "arguments": { "id": "not-an-id" } });
+        let r = unwrap_response(srv.handle("tools/call", &params, json!(12)).await);
+        // A bad id is a tool error, surfaced as isError, never reaching the daemon.
+        assert_eq!(r.result["isError"], true);
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
