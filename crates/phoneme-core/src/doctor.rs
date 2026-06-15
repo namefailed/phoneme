@@ -1282,8 +1282,17 @@ pub async fn run_backend_checks_with_ports(
     // `in_place_provider_config()` so this stays in lockstep with what the
     // dictation fast lane actually dials.
     {
+        // Only meaningful when dictation can actually run — its own STT provider
+        // is configured, OR the in-place hotkey is enabled (which also stands in
+        // for the CLI `record --in-place` path). Without this gate the check
+        // false-fires for anyone who merely picked a heavy MAIN transcription
+        // model (large/turbo) but never turned dictation on — `in_place_provider_config`
+        // falls through to `[whisper]` in that case. Mirrors the in-use gate the
+        // sibling dictation checks (endpoint, model file) already apply.
+        let dictation_in_use = cfg.in_place.stt.is_some() || cfg.in_place_hotkey.enabled;
         let stt = cfg.in_place_provider_config();
-        if stt.provider == TranscriptionBackend::Local
+        if dictation_in_use
+            && stt.provider == TranscriptionBackend::Local
             && matches!(
                 stt.mode,
                 WhisperMode::BundledModel | WhisperMode::BundledDownload
@@ -1930,6 +1939,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slow_dictation_warning_is_gated_on_dictation_being_in_use() {
+        // A heavy MAIN transcription model (large/turbo) must NOT trigger the
+        // "Dictation speed" warning on its own — only once dictation is actually
+        // reachable. Regression for the false-fire the integration review caught.
+        let mut cfg = Config::default();
+        cfg.whisper.provider = TranscriptionBackend::Local;
+        cfg.whisper.mode = WhisperMode::BundledModel;
+        cfg.whisper.model_path = "ggml-large-v3-turbo.bin".into();
+
+        // Defaults: in_place.stt = None and in_place_hotkey disabled → dictation off.
+        let off = run_backend_checks(&cfg).await;
+        assert!(
+            !off.iter().any(|c| c.name == "Dictation speed"),
+            "heavy MAIN model with dictation OFF must not raise a dictation-speed warning"
+        );
+
+        // Enabling the in-place hotkey makes dictation reachable; now the heavy
+        // model the dictation lane would dial is a legitimate warning.
+        cfg.in_place_hotkey.enabled = true;
+        let on = run_backend_checks(&cfg).await;
+        assert!(
+            on.iter().any(|c| c.name == "Dictation speed"),
+            "heavy model with dictation enabled should raise the dictation-speed warning"
+        );
+    }
+
+    #[tokio::test]
     async fn backend_check_ollama_running() {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -2488,9 +2524,11 @@ mod tests {
 
     #[tokio::test]
     async fn dictation_speed_warns_when_riding_the_heavy_main_model() {
-        // Default: dictation falls back to the main provider. Make the main a
-        // heavy local model — the slow-model warning should fire.
+        // With dictation actually in use (hotkey on) and no dedicated STT,
+        // dictation falls back to the main provider. Make the main a heavy local
+        // model — the slow-model warning should fire.
         let mut cfg = Config::default();
+        cfg.in_place_hotkey.enabled = true;
         cfg.whisper.provider = TranscriptionBackend::Local;
         cfg.whisper.mode = WhisperMode::BundledModel;
         cfg.whisper.model_path = "C:/models/ggml-large-v3-turbo.bin".into();
