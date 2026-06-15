@@ -215,6 +215,19 @@ export class NotesEditor {
       parent: root,
     });
 
+    // Shift+Esc leaves the editor and hands focus back to the keyboard-nav layer
+    // (the detail pane), so h/l/j/k work again — exactly like the transcript
+    // editor. Plain Esc is the editor's own vim normal mode here, so Shift is the
+    // explicit "leave the box" gesture. The event bubbles from the CodeMirror
+    // content up to this root (Shift+Esc isn't a vim binding, so vim lets it pass).
+    root.addEventListener("keydown", (e) => {
+      if (e.shiftKey && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "exit-editor" } }));
+      }
+    });
+
     document.addEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
 
     // Reflect the REAL vim mode in the badge via the editor's own mode-change

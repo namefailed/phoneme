@@ -249,6 +249,18 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Detail-pane & keyboard-nav polish** — the **Pipeline** provenance popover
+  now floats free of the detail pane's scroll box (fixed positioning, clamped into
+  the viewport), so long model names like `ggml-large-v3-turbo` wrap cleanly inside
+  it instead of crowding or being clipped at the pane edge. Keyboard nav gained
+  parity across panes: **focus follows your mouse in the header strip** (clicking a
+  header control places the roving cursor on it, like the list/detail/sidebar
+  already do), **k at the top of the sidebar** drops up into the search bar (matching
+  k at the top of the list), and **Shift+Esc in the Notes editor** leaves the editor
+  back to the detail pane (matching the transcript editor). Also: the Settings panel
+  reliably fills its area again — the custom-element host no longer collapses the
+  height chain (`display: contents`), so short tabs keep the Save/Close footer pinned
+  to the bottom instead of floating mid-window (or, in the regression, blanking out).
 - [x] **Edited transcripts re-sync the Synced & Timeline views** — when you edit
   and save a transcript, the per-word and per-segment timing layers are re-flowed
   onto your new text (`phoneme_core::realign`), so the **Synced** (per-word) and

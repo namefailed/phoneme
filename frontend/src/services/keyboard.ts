@@ -783,6 +783,39 @@ export function initKeyboard() {
   if (installed) return;
   installed = true;
   document.addEventListener("keydown", onKeyDown);
+  // Focus-follows-click for the header strip: clicking a header control puts the
+  // roving header cursor on it, so h/l roam from where you clicked — parity with
+  // the list / detail / sidebar panes, which already do this. The search box is a
+  // typing target, so clicking it focuses to type (just drop any stale roving
+  // cursor). Capture phase so we read the pre-click control set; we never
+  // preventDefault, so the control's own click still fires.
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!vimNav) return;
+      const target = e.target as HTMLElement | null;
+      if (!target || typeof target.closest !== "function" || !target.closest(".headerbar")) return;
+      const items = headerControls();
+      const ctrl = items.find((el) => el === target || el.contains(target));
+      if (!ctrl) return;
+      if (ctrl.classList.contains("search")) { exitHeaderNav(); return; }
+      closeHeaderSub(false);
+      headerCursor = items.indexOf(ctrl);
+      highlightHeaderCursor();
+      // Anchor focus on the bar (a non-typing target) so the roving cursor sticks
+      // and h/l keep routing here. The native status <select> needs its own focus
+      // to open, so leave it alone. Defer past this gesture so we don't fight the
+      // control's own click/focus.
+      if (ctrl.tagName !== "SELECT") {
+        const bar = ctrl.closest(".headerbar") as HTMLElement | null;
+        if (bar) {
+          bar.setAttribute("tabindex", "-1");
+          requestAnimationFrame(() => { if (headerCursor >= 0) bar.focus({ preventScroll: true }); });
+        }
+      }
+    },
+    true,
+  );
   // Restore the Ctrl+/ "top bar hidden" preference.
   try {
     if (localStorage.getItem(LS_HEADER_HIDDEN) === "true") toggleHeaderBar(true);

@@ -873,7 +873,20 @@ export class RecordingsView {
     const rows = this.sidebarGrid();
     if (!rows.length) return;
     if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
-    this.sidebarRow = Math.max(0, Math.min(rows.length - 1, this.sidebarRow + delta));
+    const next = this.sidebarRow + delta;
+    // Up past the very top row → HIGHLIGHT the header search bar (roving mode),
+    // exactly like k at the top of the list or detail pane. Release the sidebar
+    // first so the header owns the cursor.
+    if (next < 0) {
+      this.clearSidebarCursorHighlight();
+      this.paneEl("sidebar")?.classList.remove("rv-pane-focused");
+      this.sidebarRow = -1;
+      this.sidebarCol = 0;
+      this.focusedPane = null;
+      window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
+      return;
+    }
+    this.sidebarRow = Math.min(rows.length - 1, next);
     this.sidebarCol = 0;
     this.highlightSidebar();
   }
