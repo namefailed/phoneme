@@ -272,7 +272,7 @@ export class SectionInterface {
               config.interface.strip_titlebar,
             )}</div>
             <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
-              Removes the default OS window decorations. The top header will become draggable. Requires app restart to fully apply.
+              Removes the default OS window decorations. The top header will become draggable. Stripping the bar applies live; turning it back ON needs an app restart (Windows can't re-add the native title bar to a running window).
             </span>
           </div>
         </div>
