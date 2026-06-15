@@ -14,6 +14,7 @@ This means:
 - **Instant Results**: Searching through 5,000 recordings takes less than 10 milliseconds.
 - **Prefix Matching**: If you search for "phono", it will match "phoneme", "phonology", etc.
 - **Compound Queries**: You can type multiple words like `"marketing budget"` to find recordings that contain both concepts.
+- **Model Names**: The search box also matches the **models** behind each recording. Type a model name (e.g. `medium`, `gpt-4o-mini`, `llama3.2`) to find every recording that model transcribed, cleaned, summarised, titled, tagged, or diarized.
 
 ## 🧠 Semantic search (meaning-based)
 

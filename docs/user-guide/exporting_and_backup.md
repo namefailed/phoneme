@@ -83,7 +83,8 @@ For sharing transcripts without the full archive, you have a few options:
 
 - **One recording** — the open recording's **⬇ Export** button saves its
   transcript as a `.txt` file.
-- **Several at once** — select multiple recordings and use the bulk action
+- **Several at once (bulk export)** — select **2 or more** recordings
+  (`Space` to toggle a row, or `Shift+Click` a range) and use the bulk action
   bar's **Export** menu to save **TXT**, **JSON**, or **CSV**.
 - **The whole library, as text** — **Settings → Storage → Export recordings**
   writes every transcript to a single JSON / CSV / TXT file (text only — no

@@ -64,7 +64,7 @@ interchangeable front ends:
 | Process | Crate / dir | Owns | Doc |
 | :--- | :--- | :--- | :--- |
 | **Daemon** | [`bin/phoneme-daemon`](../../bin/phoneme-daemon/src/main.rs) | Mic, inbox queue, pipeline, catalog, event bus, child processes | [`main.rs`](../../bin/phoneme-daemon/src/main.rs) |
-| **Tray** | [`src-tauri`](../../src-tauri/src/lib.rs) + [`frontend`](../../frontend/src/App.ts) | Window, tray icon, global hotkeys, preview overlay, settings UI | [`src-tauri/src/lib.rs`](../../src-tauri/src/lib.rs) |
+| **Tray** | [`src-tauri`](../../src-tauri/src/lib.rs) + [`frontend`](../../frontend/src/App.ts) | Window, tray icon, global hotkeys, preview overlay, settings UI (~9 sections) | [`src-tauri/src/lib.rs`](../../src-tauri/src/lib.rs) |
 | **CLI** | [`bin/phoneme`](../../bin/phoneme/src/main.rs) | A scriptable peer for every GUI action | [`bin/phoneme/src/main.rs`](../../bin/phoneme/src/main.rs) |
 | **whisper-server** | bundled `whisper.cpp` | Local speech-to-text over HTTP | (external binary) |
 
@@ -309,6 +309,14 @@ Every result is written to the SQLite [`Catalog`](../../crates/phoneme-core/src/
 complete, the [`event_bus`](../../bin/phoneme-daemon/src/event_bus.rs) broadcasts
 `DaemonEvent`s; every subscribed client follows along (§8). For schema details,
 see [internals.md](internals.md#sqlite-catalog--search-internals).
+
+Each stage also persists the provider+model it actually ran with, so the detail
+pane's footer **🪈 Pipeline** button opens a provenance popover listing every
+stage and the model that produced it — exactly what transcribed, cleaned,
+titled, summarized, and tagged this recording (including a re-run's one-off
+overrides). Those per-step model names are indexed too, so a library search
+matches on them: searching a model name surfaces every recording that ran
+through it.
 
 ---
 

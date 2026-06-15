@@ -2,6 +2,8 @@
 
 Phoneme supports several ways to start and stop capture. You can use the UI buttons, global hotkeys, the CLI, or IPC — they all talk to the same daemon.
 
+> This page covers **capture / recording control**. For driving the app's UI from the keyboard — pane navigation, the detail-pane grid, dropdowns, and the cheat sheet — see [Keyboard Navigation](keyboard_navigation.md).
+
 ## Global hotkeys (defaults)
 
 Configure under **Settings → Capture → Hotkeys**. All hotkeys are **disabled by default** until you enable them in the wizard or settings.

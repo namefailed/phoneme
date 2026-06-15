@@ -18,8 +18,10 @@ the recording's tag row and **nothing is applied until you approve it**.
    - **×** dismisses it.
    - **✓ All** applies every suggestion at once.
 
-Suggestions are stored with the recording, so they're still waiting for you
-after a restart.
+Pending suggestions are stored with the recording, so they **persist across
+restarts** — they stay as dashed ✨ chips until you decide, and you can review
+and approve (or dismiss) them at any time, even after closing and reopening
+Phoneme.
 
 ## On demand
 

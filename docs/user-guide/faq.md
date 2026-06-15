@@ -81,6 +81,16 @@ it (empty) hands the recording back to auto-titling. A title you set by hand is
 never overwritten when you re-transcribe. From the CLI:
 `phoneme edit <id> --title "..."` (or `--clear-title`).
 
+### What is the AI-activity panel (brain button)?
+
+It's the floating brain button (the FAB at the edge of the window). Toggle it
+with **`g A`**. The panel logs each processing step as it runs — cleanup,
+summary, title, auto-tag, diarization — recording the **prompt** sent and the
+**response** received, so you can see exactly how each transcript was shaped.
+The log **persists across restarts**, so you can reopen Phoneme and still
+review what earlier recordings went through. See
+[Smart Cleanup → The AI-activity panel](smart_cleanup.md#-the-ai-activity-panel).
+
 ---
 
 ## Hooks & automation

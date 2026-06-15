@@ -15,6 +15,7 @@ vim-style pane navigation is opt-in: **Settings → Appearance → Vim navigatio
 | `g` then `s` | Go to Settings |
 | `g` then `d` | Put the keyboard in the open recording's pane |
 | `g` then `D` | Go to the Doctor |
+| `g` then `A` | Toggle the AI-activity panel (the floating brain/FAB; its log persists across restarts) |
 | `g` then `/` | Highlight the search bar (`h`/`l` then roam the header) |
 | `g` then `T` | Open the Tag Manager (quick popup) |
 | `g` then `P` | Settings → Managers → Profiles |
@@ -22,6 +23,7 @@ vim-style pane navigation is opt-in: **Settings → Appearance → Vim navigatio
 | `Ctrl + ,` | Open Settings |
 | `Ctrl + B` | Toggle the sidebar |
 | `Ctrl + \` | Toggle the detail pane |
+| `Ctrl + D` | Toggle the detail pane (alias of `Ctrl + \`) |
 | `Ctrl + /` | Hide / show the top (search/header) bar |
 | `Ctrl + =` / `Ctrl + -` / `Ctrl + 0` | Zoom the recordings list bigger / smaller / reset |
 | `Ctrl + scroll` | Zoom the list (while the pointer is over it) |
@@ -82,23 +84,49 @@ cursor immediately.
 **Sidebar** — `j`/`k` step through everything: the Library filters, the Tags
 filters, the **section headers** (Enter folds/unfolds them), and the **queue**
 (its pending items, the pinned active item, and the queue header). On queue
-rows, `h`/`l` walk the row's buttons — open · move up · move down · remove —
-and on the queue header: fold · failed badge · pause · clear. `l` past a row's
-last button steps over to the list.
+rows, `h`/`l` walk the row's controls — open · the ▲/▼ **move pair** · remove —
+and on the queue header: fold · failed badge · pause · clear. The ▲/▼ pair is
+**one** `h`/`l` stop: land on it, then `j`/`k` pick move-up vs move-down. `l`
+past a row's last control steps over to the list. `gg`/`G` here jump to the top
+/ bottom of the **current section** (Library / Tags / Queue), not the whole
+sidebar.
 
-**List** — `j`/`k` move rows; `k` at the very top steps up into the header
-search box (highlighted, not focused — `h`/`l` then roam the header controls,
-`Enter` opens dropdowns, `↓`/`Esc` come back).
+**List** — `j`/`k` move rows; `gg`/`G` jump to the first / last row; `k` at the
+very top steps up into the header search box (highlighted, not focused — `h`/`l`
+then roam the header controls, `Enter` opens dropdowns, `↓`/`Esc` come back).
 
-**Detail** — the open recording is a grid of rows, top to bottom: window
-buttons · action buttons · tags · transcript · transcript-view buttons
-(Speakers / Summary / Compare / Original / Unedited) · notes. `j`/`k` move
-between rows, `h`/`l` along a row (h at the leftmost edge returns to the
-list), `Enter` presses the button or enters the editor, `Shift + Enter` on the
-tags row opens the Tag Manager.
+**Header roving** — the cursor is **sticky** and follows your clicks. Clicking a
+header control places the roving cursor on it. `Enter` on a plain control
+**fires it and keeps the cursor on it** (so after sorting or toggling you keep
+roaming with `h`/`l`); `Enter` on a date field opens its calendar. `Esc` from a
+header **input** (search box or a date filter) returns the cursor **to** that
+control — a *second* `Esc` from roving then drops to the list.
+
+**Detail** — the open recording is a **2-D grid**: `j`/`k` move down/up between
+rows, `h`/`l` move within a row (`h` at the start of a row returns to the list),
+and `Enter` edits the box / fires the button / opens the dropdown under the
+cursor. Top to bottom the rows are:
+
+1. **Title** — editable; `Enter` to rename.
+2. **Waveform player** — `Enter` enters **scrub mode**: `h`/`l` nudge ±1 s,
+   `H`/`L` jump ±5 s, `Space` plays/pauses, and `Esc` (or `j`/`k`) leaves it.
+3. **Action row** — the recording's buttons.
+4. **Applied tag chips** — the tags already on the recording.
+5. **Tag input + controls** — add a tag (`Shift + Enter` opens the Tag Manager).
+6. **Pending tag suggestions** — each carries its own **✓** (apply) / **✗**
+   (dismiss).
+7. **Transcript** — `Enter`/`i` to edit.
+8. **Speakers / Views / Versions** — the in-box buttons.
+9. **Notes** — `Enter` to edit; `Shift + Esc` leaves it.
+10. **Pipeline** — opens the pipeline.
+
+**Dropdowns** — the detail dropdowns (Speed · Export · Views · Versions ·
+Pipeline) and the bulk bar's Tag / Export are fully keyboard-driven: `Enter`
+opens, `j`/`k` cycle the options, `Enter` picks, and `Esc`/`h`/`l` close.
 
 **Escape ladder** — `Esc` steps out one level at a time: editor → detail nav →
-list → close the recording.
+list → close the recording. From the **Notes** (or transcript) editor, use
+`Shift + Esc` to step back to pane navigation.
 
 ## Customizing
 

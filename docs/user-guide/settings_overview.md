@@ -4,7 +4,7 @@ Phoneme stores all preferences in `%APPDATA%\phoneme\config.toml`. The Settings 
 
 Open Settings from the cog icon in the header or **Tray → Settings**.
 
-The settings are grouped into nine tabs in the left sidebar, with a **search box** at the top: start typing and Settings shows every matching field across all sections, with a live results count and a breadcrumb back to each result's home tab.
+The settings are grouped into nine sections in the left sidebar (Transcription, Live Preview, Diarization, Capture, Post-Processing, Appearance, Recall, Managers, System), with a **search box** at the top: start typing and Settings shows every matching field across all sections — it matches field labels and **model names** too — with a live results count and a breadcrumb back to each result's home tab.
 
 | Tab | Sections it contains |
 |-----|----------------------|
@@ -68,9 +68,17 @@ Enable and configure global combos for record, transcribe-in-place, and meeting 
 
 Theme (Catppuccin Mocha default), 24-hour time, visible list columns (reorderable / toggleable), column widths, title-bar stripping, vim navigation, and **animation speed** for pane show/hide (Off / Fast / Normal / Slow — Off makes the sidebar, detail-pane, and focus-mode toggles instant).
 
+- **UI font** (`interface.ui_font`) — a CSS font-family name (e.g. `Segoe UI`, `JetBrains Mono`); leave it empty to use the bundled default. An uninstalled choice falls back cleanly to the default stack.
+- **UI font size** (`interface.ui_font_size`) — the interface text size in px (10–24, default 14). The whole UI scales from this real root font-size — it's not a zoom, so spacing and boxes stay crisp.
+
+**Strip title bar:** removing the OS title bar applies live. Turning it back **on** needs an app restart on Windows.
+
 ![Editor settings](../screenshots/settings-editor.png)
 
 Optional Vim keybindings (with inline or external `vimrc`) for the transcript editor.
+
+> [!TIP]
+> A few handy shortcuts from the `?` cheat-sheet: **g A** toggles the AI-activity panel (the floating brain/FAB, whose log persists across restarts), **Ctrl+D** toggles the detail pane (an alias of **Ctrl+\\**), and **Shift+Esc** leaves the Notes editor (just like the transcript editor).
 
 ## 🗂️ Managers
 

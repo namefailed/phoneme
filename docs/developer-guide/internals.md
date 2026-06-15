@@ -129,6 +129,11 @@ The catalog lives in `catalog.db` under local app data
   (re)transcribe, so user edits to `transcript` never rewrite the timeline.
 - **`embedding_chunks` / `embeddings`** — per-chunk f32 BLOB vectors for semantic
   search (see below).
+- **`ai_activity`** — completed streaming LLM sessions (cleanup/summary and their
+  re-runs), each row holding the exact prompt and response. The AI-activity log is
+  *persisted* here, not transient-event-only, so the 🧠 popout's history survives a
+  daemon/app restart; `list_ai_activity` reads it back (newest first), and the
+  daemon prunes the table to a bounded recent window.
 
 ### Status is a string column
 

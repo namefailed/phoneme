@@ -125,6 +125,15 @@ frontend/src/
 └── styles/                 # theme.css (all themes), reset.css, toast.css, overlay.css
 ```
 
+**Inside `RecordingsView/`** the panes and floating widgets worth knowing before you read the tree:
+
+- `RecordingsList.ts` / `RecordingDetail.ts` / `MergedConversationDetail.ts` — the list pane, the single-recording detail pane, and the merged dual-track meeting view.
+- `Sidebar.ts` / `QueuePanel.ts` / `FailedPanel.ts` — the left filters, the live inbox-queue panel, and the failed-quarantine panel.
+- `WaveformPlayer.ts` — wavesurfer.js playback for the open recording, with keyboard scrubbing (Enter enters scrub mode; `h`/`l` ±1s, `H`/`L` ±5s, Space play/pause, Esc leaves).
+- `BulkActionBar.ts` — the floating multi-select toolbar (tag / export / re-run / delete across the selection); `Shift+Enter` hands it the keyboard, then `h`/`l` roam its buttons.
+- `ThinkingPopout.ts` — the 🧠 AI-activity FAB and its floating panel (toggled with `g A`), which streams the live LLM prompt/response and keeps a persisted history of completed sessions across restarts.
+- `ActionRow.ts` / `TagChips.ts` / `TranscriptEditor.ts` / `NotesEditor.ts` / `TimelineView.ts` / `TranscriptDiff.ts` — the detail pane's action buttons, applied/suggested tag chips, the two CodeMirror editors, the synced-timeline view, and the version diff.
+
 **The second window:** [`overlay.ts`](../../frontend/src/overlay.ts) is its own Vite entry (`overlay.html`, wired up in `vite.config.ts`'s `rollupOptions.input`) loaded by a separate Tauri `WebviewWindow` that the tray creates for the system-wide live-caption overlay. It is deliberately standalone — no App, no router — and listens to the same `daemon-event` stream. If you add a third window, mirror that pattern.
 
 ---
@@ -321,6 +330,7 @@ When adding a feature, mirror the nearest test file's approach. New IPC wrappers
 |---|---|
 | **Add a Tauri/IPC call** | Command in `src-tauri/src/commands.rs` (and the daemon request in `crates/phoneme-ipc/src/schema.rs` + `bin/phoneme-daemon/src/ipc_handler.rs` if it reaches the daemon) → typed wrapper in `services/ipc.ts` → payload-pinning test in `ipc.test.ts` → document in `docs/developer-guide/ipc_integration.md` |
 | **React to a new daemon event** | Add the variant to `DaemonEvent` in `services/events.ts` (mirroring `schema.rs`) → handle it where it matters (usually `RecordingsView.subscribeToEvents`, `QueuePanel`, or `notifications.ts`) |
+| **React to a new IPC request** | Send it through a typed wrapper in `services/ipc.ts` (camelCase top-level keys, snake_case nested) → call it from the view/widget that needs the data → refresh on the matching daemon event rather than hand-patching local state (mutations resolve `void`); pin the payload in `ipc.test.ts` |
 | **Add a setting** | The serde field in `crates/phoneme-core/src/config.rs` → the right `SettingsView/Section*.ts` (a `renderField` row bound to its dotted path; seed the table if it's new) → intent keywords in `searchKeywords.ts` if the label isn't obvious → `docs/developer-guide/config_reference.md` + the relevant user-guide page |
 | **Add a Settings tab** | New `Section*.ts` class → register it in `SettingsView/index.ts` (`mountSection` + the tab rail) |
 | **Add a recordings-list column** | `COLUMN_CATALOG` + defaults in `SectionInterface.ts` → render it in `RecordingsList.ts` (header + row + width handling) |

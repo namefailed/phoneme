@@ -202,3 +202,19 @@ You don't have to change your saved config to experiment. From a recording's
 These overrides apply to that single run only and are never written back to
 `config.toml`. See [Smart Cleanup](smart_cleanup.md) and
 [Search & Organization](search_and_organization.md).
+
+---
+
+## Making the picker readable — interface size & font
+
+If the provider and model dropdowns feel too small (or too big), scale the whole
+interface in **Settings → Interface**. Two appearance knobs control it:
+
+- **UI size** (`interface.ui_font_size`, in **px**) sets the app's real root
+  font size — `14` is the baseline. This is a true font size, **not** a zoom of
+  the canvas: text and controls grow from it without stretching spacing or
+  shoving the layout off-window. (Use `Ctrl+=` / `-` / `0` to zoom just the
+  recordings list instead.)
+- **UI font** (`interface.ui_font`) picks the interface typeface. Your choice is
+  layered ahead of the bundled fallback stack, so an uninstalled font still
+  falls back cleanly; leave it blank for the default.

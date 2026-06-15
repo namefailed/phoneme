@@ -24,6 +24,18 @@ The raw output is always saved as `original_transcript`; the cleaned text become
 
 *(Note: Phoneme preserves both the raw machine transcript (`original_transcript`) and the cleaned-but-unedited transcript (`clean_transcript`) in the database. If the AI ever makes a mistake, you can **Restore raw transcript** or **Restore unedited transcript** from the detail view — see [the three transcript layers](getting_started.md#the-three-transcript-layers).)*
 
+## 🧠 The AI-activity panel
+
+Want to see exactly what each AI step asked for and got back? Toggle the
+**AI-activity panel** — the floating brain button (the FAB at the edge of the
+window) — with **`g A`**. It logs every processing step as it runs (cleanup,
+summary, title, auto-tag, diarization), recording both the **prompt** sent and
+the **response** received, so you can see precisely how a transcript was
+shaped.
+
+The log **persists across restarts**, so you can reopen Phoneme later and still
+review what each step did on earlier recordings.
+
 ## ☁️ Provider Options
 
 In keeping with Phoneme's philosophy, you have total control over *where* your data is processed. Configure cleanup under **Settings → Post-Processing → AI Post-Processing**.

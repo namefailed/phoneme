@@ -89,7 +89,21 @@ Phoneme finalizes the recording, applies any [Smart Cleanup](smart_cleanup.md) y
 
 Clicking on any recording in your list will open the **Detail Pane**.
 
-The detail pane includes an interactive waveform (wavesurfer.js), transcript editor, notes field, and action buttons.
+The detail pane lays out, top to bottom: an **editable title**, an interactive
+waveform player (wavesurfer.js), an action row, the applied **tag chips**, the
+tag input, any **pending tag suggestions**, the transcript editor, the notes
+field, and a **🪈 Pipeline** button.
+
+- **Editable title** — click the title (or press Enter on it) to rename the
+  recording; a title you set by hand is never overwritten by a re-transcribe.
+- **Waveform scrub mode** — press Enter on the waveform to enter scrub mode:
+  `h`/`l` nudge ±1s, `H`/`L` jump ±5s, `Space` plays/pauses, and `Esc` (or
+  `j`/`k`) leaves it.
+- **Tag chips & suggestions** — applied tags show as colored chips; proposed
+  tags appear below the tag input, each with a ✓ to apply and a ✗ to dismiss
+  (see [Auto-Tagging](auto_tagging.md)).
+- **🪈 Pipeline provenance** — click it to open a popover that lists every
+  processing step the recording went through and the model behind each one.
 
 Here you can:
 - **Rename**: Recordings get an automatic title from the first line of the
