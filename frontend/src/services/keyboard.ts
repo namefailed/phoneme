@@ -328,6 +328,9 @@ function exitHeaderNav() {
 function enterHeaderNav(opts?: { restore?: boolean }) {
   const bar = document.querySelector<HTMLElement>(".headerbar");
   if (!bar) return;
+  // Never roam INTO a hidden top bar (Ctrl+/, zen, focus mode) — landing a cursor
+  // on an invisible bar strands you. `/` still PEEKS it to type a search.
+  if (document.body.classList.contains("phoneme-hide-header")) return;
   headerSub = null;
   document.querySelectorAll(".rv-pane-focused").forEach((el) => el.classList.remove("rv-pane-focused"));
   const items = headerControls();

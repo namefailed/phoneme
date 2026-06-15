@@ -277,6 +277,11 @@ trust boundary. Verified against current code.*
   and you land on the same cell/control you left, instead of snapping to the top
   row / search box each time. First entry still lands on a sensible default; the
   header falls back to the search box and `g /` always goes there.
+- [x] **Vim nav won't enter a hidden bar** — with the top bar hidden (Ctrl+/,
+  zen, focus mode), `k` at the top of the list/sidebar/detail and `g /` no longer
+  land an invisible cursor on it (you'd get stranded); they stay put, and `/`
+  still peeks it to search. Likewise `g b` no longer force-reveals a hidden
+  sidebar — reveal it first. (`h`/`l` already skip hidden panes.)
 - [x] **`:w` / `:wq` save again from the vim Ex dialog** — the `:` command runs
   as a CodeMirror panel that holds focus while the command fires, so the editors'
   content-only `hasFocus` check skipped the save. They now accept focus anywhere

@@ -782,15 +782,10 @@ export class RecordingsView {
       // collapsed so the chord always gets you there; no-op in focus mode (no
       // sidebar to land on).
       case "focus-sidebar": {
-        if (this.focusMode) break;
-        if (!this.sidebarVisible) {
-          this.sidebarVisible = true;
-          try { localStorage.setItem(LS_SIDEBAR, "true"); } catch { /* private mode */ }
-          this.animateLayout();
-          this.applyLayout();
-          window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed"));
-          window.setTimeout(() => window.dispatchEvent(new CustomEvent("phoneme:sidebar-changed")), 300);
-        }
+        // Can't jump into the sidebar while it's hidden (focus mode or collapsed)
+        // — like the hidden top bar, vim nav won't enter a hidden pane. Reveal it
+        // yourself (the toggle) first.
+        if (this.focusMode || !this.sidebarVisible) break;
         this.focusPane("sidebar");
         break;
       }
@@ -995,6 +990,9 @@ export class RecordingsView {
     // exactly like k at the top of the list or detail pane. Release the sidebar
     // first so the header owns the cursor.
     if (next < 0) {
+      // The top bar is hidden — there's nowhere up to go. Stay on the top row
+      // rather than stranding focus on an invisible header.
+      if (isHeaderHidden()) { this.highlightSidebar(); return; }
       this.clearSidebarCursorHighlight();
       this.paneEl("sidebar")?.classList.remove("rv-pane-focused");
       this.sidebarRow = -1;
@@ -1163,7 +1161,9 @@ export class RecordingsView {
     if (next < 0) {
       // Up past the top row → the header search bar in ROVING (highlight) mode —
       // exactly like k at the top of the list, NOT focused for typing. Release
-      // the detail pane first.
+      // the detail pane first. (When the top bar is hidden there's nowhere up to
+      // go, so stay on the top row instead of stranding focus on it.)
+      if (isHeaderHidden()) { this.highlightDetail(); return; }
       this.container.querySelectorAll(".rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
       this.paneEl("detail")?.classList.remove("rv-pane-focused");
       this.detailRow = -1;
