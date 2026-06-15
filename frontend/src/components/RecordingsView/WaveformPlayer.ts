@@ -116,6 +116,13 @@ export class WaveformPlayerElement extends LitElement {
     this.wavesurfer?.setTime(seconds);
   }
 
+  /** Nudge the playhead by `delta` seconds (negative = back), clamped at 0.
+   *  Drives the keyboard scrub mode (h/l ±1s, H/L ±5s). */
+  seekBy(delta: number) {
+    const cur = this.wavesurfer?.getCurrentTime() ?? 0;
+    this.wavesurfer?.setTime(Math.max(0, cur + delta));
+  }
+
   render() {
     return html`
       <style>

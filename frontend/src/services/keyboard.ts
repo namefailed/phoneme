@@ -139,6 +139,12 @@ let pendingZTimer: ReturnType<typeof setTimeout> | null = null;
 /** Whether the system-wide vim navigation layer is active (`interface.vim_nav`). */
 let vimNav = false;
 
+/** When the detail pane has "captured" the keys for an open dropdown ("sub") or
+ *  the waveform scrub mode ("wave"), route j/k/h/l/H/L/Enter/Esc to that instead
+ *  of the normal grid nav. RecordingsView owns the state and announces it via the
+ *  `phoneme:detail-capture` event (detail = "sub" | "wave" | null). */
+let detailCapture: "sub" | "wave" | null = null;
+
 function isTypingTarget(el: Element | null): boolean {
   if (!el) return false;
   const node = el as HTMLElement;
@@ -489,6 +495,32 @@ function onKeyDown(e: KeyboardEvent) {
   // so non-vim users are completely unaffected. Pane movement (h/l) works from
   // anywhere; the list/edit/delete keys require the relevant pane to hold focus.
   if (vimNav) {
+    // Detail pane has captured the keys for an open dropdown or the waveform
+    // scrub mode — route the relevant keys there before normal grid nav. (The
+    // detail pane holds focus throughout, so editors aren't affected: typing
+    // targets already returned above.)
+    if (detailCapture === "sub" && activeWithin(".rv-detail")) {
+      switch (e.key) {
+        case "j": case "ArrowDown": e.preventDefault(); dispatchVim("detail-sub-next"); return;
+        case "k": case "ArrowUp": e.preventDefault(); dispatchVim("detail-sub-prev"); return;
+        case "Enter": case "i": case " ": e.preventDefault(); dispatchVim("detail-sub-activate"); return;
+        case "Escape": case "h": case "l": e.preventDefault(); dispatchVim("detail-sub-close"); return;
+      }
+      return; // swallow other keys while a dropdown is open
+    }
+    if (detailCapture === "wave" && activeWithin(".rv-detail")) {
+      switch (e.key) {
+        case "h": e.preventDefault(); dispatchVim("wave-back-1"); return;
+        case "l": e.preventDefault(); dispatchVim("wave-fwd-1"); return;
+        case "H": e.preventDefault(); dispatchVim("wave-back-5"); return;
+        case "L": e.preventDefault(); dispatchVim("wave-fwd-5"); return;
+        case "Enter": case " ": e.preventDefault(); dispatchVim("wave-toggle"); return;
+        case "Escape": e.preventDefault(); dispatchVim("wave-exit"); return;
+        case "k": e.preventDefault(); dispatchVim("wave-exit-up"); return;
+        case "j": e.preventDefault(); dispatchVim("wave-exit-down"); return;
+      }
+      return; // swallow other keys while scrubbing
+    }
     // Header strip: when focus is on a header control (a button — the search box
     // is a typing target handled above), h/l move across the header's controls
     // and j/↓ drop into the list. Completes the "k at the top of the list →
@@ -851,4 +883,10 @@ export function initKeyboard() {
   // The list dispatches this when k is pressed at the top — highlight the search
   // box (don't focus it) so h/l can roam the header without typing.
   window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav());
+  // RecordingsView announces when the detail pane has captured the keys for an
+  // open dropdown ("sub") or the waveform scrub mode ("wave"), or released them
+  // (null), so the layer above can route j/k/h/l/H/L/Enter/Esc accordingly.
+  window.addEventListener("phoneme:detail-capture", (e: Event) => {
+    detailCapture = ((e as CustomEvent).detail as "sub" | "wave" | null) ?? null;
+  });
 }

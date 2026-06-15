@@ -968,6 +968,17 @@ mark.search-hit {
    the grid wider than the popover — so values never crowd or spill past the edge. */
 .dp-value { min-width: 0; color: var(--fg-default); font-weight: 600; overflow-wrap: anywhere; word-break: break-word; }
 
+/* Waveform keyboard scrub mode (Enter on the player in vim nav): a brighter ring
+   + glow so it's obvious that h/l (±1s) and H/L (±5s) now move the playhead, Space
+   toggles play, and Esc / j / k leave. */
+.rv-detail .waveform.wave-scrubbing {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent),
+    0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 /* Notes Copy button: faded by default (inline style), lights up on hover.
    !important beats the element's inline base style for the hover state. */
 #notes-copy-btn:hover {

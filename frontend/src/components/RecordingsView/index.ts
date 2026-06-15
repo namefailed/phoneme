@@ -88,7 +88,7 @@ function readStoredSidebar(): boolean {
 /** One keyboard-navigable target in the detail pane's 2D grid. `button` clicks
  *  on Enter; `tags` focuses the add-tag input (Shift+Enter → Tag Manager);
  *  `editor` focuses the editable area inside its block (transcript / notes). */
-type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" };
+type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" | "waveform" };
 
 /** The home view (see the file-top comment for the full picture). Public
  *  surface: `refresh()` re-queries the list; `toggleSidebar()` /
@@ -133,6 +133,12 @@ export class RecordingsView {
    *  that row. row -1 = not in detail nav. */
   private detailRow = -1;
   private detailCol = 0;
+  /** Open detail-pane dropdown being keyboard-driven (Speed / Export / Views /
+   *  Versions / Pipeline): j/k cycle its items, Enter activates, Esc closes. */
+  private detailSub: { trigger: HTMLElement; items: HTMLElement[]; index: number } | null = null;
+  /** Waveform "scrub mode" (Enter on the waveform cell): h/l ±1s, H/L ±5s,
+   *  Space toggles play, Esc/j/k leave. */
+  private waveMode = false;
   /** Zoom factor for the list pane (1 = 100%). Clamped 0.6–2, persisted. */
   private listZoom = 1;
   /** List zen (`f` with nothing open): sidebar + top bar hidden, list
@@ -745,6 +751,20 @@ export class RecordingsView {
         this.highlightDetail();
         break;
       }
+      // Open-dropdown sub-nav (Speed / Export / Views / Versions / Pipeline).
+      case "detail-sub-next": this.moveDetailSub(1); break;
+      case "detail-sub-prev": this.moveDetailSub(-1); break;
+      case "detail-sub-activate": this.closeDetailSub(true); break;
+      case "detail-sub-close": this.closeDetailSub(false); break;
+      // Waveform scrub mode (h/l ±1s, H/L ±5s, Space toggles, Esc/j/k leave).
+      case "wave-back-1": this.waveEl()?.seekBy?.(-1); break;
+      case "wave-fwd-1": this.waveEl()?.seekBy?.(1); break;
+      case "wave-back-5": this.waveEl()?.seekBy?.(-5); break;
+      case "wave-fwd-5": this.waveEl()?.seekBy?.(5); break;
+      case "wave-toggle": this.waveEl()?.togglePlay?.(); break;
+      case "wave-exit": this.exitWaveMode(); break;
+      case "wave-exit-up": this.exitWaveMode(); this.moveDetailRow(-1); break;
+      case "wave-exit-down": this.exitWaveMode(); this.moveDetailRow(1); break;
       case "detail-left": this.moveDetailCol(-1); break;
       case "detail-right": this.moveDetailCol(1); break;
       case "detail-enter": this.activateDetail(false); break;
@@ -926,7 +946,11 @@ export class RecordingsView {
 
   /** The detail pane as a vertical stack of rows, each a horizontal list of
    *  navigable cells. Order matches the layout, top→bottom:
-   *  [fullscreen, close] · [action buttons] · [tags] · [transcript] · [notes]. */
+   *  [title · similar · focus · close] · [waveform] · [action buttons] ·
+   *  [applied tag chips] · [tag input · Manage · Suggest · ✓All · ✕Clear] ·
+   *  [tag-suggestion ✓/✗ buttons] · [transcript] · [Speakers · Views · Versions] ·
+   *  [notes] · [Pipeline]. Rows that have no content (no tags, no suggestions,
+   *  etc.) are simply skipped. */
   private detailGrid(): DetailCell[][] {
     const qa = (sel: string) =>
       [...this.container.querySelectorAll<HTMLElement>(sel)].filter(
@@ -936,29 +960,58 @@ export class RecordingsView {
       const el = this.container.querySelector<HTMLElement>(sel);
       return el && el.offsetParent !== null ? el : null;
     };
+    const btns = (sel: string): DetailCell[] => qa(sel).map((el) => ({ el, kind: "button" as const }));
     const rows: DetailCell[][] = [];
     const root = this.detailRootSel();
-    const top = qa(`${root} .detail-header button`);
-    if (top.length) rows.push(top.map((el) => ({ el, kind: "button" as const })));
-    const action = qa(`${root} #actions button`);
-    if (action.length) rows.push(action.map((el) => ({ el, kind: "button" as const })));
-    const tags = q1(`${root} #tags .tag-add`);
-    if (tags) rows.push([{ el: tags, kind: "tags" }]);
+    // Title row: the editable title (Enter → edit it) followed by the title-bar
+    // buttons (Similar · Focus · Close).
+    const titleEl = q1(`${root} #detail-title`);
+    const top: DetailCell[] = [];
+    if (titleEl) top.push({ el: titleEl, kind: "button" });
+    top.push(...btns(`${root} .detail-header button`));
+    if (top.length) rows.push(top);
+    // Waveform player: Enter drops into scrub mode (h/l ±1s, H/L ±5s, Esc exits).
+    const wave = q1(`${root} .waveform`);
+    if (wave) rows.push([{ el: wave, kind: "waveform" }]);
+    const action = btns(`${root} #actions button`);
+    if (action.length) rows.push(action);
+    // Tags split into up to three rows: the applied chips, the input + its
+    // controls, and the pending AI suggestions (each ✓/✗ navigable).
+    const appliedChips = btns(`${root} #tags .tags-applied .tag-chip`);
+    if (appliedChips.length) rows.push(appliedChips);
+    const tagAdd = q1(`${root} #tags .tag-add`);
+    const ctrl: DetailCell[] = [];
+    if (tagAdd) ctrl.push({ el: tagAdd, kind: "tags" });
+    ctrl.push(...btns(`${root} #tags .tags-controls button`));
+    if (ctrl.length) rows.push(ctrl);
+    const sugg = btns(`${root} #tags .tags-suggest-row button`);
+    if (sugg.length) rows.push(sugg);
     const transcript = q1(`${root} .transcript-block`);
     if (transcript) rows.push([{ el: transcript, kind: "editor" }]);
-    // The buttons INSIDE the transcript box (Speakers · Summary · Compare ·
-    // Original · Unedited) get their own row, between the transcript and notes.
-    const tbtns = qa(`${root} .transcript-history button`);
-    if (tbtns.length) rows.push(tbtns.map((el) => ({ el, kind: "button" as const })));
+    // The buttons INSIDE the transcript box (Speakers · Views · Versions) get
+    // their own row, between the transcript and notes.
+    const tbtns = btns(`${root} .transcript-history button`);
+    if (tbtns.length) rows.push(tbtns);
     const notes = q1(`${root} .notes-block`);
     if (notes) rows.push([{ el: notes, kind: "editor" }]);
+    // Footer: the Pipeline provenance button (Enter opens its popover).
+    const pipe = q1(`${root} #detail-pipeline-btn`);
+    if (pipe) rows.push([{ el: pipe, kind: "button" }]);
     return rows;
   }
 
-  /** Paint the grid cursor on the current (row, col) cell. */
+  /** Paint the grid cursor on the current (row, col) cell, clamping the cursor
+   *  into the live grid — tag approve/reject/remove re-renders the chips, so the
+   *  row/col can fall out of bounds; clamp instead of losing the cursor. */
   private highlightDetail() {
     this.container.querySelectorAll(".rv-detail .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
-    const cell = this.detailGrid()[this.detailRow]?.[this.detailCol];
+    const grid = this.detailGrid();
+    if (!grid.length || this.detailRow < 0) return;
+    if (this.detailRow >= grid.length) this.detailRow = grid.length - 1;
+    const row = grid[this.detailRow];
+    if (this.detailCol >= row.length) this.detailCol = row.length - 1;
+    if (this.detailCol < 0) this.detailCol = 0;
+    const cell = row[this.detailCol];
     if (cell) {
       cell.el.classList.add("kbd-cursor");
       cell.el.scrollIntoView({ block: "nearest" });
@@ -1015,14 +1068,24 @@ export class RecordingsView {
     this.highlightDetail();
   }
 
-  /** Enter / Shift+Enter on the current cell: click a button, focus an editor's
-   *  editable area (transcript / notes), or focus the add-tag box (Shift+Enter
-   *  opens the Tag Manager instead). */
+  /** Enter / Shift+Enter on the current cell: open a dropdown into sub-nav, drop
+   *  into the waveform's scrub mode, click a button (re-highlighting after, since
+   *  tag actions re-render the row), focus an editor, or focus the add-tag box
+   *  (Shift+Enter opens the Tag Manager instead). */
   private activateDetail(shift: boolean) {
     const cell = this.detailGrid()[this.detailRow]?.[this.detailCol];
     if (!cell) return;
-    if (cell.kind === "button") {
-      cell.el.click();
+    if (cell.kind === "waveform") {
+      this.enterWaveMode();
+    } else if (cell.kind === "button") {
+      if (this.isDropdownTrigger(cell.el)) {
+        this.openDetailSub(cell.el);
+      } else {
+        cell.el.click();
+        // Tag approve/reject/remove (and other actions) re-render the row — pull
+        // the cursor back onto the live grid after the DOM settles.
+        requestAnimationFrame(() => this.highlightDetail());
+      }
     } else if (cell.kind === "tags") {
       if (shift) void this.openTagManagerModal();
       else cell.el.focus();
@@ -1033,6 +1096,114 @@ export class RecordingsView {
         cell.el.querySelector<HTMLElement>('[contenteditable="true"]');
       ed?.focus();
     }
+  }
+
+  /** True for the detail-pane controls that open a dropdown/popover we can drive
+   *  with j/k (Speed · Export · Views · Versions · Pipeline). */
+  private isDropdownTrigger(el: HTMLElement): boolean {
+    return (
+      el.classList.contains("speed-trigger") ||
+      el.classList.contains("export-trigger") ||
+      el.id === "views-trigger" ||
+      el.id === "versions-trigger" ||
+      el.id === "detail-pipeline-btn"
+    );
+  }
+
+  /** The menu items inside a given dropdown trigger's popup (scoped to the active
+   *  detail pane), for j/k cycling. */
+  private detailSubItems(trigger: HTMLElement): HTMLElement[] {
+    const root = this.detailRootSel();
+    const pick = (sel: string) =>
+      [...this.container.querySelectorAll<HTMLElement>(`${root} ${sel}`)].filter((el) => el.offsetParent !== null);
+    if (trigger.classList.contains("speed-trigger")) return pick(".speed-dropdown .th-menu-item");
+    if (trigger.classList.contains("export-trigger")) return pick(".export-menu [role='menuitem']");
+    if (trigger.id === "views-trigger") return pick("#views-menu .th-menu-item");
+    if (trigger.id === "versions-trigger") return pick("#versions-menu .th-menu-item");
+    if (trigger.id === "detail-pipeline-btn") return pick("#detail-pipeline-pop .dp-row");
+    return [];
+  }
+
+  /** Open a dropdown and start keyboard-driving its items (mirrors the header's
+   *  menu sub-nav). Clicking the trigger toggles it open; the items paint next
+   *  frame. Tells keyboard.ts to route j/k/Enter/Esc here via `detail-capture`. */
+  private openDetailSub(trigger: HTMLElement) {
+    trigger.click();
+    requestAnimationFrame(() => {
+      const items = this.detailSubItems(trigger);
+      if (!items.length) {
+        this.detailSub = null;
+        return;
+      }
+      let idx = items.findIndex(
+        (x) => x.classList.contains("active") || x.getAttribute("aria-checked") === "true",
+      );
+      if (idx < 0) idx = 0;
+      this.detailSub = { trigger, items, index: idx };
+      this.highlightDetailSub();
+      window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: "sub" }));
+    });
+  }
+
+  private highlightDetailSub() {
+    const sub = this.detailSub;
+    if (!sub) return;
+    sub.items.forEach((el) => el.classList.remove("kbd-cursor"));
+    const el = sub.items[sub.index];
+    if (el) {
+      el.classList.add("kbd-cursor");
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  /** j/k inside an open dropdown. */
+  private moveDetailSub(delta: number) {
+    const sub = this.detailSub;
+    if (!sub) return;
+    sub.index = (sub.index + delta + sub.items.length) % sub.items.length;
+    this.highlightDetailSub();
+  }
+
+  /** Close the dropdown sub-nav. `activate` clicks the highlighted item first
+   *  (e.g. pick a speed / an export format); otherwise it just dismisses. Returns
+   *  the grid cursor to the trigger and hands key routing back to normal. */
+  private closeDetailSub(activate: boolean) {
+    const sub = this.detailSub;
+    this.detailSub = null;
+    window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: null }));
+    if (!sub) return;
+    sub.items.forEach((el) => el.classList.remove("kbd-cursor"));
+    if (activate) sub.items[sub.index]?.click();
+    requestAnimationFrame(() => {
+      // If the menu is still open (e.g. Pipeline rows have no click handler that
+      // closes it, or we only dismissed), toggle it shut via its trigger.
+      if (this.detailSubItems(sub.trigger).length) sub.trigger.click();
+      this.highlightDetail();
+    });
+  }
+
+  /** Enter the waveform scrub mode (Enter on the waveform cell). */
+  private enterWaveMode() {
+    const wave = this.container.querySelector<HTMLElement>(`${this.detailRootSel()} .waveform`);
+    if (!wave) return;
+    this.waveMode = true;
+    wave.classList.add("kbd-cursor", "wave-scrubbing");
+    window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: "wave" }));
+  }
+
+  /** Leave waveform scrub mode, leaving the grid cursor on the waveform cell. */
+  private exitWaveMode() {
+    this.waveMode = false;
+    this.container
+      .querySelectorAll(`${this.detailRootSel()} .waveform`)
+      .forEach((el) => el.classList.remove("wave-scrubbing"));
+    window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: null }));
+    this.highlightDetail();
+  }
+
+  /** The active pane's waveform element (custom element with seekBy/togglePlay). */
+  private waveEl(): (HTMLElement & { seekBy?: (d: number) => void; togglePlay?: () => void }) | null {
+    return this.container.querySelector(`${this.detailRootSel()} ph-waveform-player`);
   }
 
   /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */
