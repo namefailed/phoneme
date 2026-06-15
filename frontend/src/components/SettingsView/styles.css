@@ -1,12 +1,12 @@
-/* The Settings custom-element host must fill #main, or `.settings-layout`'s
-   height:100% collapses to content height — which left a SHORT tab (e.g.
-   Managers) with the pinned Save/Close footer floating mid-window and dead space
-   below. A plain `height:100%` on the (custom-element) host didn't resolve, so
-   pin it to #main's box directly (#main is position:relative) — bulletproof. */
+/* The Settings custom-element host must not break the height chain, or
+   `.settings-layout`'s height:100% collapses to content height (short tabs left
+   the pinned Save/Close footer floating with dead space below). `display:contents`
+   removes the host's own box so .settings-layout resolves height against #main
+   directly — exactly like RecordingsView's #rv-shell does (which fills fine).
+   (A plain height:100% on the custom-element host didn't resolve; absolute
+   positioning collapsed it to zero height.) */
 ph-settings-view {
-  position: absolute;
-  inset: 0;
-  display: block;
+  display: contents;
 }
 .settings-layout {
   height: 100%;
