@@ -134,7 +134,7 @@ export class SectionPostProcessing {
         </div>
 
         <div class="settings-field ai-prompt-field">
-          <label>Instructions for the AI</label>
+          <label>Cleanup instructions</label>
           <div class="ai-prompt-controls">
             <div class="ai-preset-row">
               <select id="prompt-preset-select" class="ai-preset-select">
@@ -266,11 +266,16 @@ export class SectionPostProcessing {
             </span>
           </div>
 
-          <div class="settings-field">
+          <div class="settings-field ai-prompt-field">
             <label>Title instructions</label>
-            <div>
-              <textarea data-key="title.prompt" rows="3" style="width:100%; resize:vertical; font-family:inherit;"
-                placeholder="How the AI should title the transcript (the transcript is appended automatically)">${escapeHtml(config.title.prompt ?? "")}</textarea>
+            <div class="ai-prompt-controls">
+              ${renderField(
+                { key: "title.prompt", label: "", kind: "textarea" },
+                config.title.prompt ?? "",
+              )}
+              <span class="settings-help-text">
+                How the AI should title the transcript (the transcript is appended automatically).
+              </span>
             </div>
           </div>
         </div>
@@ -494,8 +499,4 @@ export class SectionPostProcessing {
         }
       });
   }
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
