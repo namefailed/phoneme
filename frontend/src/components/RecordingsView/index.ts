@@ -25,6 +25,7 @@
 //    grace-period toast), phoneme:close-detail, phoneme:open-split.
 //    Out: phoneme:sidebar-changed (so the AI-activity FAB re-anchors).
 
+import { invoke } from "@tauri-apps/api/core";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { Store } from "../../state/store";
 import { setOpenRecordingId } from "../../state/openRecording";
@@ -823,6 +824,25 @@ export class RecordingsView {
     try { localStorage.setItem(LS_LIST_ZOOM, String(this.listZoom)); } catch { /* private mode */ }
   }
 
+  /** Ctrl+Shift+= / Ctrl+Shift+- — nudge the global UI text size by ±1px
+   *  (interface.ui_font_size, clamped 10–24) and persist it. Saving fires
+   *  config:saved, which keyboard.ts turns into the live --ui-font-size update. */
+  private async adjustUiFontSize(delta: number) {
+    try {
+      const cfg = await invoke<{ interface?: { ui_font_size?: number } }>("read_config");
+      const cur = Number(cfg?.interface?.ui_font_size) || 14;
+      const next = Math.max(10, Math.min(24, cur + delta));
+      const pct = Math.round((next / 14) * 100);
+      if (next === cur) { showToast(`UI text size ${pct}% (min/max)`, "info"); return; }
+      const merged = { ...cfg, interface: { ...(cfg.interface ?? {}), ui_font_size: next } };
+      await invoke("write_config", { config: merged });
+      window.dispatchEvent(new CustomEvent("config:saved", { detail: merged }));
+      showToast(`UI text size ${pct}%`, "info");
+    } catch {
+      showToast("Couldn't change the UI text size.", "error");
+    }
+  }
+
   /** Leave the panes for the header search box (vim k at the top of the list).
    *  Clears the pane focus ring + sidebar cursor since the header isn't one of
    *  our panes; ArrowDown / Esc from the search box come back to the list. */
@@ -854,7 +874,9 @@ export class RecordingsView {
       [
         item.querySelector<HTMLElement>(".queue-item-main"),
         ...item.querySelectorAll<HTMLElement>(".queue-move, .queue-cancel"),
-      ].filter((el): el is HTMLElement => !!el);
+        // Skip disabled arrows — the top item has no ▲ and the bottom none ▼, so
+        // there's nothing to land on there.
+      ].filter((el): el is HTMLElement => !!el && !el.hasAttribute("disabled"));
     sb.querySelectorAll<HTMLElement>(".queue-list .queue-item").forEach((i) => rows.push(queueItemCells(i)));
     sb.querySelectorAll<HTMLElement>(".queue-active .queue-item").forEach((i) => rows.push(queueItemCells(i)));
     const qh = sb.querySelector<HTMLElement>(".queue-header");
@@ -926,17 +948,37 @@ export class RecordingsView {
     const rows = this.sidebarGrid();
     if (!rows.length) return;
     if (this.sidebarRow < 0) { this.enterSidebarNav(); return; }
-    // On a queue ▲/▼ move button, j/k step between that up/down PAIR (they read
-    // as vertical) rather than changing rows; h/l treats the pair as one stop.
+    // Queue cells keep their COLUMN when stepping rows: the ▲/▼ arrows walk as a
+    // single vertical list (both arrows of an item, then the next item's arrows),
+    // and ✕ walks the cancels — j/k never default to the queue title. Only the
+    // main column (and non-queue rows) fall through to the plain row move below.
     const cur = rows[this.sidebarRow]?.[this.sidebarCol];
-    if (cur && cur.classList.contains("queue-move")) {
-      const moves = [...(cur.closest(".queue-item")?.querySelectorAll<HTMLElement>(".queue-move") ?? [])];
-      const ni = moves.indexOf(cur) + delta;
-      if (ni >= 0 && ni < moves.length) {
-        const nc = rows[this.sidebarRow].indexOf(moves[ni]);
-        if (nc >= 0) { this.sidebarCol = nc; this.highlightSidebar(); return; }
+    if (cur && (cur.classList.contains("queue-move") || cur.classList.contains("queue-cancel"))) {
+      const isMove = cur.classList.contains("queue-move");
+      if (isMove) {
+        // Step to the sibling arrow within the same item first.
+        const moves = [...(cur.closest(".queue-item")?.querySelectorAll<HTMLElement>(".queue-move:not([disabled])") ?? [])];
+        const ni = moves.indexOf(cur) + delta;
+        if (ni >= 0 && ni < moves.length) {
+          const nc = rows[this.sidebarRow].indexOf(moves[ni]);
+          if (nc >= 0) { this.sidebarCol = nc; this.highlightSidebar(); return; }
+        }
       }
-      // Past the top/bottom of the pair → fall through to a normal row move.
+      // Otherwise hop to the same column on the adjacent QUEUE item row.
+      const cls = isMove ? "queue-move" : "queue-cancel";
+      for (let r = this.sidebarRow + delta; r >= 0 && r < rows.length; r += delta) {
+        const cells = rows[r].filter((c) => c.classList.contains(cls));
+        if (cells.length) {
+          const pick = isMove && delta < 0 ? cells[cells.length - 1] : cells[0];
+          this.sidebarRow = r;
+          this.sidebarCol = rows[r].indexOf(pick);
+          this.highlightSidebar();
+          return;
+        }
+        // Stop scanning once we leave the queue's item rows (e.g. the header).
+        if (!rows[r].some((c) => c.classList.contains("queue-item-main"))) break;
+      }
+      return; // no same-column cell that way — stay put, don't drop to the title
     }
     const next = this.sidebarRow + delta;
     // Up past the very top row → HIGHLIGHT the header search bar (roving mode),
@@ -1035,15 +1077,25 @@ export class RecordingsView {
     if (sugg.length) rows.push(sugg);
     const transcript = q1(`${root} .transcript-block`);
     if (transcript) rows.push([{ el: transcript, kind: "editor" }]);
+    // When a Views/Versions "peek" (Original/Unedited/Summary) hijacks the editor,
+    // the .transcript-block is hidden — surface the VISIBLE peek's buttons (e.g.
+    // "Restore raw transcript") as a row so they're keyboard-reachable.
+    const peekBtns = btns(`${root} #original-peek button, ${root} #unedited-peek button, ${root} #summary-peek button`);
+    if (peekBtns.length) rows.push(peekBtns);
     // The buttons INSIDE the transcript box (Speakers · Views · Versions) get
     // their own row, between the transcript and notes.
     const tbtns = btns(`${root} .transcript-history button`);
     if (tbtns.length) rows.push(tbtns);
     const notes = q1(`${root} .notes-block`);
     if (notes) rows.push([{ el: notes, kind: "editor" }]);
-    // Footer: the Pipeline provenance button (Enter opens its popover).
+    // Footer: the Pipeline provenance button (Enter opens its popover) then the
+    // clickable file path (l reaches it; Enter reveals the file in the OS).
     const pipe = q1(`${root} #detail-pipeline-btn`);
-    if (pipe) rows.push([{ el: pipe, kind: "button" }]);
+    const path = q1(`${root} #detail-reveal-path`);
+    const footer: DetailCell[] = [];
+    if (pipe) footer.push({ el: pipe, kind: "button" });
+    if (path) footer.push({ el: path, kind: "button" });
+    if (footer.length) rows.push(footer);
     return rows;
   }
 
@@ -1698,6 +1750,13 @@ export class RecordingsView {
     if (document.activeElement?.closest(".headerbar")) return;
     if (e.defaultPrevented) return;
 
+    // Ctrl+Shift+= / Ctrl+Shift+- bump the GLOBAL UI text size
+    // (interface.ui_font_size) — distinct from Ctrl+=/- which zoom the list pane.
+    // Shift turns "=" into "+" and "-" into "_" on most layouts; accept both.
+    if (e.ctrlKey && e.shiftKey && !e.altKey) {
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); void this.adjustUiFontSize(1); return; }
+      if (e.key === "_" || e.key === "-") { e.preventDefault(); void this.adjustUiFontSize(-1); return; }
+    }
     // Ctrl+= / Ctrl+- zoom the recordings list (Ctrl+0 resets) — the keyboard
     // counterpart to Ctrl+scroll over the list pane.
     if (e.ctrlKey && !e.altKey) {
