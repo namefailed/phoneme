@@ -16,6 +16,24 @@ export interface VimMock {
 /** Custom DOM event fired when the user runs `:w` (or `:wq`/`:x`) in a vim editor. */
 export const VIM_SAVE_EVENT = "phoneme:vim-save";
 
+/**
+ * Whether a CodeMirror editor should answer a global `:w` — true when focus is
+ * in its content **or** its vim `:` Ex-command dialog.
+ *
+ * The `:` dialog is a CodeMirror panel (`.cm-vim-panel` with an `<input>`) that
+ * lives inside `view.dom`. The Ex command runs from the dialog's Enter handler
+ * **before** it blurs, so at save time `document.activeElement` is the dialog
+ * input and `view.hasFocus` (content-only) is `false`. Checking `view.dom`
+ * covers both the content and the dialog, so the editor whose dialog is open
+ * (and only that one) saves.
+ */
+export function editorOwnsFocus(
+  view: { hasFocus: boolean; dom: HTMLElement } | null | undefined,
+): boolean {
+  if (!view) return false;
+  return view.hasFocus || view.dom.contains(document.activeElement);
+}
+
 let vimWriteDefined = false;
 /**
  * Make `:w` / `:write` / `:wq` / `:x` save in any CodeMirror vim editor. The Ex

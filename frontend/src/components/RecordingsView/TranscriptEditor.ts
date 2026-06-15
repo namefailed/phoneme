@@ -3,7 +3,7 @@ import { LitElement, html, PropertyValues } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { updateTranscript } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { applyVimrc, defineVimWrite, VIM_SAVE_EVENT } from "../../utils/vimrc";
+import { applyVimrc, defineVimWrite, editorOwnsFocus, VIM_SAVE_EVENT } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -51,8 +51,10 @@ export class TranscriptEditorElement extends LitElement {
   private view: EditorView | null = null;
 
   private vimSaveHandler = (e: Event) => {
-    // Only the focused editor responds to a global `:w` / `:wq` / `:q`.
-    if (!this.view?.hasFocus) return;
+    // Only the focused editor responds to a global `:w` / `:wq` / `:q` — focus
+    // counts whether it's in the content or this editor's `:` dialog (the dialog
+    // holds focus while the command fires, so `hasFocus` alone misses it).
+    if (!editorOwnsFocus(this.view)) return;
     const detail = (e as CustomEvent)?.detail ?? {};
     const save = detail.save !== false; // default true for a plain `:w`
     const quit = !!detail.quit;

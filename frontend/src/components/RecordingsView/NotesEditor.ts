@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { updateNotes } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
-import { applyVimrc, defineVimWrite, VIM_SAVE_EVENT } from "../../utils/vimrc";
+import { applyVimrc, defineVimWrite, editorOwnsFocus, VIM_SAVE_EVENT } from "../../utils/vimrc";
 import { EditorView, keymap, drawSelection } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { standardKeymap } from "@codemirror/commands";
@@ -35,7 +35,9 @@ export class NotesEditor {
   private copyBtn: HTMLButtonElement | null = null;
   private onDirtyChange?: (dirty: boolean) => void;
   private vimSaveHandler = () => {
-    if (this.view?.hasFocus) void this.save();
+    // Save when focus is in the content OR this editor's `:` dialog (the dialog
+    // holds focus while `:w` runs, so `hasFocus` alone would miss it).
+    if (editorOwnsFocus(this.view)) void this.save();
   };
 
   constructor(container: HTMLElement, id: string, initial: string, onDirtyChange?: (dirty: boolean) => void) {
