@@ -8,19 +8,37 @@ import { renderField, bindFieldEvents } from "./form";
  * threshold/window, and the pre-roll buffer. Plain section class on the
  * form.ts binding; the daemon picks changes up when the saved config
  * reloads.
+ *
+ * Renders SYNCHRONOUSLY (the device list fills in afterward) so the Capture tab
+ * appears all at once — awaiting `list_input_devices` before the first paint
+ * left this top section blank while the rest of the tab was already on screen.
  */
 export class SectionRecording {
+  private container: HTMLElement;
 
   constructor(
     container: HTMLElement,
     private config: any,
   ) {
-    void this.render(container);
+    this.container = container;
+    // Immediate paint with just the saved device + the system-default option;
+    // the full device list is appended once the IPC returns (see loadDevices).
+    container.innerHTML = this.markup();
+    bindFieldEvents(container, this.config);
+    void this.loadDevices();
   }
 
-  private async render(container: HTMLElement) {
-    const devices: string[] = await invoke<string[]>("list_input_devices").catch(() => []);
-    container.innerHTML = `
+  /** Initial microphone options: system default, plus the saved device (so it
+   *  shows selected before the full list loads). The rest arrive in loadDevices. */
+  private deviceOptions(): { value: string; label: string }[] {
+    const opts = [{ value: "default", label: "(system default)" }];
+    const saved = this.config.recording.input_device;
+    if (saved && saved !== "default") opts.push({ value: saved, label: saved });
+    return opts;
+  }
+
+  private markup(): string {
+    return `
       <div class="settings-section">
         <h3>Recording</h3>
         <div class="settings-field long-input">
@@ -31,9 +49,7 @@ export class SectionRecording {
                 key: "recording.input_device",
                 label: "",
                 kind: "select",
-                options: [{ value: "default", label: "(system default)" }].concat(
-                  devices.map((d) => ({ value: d, label: d })),
-                ),
+                options: this.deviceOptions(),
               },
               this.config.recording.input_device,
             )}
@@ -129,6 +145,24 @@ export class SectionRecording {
         </div>
       </div>
     `;
-    bindFieldEvents(container, this.config);
+  }
+
+  /** Append the live input-device list to the already-rendered Microphone select
+   *  (best-effort). Runs after the synchronous paint so it never delays the tab. */
+  private async loadDevices() {
+    const devices: string[] = await invoke<string[]>("list_input_devices").catch(() => []);
+    if (!devices.length) return;
+    const sel = this.container.querySelector<HTMLSelectElement>(
+      'select[data-key="recording.input_device"]',
+    );
+    if (!sel) return;
+    const have = new Set([...sel.options].map((o) => o.value));
+    for (const d of devices) {
+      if (have.has(d)) continue;
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = d;
+      sel.appendChild(opt);
+    }
   }
 }
