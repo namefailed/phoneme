@@ -106,7 +106,7 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
   // directly above each model field, so model pickers line up with their
   // provider/key rows instead of stretching the full 1fr column (A).
   const inputStyle =
-    "flex:1; min-width:0; max-width:580px; border-radius:6px; padding:8px 10px; font-size:13px; background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);";
+    "flex:1; min-width:0; max-width:580px; border-radius:6px; padding:8px 10px; font-size: 0.9286rem; background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);";
 
   const render = () => {
     if (mountTokens.get(host) !== token) return; // superseded by a newer mount
@@ -172,15 +172,15 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
     // description, else what ↻ would do for this field.
     const selectedMeta = current ? richById.get(current) : undefined;
     const status = loading
-      ? `<span style="font-size:11px; color:var(--fg-faded);">Loading models…</span>`
+      ? `<span style="font-size: 0.7857rem; color:var(--fg-faded);">Loading models…</span>`
       : error
-        ? `<span style="font-size:11px; color:var(--fg-faded);">Couldn't list models (${escHtml(error)}) — Refresh or choose Other.</span>`
+        ? `<span style="font-size: 0.7857rem; color:var(--fg-faded);">Couldn't list models (${escHtml(error)}) — Refresh or choose Other.</span>`
         : selectedMeta
-          ? `<span style="font-size:11px; color:var(--fg-faded);">${escHtml(selectedMeta.description)}</span>`
+          ? `<span style="font-size: 0.7857rem; color:var(--fg-faded);">${escHtml(selectedMeta.description)}</span>`
           : opts.mode === "llm" && !models.length && suggested.length
-            ? `<span style="font-size:11px; color:var(--fg-faded);">Suggested picks shown — ↻ fetches your provider's live list.</span>`
+            ? `<span style="font-size: 0.7857rem; color:var(--fg-faded);">Suggested picks shown — ↻ fetches your provider's live list.</span>`
             : opts.mode === "llm" && !models.length && !current
-              ? `<span style="font-size:11px; color:var(--fg-faded);">Click Refresh to list models.</span>`
+              ? `<span style="font-size: 0.7857rem; color:var(--fg-faded);">Click Refresh to list models.</span>`
               : "";
 
     host.innerHTML = `

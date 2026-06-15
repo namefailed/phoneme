@@ -50,7 +50,7 @@ export class SectionSemantic {
             </svg>
             Advanced — model compatibility
           </summary>
-          <span style="display:block; font-size:11px; color:var(--fg-faded); margin:4px 0 10px;">
+          <span style="display:block; font-size: 0.7857rem; color:var(--fg-faded); margin:4px 0 10px;">
             Defaults match all-MiniLM. Adjust these to use other ONNX sentence-transformers (E5, BGE, GTE, MPNet…).
           </span>
 
@@ -101,7 +101,7 @@ export class SectionSemantic {
           <label>Re-embed library</label>
           <div>
             <button class="inline-button" id="reembed-all">↻ Re-embed all recordings…</button>
-            <span id="reembed-status" style="font-size:11px; color: var(--fg-muted);"></span>
+            <span id="reembed-status" style="font-size: 0.7857rem; color: var(--fg-muted);"></span>
           </div>
           <span>Clears all embeddings and re-indexes every recording with the current model. Run this after changing
             the model (Save first). Runs in the background.</span>

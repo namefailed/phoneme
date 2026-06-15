@@ -38,7 +38,7 @@ export class SectionAutoTag {
     this.container.innerHTML = `
       <div class="settings-section">
         <h3>Auto-Tagging</h3>
-        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 4px;">
+        <p style="font-size: 0.8571rem; color:var(--fg-muted); margin:0 0 4px;">
           Let the AI propose tags for each new transcript (it prefers tags you already use).
           Proposals appear as dashed ✨ chips on the recording — <b>you approve or dismiss
           each one</b>. With "auto-accept existing tags" on, matches of tags you already
@@ -53,7 +53,7 @@ export class SectionAutoTag {
 
         <div class="settings-field">
           <label>Auto-apply existing tags
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">A suggestion matching a tag you already have (e.g. <code>code</code>) is applied immediately; only brand-new tag names wait for approval.</span>
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">A suggestion matching a tag you already have (e.g. <code>code</code>) is applied immediately; only brand-new tag names wait for approval.</span>
           </label>
           <div><input type="checkbox" class="toggle-switch" id="at-accept" data-key="auto_tag.auto_accept_existing" ${t.auto_accept_existing ? "checked" : ""} /></div>
         </div>
@@ -85,7 +85,7 @@ export class SectionAutoTag {
           <label>Pending tag suggestions</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <button class="inline-button" id="at-clear-all" title="Remove every pending ✨ suggestion chip from every recording in the library">🧹 Clear all suggestions</button>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Removes every pending suggestion chip across the whole library in one sweep.
               Tags that were already approved stay attached — this only discards the
               not-yet-decided proposals.

@@ -366,7 +366,7 @@ export class SettingsViewElement extends LitElement {
         }
         .managers-subtab {
           background: var(--bg-surface); border: 1px solid var(--border-subtle);
-          color: var(--fg-muted); font-size: 13px; padding: 6px 14px;
+          color: var(--fg-muted); font-size: 0.9286rem; padding: 6px 14px;
           border-radius: 8px; cursor: pointer;
           transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
         }

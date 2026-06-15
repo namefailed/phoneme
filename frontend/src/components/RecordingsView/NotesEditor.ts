@@ -107,15 +107,15 @@ export class NotesEditor {
   private render(vimMode: boolean, vimrc: string) {
     this.container.innerHTML = `
       <div style="display: flex; align-items: center; margin-bottom: 4px; gap: 6px;">
-        <label style="font-size: 11px; color: var(--fg-muted); font-weight: bold; text-transform: uppercase;">Notes</label>
+        <label style="font-size: 0.7857rem; color: var(--fg-muted); font-weight: bold; text-transform: uppercase;">Notes</label>
         ${
           vimMode
-            ? `<span id="notes-vim-badge" style="color: var(--accent); font-size: 9px; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">NORMAL</span>`
+            ? `<span id="notes-vim-badge" style="color: var(--accent); font-size: 0.6429rem; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">NORMAL</span>`
             : ""
         }
-        <button id="notes-copy-btn" title="Copy the notes to the clipboard" aria-label="Copy notes" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; font-size: 13px; line-height: 1; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--fg-muted); opacity: 0.45; cursor: pointer; transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;">📋</button>
+        <button id="notes-copy-btn" title="Copy the notes to the clipboard" aria-label="Copy notes" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; font-size: 0.9286rem; line-height: 1; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--fg-muted); opacity: 0.45; cursor: pointer; transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;">📋</button>
         <span style="flex: 1;"></span>
-        <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">Save Changes</button>
+        <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.7857rem; cursor: pointer; font-weight: bold;">Save Changes</button>
       </div>
       <div id="notes-cm-root" class="notes-cm-root"></div>
     `;
@@ -137,7 +137,7 @@ export class NotesEditor {
         height: "auto",
         minHeight: "120px",
         fontFamily: "inherit",
-        fontSize: "13px",
+        fontSize: "0.9286rem",
         border: "none",
         padding: "0",
       },

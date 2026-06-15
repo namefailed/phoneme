@@ -189,7 +189,7 @@ export class SectionInterface {
           #col-list .col-move { display: inline-flex; flex-direction: column; gap: 1px; }
           #col-list .col-move button {
             background: transparent; border: none; color: var(--fg-faded);
-            width: 22px; height: 14px; line-height: 1; font-size: 9px; padding: 0;
+            width: 22px; height: 14px; line-height: 1; font-size: 0.6429rem; padding: 0;
             border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
           }
           #col-list .col-move button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
@@ -242,7 +242,7 @@ export class SectionInterface {
                   `<option value="${f.value}" ${(config.interface.ui_font ?? "") === f.value ? "selected" : ""}>${f.label}</option>`,
               ).join("")}
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               The base typeface for the whole interface. Falls back to the bundled default if the
               font isn't installed. Transcript &amp; code blocks keep their fixed monospace font.
             </span>
@@ -258,7 +258,7 @@ export class SectionInterface {
                   `<option value="${s.value}" ${Number(config.interface.ui_font_size ?? 14) === s.value ? "selected" : ""}>${s.label}</option>`,
               ).join("")}
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Base text size the rest of the UI scales from. Takes effect on save.
             </span>
           </div>
@@ -271,7 +271,7 @@ export class SectionInterface {
               { key: "interface.strip_titlebar", label: "", kind: "checkbox" },
               config.interface.strip_titlebar,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Removes the default OS window decorations. The top header will become draggable. Requires app restart to fully apply.
             </span>
           </div>
@@ -284,7 +284,7 @@ export class SectionInterface {
               { key: "interface.vim_nav", label: "", kind: "checkbox" },
               config.interface.vim_nav,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               System-wide vim keys: <kbd>h</kbd>/<kbd>l</kbd> move focus between the sidebar, list, and
               detail panes; <kbd>j</kbd>/<kbd>k</kbd> and <kbd>gg</kbd>/<kbd>G</kbd> move within the list;
               <kbd>i</kbd>/<kbd>Enter</kbd> edit the transcript; <kbd>dd</kbd> deletes; <kbd>Esc</kbd> steps
@@ -303,7 +303,7 @@ export class SectionInterface {
               <option value="normal" ${(config.interface.animation_speed ?? "normal") === "normal" ? "selected" : ""}>Normal</option>
               <option value="slow" ${config.interface.animation_speed === "slow" ? "selected" : ""}>Slow</option>
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               How fast panes slide when shown/hidden (the sidebar <kbd>Ctrl+B</kbd>, the detail pane
               <kbd>Ctrl+\\</kbd>, and focus mode <kbd>f</kbd>). "Off" makes every toggle instant.
             </span>
@@ -317,7 +317,7 @@ export class SectionInterface {
               { key: "interface.step_notifications", label: "", kind: "checkbox" },
               config.interface.step_notifications ?? true,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Show a toast as each processing step finishes (transcribed, cleaned up, summarized,
               tags suggested) and when a recording is fully ready. Errors always notify, even
               with this off.
@@ -332,7 +332,7 @@ export class SectionInterface {
               { key: "interface.quit_stops_daemon", label: "", kind: "checkbox" },
               config.interface.quit_stops_daemon ?? true,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Quitting the tray also shuts down the background engine: an in-flight recording is
               finalized and queued first, and everything Phoneme started (whisper-server, an
               auto-launched Ollama) stops with it. Turn off to keep the engine running after the
@@ -346,7 +346,7 @@ export class SectionInterface {
           <label style="margin-top: 8px;">Visible Columns</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;">
             <div id="col-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
-            <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
               Check a column to show it; use the up/down chevrons to reorder. Columns appear left-to-right in this order. The transcript snippet is always shown last (it scrolls to read more inline).
             </span>
           </div>
@@ -355,7 +355,7 @@ export class SectionInterface {
         <div class="settings-field">
           <label>Reset remembered layout</label>
           <div><button class="inline-button" id="reset-ui-prefs" type="button">Reset interface preferences</button></div>
-          <span style="grid-column: 2; font-size: 11px; color: var(--fg-faded);">
+          <span style="grid-column: 2; font-size: 0.7857rem; color: var(--fg-faded);">
             Clears all per-device UI state remembered across reloads — column layout &amp; widths,
             panel split, sidebar, expanded meetings, the semantic-search toggle, record mode, and
             "don't ask again" prompts — back to defaults, then reloads.

@@ -168,7 +168,7 @@ export class SectionInPlace {
     this.container.innerHTML = `
       <div class="settings-section">
         <h3>Dictation (in-place)</h3>
-        <p style="font-size: 12px; color: var(--fg-muted); margin: 0 0 12px; line-height: 1.5;">
+        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin: 0 0 12px; line-height: 1.5;">
           The in-place hotkey types what you say straight into the focused window.
           Dictations take a <b>fast lane</b>: they skip the processing queue and the
           full pipeline, so the text lands in well under a second — even while a
@@ -183,7 +183,7 @@ export class SectionInPlace {
               <option value="auto" ${sttMode === "auto" ? "selected" : ""}>Automatic (preview's fast model, else the main one)</option>
               <option value="custom" ${sttMode === "custom" ? "selected" : ""}>Custom</option>
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               <b>Automatic</b> needs no setup: dictation borrows the Live Preview's fast model
               while the preview is enabled (that server is already running), else the main
               transcription provider. <b>Custom</b> pins dictation to its own provider and model.
@@ -200,7 +200,7 @@ export class SectionInPlace {
               <option value="off" ${ip.cleanup === "off" ? "selected" : ""}>Off — raw transcription</option>
               <option value="llm" ${ip.cleanup === "llm" ? "selected" : ""}>AI cleanup — slower, full LLM pass</option>
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               <b>Fast</b> strips filler words ("um", "uh") and whisper's non-speech tags, fixes
               stutter-doubled words, capitalization, and end punctuation — with zero added latency.
               <b>AI cleanup</b> runs the Post-Processing provider before typing, adding its full
@@ -216,7 +216,7 @@ export class SectionInPlace {
               <option value="type" ${(ip.type_mode ?? "type") === "type" ? "selected" : ""}>Typing — simulated keystrokes</option>
               <option value="paste" ${ip.type_mode === "paste" ? "selected" : ""}>Pasting — clipboard + Ctrl+V</option>
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Typing works everywhere but takes a moment for long text. Pasting is near-instant —
               your previous clipboard is put back afterwards — but a few apps block paste.
             </span>
@@ -230,7 +230,7 @@ export class SectionInPlace {
               { key: "in_place.save_to_library", label: "", kind: "checkbox" },
               ip.save_to_library ?? true,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               On: after the text is typed, the recording saves like any other (searchable, with
               audio). Off: dictations are ephemeral — audio and transcript are discarded once typed.
             </span>
@@ -244,7 +244,7 @@ export class SectionInPlace {
               { key: "in_place.full_pipeline", label: "", kind: "checkbox" },
               ip.full_pipeline ?? false,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Route dictations through the normal queue and every configured step (cleanup,
               summary, auto-tags, hooks) — the pre-fast-lane behavior. Slow;
               only useful when dictations must trigger the same automation as recordings.
@@ -262,7 +262,7 @@ export class SectionInPlace {
               <option value="immediate" ${ip.type_first ? "selected" : ""}>Type the text immediately — the pipeline keeps running in the background</option>
               <option value="after" ${!ip.type_first ? "selected" : ""}>Type only after every step finishes — the typed text includes cleanup</option>
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               <b>Immediately</b> types the fast transcription the moment you stop speaking,
               while cleanup, summary, auto-tags, and hooks keep running in the background for
               the library copy — the typed text does <b>not</b> include the AI cleanup.
@@ -347,7 +347,7 @@ export class SectionInPlace {
               <option value="main" ${server === "main" ? "selected" : ""}>Main transcription server</option>
               <option value="preview" ${server === "preview" ? "selected" : ""}>Live Preview's fast-model server</option>
             </select>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               Dictation reuses a whisper server that's <b>already running</b> — the daemon never
               starts a third one just for it. <b>Main</b> is the regular transcription server;
               <b>Live Preview's</b> is the second, fast-model one, only alive while the preview
@@ -355,7 +355,7 @@ export class SectionInPlace {
             </span>
             ${
               server === "preview" && !previewServerRuns
-                ? `<span style="font-size: 11px; color: var(--err); display: block;">The Live Preview isn't set to run its own local server right now — enable it with a dedicated local model (Transcription → Live Preview), or dictations will fail.</span>`
+                ? `<span style="font-size: 0.7857rem; color: var(--err); display: block;">The Live Preview isn't set to run its own local server right now — enable it with a dedicated local model (Transcription → Live Preview), or dictations will fail.</span>`
                 : ""
             }
           </div>

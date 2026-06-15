@@ -25,7 +25,7 @@ export class SectionTray {
           <label>Software Updates</label>
           <div style="display: flex; align-items: center; gap: 12px;">
             <button class="inline-button" id="check-updates-btn">Check for Updates</button>
-            <span id="update-status" style="font-size: 12px; color: var(--fg-muted);">You are on the latest version.</span>
+            <span id="update-status" style="font-size: 0.8571rem; color: var(--fg-muted);">You are on the latest version.</span>
           </div>
         </div>
 

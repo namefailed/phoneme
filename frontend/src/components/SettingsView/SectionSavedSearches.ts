@@ -67,7 +67,7 @@ export class SectionSavedSearches {
     this.container.innerHTML = `
       <div class="settings-section">
         <h3>Saved Searches</h3>
-        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 4px;">
+        <p style="font-size: 0.8571rem; color:var(--fg-muted); margin:0 0 4px;">
           A saved search snapshots <b>everything</b> the library is filtered by — search text,
           semantic toggle, library type, tag, status, date range and sort order — and restores
           it all with one click (or the header's 🔖 menu).
@@ -75,7 +75,7 @@ export class SectionSavedSearches {
 
         <div class="settings-field">
           <label>Save current filters
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">Currently: ${escapeHtml(current)}</span>
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">Currently: ${escapeHtml(current)}</span>
           </label>
           <div style="display:flex; gap:8px;">
             <input type="text" id="ssm-new-name" placeholder="Name this search" style="flex:1; min-width:0;" />
@@ -93,18 +93,18 @@ export class SectionSavedSearches {
 
       <style>
         .ssm-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-        .ssm-empty { font-size: 12px; color: var(--fg-faded); padding: 6px 2px; }
+        .ssm-empty { font-size: 0.8571rem; color: var(--fg-faded); padding: 6px 2px; }
         .ssm-row {
           display: flex; align-items: center; gap: 10px;
           border: 1px solid var(--border-subtle); border-radius: 8px;
           padding: 8px 10px; background: var(--bg-surface);
         }
         .ssm-main { flex: 1; min-width: 0; }
-        .ssm-name { font-size: 13px; color: var(--fg-default); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .ssm-desc { font-size: 11px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ssm-name { font-size: 0.9286rem; color: var(--fg-default); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ssm-desc { font-size: 0.7857rem; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .ssm-actions { flex: 0 0 auto; display: inline-flex; gap: 6px; }
         .ssm-rename-input {
-          width: 100%; height: 26px; border-radius: 6px; padding: 2px 8px; font-size: 12px;
+          width: 100%; height: 26px; border-radius: 6px; padding: 2px 8px; font-size: 0.8571rem;
           background: var(--bg-deep); border: 1px solid var(--accent); color: var(--fg-default);
         }
       </style>

@@ -49,7 +49,7 @@ body.phoneme-hide-header-instant #hdr {
   color: var(--fg-muted);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 0.9286rem;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .hb-like-clear:hover {
@@ -108,7 +108,7 @@ body.phoneme-hide-header-instant #hdr {
      space). No max-width cap — the group is the thing that grows/shrinks. */
   flex: 1;
   width: 100%;
-  font-size: 13px;
+  font-size: 0.9286rem;
   transition: all 0.15s ease-out;
 }
 .headerbar .search:focus {
@@ -122,7 +122,7 @@ body.phoneme-hide-header-instant #hdr {
   color: var(--fg-default);
   padding: 0 12px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   line-height: 1;
   /* Vertically center the value/placeholder text inside the fixed-height pill
      (date inputs and selects otherwise baseline-align toward the top). */
@@ -136,7 +136,7 @@ body.phoneme-hide-header-instant #hdr {
 /* The status <select> shares the pill look; keep its text centered too. */
 .headerbar .hb-status-select {
   padding: 0 28px 0 12px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -163,7 +163,7 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
   border-radius: 6px;
   padding: 6px 10px;
   color: var(--fg-muted);
-  font-size: 16px;
+  font-size: 1.1429rem;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -187,7 +187,7 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
   gap: 4px;
   padding: 2px 8px;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 0.7857rem;
 }
 .status-pill.done    { background: rgba(166,227,161,0.15); color: var(--ok); }
 .status-pill.failed  { background: rgba(243,139,168,0.15); color: var(--err); }
@@ -218,7 +218,7 @@ select {
   border-radius: 6px;
   padding: 6px 28px 6px 12px;
   outline: none;
-  font-size: 11px;
+  font-size: 0.7857rem;
   cursor: pointer;
   transition: all 0.15s ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
@@ -241,7 +241,7 @@ option {
   border: 1px solid rgba(243, 139, 168, 0.4);
   padding: 6px 16px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease-out;
@@ -320,7 +320,7 @@ option {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   color: var(--accent);
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   min-width: 18px;
   height: 18px;
@@ -345,7 +345,7 @@ option {
   align-items: center;
   gap: 9px;
   padding: 11px 16px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   line-height: 1.45;
   color: var(--fg-default);
   background: color-mix(in srgb, var(--bg-elevated, #1e1e2e) 90%, transparent);
@@ -389,7 +389,7 @@ option {
 }
 .hb-preview .hb-preview-label {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -421,7 +421,7 @@ option {
   border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   letter-spacing: 0.06em;
 }

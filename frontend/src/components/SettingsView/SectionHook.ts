@@ -93,14 +93,14 @@ export class SectionHook {
     container.innerHTML = `
       <div class="settings-section">
         <h3>Destination & Integrations</h3>
-        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Phoneme can automatically pass your voice notes to other applications or save them to disk by executing local scripts. Point these at a <code>.bat</code> or <code>.ps1</code> file to save notes to Obsidian, Word, or anything else. Multiple commands run sequentially in order.
         </p>
         <div class="settings-field long-input" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Integration Scripts</label>
           <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; align-items: stretch;">
             <div style="display: flex; gap: 8px; align-items: center; margin-right: auto;">
-              <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
+              <select id="hook-preset-select" style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; color: var(--fg-default); max-width: 250px; outline: none; cursor: pointer;">
                 <option value="" disabled selected>Add a preset hook…</option>
                 <optgroup label="Clipboard">
                   <option value="powershell -Command &quot;$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript&quot;">Copy transcript to clipboard</option>
@@ -120,13 +120,13 @@ export class SectionHook {
                   <option value="node process_note.js">Run Node.js script</option>
                 </optgroup>
               </select>
-              <span style="font-size: 11px; color: var(--fg-faded);">← adds a command below</span>
+              <span style="font-size: 0.7857rem; color: var(--fg-faded);">← adds a command below</span>
             </div>
             <div id="hook-cmd-list" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch;"></div>
             <button class="inline-button" id="hook-add-cmd" style="align-self: flex-start;">+ Add command</button>
             <div class="test-result" id="hook-result" style="display:none; margin-top: 0;"></div>
           </div>
-          <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
             Each command runs automatically (in order) after transcription. Phoneme pipes a JSON object with the recording's data to the command's standard input (<code>stdin</code>). <br/>
             Example: <code>python process.py</code> (runs as <code>python pipes.py &lt; data.json</code>).
           </span>
@@ -137,7 +137,7 @@ export class SectionHook {
             { key: "hook.webhook_url", label: "", kind: "text", placeholder: "https://… — POSTs the recording JSON after each transcription" },
             this.config.hook.webhook_url ?? "",
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Optional. Phoneme sends an HTTP POST with the recording's JSON payload to this URL after each transcription (alongside any Integration Scripts above). Leave blank to disable. Honors the <b>Run hooks after transcription</b> toggle below.
           </span>
         </div>
@@ -147,7 +147,7 @@ export class SectionHook {
             { key: "webhook.allow_private_network", label: "", kind: "checkbox" },
             this.config.webhook.allow_private_network ?? false,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Allow the webhook to POST to private network addresses (your LAN, <code>10.x</code> / <code>192.168.x</code> / <code>172.16–31.x</code>, link-local). Off by default — such targets are blocked to stop a transcript being sent to an internal service by mistake. <b>Only enable for local automation you trust</b> (e.g. an n8n box on your NAS).
           </span>
         </div>
@@ -157,7 +157,7 @@ export class SectionHook {
             { key: "webhook.allow_http", label: "", kind: "checkbox" },
             this.config.webhook.allow_http ?? false,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Allow plain <code>http://</code> for public webhook targets. Off by default — public URLs must be <code>https://</code> so transcripts aren't sent in the clear. Loopback is always allowed; <b>leave this off unless you really mean to send over unencrypted HTTP</b>.
           </span>
         </div>
@@ -167,7 +167,7 @@ export class SectionHook {
             { key: "webhook.hmac_secret", label: "", kind: "text", type: "password", placeholder: "Optional — signs each webhook POST" },
             this.config.webhook.hmac_secret ?? "",
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             When set, every webhook POST carries an <code>X-Phoneme-Signature: sha256=&lt;hex&gt;</code> header — HMAC-SHA256 of the exact body — so your receiver can verify the request really came from this Phoneme install and wasn't tampered with. Leave blank to disable signing. Stored encrypted (DPAPI); it never leaves your machine in plaintext.
           </span>
         </div>
@@ -175,7 +175,7 @@ export class SectionHook {
           <label>Webhook headers</label>
           <div id="wh-headers-list" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch;"></div>
           <button class="inline-button" id="wh-add-header" style="margin-top: 8px; align-self: flex-start;">+ Add header</button>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 6px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 6px; display: block;">
             Extra HTTP headers attached to every webhook POST (e.g. <code>Authorization: Bearer …</code>, an <code>X-Api-Key</code>, or a routing tag). A header that collides with one Phoneme sets itself (<code>Content-Type</code>, the signature header) is ignored — Phoneme's value wins.
           </span>
         </div>
@@ -185,7 +185,7 @@ export class SectionHook {
             { key: "hook.timeout_secs", label: "", kind: "number" },
             this.config.hook.timeout_secs,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Maximum time (in seconds) to wait for each Integration Script to finish before giving up and labeling the post-processing phase as failed.
           </span>
         </div>
@@ -195,7 +195,7 @@ export class SectionHook {
             { key: "hook.run_on_transcribe", label: "", kind: "checkbox" },
             this.config.hook.run_on_transcribe ?? true,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             When on (default), your Integration Scripts and webhook fire automatically after every transcription — including re-transcriptions. Turn it off if you only want hooks to run on demand via the <b>⚡ Re-fire hook</b> button (so re-transcribing fixes the text without re-triggering side effects like re-appending to a note).
           </span>
         </div>
@@ -203,7 +203,7 @@ export class SectionHook {
           <label>Keyword-triggered hooks</label>
           <div id="kw-rules-list" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch;"></div>
           <button class="inline-button" id="kw-add-rule" style="margin-top: 8px; align-self: flex-start;">+ Add rule</button>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 6px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 6px; display: block;">
             Run an extra command <i>only</i> when the transcript contains a phrase — on top of the Integration Scripts above. Example: phrase <code>Action Item:</code> → a command that sends the note to your task manager. The command receives the same JSON on <code>stdin</code>.
           </span>
         </div>
@@ -244,7 +244,7 @@ export class SectionHook {
     const list = container.querySelector<HTMLElement>("#wh-headers-list");
     if (!list) return;
     if (this.headerRows.length === 0) {
-      list.innerHTML = `<span style="font-size: 11px; color: var(--fg-faded);">No custom headers.</span>`;
+      list.innerHTML = `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No custom headers.</span>`;
       return;
     }
     list.innerHTML = this.headerRows
@@ -252,9 +252,9 @@ export class SectionHook {
         (h, i) => `
         <div class="wh-header-row" data-idx="${i}" style="display: flex; gap: 6px; align-items: center;">
           <input class="wh-name" type="text" placeholder="Header name (e.g. Authorization)" value="${escapeAttr(h.name)}"
-            style="width: 220px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
+            style="width: 220px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 0.8571rem; color: var(--fg-default);" />
           <input class="wh-value" type="text" placeholder="Value" value="${escapeAttr(h.value)}"
-            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
+            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 0.8571rem; color: var(--fg-default);" />
           <button class="inline-button wh-remove" title="Remove header" style="padding: 4px 8px;">✕</button>
         </div>`,
       )
@@ -283,16 +283,16 @@ export class SectionHook {
     const list = container.querySelector<HTMLElement>("#hook-cmd-list");
     if (!list) return;
     if (this.commands.length === 0) {
-      list.innerHTML = `<span style="font-size: 11px; color: var(--fg-faded);">No integration scripts yet — add one above, or pick a preset.</span>`;
+      list.innerHTML = `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No integration scripts yet — add one above, or pick a preset.</span>`;
       return;
     }
     list.innerHTML = this.commands
       .map(
         (cmd, i) => `
         <div class="hook-cmd-row" data-idx="${i}" style="display: flex; gap: 8px; align-items: center;">
-          <span style="font-size: 11px; color: var(--fg-faded); width: 14px; text-align: right;">${i + 1}.</span>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); width: 14px; text-align: right;">${i + 1}.</span>
           <input class="hook-cmd" type="text" placeholder="Command to run…" value="${escapeAttr(cmd)}"
-            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
+            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 0.8571rem; color: var(--fg-default);" />
           <button class="inline-button hook-browse" title="Browse for a script" style="white-space: nowrap;">Browse…</button>
           <button class="inline-button hook-test" title="Run this command once with sample data" style="white-space: nowrap;">Test</button>
           <button class="inline-button hook-remove" title="Remove command" style="padding: 4px 8px;">✕</button>
@@ -339,7 +339,7 @@ export class SectionHook {
     const list = container.querySelector<HTMLElement>("#kw-rules-list");
     if (!list) return;
     if (this.rules.length === 0) {
-      list.innerHTML = `<span style="font-size: 11px; color: var(--fg-faded);">No keyword rules yet.</span>`;
+      list.innerHTML = `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No keyword rules yet.</span>`;
       return;
     }
     list.innerHTML = this.rules
@@ -347,10 +347,10 @@ export class SectionHook {
         (r, i) => `
         <div class="kw-rule-row" data-idx="${i}" style="display: flex; gap: 6px; align-items: center;">
           <input class="kw-pattern" type="text" placeholder="Phrase to match…" value="${escapeAttr(r.pattern)}"
-            style="width: 180px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
+            style="width: 180px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 0.8571rem; color: var(--fg-default);" />
           <input class="kw-command" type="text" placeholder="Command to run…" value="${escapeAttr(r.command)}"
-            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 12px; color: var(--fg-default);" />
-          <label title="Case-sensitive match" style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted); white-space: nowrap;">
+            style="flex: 1; min-width: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 5px 8px; font-size: 0.8571rem; color: var(--fg-default);" />
+          <label title="Case-sensitive match" style="display: flex; align-items: center; gap: 4px; font-size: 0.7857rem; color: var(--fg-muted); white-space: nowrap;">
             <input type="checkbox" class="kw-cs toggle-switch" ${r.case_sensitive ? "checked" : ""} /> Aa
           </label>
           <button class="inline-button kw-remove" title="Remove rule" style="padding: 4px 8px;">✕</button>

@@ -21,7 +21,7 @@ export class SectionHotkey {
               { key: "hotkey.enabled", label: "", kind: "checkbox" },
               config.hotkey.enabled,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               If you use Kanata/AHK/WHKD to bind a hotkey externally, leave this OFF.
             </span>
           </div>
@@ -50,7 +50,7 @@ export class SectionHotkey {
         </div>
 
         <h3 style="margin-top: 18px;">Meeting Hotkey</h3>
-        <span style="font-size: 11px; color: var(--fg-faded); display: block; margin: -6px 0 8px;">
+        <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin: -6px 0 8px;">
           A separate shortcut that toggles a multi-track meeting recording (your mic + system audio).
         </span>
         <div class="settings-field">
@@ -84,7 +84,7 @@ export class SectionHotkey {
         </div>
 
         <h3 style="margin-top: 18px;">In-place Transcription</h3>
-        <span style="font-size: 11px; color: var(--fg-faded); display: block; margin: -6px 0 8px;">
+        <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin: -6px 0 8px;">
           A separate shortcut to type the transcription directly into the currently focused window, like Windows Dictation.
         </span>
         <div class="settings-field">

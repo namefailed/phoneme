@@ -120,11 +120,11 @@ export class SavedSearchesElement extends LitElement {
           ?hidden=${!this.open}
           style="position:absolute; top:calc(100% + 6px); left:0; z-index:60; min-width:240px; max-width:320px; background:var(--bg-elevated,#1e1e2e); border:var(--popup-border); border-radius:10px; padding:6px; box-shadow:0 10px 30px rgba(0,0,0,0.5); text-align:left;"
         >
-          <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--fg-faded); padding:4px 8px 6px;">
+          <div style="font-size: 0.7143rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--fg-faded); padding:4px 8px 6px;">
             Saved searches
           </div>
           ${this.items.length === 0
-            ? html`<div style="padding:2px 8px 8px; font-size:12px; color:var(--fg-muted); line-height:1.4;">
+            ? html`<div style="padding:2px 8px 8px; font-size: 0.8571rem; color:var(--fg-muted); line-height:1.4;">
                 No saved searches yet. Set up the search + filters you want, then save them below.
               </div>`
             : this.items.map(
@@ -141,10 +141,10 @@ export class SavedSearchesElement extends LitElement {
                       ((e.currentTarget as HTMLElement).style.background = "transparent")}
                   >
                     <div style="flex:1; min-width:0;">
-                      <div style="font-size:13px; color:var(--fg-default); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                      <div style="font-size: 0.9286rem; color:var(--fg-default); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                         ${s.name}
                       </div>
-                      <div style="font-size:11px; color:var(--fg-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                      <div style="font-size: 0.7857rem; color:var(--fg-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                         ${describeFilter(s.filter)}
                       </div>
                     </div>
@@ -152,7 +152,7 @@ export class SavedSearchesElement extends LitElement {
                       class="icon-btn"
                       title="Delete this saved search"
                       aria-label="Delete saved search"
-                      style="flex:0 0 auto; width:22px; height:22px; font-size:11px;"
+                      style="flex:0 0 auto; width:22px; height:22px; font-size: 0.7857rem;"
                       @click=${(e: Event) => this.deleteSaved(s.id, e)}
                     >✕</button>
                   </div>
@@ -168,7 +168,7 @@ export class SavedSearchesElement extends LitElement {
                   .value=${this.draftName}
                   @input=${(e: Event) => (this.draftName = (e.target as HTMLInputElement).value)}
                   @keydown=${this.onNameKey}
-                  style="flex:1; min-width:0; height:28px; border-radius:6px; padding:2px 8px; font-size:12px; background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);"
+                  style="flex:1; min-width:0; height:28px; border-radius:6px; padding:2px 8px; font-size: 0.8571rem; background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);"
                 />
                 <button class="icon-btn" title="Save" style="height:28px; padding:0 10px;" @click=${this.confirmSave}>
                   Save
@@ -176,7 +176,7 @@ export class SavedSearchesElement extends LitElement {
               </div>`
             : html`<button
                 role="menuitem"
-                style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--accent); padding:8px; border-radius:7px; cursor:pointer; font-size:13px;"
+                style="display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none; border:none; color:var(--accent); padding:8px; border-radius:7px; cursor:pointer; font-size: 0.9286rem;"
                 @click=${this.startNaming}
               >➕ Save current search…</button>`}
         </div>

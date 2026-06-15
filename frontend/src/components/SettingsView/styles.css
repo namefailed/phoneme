@@ -23,7 +23,7 @@ ph-settings-view {
 }
 .settings-sidebar h2 {
   margin: 0 0 16px 20px;
-  font-size: 18px;
+  font-size: 1.2857rem;
   color: var(--fg-default);
 }
 /* ── Settings search box ──────────────────────────────────────────────────── */
@@ -47,7 +47,7 @@ ph-settings-view {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   color: var(--fg-default);
-  font-size: 13px;
+  font-size: 0.9286rem;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -78,7 +78,7 @@ ph-settings-view {
   border-radius: 50%;
   background: transparent;
   color: var(--fg-faded);
-  font-size: 11px;
+  font-size: 0.7857rem;
   line-height: 1;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
@@ -110,7 +110,7 @@ mark.settings-hit {
   gap: 8px;
   margin: 0 0 16px;
   padding: 7px 14px 7px 11px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-muted);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
@@ -133,16 +133,16 @@ mark.settings-hit {
   text-align: center;
 }
 .sv-empty-icon {
-  font-size: 30px;
+  font-size: 2.1429rem;
   opacity: 0.5;
 }
 .sv-empty-title {
-  font-size: 15px;
+  font-size: 1.0714rem;
   color: var(--fg-default);
   font-weight: 600;
 }
 .sv-empty-hint {
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-faded);
   max-width: 360px;
   line-height: 1.5;
@@ -160,7 +160,7 @@ mark.settings-hit {
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: 0.7857rem;
   cursor: pointer;
   transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
@@ -193,7 +193,7 @@ mark.settings-hit {
   padding: 10px 20px;
   cursor: pointer;
   color: var(--fg-muted);
-  font-size: 14px;
+  font-size: 1rem;
   border-left: 3px solid transparent;
   transition: all 0.2s;
 }
@@ -240,7 +240,7 @@ mark.settings-hit {
   border-right: none;
   border-radius: 6px 0 0 6px;
   padding: 4px 11px;
-  font-size: 16px;
+  font-size: 1.1429rem;
   color: var(--fg-muted);
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -288,7 +288,7 @@ mark.settings-hit {
   padding: 8px 12px;
   border-radius: 7px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 0.9286rem;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .settings-float-group .hb-menu-item:hover {
@@ -301,12 +301,12 @@ mark.settings-hit {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 1.0714rem;
   line-height: 1;
 }
 .settings-float-group .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
 .settings-float-group .hb-menu-label {
-  font-size: 10px;
+  font-size: 0.7143rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--fg-faded);
@@ -330,7 +330,7 @@ mark.settings-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-radius: 6px;
   padding: 7px 16px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
@@ -356,7 +356,7 @@ mark.settings-hit {
 }
 .settings-toolbar h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 1.2857rem;
   color: var(--fg-default);
 }
 .settings-toolbar .spacer {
@@ -367,7 +367,7 @@ mark.settings-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-radius: 6px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -400,7 +400,7 @@ mark.settings-hit {
 }
 .settings-section h3 {
   margin: 0 0 12px;
-  font-size: 14px;
+  font-size: 1rem;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -418,7 +418,7 @@ mark.settings-hit {
 }
 .settings-field > label {
   color: var(--fg-default);
-  font-size: 13px;
+  font-size: 0.9286rem;
   font-weight: 500;
   padding-top: 0;
 }
@@ -431,7 +431,7 @@ mark.settings-hit {
 .settings-field > span {
   grid-column: 2;
   color: var(--fg-faded);
-  font-size: 11px;
+  font-size: 0.7857rem;
   line-height: 1.5;
   margin-top: 2px;
 }
@@ -443,7 +443,7 @@ mark.settings-hit {
   border-radius: 4px;
   padding: 6px 10px;
   color: var(--fg-default);
-  font-size: 13px;
+  font-size: 0.9286rem;
   width: 100%;
 }
 .settings-field input[type="number"] {
@@ -475,7 +475,7 @@ mark.settings-hit {
   color: var(--fg-default);
   padding: 6px 12px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -493,7 +493,7 @@ select[data-key="daemon.log_level"] {
   padding: 6px 10px;
   border-radius: 4px;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .test-result.ok {
   background: rgba(166, 227, 161, 0.15);
@@ -531,7 +531,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 4px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-default);
   cursor: pointer;
   transition: all 0.15s;
@@ -556,7 +556,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid var(--border) !important;
   border-radius: 4px;
   padding: 4px 8px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
 }
 
@@ -606,7 +606,7 @@ select[data-key="daemon.log_level"] {
   align-self: flex-end;
   white-space: nowrap;
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 500;
   border-radius: 6px;
   background: var(--bg-elevated);
@@ -651,11 +651,11 @@ select[data-key="daemon.log_level"] {
 .ai-preset-select {
   flex: 1;
   max-width: 360px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   padding: 5px 28px 5px 10px;
 }
 .ai-preset-hint {
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-faded);
   white-space: nowrap;
 }
@@ -666,7 +666,7 @@ select[data-key="daemon.log_level"] {
   max-width: 580px;
   min-height: 220px;
   resize: vertical;
-  font-size: 13px;
+  font-size: 0.9286rem;
   padding: 8px 10px;
   line-height: 1.5;
 }
@@ -691,7 +691,7 @@ select[data-key="daemon.log_level"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 600;
   color: var(--fg-muted);
   user-select: none;
@@ -719,7 +719,7 @@ select[data-key="daemon.log_level"] {
 
 /* Generic helper text below a control (reusable across any section). */
 .settings-help-text {
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-faded);
   line-height: 1.5;
   margin-top: 2px;
@@ -737,7 +737,7 @@ select[data-key="daemon.log_level"] {
 
 .tag-mgr-name {
   flex: 1;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
   min-width: 0;
   overflow: hidden;
@@ -746,7 +746,7 @@ select[data-key="daemon.log_level"] {
 }
 
 .tag-mgr-badge {
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -778,16 +778,16 @@ select[data-key="daemon.log_level"] {
 }
 .tag-mgr-empty p {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-muted);
 }
 .tag-mgr-empty-icon {
-  font-size: 30px;
+  font-size: 2.1429rem;
   line-height: 1;
   margin-bottom: 4px;
 }
 .tag-mgr-empty-hint {
-  font-size: 11px !important;
+  font-size: 0.7857rem !important;
   color: var(--fg-faded) !important;
 }
 
@@ -797,7 +797,7 @@ select[data-key="daemon.log_level"] {
   padding-top: 20px;
 }
 .tag-mgr-add-label {
-  font-size: 11px;
+  font-size: 0.7857rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -828,7 +828,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
   min-width: 0;
 }
@@ -844,7 +844,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid var(--accent);
   border-radius: 6px;
   padding: 6px 16px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   font-weight: 600;
   color: var(--accent-fg);
   cursor: pointer;
@@ -870,7 +870,7 @@ select[data-key="daemon.log_level"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-muted);
   margin-bottom: 14px;
 }
@@ -886,7 +886,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid rgba(243, 139, 168, 0.3);
   border-radius: 6px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 600;
   color: var(--err);
   cursor: pointer;
@@ -923,7 +923,7 @@ select[data-key="daemon.log_level"] {
   outline: none;
   width: 100%;
   color: var(--fg-default);
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 .tag-mgr-search input::placeholder { color: var(--fg-faded); }
 .tag-mgr-search-clear {
@@ -932,7 +932,7 @@ select[data-key="daemon.log_level"] {
   color: var(--fg-muted);
   cursor: pointer;
   padding: 0 4px;
-  font-size: 16px;
+  font-size: 1.1429rem;
   line-height: 1;
 }
 .tag-mgr-search-clear:hover { color: var(--fg-default); }
@@ -941,7 +941,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-default);
   cursor: pointer;
   flex-shrink: 0;
@@ -972,7 +972,7 @@ select[data-key="daemon.log_level"] {
 
 /* ── Profile Manager rows (built on the tag-manager row chrome) ──────────── */
 .profile-icon {
-  font-size: 14px;
+  font-size: 1rem;
   line-height: 1;
   flex-shrink: 0;
   opacity: 0.85;
@@ -986,14 +986,14 @@ select[data-key="daemon.log_level"] {
   overflow: hidden;
 }
 .profile-name {
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .profile-meta {
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-faded);
   white-space: nowrap;
   flex-shrink: 0;
@@ -1031,7 +1031,7 @@ select[data-key="daemon.log_level"] {
 }
 .cf-mini-label {
   flex: 0 0 92px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-muted);
 }
 .cf select,
@@ -1044,7 +1044,7 @@ select[data-key="daemon.log_level"] {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 7px 10px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
 }
 .cf select:focus,
@@ -1053,13 +1053,13 @@ select[data-key="daemon.log_level"] {
   border-color: var(--accent);
 }
 .cf-hint {
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-faded);
   line-height: 1.5;
 }
 .cf-key-link {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--accent);
   text-decoration: none;
   white-space: nowrap;
@@ -1071,6 +1071,6 @@ select[data-key="daemon.log_level"] {
    block spacing so it sits beside the button. */
 .cf .cf-test-result {
   margin-top: 0;
-  font-size: 12px;
+  font-size: 0.8571rem;
   min-width: 0;
 }

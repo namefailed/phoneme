@@ -365,7 +365,7 @@ export class TagChipsElement extends LitElement {
                       if (e.key === "Enter") { e.preventDefault(); void this.saveEdit(t.id); }
                       else if (e.key === "Escape") { e.preventDefault(); this.cancelEdit(); }
                     }}
-                    style="width:140px; padding:5px 8px; border-radius:6px; font-size:13px;
+                    style="width:140px; padding:5px 8px; border-radius:6px; font-size: 0.9286rem;
                       background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);" />
                   <button class="inline-button" title="Save changes" @click=${() => void this.saveEdit(t.id)}
                     style="padding:5px 10px;">Save</button>

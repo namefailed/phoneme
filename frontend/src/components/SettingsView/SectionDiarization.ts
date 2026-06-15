@@ -1,7 +1,7 @@
 import { renderField, bindFieldEvents } from "./form";
 
 const HELP =
-  "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
+  "font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;";
 
 /**
  * Returns a warning string when the chosen diarization provider can't run with
@@ -74,7 +74,7 @@ export class SectionDiarization {
 
         <div class="settings-field" id="diarize-warn" style="display:none">
           <label></label>
-          <div style="border:1px solid var(--warn, #f9e2af); border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.45; background: color-mix(in srgb, var(--warn, #f9e2af) 12%, transparent); color: var(--fg-default);">
+          <div style="border:1px solid var(--warn, #f9e2af); border-radius:6px; padding:8px 10px; font-size: 0.8571rem; line-height:1.45; background: color-mix(in srgb, var(--warn, #f9e2af) 12%, transparent); color: var(--fg-default);">
             ⚠️ <b>Won't run with your current transcription provider.</b>
             <div id="diarize-warn-text" style="margin-top:4px; color: var(--fg-muted);"></div>
           </div>
@@ -83,7 +83,7 @@ export class SectionDiarization {
         <div id="diarize-local" style="display:none">
           <div class="settings-field">
             <label></label>
-            <div style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.45;">
+            <div style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; font-size: 0.8571rem; line-height:1.45;">
               ⚠️ <b>Local Diarization</b> requires an additional 500MB ONNX model and significantly more RAM.
             </div>
           </div>
@@ -102,7 +102,7 @@ export class SectionDiarization {
         <div id="diarize-cloud" style="display:none">
           <div class="settings-field">
             <label></label>
-            <div style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.45;">
+            <div style="border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; font-size: 0.8571rem; line-height:1.45;">
               ⚠️ <b>Cloud Diarization.</b> Make sure to configure your chosen provider's API key in the Whisper section above.
             </div>
           </div>

@@ -45,7 +45,7 @@
   padding: 12px 16px 12px 6px;
   display: grid;
   gap: 0;
-  font-size: 11px;
+  font-size: 0.7857rem;
   text-transform: uppercase;
   color: var(--accent);
   letter-spacing: 1px;
@@ -59,7 +59,7 @@
   border-bottom: 1px solid var(--border-subtle);
   display: grid;
   gap: 0;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
   cursor: pointer;
   border-left: 3px solid transparent;
@@ -176,7 +176,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
   transition: color 0.2s ease;
 }
 .rec-row:hover .rec-preview {
@@ -195,7 +195,7 @@ mark.search-hit {
   color: var(--fg-muted);
 }
 .empty .hint {
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-faded);
 }
 .empty code {
@@ -203,7 +203,7 @@ mark.search-hit {
   padding: 1px 6px;
   border-radius: 4px;
   font-family: ui-monospace, "Cascadia Code", monospace;
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .empty.error {
   color: var(--err);
@@ -235,12 +235,12 @@ mark.search-hit {
   border-bottom: 1px solid var(--border-subtle);
 }
 .detail-title {
-  font-size: 14px;
+  font-size: 1rem;
   color: var(--fg-default);
 }
 .detail-meta {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .waveform {
   margin: 16px 18px;
@@ -263,7 +263,7 @@ mark.search-hit {
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   border-radius: 6px;
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-default);
   font-weight: 500;
 }
@@ -332,7 +332,7 @@ mark.search-hit {
 .action-row .split-btn .split-caret {
   border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   padding: 0 9px;
-  font-size: 10px;
+  font-size: 0.7143rem;
 }
 
 /* Secondary inline button — used outside Settings (e.g. "View original
@@ -345,7 +345,7 @@ mark.search-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 6px;
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 500;
   color: var(--fg-default);
   cursor: pointer;
@@ -391,7 +391,7 @@ mark.search-hit {
   border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   border-radius: 6px;
   padding: 4px 9px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-muted);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -442,19 +442,19 @@ mark.search-hit {
   padding: 14px;
 }
 .speakers-block .speakers-header {
-  font-size: 11px;
+  font-size: 0.7857rem;
   font-weight: bold;
   text-transform: uppercase;
   color: var(--fg-muted);
   margin-bottom: 4px;
 }
 .speakers-block .speakers-hint {
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-muted);
   margin-bottom: 10px;
 }
 .speakers-block .speakers-hint code {
-  font-size: 10px;
+  font-size: 0.7143rem;
   background: var(--bg-elevated);
   border-radius: 3px;
   padding: 0 3px;
@@ -473,7 +473,7 @@ mark.search-hit {
   flex: 0 0 auto;
   padding: 1px 8px;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--accent);
@@ -493,7 +493,7 @@ mark.search-hit {
   border-radius: 4px;
   padding: 4px 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 .speakers-block .speaker-name-input:focus {
   outline: none;
@@ -574,7 +574,7 @@ mark.search-hit {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 14px;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--fg-default);
 }
@@ -583,7 +583,7 @@ mark.search-hit {
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 1rem;
   padding: 2px 6px;
   border-radius: 6px;
 }
@@ -602,7 +602,7 @@ mark.search-hit {
   resize: none;
   outline: none;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 1rem;
   line-height: 1.6;
   color: var(--fg-default);
   background: transparent;
@@ -610,7 +610,7 @@ mark.search-hit {
 .detail-footer {
   padding: 6px 18px 16px;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: 0.7857rem;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -633,7 +633,7 @@ mark.search-hit {
   text-overflow: ellipsis;
   text-align: right;
   opacity: 0.7;
-  font-size: 10px;
+  font-size: 0.7143rem;
 }
 
 /* ── AI activity / "thinking" popout ──────────────────────────────────────── */
@@ -649,7 +649,7 @@ mark.search-hit {
   border: var(--popup-border);
   color: var(--fg-default);
   cursor: pointer;
-  font-size: 18px;
+  font-size: 1.2857rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -707,7 +707,7 @@ mark.search-hit {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 600;
   color: var(--fg-default);
   border-bottom: 1px solid var(--border-subtle);
@@ -718,11 +718,11 @@ mark.search-hit {
 /* Polished header title: brain glyph + name, an animated "live" pill, and a
    muted total-entries badge. */
 .thinking-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.thinking-title-icon { font-size: 14px; line-height: 1; }
-.thinking-title-text { font-size: 13px; font-weight: 700; letter-spacing: 0.01em; color: var(--fg-default); }
+.thinking-title-icon { font-size: 1rem; line-height: 1; }
+.thinking-title-text { font-size: 0.9286rem; font-weight: 700; letter-spacing: 0.01em; color: var(--fg-default); }
 .thinking-title-live {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 0.7143rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   padding: 2px 8px; border-radius: 999px;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -732,16 +732,16 @@ mark.search-hit {
   animation: thinkingPulse 1s ease-in-out infinite;
 }
 .thinking-title-count {
-  font-size: 10px; font-weight: 600;
+  font-size: 0.7143rem; font-weight: 600;
   padding: 2px 7px; border-radius: 999px;
   color: var(--fg-faded);
   background: color-mix(in srgb, var(--fg-faded) 12%, transparent);
   font-variant-numeric: tabular-nums;
 }
-.thinking-close { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 13px; }
+.thinking-close { background: none; border: none; color: var(--fg-muted); cursor: pointer; font-size: 0.9286rem; }
 .thinking-close:hover { color: var(--accent); }
 .thinking-body { flex: 1; overflow-y: auto; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px; }
-.thinking-empty { font-size: 11px; color: var(--fg-faded); line-height: 1.5; }
+.thinking-empty { font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.5; }
 /* One AI-activity log entry — a compact card. */
 .thinking-entry {
   border: 1px solid var(--border-subtle);
@@ -761,11 +761,11 @@ mark.search-hit {
 }
 .thinking-entry-stage {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.01em; color: var(--accent);
+  font-size: 0.7857rem; font-weight: 700; letter-spacing: 0.01em; color: var(--accent);
 }
 .thinking-entry-meta {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 10px; color: var(--fg-faded);
+  font-size: 0.7143rem; color: var(--fg-faded);
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .thinking-id { color: var(--fg-muted); }
@@ -787,7 +787,7 @@ mark.search-hit {
   display: flex; align-items: center; gap: 6px;
   list-style: none; cursor: pointer; user-select: none;
   padding: 3px 5px; border-radius: 6px;
-  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 0.7143rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--fg-muted);
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -807,7 +807,7 @@ mark.search-hit {
 .thinking-copy:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .thinking-pre {
   white-space: pre-wrap; word-break: break-word;
-  font-size: 11px; line-height: 1.5;
+  font-size: 0.7857rem; line-height: 1.5;
   background: var(--bg-deep);
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
@@ -872,7 +872,7 @@ mark.search-hit {
   box-shadow: none;
   transform: none;
   padding: 7px 10px;
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .th-menu .th-menu-item:hover {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -896,7 +896,7 @@ mark.search-hit {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-muted);
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
@@ -912,7 +912,7 @@ mark.search-hit {
   border-radius: 999px;
   padding: 0 6px;
   font-weight: 700;
-  font-size: 10px;
+  font-size: 0.7143rem;
 }
 .detail-pipeline-pop {
   /* FIXED, not absolute: the detail pane is an overflow scroll container, which
@@ -939,7 +939,7 @@ mark.search-hit {
 }
 .detail-pipeline-pop[hidden] { display: none; }
 .detail-pipeline-title {
-  font-size: 10px;
+  font-size: 0.7143rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--fg-faded);
@@ -957,11 +957,11 @@ mark.search-hit {
   gap: 3px 10px;
   padding: 6px 10px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   line-height: 1.45;
 }
 .dp-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.dp-ico { align-self: center; text-align: center; font-size: 13px; }
+.dp-ico { align-self: center; text-align: center; font-size: 0.9286rem; }
 .dp-label { color: var(--fg-muted); }
 /* overflow-wrap:anywhere lets a long model name (or path) wrap to a second line
    WITHIN its column and, crucially, lets the 1fr track shrink instead of forcing
@@ -987,7 +987,7 @@ mark.search-hit {
   color: inherit;
   padding: 2px 10px;
   border-radius: 12px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1004,7 +1004,7 @@ mark.search-hit {
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   padding: 2px 10px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   min-width: 100px;
   width: 120px;
   flex-shrink: 0;
@@ -1034,7 +1034,7 @@ mark.search-hit {
   gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-default);
   transition: background 0.15s ease-out;
 }
@@ -1067,7 +1067,7 @@ mark.search-hit {
   color: var(--fg-muted);
   border-radius: 12px;
   padding: 2px 10px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   cursor: pointer;
 }
 .tag-manage:hover {
@@ -1270,7 +1270,7 @@ body.phoneme-hide-header ph-header-bar {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 1.0714rem;
   line-height: 1;
   padding: 2px 4px;
   border-radius: 4px;
@@ -1322,7 +1322,7 @@ body.phoneme-hide-header ph-header-bar {
 .bulk-grip {
   cursor: move;
   color: var(--fg-faded);
-  font-size: 15px;
+  font-size: 1.0714rem;
   line-height: 1;
   padding: 4px 3px;
   user-select: none;
@@ -1362,14 +1362,14 @@ body.phoneme-hide-header ph-header-bar {
   padding: 7px 10px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.8571rem;
   white-space: nowrap;
 }
 .bulk-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .bulk-menu-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
-.bulk-menu-empty { font-size: 11px; color: var(--fg-faded); padding: 8px 10px; }
+.bulk-menu-empty { font-size: 0.7857rem; color: var(--fg-faded); padding: 8px 10px; }
 .bulk-count {
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 600;
   color: var(--accent);
   white-space: nowrap;
@@ -1386,7 +1386,7 @@ body.phoneme-hide-header ph-header-bar {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 500;
   color: var(--fg-default);
   cursor: pointer;
@@ -1440,7 +1440,7 @@ body.phoneme-hide-header ph-header-bar {
   border-left: 3px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 0.9286rem;
   font-weight: 600;
   color: var(--fg-default);
   transition: background 0.15s ease-out;
@@ -1499,7 +1499,7 @@ body.phoneme-hide-header ph-header-bar {
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.8571rem;
   padding: 2px 4px;
   border-radius: 4px;
   transition: opacity 0.15s ease-out, color 0.15s ease-out, background 0.15s ease-out;
@@ -1514,7 +1514,7 @@ body.phoneme-hide-header ph-header-bar {
 }
 .rec-group-meta {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
@@ -1544,7 +1544,7 @@ body.phoneme-hide-header ph-header-bar {
   margin-right: 8px;
   padding: 2px 8px;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--accent);
@@ -1559,7 +1559,7 @@ body.phoneme-hide-header ph-header-bar {
   margin-right: 8px;
   padding: 2px 7px;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
@@ -1578,13 +1578,13 @@ body.phoneme-hide-header ph-header-bar {
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 500;
   color: var(--fg-muted);
   transition: color 0.2s ease;
 }
 .rec-source-ico {
-  font-size: 12px;
+  font-size: 0.8571rem;
   line-height: 1;
   flex-shrink: 0;
   opacity: 0.85;
@@ -1671,7 +1671,7 @@ ph-sidebar {
   gap: 7px;
   padding: 9px 14px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 0.7857rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.6px;
@@ -1700,7 +1700,7 @@ ph-sidebar {
 /* Badges keep their size and never wrap; the header's overflow clips them last. */
 .queue-count, .queue-failed { flex: 0 0 auto; white-space: nowrap; }
 .queue-count {
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
@@ -1714,7 +1714,7 @@ ph-sidebar {
 /* Failed-items badge: a clickable chip that opens the failure-details panel
    (per-recording reason + retry; clearing the quarantine lives in its footer). */
 .queue-failed {
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   letter-spacing: 0;
   padding: 1px 7px;
@@ -1749,7 +1749,7 @@ ph-sidebar {
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.8571rem;
   line-height: 1;
   padding: 0;
   border-radius: 6px;
@@ -1809,7 +1809,7 @@ ph-sidebar {
   width: 48px;
 }
 .queue-empty {
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-faded);
   padding: 4px 6px 8px;
   line-height: 1.4;
@@ -1827,27 +1827,27 @@ ph-sidebar {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface));
 }
-.queue-item-icon { flex: 0 0 auto; color: var(--fg-faded); font-size: 11px; }
+.queue-item-icon { flex: 0 0 auto; color: var(--fg-faded); font-size: 0.7857rem; }
 .queue-item.processing .queue-item-icon { color: var(--accent); }
 .queue-item-main { flex: 1; min-width: 0; cursor: pointer; }
 .queue-item-main:hover .queue-item-title { color: var(--accent); }
 .queue-reorder { flex: 0 0 auto; display: inline-flex; flex-direction: column; gap: 1px; }
 .queue-move {
   background: transparent; border: none; color: var(--fg-faded);
-  width: 20px; height: 13px; line-height: 1; font-size: 9px; padding: 0;
+  width: 20px; height: 13px; line-height: 1; font-size: 0.6429rem; padding: 0;
   border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
 }
 .queue-move:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
 .queue-move:disabled { opacity: 0.25; cursor: default; }
-.queue-item-title { font-size: 12px; color: var(--fg-default); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.queue-item-sub { font-size: 10px; color: var(--fg-faded); }
+.queue-item-title { font-size: 0.8571rem; color: var(--fg-default); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-item-sub { font-size: 0.7143rem; color: var(--fg-faded); }
 .queue-cancel {
   flex: 0 0 auto;
   background: transparent;
   border: none;
   color: var(--fg-faded);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.8571rem;
   width: 22px;
   height: 22px;
   border-radius: 6px;
@@ -1881,7 +1881,7 @@ ph-sidebar {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 1.0714rem;
   line-height: 1;
   padding: 3px 5px;
   transition: border-color 0.12s ease, background 0.12s ease;
@@ -1906,7 +1906,7 @@ ph-sidebar {
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 1.1429rem;
   line-height: 1;
   padding: 4px;
   transition: background 0.12s ease, border-color 0.12s ease;
@@ -1926,7 +1926,7 @@ ph-sidebar {
   align-content: center;
 }
 .rec-tag-chip {
-  font-size: 10px;
+  font-size: 0.7143rem;
   line-height: 1.4;
   padding: 1px 7px;
   border-radius: 999px;
@@ -1951,7 +1951,7 @@ ph-sidebar {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: 0.7857rem;
   font-weight: 700;
   color: var(--ok);
   background: color-mix(in srgb, var(--ok) 16%, transparent);
@@ -1979,7 +1979,7 @@ ph-sidebar {
   font-weight: 600;
   color: var(--fg-default);
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 13px;
+  font-size: 0.9286rem;
   text-transform: uppercase;
   letter-spacing: 1px;
   cursor: pointer;
@@ -2013,7 +2013,7 @@ ph-sidebar {
   padding: 8px 12px;
   border-radius: 6px;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
   cursor: pointer;
   transition: all 0.15s ease-out;
   display: flex;
@@ -2053,7 +2053,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .sidebar-icon {
-  font-size: 14px;
+  font-size: 1rem;
 }
 .sidebar-dot {
   display: inline-block;
@@ -2094,7 +2094,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
 }
 .merged-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 1.2857rem;
   font-weight: 700;
   color: var(--fg-default);
   display: flex;
@@ -2128,7 +2128,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   align-items: center;
   gap: 6px;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .merged-meta-pill {
   padding: 2px 9px;
@@ -2137,7 +2137,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   border: 1px solid var(--border-subtle);
   color: var(--fg-default);
   font-weight: 600;
-  font-size: 11px;
+  font-size: 0.7857rem;
 }
 .merged-meta-ro {
   color: var(--fg-faded);
@@ -2157,7 +2157,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   gap: 7px;
   margin: 20px 0 8px;
   padding: 4px 12px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -2170,7 +2170,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   margin-top: 0;
 }
 .merged-source-icon {
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 .merged-source-label {
   color: var(--accent);
@@ -2200,7 +2200,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   align-items: center;
   justify-content: center;
   margin-top: 1px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 800;
   color: var(--spk, var(--accent));
   background: color-mix(in srgb, var(--spk, var(--accent)) 18%, transparent);
@@ -2221,13 +2221,13 @@ ph-sidebar .queue-item-main.kbd-cursor {
 .merged-text {
   color: var(--fg-default);
   line-height: 1.6;
-  font-size: 14px;
+  font-size: 1rem;
   white-space: pre-wrap;
 }
 /* The speaker name (click to rename), in the speaker's color. */
 .merged-speaker {
   display: inline-block;
-  font-size: 12.5px;
+  font-size: 0.8929rem;
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--spk, var(--accent));
@@ -2253,7 +2253,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
 .merged-speaker-input {
   width: 14ch;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 0.8929rem;
   font-weight: 700;
   color: var(--spk, var(--accent));
   background: var(--bg-surface);
@@ -2293,7 +2293,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
 }
 .tdiff-arrow {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 .tdiff-select {
   background: var(--bg-elevated);
@@ -2301,7 +2301,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 6px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-family: inherit;
   cursor: pointer;
 }
@@ -2321,7 +2321,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   background: var(--bg-elevated);
   border: none;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: 0.7857rem;
   font-weight: 600;
   padding: 4px 10px;
   cursor: pointer;
@@ -2342,7 +2342,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-muted);
   flex: 0 0 auto;
 }
@@ -2365,13 +2365,13 @@ ph-sidebar .queue-item-main.kbd-cursor {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.7;
-  font-size: 14px;
+  font-size: 1rem;
   color: var(--fg-default);
 }
 /* Line-numbered unified view: old + new gutters, a marker, then the content. */
 .tdiff-text--numbered {
   white-space: normal;
-  font-size: 13px;
+  font-size: 0.9286rem;
   font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   line-height: 1.55;
 }
@@ -2428,7 +2428,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
 }
 .tdiff-empty,
 .tdiff-same {
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-muted);
   line-height: 1.6;
 }
@@ -2449,7 +2449,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
@@ -2496,7 +2496,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   justify-content: space-between;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 15px;
+  font-size: 1.0714rem;
   font-weight: 600;
   color: var(--fg-default);
 }
@@ -2505,7 +2505,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
-  font-size: 15px;
+  font-size: 1.0714rem;
   padding: 2px 8px;
   border-radius: 6px;
 }
@@ -2518,7 +2518,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
 }
 .tdiff-loading {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 
 /* ── Timeline peek (clickable, time-coded segment list) ─────────────────────
@@ -2541,7 +2541,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   background: none;
   color: var(--fg-default);
   font: inherit;
-  font-size: 13px;
+  font-size: 0.9286rem;
   line-height: 1.5;
   text-align: left;
   cursor: pointer;
@@ -2556,13 +2556,13 @@ ph-sidebar .queue-item-main.kbd-cursor {
   min-width: 42px;
   color: var(--fg-faded);
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: 0.7857rem;
 }
 .tl-speaker {
   flex: 0 0 auto;
   color: var(--accent);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .tl-text {
   flex: 1 1 auto;
@@ -2572,7 +2572,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
 .tl-empty,
 .tl-loading {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
   line-height: 1.6;
   padding: 10px 12px;
 }
@@ -2583,7 +2583,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
    the editable TranscriptEditor — this view never edits. */
 .st-flow {
   line-height: 1.7;
-  font-size: 14px;
+  font-size: 1rem;
   color: var(--fg-default);
 }
 .st-para {
@@ -2594,7 +2594,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   display: block;
   color: var(--accent);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 0.8571rem;
   margin-bottom: 2px;
 }
 .st-word {
@@ -2611,7 +2611,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
 .st-empty,
 .st-loading {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
   line-height: 1.6;
   padding: 10px 12px;
 }
@@ -2647,16 +2647,16 @@ ph-sidebar .queue-item-main.kbd-cursor {
   align-items: center;
   gap: 6px;
   margin-bottom: 2px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-muted);
 }
 .chrono-time {
   font-family: var(--font-mono, monospace);
   color: var(--fg-faded);
 }
-.chrono-source { font-size: 12px; }
+.chrono-source { font-size: 0.8571rem; }
 .chrono-text {
-  font-size: 13px;
+  font-size: 0.9286rem;
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2675,7 +2675,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   padding: 1px 7px;
   border-radius: 999px;
   text-align: center;
-  font-size: 10px;
+  font-size: 0.7143rem;
   line-height: 15px;
   font-variant-numeric: tabular-nums;
   color: var(--fg-faded);

@@ -7,7 +7,7 @@
 .doctor-loading {
   padding: 24px;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 
 /* Health strip: the one-glance state (count chips per category) plus the
@@ -25,14 +25,14 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 .doctor-strip-state { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
-.doctor-strip-note { font-size: 12px; color: var(--fg-muted); }
+.doctor-strip-note { font-size: 0.8571rem; color: var(--fg-muted); }
 .doctor-strip-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .doctor-strip-actions button {
   background: var(--bg-deep);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-radius: 6px;
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-default);
   transition: all 0.15s ease-out;
 }
@@ -48,7 +48,7 @@
   align-items: center;
   padding: 2px 9px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 0.7857rem;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -80,7 +80,7 @@
   color: var(--err);
 }
 .doctor-mark {
-  font-size: 18px;
+  font-size: 1.2857rem;
   text-align: center;
 }
 .doctor-name {
@@ -89,14 +89,14 @@
 }
 .doctor-detail {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .doctor-fix {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   border-radius: 4px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 
 /* Category badge on failing rows — the house status-pill idiom. */
@@ -106,7 +106,7 @@
   margin-left: 8px;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -118,12 +118,12 @@
 /* What the check verifies (always shown) and how to fix it (on failure). */
 .doctor-explain {
   color: var(--fg-faded);
-  font-size: 11px;
+  font-size: 0.7857rem;
   margin-top: 2px;
 }
 .doctor-hint {
   color: var(--warn);
-  font-size: 11px;
+  font-size: 0.7857rem;
   margin-top: 2px;
 }
 .doctor-hint::before { content: "fix: "; font-weight: 700; }
@@ -140,7 +140,7 @@
   border-radius: 8px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
-  font-size: 12px;
+  font-size: 0.8571rem;
   font-weight: 600;
   color: var(--fg-muted);
   user-select: none;
@@ -159,7 +159,7 @@
 
 /* Expanded: compact one-line rows under small subsystem headers. */
 .doctor-group-title {
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -172,14 +172,14 @@
   gap: 8px;
   padding: 4px 12px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 .doctor-pass-row:hover { background: var(--bg-elevated); }
-.doctor-pass-row .doctor-pass-mark { flex: 0 0 auto; font-size: 11px; }
+.doctor-pass-row .doctor-pass-mark { flex: 0 0 auto; font-size: 0.7857rem; }
 .doctor-pass-name { color: var(--fg-default); font-weight: 600; white-space: nowrap; }
 .doctor-pass-detail {
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: 0.7857rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

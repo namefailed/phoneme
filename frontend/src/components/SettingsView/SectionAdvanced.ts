@@ -47,7 +47,7 @@ export class SectionAdvanced {
         <div class="settings-field">
           <label>First Run Wizard</label>
           <div><button class="inline-button" id="rerun-wizard">Rerun First Run Wizard</button></div>
-          <div style="font-size: 12px; color: var(--fg-muted); margin-top: 4px;">Walk through the guided setup again — transcription engine, AI cleanup, auto-summary, and live preview. Re-downloads the whisper-server and any missing models.</div>
+          <div style="font-size: 0.8571rem; color: var(--fg-muted); margin-top: 4px;">Walk through the guided setup again — transcription engine, AI cleanup, auto-summary, and live preview. Re-downloads the whisper-server and any missing models.</div>
         </div>
       </div>
     `;

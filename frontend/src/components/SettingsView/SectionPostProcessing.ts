@@ -74,13 +74,13 @@ export class SectionPostProcessing {
     container.innerHTML = `
       <div class="settings-section">
         <h3>AI Post-Processing</h3>
-        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Automatically edit, reformat, and clean up your transcript using a local or remote LLM.
         </p>
 
         <div style="background-color: var(--bg-deep); padding: 12px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 16px;">
-          <strong style="display: block; font-size: 13px; margin-bottom: 6px; color: var(--fg-default);">How to use this for free (Offline):</strong>
-          <ol style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--fg-muted); line-height: 1.5;">
+          <strong style="display: block; font-size: 0.9286rem; margin-bottom: 6px; color: var(--fg-default);">How to use this for free (Offline):</strong>
+          <ol style="margin: 0; padding-left: 20px; font-size: 0.8571rem; color: var(--fg-muted); line-height: 1.5;">
             <li>Download and install <a href="#" id="ollama-download-link" style="color: var(--accent); text-decoration: none;">Ollama</a>.</li>
             <li>Open your terminal and run <code>ollama run llama3.2:3b</code>.</li>
             <li>Select <strong>Ollama</strong> below and use <code>llama3.2:3b</code> as your Model Name!</li>
@@ -105,7 +105,7 @@ export class SectionPostProcessing {
           <div id="cleanup-model-host"></div>
         </div>
 
-        <div id="llm-cloud-note" style="display:none; border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin:4px 0 12px; font-size:12px; line-height:1.45;">
+        <div id="llm-cloud-note" style="display:none; border:1px solid var(--err); border-radius:6px; padding:8px 10px; margin:4px 0 12px; font-size: 0.8571rem; line-height:1.45;">
           ⚠️ <b>Cloud post-processing.</b> Your transcript text is sent to this provider's servers for processing. Use <b>Ollama</b> to keep everything offline.
         </div>
 
@@ -116,7 +116,7 @@ export class SectionPostProcessing {
               { key: "llm_post_process.autostart_ollama", label: "", kind: "checkbox" },
               lp.autostart_ollama ?? true,
             )}</div>
-            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               When an AI step (cleanup, summary, tags, titles) points at a local Ollama that isn't
               running, launch <code>ollama serve</code> on demand and stop it again when the engine
               shuts down. An Ollama you started yourself is detected and never touched. Only ever
@@ -164,7 +164,7 @@ export class SectionPostProcessing {
         <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 20px 0 16px;" />
 
         <h3 style="margin-bottom: 4px;">Auto AI Summary</h3>
-        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Generate a short AI summary of each transcript. You can always summarize a single
           recording on demand with the <b>View summary</b> button in its detail view — enabling
           this just runs it automatically as the <b>last step</b> of every recording's pipeline.
@@ -178,7 +178,7 @@ export class SectionPostProcessing {
             { key: "summary.auto", label: "", kind: "checkbox" },
             config.summary.auto,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
             When off, summaries are still available on demand per recording.
           </span>
         </div>
@@ -191,7 +191,7 @@ export class SectionPostProcessing {
         <div class="settings-field">
           <label>Summary model (optional)</label>
           <div id="summary-model-host"></div>
-          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
             Leave on "Same as cleanup model" to reuse the post-processing model, or pick a different
             one (e.g. a smaller/faster model just for summaries).
           </span>
@@ -224,7 +224,7 @@ export class SectionPostProcessing {
         <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 20px 0 16px;" />
 
         <h3 style="margin-bottom: 4px;">Auto Titles</h3>
-        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Name each recording from its first meaningful sentence — free, instant, and fully
           offline. Optionally let the AI write a short title instead; if the AI fails for any
           reason, the built-in heuristic still applies. A title you type on a recording yourself
@@ -245,7 +245,7 @@ export class SectionPostProcessing {
             { key: "title.use_llm", label: "", kind: "checkbox" },
             config.title.use_llm,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
             Off = the built-in heuristic (first sentence of the transcript). On = ask the model
             below for a short title, falling back to the heuristic on any error.
           </span>
@@ -260,7 +260,7 @@ export class SectionPostProcessing {
           <div class="settings-field">
             <label>Title model (optional)</label>
             <div id="title-model-host"></div>
-            <span style="font-size: 11px; color: var(--fg-faded); grid-column: 2;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
               Leave on "Same as cleanup model" to reuse the post-processing model, or pick a
               small/fast one just for titles.
             </span>

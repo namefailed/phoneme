@@ -82,7 +82,7 @@ export class SectionStorage {
               <option value="txt">Plain Text</option>
             </select>
             <button class="inline-button" id="btn-export-all">⬇ Export All…</button>
-            <span id="export-status" style="font-size:11px; color: var(--fg-muted);"></span>
+            <span id="export-status" style="font-size: 0.7857rem; color: var(--fg-muted);"></span>
           </div>
           <span>Exports all recordings and their transcripts to a single file (text only — no audio).</span>
         </div>
@@ -91,7 +91,7 @@ export class SectionStorage {
           <label>Back up library</label>
           <div>
             <button class="inline-button" id="btn-backup-zip">🗄 Back up to .zip…</button>
-            <span id="backup-status" style="font-size:11px; color: var(--fg-muted);"></span>
+            <span id="backup-status" style="font-size: 0.7857rem; color: var(--fg-muted);"></span>
           </div>
           <span>A portable backup zip — the full catalog (<code>catalog.json</code>) plus every audio file under <code>audio/</code>. This is the same archive <code>phoneme export &lt;file&gt;</code> produces, so it can be restored later. Audio can make this large.</span>
         </div>

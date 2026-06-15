@@ -358,8 +358,8 @@ export class RerunFormElement extends LitElement {
 
   /** Summary model + instructions inputs (shared by the Summarize and All steps). */
   private renderSummaryPanel() {
-    const sInput = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
-    const sLabel = "font-size: 11px; color: var(--fg-muted);";
+    const sInput = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
+    const sLabel = "font-size: 0.7857rem; color: var(--fg-muted);";
     return html`
       <div style="display: flex; flex-direction: column; gap: 4px;">
         <label style=${sLabel}>Summary model</label>
@@ -379,8 +379,8 @@ export class RerunFormElement extends LitElement {
   /** Cleanup provider/model/prompt panel, with a quick provider pick that
    *  fills provider + URL + model in one go (shared by the Cleanup and All steps). */
   private renderCleanupPanel() {
-    const inputStyle = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
-    const labelStyle = "font-size: 11px; color: var(--fg-muted);";
+    const inputStyle = "width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);";
+    const labelStyle = "font-size: 0.7857rem; color: var(--fg-muted);";
     const isApi = isApiLlmProvider(this.cleanupProvider);
     return html`
       <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -432,11 +432,11 @@ export class RerunFormElement extends LitElement {
   /** The per-step options block shown inside the Re-run menu. */
   private renderStepOptions() {
     if (this.rerunStep === "all") {
-      const sectionStyle = "font-size: 10px; font-weight: 700; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border-subtle);";
+      const sectionStyle = "font-size: 0.7143rem; font-weight: 700; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border-subtle);";
       return html`
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style="font-size: 11px; color: var(--fg-muted);">Transcription model</label>
-          <select class="rerun-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
+          <label style="font-size: 0.7857rem; color: var(--fg-muted);">Transcription model</label>
+          <select class="rerun-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
             ${this.availableModels.map(m => html`
               <option value=${m.value} ?selected=${m.value === this.selectedModel}>${m.label}</option>
             `)}
@@ -447,15 +447,15 @@ export class RerunFormElement extends LitElement {
           ${this.renderCleanupPanel()}
           <div style=${sectionStyle}>Summary</div>
           ${this.renderSummaryPanel()}
-          <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
+          <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted); line-height: 1.4;">
             Re-transcribes, then re-runs cleanup and the AI summary with these one-time settings, then your hooks. Overrides apply to this run only and aren't saved.
           </p>
         ` : html`
-          <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
+          <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted); line-height: 1.4;">
             Re-transcribes the audio and runs your hooks. Set up an AI provider to also include cleanup &amp; summary here.
           </p>
           <button class="rerun-enable-cleanup" type="button"
-            style="align-self: flex-start; padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
+            style="align-self: flex-start; padding: 4px 10px; font-size: 0.7857rem; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
             @click=${this.openCleanupSettings}>Set up AI in Settings →</button>
         `}
       `;
@@ -464,16 +464,16 @@ export class RerunFormElement extends LitElement {
     if (this.rerunStep === "summarize") {
       if (!this.llmPostProcessEnabled) {
         return html`
-          <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
+          <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted);">
             No AI provider is configured, so there's nothing to summarize with. Set one up to use this.
           </p>
           <button class="rerun-enable-summary" type="button"
-            style="align-self: flex-start; padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
+            style="align-self: flex-start; padding: 4px 10px; font-size: 0.7857rem; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
             @click=${this.openCleanupSettings}>Set up AI in Settings →</button>
         `;
       }
       return html`
-        <p style="margin: 0; font-size: 11px; color: var(--fg-muted); line-height: 1.4;">
+        <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted); line-height: 1.4;">
           Regenerates the AI summary from the current transcript. Overrides apply to this run only and aren't saved; the transcript itself isn't changed.
         </p>
         ${this.renderSummaryPanel()}
@@ -483,8 +483,8 @@ export class RerunFormElement extends LitElement {
     if (this.rerunStep === "transcribe") {
       return html`
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style="font-size: 11px; color: var(--fg-muted);">Model</label>
-          <select class="rerun-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
+          <label style="font-size: 0.7857rem; color: var(--fg-muted);">Model</label>
+          <select class="rerun-model-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleModelChange}>
             ${this.availableModels.map(m => html`
               <option value=${m.value} ?selected=${m.value === this.selectedModel}>${m.label}</option>
             `)}
@@ -492,13 +492,13 @@ export class RerunFormElement extends LitElement {
         </div>
 
         ${this.llmPostProcessEnabled ? html`
-          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.8571rem; color: var(--fg-default); cursor: pointer; user-select: none;">
             <input type="checkbox" class="rerun-postprocess-cb toggle-switch" ?checked=${this.postProcessOnTranscribe} @change=${(e: Event) => this.postProcessOnTranscribe = (e.target as HTMLInputElement).checked} />
             Run cleanup (post-processing) after transcribing
           </label>
         ` : nothing}
 
-        <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-default); cursor: pointer; user-select: none;">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 0.8571rem; color: var(--fg-default); cursor: pointer; user-select: none;">
           <input type="checkbox" class="rerun-hooks-cb toggle-switch" ?checked=${this.runHooksAfterTranscribing} @change=${(e: Event) => this.runHooksAfterTranscribing = (e.target as HTMLInputElement).checked} />
           Run hooks after transcribing
         </label>
@@ -508,16 +508,16 @@ export class RerunFormElement extends LitElement {
     if (this.rerunStep === "cleanup") {
       if (!this.llmPostProcessEnabled) {
         return html`
-          <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
+          <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted);">
             Post-processing (LLM cleanup) is turned off, so there's nothing to re-run. Enable a cleanup provider to use this.
           </p>
           <button class="rerun-enable-cleanup" type="button"
-            style="align-self: flex-start; padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
+            style="align-self: flex-start; padding: 4px 10px; font-size: 0.7857rem; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--accent); cursor: pointer;"
             @click=${this.openCleanupSettings}>Enable cleanup in Settings →</button>
         `;
       }
       return html`
-        <p style="margin: 0; font-size: 11px; color: var(--fg-muted);">
+        <p style="margin: 0; font-size: 0.7857rem; color: var(--fg-muted);">
           Re-cleans the original transcript with the LLM (re-transcription is skipped). These overrides apply to this run only and aren't saved.
         </p>
         ${this.renderCleanupPanel()}
@@ -527,8 +527,8 @@ export class RerunFormElement extends LitElement {
     // hook
     return html`
       <div style="display: flex; flex-direction: column; gap: 4px;">
-        <label style="font-size: 11px; color: var(--fg-muted);">Run command</label>
-        <select class="rerun-hook-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleHookCommandSelect}>
+        <label style="font-size: 0.7857rem; color: var(--fg-muted);">Run command</label>
+        <select class="rerun-hook-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleHookCommandSelect}>
           <option value="">All configured commands</option>
           ${this.configuredHookCommands.map(cmd => html`
             <option value=${cmd} ?selected=${cmd === this.selectedHookCommand}>${cmd}</option>
@@ -539,8 +539,8 @@ export class RerunFormElement extends LitElement {
 
       ${this.customHookCommandSelected ? html`
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style="font-size: 11px; color: var(--fg-muted);">Custom Command</label>
-          <input type="text" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"
+          <label style="font-size: 0.7857rem; color: var(--fg-muted);">Custom Command</label>
+          <input type="text" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);"
             .value=${this.selectedHookCommand} @input=${this.handleCustomHookCommandInput} />
         </div>
       ` : nothing}
@@ -556,11 +556,11 @@ export class RerunFormElement extends LitElement {
     return html`
       <div class="rerun-form ${this.modal ? "rerun-form--modal" : ""}" @click=${(e: Event) => e.stopPropagation()}
         style=${rootStyle}>
-        <h4 style="margin: 0; font-size: ${this.modal ? "15px" : "13px"}; font-weight: 600; color: var(--fg-default); display: flex; align-items: center; gap: 7px;">↻ Re-run</h4>
+        <h4 style="margin: 0; font-size: ${this.modal ? "1.0714rem" : "0.9286rem"}; font-weight: 600; color: var(--fg-default); display: flex; align-items: center; gap: 7px;">↻ Re-run</h4>
 
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          <label style="font-size: 11px; color: var(--fg-muted);">Step</label>
-          <select class="rerun-step-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleStepChange}>
+          <label style="font-size: 0.7857rem; color: var(--fg-muted);">Step</label>
+          <select class="rerun-step-select" style="width: 100%; border-radius: 4px; padding: 4px 8px; font-size: 0.8571rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @change=${this.handleStepChange}>
             <option value="all" ?selected=${this.rerunStep === "all"}>All (everything)</option>
             <option value="transcribe" ?selected=${this.rerunStep === "transcribe"}>Transcribe</option>
             <option value="cleanup" ?selected=${this.rerunStep === "cleanup"}>Cleanup</option>
@@ -572,8 +572,8 @@ export class RerunFormElement extends LitElement {
         ${this.renderStepOptions()}
 
         <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px;">
-          <button style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @click=${this.cancel}>Cancel</button>
-          <button class="primary rerun-submit" ?disabled=${this.runDisabled || this.busy} style="padding: 4px 10px; font-size: 11px; border-radius: 4px; background: var(--accent); color: var(--accent-fg); border: none;" @click=${this.submit}>${this.busy ? "Working…" : this.submitLabel}</button>
+          <button style="padding: 4px 10px; font-size: 0.7857rem; border-radius: 4px; background: var(--bg-surface); border: 1px solid var(--border-subtle); color: var(--fg-default);" @click=${this.cancel}>Cancel</button>
+          <button class="primary rerun-submit" ?disabled=${this.runDisabled || this.busy} style="padding: 4px 10px; font-size: 0.7857rem; border-radius: 4px; background: var(--accent); color: var(--accent-fg); border: none;" @click=${this.submit}>${this.busy ? "Working…" : this.submitLabel}</button>
         </div>
       </div>
     `;

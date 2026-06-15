@@ -67,7 +67,7 @@ export class WaveformPlayerElement extends LitElement {
         Timeline.create({
           height: 20,
           style: {
-            fontSize: "10px",
+            fontSize: "0.7143rem",
             color: fg,
             fontFamily: "monospace",
           },

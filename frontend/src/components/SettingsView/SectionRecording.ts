@@ -71,7 +71,7 @@ export class SectionRecording {
               this.config.recording.source || "microphone",
             )}
           </div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             <b>System audio</b> records what's playing through your speakers (meetings, videos) via WASAPI loopback. Windows only.
           </span>
         </div>
@@ -95,7 +95,7 @@ export class SectionRecording {
             { key: "recording.auto_stop_on_silence", label: "", kind: "checkbox" },
             this.config.recording.auto_stop_on_silence || false,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             When <b>on</b>, the Record button stops automatically once your mic goes quiet (using the threshold and window below) — good for hands-free quick notes.<br/>
             When <b>off</b> (default), the Record button is a <b>Start/Stop toggle</b>: it records until you click stop, so a quiet mic or a natural pause never cuts you off. The silence threshold and window below only apply when this is on. (Your push-to-talk hotkey is unaffected.)
           </span>
@@ -106,7 +106,7 @@ export class SectionRecording {
             { key: "recording.silence_threshold_dbfs", label: "", kind: "number" },
             this.config.recording.silence_threshold_dbfs,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             The volume level (in decibels) below which audio is considered "silence".<br/>
             <b>-45 dBFS</b> is good for quiet rooms. Use <b>-30 dBFS</b> for noisy environments to prevent background noise from keeping the recording open.
           </span>
@@ -117,7 +117,7 @@ export class SectionRecording {
             { key: "recording.silence_window_ms", label: "", kind: "number" },
             this.config.recording.silence_window_ms,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             How long you must pause (in milliseconds) before Phoneme considers you finished speaking and automatically stops the recording. (e.g. 1500 = 1.5 seconds)
           </span>
         </div>
@@ -127,7 +127,7 @@ export class SectionRecording {
             { key: "recording.normalize", label: "", kind: "checkbox" },
             this.config.recording.normalize || false,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Boost quiet recordings to a consistent level before transcribing — a turned-down mic still hands transcription a healthy signal.<br/>
             <b>Off</b> by default; affects newly captured recordings only (not the live preview or imported files).
           </span>
@@ -138,7 +138,7 @@ export class SectionRecording {
             { key: "recording.pre_roll_ms", label: "", kind: "number" },
             this.config.recording.pre_roll_ms ?? 0,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Captures up to this many milliseconds of audio from <b>before</b> you hit record, so the first syllable isn't clipped. (e.g. 500 = 0.5 seconds)<br/>
             <b>0 disables it</b> (default). When set above 0, Phoneme keeps your <b>microphone open continuously</b> between recordings, holding the most recent audio in a rolling in-memory buffer that is constantly discarded. Nothing is written to disk unless you actually start a recording. Microphone source only — ignored for system audio.
           </span>

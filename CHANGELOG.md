@@ -249,6 +249,12 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **UI font size is a real font size now** — the Appearance → font-size setting
+  drives the root `font-size` (`--ui-font-size`), and every text size across the app
+  is expressed in `rem`, so changing it scales the interface text up/down cleanly.
+  It replaces an earlier `zoom`-based approach that magnified spacing/boxes and could
+  push the layout off-window with no way to scroll back. At the 14px baseline nothing
+  changes; other sizes scale text without breaking the fixed-viewport layout.
 - [x] **Detail-pane & keyboard-nav polish** — the **Pipeline** provenance popover
   now floats free of the detail pane's scroll box (fixed positioning, clamped into
   the viewport), so long model names like `ggml-large-v3-turbo` wrap cleanly inside

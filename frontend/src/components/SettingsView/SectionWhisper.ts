@@ -7,7 +7,7 @@ import { mountModelField } from "./modelField";
 import { curatedTranscriptionModels } from "../../data/curatedModels";
 
 const HELP =
-  "font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;";
+  "font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;";
 
 /** The port fields a `DaemonStatus` reply carries for the bundled whisper
  *  servers. The `preferred` ports are the configured `bundled_server_port`
@@ -177,7 +177,7 @@ export class SectionWhisper {
       const badgeArea = card.querySelector(".model-badge");
       if (badgeArea) {
         if (m.id === recommendedId) {
-          badgeArea.innerHTML = `<span style="background: rgba(166,227,161,0.2); color: var(--ok); padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">⭐ RECOMMENDED</span>`;
+          badgeArea.innerHTML = `<span style="background: rgba(166,227,161,0.2); color: var(--ok); padding: 2px 6px; border-radius: 4px; font-size: 0.6429rem; font-weight: bold;">⭐ RECOMMENDED</span>`;
         }
       }
 
@@ -192,7 +192,7 @@ export class SectionWhisper {
             <button class="download-btn" data-id="${m.id}" data-url="${m.url}" data-filename="${m.filename}" style="border-radius: 6px;">
               Download
             </button>
-            <div class="progress-text" style="display:none; font-size: 10px; color: var(--fg-muted); margin-top: 4px;"></div>
+            <div class="progress-text" style="display:none; font-size: 0.7143rem; color: var(--fg-muted); margin-top: 4px;"></div>
           `;
         }
       }
@@ -279,14 +279,14 @@ export class SectionWhisper {
       <div id="model-card-${m.id}" style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 4px; background: var(--bg-deep);">
         <div style="display: flex; flex-direction: column; gap: 2px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <strong style="color: var(--fg-default); font-size: 13px;">${m.name}</strong>
-            <span style="color: var(--fg-faded); font-size: 11px;">${m.size}</span>
+            <strong style="color: var(--fg-default); font-size: 0.9286rem;">${m.name}</strong>
+            <span style="color: var(--fg-faded); font-size: 0.7857rem;">${m.size}</span>
             <div class="model-badge"></div>
           </div>
-          <span style="font-size: 11px; color: var(--fg-muted);">${m.desc}</span>
+          <span style="font-size: 0.7857rem; color: var(--fg-muted);">${m.desc}</span>
         </div>
         <div class="model-actions" style="display: flex; flex-direction: column; align-items: flex-end;">
-           <span style="font-size: 11px; color: var(--fg-faded);">Loading...</span>
+           <span style="font-size: 0.7857rem; color: var(--fg-faded);">Loading...</span>
         </div>
       </div>
     `).join("");
@@ -326,7 +326,7 @@ export class SectionWhisper {
             <div style="display: flex; flex-direction: column; gap: 4px; max-width: 800px; margin-left: 256px;">
               ${modelCardsHtml}
               <div style="margin-top: 8px;">
-                 <button class="inline-button" id="pick-model" style="font-size: 11px;">Browse for custom .bin…</button>
+                 <button class="inline-button" id="pick-model" style="font-size: 0.7857rem;">Browse for custom .bin…</button>
               </div>
               <span style="${HELP}">
                 Models run locally via <code>whisper.cpp</code>. Larger models have higher accuracy but use more RAM and run slower.
@@ -341,11 +341,11 @@ export class SectionWhisper {
               </svg>
               Advanced — local server connection
             </summary>
-            <span style="display:block; font-size:11px; color:var(--fg-faded); margin:4px 0 10px;">
+            <span style="display:block; font-size: 0.7857rem; color:var(--fg-faded); margin:4px 0 10px;">
               Normally the app starts and manages its own whisper server for the model picked
               above — nothing to configure. Fill the URL below only to use a server you run yourself.
             </span>
-            <span id="whisper-effective-port" style="display:block; font-size:11px; color:var(--accent); margin:0 0 10px;"></span>
+            <span id="whisper-effective-port" style="display:block; font-size: 0.7857rem; color:var(--accent); margin:0 0 10px;"></span>
             <div class="settings-field long-input">
               <label>External URL</label>
               <div>${renderField(

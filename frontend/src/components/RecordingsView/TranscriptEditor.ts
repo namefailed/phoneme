@@ -127,7 +127,7 @@ export class TranscriptEditorElement extends LitElement {
         height: "100%",
         minHeight: "150px",
         fontFamily: "inherit",
-        fontSize: "14px",
+        fontSize: "1rem",
         border: "none",
         padding: "0",
       },
@@ -306,14 +306,14 @@ export class TranscriptEditorElement extends LitElement {
            anchored beside the title on the left (H1). */
         ph-transcript-editor .header-spacer { flex: 1; }
         ph-transcript-editor .title {
-          font-size: 11px;
+          font-size: 0.7857rem;
           font-weight: bold;
           text-transform: uppercase;
           color: var(--fg-muted);
         }
         ph-transcript-editor .vim-badge {
           color: var(--accent);
-          font-size: 9px;
+          font-size: 0.6429rem;
           margin-left: 6px;
           border: 1px solid var(--accent);
           padding: 1px 4px;
@@ -330,7 +330,7 @@ export class TranscriptEditorElement extends LitElement {
           border: none;
           padding: 4px 10px;
           border-radius: 4px;
-          font-size: 11px;
+          font-size: 0.7857rem;
           cursor: pointer;
           font-weight: bold;
         }
@@ -343,7 +343,7 @@ export class TranscriptEditorElement extends LitElement {
           width: 26px;
           height: 24px;
           padding: 0;
-          font-size: 13px;
+          font-size: 0.9286rem;
           line-height: 1;
           /* Faded by default — only the glyph, no chrome — and lights up to a
              full bordered button on hover. */
@@ -370,7 +370,7 @@ export class TranscriptEditorElement extends LitElement {
         ph-transcript-editor .edited-badge {
           padding: 4px 10px;
           border-radius: 4px;
-          font-size: 11px;
+          font-size: 0.7857rem;
           font-weight: bold;
           background: color-mix(in srgb, var(--accent) 16%, transparent);
           color: var(--accent);

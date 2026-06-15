@@ -33,7 +33,7 @@ export class SectionIntegrations {
     container.innerHTML = `
       <div class="settings-section">
         <h3>Integrations</h3>
-        <p style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
+        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Two opt-in ways to drive Phoneme from outside the app. Both talk to the
           same local daemon; both are off until you turn them on.
         </p>
@@ -44,7 +44,7 @@ export class SectionIntegrations {
             { key: "rest_api.enabled", label: "", kind: "checkbox" },
             this.config.rest_api.enabled ?? false,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             Allow the <code>phoneme-rest</code> binary to run. It serves the daemon over
             <b>loopback-only</b> HTTP + SSE (<code>127.0.0.1</code>, never <code>0.0.0.0</code>) for scripts and
             other languages. Off by default — when off, <code>phoneme-rest</code> exits with a clear
@@ -59,14 +59,14 @@ export class SectionIntegrations {
             { key: "rest_api.port", label: "", kind: "number" },
             this.config.rest_api.port ?? 3737,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); margin-top: 4px; display: block;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
             TCP port the bridge binds on <code>127.0.0.1</code>. Default <b>3737</b>.
           </span>
         </div>
 
         <div class="settings-field conn-field">
           <label>MCP server</label>
-          <div style="display: block; font-size: 12px; color: var(--fg-muted); line-height: 1.5; max-width: 760px;">
+          <div style="display: block; font-size: 0.8571rem; color: var(--fg-muted); line-height: 1.5; max-width: 760px;">
             <p style="margin: 0 0 8px;">
               <code>phoneme-mcp</code> is a <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer">Model Context Protocol</a>
               stdio server. Point an MCP-aware client (Claude Desktop, etc.) at the
@@ -80,7 +80,7 @@ export class SectionIntegrations {
               <li><code>search_recordings</code> — semantic + lexical search over the library</li>
               <li><code>list_recent</code> — list the latest recordings</li>
             </ul>
-            <p style="margin: 0; color: var(--fg-faded); font-size: 11px;">
+            <p style="margin: 0; color: var(--fg-faded); font-size: 0.7857rem;">
               Add it to your client's MCP config as a stdio server whose command is the
               <code>phoneme-mcp</code> executable (next to <code>phoneme.exe</code>). See
               <code>docs/developer-guide/mcp_server.md</code> for a ready-to-paste example.

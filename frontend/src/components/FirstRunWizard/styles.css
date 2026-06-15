@@ -31,12 +31,12 @@
 .wizard-brand {
   color: var(--fg-default);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 1rem;
   letter-spacing: 0.2px;
 }
 .wizard-steplabel {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-muted);
 }
 .wizard-steplabel b {
@@ -103,7 +103,7 @@
   to   { opacity: 1; transform: none; }
 }
 .wizard-title {
-  font-size: 26px;
+  font-size: 1.8571rem;
   font-weight: 700;
   color: var(--fg-default);
   margin: 0 0 8px;
@@ -112,7 +112,7 @@
 .wizard-subtitle {
   color: var(--fg-muted);
   margin: 0 0 24px;
-  font-size: 14px;
+  font-size: 1rem;
   line-height: 1.55;
 }
 .wizard-bullets {
@@ -141,7 +141,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 9px 18px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   color: var(--fg-default);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
@@ -180,7 +180,7 @@
 }
 .wizard-btn.small {
   padding: 5px 11px;
-  font-size: 12px;
+  font-size: 0.8571rem;
 }
 
 /* ── Generic fields ────────────────────────────────────────────────────────── */
@@ -190,7 +190,7 @@
 .wizard-field > label {
   display: block;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: 0.8571rem;
   margin-bottom: 4px;
 }
 .wizard-field input[type="text"],
@@ -203,7 +203,7 @@
   color: var(--fg-default);
   width: 100%;
   max-width: 100%;
-  font-size: 14px;
+  font-size: 1rem;
 }
 .wizard-field input:focus,
 .wizard-field select:focus {
@@ -231,14 +231,14 @@
 }
 .wizard-feature-title {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 1.0714rem;
   color: var(--fg-default);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .wizard-feature-rec {
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -252,7 +252,7 @@
   padding-left: 2px;
 }
 .wizard-feature-note {
-  font-size: 12.5px;
+  font-size: 0.8929rem;
   color: var(--fg-muted);
   line-height: 1.5;
   margin-top: 8px;
@@ -325,8 +325,8 @@
   gap: 3px;
   align-items: flex-start;
 }
-.wizard-choice .wizard-btn .opt-title { font-weight: 600; font-size: 14px; }
-.wizard-choice .wizard-btn .opt-sub { font-size: 12px; color: var(--fg-muted); }
+.wizard-choice .wizard-btn .opt-title { font-weight: 600; font-size: 1rem; }
+.wizard-choice .wizard-btn .opt-sub { font-size: 0.8571rem; color: var(--fg-muted); }
 .wizard-choice .wizard-btn.primary .opt-sub { color: color-mix(in srgb, var(--accent-fg) 80%, transparent); }
 
 /* ── Review step ───────────────────────────────────────────────────────────── */
@@ -355,12 +355,12 @@
 .review-key {
   flex: 0 0 150px;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 .review-val {
   flex: 1;
   color: var(--fg-default);
-  font-size: 13px;
+  font-size: 0.9286rem;
   font-weight: 500;
 }
 .review-val.off { color: var(--fg-faded); font-weight: 400; }
@@ -404,7 +404,7 @@ progress {
   border: none;
   background: var(--accent);
   color: var(--accent-fg);
-  font-size: 38px;
+  font-size: 2.7143rem;
   margin: 28px auto;
   display: block;
   cursor: pointer;
@@ -454,7 +454,7 @@ progress {
 }
 .wizard-pref-hint {
   color: var(--fg-faded);
-  font-size: 11px;
+  font-size: 0.7857rem;
 }
 
 /* ── Express "recommended setup" card (welcome) ───────────────────────────── */
@@ -478,12 +478,12 @@ progress {
   color: var(--fg-default);
 }
 .wizard-express-specs {
-  font-size: 11px;
+  font-size: 0.7857rem;
   color: var(--fg-faded);
 }
 .wizard-express-sub {
   margin: 6px 0 12px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   color: var(--fg-muted);
   line-height: 1.5;
 }
@@ -501,7 +501,7 @@ progress {
   gap: 11px;
 }
 .wizard-express-ico {
-  font-size: 18px;
+  font-size: 1.2857rem;
   flex: 0 0 auto;
   width: 22px;
   text-align: center;
@@ -513,18 +513,18 @@ progress {
 }
 .wizard-express-text b {
   color: var(--fg-default);
-  font-size: 13px;
+  font-size: 0.9286rem;
 }
 .wizard-express-detail {
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: 0.7857rem;
 }
 
 .test-result {
   padding: 6px 10px;
   border-radius: 6px;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 0.8571rem;
   max-width: 100%;
 }
 .test-result.ok { background: rgba(166, 227, 161, 0.15); color: var(--ok); }

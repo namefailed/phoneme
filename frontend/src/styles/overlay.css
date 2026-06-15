@@ -33,7 +33,7 @@ body {
   align-items: center;
   gap: 9px;
   padding: 10px 14px;
-  font-size: 13px;
+  font-size: 0.9286rem;
   line-height: 1.45;
   color: var(--fg-default, #cdd6f4);
   background: var(--bg-elevated, #1e1e2e);
@@ -88,7 +88,7 @@ body.ov-dim .ov-card {
 
 .ov-label {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 0.7143rem;
   font-weight: 700;
   letter-spacing: 0.07em;
   color: var(--accent, #89b4fa);
@@ -124,7 +124,7 @@ body.ov-dim .ov-card {
 }
 .ov-row .ov-row-ico {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 0.7857rem;
   line-height: 1.45;
 }
 /* In two-row mode each track gets one tail-anchored line so both fit the card. */
@@ -144,7 +144,7 @@ body.ov-dim .ov-card {
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
   border-radius: 7px;
   background: color-mix(in srgb, var(--accent, #89b4fa) 12%, transparent);
-  font-size: 12px;
+  font-size: 0.8571rem;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
@@ -171,7 +171,7 @@ body.ov-dim .ov-card {
   border-radius: 6px;
   background: transparent;
   color: var(--fg-faded, #6c7086);
-  font-size: 12px;
+  font-size: 0.8571rem;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }

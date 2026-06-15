@@ -677,7 +677,7 @@ export class RecordingsListElement extends LitElement {
       return html`<div class="empty">
         <h3 style="margin-bottom: 8px; color: var(--fg-default);">No recordings found</h3>
         <p style="color: var(--fg-muted); margin-bottom: 12px;">Press your global hotkey to start speaking, or click the Record button in the top right.</p>
-        <p class="hint" style="font-size: 11px;">You can also use the CLI: <code>phoneme record --oneshot</code></p>
+        <p class="hint" style="font-size: 0.7857rem;">You can also use the CLI: <code>phoneme record --oneshot</code></p>
       </div>`;
     }
 
@@ -1035,7 +1035,7 @@ export class RecordingsListElement extends LitElement {
                 class="rec-group-input"
                 data-session="${meetingId}"
                 placeholder="Meeting name"
-                style="background: var(--bg-deep, #11111b); color: var(--fg-default); border: 1px solid var(--accent, #89b4fa); border-radius: 4px; padding: 2px 6px; font-size: 13px; font-family: inherit; font-weight: 600; outline: none; flex: 1; min-width: 120px;"
+                style="background: var(--bg-deep, #11111b); color: var(--fg-default); border: 1px solid var(--accent, #89b4fa); border-radius: 4px; padding: 2px 6px; font-size: 0.9286rem; font-family: inherit; font-weight: 600; outline: none; flex: 1; min-width: 120px;"
                 .value=${this.editingName}
                 @click=${(e: Event) => e.stopPropagation()}
                 @dblclick=${(e: Event) => e.stopPropagation()}

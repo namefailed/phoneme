@@ -30,7 +30,7 @@ export class SectionEditor {
             { key: "editor.resync_views_on_edit", label: "", kind: "checkbox" },
             this.config.editor.resync_views_on_edit !== false,
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4; grid-column: 2;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4; grid-column: 2;">
             When you save a transcript edit, re-flow the per-word/segment timings onto your
             new text so the <strong>Synced</strong> and <strong>Timeline</strong> views (and
             click-to-seek) follow the edit — unchanged words keep their exact timing, new words
@@ -56,7 +56,7 @@ export class SectionEditor {
             )}
             <button class="inline-button" id="pick-vimrc" style="white-space: nowrap;">Browse…</button>
           </div>
-          <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4;">
             Absolute path to a <code>.vimrc</code> file on your computer (e.g., <code>~/.vimrc</code> or <code>C:\\Users\\Namef\\.vimrc</code>). Phoneme will read and apply these mappings automatically.
           </span>
         </div>
@@ -67,7 +67,7 @@ export class SectionEditor {
             { key: "editor.vimrc", label: "", kind: "textarea" },
             this.config.editor.vimrc || "",
           )}</div>
-          <span style="font-size: 11px; color: var(--fg-faded); line-height: 1.4;">
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); line-height: 1.4;">
             Map custom keybindings for Vim mode (e.g., <code>imap jj &lt;Esc&gt;</code>, <code>nnoremap &lt;C-c&gt; yy</code>). Note: CodeMirror Vim is an emulation layer, so advanced plugins won't work.
           </span>
         </div>

@@ -144,7 +144,7 @@ export class SectionPreview {
     this.container.innerHTML = `
       <div class="settings-section">
         <h3>Live Preview <span class="beta-pill" title="Live preview works but isn't smooth yet — a dedicated overhaul phase is on the roadmap. Off by default.">BETA</span></h3>
-        <p style="font-size:12px; color:var(--fg-muted); margin:0 0 4px;">
+        <p style="font-size: 0.8571rem; color:var(--fg-muted); margin:0 0 4px;">
           Shows transcription as you speak. Give it its own fast model or API so it
           never slows down your final transcription.
         </p>
@@ -156,7 +156,7 @@ export class SectionPreview {
 
         <div class="settings-field">
           <label>System-wide overlay
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
               Float the live text in an always-on-top window over the whole desktop
               (draggable; remembers where you put it). Auto-shows when recording starts.
             </span>
@@ -169,7 +169,7 @@ export class SectionPreview {
 
         <div class="settings-field">
           <label>Meetings (two tracks)
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
               How the overlay captions a meeting's mic + system audio.
             </span>
           </label>
@@ -194,11 +194,11 @@ export class SectionPreview {
 
         <div id="prev-detail"></div>
 
-        <h4 style="margin:14px 0 6px; font-size:13px; color:var(--fg-muted);">Feel &amp; performance</h4>
+        <h4 style="margin:14px 0 6px; font-size: 0.9286rem; color:var(--fg-muted);">Feel &amp; performance</h4>
 
         <div class="settings-field">
           <label>Auto-throttle on slow machines
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
               When a preview update takes too long, the daemon automatically slows the cadence so
               recording never lags. Leave on unless you want a fixed update rate.
             </span>
@@ -208,19 +208,19 @@ export class SectionPreview {
 
         <div class="settings-field">
           <label>Reveal speed
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
               How fast live words stream in. <b>0</b> shows each update instantly (no smoothing).
             </span>
           </label>
           <div>
             <input type="number" id="prev-reveal-wps" min="0" max="60" step="1" value="${revealWps}" style="width:90px;" ${enabled ? "" : "disabled"} />
-            <span style="color:var(--fg-muted); font-size:12px; margin-left:6px;">words / sec</span>
+            <span style="color:var(--fg-muted); font-size: 0.8571rem; margin-left:6px;">words / sec</span>
           </div>
         </div>
 
         <div class="settings-field">
           <label>Overlay waveform
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
               Show the “it hears me” bars in the desktop overlay so you can see audio is being captured,
               even between words.
             </span>
@@ -230,13 +230,13 @@ export class SectionPreview {
 
         <div class="settings-field">
           <label>“Listening” after
-            <br><span style="font-size:11px; color:var(--fg-muted); font-weight:normal;">
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
               When no new words arrive for this long, the overlay label calms from <b>LIVE</b> to <b>LISTENING</b>.
             </span>
           </label>
           <div>
             <input type="number" id="prev-idle-ms" min="500" max="20000" step="250" value="${idleMs}" style="width:110px;" ${overlay ? "" : "disabled"} />
-            <span style="color:var(--fg-muted); font-size:12px; margin-left:6px;">ms</span>
+            <span style="color:var(--fg-muted); font-size: 0.8571rem; margin-left:6px;">ms</span>
           </div>
         </div>
       </div>
@@ -343,7 +343,7 @@ export class SectionPreview {
       host.innerHTML = `
         <div class="settings-field">
           <label></label>
-          <div style="font-size:12px; color:var(--fg-muted); line-height:1.5;">
+          <div style="font-size: 0.8571rem; color:var(--fg-muted); line-height:1.5;">
             Preview reuses your final model on the same server. Simplest, but on a heavy model the
             live text can lag — pick a dedicated local model or a cloud API for a snappy overlay.
           </div>
@@ -351,7 +351,7 @@ export class SectionPreview {
         ${heavy ? `
         <div class="settings-field">
           <label></label>
-          <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--accent, #89b4fa) 35%, transparent); background:color-mix(in srgb, var(--accent, #89b4fa) 10%, transparent); border-radius:8px; font-size:12px; color:var(--fg-default); line-height:1.5;">
+          <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--accent, #89b4fa) 35%, transparent); background:color-mix(in srgb, var(--accent, #89b4fa) 10%, transparent); border-radius:8px; font-size: 0.8571rem; color:var(--fg-default); line-height:1.5;">
             <span>⚡ Your final model looks heavy for live preview. Give the preview its own Tiny model so recording stays smooth.</span>
             <div><button class="inline-button" id="prev-use-tiny">Use a dedicated Tiny model</button></div>
           </div>
@@ -392,7 +392,7 @@ export class SectionPreview {
             models (Tiny / Base) give the snappiest overlay.${this.downloaded.length ? "" : " Download a model in the <b>Whisper</b> section above first."}
           </span>
         </div>
-        ${current || !this.downloaded.length ? "" : `<div class="settings-field"><label></label><div style="font-size:12px; color:var(--err);">Pick a model above.</div></div>`}`;
+        ${current || !this.downloaded.length ? "" : `<div class="settings-field"><label></label><div style="font-size: 0.8571rem; color:var(--err);">Pick a model above.</div></div>`}`;
 
       host.querySelector<HTMLSelectElement>("#prev-local-model")?.addEventListener("change", (e) => {
         const path = (e.target as HTMLSelectElement).value;

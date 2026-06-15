@@ -736,9 +736,9 @@ export class HeaderBarElement extends LitElement {
           <span class="hb-health-dot" aria-hidden="true"></span>${this.health === "bad" ? html`<span class="hb-health-n">${this.healthIssues.length}</span>` : null}
         </button>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
-          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;"
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size: 0.8571rem; padding: 6px 12px;"
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
-          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size:12px; padding: 6px 12px;" 
+          <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(249,226,175,0.15); color: var(--warn); border-color: rgba(249,226,175,0.4); font-size: 0.8571rem; padding: 6px 12px;" 
             title="Cancel recording and discard audio" @click=${this.cancelRecording}>✕ Cancel</button>
           <div class="hb-rec-group" style="position:relative; display:flex; align-items:stretch;">
             <button class="record-btn ${isCapturing ? 'recording-active' : ''}" title=${actionTitle} 
@@ -750,16 +750,16 @@ export class HeaderBarElement extends LitElement {
             <style>
               .hb-mode-menu { animation: hbMenuIn 0.12s ease-out; }
               @keyframes hbMenuIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
-              .hb-mode-menu .hb-mode-cap { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 3px; }
+              .hb-mode-menu .hb-mode-cap { font-size: 0.7143rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 3px; }
               .hb-mode-item {
                 display: flex; align-items: center; gap: 10px;
                 width: 100%; text-align: left; background: none; border: none;
                 color: var(--fg-default); padding: 9px 12px; border-radius: 8px;
-                cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
+                cursor: pointer; font-size: 0.9286rem; transition: background 0.12s ease, color 0.12s ease;
               }
               .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
               .hb-mode-item.selected { color: var(--accent); }
-              .hb-mode-item .hb-mode-ico { font-size: 15px; width: 20px; text-align: center; flex: 0 0 auto; }
+              .hb-mode-item .hb-mode-ico { font-size: 1.0714rem; width: 20px; text-align: center; flex: 0 0 auto; }
               .hb-mode-item .hb-mode-label { flex: 0 1 auto; }
               .hb-mode-item .hb-mode-check { margin-left: 4px; color: var(--accent); font-weight: 700; }
               .hb-mode-menu .hb-mode-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
@@ -767,7 +767,7 @@ export class HeaderBarElement extends LitElement {
                  but dresses and behaves like its .hb-mode-item siblings. */
               .hb-mode-item.hb-mode-duration { cursor: pointer; }
               .hb-mode-item .hb-mode-secs {
-                width: 58px; padding: 3px 6px; font-size: 12px; text-align: right;
+                width: 58px; padding: 3px 6px; font-size: 0.8571rem; text-align: right;
                 background: var(--bg-surface); color: var(--fg-default);
                 border: 1px solid var(--border-subtle); border-radius: 6px;
               }
@@ -831,7 +831,7 @@ export class HeaderBarElement extends LitElement {
             .hb-health-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-faded); }
             .hb-health.ok .hb-health-dot { background: var(--ok, #a6e3a1); box-shadow: 0 0 6px color-mix(in srgb, var(--ok, #a6e3a1) 60%, transparent); }
             .hb-health.bad .hb-health-dot { background: var(--err, #f38ba8); box-shadow: 0 0 8px color-mix(in srgb, var(--err, #f38ba8) 70%, transparent); animation: hbHealthBlink 1.2s ease-in-out infinite; }
-            .hb-health-n { font-size: 11px; font-weight: 700; color: var(--err, #f38ba8); }
+            .hb-health-n { font-size: 0.7857rem; font-weight: 700; color: var(--err, #f38ba8); }
             @keyframes hbHealthBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
           </style>
           <style>
@@ -839,14 +839,14 @@ export class HeaderBarElement extends LitElement {
             .hb-menu-item {
               display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
               background: none; border: none; color: var(--fg-default); padding: 8px 12px;
-              border-radius: 7px; cursor: pointer; font-size: 13px; transition: background 0.12s ease, color 0.12s ease;
+              border-radius: 7px; cursor: pointer; font-size: 0.9286rem; transition: background 0.12s ease, color 0.12s ease;
             }
             .hb-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
             /* Fixed-width icon column so every label starts at the same x — emoji
                glyph widths vary, which otherwise leaves the first row out of line. */
-            .hb-menu-ico { flex-shrink: 0; width: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; }
+            .hb-menu-ico { flex-shrink: 0; width: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 1.0714rem; line-height: 1; }
             .hb-menu-sep { height: 1px; background: var(--border-subtle); margin: 5px 6px; }
-            .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
+            .hb-menu-label { font-size: 0.7143rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
           <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
             style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
@@ -880,7 +880,7 @@ export class HeaderBarElement extends LitElement {
         <style>
           .hb-health-banner {
             display: flex; align-items: center; gap: 10px;
-            padding: 7px 14px; font-size: 12px;
+            padding: 7px 14px; font-size: 0.8571rem;
             background: color-mix(in srgb, var(--err, #f38ba8) 14%, var(--bg-elevated, #1e1e2e));
             border-bottom: 1px solid color-mix(in srgb, var(--err, #f38ba8) 45%, transparent);
             color: var(--fg-default);
@@ -896,7 +896,7 @@ export class HeaderBarElement extends LitElement {
             ? html`<button class="inline-button" @click=${() => void this.fixNow()}>🔧 Fix now</button>`
             : null}
           <button class="inline-button" @click=${() => void this.openDoctor()}>🩺 Open Doctor</button>
-          <button class="icon-btn" title="Dismiss until it recurs" style="width:24px; height:24px; font-size:11px;"
+          <button class="icon-btn" title="Dismiss until it recurs" style="width:24px; height:24px; font-size: 0.7857rem;"
             @click=${() => { this.bannerDismissed = true; }}>✕</button>
         </div>
       ` : null}

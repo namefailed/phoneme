@@ -435,7 +435,7 @@ export class FirstRunWizardElement extends LitElement {
                 <option value="ggml-large-v3.bin">Large v3 · best accuracy · ~3.1 GB · 32 GB RAM</option>
               </select>
               <div class="wizard-feature-head" style="margin-top:12px;">
-                <span style="font-size:13px; color:var(--fg-default);">⚡ Real-time streaming (word-by-word)</span>
+                <span style="font-size: 0.9286rem; color:var(--fg-default);">⚡ Real-time streaming (word-by-word)</span>
                 ${sw("setup-native-streaming", this.config._setup_native_streaming, (e) => { this.config._setup_native_streaming = (e.target as HTMLInputElement).checked; this.requestUpdate(); })}
               </div>
             </div>
@@ -728,7 +728,7 @@ export class FirstRunWizardElement extends LitElement {
                     .max=${this.progressMax} 
                     .value=${this.progressValue ?? undefined}>
           </progress>
-          <div id="status" style="font-size: 13px; color: var(--fg-muted); margin-top: 8px; font-family: monospace;">
+          <div id="status" style="font-size: 0.9286rem; color: var(--fg-muted); margin-top: 8px; font-family: monospace;">
             ${this.downloadStatus}
           </div>
         </div>
@@ -771,7 +771,7 @@ export class FirstRunWizardElement extends LitElement {
     }
 
     const inputStyle =
-      "width:100%; padding:9px 12px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default); font-size:13px;";
+      "width:100%; padding:9px 12px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default); font-size: 0.9286rem;";
     const cleanupOn = !!c.llm_post_process.enabled;
     const currentCleanupPreset = cleanupOn
       ? (CLOUD_LLM_PRESETS.find((p) => p.apiUrl === (c.llm_post_process.api_url || ""))?.id ?? "")
@@ -1027,7 +1027,7 @@ export class FirstRunWizardElement extends LitElement {
     const overlay = !!this.config.interface?.preview_overlay;
     const source = this.previewSource();
     const inputStyle =
-      "width:100%; padding:9px 12px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default); font-size:13px;";
+      "width:100%; padding:9px 12px; background:var(--bg-deep); border:1px solid var(--border-subtle); border-radius:6px; color:var(--fg-default); font-size: 0.9286rem;";
     const sw = (id: string, checked: boolean, disabled: boolean, handler: (e: Event) => void) => html`
       <label class="wizard-switch ${disabled ? "is-disabled" : ""}" title="Toggle">
         <input type="checkbox" id=${id} .checked=${checked} ?disabled=${disabled} @change=${handler}>
@@ -1305,34 +1305,34 @@ export class FirstRunWizardElement extends LitElement {
         <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 24px; align-items: flex-start;">
 
           <div style="display: flex; flex-direction: column; align-items: flex-start;">
-            <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">General Hotkey</h3>
-            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Transcribes and triggers your background hooks.</p>
+            <h3 style="margin: 0 0 6px; font-size: 1.0714rem; font-weight: 500;">General Hotkey</h3>
+            <p style="margin: 0 0 10px; font-size: 0.9286rem; color: var(--fg-muted);">Transcribes and triggers your background hooks.</p>
             <button id="capture-general" class="combo-capture ${this.capturingHotkeyFor === 'general' ? 'capturing' : ''}" @click=${() => this.toggleCapture('general')}>
               ${this.config.hotkey.combo || "No Hotkey Set"}
             </button>
-            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 12px;">
+            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 0.8571rem;">
               ${this.capturingHotkeyFor === 'general' ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
             </div>
           </div>
 
           <div style="display: flex; flex-direction: column; align-items: flex-start;">
-            <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">Meeting Hotkey</h3>
-            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Records your mic + system audio simultaneously for meetings.</p>
+            <h3 style="margin: 0 0 6px; font-size: 1.0714rem; font-weight: 500;">Meeting Hotkey</h3>
+            <p style="margin: 0 0 10px; font-size: 0.9286rem; color: var(--fg-muted);">Records your mic + system audio simultaneously for meetings.</p>
             <button id="capture-meeting" class="combo-capture ${this.capturingHotkeyFor === 'meeting' ? 'capturing' : ''}" @click=${() => this.toggleCapture('meeting')}>
               ${this.config.meeting_hotkey.combo || "No Hotkey Set"}
             </button>
-            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 12px;">
+            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 0.8571rem;">
               ${this.capturingHotkeyFor === 'meeting' ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
             </div>
           </div>
 
           <div style="display: flex; flex-direction: column; align-items: flex-start;">
-            <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 500;">In-place Transcription</h3>
-            <p style="margin: 0 0 10px; font-size: 13px; color: var(--fg-muted);">Types the transcription directly into your currently active window (e.g. Zoom/Discord).</p>
+            <h3 style="margin: 0 0 6px; font-size: 1.0714rem; font-weight: 500;">In-place Transcription</h3>
+            <p style="margin: 0 0 10px; font-size: 0.9286rem; color: var(--fg-muted);">Types the transcription directly into your currently active window (e.g. Zoom/Discord).</p>
             <button id="capture-in-place" class="combo-capture ${this.capturingHotkeyFor === 'in_place' ? 'capturing' : ''}" @click=${() => this.toggleCapture('in_place')}>
               ${this.config.in_place_hotkey.combo || "No Hotkey Set"}
             </button>
-            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 12px;">
+            <div style="margin-top: 8px; color: var(--fg-faded); font-size: 0.8571rem;">
               ${this.capturingHotkeyFor === 'in_place' ? "Listening... press your combo or Escape to cancel" : "Click, then press your desired combo."}
             </div>
           </div>

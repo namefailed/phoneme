@@ -258,7 +258,7 @@ export class RecordingDetail {
       <div class="detail">
         <div class="detail-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
           <div style="min-width: 0; flex: 1;">
-            <div class="detail-title" id="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px; cursor: text;" title="Click to edit the title — Enter saves, Esc cancels, empty resets to automatic"><span id="detail-title-text">${escapeHtml(r.title ?? formatDate(r.started_at, this.use24h))}</span></div>
+            <div class="detail-title" id="detail-title" style="font-size: 1.2857rem; font-weight: 700; margin-bottom: 6px; cursor: text;" title="Click to edit the title — Enter saves, Esc cancels, empty resets to automatic"><span id="detail-title-text">${escapeHtml(r.title ?? formatDate(r.started_at, this.use24h))}</span></div>
             <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
               <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
               <span id="detail-title-date" style="${r.title ? "" : "display: none;"}">${formatDate(r.started_at, this.use24h)}</span>
@@ -419,7 +419,7 @@ export class RecordingDetail {
         return;
       }
       peeks.original.el!.innerHTML = `
-        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">Raw transcript — straight from the model, <b>before</b> AI cleanup (read-only)</div>
+        <div style="font-size: 0.7857rem; color: var(--fg-muted); margin-bottom: 6px;">Raw transcript — straight from the model, <b>before</b> AI cleanup (read-only)</div>
         <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(original)}</div>
         <button class="inline-button" id="restore-original" style="margin-top: 10px;" title="Replace the current transcript with this raw machine version">Restore raw transcript</button>`;
       peeks.original.el!.querySelector("#restore-original")?.addEventListener("click", async () => {
@@ -439,7 +439,7 @@ export class RecordingDetail {
         return;
       }
       peeks.unedited.el!.innerHTML = `
-        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">Unedited transcript — transcribed <b>and</b> AI-cleaned, before <b>your</b> edits (read-only)</div>
+        <div style="font-size: 0.7857rem; color: var(--fg-muted); margin-bottom: 6px;">Unedited transcript — transcribed <b>and</b> AI-cleaned, before <b>your</b> edits (read-only)</div>
         <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(clean)}</div>
         <button class="inline-button" id="restore-unedited" style="margin-top: 10px;" title="Discard your edits and restore the cleaned (unedited) version">Restore unedited transcript</button>`;
       peeks.unedited.el!.querySelector("#restore-unedited")?.addEventListener("click", async () => {
@@ -460,7 +460,7 @@ export class RecordingDetail {
         this.fillSummaryPeek(peeks.summary.el!, r);
       } else {
         peeks.summary.el!.innerHTML = `
-          <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
+          <div style="font-size: 0.7857rem; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
           <div style="color: var(--fg-muted); line-height: 1.6;">Generating summary…</div>`;
         void this.requestSummary(r.id);
       }
@@ -719,7 +719,7 @@ export class RecordingDetail {
     input.placeholder = "Recording title (empty = automatic)";
     input.setAttribute("aria-label", "Recording title");
     input.style.cssText =
-      "width: 100%; font-size: 18px; font-weight: 700; padding: 0 4px; background: var(--bg-surface); color: var(--fg-default); border: 1px solid var(--border-subtle); border-radius: 4px;";
+      "width: 100%; font-size: 1.2857rem; font-weight: 700; padding: 0 4px; background: var(--bg-surface); color: var(--fg-default); border: 1px solid var(--border-subtle); border-radius: 4px;";
     host.appendChild(input);
     input.focus();
     input.select();
@@ -948,12 +948,12 @@ export class RecordingDetail {
       ? ` · <span style="opacity: 0.8;">${escapeHtml(r.summary_model)}</span>`
       : "";
     peekEl.innerHTML = `
-      <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary${modelNote} (read-only)</div>
+      <div style="font-size: 0.7857rem; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary${modelNote} (read-only)</div>
       <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(text)}</div>
       <button class="inline-button" id="regen-summary" style="margin-top: 10px;" title="Generate a fresh summary from the current transcript">Regenerate summary</button>`;
     peekEl.querySelector("#regen-summary")?.addEventListener("click", () => {
       peekEl.innerHTML = `
-        <div style="font-size: 11px; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
+        <div style="font-size: 0.7857rem; color: var(--fg-muted); margin-bottom: 6px;">✨ AI summary (read-only)</div>
         <div style="color: var(--fg-muted); line-height: 1.6;">Regenerating summary…</div>`;
       void this.requestSummary(r.id);
     });

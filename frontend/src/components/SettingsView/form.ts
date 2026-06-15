@@ -71,7 +71,7 @@ export function renderField(field: Field, value: any): string {
           .join("") ?? ""
       }</select>`;
     case "textarea":
-      return `<textarea data-key="${field.key}" rows="8" style="resize: vertical; min-height: 140px; font-size: 13px; padding: 8px;">${escapeHtml(
+      return `<textarea data-key="${field.key}" rows="8" style="resize: vertical; min-height: 140px; font-size: 0.9286rem; padding: 8px;">${escapeHtml(
         value as string,
       )}</textarea>`;
   }
