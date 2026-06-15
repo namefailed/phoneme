@@ -2,7 +2,6 @@ import { errText } from "../../utils/error";
 import { LitElement, html } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
 import { invoke } from "@tauri-apps/api/core";
-import { runDoctor } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { fuzzyScore } from "../../utils/fuzzy";
 import { keywordsForKey } from "./searchKeywords";
@@ -134,11 +133,6 @@ export class SettingsViewElement extends LitElement {
   @state() private searchQuery: string = "";
   /** In-panel ⚙ Settings split-button dropdown (mirrors the header's) (L). */
   @state() private floatMenuOpen = false;
-  /** App health for the floating Doctor pill beside the ⚙ button — the header
-   *  (which owns the live polling pill) is unmounted while Settings is open, so
-   *  this runs a one-shot check on open to colour the dot; click opens Doctor. */
-  @state() private doctorHealth: "ok" | "bad" | "unknown" = "unknown";
-  @state() private doctorIssueCount = 0;
   private originalConfigStr: string = "";
   /** Cursor index into the visible result fields for ↑/↓ keyboard nav. */
   private searchCursor = -1;
@@ -163,29 +157,7 @@ export class SettingsViewElement extends LitElement {
       console.error(e);
       showToast(`Failed to load settings: ${errText(e)}`, "error");
     }
-    void this.checkDoctorHealth();
   }
-
-  /** One-shot Doctor check to colour the floating pill (an "(optional)" check
-   *  never fails health; an unreachable daemon is the reddest state). */
-  private async checkDoctorHealth() {
-    try {
-      const checks = await runDoctor();
-      const failing = checks.filter((c) => !c.ok && !/\(optional\)/i.test(c.name));
-      this.doctorIssueCount = failing.length;
-      this.doctorHealth = failing.length ? "bad" : "ok";
-    } catch {
-      this.doctorIssueCount = 0;
-      this.doctorHealth = "bad";
-    }
-  }
-
-  /** Open the Doctor modal from the floating pill (same path as the header). */
-  private openFloatDoctor = async () => {
-    this.floatMenuOpen = false;
-    const { openDoctor } = await import("../DoctorModal");
-    await openDoctor();
-  };
 
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -712,12 +684,6 @@ export class SettingsViewElement extends LitElement {
             <button class="settings-float-toggle" title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
             <button class="settings-float-caret ${this.floatMenuOpen ? "active" : ""}" aria-label="Quick settings &amp; actions" aria-haspopup="menu" aria-expanded=${this.floatMenuOpen} title="Quick settings &amp; actions" @click=${this.toggleFloatMenu}>
               <svg class="ph-caret-ico ${this.floatMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-            </button>
-            <button class="settings-float-doctor ${this.doctorHealth}" @click=${this.openFloatDoctor}
-              aria-label="App health" title=${this.doctorHealth === "bad"
-                ? "Problems found — click to open Doctor"
-                : this.doctorHealth === "ok" ? "All systems healthy — click to open Doctor" : "Open Doctor"}>
-              <span class="sfd-dot" aria-hidden="true"></span>${this.doctorHealth === "bad" && this.doctorIssueCount ? html`<span class="sfd-n">${this.doctorIssueCount}</span>` : null}
             </button>
             <div class="hb-settings-menu" role="menu" ?hidden=${!this.floatMenuOpen}
               style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border, 1px solid rgba(255,255,255,0.12)); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">

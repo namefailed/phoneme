@@ -236,47 +236,7 @@ mark.settings-hit {
   right: 14px;
   z-index: 5;
   display: inline-flex;
-  align-items: center;
-}
-
-/* Floating Doctor health pill, sitting beside the ⚙ button while Settings is
-   open (the header — which owns the live pill — is unmounted then). Self-styled
-   because the header's `.hb-health` rules aren't present on this view. */
-.settings-float-doctor {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: 6px;
-  background: var(--bg-deep);
-  border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 5px 9px;
-  cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.settings-float-doctor:hover {
-  background: var(--border-subtle);
-  border-color: var(--accent);
-}
-.settings-float-doctor .sfd-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--fg-faded);
-}
-.settings-float-doctor.ok .sfd-dot {
-  background: var(--ok, #a6e3a1);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--ok, #a6e3a1) 60%, transparent);
-}
-.settings-float-doctor.bad .sfd-dot {
-  background: var(--err, #f38ba8);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--err, #f38ba8) 70%, transparent);
-}
-.settings-float-doctor .sfd-n {
-  font-size: 0.7857rem;
-  font-weight: 700;
-  color: var(--err, #f38ba8);
+  align-items: stretch;
 }
 .settings-float-toggle {
   display: inline-flex;

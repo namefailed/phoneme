@@ -758,6 +758,12 @@ export class HeaderBarElement extends LitElement {
           <option value="tag_failed" ?selected=${f.status === "tag_failed"}>Tagging Failed</option>
           <option value="cancelled" ?selected=${f.status === "cancelled"}>Cancelled</option>
         </select>
+        <button class="hb-health ${this.health}" title=${this.health === "bad"
+            ? `Problems found: ${this.healthIssues.map((i) => i.name).join(", ")} — click to open Doctor`
+            : this.health === "ok" ? "All systems healthy — click to open Doctor" : "Checking health…"}
+          aria-label="App health" @click=${this.openDoctor}>
+          <span class="hb-health-dot" aria-hidden="true"></span>${this.health === "bad" ? html`<span class="hb-health-n">${this.healthIssues.length}</span>` : null}
+        </button>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
           <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size: 0.8571rem; padding: 6px 12px;"
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
@@ -911,12 +917,6 @@ export class HeaderBarElement extends LitElement {
             <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙</span>All settings…</button>
           </div>
         </div>
-        <button class="hb-health ${this.health}" title=${this.health === "bad"
-            ? `Problems found: ${this.healthIssues.map((i) => i.name).join(", ")} — click to open Doctor`
-            : this.health === "ok" ? "All systems healthy — click to open Doctor" : "Checking health…"}
-          aria-label="App health" @click=${this.openDoctor}>
-          <span class="hb-health-dot" aria-hidden="true"></span>${this.health === "bad" ? html`<span class="hb-health-n">${this.healthIssues.length}</span>` : null}
-        </button>
       </div>
       <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"
         title="Live transcription preview — updates as you speak while recording">

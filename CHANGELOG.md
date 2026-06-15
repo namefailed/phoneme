@@ -101,12 +101,6 @@ trust boundary. Verified against current code.*
   pipeline's LLM auto-title) now also get a cheap, no-LLM **snippet title** from
   the dictated text, so the detail header reads like any other recording — title +
   date + duration — instead of falling back to the bare date as the title.
-- [x] **Doctor health pill — moved to the far right + floats beside Settings.** The
-  header's health pill now sits at the far-right end of the top bar, and a matching
-  pill appears next to the floating ⚙ button **while the Settings panel is open**
-  (the header is unmounted then), so app health is always one click from the Doctor
-  no matter where you are. The in-panel pill runs a one-shot health check on open to
-  colour its dot.
 - [x] **Live-preview wave 1 — smooth, adaptive & it-hears-me.** The biggest live
   preview pass yet, all under the Beta pill until verified:
   - **Adaptive cadence (the record-time crash fix).** When a preview tick takes
