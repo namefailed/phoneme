@@ -57,6 +57,11 @@ trust boundary. Verified against current code.*
 
 ### Recording
 
+- [x] **Capture profiles on the Record button** — the Record split-button
+  dropdown lists your saved profiles under **Capture profile**; one click swaps
+  the whole config for that capture intent (Standup vs Interview, etc.) via the
+  existing `switch_profile`. Falls back to **Set up profiles…** → Settings →
+  Managers → Profiles when none exist.
 - [x] **Dictation voice commands** — in-place dictation now understands spoken
   editing commands: say **"new line"** / **"new paragraph"** to break lines, or
   **"scratch that"** / **"delete that"** to drop the sentence you just dictated.

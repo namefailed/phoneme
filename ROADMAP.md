@@ -354,7 +354,14 @@ explicit roadmap line here saying why not).
   and the merged view both carry the name; re-renamable after the fact. *(Manual
   rename shipped; automatic recognition via speaker embeddings is the separate
   item above.)*
-- [ ] **Meeting capture profiles** — one click "Standup" (tag + summarize preset + Obsidian hook) vs "Interview" (diarize on, different prompt). Config profiles exist; tie them to capture intent.
+- [x] **Capture profiles tied to capture intent** — the Record split-button
+  dropdown now lists your saved profiles under a **Capture profile** group; one
+  click switches the whole config (via `switch_profile` → writes config +
+  `ReloadConfig`) so the next capture uses that intent's settings — "Standup"
+  (tags + summary preset + hook) vs "Interview" (diarize on, different prompt),
+  etc. With none saved it shows **Set up profiles…** → Settings → Managers →
+  Profiles (the built-ins are user-created there; `g P` also jumps there).
+  (`HeaderBar.ts` `loadProfiles`/`selectProfile`.)
 - *(Per-recording "summarize on meeting end" was considered and dropped — auto-summary (#53) + on-demand per-recording summary already cover it. The genuinely-new **whole-meeting digest** moved to v1.10.)*
 
 ### 🔎 Recall

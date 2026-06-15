@@ -3,7 +3,7 @@ import { LitElement, html } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 
 import { filterStore, clearMoreLikeThis, type UiFilter } from '../state/filter';
-import { listTags, runDoctor, type Tag } from '../services/ipc';
+import { listTags, runDoctor, listProfiles, switchProfile, type Tag } from '../services/ipc';
 import {
   loadStopMode, saveStopMode, stopModeToRecordMode, resolveRecordStartMode,
   stopModeTitle, clampDurationSecs, DEFAULT_DURATION_SECS, MIN_DURATION_SECS,
@@ -63,6 +63,10 @@ export class HeaderBarElement extends LitElement {
   @state() private recordMode: "recording" | "meeting" =
     (localStorage.getItem("phoneme.recordMode") as "recording" | "meeting") || "recording";
   @state() private modeMenuOpen = false;
+  /** Saved capture profiles, listed in the Record dropdown so one click swaps
+   *  the whole config for a capture intent (e.g. "Standup" vs "Interview").
+   *  Refreshed when the menu opens. */
+  @state() private captureProfiles: string[] = [];
   /** Explicit stop-behavior choice for the Record button (Toggle / Silence /
    *  Fixed length), or null when never picked — the config default applies. */
   @state() private stopMode: StopMode | null = loadStopMode();
@@ -591,6 +595,31 @@ export class HeaderBarElement extends LitElement {
     e.stopPropagation();
     if (this.isRecording || this.isMeeting) return;
     this.modeMenuOpen = !this.modeMenuOpen;
+    if (this.modeMenuOpen) void this.loadProfiles();
+  }
+
+  /** Load saved capture profiles for the Record dropdown (best-effort). */
+  private async loadProfiles() {
+    try {
+      this.captureProfiles = await listProfiles();
+    } catch {
+      this.captureProfiles = [];
+    }
+  }
+
+  /** Switch the active capture profile (swaps the whole config + reloads the
+   *  daemon, server-side) so the next capture uses that intent's settings. */
+  private async selectProfile(name: string, e: Event) {
+    e.stopPropagation();
+    this.modeMenuOpen = false;
+    try {
+      await switchProfile(name);
+      // Let the rest of the app re-read the now-current config.
+      window.dispatchEvent(new CustomEvent("config:saved"));
+      showToast(`Capture profile: ${name}`, "info");
+    } catch (err) {
+      showToast(`Couldn't switch profile: ${errText(err)}`, "error");
+    }
   }
 
   private selectMode(mode: "recording" | "meeting", e: Event) {
@@ -813,6 +842,27 @@ export class HeaderBarElement extends LitElement {
                 <span class="hb-mode-label">seconds</span>
                 ${effStop.kind === 'duration' ? html`<span class="hb-mode-check">✓</span>` : ""}
               </div>
+              <div class="hb-mode-sep"></div>
+              <div class="hb-mode-cap">Capture profile</div>
+              ${this.captureProfiles.length
+                ? html`${this.captureProfiles.map((p) => html`
+                    <button class="hb-mode-item" role="menuitem"
+                      title="Switch the whole config to the “${p}” profile for this capture"
+                      @click=${(e: Event) => this.selectProfile(p, e)}>
+                      <span class="hb-mode-ico">👤</span>
+                      <span class="hb-mode-label">${p}</span>
+                    </button>`)}
+                    <button class="hb-mode-item" role="menuitem" title="Create or edit capture profiles"
+                      @click=${(e: Event) => { e.stopPropagation(); this.modeMenuOpen = false; this.jumpSettings("managers/profiles"); }}>
+                      <span class="hb-mode-ico">⚙</span>
+                      <span class="hb-mode-label">Manage profiles…</span>
+                    </button>`
+                : html`<button class="hb-mode-item" role="menuitem"
+                      title="Create capture profiles (e.g. Standup, Interview) in Settings"
+                      @click=${(e: Event) => { e.stopPropagation(); this.modeMenuOpen = false; this.jumpSettings("managers/profiles"); }}>
+                      <span class="hb-mode-ico">👤</span>
+                      <span class="hb-mode-label">Set up profiles…</span>
+                    </button>`}
             </div>
           </div>
         </div>
