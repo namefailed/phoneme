@@ -26,6 +26,10 @@ import { setStepNotifications } from "./notifications";
 type HelpItem = { combo: string; label: string };
 type HelpGroup = { title: string; items: HelpItem[] };
 
+/** The bundled default UI font stack (mirrors reset.css). A user-chosen font is
+ *  prepended to this so an uninstalled choice still falls back cleanly. */
+const UI_FONT_FALLBACK = `"Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+
 const BASE_HELP_GROUPS: HelpGroup[] = [
   {
     title: "Global",
@@ -776,6 +780,15 @@ export function initKeyboard() {
     const speeds: Record<string, string> = { off: "0ms", fast: "110ms", normal: "200ms", slow: "320ms" };
     const dur = speeds[String(cfg?.interface?.animation_speed ?? "normal")] ?? "200ms";
     document.documentElement.style.setProperty("--pane-anim", dur);
+    // Global UI font + size (Appearance). A chosen family is prepended to the
+    // bundled stack so an uninstalled font still falls back cleanly; an empty
+    // choice clears the var entirely, letting the CSS fallback (Inter) apply.
+    const rootStyle = document.documentElement.style;
+    const font = String(cfg?.interface?.ui_font ?? "").trim().replace(/["';]/g, "");
+    if (font) rootStyle.setProperty("--ui-font", `"${font}", ${UI_FONT_FALLBACK}`);
+    else rootStyle.removeProperty("--ui-font");
+    const size = Number(cfg?.interface?.ui_font_size);
+    rootStyle.setProperty("--ui-font-size", `${Number.isFinite(size) && size >= 10 && size <= 24 ? Math.round(size) : 14}px`);
     // Step-completion toasts (errors always show regardless).
     setStepNotifications(cfg?.interface?.step_notifications ?? true);
   };

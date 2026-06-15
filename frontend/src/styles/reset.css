@@ -7,8 +7,11 @@ html, body, #app {
   height: 100%;
   background: var(--bg-deep);
   color: var(--fg-default);
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 14px;
+  /* Base typeface + size for the whole UI. Both are driven by Appearance
+     settings (interface.ui_font / ui_font_size) — keyboard.ts sets the vars
+     from config; these literals are the fallback when nothing is configured. */
+  font-family: var(--ui-font, "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+  font-size: var(--ui-font-size, 14px);
   -webkit-font-smoothing: antialiased;
 }
 button {

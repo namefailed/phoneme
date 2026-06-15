@@ -122,6 +122,8 @@ followed.
 | `preview_overlay` | `false` | Float the live preview in a system-wide, always-on-top overlay window (requires `recording.streaming_preview`) |
 | `vim_nav` | `false` | System-wide vim-style keyboard navigation (`h`/`l` across panes, `j`/`k` within the list, `gg`/`G`, `i`/`Enter`, `Esc`). Distinct from `editor.vim_mode`, which only affects the transcript editor. |
 | `animation_speed` | `normal` | Pane show/hide animation speed: `off` \| `fast` \| `normal` \| `slow`. `off` makes sidebar / detail-pane / focus-mode toggles instant. |
+| `ui_font` | `""` (Inter) | Base interface font family — a single CSS family name (e.g. `Segoe UI`, `JetBrains Mono`). Prepended to the bundled stack, so an uninstalled font falls back cleanly. Empty = the default (Inter). Transcript/code blocks keep their own monospace. Frontend-only; the engine never reads it. |
+| `ui_font_size` | `14` | Base interface font size in px (the UI scales from this). Clamped to 10–24. |
 | `step_notifications` | `true` | Toast a note as each pipeline step finishes (transcribed, cleaned up, summarized, tags suggested) and when a recording is fully ready. Failure toasts always show regardless — a silently lost transcription is never the right default. |
 | `quit_stops_daemon` | `true` | Tray **Quit** also shuts the daemon down: an in-flight recording is stopped and queued first, then the whisper-server(s) and a Phoneme-launched Ollama go with it. `false` = the daemon outlives the tray (headless setups). Also read at daemon **spawn** time to decide whether the tray ties the daemon's lifetime to its own at the OS level (kill-on-close job) — that part of a change applies on the next spawn. |
 

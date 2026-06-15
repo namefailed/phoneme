@@ -1254,6 +1254,17 @@ pub struct InterfaceConfig {
     /// `"off"` makes every pane toggle instant.
     #[serde(default = "default_animation_speed")]
     pub animation_speed: String,
+    /// Base UI font family for the whole interface — a single CSS family name
+    /// (e.g. `"Segoe UI"`, `"JetBrains Mono"`). Empty = the bundled default
+    /// stack (Inter + system sans-serif). The chosen name is prepended to that
+    /// stack in the UI, so an uninstalled font still falls back cleanly. Purely
+    /// a frontend aesthetic — the engine never reads it.
+    #[serde(default)]
+    pub ui_font: String,
+    /// Base UI font size in px; the interface inherits from this. Clamped to a
+    /// sane range (10–24) by the UI. **Default 14.**
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: u8,
     /// Toast a note as each pipeline step finishes (transcribed, cleaned up,
     /// summarized, tags suggested) and when a recording is fully ready.
     /// **Default true.** Failure toasts always show regardless of this — a
@@ -1274,6 +1285,10 @@ pub struct InterfaceConfig {
 
 fn default_animation_speed() -> String {
     "normal".into()
+}
+
+fn default_ui_font_size() -> u8 {
+    14
 }
 
 fn default_column_widths() -> Vec<String> {
@@ -1570,6 +1585,8 @@ impl Default for Config {
                 preview_overlay: false,
                 vim_nav: false,
                 animation_speed: default_animation_speed(),
+                ui_font: String::new(),
+                ui_font_size: default_ui_font_size(),
                 step_notifications: true,
                 quit_stops_daemon: true,
             },

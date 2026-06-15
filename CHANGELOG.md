@@ -401,6 +401,13 @@ trust boundary. Verified against current code.*
 
 ### GUI parity
 
+- [x] **Choose the interface font & size.** Settings → Interface gained an
+  **Interface font** picker (Inter default, plus Windows-bundled and common
+  cross-platform families incl. monospace options) and an **Interface font
+  size** (12–18px). Both drive app-wide CSS vars (`--ui-font` / `--ui-font-size`
+  off `interface.ui_font` / `ui_font_size`); a chosen family is prepended to the
+  bundled stack so an uninstalled font falls back cleanly, and transcript/code
+  blocks keep their fixed monospace.
 - [x] **One Export ▾ menu per recording** — the separate Export and 💬 Captions
   buttons are now a single dropdown: **Transcript** (.txt), **Captions** (SubRip
   .srt / WebVTT .vtt, matching `phoneme export --captions`), and **All data**

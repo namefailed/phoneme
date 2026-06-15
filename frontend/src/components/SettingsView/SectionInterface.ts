@@ -4,6 +4,32 @@ import { invoke } from "@tauri-apps/api/core";
 /** Default visible columns, used by the reset action. */
 const DEFAULT_VISIBLE_COLUMNS = ["day", "time", "duration", "status", "source", "transcript"];
 
+/** Curated UI font choices. Empty value = the bundled default (Inter). The rest
+ *  are families that ship with Windows (the primary target) plus common
+ *  cross-platform picks, so a selection renders without installing anything. */
+const UI_FONT_CATALOG: { value: string; label: string }[] = [
+  { value: "", label: "System default (Inter)" },
+  { value: "Segoe UI", label: "Segoe UI" },
+  { value: "Calibri", label: "Calibri" },
+  { value: "Verdana", label: "Verdana" },
+  { value: "Tahoma", label: "Tahoma" },
+  { value: "Georgia", label: "Georgia (serif)" },
+  { value: "Cambria", label: "Cambria (serif)" },
+  { value: "Cascadia Code", label: "Cascadia Code (mono)" },
+  { value: "Consolas", label: "Consolas (mono)" },
+  { value: "JetBrains Mono", label: "JetBrains Mono (mono)" },
+];
+
+/** Curated base UI font sizes (px). 14 is the app default. */
+const UI_FONT_SIZES: { value: number; label: string }[] = [
+  { value: 12, label: "Small (12px)" },
+  { value: 13, label: "13px" },
+  { value: 14, label: "Default (14px)" },
+  { value: 15, label: "15px" },
+  { value: 16, label: "Large (16px)" },
+  { value: 18, label: "Extra large (18px)" },
+];
+
 /** All reorderable/toggleable list columns. */
 const COLUMN_CATALOG: { value: string; label: string }[] = [
   { value: "day", label: "Day" },
@@ -202,6 +228,37 @@ export class SectionInterface {
         </div>
 
         <div class="settings-field">
+          <label>Interface font</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <select id="ui-font">
+              ${UI_FONT_CATALOG.map(
+                (f) =>
+                  `<option value="${f.value}" ${(config.interface.ui_font ?? "") === f.value ? "selected" : ""}>${f.label}</option>`,
+              ).join("")}
+            </select>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              The base typeface for the whole interface. Falls back to the bundled default if the
+              font isn't installed. Transcript &amp; code blocks keep their fixed monospace font.
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label>Interface font size</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <select id="ui-font-size">
+              ${UI_FONT_SIZES.map(
+                (s) =>
+                  `<option value="${s.value}" ${Number(config.interface.ui_font_size ?? 14) === s.value ? "selected" : ""}>${s.label}</option>`,
+              ).join("")}
+            </select>
+            <span style="font-size: 11px; color: var(--fg-faded); display: block;">
+              Base text size the rest of the UI scales from. Takes effect on save.
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-field">
           <label>Strip system titlebar</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <div>${renderField(
@@ -307,6 +364,19 @@ export class SectionInterface {
       .querySelector<HTMLSelectElement>("#anim-speed")
       ?.addEventListener("change", (e) => {
         config.interface.animation_speed = (e.target as HTMLSelectElement).value;
+      });
+
+    this.container
+      .querySelector<HTMLSelectElement>("#ui-font")
+      ?.addEventListener("change", (e) => {
+        config.interface.ui_font = (e.target as HTMLSelectElement).value;
+      });
+
+    this.container
+      .querySelector<HTMLSelectElement>("#ui-font-size")
+      ?.addEventListener("change", (e) => {
+        // Stored as a number — the Rust config field is a u8.
+        config.interface.ui_font_size = Number((e.target as HTMLSelectElement).value);
       });
 
     this.container
