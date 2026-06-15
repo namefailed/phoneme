@@ -407,8 +407,10 @@ async function showOverlay() {
 function scheduleHide() {
   if (previewPinned) return; // a manual preview stays up until the user closes it
   clearTimers();
-  // Keep the final caption up briefly, then dim, then hide.
-  dimTimer = window.setTimeout(() => document.body.classList.add("ov-dim"), 2500);
+  // Keep the final caption up briefly so the last words stay readable, then hide
+  // in ONE clean step. No dim stage: the old dim-then-hide read as a slow,
+  // multi-step disappear (caption dims at 2.5s, the live dot fades, then the
+  // window goes at 4s). A single short linger + an instant hide feels crisp.
   hideTimer = window.setTimeout(() => {
     // Keep the hide as cheap as possible: ONLY hide the window. The DOM reset
     // (clearAllText + setShape) is deferred to the next show — both show paths

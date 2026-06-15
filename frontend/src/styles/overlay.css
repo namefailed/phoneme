@@ -71,11 +71,6 @@ body {
   width: 0;
 }
 
-/* Dimmed state shortly after a recording stops, before the window auto-hides. */
-body.ov-dim .ov-card {
-  opacity: 0.35;
-}
-
 /* Live indicator. Calm by default: a small accent dot that only PULSES while
    words are flowing (body.ov-live); when merely listening it settles to a
    static, slightly dimmed dot — no alarm-y throb. Uses the theme accent, never
@@ -86,7 +81,6 @@ body.ov-dim .ov-card {
   height: 8px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--accent, #89b4fa) 60%, var(--fg-faded, #6c7086));
-  transition: background 0.4s ease;
 }
 body.ov-live .ov-pulse {
   background: var(--accent, #89b4fa);
