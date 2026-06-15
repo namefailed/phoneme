@@ -7,12 +7,23 @@ html, body, #app {
   height: 100%;
   background: var(--bg-deep);
   color: var(--fg-default);
-  /* Base typeface + size for the whole UI. Both are driven by Appearance
-     settings (interface.ui_font / ui_font_size) — keyboard.ts sets the vars
-     from config; these literals are the fallback when nothing is configured. */
+  /* Base typeface for the whole UI, driven by the Appearance setting
+     (interface.ui_font); the literal stack is the fallback. UI *size* is handled
+     by the zoom rule below, not font-size, since the UI is almost all fixed px. */
   font-family: var(--ui-font, "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
-  font-size: var(--ui-font-size, 14px);
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
+}
+/* UI scale (Appearance → Interface font size). `zoom` magnifies the whole
+   document — fonts AND spacing — so the px-based UI scales uniformly; a root
+   font-size alone can't. Width/height are divided by the zoom so the magnified
+   result still exactly fills the viewport (no overflow / scrollbars). Default
+   --ui-zoom is 1 → an exact no-op. keyboard.ts sets the var from config. Toasts
+   and modals live under <body>, so zooming body scales them too. */
+body {
+  zoom: var(--ui-zoom, 1);
+  width: calc(100% / var(--ui-zoom, 1));
+  height: calc(100% / var(--ui-zoom, 1));
 }
 button {
   font: inherit;
@@ -107,7 +118,9 @@ input[type="checkbox"].toggle-switch:disabled {
 .app-shell {
   display: grid;
   grid-template-rows: auto 1fr;
-  height: 100vh;
+  /* 100% (of the zoom-compensated body), not 100vh: under a UI zoom, vh stays
+     viewport-relative and would overflow the magnified layout. */
+  height: 100%;
 }
 #main {
   overflow: hidden;

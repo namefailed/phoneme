@@ -20,14 +20,20 @@ const UI_FONT_CATALOG: { value: string; label: string }[] = [
   { value: "JetBrains Mono", label: "JetBrains Mono (mono)" },
 ];
 
-/** Curated base UI font sizes (px). 14 is the app default. */
+/** Curated base UI sizes (px-equivalent; the UI scales by size/14). 14 is the
+ *  default = 100%. Spans the 10–24 range keyboard.ts clamps to. */
 const UI_FONT_SIZES: { value: number; label: string }[] = [
-  { value: 12, label: "Small (12px)" },
-  { value: 13, label: "13px" },
-  { value: 14, label: "Default (14px)" },
-  { value: 15, label: "15px" },
-  { value: 16, label: "Large (16px)" },
-  { value: 18, label: "Extra large (18px)" },
+  { value: 10, label: "Smallest (10px · 71%)" },
+  { value: 11, label: "11px · 79%" },
+  { value: 12, label: "Small (12px · 86%)" },
+  { value: 13, label: "13px · 93%" },
+  { value: 14, label: "Default (14px · 100%)" },
+  { value: 15, label: "15px · 107%" },
+  { value: 16, label: "Large (16px · 114%)" },
+  { value: 18, label: "Extra large (18px · 129%)" },
+  { value: 20, label: "20px · 143%" },
+  { value: 22, label: "Huge (22px · 157%)" },
+  { value: 24, label: "Largest (24px · 171%)" },
 ];
 
 /** All reorderable/toggleable list columns. */
