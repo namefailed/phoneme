@@ -117,6 +117,8 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "Enter (detail)", label: "Edit the box / press the button / open a dropdown" },
     { combo: "j k · Enter · Esc", label: "Drive a detail dropdown (Speed/Export/Views/Pipeline)" },
     { combo: "Enter (waveform)", label: "Scrub mode: h/l ±1s, H/L ±5s, Space play, Esc leaves" },
+    { combo: "h  l (split view)", label: "Cross between the two panes (at a row's edge)" },
+    { combo: "g 1   g 2", label: "Jump to the left (1) / right (2) split-view pane" },
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
     { combo: "i", label: "Edit the transcript directly" },
     { combo: "d d", label: "Delete the focused recording (with Undo)" },
@@ -502,6 +504,13 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
     if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
     if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
+    // g 1 / g 2 — in split view, jump straight to the left (1) or right (2)
+    // recording pane. (g 1 also just focuses the detail pane outside split.)
+    if (vimNav && (e.key === "1" || e.key === "2")) {
+      e.preventDefault();
+      dispatchVim(e.key === "1" ? "pane-1" : "pane-2");
+      return;
+    }
     // g / — HIGHLIGHT the search bar (roving header cursor, like k at the top of
     // the list) rather than focusing it to type like plain `/` does.
     if (e.key === "/") { e.preventDefault(); enterHeaderNav(); return; }

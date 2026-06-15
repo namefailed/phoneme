@@ -734,6 +734,11 @@ export class RecordingsView {
       case "list-center": this.list.centerCursor(); break;
       // g d — jump the keyboard into the detail pane (no-op when nothing open).
       case "focus-detail": if (this.detailVisible) this.focusPane("detail"); break;
+      // g 1 / g 2 — jump straight to the left (1) / right (2) recording pane in
+      // split view. g 1 doubles as "focus the detail pane" outside split; g 2 is
+      // a no-op when there's no second pane.
+      case "pane-1": if (this.detailVisible || this.splitId) this.focusPane("detail"); break;
+      case "pane-2": if (this.splitId) this.focusPane("detail2"); break;
       case "edit": this.focusEditor(); break;
       case "delete": this.vimDelete(); break;
       case "sidebar-down": this.moveSidebarRow(1); break;
@@ -1181,13 +1186,20 @@ export class RecordingsView {
     if (!row) { this.focusPane("list"); return; }
     const next = this.detailCol + delta;
     if (next < 0) {
-      // h at the start → list. Remember where we were so coming back to THIS
-      // recording's detail (l, or g d) lands here again.
+      // Left edge. In split mode h steps to the pane on the left (the left pane
+      // itself just stays — nothing's further left). Outside split, h at the
+      // start drops back to the list; remember the cell so l / g d returns here.
+      if (this.splitId) { this.movePaneFocus("left"); return; }
       this.lastDetailPos = { row: this.detailRow, col: this.detailCol, id: this.state.get().selectedId };
       this.focusPane("list");
       return;
     }
-    if (next >= row.length) return; // l at the end stays
+    if (next >= row.length) {
+      // Right edge. In split mode l crosses into the pane on the right (the
+      // right pane stays put). Outside split, l at the end is a no-op.
+      if (this.splitId) { this.movePaneFocus("right"); return; }
+      return;
+    }
     this.detailCol = next;
     this.highlightDetail();
   }

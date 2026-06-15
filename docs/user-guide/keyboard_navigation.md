@@ -124,6 +124,11 @@ cursor. Top to bottom the rows are:
 Pipeline) and the bulk bar's Tag / Export are fully keyboard-driven: `Enter`
 opens, `j`/`k` cycle the options, `Enter` picks, and `Esc`/`h`/`l` close.
 
+**Split view** — with two recording panes open (`\`), `h`/`l` cross between
+them at a row's edge: `h` from a row's left edge steps into the left pane, and
+`l` from its right edge into the right pane (mid-row they keep moving within the
+row, as usual). `g 1` / `g 2` jump straight to the left / right pane.
+
 **Escape ladder** — `Esc` steps out one level at a time: editor → detail nav →
 list → close the recording. From the **Notes** (or transcript) editor, use
 `Shift + Esc` to step back to pane navigation.

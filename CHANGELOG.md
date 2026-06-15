@@ -267,6 +267,10 @@ trust boundary. Verified against current code.*
   reliably fills its area again — the custom-element host no longer collapses the
   height chain (`display: contents`), so short tabs keep the Save/Close footer pinned
   to the bottom instead of floating mid-window (or, in the regression, blanking out).
+- [x] **Split-view keyboard nav** — with two recording panes open (`\`), `h`/`l`
+  now cross between them at a row's edge (the detail grid's per-row `h`/`l` still
+  walks a row's buttons in the middle), and `g 1` / `g 2` jump straight to the
+  left / right pane.
 - [x] **Edited transcripts re-sync the Synced & Timeline views** — when you edit
   and save a transcript, the per-word and per-segment timing layers are re-flowed
   onto your new text (`phoneme_core::realign`), so the **Synced** (per-word) and
