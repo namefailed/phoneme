@@ -496,7 +496,14 @@ explicit roadmap line here saying why not).
   then the agent turns its retrieval into one tool among many.*
 - [ ] **Phoneme Agent** — a fully phoneme-aware agent living right inside the
   app: a chat panel that doesn't just *answer* from the archive but *acts* on
-  it. "Find every standup from this week, tag them `standup`, and give me the
+  it. **🦴 Bones laid (2026-06-15):** harness decision record
+  (`docs/design/phoneme-agent-harness.md`); the in-tree seam
+  `crates/phoneme-agent-core` (a compiler-enforced tool registry mapping JSON
+  tool calls → typed `Request`s, mirroring phoneme-mcp's five tools, 6 tests);
+  and a standalone opencode-based agent scaffold in the sibling `phoneme-agent`
+  repo (opencode + `phoneme-mcp` + filesystem). Remaining: the agent loop + Lit
+  chat panel on top of the seam, and richer tools (tag/title/summarize/export)
+  as their `Request`s are exposed. "Find every standup from this week, tag them `standup`, and give me the
   open action items" — it searches (hybrid/semantic), reads transcripts, then
   tags, titles, summarizes, re-runs steps, exports captions, starts/stops
   recordings, and adjusts filters, chaining steps until the job is done.

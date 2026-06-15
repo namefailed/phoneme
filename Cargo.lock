@@ -4689,6 +4689,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "phoneme-agent-core"
+version = "1.8.1"
+dependencies = [
+ "phoneme-core",
+ "phoneme-ipc",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "phoneme-audio"
 version = "1.8.1"
 dependencies = [

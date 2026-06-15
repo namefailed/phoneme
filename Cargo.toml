@@ -4,6 +4,7 @@ members = [
     "crates/phoneme-core",
     "crates/phoneme-audio",
     "crates/phoneme-ipc",
+    "crates/phoneme-agent-core",
     "bin/phoneme-daemon",
     "bin/phoneme",
     "bin/phoneme-mcp",
