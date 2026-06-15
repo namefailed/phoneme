@@ -14,8 +14,14 @@
  */
 import { subscribe, stageLabel, type DaemonEvent, type PipelineStage } from "./events";
 import { showToast } from "../utils/toast";
+import { getRecording } from "./ipc";
 
 let stepsEnabled = true;
+
+/** Last-seen tag-suggestion count per recording, so the "new tag suggestions"
+ *  toast fires only when the count GROWS (a fresh auto-tag run) — not on a
+ *  dismiss/approve/clear, which also emit tag_suggestions_updated (R). */
+const lastSuggestionCount = new Map<string, number>();
 
 /** Toggle step-completion toasts (errors are unaffected). Driven by
  *  `interface.step_notifications` from the config-apply path. */
@@ -107,9 +113,21 @@ function onEvent(event: DaemonEvent) {
     case "summary_updated":
       if (stepsEnabled) showToast("Summary ready", "success");
       return;
-    case "tag_suggestions_updated":
-      if (stepsEnabled) showToast("New tag suggestions to review", "info");
+    case "tag_suggestions_updated": {
+      if (!stepsEnabled) return;
+      // Only toast when the suggestion count GROWS — dismissing, approving, or
+      // clearing also fire this event but should never re-announce suggestions.
+      const id = e.id as string;
+      void getRecording(id)
+        .then((rec) => {
+          const n = rec?.tag_suggestions?.length ?? 0;
+          const prev = lastSuggestionCount.get(id) ?? 0;
+          lastSuggestionCount.set(id, n);
+          if (n > prev) showToast("New tag suggestions to review", "info");
+        })
+        .catch(() => { /* recording vanished — nothing to announce */ });
       return;
+    }
   }
 }
 

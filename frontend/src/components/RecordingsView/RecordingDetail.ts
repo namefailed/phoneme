@@ -87,11 +87,18 @@ export class RecordingDetail {
   private summaryPeeking = false;
   /** Guards against overlapping summary-generation polls. */
   private summaryPolling = false;
+  /** The 24-hour-time setting, for the header date (K). Loaded from config and
+   *  kept current via the config:saved event. */
+  private use24h = false;
 
   constructor(container: HTMLElement, onRefresh: () => void) {
     this.container = container;
     this.onRefresh = onRefresh;
     this.renderEmpty();
+    void invoke<any>("read_config").then((c) => { this.use24h = !!c?.interface?.format_24h; }).catch(() => { /* keep 12h default */ });
+    window.addEventListener("config:saved", (e) => {
+      this.use24h = !!(e as CustomEvent).detail?.interface?.format_24h;
+    });
   }
 
   async show(id: string) {
@@ -132,7 +139,7 @@ export class RecordingDetail {
     const titleHost = this.container.querySelector<HTMLElement>("#detail-title");
     if (titleHost && !titleHost.querySelector("input")) {
       const text = titleHost.querySelector<HTMLElement>("#detail-title-text");
-      if (text) text.textContent = r.title ?? formatDate(r.started_at);
+      if (text) text.textContent = r.title ?? formatDate(r.started_at, this.use24h);
       const dateEl = this.container.querySelector<HTMLElement>("#detail-title-date");
       if (dateEl) dateEl.style.display = r.title ? "" : "none";
     }
@@ -251,10 +258,10 @@ export class RecordingDetail {
       <div class="detail">
         <div class="detail-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
           <div style="min-width: 0; flex: 1;">
-            <div class="detail-title" id="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px; cursor: text;" title="Click to edit the title — Enter saves, Esc cancels, empty resets to automatic"><span id="detail-title-text">${escapeHtml(r.title ?? formatDate(r.started_at))}</span></div>
+            <div class="detail-title" id="detail-title" style="font-size: 18px; font-weight: 700; margin-bottom: 6px; cursor: text;" title="Click to edit the title — Enter saves, Esc cancels, empty resets to automatic"><span id="detail-title-text">${escapeHtml(r.title ?? formatDate(r.started_at, this.use24h))}</span></div>
             <div class="detail-meta" style="display: flex; align-items: center; gap: 8px;">
               <span id="detail-status" class="status-pill ${statusToClass(r.status)}">${statusLabel(r.status)}</span>
-              <span id="detail-title-date" style="${r.title ? "" : "display: none;"}">${formatDate(r.started_at)}</span>
+              <span id="detail-title-date" style="${r.title ? "" : "display: none;"}">${formatDate(r.started_at, this.use24h)}</span>
               <span>${formatDuration(r.duration_ms)}</span>
               <span class="rec-source ${r.track === "system" ? "rec-source--system" : "rec-source--mic"}" title="${r.track === "system" ? "System audio" : "Microphone"}"><span class="rec-source-ico">${r.track === "system" ? "🔊" : "🎤"}</span></span>
             </div>
@@ -992,10 +999,10 @@ export class RecordingDetail {
   }
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso: string, use24h: boolean): string {
   const d = new Date(iso);
   const dateObj = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  const timeObj = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const timeObj = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: !use24h });
   return `${dateObj} at ${timeObj}`;
 }
 

@@ -25,7 +25,14 @@ vi.mock("../utils/toast", () => ({
   showToast: vi.fn(),
 }));
 
+// `./ipc` — the tag-suggestion toast now fetches the recording to gate on a
+// count increase (so dismiss/approve/clear don't re-announce).
+vi.mock("./ipc", () => ({
+  getRecording: vi.fn(),
+}));
+
 import { showToast } from "../utils/toast";
+import { getRecording } from "./ipc";
 import {
   initStepNotifications,
   setStepNotifications,
@@ -33,6 +40,11 @@ import {
 } from "./notifications";
 
 const toast = showToast as unknown as Mock;
+const getRec = getRecording as unknown as Mock;
+
+/** Flush the microtask/macrotask queue so the async tag-suggestion gate (which
+ *  awaits getRecording) has run before we assert. */
+const flush = () => new Promise((r) => setTimeout(r, 0));
 
 /** Feed an event through the subscribed handler. */
 function emit(event: DaemonEvent) {
@@ -222,13 +234,26 @@ describe("summary / tag-suggestion toasts follow the step gate", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it("tag_suggestions_updated toasts only when steps are ON", () => {
-    emit({ event: "tag_suggestions_updated", id: "r1" });
+  it("tag_suggestions_updated toasts only when the count grows (and steps ON)", async () => {
+    // First suggestions appear (0 → 2): toast once.
+    getRec.mockResolvedValue({ tag_suggestions: ["a", "b"] });
+    emit({ event: "tag_suggestions_updated", id: "rtag" });
+    await flush();
     expect(toast).toHaveBeenCalledWith("New tag suggestions to review", "info");
 
+    // A dismiss/approve lowers the count (2 → 1): no re-announcement.
+    toast.mockClear();
+    getRec.mockResolvedValue({ tag_suggestions: ["a"] });
+    emit({ event: "tag_suggestions_updated", id: "rtag" });
+    await flush();
+    expect(toast).not.toHaveBeenCalled();
+
+    // Steps off — never toast even if the count would grow.
     toast.mockClear();
     setStepNotifications(false);
-    emit({ event: "tag_suggestions_updated", id: "r1" });
+    getRec.mockResolvedValue({ tag_suggestions: ["a", "b", "c"] });
+    emit({ event: "tag_suggestions_updated", id: "rtag" });
+    await flush();
     expect(toast).not.toHaveBeenCalled();
   });
 });

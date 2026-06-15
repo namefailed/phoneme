@@ -27,6 +27,11 @@ export class QueuePanelElement extends LitElement {
   /** Count of payloads quarantined in the inbox `failed/` folder (permanent
    *  transcription/hook errors, corrupt payloads, cancels). 0 hides the badge. */
   @state() private failed = 0;
+  /** 24-hour-time setting for queue item timestamps (K). */
+  @state() private use24h = false;
+  private onConfigSaved = (e: Event) => {
+    this.use24h = !!(e as CustomEvent).detail?.interface?.format_24h;
+  };
   private unsub: (() => void) | null = null;
   private pollTimer: number | null = null;
   /** Snapshot of the last-rendered queue, to skip no-op re-renders (see load). */
@@ -57,6 +62,10 @@ export class QueuePanelElement extends LitElement {
     this.collapsed = localStorage.getItem("phoneme.queuePanelCollapsed") === "true";
     const h = Number(localStorage.getItem("phoneme.queueListHeight"));
     this.listHeight = Number.isFinite(h) && h >= QueuePanelElement.MIN_H ? h : null;
+    window.addEventListener("config:saved", this.onConfigSaved);
+    void import("@tauri-apps/api/core").then(({ invoke }) =>
+      invoke<any>("read_config").then((c) => { this.use24h = !!c?.interface?.format_24h; }).catch(() => { /* keep 12h */ }),
+    );
     void this.load();
     this.unsub = await subscribe((event: DaemonEvent) => {
       // The depth event carries the failed count directly — reflect it at once
@@ -109,6 +118,7 @@ export class QueuePanelElement extends LitElement {
     super.disconnectedCallback();
     if (this.unsub) this.unsub();
     if (this.pollTimer !== null) clearInterval(this.pollTimer);
+    window.removeEventListener("config:saved", this.onConfigSaved);
   }
 
   /** Pin the queue list's scroll to the bottom when it first renders and
@@ -389,7 +399,7 @@ export class QueuePanelElement extends LitElement {
       <div class="queue-item ${it.state}">
         <span class="queue-item-icon">${it.state === "processing" ? "⟳" : "•"}</span>
         <div class="queue-item-main" title="Open this recording" @click=${() => this.select(it.id)}>
-          <div class="queue-item-title">${formatTime(it.timestamp, false)} · ${formatDuration(it.duration_ms)}</div>
+          <div class="queue-item-title">${formatTime(it.timestamp, this.use24h)} · ${formatDuration(it.duration_ms)}</div>
           <div class="queue-item-sub">${sub}</div>
         </div>
         ${vis
