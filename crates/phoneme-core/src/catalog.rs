@@ -1437,12 +1437,18 @@ impl Catalog {
 
         let mut fts_query = None;
         let mut tag_search_query = None;
+        let mut model_search_query = None;
 
         if let Some(q) = filter.search.as_deref() {
             let sanitized = sanitize_fts5_query(q);
             if !sanitized.is_empty() {
                 fts_query = Some(sanitized);
-                tag_search_query = Some(format!("%{}%", q));
+                let like = format!("%{}%", q);
+                tag_search_query = Some(like.clone());
+                // The same substring also matches any step's model name, so a
+                // search like "large-v3" or "gemma3:4b" finds everything that
+                // model ran on (see the WHERE OR + per-column binds below).
+                model_search_query = Some(like);
             }
         }
 
@@ -1453,7 +1459,7 @@ impl Catalog {
         sql.push_str(" WHERE 1=1");
 
         if fts_query.is_some() {
-            sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?))");
+            sql.push_str(" AND (recordings.rowid IN (SELECT rowid FROM recordings_fts WHERE transcript MATCH ?) OR recordings.id IN (SELECT recording_id FROM recording_tags rts JOIN tags ts ON ts.id = rts.tag_id WHERE ts.name LIKE ?) OR recordings.model LIKE ? OR recordings.cleanup_model LIKE ? OR recordings.summary_model LIKE ? OR recordings.title_model LIKE ? OR recordings.tag_model LIKE ? OR recordings.diarization_model LIKE ?)");
         }
         if let Some(tag_id) = filter.tag_id {
             // `tag_id` is `i64`, so direct formatting is injection-safe (an
@@ -1511,6 +1517,13 @@ impl Catalog {
         }
         if let Some(tq) = &tag_search_query {
             q = q.bind(tq);
+        }
+        if let Some(mq) = &model_search_query {
+            // One bind per model column in the WHERE OR above (transcription +
+            // cleanup + summary + title + tag + diarization), in that order.
+            for _ in 0..6 {
+                q = q.bind(mq);
+            }
         }
         if let Some(s) = filter.status {
             q = q.bind(s.as_str().to_string());
