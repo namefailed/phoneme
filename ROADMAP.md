@@ -291,7 +291,7 @@ explicit roadmap line here saying why not).
   (src-tauri/src/bridge.rs) lazily reconnects with bounded backoff and re-attaches
   the event stream the moment the daemon reappears, so a Doctor restart no longer
   needs a window close/reopen.
-- [ ] **In-app hook log tail** — hook debugging means opening `%LOCALAPPDATA%\phoneme\logs\hook.log` by hand.
+- [x] **In-app hook log tail** — Settings → Destination & Integrations → **View hook log** / **View daemon log** opens a read-only viewer that tails the last ~400 lines (`tail_log` Tauri command, allowlisted basenames, newest rolled `daemon.log.*` resolved automatically). `LogViewer.ts`; no more opening `%LOCALAPPDATA%\phoneme\logs\hook.log` by hand.
 - [x] **Import file picker** — wired as an **Import audio** button in Settings →
   Storage (`SectionStorage.ts` → `pickAndImportAudio`), alongside drag-drop.
 - [x] **FLAC import** — symphonia `flac` feature enabled; wav/mp3/m4a/flac all accepted.

@@ -205,6 +205,12 @@ trust boundary. Verified against current code.*
 
 ### Integration
 
+- [x] **In-app log viewer** — Settings → Destination & Integrations now has
+  **View hook log** / **View daemon log**: a read-only modal that tails the last
+  ~400 lines so a hook that silently does nothing is debuggable without leaving
+  the app. Backed by a `tail_log` Tauri command with an allowlisted set of log
+  basenames (no path traversal) that resolves the daily-rolled `daemon.log.*`
+  automatically. `LogViewer.ts`.
 - [x] **MCP server (`phoneme-mcp`)** — a thin Model Context Protocol bridge
   (JSON-RPC 2.0 over stdio) exposing five tools — `start_recording`,
   `stop_recording`, `get_transcript`, `search_recordings`, `list_recent` — that

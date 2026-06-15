@@ -460,6 +460,13 @@ export async function clearFailed(): Promise<number> {
   return r.removed;
 }
 
+/** Tail the last `maxLines` of a daemon log (`hook.log` / `daemon.log` /
+ *  `ollama.log`) for the in-app log viewer. Returns "" when the log doesn't
+ *  exist yet. The basename is allowlisted on the backend. */
+export async function tailLog(name: string, maxLines = 200): Promise<string> {
+  return await tauriInvoke<string>("tail_log", { name, maxLines });
+}
+
 /** Remove ALL still-pending items from the queue. Returns how many were removed. */
 export async function cancelAllQueued(): Promise<number> {
   const r = await tauriInvoke<{ removed: number }>("cancel_all_queued");

@@ -1858,6 +1858,50 @@ pub fn read_file_string(path: String) -> Result<String, CommandError> {
         .map_err(|e| CommandError::from(format!("failed to read {}: {}", path, e)))
 }
 
+/// Tail the last `max_lines` of a daemon log file, for the in-app log viewer
+/// (Settings → Destination & Integrations → "View hook log"). Restricted to a
+/// fixed allowlist of log basenames — no caller-supplied path, no traversal.
+///
+/// The daemon writes its own log via a daily rolling appender
+/// (`daemon.log.YYYY-MM-DD`), so when the exact name is missing we fall back to
+/// the newest `<name>*` file in the logs dir (the date suffix sorts as age).
+/// Returns "" when no matching log exists yet, so the viewer shows an honest
+/// empty state instead of an error.
+#[tauri::command]
+pub fn tail_log(name: String, max_lines: usize) -> Result<String, CommandError> {
+    const ALLOWED: &[&str] = &["hook.log", "daemon.log", "ollama.log"];
+    if !ALLOWED.contains(&name.as_str()) {
+        return Err("log not permitted".into());
+    }
+    let dirs = directories::ProjectDirs::from("", "", "phoneme")
+        .ok_or_else(|| "could not resolve project directories".to_string())?;
+    let logs = dirs.data_local_dir().join("logs");
+    let mut path = logs.join(&name);
+    if !path.exists() {
+        // Newest rolled variant (e.g. daemon.log.2026-06-15), or nothing yet.
+        let newest = std::fs::read_dir(&logs).ok().and_then(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|f| f.starts_with(&name))
+                        .unwrap_or(false)
+                })
+                .max_by_key(|e| e.file_name())
+        });
+        match newest {
+            Some(e) => path = e.path(),
+            None => return Ok(String::new()),
+        }
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| CommandError::from(format!("failed to read {}: {}", path.display(), e)))?;
+    let max = max_lines.clamp(1, 5000);
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(max);
+    Ok(lines[start..].join("\n"))
+}
+
 #[tauri::command]
 pub async fn wizard_download_server(window: tauri::Window) -> Result<String, CommandError> {
     let dirs = directories::ProjectDirs::from("", "", "phoneme")

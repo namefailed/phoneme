@@ -2,6 +2,7 @@ import { errText } from "../../utils/error";
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
+import { openLogViewer } from "./LogViewer";
 
 /** One keyword routing rule (`hook.keyword_rules[i]`): when the transcript
  *  matches `pattern`, run `command` instead of the default hook commands. */
@@ -207,9 +208,24 @@ export class SectionHook {
             Run an extra command <i>only</i> when the transcript contains a phrase — on top of the Integration Scripts above. Example: phrase <code>Action Item:</code> → a command that sends the note to your task manager. The command receives the same JSON on <code>stdin</code>.
           </span>
         </div>
+        <div class="settings-field">
+          <label>Logs</label>
+          <div>
+            <button class="inline-button" id="hook-view-log">View hook log</button>
+            <button class="inline-button" id="hook-view-daemon-log">View daemon log</button>
+          </div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
+            The last lines your Integration Scripts wrote to <code>hook.log</code> — handy when a hook silently does nothing — plus the daemon's own <code>daemon.log</code>. Read-only; the full files live in <code>%LOCALAPPDATA%\\phoneme\\logs</code>.
+          </span>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
+
+    container.querySelector("#hook-view-log")?.addEventListener("click", () => openLogViewer("hook.log"));
+    container
+      .querySelector("#hook-view-daemon-log")
+      ?.addEventListener("click", () => openLogViewer("daemon.log"));
 
     this.renderCmds(container);
     container.querySelector("#hook-add-cmd")?.addEventListener("click", () => {

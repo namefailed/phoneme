@@ -413,6 +413,7 @@ pub fn run() {
             commands::open_file,
             commands::open_hooks_folder,
             commands::read_file_string,
+            commands::tail_log,
         ]);
 
     let builder = builder

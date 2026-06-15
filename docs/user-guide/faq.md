@@ -103,6 +103,13 @@ An external script that receives JSON on stdin after each transcription. Copy to
 
 Set `hook.run_on_transcribe = false` and use **Re-fire hook** per recording.
 
+### A hook ran but nothing happened — how do I debug it?
+
+Open **Settings → Destination & Integrations → View hook log**. It tails the
+last few hundred lines of `hook.log` (what your scripts printed) right inside the
+app; **View daemon log** shows the daemon's own log. The full files live in
+`%LOCALAPPDATA%\phoneme\logs`.
+
 ---
 
 ## Quitting & the background engine
