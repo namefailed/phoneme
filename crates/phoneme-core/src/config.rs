@@ -1076,6 +1076,35 @@ pub struct InPlaceConfig {
     /// keystrokes, works everywhere) or `"paste"` (clipboard + Ctrl+V with
     /// the previous clipboard restored — near-instant for long text).
     pub type_mode: String,
+    /// Per-app overrides for how dictation lands, keyed by the foreground
+    /// app's lowercased executable stem (e.g. `"code"` for `Code.exe`,
+    /// `"chrome"`). Value is `"type"`, `"paste"`, or `"off"` (don't auto-deliver
+    /// for that app). The app focused when you stop speaking is matched here
+    /// first; an unlisted app falls back to `type_mode`. **Default empty** — no
+    /// overrides, so every app uses `type_mode` exactly as before.
+    #[serde(default)]
+    pub app_overrides: std::collections::BTreeMap<String, String>,
+    /// Opt-in (**default false**): include the focused window's title in the
+    /// LLM cleanup prompt so dictation can adapt to what you're working in
+    /// (code-ish in an editor, prose in a doc). Only consulted when
+    /// `cleanup = "llm"`. The title is potentially sensitive — when this is on,
+    /// it is sent to your configured cleanup LLM (use a local one if that
+    /// matters). When off, the title is never read, never sent, never logged.
+    #[serde(default)]
+    pub app_context: bool,
+    /// Apps (lowercased executable stems) whose window titles are NEVER read for
+    /// app-aware context, even when `app_context` is on — e.g. a password
+    /// manager or a banking app. **Default empty.**
+    #[serde(default)]
+    pub app_context_denylist: Vec<String>,
+    /// Streaming-type spike (**default false**, off): type words incrementally
+    /// as they're recognized instead of all at once when you stop. The current
+    /// dictation fast lane transcribes the whole clip after stop and types once,
+    /// so there is no committed-word stream to drive incremental typing safely
+    /// yet — this flag is a stub that does nothing until that groundwork lands.
+    /// See `archive_internal/plans/dictation-streaming-type-spike.md`.
+    #[serde(default)]
+    pub stream_type: bool,
 }
 
 impl Default for InPlaceConfig {
@@ -1087,6 +1116,46 @@ impl Default for InPlaceConfig {
             type_first: false,
             save_to_library: true,
             type_mode: "type".into(),
+            // Defaults below preserve today's behavior exactly: no per-app
+            // overrides (every app uses `type_mode`), no app-aware context
+            // (titles never read/sent), no streaming type.
+            app_overrides: std::collections::BTreeMap::new(),
+            app_context: false,
+            app_context_denylist: Vec::new(),
+            stream_type: false,
+        }
+    }
+}
+
+impl InPlaceConfig {
+    /// Resolve how dictation should land for the given foreground app stem.
+    ///
+    /// `app` is the lowercased executable stem of the window focused when the
+    /// dictation stopped (`None` when it couldn't be detected). A matching
+    /// `app_overrides` entry wins; otherwise the global `type_mode` applies.
+    /// Returns one of `"type"`, `"paste"`, or `"off"`.
+    ///
+    /// With the default (empty) `app_overrides`, this always returns
+    /// `type_mode` — byte-for-byte today's behavior.
+    pub fn resolve_type_mode(&self, app: Option<&str>) -> &str {
+        app.and_then(|name| self.app_overrides.get(name))
+            .map(String::as_str)
+            .unwrap_or(self.type_mode.as_str())
+    }
+
+    /// Whether the focused window's title may be read for app-aware cleanup
+    /// context. True only when `app_context` is on AND the foreground app isn't
+    /// on `app_context_denylist`. With `app_context` off (the default) this is
+    /// always false — the title is never even read.
+    pub fn may_read_window_title(&self, app: Option<&str>) -> bool {
+        if !self.app_context {
+            return false;
+        }
+        match app {
+            Some(name) => !self.app_context_denylist.iter().any(|d| d == name),
+            // No detectable app: nothing to deny against, so context is allowed
+            // (the title — if any — still only flows into the cleanup prompt).
+            None => true,
         }
     }
 }
@@ -2153,6 +2222,88 @@ mod tests {
         let serialized = toml::to_string(&cfg).unwrap();
         let parsed: Config = toml::from_str(&serialized).unwrap();
         assert!(parsed.recording.streaming_preview);
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn in_place_phase2_defaults_preserve_current_behavior() {
+        // The non-negotiable invariant: a default config must dictate exactly
+        // like today — no per-app overrides, no app-aware context, no streaming.
+        let ip = Config::default().in_place;
+        assert!(ip.app_overrides.is_empty());
+        assert!(!ip.app_context);
+        assert!(ip.app_context_denylist.is_empty());
+        assert!(!ip.stream_type);
+        // With an empty map, every app (and no-app) resolves to the global mode.
+        assert_eq!(ip.resolve_type_mode(None), "type");
+        assert_eq!(ip.resolve_type_mode(Some("code")), "type");
+        // app_context off ⇒ the window title is never read for any app.
+        assert!(!ip.may_read_window_title(Some("code")));
+        assert!(!ip.may_read_window_title(None));
+    }
+
+    #[test]
+    fn in_place_phase2_fields_absent_in_legacy_toml_keep_old_behavior() {
+        // A config written before phase 2 (no app_overrides / app_context /
+        // app_context_denylist / stream_type keys) must still load and behave
+        // identically to the old global-only dictation.
+        let dir = TempDir::new().unwrap();
+        let cfg = Config::default();
+        let mut toml_val: toml::Value = toml::Value::try_from(cfg).unwrap();
+        if let Some(ip) = toml_val.get_mut("in_place").and_then(|v| v.as_table_mut()) {
+            ip.remove("app_overrides");
+            ip.remove("app_context");
+            ip.remove("app_context_denylist");
+            ip.remove("stream_type");
+        }
+        let cfg_text = toml::to_string(&toml_val).unwrap();
+        let path = write_config(&dir, &cfg_text);
+        let parsed = Config::load(&path).expect("loads legacy in_place config");
+        assert!(parsed.in_place.app_overrides.is_empty());
+        assert!(!parsed.in_place.app_context);
+        assert!(parsed.in_place.app_context_denylist.is_empty());
+        assert!(!parsed.in_place.stream_type);
+    }
+
+    #[test]
+    fn in_place_app_override_resolution() {
+        // A per-app override wins over the global type_mode; case-insensitivity
+        // is handled by the caller lowercasing the stem, so keys are matched as
+        // stored. An unlisted app falls back to the global mode.
+        let mut ip = InPlaceConfig::default();
+        ip.type_mode = "type".into();
+        ip.app_overrides.insert("code".into(), "paste".into());
+        ip.app_overrides.insert("banking".into(), "off".into());
+
+        assert_eq!(ip.resolve_type_mode(Some("code")), "paste"); // override hit
+        assert_eq!(ip.resolve_type_mode(Some("banking")), "off"); // off override
+        assert_eq!(ip.resolve_type_mode(Some("notepad")), "type"); // global fallback
+        assert_eq!(ip.resolve_type_mode(None), "type"); // no app → global
+    }
+
+    #[test]
+    fn in_place_app_context_respects_optin_and_denylist() {
+        let mut ip = InPlaceConfig::default();
+        // Default (off): never read a title, even for a known app.
+        assert!(!ip.may_read_window_title(Some("code")));
+
+        // Opt in: titles may be read except for denylisted apps.
+        ip.app_context = true;
+        ip.app_context_denylist.push("1password".into());
+        assert!(ip.may_read_window_title(Some("code")));
+        assert!(!ip.may_read_window_title(Some("1password"))); // denied
+        assert!(ip.may_read_window_title(None)); // no app to deny against
+    }
+
+    #[test]
+    fn in_place_phase2_round_trips_through_toml() {
+        let mut cfg = Config::default();
+        cfg.in_place.app_overrides.insert("code".into(), "paste".into());
+        cfg.in_place.app_context = true;
+        cfg.in_place.app_context_denylist.push("1password".into());
+        cfg.in_place.stream_type = true;
+        let serialized = toml::to_string(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(parsed, cfg);
     }
 

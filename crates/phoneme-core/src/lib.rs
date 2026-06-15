@@ -88,6 +88,10 @@ pub mod embed;
 pub mod endpoints;
 pub mod error;
 pub mod export;
+// Foreground-window detection for per-app dictation overrides. Exported on every
+// platform — the module ships a non-Windows stub so the daemon can call it
+// unconditionally and just get `None` off Windows.
+pub mod foreground;
 pub mod fusion;
 pub mod hook;
 pub mod id;

@@ -173,6 +173,12 @@ export class SectionInPlace {
       };
     }
     const ip = this.config.in_place;
+    // Seed the phase-2 tables so the editors below always have something to bind
+    // to (a config saved before these existed simply lacks the keys). Empty map +
+    // context off = today's behavior unchanged.
+    if (!ip.app_overrides || typeof ip.app_overrides !== "object") ip.app_overrides = {};
+    if (!Array.isArray(ip.app_context_denylist)) ip.app_context_denylist = [];
+    if (typeof ip.app_context !== "boolean") ip.app_context = false;
     const sttMode = this.sttMode();
 
     this.container.innerHTML = `
@@ -237,6 +243,68 @@ export class SectionInPlace {
             </span>
           </div>
         </div>
+
+        <div class="settings-field">
+          <label>Per-app delivery</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Override how dictation lands for specific apps, by the app's executable name (e.g.
+              <code>Code.exe</code> or just <code>code</code> — matched case-insensitively against the
+              window focused when you stop speaking). <b>Type</b> / <b>Paste</b> as above, or <b>Off</b>
+              to not auto-insert text for that app at all (the dictation still saves to the library).
+              Apps not listed use the default <b>Insert text by</b> setting above.
+            </span>
+            <div id="ip-app-overrides" style="display: flex; flex-direction: column; gap: 6px; width: 100%;"></div>
+            <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
+              <input id="ip-app-add-name" type="text" placeholder="App executable (e.g. Code.exe)"
+                style="flex: 1 1 auto; min-width: 0;" />
+              <select id="ip-app-add-mode">
+                <option value="type">Type</option>
+                <option value="paste">Paste</option>
+                <option value="off">Off</option>
+              </select>
+              <button id="ip-app-add-btn" type="button">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label>App-aware AI cleanup</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "in_place.app_context", label: "", kind: "checkbox" },
+              ip.app_context ?? false,
+            )}</div>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Off by default. When on, the title of the focused window is added to the
+              <b>AI cleanup</b> prompt (only when Text polish is set to <b>AI cleanup</b>) so the LLM
+              can adapt — for example, leaning code-ish in an editor. <b>Privacy:</b> the window title
+              can be sensitive (a document name, an email subject), and turning this on means it is
+              <b>sent to your configured cleanup provider</b> — prefer a local LLM if that matters.
+              It is never logged or stored. While off, the title is never even read.
+            </span>
+          </div>
+        </div>
+        ${
+          ip.app_context
+            ? `
+        <div class="settings-field">
+          <label>Never read titles from</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%;">
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Apps (by executable name) whose window titles are <b>never</b> read for context, even
+              while App-aware cleanup is on — e.g. a password manager or a banking app.
+            </span>
+            <div id="ip-context-denylist" style="display: flex; flex-direction: column; gap: 6px; width: 100%;"></div>
+            <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
+              <input id="ip-deny-add-name" type="text" placeholder="App executable (e.g. 1Password.exe)"
+                style="flex: 1 1 auto; min-width: 0;" />
+              <button id="ip-deny-add-btn" type="button">Add</button>
+            </div>
+          </div>
+        </div>`
+            : ""
+        }
 
         <div class="settings-field">
           <label>Keep dictations in the library</label>
@@ -324,8 +392,125 @@ export class SectionInPlace {
         else this.setSttLocal("main");
         this.render();
       });
+    // App-aware cleanup toggles whether the denylist editor shows; rebuild so it
+    // appears/hides. bindFieldEvents already wrote the new boolean before this.
+    this.container
+      .querySelector<HTMLInputElement>('input[data-key="in_place.app_context"]')
+      ?.addEventListener("change", () => this.render());
 
+    this.renderAppOverrides();
+    this.renderContextDenylist();
     this.renderSttDetail();
+  }
+
+  /** Render the per-app delivery rows (app name + mode + remove) and wire the
+   *  Add control. Each row writes straight into `in_place.app_overrides`; the
+   *  daemon keys it by the lowercased executable stem at typing time. */
+  private renderAppOverrides() {
+    const host = this.container.querySelector<HTMLElement>("#ip-app-overrides");
+    if (!host) return;
+    const overrides: Record<string, string> = this.config.in_place.app_overrides ?? {};
+    const names = Object.keys(overrides).sort();
+    host.innerHTML =
+      names.length === 0
+        ? `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No per-app overrides — every app uses the default above.</span>`
+        : names
+            .map(
+              (name) => `
+        <div class="ip-app-row" data-name="${escHtml(name)}"
+          style="display: flex; gap: 6px; width: 100%; align-items: center;">
+          <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(name)}</span>
+          <select class="ip-app-mode" data-name="${escHtml(name)}">
+            <option value="type" ${overrides[name] === "type" ? "selected" : ""}>Type</option>
+            <option value="paste" ${overrides[name] === "paste" ? "selected" : ""}>Paste</option>
+            <option value="off" ${overrides[name] === "off" ? "selected" : ""}>Off</option>
+          </select>
+          <button class="ip-app-remove" type="button" data-name="${escHtml(name)}" title="Remove">✕</button>
+        </div>`,
+            )
+            .join("");
+
+    host.querySelectorAll<HTMLSelectElement>(".ip-app-mode").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        const name = sel.getAttribute("data-name");
+        if (name) this.config.in_place.app_overrides[name] = sel.value;
+      });
+    });
+    host.querySelectorAll<HTMLButtonElement>(".ip-app-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const name = btn.getAttribute("data-name");
+        if (name) delete this.config.in_place.app_overrides[name];
+        this.renderAppOverrides();
+      });
+    });
+
+    const nameInput = this.container.querySelector<HTMLInputElement>("#ip-app-add-name");
+    const modeSel = this.container.querySelector<HTMLSelectElement>("#ip-app-add-mode");
+    const addBtn = this.container.querySelector<HTMLButtonElement>("#ip-app-add-btn");
+    const add = () => {
+      // Store the stem lowercased — the daemon matches the focused process's
+      // lowercased file stem, so "Code.exe" / "code" / "CODE" all normalize.
+      const raw = (nameInput?.value ?? "").trim().replace(/\.exe$/i, "");
+      if (!raw) return;
+      this.config.in_place.app_overrides[raw.toLowerCase()] = modeSel?.value ?? "type";
+      if (nameInput) nameInput.value = "";
+      this.renderAppOverrides();
+    };
+    addBtn?.addEventListener("click", add);
+    nameInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        add();
+      }
+    });
+  }
+
+  /** Render the app-context denylist rows + Add control. Only present while
+   *  App-aware cleanup is on (the section is rebuilt when that flips). */
+  private renderContextDenylist() {
+    const host = this.container.querySelector<HTMLElement>("#ip-context-denylist");
+    if (!host) return;
+    const deny: string[] = this.config.in_place.app_context_denylist ?? [];
+    host.innerHTML =
+      deny.length === 0
+        ? `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No apps excluded — titles may be read from any focused app.</span>`
+        : deny
+            .map(
+              (name, i) => `
+        <div style="display: flex; gap: 6px; width: 100%; align-items: center;">
+          <span style="flex: 1 1 auto; min-width: 0; font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis;">${escHtml(name)}</span>
+          <button class="ip-deny-remove" type="button" data-idx="${i}" title="Remove">✕</button>
+        </div>`,
+            )
+            .join("");
+
+    host.querySelectorAll<HTMLButtonElement>(".ip-deny-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = Number(btn.getAttribute("data-idx"));
+        if (!Number.isNaN(idx)) this.config.in_place.app_context_denylist.splice(idx, 1);
+        this.renderContextDenylist();
+      });
+    });
+
+    const nameInput = this.container.querySelector<HTMLInputElement>("#ip-deny-add-name");
+    const addBtn = this.container.querySelector<HTMLButtonElement>("#ip-deny-add-btn");
+    const add = () => {
+      const raw = (nameInput?.value ?? "").trim().replace(/\.exe$/i, "");
+      if (!raw) return;
+      const stem = raw.toLowerCase();
+      if (!this.config.in_place.app_context_denylist.includes(stem)) {
+        this.config.in_place.app_context_denylist.push(stem);
+      }
+      if (nameInput) nameInput.value = "";
+      this.renderContextDenylist();
+    };
+    addBtn?.addEventListener("click", add);
+    nameInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        add();
+      }
+    });
   }
 
   private renderSttDetail() {

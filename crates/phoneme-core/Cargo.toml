@@ -34,8 +34,10 @@ hmac = "0.12"
 sha2 = "0.10"
 
 # DPAPI (CryptProtectData/CryptUnprotectData) for at-rest API-key encryption,
-# GetDiskFreeSpaceExW for the Doctor's disk-space checks, and Job Objects for
-# the kill-on-close process lifetime chain (tray → daemon → spawned children).
+# GetDiskFreeSpaceExW for the Doctor's disk-space checks, Job Objects for the
+# kill-on-close process lifetime chain (tray → daemon → spawned children), and
+# the foreground-window APIs (GetForegroundWindow / GetWindowTextW /
+# QueryFullProcessImageNameW) behind per-app dictation overrides.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
@@ -43,6 +45,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [features]

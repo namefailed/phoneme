@@ -38,9 +38,15 @@ as an instruction to remove the immediately preceding phrase. Apply these edits 
 /// Run the fast lane for a just-stopped in-place recording. Detached: errors
 /// surface through the catalog status + `TranscriptionFailed` (toasted by the
 /// UI), never a panic.
-pub fn spawn_fast_lane(state: AppState, id: RecordingId, audio_path: PathBuf) {
+pub fn spawn_fast_lane(
+    state: AppState,
+    id: RecordingId,
+    audio_path: PathBuf,
+    focused_app: Option<String>,
+    focused_window_title: Option<String>,
+) {
     tokio::spawn(async move {
-        if let Err(e) = run(&state, &id, &audio_path).await {
+        if let Err(e) = run(&state, &id, &audio_path, focused_app, focused_window_title).await {
             tracing::error!(id = %id.as_str(), error = %e, "in-place fast lane failed");
             let _ = state
                 .catalog
@@ -71,9 +77,17 @@ pub fn spawn_fast_lane(state: AppState, id: RecordingId, audio_path: PathBuf) {
 /// Detached. A failure here costs only the instant typing — and since the
 /// pipeline won't type either in this mode, the toast tells the user their
 /// words are still coming to the library, just not to the cursor.
-pub fn spawn_type_first(state: AppState, id: RecordingId, audio_path: PathBuf) {
+pub fn spawn_type_first(
+    state: AppState,
+    id: RecordingId,
+    audio_path: PathBuf,
+    focused_app: Option<String>,
+    focused_window_title: Option<String>,
+) {
     tokio::spawn(async move {
-        if let Err(e) = transcribe_polish_type(&state, &id, &audio_path).await {
+        if let Err(e) =
+            transcribe_polish_type(&state, &id, &audio_path, focused_app, focused_window_title).await
+        {
             tracing::error!(id = %id.as_str(), error = %e, "in-place type-first pass failed");
             // No status flip, no Failed stage: the recording is fine — it's
             // still queued and the pipeline retries transcription itself.
@@ -117,14 +131,21 @@ fn dictation_title_snippet(text: &str) -> String {
     }
 }
 
-async fn run(state: &AppState, id: &RecordingId, audio_path: &PathBuf) -> Result<(), Error> {
+async fn run(
+    state: &AppState,
+    id: &RecordingId,
+    audio_path: &PathBuf,
+    focused_app: Option<String>,
+    focused_window_title: Option<String>,
+) -> Result<(), Error> {
     let cfg = state.config.load();
     state.events.emit(DaemonEvent::PipelineStageChanged {
         id: id.clone(),
         stage: PipelineStage::Transcribing,
     });
 
-    let (transcription, polished) = transcribe_polish_type(state, id, audio_path).await?;
+    let (transcription, polished) =
+        transcribe_polish_type(state, id, audio_path, focused_app, focused_window_title).await?;
     let raw = transcription.text.clone();
 
     if cfg.in_place.save_to_library {
@@ -201,6 +222,8 @@ async fn transcribe_polish_type(
     state: &AppState,
     id: &RecordingId,
     audio_path: &Path,
+    focused_app: Option<String>,
+    focused_window_title: Option<String>,
 ) -> Result<(Transcription, String), Error> {
     let cfg = state.config.load();
 
@@ -241,7 +264,19 @@ async fn transcribe_polish_type(
         // commands rule-based — consistent either way.
         "llm" => match crate::pipeline::llm_provider_for_run(state, &cfg.llm_post_process).await {
             Some(llm) => {
-                let prompt = format!("{VOICE_COMMAND_DIRECTIVES}\n\n{}", cfg.llm_post_process.prompt);
+                let mut prompt =
+                    format!("{VOICE_COMMAND_DIRECTIVES}\n\n{}", cfg.llm_post_process.prompt);
+                // (6c) Opt-in app-aware context: when enabled (and the app was
+                // not denylisted at capture time), prepend the focused window's
+                // title so the LLM can adapt its polish to what you're working
+                // in (code-ish in an editor, prose in a doc). The title is only
+                // ever present here when `app_context` is on — it is never logged
+                // and never goes anywhere but this cleanup prompt.
+                if cfg.in_place.app_context {
+                    if let Some(title) = focused_window_title.as_deref().filter(|t| !t.is_empty()) {
+                        prompt = format!("Context — the active window is titled: {title}\n\n{prompt}");
+                    }
+                }
                 match llm.process(&prompt, &raw).await {
                     Ok(out) => out,
                     Err(e) => {
@@ -257,9 +292,23 @@ async fn transcribe_polish_type(
         _ => phoneme_core::dictation::fast_polish(&raw),
     };
 
+    // (6b) Resolve how the text lands for the focused app: a per-app override
+    // ("type"/"paste"/"off") wins over the global `type_mode`; an unlisted (or
+    // undetectable) app falls back to the global mode. With the default empty
+    // map this is always the global mode — today's behavior unchanged.
+    let type_mode = cfg.in_place.resolve_type_mode(focused_app.as_deref());
+
     if polished.trim().is_empty() {
         tracing::info!(id = %id.as_str(), "in-place dictation: nothing to type (empty transcript)");
-    } else if let Err(e) = type_at_cursor(&polished, &cfg.in_place.type_mode).await {
+    } else if type_mode == "off" {
+        // The user asked dictation NOT to auto-deliver for this app — the
+        // transcript still persists (fast lane) or rides the pipeline into the
+        // library, it just doesn't land at the cursor.
+        tracing::info!(
+            id = %id.as_str(),
+            "in-place dictation: per-app override is \"off\" for the focused app; not typing"
+        );
+    } else if let Err(e) = type_at_cursor(&polished, type_mode).await {
         // Typing failing must not lose the words — the transcript still
         // persists (fast lane) or rides the queued pipeline into the library
         // (type-first), and the error reaches the UI.
@@ -328,6 +377,25 @@ fn paste_blocking(text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::dictation_title_snippet;
+    use phoneme_core::config::InPlaceConfig;
+
+    /// The exact resolution the dictation typing path relies on (6b): a per-app
+    /// override decides type/paste/off for the focused app; an unlisted app —
+    /// and the default empty map — fall back to the global `type_mode`.
+    #[test]
+    fn per_app_override_drives_the_dictation_type_mode() {
+        let mut ip = InPlaceConfig::default();
+        assert_eq!(ip.type_mode, "type");
+        // Default: every app (and no focused app) types — today's behavior.
+        assert_eq!(ip.resolve_type_mode(Some("code")), "type");
+        assert_eq!(ip.resolve_type_mode(None), "type");
+
+        ip.app_overrides.insert("code".into(), "paste".into());
+        ip.app_overrides.insert("keepassxc".into(), "off".into());
+        assert_eq!(ip.resolve_type_mode(Some("code")), "paste");
+        assert_eq!(ip.resolve_type_mode(Some("keepassxc")), "off");
+        assert_eq!(ip.resolve_type_mode(Some("notepad")), "type");
+    }
 
     #[test]
     fn short_text_is_used_verbatim() {

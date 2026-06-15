@@ -242,6 +242,32 @@ trust boundary. Verified against current code.*
   silent or already-loud recordings are left untouched — and applied to the
   finalized capture (single recordings and each meeting track), never the live
   preview or imported files.
+- [x] **Per-app dictation delivery** — set how dictation lands per application:
+  **Type**, **Paste**, or **Off** (don't auto-insert; the dictation still saves
+  to the library), keyed by the foreground app focused when you stop speaking
+  (Settings → Capture → Dictation → Per-app delivery; `in_place.app_overrides`,
+  matched case-insensitively by executable stem, e.g. `Code.exe`). Apps you
+  don't list use the global **Insert text by** setting, so an empty map behaves
+  exactly as before. Foreground detection is Windows-only; elsewhere dictation
+  always uses the global mode. A new `phoneme_core::foreground` module reads the
+  focused window via Win32 (best-effort: an elevated or unreadable process just
+  falls back to the global mode).
+- [x] **App-aware AI cleanup (opt-in, off by default)** — when **AI cleanup** is
+  the chosen Text polish, optionally add the focused window's title to the
+  cleanup prompt so the LLM can adapt to what you're working in
+  (`in_place.app_context`). **Privacy-first:** the title can be sensitive, so it
+  is never read while this is off; when on it is sent only to your configured
+  cleanup provider (prefer a local LLM) and is never logged or stored. An
+  `in_place.app_context_denylist` excludes named apps (e.g. a password manager)
+  even while it's on.
+- [x] **Streaming-type spike — assessed, not shipped.** Typing words as they're
+  recognized was evaluated against the dictation fast lane, which transcribes the
+  whole clip after stop and types once — there is no committed-word stream to
+  drive safe incremental typing without risking text corruption when Whisper
+  revises earlier words, focus changes mid-type, or the user types too. An
+  off-by-default `in_place.stream_type` flag is reserved as a no-op stub; the
+  hazards and a recommended design are written up in
+  `archive_internal/plans/dictation-streaming-type-spike.md`.
 
 ### Integration
 
