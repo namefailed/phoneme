@@ -120,6 +120,9 @@ export class RecordingsView {
    *  Only ever set while `interface.vim_nav` is on, so the focus ring never
    *  appears for non-vim users. */
   private focusedPane: "sidebar" | "list" | "detail" | "detail2" | null = null;
+  /** Cached `interface.vim_nav` (initial read + config:saved) so the pane-click
+   *  follower (P) is cheap and reacts to the setting being toggled live. */
+  private vimNav = false;
   /** Keyboard cursor in the sidebar's 2D grid (vim): row into sidebarGrid()
    *  (section headers · filter items · queue rows), col = cell within the row
    *  (queue rows have several buttons). row -1 = not in sidebar nav. */
@@ -155,6 +158,8 @@ export class RecordingsView {
   private splitRatio = readStoredSplitRatio();
   private openSplitHandler: ((e: Event) => void) | null = null;
   private vimHandler: ((e: Event) => void) | null = null;
+  private paneClickHandler: ((e: Event) => void) | null = null;
+  private configSavedHandler: ((e: Event) => void) | null = null;
   /** Any component can request an undoable recording delete by dispatching
    *  `phoneme:request-delete` with `{ ids }`; this view runs the grace-period
    *  flow (the bulk bar and the detail action row both use it). */
@@ -301,6 +306,21 @@ export class RecordingsView {
       this.openSplit(d.b, { timeline: d.timeline, returnTo: d.returnTo ?? null });
     };
     window.addEventListener("phoneme:open-split", this.openSplitHandler);
+
+    // P: the keyboard cursor follows the mouse across panes. Cache vim_nav (so
+    // the click follower is cheap and tracks the setting being toggled live),
+    // then watch pointerdown in the capture phase — a click that lands in a
+    // DIFFERENT pane moves the focus ring there, so j/k/h/l continue from where
+    // the mouse just went. Clicks WITHIN the active pane are left untouched.
+    void import("@tauri-apps/api/core").then(({ invoke }) =>
+      invoke<any>("read_config").then((c) => { this.vimNav = !!c?.interface?.vim_nav; }).catch(() => { /* keep default */ }),
+    );
+    this.configSavedHandler = (e: Event) => {
+      this.vimNav = !!(e as CustomEvent).detail?.interface?.vim_nav;
+    };
+    window.addEventListener("config:saved", this.configSavedHandler);
+    this.paneClickHandler = (e: Event) => this.onPaneClick(e);
+    this.container.addEventListener("pointerdown", this.paneClickHandler, true);
   }
 
   /** Re-query the recordings list (the daemon-event handler and the panes'
@@ -532,6 +552,32 @@ export class RecordingsView {
       : pane === "detail2" ? "#rv-detail2"
       : "#rv-detail";
     return this.container.querySelector<HTMLElement>(sel);
+  }
+
+  /** Which pane (if any) a DOM node lives in. detail2 is checked first since its
+   *  id is a distinct element (split mode), not a descendant of #rv-detail. */
+  private paneFromTarget(node: HTMLElement | null): "sidebar" | "list" | "detail" | "detail2" | null {
+    if (!node) return null;
+    if (node.closest("#rv-detail2")) return "detail2";
+    if (node.closest("#rv-detail")) return "detail";
+    if (node.closest("#rv-list")) return "list";
+    if (node.closest("ph-sidebar")) return "sidebar";
+    return null;
+  }
+
+  /** P: a mouse click that lands in a DIFFERENT pane moves the keyboard cursor
+   *  there, so j/k/h/l carry on from where the mouse just went. Only while vim
+   *  nav is on (the focus ring is meaningless otherwise) and only on a genuine
+   *  cross-pane jump — clicking around WITHIN the active pane (positioning the
+   *  text caret, re-selecting a row) is left completely alone. focusPane runs in
+   *  the capture phase, but the browser still applies the clicked element's own
+   *  focus afterward, so clicking an editor / button / row to use it still works. */
+  private onPaneClick(e: Event) {
+    if (!this.vimNav) return;
+    const pane = this.paneFromTarget(e.target as HTMLElement | null);
+    if (!pane || pane === this.focusedPane) return;
+    if (!this.panesInOrder().includes(pane)) return;
+    this.focusPane(pane);
   }
 
   /** The recording pane the keyboard is (or was last) in — split-aware. */
@@ -1009,6 +1055,10 @@ export class RecordingsView {
     if (this.vimHandler) window.removeEventListener("phoneme:vim", this.vimHandler);
     if (this.deleteReqHandler) window.removeEventListener("phoneme:request-delete", this.deleteReqHandler);
     if (this.closeDetailHandler) window.removeEventListener("phoneme:close-detail", this.closeDetailHandler);
+    if (this.configSavedHandler) window.removeEventListener("config:saved", this.configSavedHandler);
+    // The pane-click follower is on this.container (reused by App across views),
+    // so it must be detached explicitly or it would leak onto the next view.
+    if (this.paneClickHandler) this.container.removeEventListener("pointerdown", this.paneClickHandler, true);
   }
 
   private applyLayout() {
