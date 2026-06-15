@@ -3,6 +3,20 @@ import { renderField, bindFieldEvents } from "./form";
 const HELP =
   "font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;";
 
+/** Format a number as a plain fixed-point decimal string, never scientific
+ *  notation (so a tiny value like 0.0000001 shows as "0.0000001", not "1e-7"
+ *  the way `<input type="number">` would). Trims trailing zeros and a trailing
+ *  dot so whole/short values stay tidy. */
+function formatDecimal(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  // 12 fractional digits comfortably covers the small thresholds used here
+  // without leaking float noise; trim the padding back off afterwards.
+  return n
+    .toFixed(12)
+    .replace(/(\.\d*?)0+$/, "$1")
+    .replace(/\.$/, "");
+}
+
 /**
  * Returns a warning string when the chosen diarization provider can't run with
  * the current transcription backend, or null when the combo works. Local
@@ -107,14 +121,14 @@ export class SectionDiarization {
           </div>
           <div class="settings-field">
             <label>Speaker keep threshold</label>
-            <div><input type="number" id="diar-keep-threshold" min="0" max="1" step="0.0000001" style="width:150px;"
-              value="${this.config.diarization?.speaker_keep_threshold ?? 0.0000001}" /></div>
-            <span style="${HELP}">Drop speaker clusters weaker than this. Raise it to suppress spurious extra speakers. Default 0.0000001.</span>
+            <div><input type="text" id="diar-keep-threshold" inputmode="decimal" style="width:150px;"
+              value="${formatDecimal(this.config.diarization?.speaker_keep_threshold ?? 0.0000001)}" /></div>
+            <span style="${HELP}">Advanced sensitivity value — drops speaker clusters weaker than this. Raise it to suppress spurious extra speakers; most users never need to change it. Default 0.0000001.</span>
           </div>
           <div class="settings-field">
             <label>Turn reconstruction</label>
             <div>
-              <select id="diar-reconstruct" style="width:160px;">
+              <select id="diar-reconstruct" style="min-width:220px; width:auto;">
                 <option value="smoothed" ${(this.config.diarization?.reconstruct_method ?? "smoothed") !== "standard" ? "selected" : ""}>Smoothed (recommended)</option>
                 <option value="standard" ${this.config.diarization?.reconstruct_method === "standard" ? "selected" : ""}>Standard</option>
               </select>
@@ -155,8 +169,18 @@ export class SectionDiarization {
       });
     };
     bindNum("diar-merge-gap", "merge_gap_secs", 0, 5, 0.25);
-    bindNum("diar-keep-threshold", "speaker_keep_threshold", 0, 1, 0.0000001);
     bindNum("diar-epsilon", "reconstruct_method_epsilon", 0, 1, 0.1);
+    // The keep-threshold is a text input (so a tiny value shows as a plain
+    // decimal, not "1e-7"); parse with parseFloat, clamp to [0,1], write a
+    // NUMBER into config, and normalize the field back to a plain decimal.
+    const keepInput = container.querySelector<HTMLInputElement>("#diar-keep-threshold");
+    keepInput?.addEventListener("change", () => {
+      ensureDiar();
+      const n = parseFloat(keepInput.value);
+      const val = Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0.0000001;
+      this.config.diarization.speaker_keep_threshold = val;
+      keepInput.value = formatDecimal(val);
+    });
     const reconSel = container.querySelector<HTMLSelectElement>("#diar-reconstruct");
     const epsRow = container.querySelector<HTMLElement>("#diar-epsilon-row");
     const applyRecon = () => {

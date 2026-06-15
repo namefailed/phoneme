@@ -8,6 +8,23 @@ import { effectiveLocalWhisperHint, type WhisperPortStatus } from "./SectionWhis
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/** Friendly label for a downloaded whisper model filename (mirrors the Live
+ *  Preview section's local dropdown, so the dedicated dictation picker reads
+ *  the same way). */
+function prettyModel(path: string): string {
+  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  const map: Record<string, string> = {
+    "ggml-tiny.en.bin": "Tiny (English)",
+    "ggml-base.en.bin": "Base (English)",
+    "ggml-small.en.bin": "Small (English)",
+    "ggml-medium.en.bin": "Medium (English)",
+    "ggml-large-v3.bin": "Large v3",
+    "ggml-large-v3-turbo.bin": "Large v3 Turbo",
+    "ggml-large-v3-turbo-q5_0.bin": "Large v3 Turbo (q5)",
+  };
+  return map[name] ?? name;
+}
+
 /** How `[in_place].stt` is being edited: absent = Automatic (the daemon falls
  *  back preview → main `[whisper]`), present = a pinned custom provider. */
 type SttMode = "auto" | "custom";
@@ -44,6 +61,14 @@ export class SectionInPlace {
    *  the local-server hint name the EFFECTIVE port after a port fallback; left
    *  null until the probe resolves (or when the daemon is down). */
   private portStatus: WhisperPortStatus | null = null;
+  /** Downloaded whisper models, for the dedicated-server model dropdown (same
+   *  list the Live Preview's local picker uses). Fetched lazily the first time
+   *  the dedicated server is active; populated into the select on resolve. */
+  private downloaded: string[] = [];
+  /** True once the downloaded-models list has been fetched, so we only probe
+   *  once (the list doesn't change while the section is open — new downloads
+   *  happen in the Whisper section). */
+  private downloadedLoaded = false;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(container: HTMLElement, config: any) {
@@ -680,32 +705,77 @@ export class SectionInPlace {
       this.render();
     });
 
-    // Dedicated dictation server: a model-path field for the third server. It
-    // must point at a downloaded GGML model (download in the Whisper section);
-    // a small model keeps dictation fast and the RAM cost down.
+    // Dedicated dictation server: a dropdown of downloaded GGML models for the
+    // third server (the same local picker the Live Preview uses). Models are
+    // downloaded in the Whisper section; a small model keeps dictation fast and
+    // the RAM cost down.
     const dedicatedModelHost = host.querySelector<HTMLElement>("#ip-stt-dedicated-model-host");
     if (dedicatedModelHost && this.config.in_place?.stt) {
-      dedicatedModelHost.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
-          <div style="width:100%;">${renderField(
-            {
-              key: "in_place.stt.model_path",
-              label: "",
-              kind: "text",
-              placeholder: "Path to a downloaded GGML model (e.g. ggml-base.en.bin)",
-            },
-            this.config.in_place.stt.model_path ?? "",
-          )}</div>
-          <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
-            Download models in the <b>Whisper</b> section (Transcription). A small model
-            (Tiny / Base) is the right pick for snappy dictation on the dedicated server.
-          </span>
-        </div>`;
-      bindFieldEvents(dedicatedModelHost, this.config);
+      this.renderDedicatedModelSelect(dedicatedModelHost);
     }
 
     const modelHost = host.querySelector<HTMLElement>("#ip-stt-model-host");
     if (modelHost) this.mountSttModel(modelHost);
+  }
+
+  /** Render the dedicated-server model picker as a dropdown of downloaded
+   *  models (mirrors SectionPreview's `src === "local"` branch): an <option>
+   *  per downloaded model with the current `model_path` pre-selected (matched
+   *  on the normalized filename), writing the FULL path on change. Fetches the
+   *  list lazily the first time and re-renders on resolve; shows an empty-state
+   *  with a pointer to the Whisper section when nothing is downloaded. */
+  private renderDedicatedModelSelect(host: HTMLElement) {
+    if (!this.config.in_place?.stt) return;
+    const current = this.config.in_place.stt.model_path ?? "";
+    const currentNorm = current.replace(/\\/g, "/");
+    const options = this.downloaded.length
+      ? this.downloaded
+          .map((p) => {
+            const sel =
+              currentNorm && currentNorm.endsWith(p.replace(/\\/g, "/").split("/").pop() ?? "")
+                ? "selected"
+                : "";
+            return `<option value="${p.replace(/"/g, "&quot;")}" ${sel}>${prettyModel(p)}</option>`;
+          })
+          .join("")
+      : `<option value="">No models downloaded yet</option>`;
+
+    host.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+        <div style="width:100%;"><select id="ip-stt-dedicated-model" style="width:100%; max-width:400px;">${options}</select></div>
+        <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+          Download models in the <b>Whisper</b> section (Transcription). A small model
+          (Tiny / Base) is the right pick for snappy dictation on the dedicated server.${
+            this.downloaded.length ? "" : " Download a model in the <b>Whisper</b> section first."
+          }
+        </span>
+      </div>`;
+
+    host.querySelector<HTMLSelectElement>("#ip-stt-dedicated-model")?.addEventListener("change", (e) => {
+      const path = (e.target as HTMLSelectElement).value;
+      if (path && this.config.in_place?.stt) {
+        this.config.in_place.stt.model_path = path;
+      }
+    });
+
+    // Fetch the downloaded-models list once, then re-render the select so it
+    // shows real options (the same async-populate pattern SectionPreview uses).
+    if (!this.downloadedLoaded) {
+      this.downloadedLoaded = true;
+      void invoke<string[]>("wizard_list_downloaded_models")
+        .then((list) => {
+          this.downloaded = list;
+        })
+        .catch(() => {
+          this.downloaded = [];
+        })
+        .finally(() => {
+          // The dedicated branch may have been navigated away from while the
+          // probe was in flight; only repopulate if its host is still mounted.
+          const stillThere = this.container.querySelector<HTMLElement>("#ip-stt-dedicated-model-host");
+          if (stillThere && this.config.in_place?.stt) this.renderDedicatedModelSelect(stillThere);
+        });
+    }
   }
 
   /** Mount the shared model field for the current cloud provider. The mount
