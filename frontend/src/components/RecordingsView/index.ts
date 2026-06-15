@@ -565,19 +565,61 @@ export class RecordingsView {
     return null;
   }
 
-  /** P: a mouse click that lands in a DIFFERENT pane moves the keyboard cursor
-   *  there, so j/k/h/l carry on from where the mouse just went. Only while vim
-   *  nav is on (the focus ring is meaningless otherwise) and only on a genuine
-   *  cross-pane jump — clicking around WITHIN the active pane (positioning the
-   *  text caret, re-selecting a row) is left completely alone. focusPane runs in
-   *  the capture phase, but the browser still applies the clicked element's own
-   *  focus afterward, so clicking an editor / button / row to use it still works. */
+  /** P: a mouse click moves the vim keyboard cursor to land on the EXACT control
+   *  it hit — click the Speed button and the cursor sits on Speed; click a
+   *  sidebar filter/tag/queue row and the cursor sits there — so j/k/h/l carry on
+   *  from precisely where the mouse went, not the pane's default entry cell. Only
+   *  while vim nav is on. focusPane runs in the capture phase, but the browser
+   *  still applies the clicked element's own focus afterward, so clicking an
+   *  editor / button / row to use it still works. */
   private onPaneClick(e: Event) {
     if (!this.vimNav) return;
-    const pane = this.paneFromTarget(e.target as HTMLElement | null);
-    if (!pane || pane === this.focusedPane) return;
-    if (!this.panesInOrder().includes(pane)) return;
-    this.focusPane(pane);
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    const pane = this.paneFromTarget(target);
+    if (!pane || !this.panesInOrder().includes(pane)) return;
+    const crossPane = pane !== this.focusedPane;
+
+    if (pane === "list") {
+      // The list sets its own focusedIndex on the row click (RecordingsList) — so
+      // it already follows the click; just take pane focus when arriving fresh.
+      if (crossPane) this.focusPane("list");
+      return;
+    }
+    // sidebar / detail / detail2: take pane focus when arriving (so keys route
+    // here), then snap the grid cursor onto the precise cell that was clicked.
+    if (crossPane) this.focusPane(pane);
+    if (pane === "sidebar") {
+      const pos = this.sidebarCellAt(target);
+      if (pos) { this.sidebarRow = pos.row; this.sidebarCol = pos.col; this.highlightSidebar(); }
+    } else {
+      const pos = this.detailCellAt(target);
+      if (pos) { this.detailRow = pos.row; this.detailCol = pos.col; this.highlightDetail(); }
+    }
+  }
+
+  /** The (row, col) of the sidebar nav cell the clicked node lives in, or null
+   *  when the click wasn't on a navigable cell (so the cursor is left as-is). */
+  private sidebarCellAt(target: HTMLElement): { row: number; col: number } | null {
+    const grid = this.sidebarGrid();
+    for (let r = 0; r < grid.length; r++) {
+      for (let c = 0; c < grid[r].length; c++) {
+        if (grid[r][c] === target || grid[r][c].contains(target)) return { row: r, col: c };
+      }
+    }
+    return null;
+  }
+
+  /** The (row, col) of the detail-pane nav cell the clicked node lives in (built
+   *  for the currently-focused recording pane), or null when off any cell. */
+  private detailCellAt(target: HTMLElement): { row: number; col: number } | null {
+    const grid = this.detailGrid();
+    for (let r = 0; r < grid.length; r++) {
+      for (let c = 0; c < grid[r].length; c++) {
+        if (grid[r][c].el === target || grid[r][c].el.contains(target)) return { row: r, col: c };
+      }
+    }
+    return null;
   }
 
   /** The recording pane the keyboard is (or was last) in — split-aware. */
