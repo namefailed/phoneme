@@ -159,14 +159,25 @@ pub enum DiarizationBackend {
 }
 
 /// Settings for speaker diarization.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+///
+/// NOTE: a manual `Default` (not `#[derive(Default)]`) so the speakrs tuning
+/// knobs default to the values the local pipeline already used implicitly —
+/// changing them via Settings actually shifts behavior, while a config that
+/// omits them (every existing config.toml) keeps today's exact output.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DiarizationConfig {
     /// Which backend handles speaker diarization.
     #[serde(default)]
     pub provider: DiarizationBackend,
-    /// Absolute path to the local Pyannote ONNX model file.
+    /// Absolute path to the local Pyannote ONNX model file. Legacy/unused — the
+    /// local speakrs pipeline loads from the Hugging Face cache; kept so old
+    /// configs still parse. Prefer [`models_dir`](Self::models_dir).
     #[serde(default)]
     pub local_model_path: String,
+    /// Optional override for where the local diarization models live. Empty =
+    /// the default Hugging Face cache (`%USERPROFILE%/.cache/huggingface/hub`).
+    #[serde(default)]
+    pub models_dir: String,
     /// Treat a single (non-meeting) recording as ONE speaker — skip diarization
     /// for it entirely so it reads as plain prose, never split into `[Speaker N]`
     /// turns. Off by default. Solo dictation is almost always one voice, but the
@@ -177,6 +188,53 @@ pub struct DiarizationConfig {
     /// (Honored on the local diarization path.)
     #[serde(default)]
     pub solo_one_speaker: bool,
+    /// Gap (seconds) below which adjacent same-speaker turns are merged into one.
+    /// Lower = more, shorter turns; higher = fewer, longer turns. Default 0.25.
+    #[serde(default = "default_merge_gap_secs")]
+    pub merge_gap_secs: f64,
+    /// Speaker-cluster keep threshold — clusters with weaker presence than this
+    /// are dropped. Speakrs' default is `1e-7`; raise it to suppress spurious
+    /// extra speakers, lower it to keep faint ones.
+    #[serde(default = "default_speaker_keep_threshold")]
+    pub speaker_keep_threshold: f64,
+    /// Turn-boundary reconstruction: `"standard"` (hard boundaries) or
+    /// `"smoothed"` (softened by `reconstruct_method_epsilon`). Default smoothed.
+    /// Stored as a plain string (not an enum) so the Settings form round-trips
+    /// cleanly through `write_config`'s strict serde deserialization.
+    #[serde(default = "default_reconstruct_method")]
+    pub reconstruct_method: String,
+    /// Smoothing strength for `reconstruct_method = "smoothed"`, in [0, 1].
+    /// Default 0.1 (speakrs' default). Ignored when method is `"standard"`.
+    #[serde(default = "default_reconstruct_epsilon")]
+    pub reconstruct_method_epsilon: f64,
+}
+
+fn default_merge_gap_secs() -> f64 {
+    0.25
+}
+fn default_speaker_keep_threshold() -> f64 {
+    1e-7
+}
+fn default_reconstruct_method() -> String {
+    "smoothed".to_string()
+}
+fn default_reconstruct_epsilon() -> f64 {
+    0.1
+}
+
+impl Default for DiarizationConfig {
+    fn default() -> Self {
+        Self {
+            provider: DiarizationBackend::default(),
+            local_model_path: String::new(),
+            models_dir: String::new(),
+            solo_one_speaker: false,
+            merge_gap_secs: default_merge_gap_secs(),
+            speaker_keep_threshold: default_speaker_keep_threshold(),
+            reconstruct_method: default_reconstruct_method(),
+            reconstruct_method_epsilon: default_reconstruct_epsilon(),
+        }
+    }
 }
 
 impl DiarizationConfig {

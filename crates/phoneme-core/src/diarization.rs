@@ -711,6 +711,9 @@ pub fn load_audio_mono_16khz(path: &Path) -> Result<Vec<f32>> {
 /// by tens of ms; coalescing anything under a quarter-second stitches those back
 /// together without merging a genuine back-and-forth exchange (turn-taking gaps
 /// are typically a half-second or more).
+/// The production path now reads `DiarizationConfig::merge_gap_secs` (same 0.25
+/// default); this constant remains as the fixed value the unit tests pin against.
+#[cfg_attr(not(test), allow(dead_code))]
 const SPEAKER_MERGE_GAP_SECS: f64 = 0.25;
 
 /// Post-process raw speakrs turns into clean, assignment-ready speaker spans:
@@ -936,13 +939,31 @@ impl QueuedDiarizer {
     /// Load the speakrs pipeline (CPU execution for portability) and move it
     /// onto its background queue worker. Multi-second and allocation-heavy —
     /// only ever called through [`DiarizerCache::get_or_load`].
-    fn load() -> Result<Self> {
+    fn load(cfg: &DiarizationConfig) -> Result<Self> {
+        use speakrs::pipeline::{PipelineConfig, ReconstructMethod};
         use speakrs::{ExecutionMode, OwnedDiarizationPipeline};
 
         tracing::info!("loading local diarization pipeline (segmentation + embedding models)");
         let started = std::time::Instant::now();
         let pipeline = OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?;
-        let (sender, receiver) = pipeline.into_queued()?;
+
+        // Map the user-facing knobs onto speakrs' PipelineConfig. The diarizer
+        // cache is keyed on the whole DiarizationConfig, so changing any of these
+        // in Settings drops the cached pipeline and reloads with the new values.
+        let reconstruct_method = if cfg.reconstruct_method.eq_ignore_ascii_case("standard") {
+            ReconstructMethod::Standard
+        } else {
+            ReconstructMethod::Smoothed {
+                epsilon: cfg.reconstruct_method_epsilon as f32,
+            }
+        };
+        let pc = PipelineConfig {
+            merge_gap: cfg.merge_gap_secs,
+            speaker_keep_threshold: cfg.speaker_keep_threshold,
+            reconstruct_method,
+            ..PipelineConfig::default()
+        };
+        let (sender, receiver) = pipeline.into_queued_with_config(pc)?;
         tracing::info!(
             elapsed_ms = started.elapsed().as_millis() as u64,
             "local diarization pipeline loaded"
@@ -1164,7 +1185,7 @@ pub fn run_local_diarization(
     // Decode the audio before touching the cache so a bad WAV fails fast
     // without costing (or being blamed on) a model load.
     let audio = load_audio_mono_16khz(audio_path)?;
-    let pipeline = cache.get_or_load(cfg, QueuedDiarizer::load)?;
+    let pipeline = cache.get_or_load(cfg, || QueuedDiarizer::load(cfg))?;
 
     // The file id is only a label (speakrs uses it for RTTM/log output).
     let file_id = audio_path
@@ -1255,7 +1276,7 @@ pub fn run_local_diarization(
             label: s.speaker.clone(),
         })
         .collect();
-    let spans = clean_speaker_spans(raw_spans, SPEAKER_MERGE_GAP_SECS);
+    let spans = clean_speaker_spans(raw_spans, cfg.merge_gap_secs);
 
     Ok(LocalDiarization {
         spans,

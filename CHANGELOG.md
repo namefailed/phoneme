@@ -307,6 +307,14 @@ trust boundary. Verified against current code.*
   recovery. Also surfaced as a **Doctor button** ("↻ Re-import from disk"): one
   click dry-runs and reports how many orphaned files it found, a second confirms
   and re-links them.
+- [x] **Diarization tuning knobs** — Settings → Diarization (local) now exposes the
+  speakrs pipeline knobs: **merge gap** (seconds; how aggressively same-speaker
+  turns coalesce), **speaker keep threshold** (drop weak clusters), and
+  **turn reconstruction** (smoothed vs standard, with a smoothing-strength ε).
+  They map onto speakrs' `PipelineConfig` at load time, and the diarizer cache is
+  keyed on the whole `[diarization]` config so changing any knob reloads the
+  pipeline with the new values. Defaults match today's implicit behavior
+  (0.25 / 1e-7 / smoothed 0.1), so existing configs are unaffected.
 - [x] **UI font size is a real font size now** — the Appearance → font-size setting
   drives the root `font-size` (`--ui-font-size`), and every text size across the app
   is expressed in `rem`, so changing it scales the interface text up/down cleanly.

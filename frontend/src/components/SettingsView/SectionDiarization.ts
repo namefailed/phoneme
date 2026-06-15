@@ -97,6 +97,36 @@ export class SectionDiarization {
               Optional. Leave blank to use the default speakrs models automatically downloaded to the Hugging Face cache (located at %USERPROFILE%\\.cache\\huggingface\\hub).
             </span>
           </div>
+
+          <h4 style="margin:14px 0 6px; font-size: 0.9286rem; color:var(--fg-muted);">Tuning</h4>
+          <div class="settings-field">
+            <label>Merge gap (seconds)</label>
+            <div><input type="number" id="diar-merge-gap" min="0" max="5" step="0.05" style="width:110px;"
+              value="${this.config.diarization?.merge_gap_secs ?? 0.25}" /></div>
+            <span style="${HELP}">Adjacent turns from the same speaker closer than this are merged into one. Lower = more, shorter turns. Default 0.25.</span>
+          </div>
+          <div class="settings-field">
+            <label>Speaker keep threshold</label>
+            <div><input type="number" id="diar-keep-threshold" min="0" max="1" step="0.0000001" style="width:150px;"
+              value="${this.config.diarization?.speaker_keep_threshold ?? 0.0000001}" /></div>
+            <span style="${HELP}">Drop speaker clusters weaker than this. Raise it to suppress spurious extra speakers. Default 0.0000001.</span>
+          </div>
+          <div class="settings-field">
+            <label>Turn reconstruction</label>
+            <div>
+              <select id="diar-reconstruct" style="width:160px;">
+                <option value="smoothed" ${(this.config.diarization?.reconstruct_method ?? "smoothed") !== "standard" ? "selected" : ""}>Smoothed (recommended)</option>
+                <option value="standard" ${this.config.diarization?.reconstruct_method === "standard" ? "selected" : ""}>Standard</option>
+              </select>
+            </div>
+            <span style="${HELP}">How turn boundaries are reconstructed — Smoothed softens them; Standard uses hard cuts.</span>
+          </div>
+          <div class="settings-field" id="diar-epsilon-row">
+            <label>Smoothing strength</label>
+            <div><input type="number" id="diar-epsilon" min="0" max="1" step="0.05" style="width:110px;"
+              value="${this.config.diarization?.reconstruct_method_epsilon ?? 0.1}" /></div>
+            <span style="${HELP}">Only for Smoothed reconstruction. 0–1; higher = more smoothing. Default 0.1.</span>
+          </div>
         </div>
 
         <div id="diarize-cloud" style="display:none">
@@ -111,6 +141,33 @@ export class SectionDiarization {
     `;
 
     bindFieldEvents(container, this.config);
+
+    // The tuning knobs are raw inputs (numbers must land in config as numbers,
+    // not strings, or write_config's strict serde deserialize rejects them).
+    const ensureDiar = () => {
+      if (!this.config.diarization) this.config.diarization = {};
+    };
+    const bindNum = (id: string, key: string, lo: number, hi: number, dflt: number) => {
+      container.querySelector<HTMLInputElement>(`#${id}`)?.addEventListener("change", (e) => {
+        ensureDiar();
+        const n = Number((e.target as HTMLInputElement).value);
+        this.config.diarization[key] = Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt;
+      });
+    };
+    bindNum("diar-merge-gap", "merge_gap_secs", 0, 5, 0.25);
+    bindNum("diar-keep-threshold", "speaker_keep_threshold", 0, 1, 0.0000001);
+    bindNum("diar-epsilon", "reconstruct_method_epsilon", 0, 1, 0.1);
+    const reconSel = container.querySelector<HTMLSelectElement>("#diar-reconstruct");
+    const epsRow = container.querySelector<HTMLElement>("#diar-epsilon-row");
+    const applyRecon = () => {
+      if (epsRow) epsRow.style.display = reconSel?.value === "standard" ? "none" : "";
+    };
+    reconSel?.addEventListener("change", () => {
+      ensureDiar();
+      this.config.diarization.reconstruct_method = reconSel.value;
+      applyRecon();
+    });
+    applyRecon();
 
     const applyProviderVisibility = (provider: string) => {
       container.querySelector<HTMLElement>("#diarize-local")!.style.display =
