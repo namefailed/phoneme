@@ -41,6 +41,22 @@ hotkey, the recording takes a **dedicated fast lane**:
    closed, the text is still in Phoneme. Turn "Keep dictations in the library"
    off for fully ephemeral dictation.
 
+## 🗣️ Voice commands
+
+While dictating, a few spoken commands are turned into formatting instead of
+being typed literally:
+
+| Say | Does |
+|-----|------|
+| "new line" | inserts a line break |
+| "new paragraph" | inserts a blank line |
+| "scratch that" / "delete that" | removes the sentence you just dictated |
+
+These work in every cleanup mode (Fast, Off, and AI cleanup). To keep normal
+speech safe, a command only triggers when it's said on its own — "put it on a
+new line of code" mid-sentence is left as written. (With AI cleanup on, the
+model is asked to apply them, which handles looser phrasing too.)
+
 > [!NOTE]
 > In-place runs its own fast path, so the [live streaming
 > preview](streaming_preview_and_preroll.md) is **skipped** during dictation —

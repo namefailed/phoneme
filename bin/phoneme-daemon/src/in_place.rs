@@ -27,6 +27,14 @@ use phoneme_core::Error;
 use phoneme_ipc::schema::{DaemonEvent, PipelineStage};
 use std::path::{Path, PathBuf};
 
+/// Prepended to the in-place LLM cleanup prompt so spoken editing commands are
+/// interpreted, not echoed. Kept local to dictation (not baked into the global
+/// post-processing prompt). The rule-based `fast_polish` fallback applies the
+/// same three commands, so behavior is consistent whether the LLM runs or not.
+const VOICE_COMMAND_DIRECTIVES: &str = "The text is dictation that may contain spoken editing commands. \
+Treat \"new line\" as a line break, \"new paragraph\" as a blank line, and \"scratch that\" (or \"delete that\") \
+as an instruction to remove the immediately preceding phrase. Apply these edits and do not include the command words in the output.";
+
 /// Run the fast lane for a just-stopped in-place recording. Detached: errors
 /// surface through the catalog status + `TranscriptionFailed` (toasted by the
 /// UI), never a panic.
@@ -172,22 +180,32 @@ async fn transcribe_polish_type(
 
     let raw = transcription.text.clone();
     let polished = match cfg.in_place.cleanup.as_str() {
-        "off" => raw.clone(),
+        // Even with cleanup off, honor the spoken editing commands (the rule
+        // pass is a no-op on dictation that doesn't contain them).
+        "off" => phoneme_core::dictation::apply_voice_commands(&raw),
         // A full LLM round-trip through the configured post-processing
         // provider — the user explicitly chose polish over latency.
         // `llm_provider_for_run` also launches the local Ollama when the
-        // connection needs it (same as every queued LLM stage).
+        // connection needs it (same as every queued LLM stage). The dictation
+        // voice-command directives are prepended so the LLM interprets
+        // "new line"/"new paragraph"/"scratch that" rather than echoing them;
+        // on failure we fall back to `fast_polish`, which applies the same
+        // commands rule-based — consistent either way.
         "llm" => match crate::pipeline::llm_provider_for_run(state, &cfg.llm_post_process).await {
-            Some(llm) => match llm.process(&cfg.llm_post_process.prompt, &raw).await {
-                Ok(out) => out,
-                Err(e) => {
-                    tracing::warn!(error = %e, "in-place llm cleanup failed; typing raw text");
-                    phoneme_core::dictation::fast_polish(&raw)
+            Some(llm) => {
+                let prompt = format!("{VOICE_COMMAND_DIRECTIVES}\n\n{}", cfg.llm_post_process.prompt);
+                match llm.process(&prompt, &raw).await {
+                    Ok(out) => out,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "in-place llm cleanup failed; typing raw text");
+                        phoneme_core::dictation::fast_polish(&raw)
+                    }
                 }
-            },
+            }
             None => phoneme_core::dictation::fast_polish(&raw),
         },
-        // "fast" and anything unrecognized: the zero-latency rule polish.
+        // "fast" and anything unrecognized: the zero-latency rule polish
+        // (which now includes the voice-command pass).
         _ => phoneme_core::dictation::fast_polish(&raw),
     };
 

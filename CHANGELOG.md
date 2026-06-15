@@ -57,6 +57,13 @@ trust boundary. Verified against current code.*
 
 ### Recording
 
+- [x] **Dictation voice commands** — in-place dictation now understands spoken
+  editing commands: say **"new line"** / **"new paragraph"** to break lines, or
+  **"scratch that"** / **"delete that"** to drop the sentence you just dictated.
+  Rule-based in `dictation::apply_voice_commands` (segment-anchored, so "a new
+  line of code" mid-sentence stays literal) and honored in every cleanup mode —
+  fast, off, and llm (the LLM is told to interpret them; the rule pass is the
+  fallback). 12 unit tests.
 - [x] **System-wide live-preview overlay** — an opt-in, always-on-top, frameless
   desktop window that floats the live caption over any app, even when the main
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on

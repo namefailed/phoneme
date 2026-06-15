@@ -29,7 +29,126 @@ pub fn fast_polish(raw: &str) -> String {
     text = strip_fillers(&text);
     text = collapse_doubled_words(&text);
     text = normalize_spacing(&text);
-    finish_sentence(&text)
+    text = finish_sentence(&text);
+    // Voice commands run LAST: the steps above split on whitespace and would
+    // collapse an inserted newline, so the literal `\n`/`\n\n` are applied to
+    // the otherwise-polished text where they survive to the typed output.
+    apply_voice_commands(&text)
+}
+
+/// Spoken editing/formatting commands, applied to already-polished dictation.
+///
+/// Conservative by design — only the three the roadmap names, and only when a
+/// command is its **own sentence/segment**, so a literal "on a new line of
+/// text" mid-sentence is left untouched (the boundary rule). Recognized:
+/// - "new line" / "newline" → a single line break (`\n`)
+/// - "new paragraph" → a blank line (`\n\n`)
+/// - "scratch that" / "delete that" → drop the preceding sentence (the thing
+///   just dictated), plus any line break sitting right after it.
+///
+/// A leading connective ("and new line", "then scratch that") still matches.
+/// Anything not recognized is left exactly as dictated. With no command phrase
+/// present the input is returned byte-for-byte (normal dictation is untouched).
+pub fn apply_voice_commands(text: &str) -> String {
+    const PHRASES: &[&str] = &["new line", "newline", "new paragraph", "scratch that", "delete that"];
+    let lower = text.to_ascii_lowercase();
+    if !PHRASES.iter().any(|c| lower.contains(c)) {
+        return text.to_string();
+    }
+
+    enum Piece {
+        Text(String),
+        Break(&'static str),
+    }
+    let mut pieces: Vec<Piece> = Vec::new();
+
+    for seg in split_sentences(text) {
+        match normalize_command(&seg).as_str() {
+            "new line" | "newline" => pieces.push(Piece::Break("\n")),
+            "new paragraph" => pieces.push(Piece::Break("\n\n")),
+            "scratch that" | "delete that" => {
+                // Retract the most recent dictated sentence, discarding any line
+                // break that immediately preceded the command.
+                while let Some(top) = pieces.pop() {
+                    if matches!(top, Piece::Text(_)) {
+                        break;
+                    }
+                }
+            }
+            _ => pieces.push(Piece::Text(seg)),
+        }
+    }
+
+    let mut out = String::new();
+    for p in pieces {
+        match p {
+            Piece::Text(t) => {
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push(' ');
+                }
+                out.push_str(&t);
+            }
+            Piece::Break(b) => out.push_str(b),
+        }
+    }
+    // Editing can promote a mid-text sentence to the start of the result or of a
+    // new line; re-capitalize those starts so the output still reads cleanly.
+    capitalize_sentence_starts(out.trim())
+}
+
+/// Uppercase the first alphabetic character at the start of the text and after
+/// each line break (intervening spaces are skipped).
+fn capitalize_sentence_starts(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut at_start = true;
+    for c in s.chars() {
+        if at_start && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            at_start = false;
+        } else {
+            out.push(c);
+            if c == '\n' {
+                at_start = true;
+            } else if !c.is_whitespace() {
+                at_start = false;
+            }
+        }
+    }
+    out
+}
+
+/// Split text into sentence segments on terminal punctuation (`.`/`!`/`?`),
+/// keeping the punctuation with its sentence; blanks are dropped.
+fn split_sentences(text: &str) -> Vec<String> {
+    let mut segs = Vec::new();
+    let mut cur = String::new();
+    for c in text.chars() {
+        cur.push(c);
+        if matches!(c, '.' | '!' | '?') {
+            segs.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.trim().is_empty() {
+        segs.push(cur);
+    }
+    segs.into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Normalize a segment for command matching: lowercase, drop trailing sentence
+/// punctuation, and strip a single leading connective ("and"/"then"/"ok").
+fn normalize_command(seg: &str) -> String {
+    let mut s = seg.trim().to_ascii_lowercase();
+    s = s.trim_end_matches([' ', '.', '!', '?', ',']).to_string();
+    for lead in ["and ", "then ", "ok ", "okay "] {
+        if let Some(rest) = s.strip_prefix(lead) {
+            s = rest.trim().to_string();
+            break;
+        }
+    }
+    s
 }
 
 /// Remove `[...]`, `(...)`, and `*...*` spans — whisper emits non-speech
@@ -227,5 +346,54 @@ mod tests {
     fn empty_and_annotation_only_input_yield_empty() {
         assert_eq!(fast_polish("   "), "");
         assert_eq!(fast_polish("[BLANK_AUDIO]"), "");
+    }
+
+    #[test]
+    fn voice_command_new_line_when_its_own_segment() {
+        // "new line" said as its own utterance → a line break between sentences.
+        assert_eq!(
+            fast_polish("first point. new line. second point."),
+            "First point.\nSecond point."
+        );
+    }
+
+    #[test]
+    fn voice_command_new_paragraph() {
+        assert_eq!(
+            fast_polish("intro here. new paragraph. body here."),
+            "Intro here.\n\nBody here."
+        );
+    }
+
+    #[test]
+    fn voice_command_scratch_that_drops_prior_sentence() {
+        assert_eq!(
+            fast_polish("send it tomorrow. scratch that. send it today."),
+            "Send it today."
+        );
+    }
+
+    #[test]
+    fn voice_command_leading_connective_still_matches() {
+        assert_eq!(
+            fast_polish("line one. and new line. line two."),
+            "Line one.\nLine two."
+        );
+    }
+
+    #[test]
+    fn literal_new_line_mid_sentence_is_not_a_command() {
+        // The boundary rule: "new line" inside a longer sentence stays literal.
+        assert_eq!(
+            fast_polish("put it on a new line of text"),
+            "Put it on a new line of text."
+        );
+    }
+
+    #[test]
+    fn no_command_phrase_leaves_text_untouched() {
+        // The fast path: normal dictation must be byte-identical to fast_polish
+        // without the voice-command step.
+        assert_eq!(apply_voice_commands("Hello, world."), "Hello, world.");
     }
 }

@@ -421,10 +421,18 @@ explicit roadmap line here saying why not).
   nails. Builds on the existing overlay window; the waveform needs only audio
   levels, not transcription.
 
-- [ ] **In-place dictation, phase 2** — the fast lane shipped; now the feel:
-  **(a)** voice commands in the polish pass — "new line", "new paragraph",
-  "scratch that" handled rule-based in `fast_polish` (and as prompt directives
-  in LLM mode); **(b)** per-app overrides — type vs paste vs off per process
+- [ ] **In-place dictation, phase 2** — the fast lane shipped; now the feel.
+  **(a) ✅ shipped** — voice commands in the polish pass: "new line",
+  "new paragraph", "scratch that"/"delete that" handled rule-based in
+  `dictation::apply_voice_commands` (the last step of `fast_polish`, so the
+  inserted breaks survive the whitespace-collapsing steps; sentence/segment
+  anchored so "a new line of code" mid-sentence stays literal; "scratch that"
+  drops the prior sentence; leading "and/then" still matches; re-capitalizes
+  sentence starts after edits). Applied in **all** cleanup modes — `fast`,
+  `off` (rule pass is a no-op without commands), and `llm` (directives
+  prepended to the prompt; `fast_polish` fallback applies the same rules on LLM
+  failure). 12 unit tests. Remaining: **(b)** per-app overrides — type vs paste
+  vs off per process
   name (some apps reject synthetic keystrokes; the fast lane should know);
   **(c)** app-aware context, tier 1 — opt-in (OFF by default), the focused
   window's title feeds the polish prompt so jargon resolves correctly, with a
