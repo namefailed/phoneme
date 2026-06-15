@@ -244,7 +244,7 @@ export class ActionRowElement extends LitElement {
       <div class="action-row">
         <button class="primary" @click=${this.handlePlay}>${this.playing ? "⏸ Pause" : "▶ Play"}</button>
         <span class="th-dropdown speed-dropdown">
-          <button class="speed-trigger" title="Playback speed" aria-haspopup="menu" aria-expanded=${this.speedMenuOpen} @click=${this.toggleSpeedMenu}>Speed ${this.speed}× ${CARET_ICO}</button>
+          <button class="speed-trigger" title="Playback speed (currently ${this.speed}×)" aria-haspopup="menu" aria-expanded=${this.speedMenuOpen} @click=${this.toggleSpeedMenu}>Speed ${CARET_ICO}</button>
           <div class="th-menu" role="menu" ?hidden=${!this.speedMenuOpen}>
             ${PLAYBACK_SPEEDS.map((s) => html`<button class="view-btn th-menu-item ${s === this.speed ? "active" : ""}" @click=${() => this.pickSpeed(s)}>${s}×</button>`)}
           </div>
