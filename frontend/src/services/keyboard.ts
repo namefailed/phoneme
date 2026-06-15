@@ -838,13 +838,14 @@ export function initKeyboard() {
     const font = String(cfg?.interface?.ui_font ?? "").trim().replace(/["';]/g, "");
     if (font) rootStyle.setProperty("--ui-font", `"${font}", ${UI_FONT_FALLBACK}`);
     else rootStyle.removeProperty("--ui-font");
-    // UI size scales via zoom, NOT a root font-size: the interface is almost
-    // entirely fixed-px, so a font-size only resizes the handful of inheriting
-    // elements. 14px is the 1.0 baseline; reset.css applies the zoom with
-    // viewport-size compensation so the magnified layout still fills the window.
+    // UI size = a REAL root font-size (px): `rem` and every inheriting text
+    // element scale from it. NOT a zoom of the whole canvas — that magnified
+    // spacing/boxes and could shove the layout off-window. 14px is the 1.0
+    // baseline; reset.css reads --ui-font-size on the root.
     const size = Number(cfg?.interface?.ui_font_size);
     const px = Number.isFinite(size) && size >= 10 && size <= 24 ? Math.round(size) : 14;
-    rootStyle.setProperty("--ui-zoom", String(px / 14));
+    rootStyle.setProperty("--ui-font-size", `${px}px`);
+    rootStyle.removeProperty("--ui-zoom"); // legacy zoom scale — no longer used
     // Step-completion toasts (errors always show regardless).
     setStepNotifications(cfg?.interface?.step_notifications ?? true);
   };
