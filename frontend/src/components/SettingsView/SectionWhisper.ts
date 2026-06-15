@@ -298,7 +298,10 @@ export class SectionWhisper {
              advanced), key row when the provider needs one, Test, and the
              cloud endpoint override under its Advanced fold. The model row
              stays ours, below, because local "models" are files on disk. -->
-        <div id="whisper-connection"></div>
+        <div class="settings-field conn-field">
+          <label>Provider</label>
+          <div id="whisper-connection"></div>
+        </div>
 
         <div id="whisper-cloud" style="display:none">
           <div class="settings-field long-input">

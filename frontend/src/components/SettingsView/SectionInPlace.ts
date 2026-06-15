@@ -336,7 +336,10 @@ export class SectionInPlace {
       // empty for external configs or when no fallback is known.
       const hint = effectiveLocalWhisperHint(this.sttLocalUrl(stt), this.portStatus);
       host.innerHTML = `
-        <div id="ip-stt-conn"></div>
+        <div class="settings-field conn-field">
+          <label>Provider</label>
+          <div id="ip-stt-conn"></div>
+        </div>
         <div class="settings-field">
           <label>Local server</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
@@ -359,7 +362,10 @@ export class SectionInPlace {
         </div>`;
     } else {
       host.innerHTML = `
-        <div id="ip-stt-conn"></div>
+        <div class="settings-field conn-field">
+          <label>Provider</label>
+          <div id="ip-stt-conn"></div>
+        </div>
         <div class="settings-field">
           <label>Model <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
           <div id="ip-stt-model-host"></div>

@@ -671,6 +671,18 @@ select[data-key="daemon.log_level"] {
   line-height: 1.5;
 }
 
+/* Connection/provider blocks (connectionField.ts) live in the standard control
+   column like every other field — label on the left (top-aligned, since the .cf
+   block is multi-row), the block filling the column — so a section's provider
+   lines up with its model/toggle/timeout controls instead of spanning the whole
+   row full-width. Replaces the old `.stacked` treatment for provider fields. */
+.settings-field.conn-field {
+  align-items: start;
+}
+.settings-field.conn-field > label {
+  padding-top: 7px;
+}
+
 /* Advanced disclosure (<details>) — replace the browser's default triangle
    marker with a chevron that rotates down when the section is open. */
 .settings-advanced > summary {

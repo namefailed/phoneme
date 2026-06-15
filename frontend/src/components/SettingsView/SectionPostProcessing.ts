@@ -95,7 +95,7 @@ export class SectionPostProcessing {
           )}</div>
         </div>
 
-        <div class="settings-field stacked">
+        <div class="settings-field conn-field">
           <label>AI Provider</label>
           <div id="cleanup-conn-host"></div>
         </div>
@@ -183,7 +183,7 @@ export class SectionPostProcessing {
           </span>
         </div>
 
-        <div class="settings-field stacked">
+        <div class="settings-field conn-field">
           <label>Summary provider</label>
           <div id="summary-conn-host"></div>
         </div>
@@ -252,7 +252,7 @@ export class SectionPostProcessing {
         </div>
 
         <div id="title-llm-fields" style="${config.title.use_llm ? "" : "display: none;"}">
-          <div class="settings-field stacked">
+          <div class="settings-field conn-field">
             <label>Title provider</label>
             <div id="title-conn-host"></div>
           </div>

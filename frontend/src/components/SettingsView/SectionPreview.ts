@@ -411,7 +411,10 @@ export class SectionPreview {
     // provider in the block is the same as choosing "Dedicated local model"
     // in the source select — the section re-renders into that branch.
     host.innerHTML = `
-      <div id="prev-api-conn"></div>
+      <div class="settings-field conn-field">
+        <label>Provider</label>
+        <div id="prev-api-conn"></div>
+      </div>
       <div class="settings-field">
         <label>Model <span style="color:var(--fg-faded); font-weight:normal;">(optional)</span></label>
         <div id="prev-api-model-host"></div>

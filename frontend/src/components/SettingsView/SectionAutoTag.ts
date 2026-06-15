@@ -58,7 +58,7 @@ export class SectionAutoTag {
           <div><input type="checkbox" class="toggle-switch" id="at-accept" data-key="auto_tag.auto_accept_existing" ${t.auto_accept_existing ? "checked" : ""} /></div>
         </div>
 
-        <div class="settings-field stacked">
+        <div class="settings-field conn-field">
           <label>Provider</label>
           <div id="at-conn-host"></div>
         </div>
