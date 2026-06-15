@@ -66,7 +66,7 @@ export class SectionIntegrations {
 
         <div class="settings-field stacked">
           <label>MCP server</label>
-          <div style="font-size: 12px; color: var(--fg-muted); line-height: 1.5; max-width: 760px;">
+          <div style="display: block; font-size: 12px; color: var(--fg-muted); line-height: 1.5; max-width: 760px;">
             <p style="margin: 0 0 8px;">
               <code>phoneme-mcp</code> is a <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer">Model Context Protocol</a>
               stdio server. Point an MCP-aware client (Claude Desktop, etc.) at the

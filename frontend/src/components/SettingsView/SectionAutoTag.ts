@@ -59,22 +59,22 @@ export class SectionAutoTag {
         </div>
 
         <div class="settings-field conn-field">
-          <label>Provider</label>
+          <label>Auto-tag provider</label>
           <div id="at-conn-host"></div>
         </div>
 
         <div class="settings-field">
-          <label>Model</label>
+          <label>Auto-tag model</label>
           <div id="at-model-host"></div>
         </div>
 
         <div class="settings-field">
-          <label>Max suggestions</label>
+          <label>Max tag suggestions</label>
           <div><input type="number" id="at-max" data-key="auto_tag.max_tags" min="1" max="12" value="${Number(t.max_tags) || 5}" style="width:80px;" /></div>
         </div>
 
         <div class="settings-field">
-          <label>Instructions</label>
+          <label>Auto-tag instructions</label>
           <div>
             <textarea id="at-prompt" data-key="auto_tag.prompt" rows="3" style="width:100%; resize:vertical; font-family:inherit;"
               placeholder="How the AI should pick tags (your tag list and the transcript are appended automatically)">${escapeHtml(t.prompt ?? "")}</textarea>
@@ -82,7 +82,7 @@ export class SectionAutoTag {
         </div>
 
         <div class="settings-field">
-          <label>Pending suggestions</label>
+          <label>Pending tag suggestions</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <button class="inline-button" id="at-clear-all" title="Remove every pending ✨ suggestion chip from every recording in the library">🧹 Clear all suggestions</button>
             <span style="font-size: 11px; color: var(--fg-faded); display: block;">

@@ -681,7 +681,7 @@ export class SettingsViewElement extends LitElement {
         </div>
         <div class="settings-main">
           <div class="settings-float-group" style=${this.floatAnchorStyle()}>
-            <button class="settings-float-toggle" title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙️ Settings</button>
+            <button class="settings-float-toggle" title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
             <button class="settings-float-caret ${this.floatMenuOpen ? "active" : ""}" aria-label="Quick settings &amp; actions" aria-haspopup="menu" aria-expanded=${this.floatMenuOpen} title="Quick settings &amp; actions" @click=${this.toggleFloatMenu}>
               <svg class="ph-caret-ico ${this.floatMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>

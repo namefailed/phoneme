@@ -729,6 +729,12 @@ export class HeaderBarElement extends LitElement {
           <option value="tag_failed" ?selected=${f.status === "tag_failed"}>Tagging Failed</option>
           <option value="cancelled" ?selected=${f.status === "cancelled"}>Cancelled</option>
         </select>
+        <button class="hb-health ${this.health}" title=${this.health === "bad"
+            ? `Problems found: ${this.healthIssues.map((i) => i.name).join(", ")} — click to open Doctor`
+            : this.health === "ok" ? "All systems healthy — click to open Doctor" : "Checking health…"}
+          aria-label="App health" @click=${this.openDoctor}>
+          <span class="hb-health-dot" aria-hidden="true"></span>${this.health === "bad" ? html`<span class="hb-health-n">${this.healthIssues.length}</span>` : null}
+        </button>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
           <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size:12px; padding: 6px 12px;"
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
@@ -810,17 +816,11 @@ export class HeaderBarElement extends LitElement {
             </div>
           </div>
         </div>
-        <button class="hb-health ${this.health}" title=${this.health === "bad"
-            ? `Problems found: ${this.healthIssues.map((i) => i.name).join(", ")} — click to open Doctor`
-            : this.health === "ok" ? "All systems healthy — click to open Doctor" : "Checking health…"}
-          aria-label="App health" @click=${this.openDoctor}>
-          <span class="hb-health-dot" aria-hidden="true"></span>${this.health === "bad" ? html`<span class="hb-health-n">${this.healthIssues.length}</span>` : null}
-        </button>
         <div class="hb-settings-group" style="position: relative; display: inline-flex;">
           <style>
-            /* Health pill (left of Settings): green dot = all checks pass, red =
-               something the Doctor can explain is wrong; the banner carries the
-               detail. Click opens the Doctor. */
+            /* Health pill (sits between the status filter and the Record button):
+               green dot = all checks pass, red = something the Doctor can explain
+               is wrong; the banner carries the detail. Click opens the Doctor. */
             .hb-health {
               display: inline-flex; align-items: center; gap: 5px;
               background: none; border: 1px solid transparent; border-radius: 999px;
@@ -849,7 +849,7 @@ export class HeaderBarElement extends LitElement {
             .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
           <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
-            style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙️ Settings</button>
+            style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
           <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings &amp; actions" aria-haspopup="menu"
             aria-expanded=${this.settingsMenuOpen} title="Quick settings &amp; actions"
             style="padding:6px 7px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
@@ -864,7 +864,7 @@ export class HeaderBarElement extends LitElement {
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}><span class="hb-menu-ico">🎙️</span>Capture &amp; hotkeys</button>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}><span class="hb-menu-ico">🎨</span>Appearance</button>
             <div class="hb-menu-sep"></div>
-            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙️</span>All settings…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙</span>All settings…</button>
           </div>
         </div>
       </div>
