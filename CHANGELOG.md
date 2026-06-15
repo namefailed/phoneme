@@ -84,6 +84,14 @@ trust boundary. Verified against current code.*
   desktop window that floats the live caption over any app, even when the main
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on
   `interface.preview_overlay`. Off by default.
+- [x] **Overlay redesign — roomy, clean, properly sized.** The floating caption is
+  now a two-zone card: a compact chrome bar (record dot, LIVE/LISTENING, the
+  "it hears me" waveform, meeting toggle, close) over a caption area that fills the
+  rest of the window, **wraps** long text instead of spilling past the edge, and
+  keeps the newest words pinned to the bottom. Sensible default size (540×150) with
+  a **minimum** so it can't be shrunk to a useless sliver; resize it taller for more
+  lines at once (size remembered across runs). Replaces the old cramped single-row
+  card where text was squeezed into a narrow middle column.
 - [x] **Live-preview wave 1 — smooth, adaptive & it-hears-me.** The biggest live
   preview pass yet, all under the Beta pill until verified:
   - **Adaptive cadence (the record-time crash fix).** When a preview tick takes

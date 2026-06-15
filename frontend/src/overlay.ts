@@ -21,14 +21,22 @@ import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 
 const root = document.getElementById("overlay-root")!;
+// Layout: a compact chrome bar on top (status + waveform + controls) and a
+// roomy caption area below that fills the rest of the window — so the live text
+// gets the full width and height, wraps cleanly, and the newest words stay
+// pinned to the bottom. The window is resizable; the bar stays fixed-height
+// while the caption grows/shrinks with it.
 root.innerHTML = `
   <div class="ov-card">
-    <span class="ov-pulse" aria-hidden="true"></span>
-    <span class="ov-wave" id="ov-wave" aria-hidden="true"></span>
-    <span class="ov-label" id="ov-label">LIVE</span>
-    <span class="ov-body" id="ov-body"></span>
-    <button class="ov-src" id="ov-src" hidden title="Switch which audio the caption follows"></button>
-    <button class="ov-close" id="ov-close" title="Hide overlay (re-shows on the next recording)" aria-label="Hide overlay">✕</button>
+    <div class="ov-bar">
+      <span class="ov-pulse" aria-hidden="true"></span>
+      <span class="ov-label" id="ov-label">LIVE</span>
+      <span class="ov-wave" id="ov-wave" aria-hidden="true"></span>
+      <span class="ov-spacer"></span>
+      <button class="ov-src" id="ov-src" hidden title="Switch which audio the caption follows"></button>
+      <button class="ov-close" id="ov-close" title="Hide overlay (re-shows on the next recording)" aria-label="Hide overlay">✕</button>
+    </div>
+    <div class="ov-body" id="ov-body"></div>
   </div>
 `;
 

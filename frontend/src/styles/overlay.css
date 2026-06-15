@@ -25,25 +25,41 @@ body {
 .ov-card {
   box-sizing: border-box;
   /* Fill the (opaque) window edge-to-edge. The window itself is the floating
-     card now — no transparent gap, no desktop blur (both crash WebView2). */
+     card now — no transparent gap, no desktop blur (both crash WebView2). A
+     column: a fixed chrome bar on top, the caption filling the rest. */
   width: 100%;
   height: 100%;
   margin: 0;
   display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px 14px;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 13px 11px;
   font-size: 0.9286rem;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--fg-default, #cdd6f4);
   background: var(--bg-elevated, #1e1e2e);
   border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
-  border-radius: 13px;
+  border-radius: 12px;
   cursor: grab; /* the whole card is the drag region */
   transition: opacity 0.4s ease;
 }
 .ov-card:active {
   cursor: grabbing;
+}
+
+/* Top chrome row: the record dot + LIVE/LISTENING label + waveform on the left,
+   the meeting source toggle + close on the right. Fixed height; a hairline
+   separates it from the caption below, which takes all the remaining space. */
+.ov-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle, rgba(255, 255, 255, 0.12)) 65%, transparent);
+}
+.ov-spacer {
+  flex: 1 1 auto;
 }
 
 /* Dimmed state shortly after a recording stops, before the window auto-hides. */
@@ -94,42 +110,53 @@ body.ov-dim .ov-card {
   color: var(--accent, #89b4fa);
 }
 
-/* Tail-anchored two-line window: a fixed-height scroll box pinned to its bottom
-   (in overlay.ts) so the NEWEST words stay visible while older text scrolls up
-   out of view. */
+/* The caption fills the card's remaining height and wraps; the newest words
+   stay pinned to the bottom (overlay.ts sets scrollTop), so older text scrolls
+   up out of view as you speak. Long or odd tokens break instead of spilling
+   past the card edge. The scrollbar is hidden for a clean look — it's
+   tail-anchored, so there's nothing to scroll to by hand. Resize the window
+   taller to see more lines at once. */
 .ov-text {
-  flex: 1;
+  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
-  max-height: calc(1.45em * 2);
-  overflow: hidden;
-  font-style: italic;
-  color: var(--fg-muted, #a6adc8);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--fg-default, #cdd6f4);
   scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.ov-text::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
-/* The caption area: a single .ov-text line, or (meetings in "both" mode) two
-   stacked .ov-row lines, one per track. */
+/* The caption area: a single .ov-text block, or (meetings in "both" mode) two
+   stacked .ov-row lines, one per track, splitting the height evenly. */
 .ov-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 .ov-row {
+  flex: 1 1 0;
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 7px;
   min-width: 0;
+  min-height: 0;
 }
 .ov-row .ov-row-ico {
   flex: 0 0 auto;
   font-size: 0.7857rem;
-  line-height: 1.45;
-}
-/* In two-row mode each track gets one tail-anchored line so both fit the card. */
-.ov-row .ov-text {
-  max-height: calc(1.45em * 1);
+  line-height: 1.5;
+  padding-top: 1px;
 }
 
 /* Meeting source toggle (🎤/🔊) — "toggle" mode only. Shows which track the

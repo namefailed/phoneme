@@ -46,9 +46,15 @@ pub const OVERLAY_LABEL: &str = "preview-overlay";
 /// live recording. See `frontend/src/overlay.ts`.
 pub const OVERLAY_PREVIEW_EVENT: &str = "overlay-preview";
 
-/// Default overlay size (logical px). Small: a one/two-line caption card.
+/// Default overlay size (logical px): a compact caption card — the chrome bar
+/// plus room for ~4 wrapped lines. Sensible default, resizable from there;
+/// `tauri-plugin-window-state` then remembers whatever size the user picks.
 const OVERLAY_W: f64 = 540.0;
-const OVERLAY_H: f64 = 92.0;
+const OVERLAY_H: f64 = 150.0;
+/// Minimum size so the window can't be dragged down to a useless sliver — still
+/// enough for the bar plus a line or two of caption.
+const OVERLAY_MIN_W: f64 = 300.0;
+const OVERLAY_MIN_H: f64 = 96.0;
 /// Inset from the bottom of the work area for the first-run placement.
 const BOTTOM_MARGIN: f64 = 96.0;
 
@@ -78,6 +84,7 @@ pub fn ensure(app: &AppHandle) {
     let builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
         .title("Phoneme Live Preview")
         .inner_size(OVERLAY_W, OVERLAY_H)
+        .min_inner_size(OVERLAY_MIN_W, OVERLAY_MIN_H)
         // Resizable so the caption can be sized to taste; position AND size are
         // remembered by tauri-plugin-window-state. Frameless, so the resize grips
         // are the window edges.
