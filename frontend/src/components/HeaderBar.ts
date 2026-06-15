@@ -690,6 +690,9 @@ export class HeaderBarElement extends LitElement {
           ${f.sort_desc === false ? "↑ Oldest" : "↓ Newest"}
         </button>
         <div class="search-group" style="display:flex; align-items:center; gap:4px; flex:1 100 220px; min-width:170px;">
+          <button class="icon-btn ${f.semantic ? 'active' : ''}"
+            title="Toggle Semantic Search (finds meaning, not exact words)"
+            @click=${this.toggleSemantic}>🔮</button>
           ${f.like_id
             ? html`<div class="filter-pill hb-like-pill" style="flex:1; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"
                 title="Showing recordings similar to “${f.like_label || f.like_id}” — ranked by meaning, from its stored index">
@@ -699,9 +702,6 @@ export class HeaderBarElement extends LitElement {
               </div>`
             : html`<input type="search" class="search" style="flex:1;" placeholder="Search transcripts…"
             .value=${f.search || ""} @input=${this.handleSearch} title="Search through your transcripts by text" />`}
-          <button class="icon-btn ${f.semantic ? 'active' : ''}"
-            title="Toggle Semantic Search (finds meaning, not exact words)"
-            @click=${this.toggleSemantic}>🔮</button>
           <ph-saved-searches></ph-saved-searches>
         </div>
         <div class="hb-date-range" style="display: flex; align-items: center; gap: 4px;">
@@ -849,7 +849,7 @@ export class HeaderBarElement extends LitElement {
             .hb-menu-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 2px; }
           </style>
           <button class="icon-btn hb-settings-main" aria-label="Open settings" title="Open settings"
-            style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
+            style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙️ Settings</button>
           <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings &amp; actions" aria-haspopup="menu"
             aria-expanded=${this.settingsMenuOpen} title="Quick settings &amp; actions"
             style="padding:6px 7px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
@@ -864,7 +864,7 @@ export class HeaderBarElement extends LitElement {
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}><span class="hb-menu-ico">🎙️</span>Capture &amp; hotkeys</button>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}><span class="hb-menu-ico">🎨</span>Appearance</button>
             <div class="hb-menu-sep"></div>
-            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙</span>All settings…</button>
+            <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙️</span>All settings…</button>
           </div>
         </div>
       </div>

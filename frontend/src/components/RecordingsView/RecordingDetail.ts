@@ -309,8 +309,8 @@ export class RecordingDetail {
           <div id="notes-editor"></div>
         </div>
         <div class="detail-footer">
-          <span id="detail-stats">${stats}</span>
           <span id="detail-pipeline-host">${pipelineHtml(r)}</span>
+          <span id="detail-stats">${stats}</span>
           <span class="detail-path" id="detail-reveal-path" role="button" tabindex="0" style="cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px;" title="Reveal in file explorer — ${escapeAttr(r.audio_path)}">${escapeHtml(r.audio_path)}</span>
         </div>
       </div>
@@ -1029,7 +1029,7 @@ function modelsSteps(r: Recording): PipelineStep[] {
   if (r.model) {
     steps.push({ icon: "🗣", label: "Transcribed", value: escapeHtml(r.model) });
     if (r.diarized) {
-      steps.push({ icon: "🧑‍🤝‍🧑", label: "Diarized", value: r.diarization_model ? escapeHtml(r.diarization_model) : "speakers labeled" });
+      steps.push({ icon: "🧑‍🤝‍🧑", label: "Diarized", value: r.diarization_model ? escapeHtml(r.diarization_model) : "Speakers labeled" });
     }
   }
 
@@ -1039,11 +1039,11 @@ function modelsSteps(r: Recording): PipelineStep[] {
   // 4. Auto-title — only a pipeline-generated title is a step (a user-set title
   //    isn't). Names the model once persisted; otherwise the bare action.
   if (r.title_model) steps.push({ icon: "🔖", label: "Titled", value: escapeHtml(r.title_model) });
-  else if (r.title_is_auto && r.title) steps.push({ icon: "🔖", label: "Titled", value: "auto-generated" });
+  else if (r.title_is_auto && r.title) steps.push({ icon: "🔖", label: "Titled", value: "Auto-generated" });
 
   // 5. Hook, when it ran (exit code recorded).
   if (r.hook_exit_code != null) {
-    steps.push({ icon: "🪝", label: "Hook", value: r.hook_exit_code === 0 ? "✓ ran successfully" : `✗ failed (exit ${r.hook_exit_code})` });
+    steps.push({ icon: "🪝", label: "Hook", value: r.hook_exit_code === 0 ? "✓ Ran successfully" : `✗ Failed (exit ${r.hook_exit_code})` });
   }
 
   // 6. Auto-summary.
@@ -1052,7 +1052,7 @@ function modelsSteps(r: Recording): PipelineStep[] {
   // 7. Auto-tagging — names the model once persisted; until then infer the step
   //    from pending suggestions (the only per-recording signal the tagger ran).
   if (r.tag_model) steps.push({ icon: "🏷", label: "Tagged", value: escapeHtml(r.tag_model) });
-  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push({ icon: "🏷", label: "Tagged", value: "suggestions pending" });
+  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push({ icon: "🏷", label: "Tagged", value: "Suggestions pending" });
 
   return steps;
 }
