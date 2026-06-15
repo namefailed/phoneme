@@ -503,6 +503,8 @@ export class RecordingsView {
     // Drop the vim focus ring with the pane it was on (if any).
     this.container.querySelector(".rv-detail")?.classList.remove("rv-pane-focused");
     if (this.focusedPane === "detail") this.focusedPane = "list";
+    // Slide the pane closed on the shared curve (matches toggleDetail / open).
+    this.animateLayout();
     this.applyLayout();
     this.list.clearSelection();
   }
@@ -1241,8 +1243,10 @@ export class RecordingsView {
         this.zenChained = true;
         this.focusMode = true;
         this.container.querySelector<HTMLElement>("#rv-shell")?.classList.add("rv-focus");
-        this.animateLayout();
       }
+      // Slide the detail pane in (matching toggleDetail / the sidebar) — both the
+      // list-zen zoom and the ordinary "click a row" open animate identically.
+      this.animateLayout();
       this.applyLayout();
     }
   }

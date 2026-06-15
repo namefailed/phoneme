@@ -201,10 +201,11 @@ export class App {
         setSettingsAnchor({ top: r.top, left: r.left, width: r.width, height: r.height });
       }
     }
-    // The top header bar is useless in Settings / the setup wizard — hide it so
-    // only the view's own (floating) controls show. Focus mode toggles the same
-    // class from RecordingsView.
-    document.body.classList.toggle("phoneme-hide-header", view === "settings" || view === "wizard");
+    // The top header bar is useless in Settings / the setup wizard — hide it
+    // instantly and completely (there's nothing to slide it back into). Focus
+    // mode / list zen / Ctrl+/ use the separate `phoneme-hide-header` class,
+    // which ANIMATES the bar's collapse instead of removing it outright.
+    document.body.classList.toggle("phoneme-hide-header-instant", view === "settings" || view === "wizard");
     switch (view) {
       case "recordings":
         this.current = new RecordingsView(this.mainEl);

@@ -1,6 +1,9 @@
-/* Settings, the setup wizard, and full-screen focus mode hide the top header
-   bar (it's useless there) — toggled via this body class by App / RecordingsView. */
-body.phoneme-hide-header #hdr {
+/* Settings and the setup wizard hide the top header bar entirely and INSTANTLY
+   — it's useless there and there's no layout to slide it back into. Toggled by
+   App.ts. Focus mode, list zen, and Ctrl+/ instead use `phoneme-hide-header`,
+   which ANIMATES the inner ph-header-bar's max-height collapse (see
+   RecordingsView/styles.css) — a `display:none` on #hdr here would defeat that. */
+body.phoneme-hide-header-instant #hdr {
   display: none;
 }
 
