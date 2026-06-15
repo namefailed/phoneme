@@ -132,6 +132,20 @@ fn rms_level_01(samples: &[i16]) -> f32 {
 /// `committed` is the full text shown so far; `window` is the latest window
 /// transcription. Returns the new full text to display. This is a pure function
 /// so it can be unit-tested without any audio/whisper round trip.
+///
+/// The window is always the freshest source of truth for the speech it covers,
+/// so we *anchor on it*: find where the window re-states the committed tail, keep
+/// the committed prefix older than that anchor, and append only the window words
+/// past the overlap. We never blindly re-append the whole window onto `committed`
+/// — that was the duplication bug. Whisper re-tokenizes/revises the window's
+/// leading words between ticks, so an overlap pinned to the very first window
+/// word often failed to match and ~15 s of already-shown words got re-appended,
+/// permanently (`committed` only grows). Two defenses keep that from happening:
+/// we normalize words (lowercase + strip surrounding punctuation) before
+/// comparing so minor revisions still match, and we let the overlap start a few
+/// words *into* the window (`MAX_LEADING_SKIP`) so a revised/inserted leading
+/// word doesn't defeat the match. Each tick's tail is therefore sourced once,
+/// from the newest transcription, so a word run can never duplicate.
 fn stitch_preview(committed: &str, window: &str) -> String {
     let window = window.trim();
     if window.is_empty() {
@@ -141,36 +155,70 @@ fn stitch_preview(committed: &str, window: &str) -> String {
         return window.to_string();
     }
 
-    // Tokenize both sides on whitespace. We look for the longest run of trailing
-    // committed words that equals a leading run of window words; everything in
-    // the window past that overlap is the new text to append.
     let committed_words: Vec<&str> = committed.split_whitespace().collect();
     let window_words: Vec<&str> = window.split_whitespace().collect();
 
-    // Case-insensitive word compare so capitalization drift across re-transcriptions
-    // (e.g. sentence-start casing changing as more context arrives) still overlaps.
-    let eq = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+    // Normalize for comparison: lowercase + strip surrounding ASCII punctuation,
+    // so whisper's minor revisions across ticks (casing drift, a trailing comma
+    // appearing/disappearing) don't defeat the overlap. We compare on these but
+    // emit the original words so punctuation/casing still shows.
+    let norm = |w: &str| {
+        w.trim_matches(|c: char| c.is_ascii_punctuation())
+            .to_ascii_lowercase()
+    };
+    let committed_norm: Vec<String> = committed_words.iter().map(|w| norm(w)).collect();
+    let window_norm: Vec<String> = window_words.iter().map(|w| norm(w)).collect();
 
-    // Try the largest possible overlap first and shrink. Cap the search at a
-    // sensible window so this stays cheap even on long captions.
-    let max_overlap = committed_words.len().min(window_words.len()).min(64);
-    for overlap in (1..=max_overlap).rev() {
-        let tail = &committed_words[committed_words.len() - overlap..];
-        let head = &window_words[..overlap];
-        if tail.iter().zip(head).all(|(a, b)| eq(a, b)) {
-            // Append only the window words past the overlap.
-            if overlap == window_words.len() {
-                // The whole window is already contained in the committed text —
-                // nothing new this tick.
-                return committed.to_string();
+    // Total containment: the window is already a suffix of committed (nothing
+    // new revised in this slide). Leave the caption untouched so we never grow
+    // it with a re-statement of words already shown.
+    if window_norm.len() <= committed_norm.len()
+        && committed_norm[committed_norm.len() - window_norm.len()..] == window_norm[..]
+    {
+        return committed.to_string();
+    }
+
+    // How many leading window words we'll allow to be skipped when anchoring: a
+    // revised/inserted leading word ("um", a re-cased first word) shouldn't pin
+    // the overlap to window[0] and force a blind append.
+    const MAX_LEADING_SKIP: usize = 8;
+    // Cap the overlap search so this stays cheap even on long captions.
+    const MAX_OVERLAP: usize = 64;
+
+    // Find the best anchor: the longest run of trailing committed words that
+    // equals a window run starting at some small offset `skip` from the window's
+    // head. The committed prefix older than that run is kept; the window past the
+    // overlap supplies the genuinely-new words. Prefer the longest overlap, and
+    // among equal overlaps the smallest skip (closest to a clean head match).
+    let mut best: Option<(usize /*overlap*/, usize /*skip*/)> = None;
+    let max_skip = MAX_LEADING_SKIP.min(window_norm.len().saturating_sub(1));
+    for skip in 0..=max_skip {
+        let max_overlap = committed_norm
+            .len()
+            .min(window_norm.len() - skip)
+            .min(MAX_OVERLAP);
+        for overlap in (1..=max_overlap).rev() {
+            let tail = &committed_norm[committed_norm.len() - overlap..];
+            let head = &window_norm[skip..skip + overlap];
+            if tail == head {
+                if best.map_or(true, |(bo, _)| overlap > bo) {
+                    best = Some((overlap, skip));
+                }
+                // Longest for this skip found — no shorter one can beat it.
+                break;
             }
-            let mut out = committed.to_string();
-            for w in &window_words[overlap..] {
-                out.push(' ');
-                out.push_str(w);
-            }
-            return out;
         }
+    }
+
+    if let Some((overlap, skip)) = best {
+        // Keep ALL the committed words (its copy of the overlap stays — committed
+        // casing/punctuation wins at the boundary) and append ONLY the window
+        // words after its overlap region. Window words before `skip` (a revised
+        // leading fragment) and the overlap itself restate committed content, so
+        // they are dropped — no run is ever duplicated.
+        let mut out: Vec<&str> = committed_words.clone();
+        out.extend_from_slice(&window_words[skip + overlap..]);
+        return out.join(" ");
     }
 
     // No overlap found (e.g. a long silence split the speech, or whisper produced
@@ -666,11 +714,24 @@ impl DaemonRecorder {
 
     /// Stop the streaming-preview loop (if running) and wait for it to exit so
     /// its temp WAV is cleaned up. No-op when no preview is running.
-    async fn stop_preview(&self) {
+    ///
+    /// `abort` (in-place dictation only) tears the loop down WITHOUT awaiting an
+    /// in-flight tick: it signals stop and `abort()`s the join handle so the
+    /// held whisper permit is released immediately and the latency-critical
+    /// dictation transcribe isn't delayed. Aborting skips the loop's graceful
+    /// temp-WAV cleanup, so callers that pass `abort = true` must remove the
+    /// preview WAV(s) themselves (see `stop`). Normal recordings and meetings
+    /// pass `abort = false` for the graceful, await-based teardown — that path
+    /// lets the loop delete its own temp WAV and must stay unchanged.
+    async fn stop_preview(&self, abort: bool) {
         let tasks: Vec<PreviewTask> = std::mem::take(&mut *self.preview.lock().await);
         for PreviewTask { stop_tx, task } in tasks {
             let _ = stop_tx.send(());
-            let _ = task.await;
+            if abort {
+                task.abort();
+            } else {
+                let _ = task.await;
+            }
         }
     }
 
@@ -691,7 +752,7 @@ impl DaemonRecorder {
                 "no active meeting track {track:?} to preview"
             )));
         };
-        self.stop_preview().await;
+        self.stop_preview(false).await;
         self.start_preview(state, id, snapshot).await;
         state
             .events
@@ -884,17 +945,16 @@ impl DaemonRecorder {
         }
 
         // Spawn the live streaming-preview loop. No-op unless
-        // `recording.streaming_preview` is enabled (default: off). Skipped
-        // entirely for in-place dictation: a quick dictation has no preview
-        // overlay to feed, and the preview loop's per-second transcription ticks
-        // contend with the dictation's own latency-critical transcribe-and-paste
-        // on the single serial whisper permit — and `stop()` waits out an
-        // in-flight preview tick before the dictation can transcribe, which
-        // delayed or dropped the paste ("constantly listening, never pastes").
-        if !in_place {
-            self.start_preview(state, id.clone(), preview_snapshot)
-                .await;
-        }
+        // `recording.streaming_preview` is enabled (default: off). Runs for
+        // in-place dictation too: the dictation overlay shows the same caption,
+        // and the loop self-throttles around the latency-critical paste — each
+        // tick only transcribes when it can `try_acquire` the single serial
+        // whisper permit, so the dictation's own transcribe always wins it and
+        // an in-flight tick simply skips. The dictation stop path tears this
+        // preview down WITHOUT awaiting (see `stop`), so a preview tick can
+        // never delay the paste ("constantly listening, never pastes").
+        self.start_preview(state, id.clone(), preview_snapshot)
+            .await;
         // The live audio-level waveform runs for every capture (including
         // in-place dictation), gated only on `recording.preview_waveform`. It's
         // cheap (RMS of a tiny tail, no whisper permit) so it never reintroduces
@@ -937,7 +997,23 @@ impl DaemonRecorder {
         // Stop the streaming-preview loop before finalizing so it isn't
         // mid-snapshot of a recorder being consumed. No-op when no preview is
         // running.
-        self.stop_preview().await;
+        //
+        // In-place dictation aborts the loop instead of awaiting it: the
+        // dictation transcribe-and-paste is on the latency path, and awaiting an
+        // in-flight preview tick (which can hold the whisper permit for up to
+        // the provider timeout) would add that tick's duration to stop→paste.
+        // Aborting releases the held permit immediately so the detached fast
+        // lane (`spawn_fast_lane`) can grab it right away. Abort skips the
+        // loop's own temp-WAV cleanup, so we remove this recording's preview WAV
+        // best-effort below. Normal recordings/meetings keep the graceful,
+        // await-based teardown (which deletes its own temp WAV) — do NOT abort
+        // them or their preview WAVs leak.
+        self.stop_preview(active.in_place).await;
+        if active.in_place {
+            let preview_wav = std::env::temp_dir()
+                .join(format!("phoneme-preview-{}.wav", active.id.file_stem()));
+            let _ = tokio::fs::remove_file(&preview_wav).await;
+        }
         let result = recorder.stop_and_finalize(&active.audio_path).await?;
 
         state
@@ -1045,7 +1121,7 @@ impl DaemonRecorder {
                 let meeting = *meeting;
                 // Tear down the live-preview loop before cancelling the track
                 // recorders. No-op when no preview is running.
-                self.stop_preview().await;
+                self.stop_preview(false).await;
                 self.meeting_preview_sources.lock().await.clear();
                 let id = meeting.tracks[0].id.clone();
                 for track_handle in meeting.tracks {
@@ -1067,7 +1143,7 @@ impl DaemonRecorder {
             Taken::Single(active, recorder) => {
                 // Stop the preview loop before tearing down the recorder. No-op
                 // when off.
-                self.stop_preview().await;
+                self.stop_preview(false).await;
                 if let Some(recorder) = recorder {
                     if let Err(e) = recorder.cancel().await {
                         tracing::warn!("failed to cancel recorder: {e}");
@@ -1506,7 +1582,7 @@ impl DaemonRecorder {
         // isn't mid-snapshot when the mic recorder is consumed. No-op when no
         // preview is running (preview disabled, or this build started before the
         // meeting-preview wiring). Mirrors the single-recording `stop`.
-        self.stop_preview().await;
+        self.stop_preview(false).await;
         self.meeting_preview_sources.lock().await.clear();
         let meeting_id = meeting.meeting_id.clone();
         let wall_started = meeting.wall_started;
@@ -1859,6 +1935,50 @@ mod tests {
             stitch_preview(committed, window),
             "to be or not to be that is the question"
         );
+    }
+
+    #[test]
+    fn stitch_preview_no_duplication_when_window_revises_leading_words() {
+        // The regression this fix targets: between ticks whisper re-tokenizes the
+        // rolling window's LEADING words (here it prepends a filler "um" and
+        // re-cases "How"), so the overlap no longer pins to window[0]. The old
+        // code's blind fallback re-appended the whole ~15 s window, duplicating
+        // words already shown. With normalization + a small leading-skip anchor we
+        // must instead append ONLY the genuinely-new tail, with no run repeated.
+        let committed = "hello there my friend how are you";
+        // Same speech, leading words revised, plus two new words at the end.
+        let window = "um How are you doing today";
+        let out = stitch_preview(committed, window);
+        assert_eq!(out, "hello there my friend how are you doing today");
+
+        // Hard guarantee against the actual symptom ("text comes up multiple
+        // times in a row"): no word from the overlapping run appears twice.
+        let words: Vec<&str> = out.split_whitespace().collect();
+        for run in ["how are you", "are you doing"] {
+            let occurrences = out.matches(run).count();
+            assert_eq!(occurrences, 1, "run {run:?} duplicated in {out:?}");
+        }
+        // "you" (the boundary word) must appear exactly once, not re-stated.
+        assert_eq!(words.iter().filter(|w| **w == "you").count(), 1, "in {out:?}");
+    }
+
+    #[test]
+    fn stitch_preview_feeds_two_overlapping_windows_without_duplication() {
+        // Simulate the loop: a non-sliding tick seeds `committed` with the whole
+        // take, then a sliding tick revises the leading words and adds a tail.
+        // The accumulated caption must read each word once, in order.
+        let first_window = "the meeting will start at noon today";
+        // First tick (take fits the window) replaces wholesale — modeled by
+        // stitching onto an empty caption.
+        let committed = stitch_preview("", first_window);
+        assert_eq!(committed, first_window);
+
+        // Second (sliding) tick: whisper re-cased "The" and dropped "the meeting",
+        // re-stating from "will start" with two new trailing words.
+        let second_window = "Will start at noon today in room five";
+        let out = stitch_preview(&committed, second_window);
+        assert_eq!(out, "the meeting will start at noon today in room five");
+        assert_eq!(out.matches("at noon today").count(), 1, "duplicated in {out:?}");
     }
 
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
