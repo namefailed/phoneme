@@ -538,12 +538,24 @@ export class RecordingDetail {
       const onDocClick = (e: MouseEvent) => {
         if (!historyRow?.contains(e.target as Node)) closeMenus();
       };
+      // Escape closes an OPEN Views/Versions menu here — capture-phase +
+      // stopPropagation so it never bubbles up to the global handler (which would
+      // close the whole recording → "sends you back to the library"). Also clear
+      // any keyboard capture so vim nav resumes (a no-op when mouse-opened).
+      const onEscKey = (e: KeyboardEvent) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenus();
+        window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: null }));
+      };
       const closeMenus = () => {
         viewsMenu?.setAttribute("hidden", "");
         versionsMenu?.setAttribute("hidden", "");
         viewsTrigger?.setAttribute("aria-expanded", "false");
         versionsTrigger?.setAttribute("aria-expanded", "false");
         document.removeEventListener("click", onDocClick, true);
+        document.removeEventListener("keydown", onEscKey, true);
       };
       const openMenu = (menu: HTMLElement | null, trigger: HTMLButtonElement | null) => {
         if (!menu || !trigger) return;
@@ -553,6 +565,7 @@ export class RecordingDetail {
           menu.removeAttribute("hidden");
           trigger.setAttribute("aria-expanded", "true");
           document.addEventListener("click", onDocClick, true);
+          document.addEventListener("keydown", onEscKey, true);
         }
       };
 

@@ -712,9 +712,17 @@ function onKeyDown(e: KeyboardEvent) {
           // sorting / toggling the sidebar / opening a popup you keep roaming the
           // header with h/l instead of being dumped to the list. Re-highlight
           // after the click (the action may re-render the header).
-          if (el.classList.contains("search")) {
+          // Inputs (the search box AND the date filters) focus to type/pick,
+          // leaving roving nav — Esc returns the cursor to them. A date input
+          // also pops its native calendar via showPicker(). Every OTHER control
+          // just fires but keeps the cursor on it.
+          if (el.tagName === "INPUT") {
             exitHeaderNav();
             el.focus();
+            const input = el as HTMLInputElement;
+            if (input.type === "date" && typeof input.showPicker === "function") {
+              try { input.showPicker(); } catch { /* not allowed in this context */ }
+            }
             return;
           }
           el.click();

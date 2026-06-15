@@ -206,6 +206,9 @@ export class TagChipsElement extends LitElement {
 
   private cancelEdit() {
     this.editingTagId = null;
+    // Hand focus back to the detail pane so vim navigation continues from the
+    // tag row instead of being stranded after the popover closes.
+    window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-detail" } }));
   }
 
   /** Persist a renamed/recolored tag globally (affects every recording using it). */
@@ -219,6 +222,8 @@ export class TagChipsElement extends LitElement {
       await updateTag(id, name, this.editColor);
       this.editingTagId = null;
       await this.load();
+      // Return to detail-pane vim nav after saving.
+      window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-detail" } }));
     } catch (e) {
       showToast(`Failed to update tag: ${errText(e)}`, "error");
     }
@@ -355,8 +360,13 @@ export class TagChipsElement extends LitElement {
                     background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.12));
                     border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
                   <input type="color" class="tag-edit-color" .value=${this.editColor}
-                    title="Tag color"
+                    title="Tag color — Enter/Space opens the palette"
                     @input=${(e: Event) => this.editColor = (e.target as HTMLInputElement).value}
+                    @keydown=${(e: KeyboardEvent) => {
+                      // Open the native palette from the keyboard (Tab/Shift+Tab reaches it).
+                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); (e.target as HTMLInputElement).showPicker?.(); }
+                      else if (e.key === "Escape") { e.preventDefault(); this.cancelEdit(); }
+                    }}
                     style="width:28px; height:28px; padding:0; border:none; background:none; cursor:pointer;" />
                   <input class="tag-edit-name" .value=${this.editName}
                     placeholder="Tag name"
@@ -369,6 +379,9 @@ export class TagChipsElement extends LitElement {
                       background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);" />
                   <button class="inline-button" title="Save changes" @click=${() => void this.saveEdit(t.id)}
                     style="padding:5px 10px;">Save</button>
+                  <button class="inline-button" title="Remove this tag from this recording"
+                    @click=${() => { this.editingTagId = null; void this.detach(t.id); window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-detail" } })); }}
+                    style="padding:5px 10px;">Remove</button>
                   <button class="inline-button" title="Cancel" @click=${() => this.cancelEdit()}
                     style="padding:5px 8px;">✕</button>
                 </div>

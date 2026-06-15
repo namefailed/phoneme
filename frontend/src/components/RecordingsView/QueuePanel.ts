@@ -135,12 +135,14 @@ export class QueuePanelElement extends LitElement {
     const isListRendered = !!queueList;
 
     const justRendered = isListRendered && !this.wasListRendered;
-    const itemsAdded = currentPendingCount > this.lastPendingCount;
+    // Keep the list pinned to the bottom as it GROWS or DRAINS (an item finishing
+    // shrinks the list) — the next-to-process item lives at the bottom.
+    const countChanged = currentPendingCount !== this.lastPendingCount;
 
     this.wasListRendered = isListRendered;
     this.lastPendingCount = currentPendingCount;
 
-    if (queueList && (justRendered || itemsAdded)) {
+    if (queueList && (justRendered || countChanged)) {
       await this.updateComplete;
       queueList.scrollTop = queueList.scrollHeight;
     }

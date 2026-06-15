@@ -1,13 +1,18 @@
 /* Model-picker modal — extends the shared .modal-* styles. */
 
 .mp-dialog {
-  /* Wide enough that the 7-tab strip fits on one row, with a height cap +
-     scroll so tall panels (Transcription/Post-processing) never clip their
-     footer on short viewports (J1). The anchored-dropdown variant below sets
-     its own width/height and is unaffected. */
-  width: min(560px, calc(100vw - 48px));
+  /* Wide enough that the 7-tab strip fits on one row (it wrapped at 560), with a
+     height cap + scroll so tall panels (Transcription/Post-processing) never clip
+     their footer on short viewports (J1). The anchored-dropdown variant below
+     sets its own width/height and is unaffected. */
+  width: min(680px, calc(100vw - 48px));
   max-height: calc(100vh - 64px);
   overflow-y: auto;
+}
+/* Breathing room between the scrolling panel content and the pinned action row —
+   the buttons were sitting flush against the last field. */
+.mp-dialog .modal-actions {
+  margin-top: 18px;
 }
 
 /* Anchored (dropdown) mode — opened from the "Re-transcribe ▾" caret. The
@@ -46,8 +51,9 @@
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 8px 11px;
-  font-size: 0.9286rem;
+  /* Tighter so all seven tabs fit one row in the wider dialog. */
+  padding: 7px 9px;
+  font-size: 0.875rem;
   white-space: nowrap;
   color: var(--fg-muted);
   cursor: pointer;

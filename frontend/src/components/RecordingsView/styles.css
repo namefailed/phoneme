@@ -1784,7 +1784,11 @@ ph-sidebar {
      cap is overridable per-device by dragging the top splitter (inline
      max-height set by QueuePanel). */
   max-height: min(60vh, 520px);
-  overflow-y: auto;
+  /* Always show the scrollbar track (not auto) so the list doesn't jump as items
+     come and go. QueuePanel keeps it scrolled to the BOTTOM — the next item to
+     process sits there and pending work stacks upward from it. (Normal `column`
+     order keeps DOM order == visual order so the j/k queue nav stays correct.) */
+  overflow-y: scroll;
   padding: 6px 8px 8px;
   display: flex;
   flex-direction: column;
