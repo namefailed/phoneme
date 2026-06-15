@@ -81,6 +81,14 @@ The three panes — sidebar · list · detail — form a grid you roam with
 `h`/`l` (left/right) and `j`/`k` (down/up). Entering a pane lands a visible
 cursor immediately.
 
+**Each pane remembers where you were.** Leave the list, sidebar, header strip,
+or a recording's detail pane and come back, and the cursor returns to the row /
+control you left — so bouncing between panes never loses your place. The first
+time you enter a pane it lands on a sensible default (the list's first row, the
+sidebar's top, the header's search box); after that it restores. The detail
+pane remembers **per recording**, so opening a different one starts fresh on its
+transcript rather than a stale cell.
+
 **Sidebar** — `j`/`k` step through everything: the Library filters, the Tags
 filters, the **section headers** (Enter folds/unfolds them), and the **queue**
 (its pending items, the pinned active item, and the queue header). On queue

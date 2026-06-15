@@ -271,6 +271,17 @@ trust boundary. Verified against current code.*
   now cross between them at a row's edge (the detail grid's per-row `h`/`l` still
   walks a row's buttons in the middle), and `g 1` / `g 2` jump straight to the
   left / right pane.
+- [x] **Pane cursor memory everywhere** — every pane now remembers where your
+  cursor was and restores it on return, not just the detail pane: leave the
+  **sidebar** or the **header strip** (e.g. down to the list, back up with `k`)
+  and you land on the same cell/control you left, instead of snapping to the top
+  row / search box each time. First entry still lands on a sensible default; the
+  header falls back to the search box and `g /` always goes there.
+- [x] **`:w` / `:wq` save again from the vim Ex dialog** — the `:` command runs
+  as a CodeMirror panel that holds focus while the command fires, so the editors'
+  content-only `hasFocus` check skipped the save. They now accept focus anywhere
+  in the editor (the content **or** its `:` dialog), so `:w` / `:wq` / `:x`
+  commit the transcript and notes again.
 - [x] **Edited transcripts re-sync the Synced & Timeline views** — when you edit
   and save a transcript, the per-word and per-segment timing layers are re-flowed
   onto your new text (`phoneme_core::realign`), so the **Synced** (per-word) and

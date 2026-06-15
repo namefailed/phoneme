@@ -649,11 +649,11 @@ export class RecordingsView {
     const panes = this.panesInOrder();
     if (!panes.includes(pane)) pane = panes[0];
     const isDetail = pane === "detail" || pane === "detail2";
-    // Re-home the per-pane keyboard cursors whenever pane focus changes: clear
-    // both highlights, drop the cursor of any pane being LEFT (re-entering
-    // lands fresh), and let the entered pane re-land below.
+    // Clear the visible cursors when pane focus changes, but KEEP the sidebar's
+    // row/col so returning to it lands where you left (the list and detail panes
+    // already remember their spot). The very first sidebar entry — row still -1 —
+    // lands on the top row; subsequent returns restore the remembered cell.
     this.clearSidebarCursorHighlight();
-    if (pane !== "sidebar") { this.sidebarRow = -1; this.sidebarCol = 0; }
     this.container.querySelectorAll(".rv-detail .kbd-cursor").forEach((i) => i.classList.remove("kbd-cursor"));
     // Leaving (or switching) recording panes drops the grid cursor; arriving
     // lands fresh on the transcript (see enterDetailNav below).
@@ -861,9 +861,9 @@ export class RecordingsView {
     for (const p of ["sidebar", "list", "detail"] as const) {
       this.paneEl(p)?.classList.remove("rv-pane-focused");
     }
+    // Hide the sidebar's cursor but keep its row/col, so returning to the sidebar
+    // later lands where you left it (matches the list/detail pane memory).
     this.clearSidebarCursorHighlight();
-    this.sidebarRow = -1;
-    this.sidebarCol = 0;
     document.querySelector<HTMLInputElement>(".headerbar input.search")?.focus();
   }
 

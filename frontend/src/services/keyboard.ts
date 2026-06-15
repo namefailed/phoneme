@@ -225,6 +225,11 @@ function headerControls(): HTMLElement[] {
 
 /** Index of the header control the vim cursor is on; -1 when not in header nav. */
 let headerCursor = -1;
+/** The header cell we were last on before leaving (e.g. `j`/Esc down to the
+ *  list), so returning to the header (k at the list/sidebar top) lands back
+ *  there — the "remember where I came from" memory the panes have. -1 until the
+ *  header has been roved once; a fresh entry then falls back to the search box. */
+let lastHeaderCursor = -1;
 
 /** When Enter "opens" the header control under the cursor, we sub-navigate it:
  *  a custom dropdown (Record / Settings) whose `[role=menuitem*]` items we step
@@ -310,6 +315,8 @@ function highlightHeaderCursor() {
 function exitHeaderNav() {
   closeHeaderSub(true);
   document.querySelectorAll(".headerbar .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
+  // Remember the spot so coming back up (k at the list/sidebar top) restores it.
+  if (headerCursor >= 0) lastHeaderCursor = headerCursor;
   headerCursor = -1;
 }
 
@@ -318,14 +325,20 @@ function exitHeaderNav() {
  *  with Enter/i (focus the box to type, or activate a button) or j/Esc (back to
  *  the list). Focus goes to the bar container, which isn't a typing target, so
  *  the global key handler keeps routing the keys. */
-function enterHeaderNav() {
+function enterHeaderNav(opts?: { restore?: boolean }) {
   const bar = document.querySelector<HTMLElement>(".headerbar");
   if (!bar) return;
   headerSub = null;
   document.querySelectorAll(".rv-pane-focused").forEach((el) => el.classList.remove("rv-pane-focused"));
   const items = headerControls();
-  const searchIdx = items.findIndex((el) => el.classList.contains("search"));
-  headerCursor = searchIdx >= 0 ? searchIdx : 0;
+  // Returning to the header (k at the list/sidebar top) restores the cell we
+  // left from; a fresh entry (g /) lands on the search box.
+  if (opts?.restore && lastHeaderCursor >= 0 && lastHeaderCursor < items.length) {
+    headerCursor = lastHeaderCursor;
+  } else {
+    const searchIdx = items.findIndex((el) => el.classList.contains("search"));
+    headerCursor = searchIdx >= 0 ? searchIdx : 0;
+  }
   bar.setAttribute("tabindex", "-1");
   bar.focus({ preventScroll: true });
   highlightHeaderCursor();
@@ -959,7 +972,7 @@ export function initKeyboard() {
   window.addEventListener("config:saved", (e: Event) => apply((e as CustomEvent).detail));
   // The list dispatches this when k is pressed at the top — highlight the search
   // box (don't focus it) so h/l can roam the header without typing.
-  window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav());
+  window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav({ restore: true }));
   // RecordingsView announces when the detail pane has captured the keys for an
   // open dropdown ("sub") or the waveform scrub mode ("wave"), or released them
   // (null), so the layer above can route j/k/h/l/H/L/Enter/Esc accordingly.
