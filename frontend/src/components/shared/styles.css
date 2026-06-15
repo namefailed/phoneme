@@ -62,6 +62,31 @@ body.phoneme-hide-header-instant #hdr {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent),
     0 0 10px color-mix(in srgb, var(--accent) 45%, transparent);
 }
+/* The keyboard "cycle" list we render beside a native <select> (status filter)
+   while j/k cycle it — so the options, their order, and the current one are
+   visible (the native popup can't be opened from JS). */
+.hb-select-cycle-pop {
+  z-index: 1000;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: var(--popup-border, 1px solid var(--border-subtle));
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.hb-select-cycle-item {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.hb-select-cycle-item.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
 .headerbar {
   background: var(--bg-surface);
   padding: 10px 14px;

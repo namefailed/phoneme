@@ -196,11 +196,12 @@ export class TagChipsElement extends LitElement {
     this.editingTagId = t.id;
     this.editName = t.name;
     this.editColor = t.color ?? "#cba6f7";
-    // Focus + select the name field once the popover renders.
+    // Focus the popover CONTAINER (not the name field) once it renders, so Enter
+    // on a chip doesn't drop straight into text editing — h/l (or Tab) then move
+    // across color / name / Save / Remove / Cancel; the name field only takes
+    // typing once you land on it.
     setTimeout(() => {
-      const input = this.renderRoot.querySelector<HTMLInputElement>(".tag-edit-name");
-      input?.focus();
-      input?.select();
+      this.renderRoot.querySelector<HTMLElement>(".tag-edit-pop")?.focus();
     }, 0);
   }
 
@@ -354,7 +355,23 @@ export class TagChipsElement extends LitElement {
                   @click=${(e: Event) => { e.stopPropagation(); void this.detach(t.id); }}>×</button>
               </span>
               ${editing ? html`
-                <div class="tag-edit-pop" @click=${(e: Event) => e.stopPropagation()}
+                <div class="tag-edit-pop" tabindex="-1" @click=${(e: Event) => e.stopPropagation()}
+                  @keydown=${(e: KeyboardEvent) => {
+                    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.cancelEdit(); return; }
+                    // h/l (or ←/→) rove focus across color · name · Save · Remove ·
+                    // Cancel — but NOT while typing in the name field (so the letters
+                    // h and l still type). Use Tab from the name field to leave it.
+                    const typing = (document.activeElement as HTMLElement | null)?.classList.contains("tag-edit-name");
+                    if (!typing && (e.key === "h" || e.key === "l" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+                      e.preventDefault();
+                      const items = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>("input, button")];
+                      if (!items.length) return;
+                      const fwd = e.key === "l" || e.key === "ArrowRight";
+                      const cur = items.indexOf(document.activeElement as HTMLElement);
+                      const ni = cur < 0 ? (fwd ? 0 : items.length - 1) : (cur + (fwd ? 1 : -1) + items.length) % items.length;
+                      items[ni].focus();
+                    }
+                  }}
                   style="position:absolute; top:calc(100% + 6px); left:0; z-index:70;
                     display:flex; align-items:center; gap:8px; padding:8px;
                     background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.12));

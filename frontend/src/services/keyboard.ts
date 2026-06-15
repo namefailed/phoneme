@@ -249,8 +249,10 @@ function highlightHeaderSub() {
     headerSub.opener.classList.add("kbd-cursor");
   } else {
     // A native <select> can't pop its options from JS, so signal "you're now
-    // cycling this" with a bolder border (.kbd-cycle) on top of the cursor ring.
+    // cycling this" with a bolder border (.kbd-cycle) AND render our own option
+    // list beside it so you can see the choices and where you are.
     headerSub.el.classList.add("kbd-cursor", "kbd-cycle");
+    renderStatusOverlay(headerSub.el);
   }
 }
 
@@ -259,10 +261,41 @@ function highlightHeaderSub() {
 function closeHeaderSub(closeMenu: boolean) {
   if (headerSub?.kind === "menu" && closeMenu) headerSub.opener.click();
   headerSub = null;
+  removeStatusOverlay();
   document.querySelectorAll("[role='menu'] .kbd-cursor").forEach((el) => el.classList.remove("kbd-cursor"));
 }
 
+/** A native <select>'s option list can't be popped open from JS, so while you
+ *  cycle it with j/k we render our OWN little list beside it — highlighting the
+ *  current option — so you can see the choices, their order, and where you are. */
+let statusOverlay: HTMLElement | null = null;
+function renderStatusOverlay(sel: HTMLSelectElement) {
+  if (!statusOverlay) {
+    statusOverlay = document.createElement("div");
+    statusOverlay.className = "hb-select-cycle-pop";
+    document.body.appendChild(statusOverlay);
+  }
+  const r = sel.getBoundingClientRect();
+  statusOverlay.style.cssText =
+    `position:fixed; top:${Math.round(r.bottom + 4)}px; left:${Math.round(r.left)}px; min-width:${Math.round(r.width)}px;`;
+  statusOverlay.replaceChildren(
+    ...[...sel.options].map((o, i) => {
+      const d = document.createElement("div");
+      d.className = "hb-select-cycle-item" + (i === sel.selectedIndex ? " active" : "");
+      d.textContent = o.textContent ?? "";
+      return d;
+    }),
+  );
+  statusOverlay.querySelector(".hb-select-cycle-item.active")?.scrollIntoView({ block: "nearest" });
+}
+function removeStatusOverlay() {
+  statusOverlay?.remove();
+  statusOverlay = null;
+}
+
 function highlightHeaderCursor() {
+  // Roving the header means we're no longer cycling a <select> — drop its overlay.
+  removeStatusOverlay();
   const items = headerControls();
   items.forEach((el) => el.classList.remove("kbd-cursor", "kbd-cycle"));
   const el = items[headerCursor];
@@ -607,6 +640,7 @@ function onKeyDown(e: KeyboardEvent) {
                 sel.selectedIndex++;
                 sel.dispatchEvent(new Event("change", { bubbles: true }));
               }
+              renderStatusOverlay(sel);
               return;
             case "k":
             case "ArrowUp":
@@ -615,6 +649,7 @@ function onKeyDown(e: KeyboardEvent) {
                 sel.selectedIndex--;
                 sel.dispatchEvent(new Event("change", { bubbles: true }));
               }
+              renderStatusOverlay(sel);
               return;
             case "i":
             case "Enter":

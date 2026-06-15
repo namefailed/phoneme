@@ -134,6 +134,11 @@ export class RecordingsView {
    *  that row. row -1 = not in detail nav. */
   private detailRow = -1;
   private detailCol = 0;
+  /** Where the detail cursor was when you last stepped OUT to the list (tagged
+   *  with the recording id). Re-entering the SAME recording's detail restores it
+   *  (h→list then l back, or g d), so a round-trip remembers where you were;
+   *  opening a different recording falls back to the transcript. */
+  private lastDetailPos: { row: number; col: number; id: string | null } | null = null;
   /** Open detail-pane dropdown being keyboard-driven (Speed / Export / Views /
    *  Versions / Pipeline): j/k cycle its items, Enter activates, Esc closes. */
   private detailSub: { trigger: HTMLElement; items: HTMLElement[]; index: number } | null = null;
@@ -1122,6 +1127,20 @@ export class RecordingsView {
   private enterDetailNav() {
     const rows = this.detailGrid();
     if (!rows.length) return;
+    // Returning to the SAME recording's detail? Restore where you stepped out
+    // from (h→list then back), if that cell still exists. Otherwise land on the
+    // transcript — the natural entry point.
+    const saved = this.lastDetailPos;
+    if (
+      saved && saved.id === this.state.get().selectedId &&
+      saved.row >= 0 && saved.row < rows.length &&
+      saved.col >= 0 && saved.col < rows[saved.row].length
+    ) {
+      this.detailRow = saved.row;
+      this.detailCol = saved.col;
+      this.highlightDetail();
+      return;
+    }
     const t = rows.findIndex((row) => row[0]?.el.classList.contains("transcript-block"));
     this.detailRow = t >= 0 ? t : 0;
     this.detailCol = 0;
@@ -1161,7 +1180,13 @@ export class RecordingsView {
     const row = rows[this.detailRow];
     if (!row) { this.focusPane("list"); return; }
     const next = this.detailCol + delta;
-    if (next < 0) { this.focusPane("list"); return; } // h at the start → list
+    if (next < 0) {
+      // h at the start → list. Remember where we were so coming back to THIS
+      // recording's detail (l, or g d) lands here again.
+      this.lastDetailPos = { row: this.detailRow, col: this.detailCol, id: this.state.get().selectedId };
+      this.focusPane("list");
+      return;
+    }
     if (next >= row.length) return; // l at the end stays
     this.detailCol = next;
     this.highlightDetail();

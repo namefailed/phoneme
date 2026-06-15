@@ -273,7 +273,7 @@ export class RecordingDetail {
             <button class="detail-focus-btn" id="detail-close" aria-label="Close recording" title="Close — back to the recordings list">${CLOSE_SVG}</button>
           </div>
         </div>
-        <div class="waveform" id="wf-${r.id}"></div>
+        <div class="waveform" id="wf-${r.id}"><span class="wf-speed-badge" id="wf-speed-${r.id}" title="Playback speed">${readPlaybackSpeed()}×</span></div>
         <div id="actions"></div>
         <div id="tags"></div>
         <div class="transcript-block">
@@ -330,7 +330,11 @@ export class RecordingDetail {
         onRefresh: () => this.onRefresh(),
         getTranscript: () => this.recording?.transcript ?? "",
         getSpeakerNames: () => this.recording?.speaker_names ?? [],
-        onSetSpeed: (rate) => this.player.setPlaybackRate(rate),
+        onSetSpeed: (rate) => {
+          this.player.setPlaybackRate(rate);
+          const badge = this.container.querySelector<HTMLElement>(`#wf-speed-${r.id}`);
+          if (badge) badge.textContent = `${rate}×`;
+        },
       });
       this.player.setOnPlayStateChange((playing) => row.setPlayState(playing));
     }

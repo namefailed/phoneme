@@ -249,6 +249,24 @@ mark.search-hit {
   border-radius: 8px;
   padding: 12px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  /* Anchor for the playback-speed badge in the top-right corner. */
+  position: relative;
+}
+/* Tiny playback-speed badge floating over the waveform's top-right corner. */
+.wf-speed-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.6429rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-deep));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  pointer-events: none;
 }
 .action-row {
   padding: 0 18px 12px;
