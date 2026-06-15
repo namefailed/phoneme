@@ -145,8 +145,9 @@ export class SectionPreview {
       <div class="settings-section">
         <h3>Live Preview <span class="beta-pill" title="Live preview works but isn't smooth yet — a dedicated overhaul phase is on the roadmap. Off by default.">BETA</span></h3>
         <p style="font-size: 0.8571rem; color:var(--fg-muted); margin:0 0 4px;">
-          Shows transcription as you speak. Give it its own fast model or API so it
-          never slows down your final transcription.
+          Shows transcription as you speak. The preview runs on its <b>own fast model</b>, on a
+          separate server from your final (high-quality) transcription — so a snappy live overlay
+          never slows the real transcript down. (Dictation borrows this same fast model by default.)
         </p>
 
         <div class="settings-field">
@@ -209,7 +210,9 @@ export class SectionPreview {
         <div class="settings-field">
           <label>Reveal speed
             <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              How fast live words stream in. <b>0</b> shows each update instantly (no smoothing).
+              How fast words stream into the overlay, word by word. <b>Higher = a smoother crawl</b>
+              (12 is a good default). <b>0 = each update appears instantly</b>, no smoothing — not a
+              slower crawl. Applies to the recording overlay; dictation types straight at your cursor.
             </span>
           </label>
           <div>

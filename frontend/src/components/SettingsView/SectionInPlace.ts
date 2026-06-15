@@ -76,6 +76,16 @@ export class SectionInPlace {
     return (this.config.whisper?.bundled_server_port ?? 5809) as number;
   }
 
+  /** True when the main transcription model is a heavy local model (medium /
+   *  large) — pointing dictation at it (Custom → Main) makes dictations slow.
+   *  A cloud main model has no local cost to borrow, so it's never "heavy". */
+  private mainModelIsHeavy(): boolean {
+    const w = this.config.whisper;
+    if (!w) return false;
+    if (w.provider && w.provider !== "local") return false;
+    return /medium|large/i.test(String(w.model_path ?? ""));
+  }
+
   /** Port of the live preview's dedicated server when it has one; else the
    *  conventional main+1 (what SectionPreview assigns its local config). */
   private previewPort(): number {
@@ -186,7 +196,12 @@ export class SectionInPlace {
             <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
               <b>Automatic</b> needs no setup: dictation borrows the Live Preview's fast model
               while the preview is enabled (that server is already running), else the main
-              transcription provider. <b>Custom</b> pins dictation to its own provider and model.
+              transcription provider. <b>Custom</b> pins dictation to its own provider and model —
+              point it at your main model for higher accuracy (slower, since that's the large one),
+              or at a cloud API (e.g. Groq) for dictation that's fast <i>and</i> accurate.
+              Phoneme runs at most <b>two</b> local whisper models at once — your main one and the
+              Live Preview's fast one — so a local Custom choice reuses one of those servers rather
+              than loading a third. (A separate cloud provider here doesn't count against that.)
             </span>
           </div>
         </div>
@@ -356,6 +371,11 @@ export class SectionInPlace {
             ${
               server === "preview" && !previewServerRuns
                 ? `<span style="font-size: 0.7857rem; color: var(--err); display: block;">The Live Preview isn't set to run its own local server right now — enable it with a dedicated local model (Transcription → Live Preview), or dictations will fail.</span>`
+                : ""
+            }
+            ${
+              server === "main" && this.mainModelIsHeavy()
+                ? `<div style="margin-top:8px; padding:8px 10px; border-left:3px solid var(--accent, #89b4fa); background:color-mix(in srgb, var(--accent, #89b4fa) 12%, transparent); border-radius:6px; font-size: 0.7857rem; color:var(--fg-default); line-height:1.5;">⚠️ Your main transcription model is large, so dictation through it will be slow. For fast dictation, switch to <b>Automatic</b> (above) or the Live Preview's fast-model server; for fast <i>and</i> accurate, point Custom at a cloud provider (e.g. Groq).</div>`
                 : ""
             }
           </div>

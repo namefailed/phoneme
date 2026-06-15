@@ -89,6 +89,19 @@ const TRACK_ICON: Record<string, string> = { mic: "🎤", system: "🔊" };
  *  Loaded with the theme below and re-read at each meeting start. */
 let meetingMode: "toggle" | "both" = "toggle";
 
+/** Apply the live-preview feel/perf knobs from a fresh config read. Called at
+ *  startup AND on every recording start, so changing the reveal speed, waveform,
+ *  idle window, or meeting layout in Settings takes effect on the very next
+ *  recording — no app restart needed. (Theme is applied once, at startup only.) */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyPreviewTuning(cfg: any) {
+  meetingMode = cfg?.recording?.meeting_preview === "both" ? "both" : "toggle";
+  waveEnabled = cfg?.recording?.preview_waveform !== false;
+  if (typeof cfg?.recording?.preview_idle_ms === "number") idleMs = cfg.recording.preview_idle_ms;
+  if (typeof cfg?.recording?.preview_reveal_words_per_sec === "number")
+    revealWps = cfg.recording.preview_reveal_words_per_sec;
+}
+
 // Apply the saved theme so the overlay matches the app's look. Falls back to the
 // CSS default if the config read fails — the overlay must never block on it.
 void (async () => {
@@ -97,11 +110,7 @@ void (async () => {
     if (cfg?.interface?.theme) {
       document.documentElement.setAttribute("data-theme", cfg.interface.theme);
     }
-    meetingMode = cfg?.recording?.meeting_preview === "both" ? "both" : "toggle";
-    waveEnabled = cfg?.recording?.preview_waveform !== false;
-    if (typeof cfg?.recording?.preview_idle_ms === "number") idleMs = cfg.recording.preview_idle_ms;
-    if (typeof cfg?.recording?.preview_reveal_words_per_sec === "number")
-      revealWps = cfg.recording.preview_reveal_words_per_sec;
+    applyPreviewTuning(cfg);
   } catch {
     /* keep CSS defaults */
   }
@@ -322,15 +331,13 @@ void listen<any>("daemon-event", async (e) => {
   switch (p?.event) {
     case "recording_started": {
       previewPinned = false; // a real recording ends any manual preview pinning
+      // Re-read the feel/perf knobs so a Settings change (reveal speed, waveform,
+      // idle window, meeting layout) takes effect on the very next recording — no
+      // app restart. Cheap local IPC; falls back to the last-known values.
+      try {
+        applyPreviewTuning(await invoke<any>("read_config"));
+      } catch { /* keep last-known tuning */ }
       if (p.meeting_id && typeof p.track === "string") {
-        // A meeting track. Re-read the layout mode on the FIRST track (cheap,
-        // and it makes a settings change apply to the next meeting, no reload).
-        if (meetingTracks.size === 0) {
-          try {
-            const cfg = await invoke<any>("read_config");
-            meetingMode = cfg?.recording?.meeting_preview === "both" ? "both" : "toggle";
-          } catch { /* keep last-known mode */ }
-        }
         meetingTracks.set(p.id, p.track);
         clearAllText();
         setShape(meetingMode === "both" ? "both" : "single");

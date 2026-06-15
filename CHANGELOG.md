@@ -69,6 +69,17 @@ trust boundary. Verified against current code.*
   line of code" mid-sentence stays literal) and honored in every cleanup mode —
   fast, off, and llm (the LLM is told to interpret them; the rule pass is the
   fallback). 12 unit tests.
+- [x] **Live-preview tuning applies without a restart + clearer help.** The overlay
+  now re-reads its feel/perf knobs (reveal speed, waveform, idle window, meeting
+  layout) on every recording start, so a Settings change takes effect on the next
+  recording instead of only after an app restart (`frontend/overlay.ts`). The
+  **Reveal speed** help now spells out that higher = a smoother word-by-word crawl
+  and **0 = instant** (not a slower crawl), and that it covers the recording overlay
+  (dictation types straight at the cursor). Live Preview and Dictation settings now
+  explain the two-server model — a fast preview model on its own server, separate
+  from the heavy final one, with dictation borrowing that fast model by default —
+  and **Dictation → Custom → main server** warns inline when that main model is large
+  (slow dictation), pointing toward Automatic or a cloud provider.
 - [x] **System-wide live-preview overlay** — an opt-in, always-on-top, frameless
   desktop window that floats the live caption over any app, even when the main
   window is hidden (`src-tauri/src/overlay.rs`, `frontend/overlay.*`); gated on

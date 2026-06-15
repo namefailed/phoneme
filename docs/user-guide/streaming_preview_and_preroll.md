@@ -78,11 +78,12 @@ With `interface.preview_overlay = true`, the live caption also appears in a fram
 
 **Settings → Transcription → Live Preview → Feel & performance** tunes how the
 preview reads. The defaults are designed to stay smooth on a modest machine.
+Changes here take effect on your **next recording** — no app restart needed.
 
 | Setting | Config key | Default | What it does |
 |---------|-----------|---------|--------------|
 | Auto-throttle on slow machines | `recording.preview_adaptive` | `true` | When a preview update takes longer than its interval (a heavy model on a modest box), the daemon automatically slows the cadence toward the update's own cost (capped at 8 s) instead of thrashing the machine — the fix for "live preview makes recording lag/crash". Turn it off for a fixed update rate. |
-| Reveal speed | `recording.preview_reveal_words_per_sec` | `12` | How fast live words stream into the overlay. Words flow in like speech instead of the caption jumping a whole chunk per update; a correction (when Whisper revises earlier words) still appears instantly. **`0`** = show each update the moment it arrives (no smoothing). |
+| Reveal speed | `recording.preview_reveal_words_per_sec` | `12` | How fast words stream into the overlay, word by word. **Higher = a smoother crawl** — words flow in like speech instead of the caption jumping a whole chunk per update (a correction, when Whisper revises earlier words, still appears instantly). **`0` = each update appears instantly** (no smoothing) — *not* a slower crawl, so set a positive value (12 is a good start) if you want the smooth word-by-word effect. Covers the recording overlay; dictation types straight at your cursor. |
 | Overlay waveform | `recording.preview_waveform` | `true` | Shows the **"it hears me"** bars in the desktop overlay — live audio levels so you can see your voice is being captured, even between words. Cheap (an audio-level reading, no extra transcription), and it runs for single recordings, in-place dictation, and meetings. |
 | "Listening" after | `recording.preview_idle_ms` | `2500` | When no new words arrive for this long, the overlay label calms from **LIVE** to **LISTENING** instead of leaving a frozen caption. |
 
