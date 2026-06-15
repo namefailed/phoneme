@@ -662,10 +662,25 @@ export class RecordingDetail {
     const btn = this.container.querySelector<HTMLButtonElement>("#detail-pipeline-btn");
     const pop = this.container.querySelector<HTMLElement>("#detail-pipeline-pop");
     if (!btn || !pop) return;
+    // The popover is position:fixed (so the detail pane's overflow can't clip it).
+    // Anchor it above the button, left-aligned, then clamp into the viewport so a
+    // long model-name value never spills off-screen or off the pane edge.
+    const place = () => {
+      const r = btn.getBoundingClientRect();
+      pop.style.top = "auto";
+      pop.style.bottom = `${Math.round(window.innerHeight - r.top + 6)}px`;
+      const maxW = Math.min(440, window.innerWidth - 24);
+      pop.style.maxWidth = `${maxW}px`;
+      let left = r.left;
+      if (left + maxW > window.innerWidth - 12) left = Math.max(12, window.innerWidth - 12 - maxW);
+      pop.style.left = `${Math.round(left)}px`;
+    };
     const close = () => {
       pop.setAttribute("hidden", "");
       btn.setAttribute("aria-expanded", "false");
       document.removeEventListener("click", onDoc, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
     };
     const onDoc = (e: MouseEvent) => {
       if (!pop.contains(e.target as Node) && e.target !== btn) close();
@@ -675,7 +690,11 @@ export class RecordingDetail {
       if (pop.hasAttribute("hidden")) {
         pop.removeAttribute("hidden");
         btn.setAttribute("aria-expanded", "true");
+        place();
         document.addEventListener("click", onDoc, true);
+        // Keep it pinned to the button if the pane scrolls or the window resizes.
+        window.addEventListener("resize", place);
+        window.addEventListener("scroll", place, true);
       } else {
         close();
       }

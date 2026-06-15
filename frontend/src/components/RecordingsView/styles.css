@@ -915,15 +915,15 @@ mark.search-hit {
   font-size: 10px;
 }
 .detail-pipeline-pop {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  /* The Pipeline button now sits on the LEFT of the footer, so open the popover
-     rightward into the pane. */
-  left: 0;
-  right: auto;
-  z-index: 60;
+  /* FIXED, not absolute: the detail pane is an overflow scroll container, which
+     clips an absolutely-positioned child — that's why long model-name values were
+     crowded/cut at the pane edge. Fixed positioning escapes every ancestor clip;
+     wirePipeline() sets bottom/left from the button's rect and clamps to the
+     viewport so the popover never spills off-screen. */
+  position: fixed;
+  z-index: 1000;
   min-width: 280px;
-  max-width: min(480px, 90vw);
+  max-width: min(440px, calc(100vw - 24px));
   background: var(--bg-elevated);
   /* Match every other popup in the app. */
   border: var(--popup-border, 1px solid var(--border-subtle));
@@ -949,7 +949,10 @@ mark.search-hit {
    columns so every row reads cleanly down the popover. */
 .dp-row {
   display: grid;
-  grid-template-columns: 20px 96px 1fr;
+  /* minmax(0, 1fr) lets the value track shrink below its content size (a plain
+     1fr won't) so a long model name wraps inside the popover instead of forcing
+     the grid wider than it. */
+  grid-template-columns: 20px 92px minmax(0, 1fr);
   align-items: baseline;
   gap: 3px 10px;
   padding: 6px 10px;
@@ -963,7 +966,7 @@ mark.search-hit {
 /* overflow-wrap:anywhere lets a long model name (or path) wrap to a second line
    WITHIN its column and, crucially, lets the 1fr track shrink instead of forcing
    the grid wider than the popover — so values never crowd or spill past the edge. */
-.dp-value { min-width: 0; color: var(--fg-default); font-weight: 600; overflow-wrap: anywhere; }
+.dp-value { min-width: 0; color: var(--fg-default); font-weight: 600; overflow-wrap: anywhere; word-break: break-word; }
 
 /* Notes Copy button: faded by default (inline style), lights up on hover.
    !important beats the element's inline base style for the hover state. */
