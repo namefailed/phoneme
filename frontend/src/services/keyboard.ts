@@ -948,7 +948,15 @@ export function initKeyboard() {
     (e) => {
       if (!vimNav) return;
       const target = e.target as HTMLElement | null;
-      if (!target || typeof target.closest !== "function" || !target.closest(".headerbar")) return;
+      if (!target || typeof target.closest !== "function") return;
+      if (!target.closest(".headerbar")) {
+        // Clicking into the rest of the app drops the roving header cursor so its
+        // highlight doesn't linger. The keydown clear (onKeyDown) only fires on a
+        // key press, so a mouse click away used to leave header/search controls
+        // stuck highlighted.
+        if (headerCursor >= 0) exitHeaderNav();
+        return;
+      }
       const items = headerControls();
       const ctrl = items.find((el) => el === target || el.contains(target));
       if (!ctrl) return;
