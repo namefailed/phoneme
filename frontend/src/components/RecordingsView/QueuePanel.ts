@@ -45,6 +45,18 @@ export class QueuePanelElement extends LitElement {
   private extraEntries = new Map<string, QueueEntry>();
   private wasListRendered = false;
   private lastPendingCount = 0;
+  /** Queue ids already rendered, so a row's one-shot enter animation fires once
+   *  (a recording joining the queue) and never re-fires on refreshes. */
+  private seenQ = new Set<string>();
+  /** This render's brand-new queue ids (recomputed each willUpdate). */
+  private freshQ = new Set<string>();
+
+  protected willUpdate() {
+    const ids = [...this.items.map((i) => i.id), ...this.extraEntries.keys()];
+    const baseline = this.seenQ.size === 0;
+    this.freshQ = baseline ? new Set() : new Set(ids.filter((id) => !this.seenQ.has(id)));
+    for (const id of ids) this.seenQ.add(id);
+  }
 
   /** Min/max drag bounds for the queue list height. */
   private static readonly MIN_H = 120;
@@ -398,7 +410,7 @@ export class QueuePanelElement extends LitElement {
       ? stageLabel(this.stages.get(it.id)!)
       : (it.state === "processing" ? "Transcribing…" : "Queued");
     return html`
-      <div class="queue-item ${it.state}">
+      <div class="queue-item ${it.state} ${this.freshQ.has(it.id) ? "queue-item-enter" : ""}">
         <span class="queue-item-icon">${it.state === "processing" ? "⟳" : "•"}</span>
         <div class="queue-item-main" title="Open this recording" @click=${() => this.select(it.id)}>
           <div class="queue-item-title">${formatTime(it.timestamp, this.use24h)} · ${formatDuration(it.duration_ms)}</div>

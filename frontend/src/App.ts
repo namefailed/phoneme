@@ -120,7 +120,13 @@ export class App {
     window.addEventListener("config:saved", (e: any) => {
       const cfg = e.detail;
       if (cfg?.interface?.theme) {
-        document.documentElement.setAttribute("data-theme", cfg.interface.theme);
+        // Cross-fade the whole UI's colours on a runtime theme switch. The
+        // `theme-anim` class is only on for the swap, so it never slows ordinary
+        // hovers; gated by --ui-motion (instant when motion is off / reduced).
+        const root = document.documentElement;
+        root.classList.add("theme-anim");
+        root.setAttribute("data-theme", cfg.interface.theme);
+        window.setTimeout(() => root.classList.remove("theme-anim"), 380);
       }
       if (cfg?.interface?.strip_titlebar !== undefined) {
         getCurrentWindow().setDecorations(!cfg.interface.strip_titlebar);

@@ -23,6 +23,20 @@ body.phoneme-hide-header-instant #hdr {
   }
 }
 
+/* Brief whole-UI colour cross-fade when the theme is switched at runtime (App.ts
+   adds .theme-anim only for the swap, so ordinary hovers are never slowed). Gated
+   by --ui-motion → instant when motion is off / reduced. */
+:root.theme-anim *,
+:root.theme-anim *::before,
+:root.theme-anim *::after {
+  transition:
+    background-color var(--ui-motion) ease,
+    color var(--ui-motion) ease,
+    border-color var(--ui-motion) ease,
+    fill var(--ui-motion) ease,
+    stroke var(--ui-motion) ease !important;
+}
+
 /* Applied tag chips pop in as they mount (animation overhaul · list/tags/queue).
    Reads the master --ui-motion, so motion "off" / reduced-motion → 0ms duration =
    instant (no visible animation). Only plays on a freshly-created chip node, so

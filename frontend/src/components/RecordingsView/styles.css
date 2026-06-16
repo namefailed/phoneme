@@ -1919,6 +1919,21 @@ ph-sidebar {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
 }
+/* A recording joining the queue slides in once (seen-set guarded; gated by
+   --ui-motion → instant when motion is off / reduced). */
+.queue-item.queue-item-enter {
+  animation: queueItemIn var(--ui-motion) cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@keyframes queueItemIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
 .queue-item.processing {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface));
