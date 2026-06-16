@@ -81,12 +81,6 @@ function isEditing(t: EventTarget | null): boolean {
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
 /** Minimum jump (px) before a streak is drawn (trail streaks on every move). */
 const SMEAR_THRESHOLD = 90;
-/** A move longer than this WITHIN one pane is snapped, not slid (the full-width
- *  search bar ↔ the saved-search button at the far end of the header would slide
- *  a huge box clear across). Generous so ordinary within-pane moves — the detail
- *  grid's vertical hops, adjacent header controls — still glide. Cross-PANE moves
- *  snap regardless of distance (handled separately). */
-const JUMP_DIST = 600;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -149,24 +143,12 @@ function place(el: HTMLElement, animate: boolean) {
   const prev = prevEl ? clampRect(prevEl, prevEl.getBoundingClientRect()) : null;
   const dist = prev ? Math.hypot(r.left - prev.left, r.top - prev.top) : 0;
 
-  // A "jump" is a move the glow should NOT slide across: into a DIFFERENT pane
-  // (otherwise the ghost flies in from the pane you just left — entering the
-  // detail pane from the list read as the highlight sliding up out of the list,
-  // streak and all), or a very long hop WITHIN one pane (the full-width search
-  // bar ↔ the saved-search button at the far end of the header — a wide box
-  // sliding clear across). On a jump the highlight is placed at the destination
-  // instantly: no streak, no slide, opacity unchanged, so it simply appears
-  // there. Ordinary short/medium moves still glide.
-  const jump =
-    !!prev && animate && (prevEl!.closest(PANE_SEL) !== el.closest(PANE_SEL) || dist > JUMP_DIST);
-
   // Streak (smear/trail): a box spanning the old + new rects, faded out over the
-  // move — a directional trail of the moving cursor. Skipped on a jump (a streak
-  // bridging two panes is the "smear from the list" we're killing). We also guard
-  // against a TALL union: moving onto the big transcript / notes editors would
-  // flash a pane-tall box. A WIDE-but-short union is fine — full-width list rows
-  // and header hops read as a clean horizontal smear — so width is unrestricted.
-  if (animate && prev && !jump && (m === "smear" || m === "trail")) {
+  // move — a directional trail of the moving cursor. We guard against a TALL union:
+  // moving onto the big transcript / notes editors would flash a pane-tall box. A
+  // WIDE-but-short union is fine — full-width list rows and header hops read as a
+  // clean horizontal smear — so width is unrestricted.
+  if (animate && prev && (m === "smear" || m === "trail")) {
     const left = Math.min(r.left, prev.left);
     const top = Math.min(r.top, prev.top);
     const uW = Math.max(r.right, prev.right) - left;
@@ -190,18 +172,13 @@ function place(el: HTMLElement, animate: boolean) {
     }
   }
 
-  // A jump skips the streak block above, so clear any tail still fading from the
-  // previous move — it must not bridge to the snapped-in destination.
-  if (jump && tail) tail.style.opacity = "0";
-
-  // Glide POSITION only — snap size instantly. Animating width/height too made
-  // the box visibly "fit" each target (grow/shrink), which read as jarring when
-  // sizes differ a lot (a full-width list row → a small control, or between the
-  // varied header controls). Snapping size so only left/top travel makes it read
-  // as the highlight simply moving to the new spot. On a jump even position snaps
-  // (duration 0) — the highlight appears at the destination instead of flying in.
-  g.style.transitionProperty = "left, top, opacity";
-  g.style.transitionDuration = animate && !jump ? `${DUR[m]}ms` : "0ms";
+  // Glide + resize together: the glow smoothly slides AND grows/shrinks into each
+  // control (mini.animate-style), so a small queue button → a tag chip, or any
+  // size change, eases between sizes instead of appearing already at the target
+  // size. left/top/width/height all share one duration so position and size move
+  // as one, never "resize then slide".
+  g.style.transitionProperty = "left, top, width, height, opacity";
+  g.style.transitionDuration = animate ? `${DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
   g.style.width = `${r.width}px`;
