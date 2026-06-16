@@ -724,24 +724,16 @@ export class RecordingDetail {
       pop.setAttribute("hidden", "");
       btn.setAttribute("aria-expanded", "false");
       document.removeEventListener("click", onDoc, true);
-      document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
     const onDoc = (e: MouseEvent) => {
       if (!pop.contains(e.target as Node) && e.target !== btn) close();
     };
-    // Escape closes the popover, like every other dialog. Capture phase + stop
-    // propagation so it doesn't fall through to the global handler (which would
-    // step out of the detail pane / close the recording instead).
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        close();
-        btn.focus({ preventScroll: true });
-      }
-    };
+    // Escape is handled by the detail-grid dropdown layer (this is a `detailSub`):
+    // closeDetailSub() dismisses the popover AND returns the roving cursor to this
+    // button. Adding our own capture-phase Escape here intercepted that and left
+    // the cursor stranded on the highlighted row — so we deliberately don't.
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       if (pop.hasAttribute("hidden")) {
@@ -749,7 +741,6 @@ export class RecordingDetail {
         btn.setAttribute("aria-expanded", "true");
         place();
         document.addEventListener("click", onDoc, true);
-        document.addEventListener("keydown", onKey, true);
         // Keep it pinned to the button if the pane scrolls or the window resizes.
         window.addEventListener("resize", place);
         window.addEventListener("scroll", place, true);
