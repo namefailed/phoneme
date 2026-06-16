@@ -26,7 +26,6 @@ let current: HTMLElement | null = null; // the control the cursor is on now
 let pending: HTMLElement | null = null; // newest .kbd-cursor seen this frame
 let raf = 0;
 let observer: MutationObserver | null = null;
-let resizeObs: ResizeObserver | null = null;
 let installed = false;
 /** Hidden while focus is in a text-editing surface (a CodeMirror editor, a tag
  *  name input): the glow sits right over what you're typing into, so it gets out
@@ -254,15 +253,10 @@ function connect() {
   // Keep the fixed ghost glued to its control as the page scrolls/resizes.
   window.addEventListener("scroll", onReflow, true);
   window.addEventListener("resize", onReflow);
-  // Re-place when the panes themselves change size — the list/detail split being
-  // dragged, or a reload that lays the detail pane out a frame late (otherwise a
-  // full-width list row's glow can momentarily clamp wrong and spill over the
-  // detail pane). Observe the shell + each pane so any of those reflows fixes it.
-  resizeObs = new ResizeObserver(() => onReflow());
-  for (const sel of ["#rv-shell", "#rv-list", "#rv-detail", "#rv-detail2"]) {
-    const node = document.querySelector(sel);
-    if (node) resizeObs.observe(node);
-  }
+  // (No ResizeObserver on the panes: it fired mid-navigation when the detail pane
+  //  opened/resized and snapped the glow, making leaving the list look like it
+  //  grew then jumped. The reload overlap is handled directly in clampRect, which
+  //  clamps a list row to a visible detail pane's left edge regardless of timing.)
   // Hide the glow while typing into an editor / input; restore on the way out.
   document.addEventListener("focusin", onFocusIn);
   document.addEventListener("focusout", onFocusOut);
@@ -274,8 +268,6 @@ function connect() {
 function disconnect() {
   observer?.disconnect();
   observer = null;
-  resizeObs?.disconnect();
-  resizeObs = null;
   window.removeEventListener("scroll", onReflow, true);
   window.removeEventListener("resize", onReflow);
   document.removeEventListener("focusin", onFocusIn);
