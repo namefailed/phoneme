@@ -305,7 +305,7 @@ export class TranscriptEditorElement extends LitElement {
           flex: 0 0 auto;
         }
         /* Spacer pushes the Edited/Save actions to the right while Copy stays
-           anchored beside the title on the left (H1). */
+           anchored beside the title on the left. */
         ph-transcript-editor .header-spacer { flex: 1; }
         ph-transcript-editor .title {
           font-size: 0.7857rem;

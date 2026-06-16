@@ -1,7 +1,7 @@
 //! Doctor checks — local filesystem checks + optional backend probes.
 //!
 //! Shared by the GUI (`phoneme-tray`) and the CLI (`phoneme doctor`) so both
-//! report the same checks with the same probe semantics (audit A-H3). Previously
+//! report the same checks with the same probe semantics. Previously
 //! each had its own copy of the whisper/ollama probe logic and its own
 //! check-result type. The GUI reads `fix_action` to render a one-click
 //! remediation; the CLI ignores it.
