@@ -270,7 +270,9 @@ body.phoneme-hide-header-instant #hdr {
   flex: 1;
   width: 100%;
   font-size: 0.9286rem;
-  transition: all 0.15s ease-out;
+  /* Only fade colours — NOT `all`, which animated the focus box-shadow ring
+     (0 → 1px) so the border looked like it grew/shrank ("fitting"). */
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
 }
 .headerbar .search:focus {
   outline: none;
@@ -291,7 +293,7 @@ body.phoneme-hide-header-instant #hdr {
   align-items: center;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 /* The status <select> shares the pill look; keep its text centered too. */
@@ -327,7 +329,7 @@ input[type="date"].filter-pill::-webkit-calendar-picker-indicator:hover {
   font-size: 1.1429rem;
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 .headerbar .icon-btn:hover {

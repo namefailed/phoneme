@@ -155,7 +155,12 @@ function place(el: HTMLElement, animate: boolean) {
     const top = Math.min(r.top, prev.top);
     const uW = Math.max(r.right, prev.right) - left;
     const uH = Math.max(r.bottom, prev.bottom) - top;
-    const proportionate = uW <= r.width * 2.5 && uH <= r.height * 2.5;
+    // Proportionate to the SMALLER endpoint in BOTH dimensions — so a move to a
+    // large target (e.g. the tall transcript) doesn't let a pane-spanning union
+    // through. Catches the list → detail jump (tall union) and any cross-pane /
+    // size-mismatch move; those skip the streak and just glide.
+    const proportionate =
+      uW <= Math.min(prev.width, r.width) * 2.5 && uH <= Math.min(prev.height, r.height) * 2.5;
     if (proportionate && (m === "trail" || dist > SMEAR_THRESHOLD)) {
       const t = tail!;
       t.style.transitionDuration = "0ms";

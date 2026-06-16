@@ -1203,9 +1203,11 @@ mark.search-hit {
   border-radius: 6px;
 }
 /* The title is large display text, so the tight inset ring used for the small
-   option buttons reads as cramped on it — give it outward breathing room. */
+   option buttons reads as cramped on it — give it a little outward breathing
+   room. Kept small (2px) because the title sits near the detail pane's top edge,
+   and a bigger offset pokes up under the top bar and gets clipped. */
 .rv-detail #detail-title.kbd-cursor {
-  outline-offset: 4px;
+  outline-offset: 2px;
   border-radius: 8px;
 }
 /* The list scroll-area and the detail/sidebar containers take focus (tabindex)
