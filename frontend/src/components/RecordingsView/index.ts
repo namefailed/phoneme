@@ -1016,10 +1016,11 @@ export class RecordingsView {
       // The top bar is hidden — there's nowhere up to go. Stay on the top row
       // rather than stranding focus on an invisible header.
       if (isHeaderHidden()) { this.highlightSidebar(); return; }
+      // Hand the cursor to the header, but KEEP sidebarRow/Col so returning to the
+      // sidebar lands back on this cell (the header-entry clears only the visible
+      // highlight, not the remembered position).
       this.clearSidebarCursorHighlight();
       this.paneEl("sidebar")?.classList.remove("rv-pane-focused");
-      this.sidebarRow = -1;
-      this.sidebarCol = 0;
       this.focusedPane = null;
       window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
       return;
@@ -1800,7 +1801,9 @@ export class RecordingsView {
     // A modal/popup is open: it owns the keyboard (Escape closes IT, not the
     // recording). This view-level handler runs before the modal's own listener,
     // so the overlay is still in the DOM here — bail and let the modal handle it.
-    if (document.querySelector(".modal-overlay")) return;
+    // Matches the `*-modal-overlay` variants (compare / speakers) too, so their
+    // keys never leak to the detail pane behind them.
+    if (document.querySelector('[class*="modal-overlay"]')) return;
 
     // The header bar owns its own keyboard nav while focused (roving cursor +
     // the status-select / Record / Settings dropdown cycling). Don't let this

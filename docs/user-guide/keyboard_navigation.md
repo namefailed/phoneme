@@ -18,6 +18,13 @@ either or both:
 
 Both are independent of the transcript editor's own vim mode (`editor.vim_mode`).
 
+**In modals & popups** (the Re-run / Models picker, Doctor, confirmations, the Tag
+Manager, …): with either layer on, `h`/`l`/`j`/`k` and the arrow keys move a cursor
+across the dialog's controls, `Enter` activates the highlighted one (a button fires,
+a field opens for typing), and `Esc` closes the dialog — the same idiom as the rest
+of the app, so no dialog traps you on the mouse. (Settings is the one exception: it's
+not keyboard-navigated yet, but `Esc` leaves it.)
+
 ## Global
 
 | Keys | Action |

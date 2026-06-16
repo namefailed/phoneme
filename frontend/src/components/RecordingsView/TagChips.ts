@@ -59,6 +59,12 @@ export class TagChipsElement extends LitElement {
   @state() private editingTagId: number | null = null;
   @state() private editName = "";
   @state() private editColor = "#cba6f7";
+  /** Which control the inline tag-editor's keyboard cursor sits on (the purple
+   *  box), navigable with h/l/j/k + arrows: 0 color · 1 name · 2 Save · 3 Remove
+   *  · 4 Cancel. Enter activates it; the name field only takes typing once landed
+   *  on (index 1) and Enter'd into. */
+  @state() private editActiveIndex = 1;
+  private static readonly EDIT_OPTION_COUNT = 5;
   /** LLM tag suggestions awaiting approval (auto-tagging). */
   @state() private suggestions: string[] = [];
   /** True while an on-demand ✨ Suggest run is in flight. */
@@ -196,13 +202,83 @@ export class TagChipsElement extends LitElement {
     this.editingTagId = t.id;
     this.editName = t.name;
     this.editColor = t.color ?? "#cba6f7";
+    this.editActiveIndex = 1; // land the cursor on the name (the usual edit)
     // Focus the popover CONTAINER (not the name field) once it renders, so Enter
-    // on a chip doesn't drop straight into text editing — h/l (or Tab) then move
-    // across color / name / Save / Remove / Cancel; the name field only takes
-    // typing once you land on it.
+    // on a chip doesn't drop straight into text editing — h/l/j/k (or the arrows)
+    // then move the purple cursor across color / name / Save / Remove / Cancel,
+    // and Enter activates the highlighted one. The name field only takes typing
+    // once you Enter into it.
     setTimeout(() => {
       this.renderRoot.querySelector<HTMLElement>(".tag-edit-pop")?.focus();
     }, 0);
+  }
+
+  /** Keyboard for the inline tag-editor popover: a purple-cursor highlight model
+   *  (not native focus), so h/l/j/k AND the arrows all roam color · name · Save ·
+   *  Remove · Cancel, Enter activates, Esc steps out. Self-contained: it stops
+   *  propagation so these keys never leak to the detail-grid nav behind it. */
+  private onEditPopKeydown(e: KeyboardEvent, tagId: number) {
+    // While typing in the name field it owns every key except Escape, which steps
+    // back out to the highlight cursor (keeping the typed text) rather than
+    // cancelling — a second Escape from the cursor then closes the popover.
+    const typing = (document.activeElement as HTMLElement | null)?.classList.contains("tag-edit-name");
+    if (typing) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        (document.activeElement as HTMLElement).blur();
+        this.editActiveIndex = 1;
+        this.renderRoot.querySelector<HTMLElement>(".tag-edit-pop")?.focus();
+      }
+      return; // Enter (save) is handled by the name field's own keydown
+    }
+    const n = TagChipsElement.EDIT_OPTION_COUNT;
+    const prev = e.key === "h" || e.key === "k" || e.key === "ArrowLeft" || e.key === "ArrowUp";
+    const next = e.key === "l" || e.key === "j" || e.key === "ArrowRight" || e.key === "ArrowDown";
+    if (prev || next) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.editActiveIndex = (this.editActiveIndex + (next ? 1 : -1) + n) % n;
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.activateEditOption(tagId);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.cancelEdit();
+      return;
+    }
+    // Trap other bare keys so they don't fire the global single-letter actions
+    // (p/c/e/r/…) on the recording behind the open popover. Tab and modifier
+    // combos pass through so focus movement and app shortcuts still work.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key !== "Tab") {
+      e.stopPropagation();
+    }
+  }
+
+  /** Activate the highlighted inline-editor control (Enter from the popover). */
+  private activateEditOption(tagId: number) {
+    switch (this.editActiveIndex) {
+      case 0: this.renderRoot.querySelector<HTMLInputElement>(".tag-edit-color")?.showPicker?.(); break;
+      case 1: {
+        const name = this.renderRoot.querySelector<HTMLInputElement>(".tag-edit-name");
+        name?.focus();
+        name?.select();
+        break;
+      }
+      case 2: void this.saveEdit(tagId); break;
+      case 3:
+        this.editingTagId = null;
+        void this.detach(tagId);
+        window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-detail" } }));
+        break;
+      case 4: this.cancelEdit(); break;
+    }
   }
 
   private cancelEdit() {
@@ -356,50 +432,35 @@ export class TagChipsElement extends LitElement {
               </span>
               ${editing ? html`
                 <div class="tag-edit-pop" tabindex="-1" @click=${(e: Event) => e.stopPropagation()}
-                  @keydown=${(e: KeyboardEvent) => {
-                    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.cancelEdit(); return; }
-                    // h/l (or ←/→) rove focus across color · name · Save · Remove ·
-                    // Cancel — but NOT while typing in the name field (so the letters
-                    // h and l still type). Use Tab from the name field to leave it.
-                    const typing = (document.activeElement as HTMLElement | null)?.classList.contains("tag-edit-name");
-                    if (!typing && (e.key === "h" || e.key === "l" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-                      e.preventDefault();
-                      const items = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>("input, button")];
-                      if (!items.length) return;
-                      const fwd = e.key === "l" || e.key === "ArrowRight";
-                      const cur = items.indexOf(document.activeElement as HTMLElement);
-                      const ni = cur < 0 ? (fwd ? 0 : items.length - 1) : (cur + (fwd ? 1 : -1) + items.length) % items.length;
-                      items[ni].focus();
-                    }
-                  }}
+                  @keydown=${(e: KeyboardEvent) => this.onEditPopKeydown(e, t.id)}
                   style="position:absolute; top:calc(100% + 6px); left:0; z-index:70;
                     display:flex; align-items:center; gap:8px; padding:8px;
                     background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.12));
                     border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
-                  <input type="color" class="tag-edit-color" .value=${this.editColor}
+                  <input type="color" class="tag-edit-color ${this.editActiveIndex === 0 ? "kbd-cursor" : ""}" .value=${this.editColor}
                     title="Tag color — Enter/Space opens the palette"
                     @input=${(e: Event) => this.editColor = (e.target as HTMLInputElement).value}
                     @keydown=${(e: KeyboardEvent) => {
-                      // Open the native palette from the keyboard (Tab/Shift+Tab reaches it).
+                      // Tab users can land here directly; Enter/Space opens the native palette.
                       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); (e.target as HTMLInputElement).showPicker?.(); }
-                      else if (e.key === "Escape") { e.preventDefault(); this.cancelEdit(); }
                     }}
                     style="width:28px; height:28px; padding:0; border:none; background:none; cursor:pointer;" />
-                  <input class="tag-edit-name" .value=${this.editName}
+                  <input class="tag-edit-name ${this.editActiveIndex === 1 ? "kbd-cursor" : ""}" .value=${this.editName}
                     placeholder="Tag name"
                     @input=${(e: Event) => this.editName = (e.target as HTMLInputElement).value}
                     @keydown=${(e: KeyboardEvent) => {
-                      if (e.key === "Enter") { e.preventDefault(); void this.saveEdit(t.id); }
-                      else if (e.key === "Escape") { e.preventDefault(); this.cancelEdit(); }
+                      // While typing: Enter saves; Escape steps back to the highlight
+                      // cursor (handled by the popover's keydown, which sees this bubble).
+                      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void this.saveEdit(t.id); }
                     }}
                     style="width:140px; padding:5px 8px; border-radius:6px; font-size: 0.9286rem;
                       background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);" />
-                  <button class="inline-button" title="Save changes" @click=${() => void this.saveEdit(t.id)}
+                  <button class="inline-button ${this.editActiveIndex === 2 ? "kbd-cursor" : ""}" title="Save changes" @click=${() => void this.saveEdit(t.id)}
                     style="padding:5px 10px;">Save</button>
-                  <button class="inline-button" title="Remove this tag from this recording"
+                  <button class="inline-button ${this.editActiveIndex === 3 ? "kbd-cursor" : ""}" title="Remove this tag from this recording"
                     @click=${() => { this.editingTagId = null; void this.detach(t.id); window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-detail" } })); }}
                     style="padding:5px 10px;">Remove</button>
-                  <button class="inline-button" title="Cancel" @click=${() => this.cancelEdit()}
+                  <button class="inline-button ${this.editActiveIndex === 4 ? "kbd-cursor" : ""}" title="Cancel" @click=${() => this.cancelEdit()}
                     style="padding:5px 8px;">✕</button>
                 </div>
               ` : null}

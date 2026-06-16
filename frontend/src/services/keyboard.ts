@@ -138,6 +138,7 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
     { combo: "i", label: "Edit the transcript directly" },
     { combo: "d d", label: "Delete the focused recording (with Undo)" },
+    { combo: "h l j k (popup)", label: "Move the cursor in a modal / popup — Enter selects, Esc closes" },
     { combo: "Esc", label: "Step back out a level" },
   ],
 };
@@ -152,6 +153,7 @@ const ARROW_HELP_GROUP: HelpGroup = {
     { combo: "↑ at list top", label: "Rise into the header controls (↓ to come back)" },
     { combo: "← → (header)", label: "Move across the header controls" },
     { combo: "Enter", label: "Open / activate the focused row, button, or dropdown" },
+    { combo: "← → ↑ ↓ (popup)", label: "Move the cursor in a modal / popup — Enter selects, Esc closes" },
     { combo: "Esc", label: "Step back out a level" },
   ],
 };
@@ -633,25 +635,27 @@ function handleGlobalKeys(e: KeyboardEvent) {
 /// keys no active layer owns become `""` and fall through harmlessly. Pane
 /// movement works from anywhere; the list/edit/delete keys require the relevant
 /// pane to hold focus.
-function handleVimNav(e: KeyboardEvent): boolean {
-  // Normalize the trigger into a canonical motion token. Arrows are aliases for
-  // h/l/j/k under EITHER layer (so vim users keep arrow support too); the bare
-  // vim letters (incl. H/L/G/i/d/z) only fire under vim_nav; Enter/Escape/Space
-  // are shared. An inert key collapses to "" — no switch case matches it, so it
-  // is swallowed inside a capture/menu block or falls through at the top level,
-  // exactly as an unrecognized key did before.
+/// Normalize a key event into a canonical motion token shared by the vim/arrow
+/// nav engine AND the modal driver: arrow keys map to h/l/j/k when EITHER layer is
+/// on; the bare vim letters (h/j/k/l/H/L/G/i/d/z) only when vim_nav is on;
+/// Enter/Escape/Space (and anything else) pass through as-is. An inert key — a bare
+/// letter with vim_nav off — collapses to "" so no handler matches it.
+function motionToken(e: KeyboardEvent): string {
   const ARROW_TO_MOTION: Record<string, string> = {
     ArrowLeft: "h", ArrowRight: "l", ArrowUp: "k", ArrowDown: "j",
   };
   const VIM_LETTERS = "hjklHLGidz";
-  let nav: string;
-  if (e.key in ARROW_TO_MOTION) {
-    nav = vimNav || arrowNav ? ARROW_TO_MOTION[e.key] : "";
-  } else if (e.key.length === 1 && VIM_LETTERS.includes(e.key)) {
-    nav = vimNav ? e.key : "";
-  } else {
-    nav = e.key; // Enter / Escape / " " and the like — shared by both layers
-  }
+  if (e.key in ARROW_TO_MOTION) return vimNav || arrowNav ? ARROW_TO_MOTION[e.key] : "";
+  if (e.key.length === 1 && VIM_LETTERS.includes(e.key)) return vimNav ? e.key : "";
+  return e.key; // Enter / Escape / " " and the like — shared by both layers
+}
+
+function handleVimNav(e: KeyboardEvent): boolean {
+  // Normalize the trigger into a canonical motion token (see motionToken). Arrows
+  // are aliases for h/l/j/k under either layer; bare vim letters only under
+  // vim_nav; Enter/Escape/Space shared. An inert key collapses to "" — no switch
+  // matches it, so it's swallowed in a capture block or falls through at top level.
+  const nav = motionToken(e);
 
   // Detail pane has captured the keys for an open dropdown or the waveform
   // scrub mode — route the relevant keys there before normal grid nav. (The
@@ -943,6 +947,112 @@ function handleVimNav(e: KeyboardEvent): boolean {
   return false;
 }
 
+// ── Generic modal / popup keyboard navigation ──────────────────────────────
+// A modal makes the background nav layer stand down (onKeyDown returns), but with
+// vim_nav or arrow_nav on we drive a roving cursor over the modal's OWN controls
+// — the same `.kbd-cursor` idiom used in the detail grid, header, and tag popover
+// — so every modal is keyboard-drivable the same way, no per-modal wiring.
+
+/** The topmost open overlay, matching the `.modal-overlay` convention plus the
+ *  `*-modal-overlay` variants (the compare / speakers overlays). Later in the DOM
+ *  = on top (openers append to <body>). null when none is open. */
+function topmostModalOverlay(): HTMLElement | null {
+  const all = document.querySelectorAll<HTMLElement>('[class*="modal-overlay"]');
+  return all.length ? all[all.length - 1] : null;
+}
+
+/** Roving-cursor index within the current modal + the overlay it belongs to, so
+ *  the index resets when a different overlay takes over. -1 = not seeded yet
+ *  (lazy: the first nav key seeds it, leaving the modal's own initial focus until
+ *  the user actually navigates). */
+let modalCursor = -1;
+let modalCursorOverlay: HTMLElement | null = null;
+
+/** Visible, enabled, focusable controls in the overlay's dialog, in DOM order —
+ *  the same visibility filter headerControls() uses, so `?hidden` tab panels and
+ *  disabled buttons are skipped automatically. Re-queried every keystroke so a
+ *  Lit re-render (a Doctor fix, a tab switch) never leaves a stale node list. */
+function modalControls(overlay: HTMLElement): HTMLElement[] {
+  const root = overlay.querySelector<HTMLElement>(".modal-dialog") ?? overlay;
+  const sel =
+    'button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])';
+  return [...root.querySelectorAll<HTMLElement>(sel)].filter((el) => el.offsetParent !== null);
+}
+
+function highlightModalCursor(controls: HTMLElement[]) {
+  document.querySelectorAll('[class*="modal-overlay"] .kbd-cursor').forEach((el) => el.classList.remove("kbd-cursor"));
+  const el = controls[modalCursor];
+  if (el) {
+    el.classList.add("kbd-cursor");
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+}
+
+/** Enter/Space on the cursor control: toggle checkboxes/radios in place, focus
+ *  text/select fields so the user can type or pick (the modal then owns typing
+ *  until Esc), otherwise click it — re-highlighting next frame since the click
+ *  may re-render the modal (a Doctor fix, a ModelPicker tab switch). */
+function activateModalControl(el: HTMLElement, overlay: HTMLElement) {
+  const tag = el.tagName;
+  const type = (el as HTMLInputElement).type;
+  if (tag === "INPUT" && (type === "checkbox" || type === "radio")) {
+    el.click(); // toggle, but keep the cursor here
+    return;
+  }
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    el.focus();
+    if (type === "color" || type === "date") {
+      try { (el as HTMLInputElement).showPicker?.(); } catch { /* not allowed in this context */ }
+    }
+    return;
+  }
+  el.click();
+  requestAnimationFrame(() => {
+    if (topmostModalOverlay() !== overlay) return; // the click closed / replaced it
+    const ctrls = modalControls(overlay);
+    if (!ctrls.length) return;
+    modalCursor = Math.min(modalCursor, ctrls.length - 1);
+    highlightModalCursor(ctrls);
+  });
+}
+
+/** Roving keyboard nav inside the topmost modal. Returns true when it consumed
+ *  the key. Esc / Tab are left for the modal's own handlers (Esc closes it, Tab
+ *  walks native focus). Typing in a focused field never reaches here — onKeyDown's
+ *  typing-target return fires first. */
+function handleModalNav(e: KeyboardEvent, overlay: HTMLElement): boolean {
+  if (e.key === "Escape" || e.key === "Tab") return false;
+  const nav = motionToken(e);
+  const step = nav === "j" || nav === "l" ? 1 : nav === "k" || nav === "h" ? -1 : 0;
+  if (step === 0 && nav !== "Enter" && nav !== " ") return false; // not a nav key for this layer
+  if (overlay !== modalCursorOverlay) { modalCursorOverlay = overlay; modalCursor = -1; }
+  const controls = modalControls(overlay);
+  if (!controls.length) { e.preventDefault(); return true; }
+  // Lazy seed: start on the control the modal already focused (e.g. ConfirmDelete
+  // focuses Cancel, so Enter can't accidentally Delete), else the first control.
+  if (modalCursor < 0) {
+    const ai = controls.indexOf(document.activeElement as HTMLElement);
+    modalCursor = ai >= 0 ? ai : 0;
+    // Take focus to the dialog container so the roving cursor — not a native focus
+    // ring — is the only highlight, and keys keep routing through onKeyDown.
+    const dialog = overlay.querySelector<HTMLElement>(".modal-dialog") ?? overlay;
+    if (document.activeElement !== dialog) {
+      dialog.setAttribute("tabindex", "-1");
+      dialog.focus({ preventScroll: true });
+    }
+  }
+  modalCursor = Math.min(modalCursor, controls.length - 1);
+  if (step !== 0) {
+    e.preventDefault();
+    modalCursor = (modalCursor + step + controls.length) % controls.length;
+    highlightModalCursor(controls);
+    return true;
+  }
+  e.preventDefault(); // Enter / Space
+  activateModalControl(controls[modalCursor], overlay);
+  return true;
+}
+
 function onKeyDown(e: KeyboardEvent) {
   // When the cheat-sheet is open it owns Esc / "?" and nothing else fires.
   if (helpOpen) {
@@ -965,9 +1075,18 @@ function onKeyDown(e: KeyboardEvent) {
     return;
   }
 
-  // Stand down if another component already handled it, or a modal is open.
+  // Stand down if another component already handled it (modals with their own
+  // capture-phase Enter/Esc, like the confirm dialog, are honoured here first).
   if (e.defaultPrevented) return;
-  if (document.querySelector(".modal-overlay")) return;
+  // A modal is open: the background nav layer always stands down, but with vim /
+  // arrow nav on we drive a roving cursor over the modal's OWN controls. Either
+  // way we return — the layer below (chords, vim nav, single-letter actions) must
+  // never run against the recordings behind an open modal.
+  const modalOverlay = topmostModalOverlay();
+  if (modalOverlay) {
+    if (vimNav || arrowNav) handleModalNav(e, modalOverlay);
+    return;
+  }
 
   // Escape closes the AI-activity popout when it's open (it isn't a modal, so it
   // wasn't covered above). The panel reflects `data-open` on its host; toggling
@@ -1125,6 +1244,20 @@ export function initKeyboard() {
   // The list dispatches this when k is pressed at the top — highlight the search
   // box (don't focus it) so h/l can roam the header without typing.
   window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav({ restore: true }));
+  // Whenever focus moves INTO the header — by keyboard (enterHeaderNav focuses the
+  // bar) or by mouse (clicking a control) — drop any lingering pane cursor so only
+  // the header shows a highlight. The pane's remembered position lives in
+  // RecordingsView state (sidebarRow / detailRow), NOT the `.kbd-cursor` class, so
+  // clearing the class keeps "return to where I was" working. The list keeps its
+  // own persistent (dimmed) cursor by design, so it's left alone.
+  document.addEventListener("focusin", (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t && typeof t.closest === "function" && t.closest(".headerbar")) {
+      document
+        .querySelectorAll("ph-sidebar .kbd-cursor, .rv-detail .kbd-cursor")
+        .forEach((el) => el.classList.remove("kbd-cursor"));
+    }
+  });
   // RecordingsView announces when the detail pane has captured the keys for an
   // open dropdown ("sub") or the waveform scrub mode ("wave"), or released them
   // (null), so the layer above can route j/k/h/l/H/L/Enter/Esc accordingly.

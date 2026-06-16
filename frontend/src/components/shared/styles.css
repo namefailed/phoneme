@@ -31,6 +31,15 @@ body.phoneme-hide-header-instant #hdr {
   outline-offset: -2px;
 }
 
+/* Roving cursor inside any modal / popup (the generic modal keyboard nav): the
+   accent box marks the control that h/l/j/k + arrows are on; Enter activates it.
+   Matches the `.modal-overlay` convention and the `*-modal-overlay` variants. */
+[class*="modal-overlay"] .kbd-cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+
 /* "More like this" pill clear-× — integrated into the pill (no boxy chrome),
    pushed flush to the end of the search bar (the label span flexes to fill). */
 .hb-like-clear {

@@ -431,6 +431,24 @@ trust boundary. Verified against current code.*
   It replaces an earlier `zoom`-based approach that magnified spacing/boxes and could
   push the layout off-window with no way to scroll back. At the 14px baseline nothing
   changes; other sizes scale text without breaking the fixed-viewport layout.
+- [x] **Keyboard navigation inside modals & popups** — with vim or arrow nav on, every
+  modal (the Re-run / Models picker, Doctor, confirmations, Tag Manager, the log viewer,
+  …) is now keyboard-drivable the same way as the rest of the app: `h`/`l`/`j`/`k` + arrows
+  rove a `.kbd-cursor` highlight over the dialog's controls, `Enter` activates (buttons fire,
+  fields open for typing), `Esc` closes. One generic driver in the keyboard layer covers
+  every current and future `.modal-overlay`, so there's no per-modal wiring; the confirm
+  dialog keeps its own capture-phase `Enter`/`Esc`, and a destructive delete starts the cursor
+  on Cancel. Also broadened the modal guard to the `*-modal-overlay` variants (compare /
+  speakers), fixing a latent bug where their keys leaked to the detail pane behind them.
+- [x] **Escape leaves the Settings panel** — a bare `Esc` closes Settings (with the
+  unsaved-changes guard); the search box, open dropdowns, and layered modals still consume
+  their own `Esc` first. (Full keyboard nav *inside* Settings is intentionally not wired yet.)
+- [x] **Sidebar highlight no longer lingers in the header** — moving from a sidebar filter
+  to the top bar (by keyboard or click) now clears the sidebar cursor so only the header is
+  highlighted, while the sidebar still remembers where you were when you return.
+- [x] **Tag-chip editor is keyboard-driven** — the inline rename/recolor popover now roves
+  with the `.kbd-cursor` box (`h`/`l`/`j`/`k` + arrows across color · name · Save · Remove ·
+  Cancel), `Enter` activates, `Esc` steps back — instead of relying on native focus.
 - [x] **Arrow-key navigation for non-vim users** (`interface.arrow_nav`, opt-in) — a
   friendly counterpart to vim navigation: `←`/`→` move between the sidebar, list, and
   detail panes; `↑`/`↓` move within the list, sidebar filters, and detail rows; `Enter`

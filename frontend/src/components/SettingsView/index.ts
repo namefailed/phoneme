@@ -147,6 +147,7 @@ export class SettingsViewElement extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
+    document.addEventListener("keydown", this.onEscapeKey);
     try {
       this.config = await invoke("read_config");
       this.originalConfigStr = JSON.stringify(this.config);
@@ -159,9 +160,26 @@ export class SettingsViewElement extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    document.removeEventListener("keydown", this.onEscapeKey);
     window.removeEventListener("config:saved", this.onConfigSaved);
     document.removeEventListener("mousedown", this.onFloatOutside, true);
   }
+
+  /** Escape leaves the Settings panel (with the unsaved-edits guard). Inner
+   *  contexts that own Escape — the search box, open dropdowns, a layered modal
+   *  like the unsaved-changes confirm — consume it first (stopPropagation / the
+   *  `.modal-overlay` check below), so this only fires for a bare Escape in the
+   *  panel. Keyboard nav INSIDE Settings is intentionally not wired yet; this is
+   *  just the way out. */
+  private onEscapeKey = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    if (this.floatMenuOpen) { this.closeFloatMenu(); return; }
+    // A modal layered above Settings owns Escape (e.g. a model picker, the
+    // unsaved-changes dialog). Don't close the panel out from under it.
+    if (document.querySelector(".modal-overlay")) return;
+    e.preventDefault();
+    void this.handleClose();
+  };
 
   private searchDebounce?: ReturnType<typeof setTimeout>;
 
