@@ -677,6 +677,57 @@ async fn pipeline_applies_pending_model_override_without_touching_global_config(
     );
 }
 
+/// Re-run overrides (hooks toggle / post-process opt-out / Re-run "All") apply
+/// onto a config CLONE only — never the process-global config — so a concurrent
+/// `ReloadConfig` can't clobber them and they can't leak onto another queued job.
+/// A forced "All" run enables cleanup + summary and layers the per-step models;
+/// the post-process opt-out disables cleanup; an empty override is a no-op.
+#[test]
+fn rerun_overrides_apply_to_a_clone_only() {
+    use crate::app_state::PendingRerun;
+    use phoneme_ipc::RerunAllOverrides;
+
+    let base = Config::default();
+
+    // Empty override = identity (the plain-retranscribe path).
+    let same = super::apply_rerun_overrides(base.clone(), PendingRerun::default());
+    assert_eq!(same.llm_post_process.enabled, base.llm_post_process.enabled);
+    assert_eq!(same.summary.auto, base.summary.auto);
+
+    // Post-process opt-out disables cleanup for this run only.
+    let raw = super::apply_rerun_overrides(
+        base.clone(),
+        PendingRerun {
+            post_process: Some(false),
+            ..Default::default()
+        },
+    );
+    assert!(!raw.llm_post_process.enabled);
+
+    // Re-run "All" forces the pipeline on and layers in the per-step values.
+    let all = super::apply_rerun_overrides(
+        base.clone(),
+        PendingRerun {
+            all_overrides: Some(RerunAllOverrides {
+                cleanup_model: Some("llama3.2:3b".into()),
+                summary_model: Some("phi3:mini".into()),
+                title_model: Some("qwen2.5:0.5b".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+    assert!(all.llm_post_process.enabled);
+    assert_eq!(all.llm_post_process.model, "llama3.2:3b");
+    assert!(all.summary.auto);
+    assert_eq!(all.summary.model, "phi3:mini");
+    assert!(all.title.enabled && all.title.use_llm);
+    assert_eq!(all.title.model, "qwen2.5:0.5b");
+
+    // The base config is untouched — overrides went onto the clone.
+    assert_eq!(base.summary.auto, Config::default().summary.auto);
+}
+
 /// A TRANSIENT transcribe failure (server unreachable) must leave the
 /// recording retryable: status stays Transcribing and nothing lands in
 /// failed/ — the queue worker requeues it and tries again with backoff.

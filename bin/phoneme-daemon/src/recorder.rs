@@ -2598,7 +2598,11 @@ mod tests {
             .preview
             .lock()
             .await
-            .push(PreviewTask { stop_tx, task });
+            .push(PreviewTask {
+                kind: PreviewKind::Caption,
+                stop_tx,
+                task,
+            });
 
         let recorder = state.recorder.clone();
         let stop_state = state.clone();

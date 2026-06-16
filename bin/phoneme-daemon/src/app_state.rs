@@ -149,6 +149,19 @@ pub struct AppState {
     /// global-config override didn't survive a restart either.
     pub pending_overrides:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
+    /// Per-recording one-time Re-run overrides for the LLM/hook side — the hooks
+    /// toggle, the post-processing opt-out, and the Re-run → "All" cleanup +
+    /// summary + title values. Recorded by the `RetranscribeRecording` handler at
+    /// enqueue time and applied by `pipeline::run` to THAT job's config CLONE
+    /// only. Why a per-id ledger instead of a temporary global-config write: the
+    /// whisper supervisor and the queue worker both reload the process-global
+    /// config, so a temp-global override raced a concurrent `ReloadConfig` (it
+    /// could be clobbered, or leak onto another queued job). This mirrors
+    /// `pending_overrides` (the whisper-model override) for the LLM/hook side.
+    /// In-memory and ephemeral: a daemon restart drops them and the job re-runs
+    /// with the configured pipeline.
+    pub pending_all_overrides:
+        Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, PendingRerun>>>,
     /// The ports the bundled whisper-servers are ACTUALLY listening on,
     /// published by the supervisors on every (re)spawn. The configured
     /// `bundled_server_port`s are preferences: when a foreign process already
@@ -369,6 +382,28 @@ impl WhisperEffectivePorts {
     }
 }
 
+/// The per-recording one-time Re-run overrides held in
+/// [`AppState::pending_all_overrides`]: the hooks toggle, the post-processing
+/// opt-out, and the Re-run → "All" cleanup/summary/title values. Applied by
+/// `pipeline::run` to that job's config clone only (never the global config).
+#[derive(Clone, Default)]
+pub struct PendingRerun {
+    /// Override `hook.run_on_transcribe` for this run (re-fire hooks or not).
+    pub run_hooks: Option<bool>,
+    /// `Some(false)` disables LLM post-processing for this run (raw transcript).
+    pub post_process: Option<bool>,
+    /// Re-run → "All" overrides: forces cleanup + summary on and layers these
+    /// per-step values in for this run.
+    pub all_overrides: Option<phoneme_ipc::RerunAllOverrides>,
+}
+
+impl PendingRerun {
+    /// No override requested — the job runs with the configured pipeline.
+    pub fn is_empty(&self) -> bool {
+        self.run_hooks.is_none() && self.post_process.is_none() && self.all_overrides.is_none()
+    }
+}
+
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl AppState {
@@ -435,6 +470,9 @@ impl AppState {
             processing: Arc::new(std::sync::Mutex::new(None)),
             whisper_model_override: Arc::new(WhisperModelOverride::default()),
             pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_all_overrides: Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             whisper_ports: Arc::new(WhisperEffectivePorts::default()),
             whisper_restart: Arc::new(tokio::sync::Notify::new()),
             skip_stage: Arc::new(tokio::sync::Notify::new()),

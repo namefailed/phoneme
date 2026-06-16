@@ -164,6 +164,58 @@ async fn apply_model_override(
     }
 }
 
+/// Apply a recording's one-time [`crate::app_state::PendingRerun`] overrides onto
+/// a per-job config CLONE: the hooks toggle, the post-processing opt-out, and the
+/// Re-run → "All" cleanup/summary/title values. Pure — it touches no global state
+/// — so `run` builds a private config for the job and the process-global config is
+/// never mutated (a temp-global write here raced a concurrent `ReloadConfig` and
+/// could leak its forced-on pipeline onto another queued job).
+fn apply_rerun_overrides(
+    mut cfg: phoneme_core::Config,
+    rerun: crate::app_state::PendingRerun,
+) -> phoneme_core::Config {
+    if let Some(rh) = rerun.run_hooks {
+        cfg.hook.run_on_transcribe = rh;
+    }
+    // Post-processing opt-out: a disabled cleanup makes `llm_provider_for_run`
+    // return None, so the run yields the raw machine transcript.
+    if rerun.post_process == Some(false) {
+        cfg.llm_post_process.enabled = false;
+    }
+    // Re-run → "All": force the whole pipeline on and layer in the per-step
+    // values (applied after the opt-out so cleanup stays on for an "All" run).
+    if let Some(ov) = rerun.all_overrides {
+        cfg.llm_post_process.enabled = true;
+        if let Some(p) = ov.cleanup_provider {
+            cfg.llm_post_process.provider = p;
+        }
+        if let Some(m) = ov.cleanup_model {
+            cfg.llm_post_process.model = m;
+        }
+        if let Some(p) = ov.cleanup_prompt {
+            cfg.llm_post_process.prompt = p;
+        }
+        if let Some(u) = ov.cleanup_api_url {
+            cfg.llm_post_process.api_url = u;
+        }
+        cfg.summary.auto = true;
+        if let Some(m) = ov.summary_model {
+            cfg.summary.model = m;
+        }
+        if let Some(p) = ov.summary_prompt {
+            cfg.summary.prompt = p;
+        }
+        // A chosen title model implies "run the title step with it" — enable the
+        // step + LLM path even if globally off.
+        if let Some(m) = ov.title_model {
+            cfg.title.enabled = true;
+            cfg.title.use_llm = true;
+            cfg.title.model = m;
+        }
+    }
+    cfg
+}
+
 /// Best-effort wait until the bundled whisper-server answers `GET {base}/health`
 /// with success, or `timeout` elapses. Used right after a one-job model-override
 /// restart so the transcription doesn't fire at a server that's still loading
@@ -1033,7 +1085,27 @@ pub async fn run(
 
     // Transcribe — reuse the process-wide client (AppState) so the HTTP
     // connection pool to the local whisper-server stays warm across items.
-    let cfg = state.config.load();
+    let cfg_guard = state.config.load();
+    // Apply this job's one-time Re-run overrides (hooks toggle / post-processing
+    // opt-out / the Re-run "All" cleanup+summary+title values) onto a per-job
+    // CLONE of the config — they must never touch the process-global config,
+    // where a concurrent ReloadConfig could clobber them or they could leak their
+    // forced-on pipeline onto another queued job. Claimed (removed) here so a
+    // daemon restart drops them. No override → run with the loaded config as-is
+    // (no clone), exactly as before.
+    let cfg_owned;
+    let cfg: &phoneme_core::Config = match state
+        .pending_all_overrides
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id)
+    {
+        Some(rerun) => {
+            cfg_owned = apply_rerun_overrides(cfg_guard.as_ref().clone(), rerun);
+            &cfg_owned
+        }
+        None => cfg_guard.as_ref(),
+    };
     let audio_path = std::path::Path::new(&payload.audio_path).to_path_buf();
     // Filter empty string to None — frontend sends "" for "auto-detect"
     let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
@@ -1516,7 +1588,7 @@ pub async fn run(
     let mut total_duration = 0;
     let mut last_cmd = String::new();
 
-    let expanded_cfg = cfg.expanded().unwrap_or_else(|_| (**cfg).clone());
+    let expanded_cfg = cfg.expanded().unwrap_or_else(|_| cfg.clone());
 
     for cmd in &expanded_cfg.hook.commands {
         let trimmed = cmd.trim();

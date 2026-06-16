@@ -681,8 +681,6 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             all_overrides,
         } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
-                let mut cfg = state.config.load().as_ref().clone();
-                let mut changed = false;
                 // A per-recording model override is NO LONGER written into the
                 // process-global config. Doing so made the whisper supervisor
                 // (which polls the global config) restart the server, and the
@@ -711,58 +709,31 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             .insert(id.clone(), m.to_string());
                     }
                 }
-                if let Some(rh) = run_hooks {
-                    cfg.hook.run_on_transcribe = rh;
-                    changed = true;
-                }
-                // One-time post-processing opt-out: disabling cleanup in this
-                // temporary in-memory config makes the pipeline's
-                // `llm.provider(...)` return `None`, so the run yields the raw
-                // machine transcript. The queue worker reloads config from disk
-                // after the job, so this never persists (the configured cleanup
-                // behavior is restored for the next recording).
-                if post_process == Some(false) {
-                    cfg.llm_post_process.enabled = false;
-                    changed = true;
-                }
-                // Re-run → "All": force the whole pipeline on and layer the
-                // one-time cleanup + summary overrides into the temp config.
-                // (Applied after the post_process opt-out so cleanup stays on.)
-                if let Some(ov) = all_overrides {
-                    cfg.llm_post_process.enabled = true;
-                    if let Some(p) = ov.cleanup_provider {
-                        cfg.llm_post_process.provider = p;
+                // The one-time LLM/hook overrides (hooks toggle, post-processing
+                // opt-out, and the Re-run → "All" cleanup/summary/title values)
+                // are ALSO recorded per-recording — NEVER written into the
+                // process-global config. A temp-global write here raced a
+                // concurrent ReloadConfig (it could be clobbered, or leak its
+                // forced-on pipeline onto another queued job). `pipeline::run`
+                // applies these to THIS job's config clone only. Mirrors the
+                // per-recording model override above.
+                let rerun = crate::app_state::PendingRerun {
+                    run_hooks,
+                    post_process,
+                    all_overrides,
+                };
+                {
+                    let mut map = state
+                        .pending_all_overrides
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if rerun.is_empty() {
+                        // Clear any stale request so a prior re-run's overrides
+                        // can't leak onto this plain retranscribe.
+                        map.remove(&id);
+                    } else {
+                        map.insert(id.clone(), rerun);
                     }
-                    if let Some(m) = ov.cleanup_model {
-                        cfg.llm_post_process.model = m;
-                    }
-                    if let Some(p) = ov.cleanup_prompt {
-                        cfg.llm_post_process.prompt = p;
-                    }
-                    if let Some(u) = ov.cleanup_api_url {
-                        cfg.llm_post_process.api_url = u;
-                    }
-                    cfg.summary.auto = true;
-                    if let Some(m) = ov.summary_model {
-                        cfg.summary.model = m;
-                    }
-                    if let Some(p) = ov.summary_prompt {
-                        cfg.summary.prompt = p;
-                    }
-                    // A chosen title model implies "run the title step with it"
-                    // for this run — enable it + the LLM path even if globally off.
-                    if let Some(m) = ov.title_model {
-                        cfg.title.enabled = true;
-                        cfg.title.use_llm = true;
-                        cfg.title.model = m;
-                    }
-                    changed = true;
-                }
-                if changed {
-                    // NOTE: this temp-global config carries only server-independent
-                    // overrides (hooks / cleanup / summary). The whisper model is
-                    // deliberately NOT here — see the per-recording override above.
-                    state.config.store(std::sync::Arc::new(cfg));
                 }
                 let payload = HookPayload {
                     id: r.id,
