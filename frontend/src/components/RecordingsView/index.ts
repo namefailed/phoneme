@@ -1249,6 +1249,14 @@ export class RecordingsView {
     } else if (cell.kind === "button") {
       if (this.isDropdownTrigger(cell.el)) {
         this.openDetailSub(cell.el);
+      } else if (cell.el.classList.contains("tag-chip")) {
+        // A tag chip opens its inline editor popover, which seeds its OWN roving
+        // cursor on the name field and takes focus. Re-highlighting the grid here
+        // (highlightDetail strips every .kbd-cursor in the detail pane, including
+        // the popover's) would yank the cursor back onto the chip — so just open
+        // it and let the popover own the cursor. Esc/Save hand focus back via the
+        // `focus-detail` vim event.
+        cell.el.click();
       } else {
         cell.el.click();
         // Tag approve/reject/remove (and other actions) re-render the row — pull
