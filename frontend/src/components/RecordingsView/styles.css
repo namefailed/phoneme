@@ -1220,7 +1220,13 @@ mark.search-hit {
 ph-sidebar:focus,
 ph-sidebar:focus-visible,
 .rec-table:focus,
-.rec-table:focus-visible {
+.rec-table:focus-visible,
+/* The tag-chip editor popover also takes focus (tabindex=-1) so keyboard mode can
+   route keys; the roving .kbd-cursor on its active control is the highlight, so
+   suppress the container's own focus ring (else keyboard entry drew an extra
+   outline that mouse entry — which focuses a child input — never showed). */
+.tag-edit-pop:focus,
+.tag-edit-pop:focus-visible {
   outline: none;
 }
 
