@@ -44,6 +44,7 @@ import { Splitter } from "./Splitter";
 import { confirmRecordingDelete, deleteModeKeepsAudio } from "../ConfirmDelete";
 import { showActionToast, showToast } from "../../utils/toast";
 import { setHeaderHidden, isHeaderHidden } from "../../services/headerBar";
+import { seedCursorGlow } from "../../services/cursorAnimation";
 import "./Sidebar";
 import "./ThinkingPopout";
 import "./styles.css";
@@ -1291,8 +1292,13 @@ export class RecordingsView {
    *  detail pane), for j/k cycling. */
   private detailSubItems(trigger: HTMLElement): HTMLElement[] {
     const root = this.detailRootSel();
+    // Visibility via getClientRects, NOT offsetParent: the Pipeline pop is
+    // position:fixed, and offsetParent is unreliable inside a fixed subtree — it
+    // could read its rows as hidden, so the pop never registered as a captured
+    // sub-dropdown and Escape didn't close it. getClientRects is 0 only for
+    // genuinely unrendered (display:none) elements, fixed or not.
     const pick = (sel: string) =>
-      [...this.container.querySelectorAll<HTMLElement>(`${root} ${sel}`)].filter((el) => el.offsetParent !== null);
+      [...this.container.querySelectorAll<HTMLElement>(`${root} ${sel}`)].filter((el) => el.getClientRects().length > 0);
     if (trigger.classList.contains("speed-trigger")) return pick(".speed-dropdown .th-menu-item");
     if (trigger.classList.contains("export-trigger")) return pick(".export-menu [role='menuitem']");
     if (trigger.id === "views-trigger") return pick("#views-menu .th-menu-item");
@@ -1356,6 +1362,12 @@ export class RecordingsView {
       // closes it, or we only dismissed), toggle it shut via its trigger.
       if (this.detailSubItems(sub.trigger).length) sub.trigger.click();
       this.highlightDetail();
+      // Pull the cursor glow back onto the trigger. highlightDetail re-adds
+      // .kbd-cursor to the trigger cell, but if it already had it (it was the
+      // highlighted grid cell before the dropdown opened) the glow's class-change
+      // observer can't see the re-add, so the glow would stay stranded over the
+      // closed dropdown's items. Seed it explicitly.
+      seedCursorGlow(sub.trigger);
     });
   }
 
