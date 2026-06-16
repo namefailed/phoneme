@@ -26,6 +26,10 @@ let current: HTMLElement | null = null; // the control the cursor is on now
 let pending: HTMLElement | null = null; // newest .kbd-cursor seen this frame
 let raf = 0;
 let observer: MutationObserver | null = null;
+/** Watches the list pane so a LIST cursor re-clamps when the pane resizes. */
+let paneObserver: ResizeObserver | null = null;
+let observedList: HTMLElement | null = null;
+let paneRaf = 0;
 let installed = false;
 /** Hidden while focus is in a text-editing surface (a CodeMirror editor, a tag
  *  name input): the glow sits right over what you're typing into, so it gets out
@@ -81,18 +85,6 @@ function isEditing(t: EventTarget | null): boolean {
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
 /** Minimum jump (px) before a streak is drawn (trail streaks on every move). */
 const SMEAR_THRESHOLD = 90;
-/** A SHORT hop (< FLASH_DIST px of travel) whose size ALSO changes a lot (one
- *  side by > FLASH_SIZE_DELTA px) "flashes": the box reaches the destination
- *  almost at once while the big resize keeps morphing, so the old size lingers
- *  over the target for a few frames (very top list row → the header; a sidebar
- *  item across to a nearby list row). Such moves run at FLASH_DUR — fast enough
- *  that the morph is over before the eye catches it, but still a smooth ease (NOT
- *  a snap, which just pops the size at the old spot). Long moves and equal-size
- *  hops keep the full per-mode duration, so tags → list and list j/k are
- *  unaffected. */
-const FLASH_DIST = 180;
-const FLASH_SIZE_DELTA = 80;
-const FLASH_DUR = 50;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -133,6 +125,7 @@ function place(el: HTMLElement, animate: boolean) {
   const m = effective();
   if (!m) return;
   if (suppressed) return; // typing into this control — stay out of the way
+  ensureListObserved(); // lazily attach once the list pane exists (cheap when set)
   const natural = el.getBoundingClientRect();
   const r = clampRect(el, natural);
   if (r.width <= 0 || r.height <= 0) {
@@ -185,14 +178,9 @@ function place(el: HTMLElement, animate: boolean) {
   }
 
   // Glide + resize together (mini.animate-style): position and size share one
-  // duration so the glow eases between controls. EXCEPT a short hop that also
-  // resizes a lot — that one runs fast (FLASH_DUR) so the stale size can't linger
-  // over the destination (the "size flash"); see the FLASH_* notes. Long moves and
-  // equal-size hops keep the full per-mode duration.
-  const sizeDelta = prev ? Math.max(Math.abs(r.width - prev.width), Math.abs(r.height - prev.height)) : 0;
-  const fastMorph = !!prev && dist < FLASH_DIST && sizeDelta > FLASH_SIZE_DELTA;
+  // duration so the glow eases between controls.
   g.style.transitionProperty = "left, top, width, height, opacity";
-  g.style.transitionDuration = animate ? `${fastMorph ? FLASH_DUR : DUR[m]}ms` : "0ms";
+  g.style.transitionDuration = animate ? `${DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
   g.style.width = `${r.width}px`;
@@ -277,10 +265,13 @@ function connect() {
   // Keep the fixed ghost glued to its control as the page scrolls/resizes.
   window.addEventListener("scroll", onReflow, true);
   window.addEventListener("resize", onReflow);
-  // (No ResizeObserver on the panes: it fired mid-navigation when the detail pane
-  //  opened/resized and snapped the glow, making leaving the list look like it
-  //  grew then jumped. The reload overlap is handled directly in clampRect, which
-  //  clamps a list row to a visible detail pane's left edge regardless of timing.)
+  // Watch the list pane so a LIST cursor re-clamps when the pane's width changes
+  // (splitter drag, sidebar/detail toggle, the detail pane's enter animation on
+  // alt-tab) — otherwise the glow keeps a stale clamp and spills over the detail
+  // pane. Scoped to list cursors + done instantly (see onPaneResize); a blanket
+  // observer that also re-placed DETAIL cursors made leaving the list "grow then
+  // jump", which is why it was removed before.
+  ensureListObserved();
   // Hide the glow while typing into an editor / input; restore on the way out.
   document.addEventListener("focusin", onFocusIn);
   document.addEventListener("focusout", onFocusOut);
@@ -292,6 +283,9 @@ function connect() {
 function disconnect() {
   observer?.disconnect();
   observer = null;
+  paneObserver?.disconnect();
+  paneObserver = null;
+  observedList = null;
   window.removeEventListener("scroll", onReflow, true);
   window.removeEventListener("resize", onReflow);
   document.removeEventListener("focusin", onFocusIn);
@@ -299,6 +293,10 @@ function disconnect() {
   if (raf) {
     cancelAnimationFrame(raf);
     raf = 0;
+  }
+  if (paneRaf) {
+    cancelAnimationFrame(paneRaf);
+    paneRaf = 0;
   }
   pending = null;
   suppressed = false;
@@ -324,6 +322,33 @@ function onReflow() {
   } else {
     hide();
   }
+}
+
+/** The list pane resized — re-clamp a LIST cursor instantly so the glow tracks
+ *  the (moved) detail-pane edge instead of spilling over it. NO animation, and
+ *  ONLY for list cursors: re-clamping a detail/sidebar cursor as its own pane
+ *  animates open is what made leaving the list "grow then jump". rAF-coalesced so
+ *  a splitter drag or an enter animation doesn't thrash. */
+function onPaneResize() {
+  if (paneRaf) return;
+  paneRaf = requestAnimationFrame(() => {
+    paneRaf = 0;
+    if (current && current.isConnected && current.closest("#rv-list")) place(current, false);
+  });
+}
+
+/** Attach the pane ResizeObserver to the live #rv-list (idempotent; re-targets if
+ *  the node is replaced). The pane mounts after this module connects, so it's
+ *  also called lazily from place() once a cursor lands. */
+function ensureListObserved() {
+  if (typeof ResizeObserver === "undefined") return;
+  if (observedList && observedList.isConnected) return; // already on the live pane
+  const list = document.querySelector<HTMLElement>("#rv-list");
+  if (list === observedList) return;
+  if (!paneObserver) paneObserver = new ResizeObserver(onPaneResize);
+  if (observedList) paneObserver.unobserve(observedList);
+  observedList = list;
+  if (list) paneObserver.observe(list);
 }
 
 function setMode(next: Mode) {
