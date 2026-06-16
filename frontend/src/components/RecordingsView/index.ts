@@ -695,6 +695,15 @@ export class RecordingsView {
       (el.querySelector<HTMLElement>(".rec-table") ?? el).focus({ preventScroll: true });
       // Land a visible cursor immediately so it's obvious what j/k will move.
       this.list.ensureCursor();
+      // Seed the glow onto the list cursor. Returning to the list from the bulk
+      // bar (Esc) never changed the list's .kbd-focused or the pane's
+      // rv-pane-focused (the bulk bar runs alongside, focusedPane stayed "list"),
+      // so the glow's class-change observer wouldn't move it — it'd stay stranded
+      // on the bulk bar. Seed explicitly so it glides back with the focus.
+      requestAnimationFrame(() => {
+        const cur = el.querySelector<HTMLElement>(".kbd-focused, .kbd-cursor");
+        if (cur) seedCursorGlow(cur);
+      });
     } else {
       // Focus the pane container itself (not the editor) so h/l/j/k keep working.
       el.setAttribute("tabindex", "-1");
