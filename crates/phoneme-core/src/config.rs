@@ -1406,6 +1406,17 @@ pub struct InterfaceConfig {
     /// the app, exactly as before.
     #[serde(default)]
     pub preview_overlay: bool,
+    /// Show a minimal, always-on-top "recording indicator" pill (a pulsing
+    /// record dot + an audio-reactive waveform + an mm:ss elapsed timer) while
+    /// recording — and *only* that, no transcription text. It's a second,
+    /// separate desktop window from [`Self::preview_overlay`], for users who
+    /// want a clear "you're recording" cue without the live-caption overlay.
+    /// Fully independent: it needs no transcription/preview, so it works even
+    /// when live preview is entirely off, and either, both, or neither overlay
+    /// can run. **Default false = disabled** — when off, the indicator window is
+    /// never created.
+    #[serde(default)]
+    pub recording_indicator: bool,
     /// Enable system-wide vim-style keyboard navigation across the whole app
     /// (h/l to move focus between panes, j/k to move within the recordings list,
     /// gg/G to jump, i/Enter to edit, Esc to step out). This is distinct from
@@ -1852,6 +1863,7 @@ impl Default for Config {
                 ],
                 column_widths: default_column_widths(),
                 preview_overlay: false,
+                recording_indicator: false,
                 vim_nav: false,
                 animation_speed: default_animation_speed(),
                 ui_font: String::new(),

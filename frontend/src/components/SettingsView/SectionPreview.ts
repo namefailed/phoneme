@@ -135,6 +135,7 @@ export class SectionPreview {
     const src = this.source();
     const enabled = !!this.config.recording?.streaming_preview;
     const overlay = !!this.config.interface?.preview_overlay;
+    const indicator = !!this.config.interface?.recording_indicator;
     // Feel/perf knobs (defaults mirror the daemon's serde defaults).
     const adaptive = this.config.recording?.preview_adaptive !== false;
     const waveform = this.config.recording?.preview_waveform !== false;
@@ -166,6 +167,17 @@ export class SectionPreview {
             <input type="checkbox" class="toggle-switch" id="prev-overlay" ${overlay ? "checked" : ""} ${enabled ? "" : "disabled"} />
             <button class="inline-button" id="prev-overlay-test" ${overlay ? "" : "disabled"}>Preview</button>
           </div>
+        </div>
+
+        <div class="settings-field">
+          <label>Recording indicator
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
+              A minimal always-on-top pill (record dot + waveform + timer) that shows while recording —
+              no captions, works with live preview off. Independent of the caption overlay above
+              (you can run either or both).
+            </span>
+          </label>
+          <div><input type="checkbox" class="toggle-switch" id="prev-indicator" ${indicator ? "checked" : ""} /></div>
         </div>
 
         <div class="settings-field">
@@ -276,6 +288,16 @@ export class SectionPreview {
         this.config.interface.preview_overlay = (e.target as HTMLInputElement).checked;
       }
       this.render();
+    });
+
+    // The recording indicator is fully independent: it needs no transcription, so
+    // it's never gated on the live-preview toggle and doesn't re-render anything
+    // else. The global Settings Save persists it; the backend reconciles the
+    // separate "recording-indicator" window on save.
+    this.container.querySelector<HTMLInputElement>("#prev-indicator")?.addEventListener("change", (e) => {
+      if (this.config.interface) {
+        this.config.interface.recording_indicator = (e.target as HTMLInputElement).checked;
+      }
     });
 
     // "Preview" shows the overlay with sample text and keeps it up until the

@@ -39,6 +39,7 @@ mod commands;
 mod config_io;
 mod doctor;
 mod events;
+mod indicator;
 mod overlay;
 mod similar;
 mod tray;
@@ -294,6 +295,12 @@ pub fn run() {
             // only built when the user opts in. `overlay.ts` then drives its
             // visibility from the daemon event stream.
             overlay::sync(app.handle(), startup_cfg.interface.preview_overlay);
+
+            // Pre-create the recording-indicator window (hidden) when its setting
+            // is on — a separate, independent always-on-top pill (record dot +
+            // waveform + timer, no captions) that `indicator.ts` shows while
+            // recording. No-op when off. Independent of the caption overlay above.
+            indicator::sync(app.handle(), startup_cfg.interface.recording_indicator);
 
             // The daemon event stream needs a live bridge. Attach now when we
             // have one; otherwise keep retrying in the background and attach

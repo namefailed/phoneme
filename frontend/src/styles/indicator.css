@@ -1,0 +1,115 @@
+/* Styles for the system-wide "recording indicator" overlay window
+   (indicator.html / indicator.ts). A tiny always-on-top pill: a pulsing record
+   dot + an audio-reactive waveform + an mm:ss timer. No captions. Mirrors the
+   live-preview overlay's opaque-panel approach (see overlay.css). */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  /* Opaque, NOT transparent: a transparent always-on-top WebView2 window
+     hard-crashes the frontend on some Windows/WebView2 builds (see
+     indicator.rs / overlay.rs). The window is a solid themed pill; the body
+     matches the card so the card's rounded corners blend into the window. */
+  background: var(--bg-elevated, #1e1e2e);
+  overflow: hidden;
+  /* The whole window is the pill; the card handles its own pointer events. */
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* The pill fills the (small, fixed) window edge-to-edge: a single centered row
+   of dot · waveform · timer. The window size is locked in indicator.rs, so this
+   card never grows. */
+.ri-card {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 14px;
+  color: var(--fg-default, #cdd6f4);
+  background: var(--bg-elevated, #1e1e2e);
+  /* A slightly stronger border + radius, plus a subtle inset top sheen and inner
+     hairline at the bottom, give the flat opaque pill a little depth WITHOUT a
+     drop shadow (we can't go transparent — that crashes WebView2). Matches the
+     caption overlay's .ov-card treatment. */
+  border: 1px solid color-mix(in srgb, var(--accent, #89b4fa) 28%, var(--border, #45475a));
+  border-radius: 20px;
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, #fff 7%, transparent),
+    inset 0 -1px 0 0 color-mix(in srgb, #000 18%, transparent);
+  cursor: grab; /* the whole pill is the drag region */
+}
+.ri-card:active {
+  cursor: grabbing;
+}
+
+/* Record dot. A small RED dot (this is a "you're recording" cue, so the
+   universal record red is right here — unlike the caption overlay's calm accent
+   dot). It PULSES via opacity only while live. Opacity is GPU-composited, so it
+   never forces a per-frame repaint the way an animated box-shadow (a paint
+   property) does. */
+.ri-dot {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--err, #f38ba8);
+}
+body.ri-live .ri-dot {
+  animation: riPulse 1.6s ease-in-out infinite;
+}
+@keyframes riPulse {
+  0%,
+  100% { opacity: 1; }
+  50%  { opacity: 0.4; }
+}
+/* Respect reduced-motion: no pulsing at all. */
+@media (prefers-reduced-motion: reduce) {
+  body.ri-live .ri-dot { animation: none; }
+}
+
+/* "It hears me" waveform — a row of bars driven by mic RMS (audio_level_sample),
+   not by transcription. Heights animate via transform (GPU-cheap); indicator.ts
+   sets each bar's scaleY. */
+.ri-wave {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  opacity: 0.85;
+}
+.ri-wave-bar {
+  width: 2.5px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent, #89b4fa);
+  transform: scaleY(0.15);
+  transform-origin: center bottom;
+  transition: transform 0.08s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ri-wave-bar { transition: none; }
+}
+
+/* The mm:ss elapsed timer. Monospaced tabular feel so the digits don't jitter as
+   they tick. */
+.ri-time {
+  flex: 0 0 auto;
+  font-size: 0.8571rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--fg-default, #cdd6f4);
+  min-width: 34px;
+  text-align: right;
+}

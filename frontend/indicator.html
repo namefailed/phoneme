@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Phoneme Recording Indicator</title>
+  </head>
+  <body>
+    <!-- Standalone page for the system-wide "recording indicator" overlay window.
+         It renders ONLY the indicator pill (no app shell, no captions) so the
+         window stays tiny and cheap. The window itself is created at runtime by
+         the tray (see src-tauri/src/indicator.rs); this page is its content. -->
+    <div id="indicator-root"></div>
+    <script type="module" src="/src/indicator.ts"></script>
+  </body>
+</html>

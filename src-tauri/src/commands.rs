@@ -1177,6 +1177,10 @@ pub(crate) async fn apply_config(app: &tauri::AppHandle, slot: &BridgeSlot, conf
     // setting off closes the window so no invisible webview lingers.
     crate::overlay::sync(app, config.interface.preview_overlay);
 
+    // Same reconcile for the independent recording-indicator window: create it
+    // (hidden) when `interface.recording_indicator` is on, close it when off.
+    crate::indicator::sync(app, config.interface.recording_indicator);
+
     // Dynamically reload hotkeys in the frontend: drop the old set, then
     // register the new config's hotkeys via the shared helper so all three
     // (record, meeting, in-place) are always re-applied together.
