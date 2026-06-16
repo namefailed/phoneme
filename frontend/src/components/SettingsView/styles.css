@@ -441,6 +441,19 @@ mark.settings-hit {
   line-height: 1.5;
   margin-top: 2px;
 }
+/* Narrow window: collapse the fixed 240px label column so each label stacks
+   above its control instead of squeezing the control column until inputs
+   overflow. The Settings window is usually opened wide, so this is just a
+   graceful fallback for a small/split view. */
+@media (max-width: 840px) {
+  .settings-field {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  .settings-field > span {
+    grid-column: 1;
+  }
+}
 .settings-field input,
 .settings-field select,
 .settings-field textarea {
