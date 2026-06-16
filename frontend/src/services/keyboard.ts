@@ -582,6 +582,23 @@ function handleTypingTargetKeys(e: KeyboardEvent) {
         headerCursor = Math.max(0, headerCursor - 1); highlightHeaderCursor(); return;
       }
     }
+    // A modal SELECT the roving layer just focused (Enter on it): let j/k cycle
+    // its options too — the arrow keys already step it natively, so without this
+    // vim users get stranded on a focused dropdown they can't move. Escape (above)
+    // still closes the modal; letters keep their native type-ahead.
+    if (vimNav && active.tagName === "SELECT" && active.closest('[class*="modal-overlay"]')) {
+      if (e.key === "j" || e.key === "k") {
+        e.preventDefault();
+        const select = active as HTMLSelectElement;
+        const n = select.options.length;
+        if (n) {
+          const delta = e.key === "j" ? 1 : -1;
+          select.selectedIndex = (select.selectedIndex + delta + n) % n;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        return;
+      }
+    }
     return;
   }
 
@@ -1011,7 +1028,11 @@ function activateModalControl(el: HTMLElement, overlay: HTMLElement) {
     if (topmostModalOverlay() !== overlay) return; // the click closed / replaced it
     const ctrls = modalControls(overlay);
     if (!ctrls.length) return;
-    modalCursor = Math.min(modalCursor, ctrls.length - 1);
+    // Keep the cursor on the SAME control across the re-render if it survived
+    // (Lit patches in place, so it usually does); only fall back to a clamped
+    // index when the clicked control is gone (e.g. a Doctor row that got fixed).
+    const i = ctrls.indexOf(el);
+    modalCursor = i >= 0 ? i : Math.min(modalCursor, ctrls.length - 1);
     highlightModalCursor(ctrls);
   });
 }
@@ -1040,6 +1061,16 @@ function handleModalNav(e: KeyboardEvent, overlay: HTMLElement): boolean {
       dialog.setAttribute("tabindex", "-1");
       dialog.focus({ preventScroll: true });
     }
+  }
+  // Re-anchor to the still-highlighted element rather than its old index: a
+  // re-render between keystrokes (a Doctor fix disabling buttons, a tab switch
+  // swapping a panel's controls) can shuffle the list under a fixed index, so
+  // follow the element the user actually sees the cursor on. On the very first
+  // seed there's no .kbd-cursor yet, so this is a no-op and the seed index stands.
+  if (modalCursor >= 0) {
+    const marked = overlay.querySelector<HTMLElement>(".kbd-cursor");
+    const mi = marked ? controls.indexOf(marked) : -1;
+    if (mi >= 0) modalCursor = mi;
   }
   modalCursor = Math.min(modalCursor, controls.length - 1);
   if (step !== 0) {
@@ -1165,15 +1196,20 @@ export function initKeyboard() {
   installed = true;
   document.addEventListener("keydown", onKeyDown);
   // Focus-follows-click for the header strip: clicking a header control puts the
-  // roving header cursor on it, so h/l roam from where you clicked — parity with
-  // the list / detail / sidebar panes, which already do this. The search box is a
-  // typing target, so clicking it focuses to type (just drop any stale roving
-  // cursor). Capture phase so we read the pre-click control set; we never
-  // preventDefault, so the control's own click still fires.
+  // roving header cursor on it, so h/l (or the arrow keys) roam from where you
+  // clicked — parity with the list / detail / sidebar panes, which already do this
+  // under EITHER layer (see onPaneClick). The search box is a typing target, so
+  // clicking it focuses to type (just drop any stale roving cursor). Capture phase
+  // so we read the pre-click control set; we never preventDefault, so the control's
+  // own click still fires.
   document.addEventListener(
     "pointerdown",
     (e) => {
-      if (!vimNav) return;
+      // Header nav is reachable under arrow nav too (k at the list top, Esc out of
+      // the search box), so the click-follower must run for both layers — otherwise
+      // arrow-nav users can't place the header cursor by mouse, and a header cursor
+      // they reached by keyboard never clears when they click into a pane.
+      if (!vimNav && !arrowNav) return;
       const target = e.target as HTMLElement | null;
       if (!target || typeof target.closest !== "function") return;
       if (!target.closest(".headerbar")) {
