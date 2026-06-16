@@ -81,6 +81,18 @@ function isEditing(t: EventTarget | null): boolean {
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
 /** Minimum jump (px) before a streak is drawn (trail streaks on every move). */
 const SMEAR_THRESHOLD = 90;
+/** A SHORT hop (< FLASH_DIST px of travel) whose size ALSO changes a lot (one
+ *  side by > FLASH_SIZE_DELTA px) "flashes": the box reaches the destination
+ *  almost at once while the big resize keeps morphing, so the old size lingers
+ *  over the target for a few frames (very top list row → the header; a sidebar
+ *  item across to a nearby list row). Such moves run at FLASH_DUR — fast enough
+ *  that the morph is over before the eye catches it, but still a smooth ease (NOT
+ *  a snap, which just pops the size at the old spot). Long moves and equal-size
+ *  hops keep the full per-mode duration, so tags → list and list j/k are
+ *  unaffected. */
+const FLASH_DIST = 180;
+const FLASH_SIZE_DELTA = 80;
+const FLASH_DUR = 50;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -172,12 +184,15 @@ function place(el: HTMLElement, animate: boolean) {
     }
   }
 
-  // Glide + resize together: the glow smoothly slides AND grows/shrinks into each
-  // control (mini.animate-style), so any size change eases between sizes instead of
-  // appearing already at the target. left/top/width/height share one duration so
-  // position and size move as one.
+  // Glide + resize together (mini.animate-style): position and size share one
+  // duration so the glow eases between controls. EXCEPT a short hop that also
+  // resizes a lot — that one runs fast (FLASH_DUR) so the stale size can't linger
+  // over the destination (the "size flash"); see the FLASH_* notes. Long moves and
+  // equal-size hops keep the full per-mode duration.
+  const sizeDelta = prev ? Math.max(Math.abs(r.width - prev.width), Math.abs(r.height - prev.height)) : 0;
+  const fastMorph = !!prev && dist < FLASH_DIST && sizeDelta > FLASH_SIZE_DELTA;
   g.style.transitionProperty = "left, top, width, height, opacity";
-  g.style.transitionDuration = animate ? `${DUR[m]}ms` : "0ms";
+  g.style.transitionDuration = animate ? `${fastMorph ? FLASH_DUR : DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
   g.style.width = `${r.width}px`;
@@ -322,6 +337,17 @@ function applyConfig(cfg: unknown) {
   const raw = (cfg as { interface?: { cursor_animation?: string } } | null)?.interface?.cursor_animation;
   const m: Mode = raw === "glide" || raw === "smear" || raw === "trail" ? raw : "off";
   setMode(m);
+}
+
+/** Seed the glow onto a specific control NOW, gliding in from wherever it sits.
+ *  The MutationObserver only catches class *changes* on existing nodes, so a
+ *  control highlighted by a FRESH render — a popover that opens with its active
+ *  option already `.kbd-cursor` — is missed, and the glow wouldn't follow until
+ *  the next move. Components call this on open so the glow lands with the
+ *  highlight. No-op when the animation is off or the element isn't live. */
+export function seedCursorGlow(el: HTMLElement) {
+  if (!effective() || !el.isConnected) return;
+  place(el, true);
 }
 
 /** Wire the cursor-animation layer once at app start (idempotent). Reads the

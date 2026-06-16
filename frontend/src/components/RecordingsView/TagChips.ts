@@ -5,6 +5,7 @@ import { addTag, attachTag, detachTag, listAllTags, tagsFor, updateTag, getRecor
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { showToast } from "../../utils/toast";
 import { fuzzyFilter } from "../../utils/fuzzy";
+import { seedCursorGlow } from "../../services/cursorAnimation";
 
 /** Black or white (#11111b / #ffffff), whichever reads better on `hexColor`
  *  (YIQ luma threshold). `""` for non-hex input — callers then inherit the
@@ -221,6 +222,12 @@ export class TagChipsElement extends LitElement {
     // once you Enter into it.
     setTimeout(() => {
       this.renderRoot.querySelector<HTMLElement>(".tag-edit-pop")?.focus();
+      // Pull the cursor glow onto the seeded name field. The popover renders with
+      // the name already `.kbd-cursor`, which the glow's class-change observer
+      // can't see (fresh node, not a change) — so it wouldn't follow until the
+      // first h/l. Seed it explicitly so the glow lands with the highlight.
+      const name = this.renderRoot.querySelector<HTMLElement>(".tag-edit-name");
+      if (name) seedCursorGlow(name);
     }, 0);
   }
 
