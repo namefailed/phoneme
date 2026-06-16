@@ -63,7 +63,7 @@ The list zoom is clamped to 60–200% and remembered per device.
 | `Space` | Toggle multi-select (on a meeting title: all of its tracks) |
 | `Shift + ↑/↓` | Extend the multi-selection |
 | `\` | **Split mode**: with a recording open, splits with the cursor row; with exactly two selected, opens both — two full panes (independent editing, draggable divider, double-click = 50/50). `Esc` closes the second pane. On an open **meeting** (merged view) it opens the **dual timeline** — both tracks as synced, clickable timelines; `Esc` returns to the merged view |
-| `d` `d` (vim nav) | Delete the focused recording (with Undo) |
+| `d` `d` (vim nav) | Delete the selection — every selected recording, or the focused one if nothing is multi-selected (with Undo) |
 | `g g` / `G` (vim nav) | Jump to the first / last row |
 | `z z` (vim nav) | Center the list on the cursor row |
 | `Esc` | Clear the multi-selection |

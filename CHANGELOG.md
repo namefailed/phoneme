@@ -449,6 +449,11 @@ trust boundary. Verified against current code.*
 - [x] **Tag-chip editor is keyboard-driven** — the inline rename/recolor popover now roves
   with the `.kbd-cursor` box (`h`/`l`/`j`/`k` + arrows across color · name · Save · Remove ·
   Cancel), `Enter` activates, `Esc` steps back — instead of relying on native focus.
+- [x] **`dd` deletes the whole selection** — with multiple recordings selected, the vim
+  `dd` motion now deletes every selected one (matching the `Delete` key and the bulk bar)
+  instead of only the row under the cursor. Also fixed a flicker when an undoable delete's
+  grace period lapsed: the rows briefly flashed back onto the list before vanishing, because
+  the hide set was cleared before the list re-fetched — the refresh now lands first.
 - [x] **Arrow-key navigation for non-vim users** (`interface.arrow_nav`, opt-in) — a
   friendly counterpart to vim navigation: `←`/`→` move between the sidebar, list, and
   detail panes; `↑`/`↓` move within the list, sidebar filters, and detail rows; `Enter`

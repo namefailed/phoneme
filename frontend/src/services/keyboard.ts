@@ -137,7 +137,7 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "h  l (split view)", label: "Cross between the two panes (at a row's edge)" },
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
     { combo: "i", label: "Edit the transcript directly" },
-    { combo: "d d", label: "Delete the focused recording (with Undo)" },
+    { combo: "d d", label: "Delete the selection — all selected, else the focused one (with Undo)" },
     { combo: "h l j k (popup)", label: "Move the cursor in a modal / popup — Enter selects, Esc closes" },
     { combo: "Esc", label: "Step back out a level" },
   ],

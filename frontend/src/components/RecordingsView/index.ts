@@ -1375,10 +1375,16 @@ export class RecordingsView {
     ed?.focus();
   }
 
-  /** `dd`: delete the recording under the list cursor (falls back to the open
-   *  one) via the undoable flow. Sessions are skipped — they're deleted
+  /** `dd`: delete the current selection via the undoable flow. With a
+   *  multi-selection it deletes every selected recording (parity with the
+   *  Delete key and the bulk bar); otherwise the row under the list cursor,
+   *  falling back to the open one. Sessions are skipped — they're deleted
    *  track-by-track or via the bulk bar. */
   private vimDelete() {
+    if (this.multiSelected.size > 0) {
+      this.requestUndoableDelete([...this.multiSelected]);
+      return;
+    }
     const id = this.list.getFocusedId() ?? this.state.get().selectedId;
     if (!id) return;
     this.requestUndoableDelete([id]);
@@ -1442,10 +1448,13 @@ export class RecordingsView {
             console.error("Failed to delete recording:", err);
           }
         }
-        // The daemon's RecordingDeleted events refresh the store; clear the hide
-        // set so it never grows, and refresh to reconcile.
+        // Reconcile the store FIRST — the re-fetch drops the now-deleted rows
+        // (the daemon removes the catalog row before `deleteRecording` resolves,
+        // so they're already gone). Only THEN clear the hide set. Clearing it
+        // before the refresh lands would briefly un-hide rows that are still in
+        // the store, flashing them back onto the list right before they vanish.
+        await this.refresh();
         this.list.setPendingDelete(ids, false);
-        void this.refresh();
       },
     });
   }
