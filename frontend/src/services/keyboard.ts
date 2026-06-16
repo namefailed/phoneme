@@ -8,6 +8,19 @@
  * Space navigation when focused — those are documented in the overlay so the
  * whole app is keyboard-navigable and discoverable.
  *
+ * KEYMAP TIERS — keep this boundary clean:
+ *   1. NORMAL (always on, for everyone): search "/" + help "?"; the Ctrl chrome
+ *      toggles; the `g`-leader "go to a place" chords (g l/s/d/D/A/T/P/S/b/1/2 + g /);
+ *      the recordings list's arrow / Enter / Space / \ nav; Tab / Shift+Tab to move
+ *      between controls and panes; and the open-recording actions p/c/e/r/f/t/T.
+ *      No vim knowledge required.
+ *   2. VIM nav (`interface.vim_nav`, opt-in): the bare-letter MOTION layer layered
+ *      on top — h/l between panes, j/k/gg/G motions, header roving, zz, dd, i, the
+ *      `x` leader (x b / x /), and the waveform / dropdown sub-modes. A non-vim user
+ *      pressing a bare `h`/`j`/`G` gets nothing; that's the contract.
+ *   3. EDITOR vim (`editor.vim_mode`): a SEPARATE axis — CodeMirror's own vim inside
+ *      the transcript / notes editors. Unrelated to tier 2.
+ *
  * When `interface.vim_nav` is enabled, a system-wide vim navigation layer turns
  * on: `h` / `l` move focus between the sidebar, list, and detail panes (the
  * active pane gets a focus ring); `j` / `k` / `gg` / `G` move within the
@@ -41,7 +54,9 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "g then d", label: "Keyboard into the open recording" },
       { combo: "g then D", label: "Go to Doctor" },
       { combo: "g then A", label: "Toggle the AI-activity panel" },
-      { combo: "g then /", label: "Highlight the search bar (h/l roam the header)" },
+      { combo: "g then /", label: "Highlight the search bar" },
+      { combo: "g then b", label: "Go to / reveal the sidebar" },
+      { combo: "g then 1 / 2", label: "Jump to the left / right split pane" },
       { combo: "g then T", label: "Open the Tag Manager" },
       { combo: "g then P", label: "Managers → Profiles" },
       { combo: "g then S", label: "Managers → Saved searches" },
@@ -51,6 +66,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "Ctrl + /", label: "Hide / show the top bar" },
       { combo: "Ctrl + = / − / 0", label: "Zoom the list bigger / smaller / reset" },
       { combo: "Ctrl + scroll", label: "Zoom the list (over the list pane)" },
+      { combo: "Tab / Shift+Tab", label: "Move between controls / panes" },
       { combo: "Esc", label: "Close popups / leave search" },
     ],
   },
@@ -119,7 +135,6 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "j k · Enter · Esc", label: "Drive a detail dropdown (Speed/Export/Views/Pipeline)" },
     { combo: "Enter (waveform)", label: "Scrub mode: h/l ±1s, H/L ±5s, Space play, Esc leaves" },
     { combo: "h  l (split view)", label: "Cross between the two panes (at a row's edge)" },
-    { combo: "g 1   g 2", label: "Jump to the left (1) / right (2) split-view pane" },
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
     { combo: "i", label: "Edit the transcript directly" },
     { combo: "d d", label: "Delete the focused recording (with Undo)" },
@@ -127,12 +142,27 @@ const VIM_HELP_GROUP: HelpGroup = {
   ],
 };
 
+/** Shown in the help sheet only while `interface.arrow_nav` is enabled — the
+ *  non-vim "normal" navigation layer driven entirely by the arrow keys. */
+const ARROW_HELP_GROUP: HelpGroup = {
+  title: "Arrow-key navigation (enabled)",
+  items: [
+    { combo: "← →", label: "Move focus between sidebar / list / detail panes" },
+    { combo: "↑ ↓", label: "Move within the list · sidebar filters · detail rows" },
+    { combo: "↑ at list top", label: "Rise into the header controls (↓ to come back)" },
+    { combo: "← → (header)", label: "Move across the header controls" },
+    { combo: "Enter", label: "Open / activate the focused row, button, or dropdown" },
+    { combo: "Esc", label: "Step back out a level" },
+  ],
+};
+
 function helpGroups(): HelpGroup[] {
-  // Surface the vim group right after "Global" so it's the first thing a vim
-  // user sees; otherwise hide it entirely (the keys are inert when off).
-  return vimNav
-    ? [BASE_HELP_GROUPS[0], VIM_HELP_GROUP, ...BASE_HELP_GROUPS.slice(1)]
-    : BASE_HELP_GROUPS;
+  // Surface the active nav layer(s) right after "Global" so they're the first
+  // thing the user sees; hide them entirely when off (the keys are inert).
+  const layers: HelpGroup[] = [];
+  if (arrowNav) layers.push(ARROW_HELP_GROUP);
+  if (vimNav) layers.push(VIM_HELP_GROUP);
+  return [BASE_HELP_GROUPS[0], ...layers, ...BASE_HELP_GROUPS.slice(1)];
 }
 
 let helpOpen = false;
@@ -147,6 +177,9 @@ let pendingXTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Whether the system-wide vim navigation layer is active (`interface.vim_nav`). */
 let vimNav = false;
+/** Whether arrow-key navigation is active (`interface.arrow_nav`) — drives the
+ *  same pane/grid cursor as vim, but via the arrow keys, for non-vim users. */
+let arrowNav = false;
 
 /** When the detail pane has "captured" the keys for an open dropdown ("sub") or
  *  the waveform scrub mode ("wave"), route j/k/h/l/H/L/Enter/Esc to that instead
@@ -424,88 +457,13 @@ function closeHelp() {
   document.querySelector(".kbd-help-overlay")?.remove();
 }
 
-function onKeyDown(e: KeyboardEvent) {
-  // When the cheat-sheet is open it owns Esc / "?" and nothing else fires.
-  if (helpOpen) {
-    if (e.key === "Escape" || e.key === "?") {
-      e.preventDefault();
-      closeHelp();
-    }
-    return;
-  }
-
-  // Drop a stale header-nav cursor if focus has drifted out of the header.
-  if (headerCursor >= 0 && !activeWithin(".headerbar")) exitHeaderNav();
-
-  // While typing, never hijack keys — except Esc from the search box, which
-  // blurs it and hands focus to the list so arrow-nav can take over. The
-  // transcript editor's own vim mode (when focused) keeps Esc too, by virtue of
-  // this early return — the system-wide layer never steals it.
-  if (isTypingTarget(document.activeElement)) {
-    const active = document.activeElement as HTMLElement;
-    const isSearch = active.classList.contains("search");
-    if (e.key === "Escape") {
-      // Escape backs out of a header input (search box, the date filters). With
-      // vim nav on, return the roving cursor TO that control so you can keep
-      // roaming the header — you just left a field, not the whole bar (a second
-      // Esc from roving then drops to the list). Without vim nav, blur straight
-      // to the list as before.
-      if (active.closest(".headerbar")) {
-        const fromCtrl = active as HTMLElement;
-        active.blur();
-        if (vimNav) {
-          enterHeaderNav();
-          const items = headerControls();
-          const idx = items.findIndex((el) => el === fromCtrl || el.contains(fromCtrl));
-          if (idx >= 0) { headerCursor = idx; highlightHeaderCursor(); }
-        } else {
-          focusList();
-        }
-      }
-      return;
-    }
-    // Header search box (vim nav): ↓ drops into the list, and ←/→ at the text
-    // edges step to the adjacent header control. Letters still type normally
-    // (so you can search for "h" / "j"), so the keyboard nav never traps you.
-    if (vimNav && isSearch) {
-      const input = active as HTMLInputElement;
-      if (e.key === "ArrowDown") { e.preventDefault(); input.blur(); dispatchVim("focus-list"); return; }
-      // ←/→ at the caret edges hop OUT of the text box back to header-cursor nav.
-      const len = input.value?.length ?? 0;
-      const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
-      const atEnd = input.selectionStart === len && input.selectionEnd === len;
-      if (e.key === "ArrowRight" && atEnd) {
-        e.preventDefault(); input.blur(); enterHeaderNav();
-        headerCursor = Math.min(headerControls().length - 1, headerCursor + 1); highlightHeaderCursor(); return;
-      }
-      if (e.key === "ArrowLeft" && atStart) {
-        e.preventDefault(); input.blur(); enterHeaderNav();
-        headerCursor = Math.max(0, headerCursor - 1); highlightHeaderCursor(); return;
-      }
-    }
-    return;
-  }
-
-  // Stand down if another component already handled it, or a modal is open.
-  if (e.defaultPrevented) return;
-  if (document.querySelector(".modal-overlay")) return;
-
-  // Ctrl+, → Settings (leave all other modifier combos to the browser/app).
-  if ((e.ctrlKey || e.metaKey) && e.key === ",") {
-    e.preventDefault();
-    navigate("settings");
-    return;
-  }
-  // Ctrl+/ → hide/show the top (search/header) bar. Persisted per device.
-  if ((e.ctrlKey || e.metaKey) && e.key === "/") {
-    e.preventDefault();
-    toggleHeaderBar();
-    return;
-  }
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-  // "g" prefix sequence (vim-style): g l / g s / g d, plus g g → top of list.
-  if (pendingG) {
+/// Handle a `g`-prefix chord (gl/gs/gd/gD/gA/gT/gP/gS/g1/g2/g//gb/gg). These are
+/// the "go to a place" destination chords and are part of the NORMAL (non-vim)
+/// keymap — they all fire regardless of `vim_nav`. The sole exception is `g g`
+/// (jump-to-top), a vim MOTION (the partner of `G`), which stays gated. A bare
+/// modifier keydown is ignored so the prefix survives until the real letter; any
+/// other key clears the prefix. Extracted from onKeyDown.
+function handleGChord(e: KeyboardEvent) {
     // A bare modifier keydown (the Shift that PRECEDES a capital chord letter —
     // pressing g then Shift+D fires keydown for "Shift" first) must NOT consume
     // the prefix, or g D / g T / g P / g S never fire. Keep pending-g armed and
@@ -535,9 +493,11 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
     if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
     if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
-    // g 1 / g 2 — in split view, jump straight to the left (1) or right (2)
-    // recording pane. (g 1 also just focuses the detail pane outside split.)
-    if (vimNav && (e.key === "1" || e.key === "2")) {
+    // g 1 / g 2 — jump straight to the left (1) / right (2) recording pane in
+    // split view (g 1 also just focuses the detail pane outside split). A "go to
+    // a pane" DESTINATION chord, so — like g d / g l — it works for everyone, not
+    // just vim nav: non-vim users reach split view via `\` / the bulk bar too.
+    if (e.key === "1" || e.key === "2") {
       e.preventDefault();
       dispatchVim(e.key === "1" ? "pane-1" : "pane-2");
       return;
@@ -545,8 +505,9 @@ function onKeyDown(e: KeyboardEvent) {
     // g / — HIGHLIGHT the search bar (roving header cursor, like k at the top of
     // the list) rather than focusing it to type like plain `/` does.
     if (e.key === "/") { e.preventDefault(); enterHeaderNav({ reveal: true }); return; }
-    // g b — jump to the sidebar (like h from the list view); reveals it if hidden.
-    if (vimNav && e.key === "b") { e.preventDefault(); dispatchVim("focus-sidebar"); return; }
+    // g b — go to / reveal the sidebar. A "go to a place" destination chord, so
+    // it's always on like its g d / g l siblings — not gated behind vim nav.
+    if (e.key === "b") { e.preventDefault(); dispatchVim("focus-sidebar"); return; }
     // g g — jump to the top of the focused list/sidebar. Defaults to the LIST
     // when focus has drifted (e.g. onto <body>) so it's reliable from the
     // recordings pane; the detail pane has no gg, so it's left alone there.
@@ -560,340 +521,72 @@ function onKeyDown(e: KeyboardEvent) {
     return;
   }
 
-  // "d" prefix (vim): dd deletes the focused recording. A non-"d" follow-up
-  // falls through so the key is still handled normally below.
-  if (pendingD) {
-    clearPendingD();
-    if (vimNav && e.key === "d") {
-      e.preventDefault();
-      dispatchVim("delete");
-      return;
-    }
-  }
-
-  // "z" prefix (vim): zz centers the list viewport on the cursor row.
-  if (pendingZ) {
-    clearPendingZ();
-    if (vimNav && e.key === "z") {
-      e.preventDefault();
-      dispatchVim("list-center");
-      return;
-    }
-  }
-
-  // "x" prefix (vim): a leader for the chrome toggles — `x b` toggles the
-  // sidebar and `x /` toggles the top (search) bar, the keyboard-only twins of
-  // the Ctrl+B / Ctrl+/ buttons. A non-matching follow-up falls through.
-  if (pendingX) {
-    clearPendingX();
-    if (vimNav && e.key === "b") { e.preventDefault(); dispatchVim("toggle-sidebar"); return; }
-    if (vimNav && e.key === "/") { e.preventDefault(); toggleHeaderBar(); return; }
-  }
-
-  // System-wide vim navigation layer. These keys are inert unless vim_nav is on,
-  // so non-vim users are completely unaffected. Pane movement (h/l) works from
-  // anywhere; the list/edit/delete keys require the relevant pane to hold focus.
-  if (vimNav) {
-    // Detail pane has captured the keys for an open dropdown or the waveform
-    // scrub mode — route the relevant keys there before normal grid nav. (The
-    // detail pane holds focus throughout, so editors aren't affected: typing
-    // targets already returned above.)
-    if (detailCapture === "sub" && activeWithin(".rv-detail")) {
-      switch (e.key) {
-        case "j": case "ArrowDown": e.preventDefault(); dispatchVim("detail-sub-next"); return;
-        case "k": case "ArrowUp": e.preventDefault(); dispatchVim("detail-sub-prev"); return;
-        case "Enter": case "i": case " ": e.preventDefault(); dispatchVim("detail-sub-activate"); return;
-        case "Escape": case "h": case "l": e.preventDefault(); dispatchVim("detail-sub-close"); return;
-      }
-      return; // swallow other keys while a dropdown is open
-    }
-    if (detailCapture === "wave" && activeWithin(".rv-detail")) {
-      switch (e.key) {
-        case "h": e.preventDefault(); dispatchVim("wave-back-1"); return;
-        case "l": e.preventDefault(); dispatchVim("wave-fwd-1"); return;
-        case "H": e.preventDefault(); dispatchVim("wave-back-5"); return;
-        case "L": e.preventDefault(); dispatchVim("wave-fwd-5"); return;
-        case "Enter": case " ": e.preventDefault(); dispatchVim("wave-toggle"); return;
-        case "Escape": e.preventDefault(); dispatchVim("wave-exit"); return;
-        case "k": e.preventDefault(); dispatchVim("wave-exit-up"); return;
-        case "j": e.preventDefault(); dispatchVim("wave-exit-down"); return;
-      }
-      return; // swallow other keys while scrubbing
-    }
-    // Header strip: when focus is on a header control (a button — the search box
-    // is a typing target handled above), h/l move across the header's controls
-    // and j/↓ drop into the list. Completes the "k at the top of the list →
-    // header → h/l through the options → j back into the recordings" loop.
-    if (activeWithin(".headerbar")) {
-      const items = headerControls();
-
-      // A control under the cursor is "open": route j/k/Enter/Esc to the
-      // dropdown's items (Record / Settings) or the status <select>'s options
-      // before the normal left/right roving.
-      if (headerSub) {
-        if (headerSub.kind === "menu") {
-          const n = headerSub.items.length;
-          switch (e.key) {
-            case "j":
-            case "ArrowDown":
-              e.preventDefault();
-              headerSub.index = (headerSub.index + 1) % n;
-              highlightHeaderSub();
-              return;
-            case "k":
-            case "ArrowUp":
-              e.preventDefault();
-              headerSub.index = (headerSub.index - 1 + n) % n;
-              highlightHeaderSub();
-              return;
-            case "i":
-            case "Enter":
-            case " ": {
-              e.preventDefault();
-              const it = headerSub.items[headerSub.index];
-              closeHeaderSub(false); // the item's own click closes the dropdown
-              it?.click();
-              highlightHeaderCursor();
-              return;
-            }
-            case "Escape":
-              e.preventDefault();
-              closeHeaderSub(true);
-              highlightHeaderCursor();
-              return;
-            case "h":
-            case "ArrowLeft":
-              e.preventDefault();
-              closeHeaderSub(true);
-              headerCursor = (headerCursor - 1 + items.length) % items.length;
-              highlightHeaderCursor();
-              return;
-            case "l":
-            case "ArrowRight":
-              e.preventDefault();
-              closeHeaderSub(true);
-              headerCursor = (headerCursor + 1) % items.length;
-              highlightHeaderCursor();
-              return;
-            default:
-              e.preventDefault(); // trap stray keys while the dropdown is open
-              return;
-          }
+/// Keys while a text input/select holds focus (search box, header date
+/// filters, editors). We never hijack typing — only Escape (back out of a
+/// header field to the list / roving cursor) and, in vim-nav, the search
+/// box's arrow edges (down into the list, left/right to adjacent controls).
+function handleTypingTargetKeys(e: KeyboardEvent) {
+    const active = document.activeElement as HTMLElement;
+    const isSearch = active.classList.contains("search");
+    if (e.key === "Escape") {
+      // Escape backs out of a header input (search box, the date filters). With
+      // vim nav on, return the roving cursor TO that control so you can keep
+      // roaming the header — you just left a field, not the whole bar (a second
+      // Esc from roving then drops to the list). Without vim nav, blur straight
+      // to the list as before.
+      if (active.closest(".headerbar")) {
+        // Stop the browser's native clear-on-Escape for `<input type="search">`
+        // so leaving the box KEEPS your query (and the live filter) intact.
+        if (isSearch) e.preventDefault();
+        const fromCtrl = active as HTMLElement;
+        active.blur();
+        if (vimNav || arrowNav) {
+          enterHeaderNav();
+          const items = headerControls();
+          const idx = items.findIndex((el) => el === fromCtrl || el.contains(fromCtrl));
+          if (idx >= 0) { headerCursor = idx; highlightHeaderCursor(); }
         } else {
-          const sel = headerSub.el;
-          switch (e.key) {
-            case "j":
-            case "ArrowDown":
-              e.preventDefault();
-              if (sel.selectedIndex < sel.options.length - 1) {
-                sel.selectedIndex++;
-                sel.dispatchEvent(new Event("change", { bubbles: true }));
-              }
-              renderStatusOverlay(sel);
-              return;
-            case "k":
-            case "ArrowUp":
-              e.preventDefault();
-              if (sel.selectedIndex > 0) {
-                sel.selectedIndex--;
-                sel.dispatchEvent(new Event("change", { bubbles: true }));
-              }
-              renderStatusOverlay(sel);
-              return;
-            case "i":
-            case "Enter":
-            case " ":
-            case "Escape":
-              e.preventDefault();
-              headerSub = null;
-              highlightHeaderCursor();
-              return;
-            case "h":
-            case "ArrowLeft":
-              e.preventDefault();
-              headerSub = null;
-              headerCursor = (headerCursor - 1 + items.length) % items.length;
-              highlightHeaderCursor();
-              return;
-            case "l":
-            case "ArrowRight":
-              e.preventDefault();
-              headerSub = null;
-              headerCursor = (headerCursor + 1) % items.length;
-              highlightHeaderCursor();
-              return;
-            default:
-              return;
-          }
+          focusList();
         }
       }
-
-      switch (e.key) {
-        case "h":
-        case "ArrowLeft":
-          e.preventDefault();
-          headerCursor = (headerCursor - 1 + items.length) % items.length;
-          highlightHeaderCursor();
-          return;
-        case "l":
-        case "ArrowRight":
-          e.preventDefault();
-          headerCursor = (headerCursor + 1) % items.length;
-          highlightHeaderCursor();
-          return;
-        case "j":
-        case "ArrowDown":
-        case "Escape":
-          e.preventDefault();
-          exitHeaderNav();
-          dispatchVim("focus-list");
-          return;
-        case "i":
-        case "Enter":
-        case " ": {
-          e.preventDefault();
-          const el = items[headerCursor];
-          if (!el) {
-            exitHeaderNav();
-            return;
-          }
-          // Native status <select>: enter option-cycling (its OS popup can't be
-          // opened from JS, so j/k step the value live; Enter/Esc commit).
-          if (el.tagName === "SELECT") {
-            headerSub = { kind: "select", el: el as HTMLSelectElement };
-            highlightHeaderSub();
-            return;
-          }
-          // Split-button caret that opens a dropdown (Record / Settings): open
-          // it, then j/k through its items. The menu paints on the next frame.
-          if (el.getAttribute("aria-haspopup") === "menu") {
-            // The menu lives in the trigger's group wrapper — Record/Settings
-            // split groups, the Saved-searches group, or (fallback) the button's
-            // immediate parent. Broadening this is what lets j/k drive the
-            // Saved-searches dropdown, not just Record/Settings.
-            const group =
-              el.closest(".hb-rec-group, .hb-settings-group, .ss-group") ?? el.parentElement;
-            el.click();
-            requestAnimationFrame(() => {
-              if (headerCursor < 0) return; // header nav was left within the frame
-              const menu = group?.querySelector<HTMLElement>('[role="menu"]') ?? null;
-              if (!menu || menu.offsetParent === null) return; // didn't open
-              const mitems = [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')].filter(
-                (x) => x.offsetParent !== null,
-              );
-              if (!mitems.length) return;
-              let idx = mitems.findIndex(
-                (x) => x.getAttribute("aria-checked") === "true" || x.classList.contains("selected"),
-              );
-              if (idx < 0) idx = 0;
-              headerSub = { kind: "menu", items: mitems, index: idx, opener: el };
-              highlightHeaderSub();
-            });
-            return;
-          }
-          // The search box focuses to type (leaving roving nav). EVERY other
-          // control just FIRES but keeps the roving cursor on it, so after
-          // sorting / toggling the sidebar / opening a popup you keep roaming the
-          // header with h/l instead of being dumped to the list. Re-highlight
-          // after the click (the action may re-render the header).
-          // Inputs (the search box AND the date filters) focus to type/pick,
-          // leaving roving nav — Esc returns the cursor to them. A date input
-          // also pops its native calendar via showPicker(). Every OTHER control
-          // just fires but keeps the cursor on it.
-          if (el.tagName === "INPUT") {
-            exitHeaderNav();
-            el.focus();
-            const input = el as HTMLInputElement;
-            if (input.type === "date" && typeof input.showPicker === "function") {
-              try { input.showPicker(); } catch { /* not allowed in this context */ }
-            }
-            return;
-          }
-          el.click();
-          requestAnimationFrame(() => { if (headerCursor >= 0) highlightHeaderCursor(); });
-          return;
-        }
-        // Any other key falls through to the global shortcuts below.
+      return;
+    }
+    // Enter in the search box commits the query (the filter is already live on
+    // every keystroke) and hands focus to the list, so you can browse the results
+    // with the text still in place — the keyboard way to leave the box WITHOUT
+    // clearing it.
+    if (isSearch && e.key === "Enter") {
+      e.preventDefault();
+      (active as HTMLInputElement).blur();
+      focusList();
+      return;
+    }
+    // Header search box (vim / arrow nav): ↓ drops into the list, and ←/→ at the
+    // text edges step to the adjacent header control. Letters still type normally
+    // (so you can search for "h" / "j"), so the keyboard nav never traps you.
+    if ((vimNav || arrowNav) && isSearch) {
+      const input = active as HTMLInputElement;
+      if (e.key === "ArrowDown") { e.preventDefault(); input.blur(); dispatchVim("focus-list"); return; }
+      // ←/→ at the caret edges hop OUT of the text box back to header-cursor nav.
+      const len = input.value?.length ?? 0;
+      const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
+      const atEnd = input.selectionStart === len && input.selectionEnd === len;
+      if (e.key === "ArrowRight" && atEnd) {
+        e.preventDefault(); input.blur(); enterHeaderNav();
+        headerCursor = Math.min(headerControls().length - 1, headerCursor + 1); highlightHeaderCursor(); return;
+      }
+      if (e.key === "ArrowLeft" && atStart) {
+        e.preventDefault(); input.blur(); enterHeaderNav();
+        headerCursor = Math.max(0, headerCursor - 1); highlightHeaderCursor(); return;
       }
     }
-    switch (e.key) {
-      case "h":
-        e.preventDefault();
-        // In the detail pane (and the sidebar), h walks LEFT through the focused
-        // row's items; elsewhere it switches pane. The sidebar steps out to the
-        // list on l past its rightmost cell (it's the leftmost pane).
-        if (activeWithin(".rv-detail")) dispatchVim("detail-left");
-        else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-left");
-        else dispatchVim("pane-left");
-        return;
-      case "l":
-        e.preventDefault();
-        if (activeWithin(".rv-detail")) dispatchVim("detail-right");
-        else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-right");
-        // From the list, l opens the cursor recording (like Enter) when no detail
-        // pane is open yet; if one's already open it just moves focus into it.
-        else if (activeWithin(".rv-list")) dispatchVim("list-right");
-        else dispatchVim("pane-right");
-        return;
-      case "G":
-        if (activeWithin(".rv-list")) {
-          e.preventDefault();
-          dispatchVim("list-bottom");
-          return;
-        }
-        if (activeWithin("ph-sidebar")) {
-          e.preventDefault();
-          dispatchVim("sidebar-bottom");
-          return;
-        }
-        if (activeWithin(".rv-detail")) {
-          e.preventDefault();
-          dispatchVim("detail-bottom");
-          return;
-        }
-        break;
-      case "j":
-        // The list owns j/k via its own keydown when focused; this only fires
-        // for the other panes — the sidebar steps its filters, the detail pane
-        // steps its option buttons (Play/Copy/Summary/…).
-        if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-down"); return; }
-        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-down"); return; }
-        break;
-      case "k":
-        if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-up"); return; }
-        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-up"); return; }
-        break;
-      case "i":
-        // i drops straight into the transcript editor from the detail pane.
-        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("edit"); return; }
-        break;
-      case "Enter":
-        // Enter activates the highlighted detail button (or edits the transcript
-        // when no detail cursor is set); in the sidebar it applies the filter.
-        // (Enter in the list is handled there and arrives as defaultPrevented.)
-        if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim(e.shiftKey ? "detail-enter-shift" : "detail-enter"); return; }
-        if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-activate"); return; }
-        break;
-      case "d":
-        if (activeWithin(".rv-list")) {
-          e.preventDefault();
-          pendingD = true;
-          pendingDTimer = setTimeout(clearPendingD, 1000);
-          return;
-        }
-        break;
-      case "z":
-        // zz (center on cursor) — armed only while the list drives the keys.
-        if (activeWithin(".rv-list")) {
-          e.preventDefault();
-          pendingZ = true;
-          pendingZTimer = setTimeout(clearPendingZ, 1000);
-          return;
-        }
-        break;
-    }
+    return;
   }
 
+/// Global single-key shortcuts that fire in any pane (vim-nav or not), tried
+/// AFTER the vim-nav layer: / search, ? help, g/x chord arming, and the
+/// open-recording actions p/c/e/r/f/t/T. Extracted from onKeyDown.
+function handleGlobalKeys(e: KeyboardEvent) {
   switch (e.key) {
     case "/":
       e.preventDefault();
@@ -928,6 +621,421 @@ function onKeyDown(e: KeyboardEvent) {
     case "t": e.preventDefault(); dispatchVim("focus-tags"); return;
     case "T": e.preventDefault(); dispatchVim("open-tag-manager"); return;
   }
+}
+
+/// System-wide vim navigation layer (extracted from `onKeyDown`). Returns `true`
+/// when it consumed the key — the caller then stops — and `false` to fall through
+/// to the global single-key shortcuts. Runs when EITHER `vim_nav` or `arrow_nav`
+/// is on. The trigger key is normalized up front into a canonical motion token
+/// (`nav`): arrow keys map to h/l/j/k when either layer is on, bare vim letters
+/// only when `vim_nav` is on, and Enter/Escape/Space are shared. Every switch
+/// below reads `nav`, so one engine drives both the vim and arrow-key audiences;
+/// keys no active layer owns become `""` and fall through harmlessly. Pane
+/// movement works from anywhere; the list/edit/delete keys require the relevant
+/// pane to hold focus.
+function handleVimNav(e: KeyboardEvent): boolean {
+  // Normalize the trigger into a canonical motion token. Arrows are aliases for
+  // h/l/j/k under EITHER layer (so vim users keep arrow support too); the bare
+  // vim letters (incl. H/L/G/i/d/z) only fire under vim_nav; Enter/Escape/Space
+  // are shared. An inert key collapses to "" — no switch case matches it, so it
+  // is swallowed inside a capture/menu block or falls through at the top level,
+  // exactly as an unrecognized key did before.
+  const ARROW_TO_MOTION: Record<string, string> = {
+    ArrowLeft: "h", ArrowRight: "l", ArrowUp: "k", ArrowDown: "j",
+  };
+  const VIM_LETTERS = "hjklHLGidz";
+  let nav: string;
+  if (e.key in ARROW_TO_MOTION) {
+    nav = vimNav || arrowNav ? ARROW_TO_MOTION[e.key] : "";
+  } else if (e.key.length === 1 && VIM_LETTERS.includes(e.key)) {
+    nav = vimNav ? e.key : "";
+  } else {
+    nav = e.key; // Enter / Escape / " " and the like — shared by both layers
+  }
+
+  // Detail pane has captured the keys for an open dropdown or the waveform
+  // scrub mode — route the relevant keys there before normal grid nav. (The
+  // detail pane holds focus throughout, so editors aren't affected: typing
+  // targets already returned above.)
+  if (detailCapture === "sub" && activeWithin(".rv-detail")) {
+    switch (nav) {
+      case "j": e.preventDefault(); dispatchVim("detail-sub-next"); return true;
+      case "k": e.preventDefault(); dispatchVim("detail-sub-prev"); return true;
+      case "Enter": case "i": case " ": e.preventDefault(); dispatchVim("detail-sub-activate"); return true;
+      case "Escape": case "h": case "l": e.preventDefault(); dispatchVim("detail-sub-close"); return true;
+    }
+    return true; // swallow other keys while a dropdown is open
+  }
+  if (detailCapture === "wave" && activeWithin(".rv-detail")) {
+    switch (nav) {
+      case "h": e.preventDefault(); dispatchVim("wave-back-1"); return true;
+      case "l": e.preventDefault(); dispatchVim("wave-fwd-1"); return true;
+      case "H": e.preventDefault(); dispatchVim("wave-back-5"); return true;
+      case "L": e.preventDefault(); dispatchVim("wave-fwd-5"); return true;
+      case "Enter": case " ": e.preventDefault(); dispatchVim("wave-toggle"); return true;
+      case "Escape": e.preventDefault(); dispatchVim("wave-exit"); return true;
+      case "k": e.preventDefault(); dispatchVim("wave-exit-up"); return true;
+      case "j": e.preventDefault(); dispatchVim("wave-exit-down"); return true;
+    }
+    return true; // swallow other keys while scrubbing
+  }
+  // Header strip: when focus is on a header control (a button — the search box
+  // is a typing target handled above), h/l move across the header's controls
+  // and j/↓ drop into the list. Completes the "k at the top of the list →
+  // header → h/l through the options → j back into the recordings" loop.
+  if (activeWithin(".headerbar")) {
+    const items = headerControls();
+
+    // A control under the cursor is "open": route j/k/Enter/Esc to the
+    // dropdown's items (Record / Settings) or the status <select>'s options
+    // before the normal left/right roving.
+    if (headerSub) {
+      if (headerSub.kind === "menu") {
+        const n = headerSub.items.length;
+        switch (nav) {
+          case "j":
+            e.preventDefault();
+            headerSub.index = (headerSub.index + 1) % n;
+            highlightHeaderSub();
+            return true;
+          case "k":
+            e.preventDefault();
+            headerSub.index = (headerSub.index - 1 + n) % n;
+            highlightHeaderSub();
+            return true;
+          case "i":
+          case "Enter":
+          case " ": {
+            e.preventDefault();
+            const it = headerSub.items[headerSub.index];
+            closeHeaderSub(false); // the item's own click closes the dropdown
+            it?.click();
+            highlightHeaderCursor();
+            return true;
+          }
+          case "Escape":
+            e.preventDefault();
+            closeHeaderSub(true);
+            highlightHeaderCursor();
+            return true;
+          case "h":
+            e.preventDefault();
+            closeHeaderSub(true);
+            headerCursor = (headerCursor - 1 + items.length) % items.length;
+            highlightHeaderCursor();
+            return true;
+          case "l":
+            e.preventDefault();
+            closeHeaderSub(true);
+            headerCursor = (headerCursor + 1) % items.length;
+            highlightHeaderCursor();
+            return true;
+          default:
+            e.preventDefault(); // trap stray keys while the dropdown is open
+            return true;
+        }
+      } else {
+        const sel = headerSub.el;
+        switch (nav) {
+          case "j":
+            e.preventDefault();
+            if (sel.selectedIndex < sel.options.length - 1) {
+              sel.selectedIndex++;
+              sel.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            renderStatusOverlay(sel);
+            return true;
+          case "k":
+            e.preventDefault();
+            if (sel.selectedIndex > 0) {
+              sel.selectedIndex--;
+              sel.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            renderStatusOverlay(sel);
+            return true;
+          case "i":
+          case "Enter":
+          case " ":
+          case "Escape":
+            e.preventDefault();
+            headerSub = null;
+            highlightHeaderCursor();
+            return true;
+          case "h":
+            e.preventDefault();
+            headerSub = null;
+            headerCursor = (headerCursor - 1 + items.length) % items.length;
+            highlightHeaderCursor();
+            return true;
+          case "l":
+            e.preventDefault();
+            headerSub = null;
+            headerCursor = (headerCursor + 1) % items.length;
+            highlightHeaderCursor();
+            return true;
+          default:
+            return true;
+        }
+      }
+    }
+
+    switch (nav) {
+      case "h":
+        e.preventDefault();
+        headerCursor = (headerCursor - 1 + items.length) % items.length;
+        highlightHeaderCursor();
+        return true;
+      case "l":
+        e.preventDefault();
+        headerCursor = (headerCursor + 1) % items.length;
+        highlightHeaderCursor();
+        return true;
+      case "j":
+      case "Escape":
+        e.preventDefault();
+        exitHeaderNav();
+        dispatchVim("focus-list");
+        return true;
+      case "i":
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        const el = items[headerCursor];
+        if (!el) {
+          exitHeaderNav();
+          return true;
+        }
+        // Native status <select>: enter option-cycling (its OS popup can't be
+        // opened from JS, so j/k step the value live; Enter/Esc commit).
+        if (el.tagName === "SELECT") {
+          headerSub = { kind: "select", el: el as HTMLSelectElement };
+          highlightHeaderSub();
+          return true;
+        }
+        // Split-button caret that opens a dropdown (Record / Settings): open
+        // it, then j/k through its items. The menu paints on the next frame.
+        if (el.getAttribute("aria-haspopup") === "menu") {
+          // The menu lives in the trigger's group wrapper — Record/Settings
+          // split groups, the Saved-searches group, or (fallback) the button's
+          // immediate parent. Broadening this is what lets j/k drive the
+          // Saved-searches dropdown, not just Record/Settings.
+          const group =
+            el.closest(".hb-rec-group, .hb-settings-group, .ss-group") ?? el.parentElement;
+          el.click();
+          requestAnimationFrame(() => {
+            if (headerCursor < 0) return; // header nav was left within the frame
+            const menu = group?.querySelector<HTMLElement>('[role="menu"]') ?? null;
+            if (!menu || menu.offsetParent === null) return; // didn't open
+            const mitems = [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')].filter(
+              (x) => x.offsetParent !== null,
+            );
+            if (!mitems.length) return;
+            let idx = mitems.findIndex(
+              (x) => x.getAttribute("aria-checked") === "true" || x.classList.contains("selected"),
+            );
+            if (idx < 0) idx = 0;
+            headerSub = { kind: "menu", items: mitems, index: idx, opener: el };
+            highlightHeaderSub();
+          });
+          return true;
+        }
+        // The search box focuses to type (leaving roving nav). EVERY other
+        // control just FIRES but keeps the roving cursor on it, so after
+        // sorting / toggling the sidebar / opening a popup you keep roaming the
+        // header with h/l instead of being dumped to the list. Re-highlight
+        // after the click (the action may re-render the header).
+        // Inputs (the search box AND the date filters) focus to type/pick,
+        // leaving roving nav — Esc returns the cursor to them. A date input
+        // also pops its native calendar via showPicker(). Every OTHER control
+        // just fires but keeps the cursor on it.
+        if (el.tagName === "INPUT") {
+          exitHeaderNav();
+          el.focus();
+          const input = el as HTMLInputElement;
+          if (input.type === "date" && typeof input.showPicker === "function") {
+            try { input.showPicker(); } catch { /* not allowed in this context */ }
+          }
+          return true;
+        }
+        el.click();
+        requestAnimationFrame(() => { if (headerCursor >= 0) highlightHeaderCursor(); });
+        return true;
+      }
+      // Any other key falls through to the global shortcuts below.
+    }
+  }
+  switch (nav) {
+    case "h":
+      e.preventDefault();
+      // In the detail pane (and the sidebar), h walks LEFT through the focused
+      // row's items; elsewhere it switches pane. The sidebar steps out to the
+      // list on l past its rightmost cell (it's the leftmost pane).
+      if (activeWithin(".rv-detail")) dispatchVim("detail-left");
+      else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-left");
+      else dispatchVim("pane-left");
+      return true;
+    case "l":
+      e.preventDefault();
+      if (activeWithin(".rv-detail")) dispatchVim("detail-right");
+      else if (activeWithin("ph-sidebar")) dispatchVim("sidebar-right");
+      // From the list, l opens the cursor recording (like Enter) when no detail
+      // pane is open yet; if one's already open it just moves focus into it.
+      else if (activeWithin(".rv-list")) dispatchVim("list-right");
+      else dispatchVim("pane-right");
+      return true;
+    case "G":
+      if (activeWithin(".rv-list")) {
+        e.preventDefault();
+        dispatchVim("list-bottom");
+        return true;
+      }
+      if (activeWithin("ph-sidebar")) {
+        e.preventDefault();
+        dispatchVim("sidebar-bottom");
+        return true;
+      }
+      if (activeWithin(".rv-detail")) {
+        e.preventDefault();
+        dispatchVim("detail-bottom");
+        return true;
+      }
+      break;
+    case "j":
+      // The list owns j/k via its own keydown when focused; this only fires
+      // for the other panes — the sidebar steps its filters, the detail pane
+      // steps its option buttons (Play/Copy/Summary/…).
+      if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-down"); return true; }
+      if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-down"); return true; }
+      break;
+    case "k":
+      if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-up"); return true; }
+      if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("detail-up"); return true; }
+      break;
+    case "i":
+      // i drops straight into the transcript editor from the detail pane.
+      if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim("edit"); return true; }
+      break;
+    case "Enter":
+      // Enter activates the highlighted detail button (or edits the transcript
+      // when no detail cursor is set); in the sidebar it applies the filter.
+      // (Enter in the list is handled there and arrives as defaultPrevented.)
+      if (activeWithin(".rv-detail")) { e.preventDefault(); dispatchVim(e.shiftKey ? "detail-enter-shift" : "detail-enter"); return true; }
+      if (activeWithin("ph-sidebar")) { e.preventDefault(); dispatchVim("sidebar-activate"); return true; }
+      break;
+    case "d":
+      if (activeWithin(".rv-list")) {
+        e.preventDefault();
+        pendingD = true;
+        pendingDTimer = setTimeout(clearPendingD, 1000);
+        return true;
+      }
+      break;
+    case "z":
+      // zz (center on cursor) — armed only while the list drives the keys.
+      if (activeWithin(".rv-list")) {
+        e.preventDefault();
+        pendingZ = true;
+        pendingZTimer = setTimeout(clearPendingZ, 1000);
+        return true;
+      }
+      break;
+  }
+  return false;
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  // When the cheat-sheet is open it owns Esc / "?" and nothing else fires.
+  if (helpOpen) {
+    if (e.key === "Escape" || e.key === "?") {
+      e.preventDefault();
+      closeHelp();
+    }
+    return;
+  }
+
+  // Drop a stale header-nav cursor if focus has drifted out of the header.
+  if (headerCursor >= 0 && !activeWithin(".headerbar")) exitHeaderNav();
+
+  // While typing, never hijack keys — except Esc from the search box, which
+  // blurs it and hands focus to the list so arrow-nav can take over. The
+  // transcript editor's own vim mode (when focused) keeps Esc too, by virtue of
+  // this early return — the system-wide layer never steals it.
+  if (isTypingTarget(document.activeElement)) {
+    handleTypingTargetKeys(e);
+    return;
+  }
+
+  // Stand down if another component already handled it, or a modal is open.
+  if (e.defaultPrevented) return;
+  if (document.querySelector(".modal-overlay")) return;
+
+  // Escape closes the AI-activity popout when it's open (it isn't a modal, so it
+  // wasn't covered above). The panel reflects `data-open` on its host; toggling
+  // the same event the brain button / `g A` use closes it.
+  if (e.key === "Escape" && document.querySelector("ph-thinking-popout[data-open]")) {
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent("phoneme:toggle-ai-activity"));
+    return;
+  }
+
+  // Ctrl+, → Settings (leave all other modifier combos to the browser/app).
+  if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+    e.preventDefault();
+    navigate("settings");
+    return;
+  }
+  // Ctrl+/ → hide/show the top (search/header) bar. Persisted per device.
+  if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+    e.preventDefault();
+    toggleHeaderBar();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  // "g" prefix sequence (vim-style): g l / g s / g d, plus g g → top of list.
+  if (pendingG) {
+    handleGChord(e);
+    return;
+  }
+
+  // "d" prefix (vim): dd deletes the focused recording. A non-"d" follow-up
+  // falls through so the key is still handled normally below.
+  if (pendingD) {
+    clearPendingD();
+    if (vimNav && e.key === "d") {
+      e.preventDefault();
+      dispatchVim("delete");
+      return;
+    }
+  }
+
+  // "z" prefix (vim): zz centers the list viewport on the cursor row.
+  if (pendingZ) {
+    clearPendingZ();
+    if (vimNav && e.key === "z") {
+      e.preventDefault();
+      dispatchVim("list-center");
+      return;
+    }
+  }
+
+  // "x" prefix (vim): a leader for the chrome toggles — `x b` toggles the
+  // sidebar and `x /` toggles the top (search) bar, the keyboard-only twins of
+  // the Ctrl+B / Ctrl+/ buttons. A non-matching follow-up falls through.
+  if (pendingX) {
+    clearPendingX();
+    if (vimNav && e.key === "b") { e.preventDefault(); dispatchVim("toggle-sidebar"); return; }
+    if (vimNav && e.key === "/") { e.preventDefault(); toggleHeaderBar(); return; }
+  }
+
+  // System-wide motion layer — runs when EITHER vim nav or arrow nav is on. The
+  // engine normalizes the trigger key (arrows under arrow_nav, bare letters under
+  // vim_nav) so one code path serves both audiences (see handleVimNav).
+  if (vimNav || arrowNav) {
+    if (handleVimNav(e)) return;
+  }
+
+  handleGlobalKeys(e);
 }
 
 let installed = false;
@@ -987,6 +1095,7 @@ export function initKeyboard() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const apply = (cfg: any) => {
     vimNav = !!cfg?.interface?.vim_nav;
+    arrowNav = !!cfg?.interface?.arrow_nav;
     // Pane show/hide animation speed (sidebar / detail / focus toggles): the
     // setting becomes a CSS duration var the layout transition reads. "off"
     // (0ms) short-circuits the animation entirely.

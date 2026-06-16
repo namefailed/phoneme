@@ -109,9 +109,10 @@
 .rec-table:focus-within .rec-group-head {
   transition: none;
 }
-/* With vim nav on (.vim-on), the cursor row is ALWAYS visible — a reload or a
-   stray click can't blank it. Dimmed while another pane owns the keyboard, so
-   it still reads where j/k will resume without competing with the active pane… */
+/* With vim OR arrow nav on (.vim-on), the cursor row is ALWAYS visible — a reload
+   or a stray click can't blank it. Dimmed while another pane owns the keyboard, so
+   it still reads where j/k (or the arrows) resume without competing with the
+   active pane… */
 .rec-table.vim-on .rec-row.kbd-focused:not(.active),
 .rec-table.vim-on .rec-group-head.kbd-focused:not(.active) {
   outline: none;

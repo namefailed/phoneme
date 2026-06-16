@@ -124,6 +124,9 @@ export class RecordingsView {
   /** Cached `interface.vim_nav` (initial read + config:saved) so the pane-click
    *  follower (P) is cheap and reacts to the setting being toggled live. */
   private vimNav = false;
+  /** Cached `interface.arrow_nav` — the non-vim arrow-key navigation layer. Shares
+   *  the same pane/grid cursor, so the click-follower applies to it as well. */
+  private arrowNav = false;
   /** Keyboard cursor in the sidebar's 2D grid (vim): row into sidebarGrid()
    *  (section headers · filter items · queue rows), col = cell within the row
    *  (queue rows have several buttons). row -1 = not in sidebar nav. */
@@ -325,10 +328,15 @@ export class RecordingsView {
     // DIFFERENT pane moves the focus ring there, so j/k/h/l continue from where
     // the mouse just went. Clicks WITHIN the active pane are left untouched.
     void import("@tauri-apps/api/core").then(({ invoke }) =>
-      invoke<any>("read_config").then((c) => { this.vimNav = !!c?.interface?.vim_nav; }).catch(() => { /* keep default */ }),
+      invoke<any>("read_config").then((c) => {
+        this.vimNav = !!c?.interface?.vim_nav;
+        this.arrowNav = !!c?.interface?.arrow_nav;
+      }).catch(() => { /* keep default */ }),
     );
     this.configSavedHandler = (e: Event) => {
-      this.vimNav = !!(e as CustomEvent).detail?.interface?.vim_nav;
+      const iface = (e as CustomEvent).detail?.interface;
+      this.vimNav = !!iface?.vim_nav;
+      this.arrowNav = !!iface?.arrow_nav;
     };
     window.addEventListener("config:saved", this.configSavedHandler);
     this.paneClickHandler = (e: Event) => this.onPaneClick(e);
@@ -352,7 +360,7 @@ export class RecordingsView {
       void import("@tauri-apps/api/core").then(({ invoke }) =>
         invoke<any>("read_config")
           .then((cfg) => {
-            if (cfg?.interface?.vim_nav) this.focusPane("list");
+            if (cfg?.interface?.vim_nav || cfg?.interface?.arrow_nav) this.focusPane("list");
           })
           .catch(() => { /* config unreadable — keep the old behavior */ }),
       );
@@ -585,7 +593,7 @@ export class RecordingsView {
    *  still applies the clicked element's own focus afterward, so clicking an
    *  editor / button / row to use it still works. */
   private onPaneClick(e: Event) {
-    if (!this.vimNav) return;
+    if (!this.vimNav && !this.arrowNav) return;
     const target = e.target as HTMLElement | null;
     if (!target) return;
     const pane = this.paneFromTarget(target);
@@ -1821,6 +1829,11 @@ export class RecordingsView {
     // collapses the detail pane). Not while typing in the transcript/notes editor
     // (CodeMirror's contenteditable, where Esc is vim's normal-mode).
     if (e.key === "Escape" && !target.isContentEditable) {
+      // The AI-activity popout owns Escape when it's open: yield (without
+      // preventDefault) so the global keyboard layer closes the popout instead
+      // of us collapsing the recording first. Otherwise Esc would need two
+      // presses (recording, then popout) and lose the open recording.
+      if (document.querySelector("ph-thinking-popout[data-open]")) return;
       if (this.focusMode) {
         e.preventDefault();
         if (this.zenChained) {

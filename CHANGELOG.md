@@ -431,6 +431,21 @@ trust boundary. Verified against current code.*
   It replaces an earlier `zoom`-based approach that magnified spacing/boxes and could
   push the layout off-window with no way to scroll back. At the 14px baseline nothing
   changes; other sizes scale text without breaking the fixed-viewport layout.
+- [x] **Arrow-key navigation for non-vim users** (`interface.arrow_nav`, opt-in) — a
+  friendly counterpart to vim navigation: `←`/`→` move between the sidebar, list, and
+  detail panes; `↑`/`↓` move within the list, sidebar filters, and detail rows; `Enter`
+  opens/activates; `Esc` steps out. It drives the **same** pane/grid cursor engine as
+  vim nav, so the two can run together (arrows _and_ `h`/`l`/`j`/`k`). Toggle it in the
+  first-run wizard or **Settings → Appearance → Arrow-key navigation**; bare `h`/`j`/`k`/`l`
+  and the vim-only extras (`dd`, `zz`, `gg`/`G`, `x b`/`x /`, ±5s scrub) stay behind
+  `vim_nav`. Default off, so an upgrade never changes what the arrow keys do.
+- [x] **Cleaner keymap tiers + `g`-chord consistency** — the keyboard layer now has a
+  documented three-tier model (NORMAL always-on · VIM `interface.vim_nav` · EDITOR
+  `editor.vim_mode`). The "go to a place" `g`-chords `g b` (sidebar) and `g 1`/`g 2`
+  (split panes) are no longer gated behind vim nav — they join their already-default
+  siblings (`g d`/`g l`/…), so every `g`-destination works for everyone. `Tab` /
+  `Shift+Tab` (the normal way to move within a region) and the promoted chords are now
+  listed in the `?` cheat-sheet.
 - [x] **Detail-pane & keyboard-nav polish** — the **Pipeline** provenance popover
   now floats free of the detail pane's scroll box (fixed positioning, clamped into
   the viewport), so long model names like `ggml-large-v3-turbo` wrap cleanly inside

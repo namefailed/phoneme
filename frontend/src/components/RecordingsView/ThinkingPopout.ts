@@ -75,6 +75,9 @@ export class ThinkingPopoutElement extends LitElement {
 
   private setOpen(v: boolean) {
     this.open = v;
+    // Reflect open-ness onto the host so the global keyboard layer can detect an
+    // open panel (`ph-thinking-popout[data-open]`) and close it on Escape.
+    this.toggleAttribute("data-open", v);
     try { localStorage.setItem(ThinkingPopoutElement.OPEN_LS, String(v)); } catch { /* ignore */ }
   }
 
@@ -95,6 +98,7 @@ export class ThinkingPopoutElement extends LitElement {
     } catch { /* ignore */ }
     try {
       this.open = localStorage.getItem(ThinkingPopoutElement.OPEN_LS) === "true";
+      this.toggleAttribute("data-open", this.open);
     } catch { /* ignore */ }
     try {
       const raw = localStorage.getItem(ThinkingPopoutElement.GEOM_LS);

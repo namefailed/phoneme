@@ -278,6 +278,22 @@ export class SectionInterface {
         </div>
 
         <div class="settings-field">
+          <label>Arrow-key navigation</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "interface.arrow_nav", label: "", kind: "checkbox" },
+              config.interface.arrow_nav,
+            )}</div>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Move around with the arrow keys: <kbd>←</kbd>/<kbd>→</kbd> step between the sidebar, list, and
+              detail panes; <kbd>↑</kbd>/<kbd>↓</kbd> move within the list, sidebar filters, and detail rows;
+              <kbd>Enter</kbd> opens or activates; <kbd>Esc</kbd> steps back out. A friendlier alternative to
+              vim navigation — leave both off to navigate with <kbd>Tab</kbd> and the mouse.
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-field">
           <label>Keyboard (vim) navigation</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <div>${renderField(

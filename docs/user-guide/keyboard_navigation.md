@@ -1,9 +1,22 @@
 # ⌨️ Keyboard Navigation
 
 Phoneme is fully drivable from the keyboard. Press **`?`** anywhere for the
-built-in cheat sheet (it shows exactly what's active for your settings). The
-vim-style pane navigation is opt-in: **Settings → Appearance → Vim navigation**
-(`interface.vim_nav`); everything else below works for everyone.
+built-in cheat sheet (it shows exactly what's active for your settings).
+
+Everything in **Global**, **Recordings list**, **Bulk actions**, and **Open
+recording** below works for everyone, no setup required. Moving _within_ a region
+(the sidebar's filters, a recording's buttons, the header) is **`Tab` /
+`Shift+Tab`** out of the box. On top of that are two **opt-in** navigation layers,
+either or both:
+
+- **Arrow-key navigation** (`interface.arrow_nav`, **Settings → Appearance →
+  Arrow-key navigation**) — `←`/`→`/`↑`/`↓` move between and within panes, `Enter`
+  opens, `Esc` steps out. The friendly, no-vim-knowledge option.
+- **Vim navigation** (`interface.vim_nav`) — the `h`/`l`/`j`/`k`/`gg`/`G`/`dd`/`zz`
+  motion layer for vim users. Adds extras the arrow layer doesn't (`dd`, `zz`,
+  `x b`/`x /`, ±5s waveform scrub).
+
+Both are independent of the transcript editor's own vim mode (`editor.vim_mode`).
 
 ## Global
 
@@ -76,6 +89,28 @@ The list zoom is clamped to 60–200% and remembered per device.
 
 Transcripts and notes never auto-save — leaving with unsaved changes always
 prompts first.
+
+## Arrow-key navigation (`interface.arrow_nav`)
+
+The friendly counterpart to vim navigation — same idea, but driven entirely by
+the arrow keys, so there's nothing to learn. Turn it on at **Settings →
+Appearance → Arrow-key navigation** (or in the first-run wizard).
+
+| Keys | Action |
+|------|--------|
+| `←` `→` | Move focus between the sidebar, list, and detail panes |
+| `↑` `↓` | Move within the list · sidebar filters · detail rows |
+| `↑` at the top of the list | Rise into the header controls (`↓` comes back) |
+| `←` `→` (in the header) | Move across the header controls |
+| `Enter` | Open / activate the focused row, button, or dropdown |
+| `Esc` | Step back out a level |
+
+It drives the **same** pane/grid cursor the vim layer uses, so the two can be on
+at once (arrows _and_ `h`/`l`/`j`/`k` both work). The bare `g`-chords —
+`g b` (sidebar), `g 1`/`g 2` (split panes), `g d` (detail), `g l` (list) — jump
+straight to a place and work whether or not either layer is on. The vim-only
+extras (`dd`, `zz`, `gg`/`G`, `x b`/`x /`, ±5s waveform scrub) have no arrow
+equivalent — turn on vim navigation if you want them.
 
 ## Vim pane navigation (`interface.vim_nav`)
 

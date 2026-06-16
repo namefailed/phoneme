@@ -452,6 +452,9 @@ export class RecordingsListElement extends LitElement {
     // a stray keystroke on the focused list never moves the cursor for users
     // who haven't opted in.
     const vim = !!this.config?.interface?.vim_nav;
+    const arrowNav = !!this.config?.interface?.arrow_nav;
+    // j/k are vim-only aliases for the arrows (letters stay behind vim_nav); the
+    // arrows themselves navigate the list for everyone, regardless of either flag.
     const key = vim && e.key === "j" ? "ArrowDown" : vim && e.key === "k" ? "ArrowUp" : e.key;
 
     if (key === "ArrowDown") {
@@ -465,9 +468,10 @@ export class RecordingsListElement extends LitElement {
       this.scrollFocusedIntoView();
     } else if (key === "ArrowUp") {
       e.preventDefault();
-      // With vim nav on, pressing up (k) at the very top steps OUT of the list
-      // into the header search box — ArrowDown / Esc there come back down.
-      if (vim && this.focusedIndex <= 0) {
+      // With vim OR arrow nav on, pressing up at the very top steps OUT of the
+      // list into the header search box — ArrowDown / Esc there come back down.
+      // Shift+Up stays a range-select (never escapes the list mid-selection).
+      if ((vim || arrowNav) && this.focusedIndex <= 0 && !e.shiftKey) {
         // Highlight (not focus) the search box so h/l can roam the header.
         window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
         return;
@@ -881,7 +885,7 @@ export class RecordingsListElement extends LitElement {
     );
 
     return html`
-      <div class="rec-table ${this.config?.interface?.vim_nav ? "vim-on" : ""}" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, navRows)}>
+      <div class="rec-table ${this.config?.interface?.vim_nav || this.config?.interface?.arrow_nav ? "vim-on" : ""}" tabindex="0" role="listbox" aria-label="Recordings" @keydown=${(e: KeyboardEvent) => this.handleKeyDown(e, navRows)}>
         <div class="rec-table-inner${transcriptIsLast ? " transcript-tail" : ""}" style="${transcriptIsLast ? "" : `min-width: ${gridMinWidth}px;`}">
           ${head}
           ${body}

@@ -260,6 +260,12 @@ export class FirstRunWizardElement extends LitElement {
             <option value="solarized-light">Solarized Light</option>
           </select>
           <label class="wizard-pref-row">
+            <span>Arrow-key navigation
+              <span class="wizard-pref-hint">— ←/→/↑/↓ to move around, Enter to open</span></span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.arrow_nav}
+              @change=${(e: Event) => this.setIfacePref("arrow_nav", (e.target as HTMLInputElement).checked)}>
+          </label>
+          <label class="wizard-pref-row">
             <span>Keyboard (vim) navigation
               <span class="wizard-pref-hint">— h/l/j/k to move, ? for the cheat-sheet</span></span>
             <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.vim_nav}
@@ -314,6 +320,12 @@ export class FirstRunWizardElement extends LitElement {
 
         <div class="wizard-theme-card">
           <label>Preferences</label>
+          <label class="wizard-pref-row">
+            <span>Arrow-key navigation
+              <span class="wizard-pref-hint">— ←/→/↑/↓ to move between panes & lists, Enter to open</span></span>
+            <input type="checkbox" class="toggle-switch" .checked=${!!this.config?.interface?.arrow_nav}
+              @change=${(e: Event) => this.setIfacePref("arrow_nav", (e.target as HTMLInputElement).checked)}>
+          </label>
           <label class="wizard-pref-row">
             <span>Keyboard (vim) navigation
               <span class="wizard-pref-hint">— h/l/j/k to move between panes & lists, ? for the cheat-sheet</span></span>

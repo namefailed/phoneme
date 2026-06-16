@@ -1441,6 +1441,15 @@ pub struct InterfaceConfig {
     /// (search `/`, help `?`, `g`-prefix jumps) are active.
     #[serde(default)]
     pub vim_nav: bool,
+    /// Enable arrow-key navigation for non-vim users: the arrow keys drive the
+    /// same pane/grid cursor as the vim layer — ←/→ move between panes (and across
+    /// a row's controls), ↑/↓ move within the sidebar / detail rows, Enter
+    /// activates, Esc steps out. Independent of and combinable with [`Self::vim_nav`]
+    /// (bare `h`/`j`/`k`/`l` stay vim-only). **Default false** — opt-in so an
+    /// upgrade never silently changes what the arrow keys do; surfaced in the
+    /// wizard and Settings → Interface for discovery.
+    #[serde(default)]
+    pub arrow_nav: bool,
     /// UI animation speed for pane show/hide (the sidebar, detail pane, and
     /// focus-mode toggles): `"off"`, `"fast"`, `"normal"` (default), `"slow"`.
     /// `"off"` makes every pane toggle instant.
@@ -1934,6 +1943,7 @@ impl Default for Config {
                 preview_overlay: false,
                 recording_indicator: false,
                 vim_nav: false,
+                arrow_nav: false,
                 animation_speed: default_animation_speed(),
                 ui_font: String::new(),
                 ui_font_size: default_ui_font_size(),
