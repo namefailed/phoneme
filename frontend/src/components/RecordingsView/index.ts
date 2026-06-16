@@ -1889,9 +1889,9 @@ export class RecordingsView {
         this.toggleListZen();
         return;
       }
-      // Vim step-out ladder: from the detail pane, Esc returns to the list
-      // (keeping the recording open) before a second Esc deselects it.
-      if (this.focusedPane === "detail") {
+      // Vim step-out ladder: from the detail pane OR the sidebar, Esc returns to
+      // the list (keeping the recording open) before a second Esc deselects it.
+      if (this.focusedPane === "detail" || this.focusedPane === "sidebar") {
         e.preventDefault();
         this.focusPane("list");
         return;

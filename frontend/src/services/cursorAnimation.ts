@@ -81,6 +81,11 @@ function isEditing(t: EventTarget | null): boolean {
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
 /** Minimum jump (px) before a streak is drawn (trail streaks on every move). */
 const SMEAR_THRESHOLD = 90;
+/** Past this jump (px) the move is treated as cross-region (a different pane /
+ *  across the window): fade in at the destination instead of sliding the box the
+ *  whole way, which read as the overlay "flying in" from another pane. Local moves
+ *  (rows, adjacent header/detail controls) stay under this and glide. */
+const CROSS_REGION_DIST = 360;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -143,6 +148,29 @@ function place(el: HTMLElement, animate: boolean) {
     current && current !== el && current.isConnected
       ? clampRect(current, current.getBoundingClientRect())
       : null;
+
+  // Cross-region jump (a different pane, or the previous spot was stale/far): fade
+  // in at the destination rather than sliding the box all the way across — long
+  // slides read as the overlay flying in from another pane (saved-search → search
+  // sliding from the recording pane; a stale list anchor sliding in on every k).
+  // Local moves (rows, adjacent header/detail controls) stay under the threshold
+  // and glide as before.
+  if (prev && animate && Math.hypot(r.left - prev.left, r.top - prev.top) > CROSS_REGION_DIST) {
+    g.style.transitionProperty = "opacity";
+    g.style.transitionDuration = "0ms";
+    g.style.left = `${r.left}px`;
+    g.style.top = `${r.top}px`;
+    g.style.width = `${r.width}px`;
+    g.style.height = `${r.height}px`;
+    g.style.opacity = "0";
+    if (tail) tail.style.opacity = "0";
+    requestAnimationFrame(() => {
+      g.style.transitionDuration = `${DUR[m]}ms`;
+      g.style.opacity = "1";
+    });
+    current = el;
+    return;
+  }
 
   // Streak (smear/trail): a box spanning the old + new rects, faded out over the
   // move. ONLY drawn when that union stays close to the cursor's own size — i.e. a
