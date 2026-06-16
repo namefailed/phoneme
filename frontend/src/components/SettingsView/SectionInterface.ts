@@ -327,6 +327,23 @@ export class SectionInterface {
         </div>
 
         <div class="settings-field">
+          <label>Keyboard cursor animation</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <select id="cursor-anim">
+              <option value="off" ${(config.interface.cursor_animation ?? "off") === "off" ? "selected" : ""}>Off</option>
+              <option value="glide" ${config.interface.cursor_animation === "glide" ? "selected" : ""}>Glide — slide to the new control</option>
+              <option value="smear" ${config.interface.cursor_animation === "smear" ? "selected" : ""}>Glide + smear — a streak on bigger jumps</option>
+              <option value="trail" ${config.interface.cursor_animation === "trail" ? "selected" : ""}>Full trail — a streak on every move</option>
+            </select>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Animates the purple keyboard cursor as it jumps between controls (with vim / arrow
+              nav), inspired by smear-cursor &amp; mini.animate. Purely cosmetic, and automatically
+              disabled when your system is set to reduce motion.
+            </span>
+          </div>
+        </div>
+
+        <div class="settings-field">
           <label>Step notifications</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <div>${renderField(
@@ -386,6 +403,12 @@ export class SectionInterface {
       .querySelector<HTMLSelectElement>("#anim-speed")
       ?.addEventListener("change", (e) => {
         config.interface.animation_speed = (e.target as HTMLSelectElement).value;
+      });
+
+    this.container
+      .querySelector<HTMLSelectElement>("#cursor-anim")
+      ?.addEventListener("change", (e) => {
+        config.interface.cursor_animation = (e.target as HTMLSelectElement).value;
       });
 
     this.container

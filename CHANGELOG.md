@@ -454,7 +454,13 @@ trust boundary. Verified against current code.*
   instead of only the row under the cursor. Also fixed a flicker when an undoable delete's
   grace period lapsed: the rows briefly flashed back onto the list before vanishing, because
   the hide set was cleared before the list re-fetched — the refresh now lands first.
-- [x] **Arrow-key navigation for non-vim users** (`interface.arrow_nav`, opt-in) — a
+- [x] **Animated keyboard cursor** (`interface.cursor_animation`, opt-in) — the roving
+  `.kbd-cursor` highlight can now glide between controls, with a translucent accent glow that
+  chases it and an optional fading streak — inspired by smear-cursor.nvim / mini.animate.
+  Four modes in **Settings → Appearance → Keyboard cursor animation**: `off` (default),
+  `glide`, `smear` (glide + a streak on bigger jumps), `trail` (a streak on every move). Purely
+  additive (the real outline still marks position), honors `prefers-reduced-motion`, and is a
+  single compositor-light overlay so it stays cheap on modest machines.
   friendly counterpart to vim navigation: `←`/`→` move between the sidebar, list, and
   detail panes; `↑`/`↓` move within the list, sidebar filters, and detail rows; `Enter`
   opens/activates; `Esc` steps out. It drives the **same** pane/grid cursor engine as

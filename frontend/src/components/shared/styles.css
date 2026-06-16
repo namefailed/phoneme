@@ -7,6 +7,44 @@ body.phoneme-hide-header-instant #hdr {
   display: none;
 }
 
+/* Cursor-move animation (services/cursorAnimation.ts): a single translucent
+   accent "ghost" that glides to wherever the roving .kbd-cursor lands, plus a
+   fading streak (the tail) for the smear/trail modes. Purely additive — the real
+   .kbd-cursor outline still marks position — and the elements are only ever moved
+   when the user opts in (Settings → Appearance), so "off" costs nothing. Fixed to
+   the viewport; the JS keeps them glued to the control on scroll/resize. */
+.kbd-cursor-ghost,
+.kbd-cursor-ghost-tail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9998;
+  border-radius: 8px;
+  transition-property: left, top, width, height, opacity;
+  transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition-duration: 130ms;
+  will-change: left, top, width, height, opacity;
+}
+.kbd-cursor-ghost {
+  /* a soft accent wash that chases the cursor and settles on the control */
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.kbd-cursor-ghost-tail {
+  /* the streak connecting old → new during a smear/trail move */
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbd-cursor-ghost,
+  .kbd-cursor-ghost-tail {
+    display: none !important;
+  }
+}
+
 /* vim header-nav: the roving cursor HIGHLIGHTS a control (the bar holds focus,
    not the control) so h/l can step across without the search box capturing
    keystrokes. Enter/i commits (focus the box to type / activate a button). */

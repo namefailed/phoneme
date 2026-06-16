@@ -1455,6 +1455,13 @@ pub struct InterfaceConfig {
     /// `"off"` makes every pane toggle instant.
     #[serde(default = "default_animation_speed")]
     pub animation_speed: String,
+    /// Cursor-move animation for the roving keyboard cursor (the `.kbd-cursor`
+    /// highlight): `"off"` (default), `"glide"` (a translucent accent glow slides
+    /// to the new control), `"smear"` (glide plus a brief streak on bigger jumps),
+    /// or `"trail"` (a stronger streak on every move). Purely cosmetic and
+    /// frontend-only; honors the OS "reduce motion" setting regardless.
+    #[serde(default = "default_cursor_animation")]
+    pub cursor_animation: String,
     /// Base UI font family for the whole interface — a single CSS family name
     /// (e.g. `"Segoe UI"`, `"JetBrains Mono"`). Empty = the bundled default
     /// stack (Inter + system sans-serif). The chosen name is prepended to that
@@ -1486,6 +1493,10 @@ pub struct InterfaceConfig {
 
 fn default_animation_speed() -> String {
     "normal".into()
+}
+
+fn default_cursor_animation() -> String {
+    "off".into()
 }
 
 fn default_ui_font_size() -> u8 {
@@ -1945,6 +1956,7 @@ impl Default for Config {
                 vim_nav: false,
                 arrow_nav: false,
                 animation_speed: default_animation_speed(),
+                cursor_animation: default_cursor_animation(),
                 ui_font: String::new(),
                 ui_font_size: default_ui_font_size(),
                 step_notifications: true,
