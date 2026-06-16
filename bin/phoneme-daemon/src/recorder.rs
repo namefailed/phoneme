@@ -2469,7 +2469,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_meeting_partial_failure_keeps_healthy_track() {
-        // Audit M2: one track failing to finalize must not abandon the other.
+        // One track failing to finalize must not abandon the other.
         // The system track's WAV write is sabotaged; the mic track must still
         // be written, flipped to Transcribing, and enqueued — and stop_meeting
         // reports success for the partial result.
@@ -2525,7 +2525,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_meeting_errors_only_when_every_track_fails() {
-        // Audit M2, the flip side: when NO track reaches the pipeline the stop
+        // The flip side: when NO track reaches the pipeline the stop
         // must surface an error (the caller would otherwise report a clean
         // stop for a meeting that produced nothing) — and the meeting state
         // must still be fully cleared.
@@ -2572,7 +2572,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_keeps_status_queries_responsive_during_preview_teardown() {
-        // Audit M3: `stop` must not hold the active-recording lock across the
+        // `stop` must not hold the active-recording lock across the
         // preview teardown — a slow in-flight preview tick (here a stand-in
         // task that takes 1.5 s to wind down) used to block every status and
         // control IPC for its whole duration.

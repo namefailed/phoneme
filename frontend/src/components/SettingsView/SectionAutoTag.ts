@@ -1,3 +1,4 @@
+import { escapeHtml } from "../../utils/format";
 import { mountModelField } from "./modelField";
 import { mountConnectionField } from "./connectionField";
 
@@ -186,6 +187,3 @@ export class SectionAutoTag {
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}

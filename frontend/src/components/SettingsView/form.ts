@@ -1,3 +1,4 @@
+import { escapeHtml, escapeAttr } from "../../utils/format";
 // Tiny declarative form helpers — the data-binding layer every plain (non-Lit)
 // Settings section is built on. A section renders inputs with
 // `renderField({ key: "whisper.timeout_secs", … })` and calls
@@ -136,10 +137,4 @@ function readEl(el: HTMLElement): any {
   return input.value;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
-function escapeAttr(s: string): string {
-  return escapeHtml(s).replace(/"/g, "&quot;");
-}

@@ -1,3 +1,4 @@
+import { escapeHtml as escHtml, escapeAttr as escAttr } from "../../utils/format";
 /**
  * The one connection block behind every provider picker: a grouped select of
  * NAMED providers (the brand the user knows — "On this computer" / "Cloud" /
@@ -136,8 +137,6 @@ export function deriveConnectionEntry(
   return connectionEntries(catalog).find((e) => e.id === id);
 }
 
-const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const escAttr = (s: string) => escHtml(s).replace(/"/g, "&quot;");
 
 /** "Ollama (local)" → "Ollama", for friendly error copy. */
 const plainName = (label: string) => label.replace(/\s*\((local|fast|cloud)\)\s*$/i, "").trim();

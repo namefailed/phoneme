@@ -1278,7 +1278,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         Request::SubscribeEvents => Response::Err(IpcError {
             kind: IpcErrorKind::Internal,
             message:
-                "subscribe_events is handled by the streaming path in handle_connection (Task 10)"
+                "subscribe_events is handled by the streaming path in handle_connection"
                     .into(),
         }),
     }

@@ -203,7 +203,7 @@ impl Transcriber {
                 {
                     // `model_path` is a plain String — this block used to
                     // pattern-match it as an Option, which broke the feature
-                    // build (cfg'd-out code is never type-checked; audit A2-H2).
+                    // build (cfg'd-out code is never type-checked).
                     let native_path = whisper.model_path.trim();
                     if !native_path.is_empty() {
                         if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(
@@ -2191,7 +2191,7 @@ mod tests {
         // The fallback (no words) must produce the SAME `[Speaker N]` text the
         // pure `assign_speakers` produces — this is the regression guard that a
         // segments-only transcript (and a one-word-per-segment transcript routed
-        // through the fallback) is byte-for-byte unchanged from before C2.
+        // through the fallback) is byte-for-byte unchanged.
         let segments = vec![
             tseg(0.0, 2.0, "hello there"),
             tseg(2.0, 4.0, "hi back"),

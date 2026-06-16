@@ -75,7 +75,7 @@ pub fn run() {
     });
 
     // The slot is what commands talk to: it retries the connect lazily, so a
-    // daemon that was down at launch heals on the first action (A2-H3).
+    // daemon that was down at launch heals on the first action.
     let bridge = BridgeSlot::new(bridge);
     // Clone before builder chain — setup closure takes ownership of `bridge`.
     let exit_bridge = bridge.clone();
@@ -266,7 +266,7 @@ pub fn run() {
             // None of the startup chrome below actually needs the daemon —
             // it only needs CONFIG. It used to live inside the bridge if-let,
             // so a down-at-launch daemon also cost the titlebar pref, the
-            // startup window, every global hotkey, and the overlay (A2-H3's
+            // startup window, every global hotkey, and the overlay (its
             // wider blast radius). Read config directly instead.
             let startup_cfg = phoneme_core::Config::read_or_default();
 

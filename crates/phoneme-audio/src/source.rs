@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn gap_fill_ignores_worker_lag() {
-        // The audit-M1 scenario: 5 s of wall clock elapsed (expected 80 000
+        // The worker-lag scenario: 5 s of wall clock elapsed (expected 80 000
         // canonical samples) and the device HAS delivered all 5 s — the worker
         // just hasn't processed the queued blocks yet (CPU load). With the gap
         // math based on the audio clock (delivered), no gap exists; the old

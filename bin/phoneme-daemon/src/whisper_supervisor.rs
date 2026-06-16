@@ -38,7 +38,7 @@
 //!   and hung orphans before a respawn.
 //! - **No pipe wedging** — the child's stdout/stderr are discarded; a
 //!   piped-but-undrained child blocks once the OS buffer fills and silently
-//!   hangs transcription (audit A2-H1).
+//!   hangs transcription.
 
 use crate::app_state::AppState;
 use crate::shutdown::ShutdownSignal;
@@ -302,7 +302,7 @@ pub async fn run_with(
             // a piped-but-undrained child blocks once the OS pipe buffer (~64 KB)
             // fills — which hangs transcription / live preview until the daemon is
             // restarted. The preview server hits this fast (it re-transcribes every
-            // ~1-2s), so the live preview is what breaks first. (audit A2-H1)
+            // ~1-2s), so the live preview is what breaks first.
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
@@ -515,7 +515,7 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
             // a piped-but-undrained child blocks once the OS pipe buffer (~64 KB)
             // fills — which hangs transcription / live preview until the daemon is
             // restarted. The preview server hits this fast (it re-transcribes every
-            // ~1-2s), so the live preview is what breaks first. (audit A2-H1)
+            // ~1-2s), so the live preview is what breaks first.
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 
@@ -898,7 +898,7 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
             .arg("--inference-path")
             .arg("/v1/audio/transcriptions")
             // Discard stdout/stderr — a piped-but-undrained child wedges once the
-            // OS pipe buffer fills (audit A2-H1), same as the other servers.
+            // OS pipe buffer fills, same as the other servers.
             .stdout(Stdio::null())
             .stderr(Stdio::null());
 

@@ -1,3 +1,4 @@
+import { escapeHtml, escapeAttr } from "../../utils/format";
 import { filterStore } from "../../state/filter";
 import {
   loadSavedSearches,
@@ -177,10 +178,4 @@ export class SectionSavedSearches {
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
-function escapeAttr(s: string): string {
-  return escapeHtml(s).replace(/"/g, "&quot;");
-}

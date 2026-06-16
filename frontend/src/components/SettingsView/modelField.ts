@@ -1,3 +1,4 @@
+import { escapeHtml as escHtml, escapeAttr as escAttr } from "../../utils/format";
 /**
  * The one "model" form control behind every model field in Settings: a
  * dropdown of model suggestions with a ↻ Refresh button and an "Other… (type)"
@@ -47,8 +48,6 @@ export interface ModelFieldOpts {
 
 const SENTINEL_OTHER = "__other__";
 
-const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const escAttr = (s: string) => escHtml(s).replace(/"/g, "&quot;");
 
 /**
  * Built-in curated suggestions for a provider: the cleanup-LLM catalog in

@@ -1,3 +1,4 @@
+import { escapeHtml } from "../../utils/format";
 import { errText } from "../../utils/error";
 import { LitElement, html } from 'lit';
 import { customElement, property, state, query } from 'lit/decorators.js';
@@ -31,9 +32,6 @@ import "./styles.css";
 // ── Settings-search helpers ────────────────────────────────────────────────
 
 /** Escape text for safe innerHTML insertion. */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 /** Wrap the first contiguous, case-insensitive run of `query` in `original` with
  *  a <mark>. Returns the escaped original unchanged when there's no contiguous

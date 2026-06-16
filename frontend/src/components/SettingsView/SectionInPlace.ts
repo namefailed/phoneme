@@ -1,3 +1,4 @@
+import { escapeHtml as escHtml } from "../../utils/format";
 import { invoke } from "@tauri-apps/api/core";
 import { curatedSttModels } from "../../services/sttProviders";
 import { curatedTranscriptionModels } from "../../data/curatedModels";
@@ -6,7 +7,6 @@ import { mountModelField } from "./modelField";
 import { bindFieldEvents, renderField } from "./form";
 import { effectiveLocalWhisperHint, type WhisperPortStatus } from "./SectionWhisper";
 
-const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Friendly label for a downloaded whisper model filename (mirrors the Live
  *  Preview section's local dropdown, so the dedicated dictation picker reads

@@ -1,7 +1,7 @@
 /**
  * Helpers for the structured error a Tauri command rejects with.
  *
- * Commands return `{ kind, message }` (Rust `CommandError`, audit A-H6) instead
+ * Commands return `{ kind, message }` (Rust `CommandError`) instead
  * of a flattened string, so the WebView can branch on `kind`. These helpers
  * normalize any caught value — structured command error, plain `Error`, or a
  * bare string — to displayable text, and expose the `kind` when present.

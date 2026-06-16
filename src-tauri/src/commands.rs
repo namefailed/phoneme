@@ -3,7 +3,7 @@
 //! Three families live here:
 //! - **Daemon forwards** — most commands are one `forward()` call: map the
 //!   WebView's arguments onto a `phoneme_ipc::Request`, send it over the
-//!   `BridgeSlot` (which lazily reconnects/auto-spawns when empty, A2-H3),
+//!   `BridgeSlot` (which lazily reconnects/auto-spawns when empty),
 //!   and return the daemon's JSON value as-is. Errors come back as a
 //!   structured [`CommandError`] `{kind, message}` whose `kind` is the
 //!   IPC error kind's wire string, so the frontend branches the same way
@@ -49,7 +49,7 @@ type Br<'r> = State<'r, BridgeSlot>;
 
 /// Structured error returned by Tauri commands. Serializes to `{ kind, message }`
 /// so the WebView can branch on `kind` (e.g. tell `whisper_timeout` apart from
-/// `not_found`) instead of parsing a flattened `"kind: message"` string. (A-H6)
+/// `not_found`) instead of parsing a flattened `"kind: message"` string.
 ///
 /// `From<String>`/`From<&str>` map ad-hoc errors (config IO, validation) to a
 /// generic `"error"` kind, so a command body's `?` on a `Result<_, String>`
@@ -90,7 +90,7 @@ impl From<&str> for CommandError {
 async fn forward(slot: &BridgeSlot, req: Request) -> Result<Value, CommandError> {
     // An empty slot retries the connect (auto-spawning the daemon) before
     // giving up — the "down at launch" case heals on the first action instead
-    // of requiring an app restart (A2-H3).
+    // of requiring an app restart.
     let bridge = slot.get_or_connect().await.ok_or_else(|| {
         CommandError::new(
             "daemon_not_running",
@@ -1519,7 +1519,7 @@ pub async fn wizard_download_model(
     if filename.contains('/') || filename.contains('\\') || filename.is_empty() {
         return Err(CommandError::from("Invalid filename"));
     }
-    // Same gate as wizard_download_file (A2-H4): a compromised WebView must
+    // Same gate as wizard_download_file: a compromised WebView must
     // not be able to pull arbitrary bytes into the models dir.
     if !is_allowed_download_url(&url) {
         return Err(CommandError::from(
@@ -2368,7 +2368,7 @@ mod tests {
         }
     }
 
-    // ── is_allowed_download_url (A2-H4) ────────────────────────────────────
+    // ── is_allowed_download_url ────────────────────────────────────
     // The download allow-list is a security boundary: a compromised renderer
     // must not be able to point a download (whose bytes can later be run via
     // wizard_run_installer) at an arbitrary host. These pin the real contract:
@@ -2447,7 +2447,7 @@ mod tests {
         assert!(!is_allowed_download_url("https://"));
     }
 
-    // ── path_within (A1-H3 / A2-H5) ───────────────────────────────────────
+    // ── path_within ───────────────────────────────────────
     // The reveal/open/run commands hand a renderer-supplied path to the OS, so
     // `path_within` is the gate that keeps those to an allowed root. It
     // canonicalizes BOTH sides (so `..` and 8.3/junction tricks can't escape a
@@ -2754,7 +2754,7 @@ pub fn wizard_run_installer(path: String) -> Result<(), CommandError> {
     if !p.exists() {
         return Err(CommandError::from("Installer file does not exist"));
     }
-    // Canonicalize BOTH sides before comparing (A2-H5): the old lexical
+    // Canonicalize BOTH sides before comparing: the old lexical
     // starts_with let "…\Temp\..\evil.exe" through (".." survives
     // Path::starts_with), and 8.3 short names / junctions could dodge a
     // prefix check entirely. path_within canonicalizes child and root.
@@ -2787,7 +2787,7 @@ pub fn open_file(path: String) -> Result<(), CommandError> {
     if !requested.exists() {
         return Err(format!("File does not exist: {}", path).into());
     }
-    // Security: same contract as reveal_file (A1-H3) — the renderer can pass
+    // Security: same contract as reveal_file — the renderer can pass
     // any string and we hand it to the OS. Restrict to the places the UI
     // actually opens: the audio library, phoneme's data dir (logs, models,
     // hooks), and its config dir.
