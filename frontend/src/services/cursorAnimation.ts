@@ -167,7 +167,12 @@ function place(el: HTMLElement, animate: boolean) {
     }
   }
 
-  g.style.transitionProperty = "left, top, width, height, opacity"; // (a prior hugeJump may have narrowed it)
+  // Glide POSITION only — snap size instantly. Animating width/height too made
+  // the box visibly "fit" each target (grow/shrink), which read as jarring when
+  // sizes differ a lot (a full-width list row → a small control, or between the
+  // varied header controls). Snapping size so only left/top travel makes it read
+  // as the highlight simply moving to the new spot.
+  g.style.transitionProperty = "left, top, opacity";
   g.style.transitionDuration = animate ? `${DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;

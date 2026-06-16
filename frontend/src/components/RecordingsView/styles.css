@@ -1202,6 +1202,12 @@ mark.search-hit {
   outline-offset: -1px;
   border-radius: 6px;
 }
+/* The title is large display text, so the tight inset ring used for the small
+   option buttons reads as cramped on it — give it outward breathing room. */
+.rv-detail #detail-title.kbd-cursor {
+  outline-offset: 4px;
+  border-radius: 8px;
+}
 /* The list scroll-area and the detail/sidebar containers take focus (tabindex)
    so h/l can move between them; suppress the browser's own focus outline in
    favour of the accent ring above. */
