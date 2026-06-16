@@ -1266,6 +1266,11 @@ export function initKeyboard() {
     const speeds: Record<string, string> = { off: "0ms", fast: "110ms", normal: "200ms", slow: "320ms" };
     const dur = speeds[String(cfg?.interface?.animation_speed ?? "normal")] ?? "200ms";
     document.documentElement.style.setProperty("--pane-anim", dur);
+    // Master UI-motion duration for the app-wide micro-animations (list/tag/queue
+    // enter-leave, state cross-fades, delight touches — the animation overhaul).
+    // Same knob as the pane slide, so "off" makes every one of them instant; a
+    // global prefers-reduced-motion rule (shared/styles.css) zeroes it regardless.
+    document.documentElement.style.setProperty("--ui-motion", dur);
     // Global UI font + size (Appearance). A chosen family is prepended to the
     // bundled stack so an uninstalled font still falls back cleanly; an empty
     // choice clears the var entirely, letting the CSS fallback (Inter) apply.

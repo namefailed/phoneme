@@ -7,6 +7,41 @@ body.phoneme-hide-header-instant #hdr {
   display: none;
 }
 
+/* Master UI-motion duration for the app-wide micro-animations (the animation
+   overhaul). keyboard.ts sets it live from interface.animation_speed (off → 0ms);
+   this is just the pre-config fallback. Every overhaul animation reads
+   var(--ui-motion), so one knob scales — or stops — all of them. */
+:root {
+  --ui-motion: 200ms;
+}
+/* Respect the OS "reduce motion" preference globally: zero the master duration so
+   every var(--ui-motion)-driven transition/animation becomes instant, no matter
+   what the setting says. Per-feature pulses opt out individually where needed. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-motion: 0ms;
+  }
+}
+
+/* Applied tag chips pop in as they mount (animation overhaul · list/tags/queue).
+   Reads the master --ui-motion, so motion "off" / reduced-motion → 0ms duration =
+   instant (no visible animation). Only plays on a freshly-created chip node, so
+   attaching one tag animates that chip without disturbing the others. */
+.tags-applied .tag-chip-wrap {
+  animation: tagChipIn var(--ui-motion) cubic-bezier(0.22, 0.61, 0.36, 1);
+  transform-origin: left center;
+}
+@keyframes tagChipIn {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Cursor-move animation (services/cursorAnimation.ts): a single translucent
    accent "ghost" that glides to wherever the roving .kbd-cursor lands, plus a
    fading streak (the tail) for the smear/trail modes. Purely additive — the real
