@@ -188,7 +188,18 @@ export class TagChipsElement extends LitElement {
     await this.loadSuggestions();
   }
 
+  /** Tags playing their leave (collapse) animation before the data drops them. */
+  private exitingTags = new Set<number>();
+
   private async detach(tagId: number) {
+    // Animate the chip out first (gated by --ui-motion: 0 = instant, no wait).
+    const ms = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--ui-motion"), 10) || 0;
+    if (ms > 0 && this.attached.some((t) => t.id === tagId)) {
+      this.exitingTags.add(tagId);
+      this.requestUpdate();
+      await new Promise((r) => setTimeout(r, ms));
+      this.exitingTags.delete(tagId);
+    }
     try {
       await detachTag(this.recordingId, tagId);
       await this.load();
@@ -444,7 +455,7 @@ export class TagChipsElement extends LitElement {
           const style = t.color ? `--tag-color: ${t.color}; color: ${contrast};` : '';
           const editing = this.editingTagId === t.id;
           return html`
-            <span class="tag-chip-wrap" style="position: relative; display: inline-flex;">
+            <span class="tag-chip-wrap ${this.exitingTags.has(t.id) ? "tag-exiting" : ""}" style="position: relative; display: inline-flex;">
               <span class="tag-chip" data-tag-id="${t.id}" style="${style} cursor: pointer;"
                 title="Click to rename or recolor this tag"
                 @click=${(e: Event) => this.startEdit(t, e)}>

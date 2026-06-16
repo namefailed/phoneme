@@ -41,6 +41,22 @@ body.phoneme-hide-header-instant #hdr {
     transform: scale(1);
   }
 }
+/* Tag chip leave: collapse + fade as it's detached (the data drops it after). */
+.tags-applied .tag-chip-wrap.tag-exiting {
+  animation: tagChipOut var(--ui-motion) cubic-bezier(0.4, 0, 1, 1) forwards;
+  transform-origin: left center;
+  pointer-events: none;
+}
+@keyframes tagChipOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+}
 
 /* Cursor-move animation (services/cursorAnimation.ts): a single translucent
    accent "ghost" that glides to wherever the roving .kbd-cursor lands, plus a

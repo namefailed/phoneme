@@ -183,6 +183,25 @@ export class RecordingsListElement extends LitElement {
    *  (cleared → they reappear). Survives daemon-event refreshes by design. */
   private pendingDelete = new Set<string>();
 
+  /** Recording ids we've already rendered — so a row's one-shot enter animation
+   *  fires once (a genuinely new recording / a freshly-loaded page) and never
+   *  re-fires on the frequent daemon-event re-renders. */
+  private seenIds = new Set<string>();
+  /** This render's brand-new ids (recomputed each willUpdate); rows with these get
+   *  the `rec-row-enter` class for their single fade-in. */
+  private freshIds = new Set<string>();
+  /** A favorite that was just toggled on — gets a one-shot star pop. */
+  private poppedFavId: string | null = null;
+
+  protected willUpdate() {
+    const ids = this.listState?.recordings?.map((r) => r.id) ?? [];
+    // Don't cascade the whole library on the very first paint — only animate
+    // arrivals after we've seen a baseline.
+    const baseline = this.seenIds.size === 0;
+    this.freshIds = baseline ? new Set() : new Set(ids.filter((id) => !this.seenIds.has(id)));
+    for (const id of ids) this.seenIds.add(id);
+  }
+
   /** Show/hide rows for the undoable-delete flow (see RecordingsView). */
   setPendingDelete(ids: string[], pending: boolean) {
     for (const id of ids) {
@@ -250,6 +269,18 @@ export class RecordingsListElement extends LitElement {
   private async toggleFavorite(r: Recording) {
     const next = !r.favorite;
     r.favorite = next; // optimistic — reflect immediately
+    // One-shot star pop when turning a star ON; cleared after the animation so it
+    // doesn't replay on the next re-render.
+    this.poppedFavId = next ? r.id : null;
+    if (next) {
+      const id = r.id;
+      window.setTimeout(() => {
+        if (this.poppedFavId === id) {
+          this.poppedFavId = null;
+          this.requestUpdate();
+        }
+      }, 320);
+    }
     this.requestUpdate();
     try {
       await setFavorite(r.id, next);
@@ -959,7 +990,7 @@ export class RecordingsListElement extends LitElement {
 
     const cellMap: Record<string, unknown> = {
       day: html`<span class="rec-time">${day}</span>`,
-      favorite: html`<span class="rec-fav"><button class="rec-fav-btn ${r.favorite ? "on" : ""}" title=${r.favorite ? "Unstar" : "Star"} aria-label=${r.favorite ? "Unstar" : "Star"} @click=${(e: Event) => { e.stopPropagation(); void this.toggleFavorite(r); }}>⭐</button></span>`,
+      favorite: html`<span class="rec-fav"><button class="rec-fav-btn ${r.favorite ? "on" : ""} ${this.poppedFavId === r.id ? "star-pop" : ""}" title=${r.favorite ? "Unstar" : "Star"} aria-label=${r.favorite ? "Unstar" : "Star"} @click=${(e: Event) => { e.stopPropagation(); void this.toggleFavorite(r); }}>⭐</button></span>`,
       time: html`<span class="rec-time">${time}</span>`,
       duration: html`<span class="rec-dur">${dur}</span>`,
       status: html`<span class="rec-status"><span class="status-pill ${cls}">${label}</span></span>`,
@@ -993,8 +1024,8 @@ export class RecordingsListElement extends LitElement {
     
     return html`
       <div 
-        class="rec-row ${active ? "active" : ""} ${kbFocused ? "kbd-focused" : ""} ${multiChecked ? "multi-selected" : ""} ${track ? "rec-row--track" : ""}" 
-        data-id="${r.id}" 
+        class="rec-row ${active ? "active" : ""} ${kbFocused ? "kbd-focused" : ""} ${multiChecked ? "multi-selected" : ""} ${track ? "rec-row--track" : ""} ${this.freshIds.has(r.id) ? "rec-row-enter" : ""}"
+        data-id="${r.id}"
         role="option" 
         aria-selected="${active}" 
         style="grid-template-columns: ${gridTemplate}"
@@ -1037,7 +1068,7 @@ export class RecordingsListElement extends LitElement {
 
     return html`
       <div
-        class="rec-group-head ${isActive ? "active" : ""} ${kbFocused ? "kbd-focused" : ""}"
+        class="rec-group-head ${isActive ? "active" : ""} ${kbFocused ? "kbd-focused" : ""} ${tracks.some((t) => this.freshIds.has(t.id)) ? "rec-row-enter" : ""}"
         data-session="${meetingId}" 
         role="group" 
         aria-expanded="${expanded}"

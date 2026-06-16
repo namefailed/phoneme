@@ -53,6 +53,43 @@
   z-index: 5;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
+/* Animation overhaul (gated by --ui-motion: 0ms when motion is off / reduced =
+   instant). One-shot row enter (a new recording arriving, a freshly-loaded page),
+   the favorite-star pop, and a smooth cross-fade as a status pill changes. */
+.rec-row-enter,
+.rec-group-head.rec-row-enter {
+  animation: recRowIn var(--ui-motion) cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@keyframes recRowIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rec-fav-btn.star-pop {
+  animation: starPop calc(var(--ui-motion) + 120ms) cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes starPop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.45);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.status-pill {
+  transition:
+    background-color var(--ui-motion) ease,
+    color var(--ui-motion) ease;
+}
+
 .rec-row {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   padding: 10px 16px 10px 6px;
