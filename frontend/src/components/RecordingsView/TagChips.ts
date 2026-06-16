@@ -229,6 +229,22 @@ export class TagChipsElement extends LitElement {
    *  Remove · Cancel, Enter activates, Esc steps out. Self-contained: it stops
    *  propagation so these keys never leak to the detail-grid nav behind it. */
   private onEditPopKeydown(e: KeyboardEvent, tagId: number) {
+    // Focus trap: Tab / Shift+Tab cycle within the popover instead of walking out
+    // to the recording behind it. Handled before the typing branch so it holds
+    // from the name field too; native focus moves and onEditPopFocusin keeps the
+    // highlight in step.
+    if (e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+      const els = this.editOptionEls();
+      if (els.length) {
+        const cur = els.indexOf(document.activeElement as HTMLElement);
+        const ni =
+          cur < 0 ? (e.shiftKey ? els.length - 1 : 0) : (cur + (e.shiftKey ? -1 : 1) + els.length) % els.length;
+        els[ni].focus();
+      }
+      return;
+    }
     // While typing in the name field it owns every key except Escape, which steps
     // back out to the highlight cursor (keeping the typed text) rather than
     // cancelling — a second Escape from the cursor then closes the popover.
@@ -277,6 +293,20 @@ export class TagChipsElement extends LitElement {
     if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key !== "Tab") {
       e.stopPropagation();
     }
+  }
+
+  /** The popover's focusable controls in DOM/cursor order — color · name · then
+   *  the inline buttons (Save · Remove? · Cancel). Used by the Tab focus trap;
+   *  matches the index model onEditPopFocusin maps focus to. */
+  private editOptionEls(): HTMLElement[] {
+    const pop = this.renderRoot.querySelector<HTMLElement>(".tag-edit-pop");
+    if (!pop) return [];
+    const ordered = [
+      pop.querySelector<HTMLElement>(".tag-edit-color"),
+      pop.querySelector<HTMLElement>(".tag-edit-name"),
+      ...pop.querySelectorAll<HTMLElement>(".inline-button"),
+    ];
+    return ordered.filter((x): x is HTMLElement => !!x);
   }
 
   /** Keep the purple cursor in step with native Tab focus: a no-vim/no-arrow user

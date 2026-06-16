@@ -1115,6 +1115,29 @@ function seedModalCursor(overlay: HTMLElement) {
   highlightModalCursor(controls);
 }
 
+/** Focus trap: keep Tab / Shift+Tab INSIDE an open dialog. Without this, native
+ *  Tab walks focus out to the controls behind the overlay (you could tab out of
+ *  a popup). We always preventDefault and move focus to the next/prev focusable
+ *  WITHIN the overlay, wrapping at the ends — so focus can never leave. Works for
+ *  everyone: typing in a field tabs to the next field, buttons cycle, and it
+ *  needs no nav layer. When vim/arrow nav is on we also sync the roving cursor so
+ *  there's a single highlight, not a native ring fighting the glow. */
+function trapModalTab(e: KeyboardEvent, overlay: HTMLElement): void {
+  e.preventDefault();
+  const controls = modalControls(overlay);
+  if (!controls.length) return; // nothing to land on — focus simply stays put
+  const active = document.activeElement as HTMLElement | null;
+  const idx = active ? controls.indexOf(active) : -1;
+  const step = e.shiftKey ? -1 : 1;
+  const next = idx < 0 ? (e.shiftKey ? controls.length - 1 : 0) : (idx + step + controls.length) % controls.length;
+  controls[next].focus();
+  if (vimNav || arrowNav) {
+    modalCursorOverlay = overlay;
+    modalCursor = next;
+    highlightModalCursor(controls);
+  }
+}
+
 function onKeyDown(e: KeyboardEvent) {
   // When the cheat-sheet is open it owns Esc / "?" and nothing else fires.
   if (helpOpen) {
@@ -1123,6 +1146,17 @@ function onKeyDown(e: KeyboardEvent) {
       closeHelp();
     }
     return;
+  }
+
+  // Focus trap for open dialogs: Tab / Shift+Tab must cycle within the popup, not
+  // walk out to whatever is behind it. Checked before the typing-target return so
+  // it holds even while a field inside the modal is focused.
+  if (e.key === "Tab") {
+    const tabModal = topmostModalOverlay();
+    if (tabModal) {
+      trapModalTab(e, tabModal);
+      return;
+    }
   }
 
   // Drop a stale header-nav cursor if focus has drifted out of the header.
