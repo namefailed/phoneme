@@ -1093,6 +1093,28 @@ function handleModalNav(e: KeyboardEvent, overlay: HTMLElement): boolean {
   return true;
 }
 
+/** Drop the roving cursor onto a modal the moment it opens, so the keyboard
+ *  cursor (and its glow) is already INSIDE the dialog without needing a first
+ *  keypress — e.g. the Re-run / Models picker, Doctor. Prefers the control the
+ *  modal itself focused (so a destructive confirm still starts on Cancel), and
+ *  bows out for modals that put focus straight into a text field to type. */
+function seedModalCursor(overlay: HTMLElement) {
+  if (!(vimNav || arrowNav)) return;
+  const active = document.activeElement as HTMLElement | null;
+  if (active && overlay.contains(active) && isTypingTarget(active)) return;
+  const controls = modalControls(overlay);
+  if (!controls.length) return;
+  modalCursorOverlay = overlay;
+  const ai = active ? controls.indexOf(active) : -1;
+  modalCursor = ai >= 0 ? ai : 0;
+  const dialog = overlay.querySelector<HTMLElement>(".modal-dialog") ?? overlay;
+  if (document.activeElement !== dialog) {
+    dialog.setAttribute("tabindex", "-1");
+    dialog.focus({ preventScroll: true });
+  }
+  highlightModalCursor(controls);
+}
+
 function onKeyDown(e: KeyboardEvent) {
   // When the cheat-sheet is open it owns Esc / "?" and nothing else fires.
   if (helpOpen) {
@@ -1308,6 +1330,27 @@ export function initKeyboard() {
         .forEach((el) => el.classList.remove("kbd-cursor"));
     }
   });
+  // Seed the roving cursor INTO a modal the moment it opens, so the keyboard
+  // cursor is already inside it (no first keypress needed) and the cursor glow
+  // follows it in. Deferred a frame so the dialog's controls have rendered.
+  new MutationObserver((records) => {
+    if (!(vimNav || arrowNav)) return;
+    for (const rec of records) {
+      for (const node of Array.from(rec.addedNodes)) {
+        if (node.nodeType !== 1) continue;
+        const el = node as HTMLElement;
+        const overlay = (
+          el.matches?.('[class*="modal-overlay"]') ? el : el.querySelector?.('[class*="modal-overlay"]')
+        ) as HTMLElement | null;
+        if (overlay) {
+          requestAnimationFrame(() => {
+            if (topmostModalOverlay() === overlay) seedModalCursor(overlay);
+          });
+          return;
+        }
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
   // RecordingsView announces when the detail pane has captured the keys for an
   // open dropdown ("sub") or the waveform scrub mode ("wave"), or released them
   // (null), so the layer above can route j/k/h/l/H/L/Enter/Esc accordingly.

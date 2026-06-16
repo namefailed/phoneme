@@ -27,6 +27,42 @@ let pending: HTMLElement | null = null; // newest .kbd-cursor seen this frame
 let raf = 0;
 let observer: MutationObserver | null = null;
 let installed = false;
+/** Hidden while focus is in a text-editing surface (a CodeMirror editor, a tag
+ *  name input): the glow sits right over what you're typing into, so it gets out
+ *  of the way until you leave the field, then returns. */
+let suppressed = false;
+
+/** Panes the ghost must stay WITHIN — its rect is clamped to the nearest of these,
+ *  so a full-width list row (which underlaps the detail pane) can't glow over the
+ *  detail pane, and a modal control can't glow outside its dialog. */
+const PANE_SEL = "#rv-list, #rv-detail, #rv-detail2, ph-sidebar, .headerbar, .modal-dialog";
+
+/** The element's viewport rect, clamped to its containing pane (see PANE_SEL). */
+function clampRect(el: HTMLElement, r: DOMRect) {
+  let { left, top, right, bottom } = r;
+  const host = el.closest<HTMLElement>(PANE_SEL);
+  if (host) {
+    const h = host.getBoundingClientRect();
+    left = Math.max(left, h.left);
+    top = Math.max(top, h.top);
+    right = Math.min(right, h.right);
+    bottom = Math.min(bottom, h.bottom);
+  }
+  return { left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+}
+
+/** Is focus going into something the user types into (so the glow should hide)? */
+function isEditing(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || el.nodeType !== 1) return false;
+  if (typeof el.closest === "function" && el.closest(".cm-editor")) return true; // CodeMirror
+  if (el.tagName === "TEXTAREA") return true;
+  if (el.tagName === "INPUT") {
+    const ty = (el as HTMLInputElement).type;
+    return ty !== "checkbox" && ty !== "radio" && ty !== "button" && ty !== "color" && ty !== "range";
+  }
+  return el.isContentEditable === true;
+}
 
 /** Per-mode glide/streak duration (ms). */
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
@@ -71,14 +107,18 @@ function hide() {
 function place(el: HTMLElement, animate: boolean) {
   const m = effective();
   if (!m) return;
-  const r = el.getBoundingClientRect();
-  if (r.width === 0 && r.height === 0) {
+  if (suppressed) return; // typing into this control — stay out of the way
+  const r = clampRect(el, el.getBoundingClientRect());
+  if (r.width <= 0 || r.height <= 0) {
     hide();
     return;
   }
   ensureEls();
   const g = ghost!;
-  const prev = current && current !== el && current.isConnected ? current.getBoundingClientRect() : null;
+  const prev =
+    current && current !== el && current.isConnected
+      ? clampRect(current, current.getBoundingClientRect())
+      : null;
 
   // Extreme size change (a tiny sidebar tag → the full transcript editor, say):
   // morphing the box across that range looks silly, so just fade in at the new
@@ -182,6 +222,27 @@ function onMutations(records: MutationRecord[]) {
   if (!raf) raf = requestAnimationFrame(flush);
 }
 
+/** Focus entered a text-editing surface → hide the glow so it isn't over the
+ *  text you're typing (the transcript/notes CodeMirror, a tag-name input). */
+function onFocusIn(e: FocusEvent) {
+  if (!isEditing(e.target)) return;
+  suppressed = true;
+  if (ghost) ghost.style.opacity = "0";
+  if (tail) tail.style.opacity = "0";
+}
+
+/** Left an editing surface → if focus didn't land on another one, bring the glow
+ *  back onto the current cursor (e.g. Shift+Esc out of the editor, or Esc out of
+ *  the tag input). */
+function onFocusOut(e: FocusEvent) {
+  if (!isEditing(e.target)) return;
+  requestAnimationFrame(() => {
+    if (isEditing(document.activeElement)) return; // moved to another field
+    suppressed = false;
+    if (current && current.isConnected) place(current, true);
+  });
+}
+
 function connect() {
   if (observer) return;
   observer = new MutationObserver(onMutations);
@@ -194,6 +255,9 @@ function connect() {
   // Keep the fixed ghost glued to its control as the page scrolls/resizes.
   window.addEventListener("scroll", onReflow, true);
   window.addEventListener("resize", onReflow);
+  // Hide the glow while typing into an editor / input; restore on the way out.
+  document.addEventListener("focusin", onFocusIn);
+  document.addEventListener("focusout", onFocusOut);
   // Seed onto whatever is already highlighted.
   const live = document.querySelector<HTMLElement>(".kbd-cursor, .kbd-focused");
   if (live) place(live, false);
@@ -204,11 +268,14 @@ function disconnect() {
   observer = null;
   window.removeEventListener("scroll", onReflow, true);
   window.removeEventListener("resize", onReflow);
+  document.removeEventListener("focusin", onFocusIn);
+  document.removeEventListener("focusout", onFocusOut);
   if (raf) {
     cancelAnimationFrame(raf);
     raf = 0;
   }
   pending = null;
+  suppressed = false;
   hide();
 }
 
