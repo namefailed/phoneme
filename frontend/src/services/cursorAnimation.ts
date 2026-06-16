@@ -144,26 +144,33 @@ function place(el: HTMLElement, animate: boolean) {
       ? clampRect(current, current.getBoundingClientRect())
       : null;
 
-  // Streak (smear/trail): a rounded box spanning the old + new rects, faded out
-  // over the move. Our nav is mostly orthogonal (j/k vertical, h/l horizontal),
-  // so the union box reads as a clean directional streak.
+  // Streak (smear/trail): a box spanning the old + new rects, faded out over the
+  // move. ONLY drawn when that union stays close to the cursor's own size — i.e. a
+  // real trail of a moving box. Across a big jump (a wide list row → a small
+  // control in another pane) the union would span most of the window and flash
+  // "as big as the list pane", so we skip it and just glide.
   if (animate && prev && (m === "smear" || m === "trail")) {
     const dist = Math.hypot(r.left - prev.left, r.top - prev.top);
-    if (m === "trail" || dist > SMEAR_THRESHOLD) {
+    const left = Math.min(r.left, prev.left);
+    const top = Math.min(r.top, prev.top);
+    const uW = Math.max(r.right, prev.right) - left;
+    const uH = Math.max(r.bottom, prev.bottom) - top;
+    const proportionate = uW <= r.width * 2.5 && uH <= r.height * 2.5;
+    if (proportionate && (m === "trail" || dist > SMEAR_THRESHOLD)) {
       const t = tail!;
-      const left = Math.min(r.left, prev.left);
-      const top = Math.min(r.top, prev.top);
       t.style.transitionDuration = "0ms";
       t.style.left = `${left}px`;
       t.style.top = `${top}px`;
-      t.style.width = `${Math.max(r.right, prev.right) - left}px`;
-      t.style.height = `${Math.max(r.bottom, prev.bottom) - top}px`;
+      t.style.width = `${uW}px`;
+      t.style.height = `${uH}px`;
       t.style.opacity = m === "trail" ? "0.28" : "0.2";
       // Next frame, fade it out over the glide duration.
       requestAnimationFrame(() => {
         t.style.transitionDuration = `${DUR[m]}ms`;
         t.style.opacity = "0";
       });
+    } else if (tail) {
+      tail.style.opacity = "0"; // big jump — no block streak
     }
   }
 
