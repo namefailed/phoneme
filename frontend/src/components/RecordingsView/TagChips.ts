@@ -499,7 +499,7 @@ export class TagChipsElement extends LitElement {
                   @keydown=${(e: KeyboardEvent) => this.onEditPopKeydown(e, t.id)}
                   style="position:absolute; top:calc(100% + 6px); left:0; z-index:70;
                     display:flex; align-items:center; gap:8px; padding:8px;
-                    background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.12));
+                    background:var(--bg-elevated, #1e1e2e); border:var(--popup-border, 1px solid var(--border-subtle));
                     border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
                   <input type="color" class="tag-edit-color ${this.editActiveIndex === 0 ? "kbd-cursor" : ""}" .value=${this.editColor}
                     title="Tag color — Enter/Space opens the palette"

@@ -81,6 +81,13 @@ function isEditing(t: EventTarget | null): boolean {
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
 /** Minimum jump (px) before a streak is drawn (trail streaks on every move). */
 const SMEAR_THRESHOLD = 90;
+/** Below this travel distance (px) the glow SNAPS its size instead of animating
+ *  it. On a short hop the position arrives almost at once, so animating a big size
+ *  change leaves the OLD size sitting at the destination for a frame before it
+ *  morphs — a "size flash" (very top list row → a header control; between tags of
+ *  different widths). Longer moves animate size so it grows/shrinks smoothly as it
+ *  travels (e.g. the queue button up to a tag). Position always glides. */
+const SIZE_GLIDE_DIST = 180;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -172,12 +179,14 @@ function place(el: HTMLElement, animate: boolean) {
     }
   }
 
-  // Glide + resize together: the glow smoothly slides AND grows/shrinks into each
-  // control (mini.animate-style), so a small queue button → a tag chip, or any
-  // size change, eases between sizes instead of appearing already at the target
-  // size. left/top/width/height all share one duration so position and size move
-  // as one, never "resize then slide".
-  g.style.transitionProperty = "left, top, width, height, opacity";
+  // Glide POSITION always; animate SIZE only on longer moves. On a short hop the
+  // position settles almost instantly, so animating a big size change leaves the
+  // OLD size briefly at the destination before it morphs — a one-frame "size
+  // flash" (very top list row → a header control; between tags of different
+  // widths). Below SIZE_GLIDE_DIST we snap size (right size at once); longer moves
+  // grow/shrink smoothly as they travel (the queue button up to a tag chip).
+  const sizeGlide = animate && dist > SIZE_GLIDE_DIST;
+  g.style.transitionProperty = sizeGlide ? "left, top, width, height, opacity" : "left, top, opacity";
   g.style.transitionDuration = animate ? `${DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
