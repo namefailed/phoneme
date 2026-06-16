@@ -2068,6 +2068,44 @@ impl Config {
                 self.recording.meeting_preview
             )));
         }
+        // No two ACTIVE bundled whisper-servers may share a port. Otherwise the
+        // supervisor probes one off its configured port at runtime and the
+        // port-keyed `WhisperEffectivePorts::resolve` can route a consumer to the
+        // wrong server — e.g. a dictation server deliberately set to the derived
+        // 2nd-preview port (preview port + 2) would shadow the 2nd meeting track's
+        // caption routing. Catch the collision at save/load instead.
+        {
+            let mut ports: Vec<(u16, &str)> = Vec::new();
+            if self.whisper.mode != WhisperMode::External {
+                ports.push((self.whisper.bundled_server_port, "whisper"));
+            }
+            if self.preview_needs_own_server() {
+                if let Some(pv) = &self.preview_whisper {
+                    ports.push((pv.bundled_server_port, "preview_whisper"));
+                }
+            }
+            if self.second_preview_needs_own_server() {
+                ports.push((
+                    self.preview2_port(),
+                    "the 2nd preview server (preview port + 2)",
+                ));
+            }
+            if self.in_place_needs_own_server() {
+                if let Some(stt) = &self.in_place.stt {
+                    ports.push((stt.bundled_server_port, "in_place.stt"));
+                }
+            }
+            for i in 0..ports.len() {
+                for j in (i + 1)..ports.len() {
+                    if ports[i].0 == ports[j].0 {
+                        return Err(Error::InvalidConfig(format!(
+                            "bundled whisper-server port {} is used by both {} and {} — each active local server needs a distinct port",
+                            ports[i].0, ports[i].1, ports[j].1
+                        )));
+                    }
+                }
+            }
+        }
         if self.whisper.mode == WhisperMode::BundledModel && self.whisper.model_path.is_empty() {
             return Err(Error::InvalidConfig(
                 "whisper.model_path is required when whisper.mode = bundled_model".into(),
@@ -2705,6 +2743,32 @@ mod tests {
         assert!(cfg.validate().is_err());
         cfg.recording.meeting_preview = "both".into();
         cfg.validate().expect("both is valid");
+    }
+
+    /// Two active bundled servers on the same port fail validation — e.g. a
+    /// dedicated dictation server deliberately pointed at the derived 2nd-preview
+    /// port (preview port + 2), which would otherwise shadow the 2nd meeting
+    /// track's caption routing in `resolve()`.
+    #[test]
+    fn colliding_bundled_server_ports_fail_validation() {
+        let mut cfg = Config::default();
+        cfg.recording.streaming_preview = true;
+        cfg.recording.meeting_preview = "both".into();
+        cfg.recording.meeting_preview_own_server = true;
+        let mut pv = cfg.whisper.clone();
+        pv.bundled_server_port = 5810; // -> preview2 derives to 5812
+        cfg.preview_whisper = Some(pv);
+        // A dictation server deliberately collides with the derived 5812.
+        let mut stt = cfg.whisper.clone();
+        stt.use_own_bundled_server = true;
+        stt.bundled_server_port = 5812;
+        cfg.in_place.stt = Some(stt);
+        assert_eq!(cfg.preview2_port(), 5812);
+        assert!(cfg.validate().is_err(), "port collision must be rejected");
+
+        // Move dictation off the collision and it validates.
+        cfg.in_place.stt.as_mut().unwrap().bundled_server_port = 5813;
+        cfg.validate().expect("distinct ports are valid");
     }
 
     /// A cloud dictation provider never spawns a dedicated server, even with

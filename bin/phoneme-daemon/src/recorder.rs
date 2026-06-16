@@ -1626,6 +1626,17 @@ impl DaemonRecorder {
             // (or its preconditions), every loop stays on the primary server and
             // they alternate on the shared permit, exactly as before.
             let dual = state.config.load().second_preview_needs_own_server();
+            // The dedicated 2nd preview server only parallelizes TWO tracks: track 0
+            // (primary, on `whisper_sem`) vs the rest (the single 2nd server + its
+            // one `preview2_sem`). With 3+ tracks every track >0 shares that one
+            // permit/server and alternates among themselves — fine for the only
+            // production layout (2-track mic + system), but an N-track meeting would
+            // need a pool of preview-N servers keyed by index. Assert the invariant
+            // so a future N-track caller trips here instead of silently serializing.
+            debug_assert!(
+                sources.len() <= 2 || !dual,
+                "2nd preview server parallelizes only 2 tracks; 3+ secondary loops would share one preview2_sem"
+            );
             for (idx, (id, _, snapshot)) in sources.into_iter().enumerate() {
                 let secondary = dual && idx > 0;
                 self.start_preview(state, id, snapshot, secondary).await;
