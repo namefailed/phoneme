@@ -64,7 +64,13 @@ let revealWps = 12; // token-bucket reveal speed (words/sec); 0 = instant. See q
 
 function pushLevel(level: number) {
   if (!waveEnabled) return;
-  waveRing.push(Math.max(0, Math.min(1, Number.isFinite(level) ? level : 0)));
+  const raw = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 0));
+  // Speech RMS sits low (~0.05–0.3), so a linear bar barely twitches. A perceptual
+  // sqrt curve + a little gain makes normal speech visibly drive the bars, while
+  // the clamp still caps loud peaks at full height. (Tune the exponent/gain if it
+  // feels too jumpy or too flat.)
+  const v = Math.min(1, Math.sqrt(raw) * 1.2);
+  waveRing.push(v);
   waveRing.shift();
   for (let i = 0; i < waveBars.length; i++) {
     // 0.15 floor so the bars are always visible while active.
