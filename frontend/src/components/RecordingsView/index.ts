@@ -619,24 +619,33 @@ export class RecordingsView {
   }
 
   /** The (row, col) of the sidebar nav cell the clicked node lives in, or null
-   *  when the click wasn't on a navigable cell (so the cursor is left as-is). */
+   *  when the click wasn't on a navigable cell (so the cursor is left as-is).
+   *  Matches the NEAREST cell ancestor so a click on a control inside a larger
+   *  cell lands on the control, not the enclosing cell. */
   private sidebarCellAt(target: HTMLElement): { row: number; col: number } | null {
     const grid = this.sidebarGrid();
-    for (let r = 0; r < grid.length; r++) {
-      for (let c = 0; c < grid[r].length; c++) {
-        if (grid[r][c] === target || grid[r][c].contains(target)) return { row: r, col: c };
+    for (let node: HTMLElement | null = target; node; node = node.parentElement) {
+      for (let r = 0; r < grid.length; r++) {
+        for (let c = 0; c < grid[r].length; c++) {
+          if (grid[r][c] === node) return { row: r, col: c };
+        }
       }
     }
     return null;
   }
 
   /** The (row, col) of the detail-pane nav cell the clicked node lives in (built
-   *  for the currently-focused recording pane), or null when off any cell. */
+   *  for the currently-focused recording pane), or null when off any cell. Walks
+   *  up from the clicked node to the NEAREST cell, so clicking the Speakers /
+   *  Views / Versions buttons (which sit INSIDE the .transcript-block) lands on
+   *  those buttons, not the whole transcript cell. */
   private detailCellAt(target: HTMLElement): { row: number; col: number } | null {
     const grid = this.detailGrid();
-    for (let r = 0; r < grid.length; r++) {
-      for (let c = 0; c < grid[r].length; c++) {
-        if (grid[r][c].el === target || grid[r][c].el.contains(target)) return { row: r, col: c };
+    for (let node: HTMLElement | null = target; node; node = node.parentElement) {
+      for (let r = 0; r < grid.length; r++) {
+        for (let c = 0; c < grid[r].length; c++) {
+          if (grid[r][c].el === node) return { row: r, col: c };
+        }
       }
     }
     return null;
