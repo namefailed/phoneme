@@ -132,7 +132,7 @@ async fn main() -> Result<()> {
                         return;
                     };
                     pipeline::embed_and_store(
-                        &embedder,
+                        embedder,
                         &retroactive_state.catalog,
                         &r.id,
                         transcript,

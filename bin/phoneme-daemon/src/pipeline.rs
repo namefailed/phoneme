@@ -376,13 +376,20 @@ use std::time::Duration;
 /// Best-effort: a failure is logged, never fatal — search degrades gracefully
 /// rather than failing the recording.
 pub(crate) async fn embed_and_store(
-    embedder: &Embedder,
+    embedder: std::sync::Arc<Embedder>,
     catalog: &Catalog,
     id: &RecordingId,
     transcript: &str,
 ) {
-    match embedder.embed_chunks(transcript) {
-        Ok(chunks) => {
+    // ONNX inference is blocking CPU work, so run it on the blocking pool rather
+    // than on an async worker (where it would stall concurrent IPC + event
+    // delivery for the duration). The catalog writes stay on the async runtime.
+    // Taking an owned `Arc<Embedder>` (cloned out of the read-lock by the caller)
+    // is what lets the work move into `spawn_blocking`.
+    let text = transcript.to_string();
+    let emb = embedder.clone();
+    match tokio::task::spawn_blocking(move || emb.embed_chunks(&text)).await {
+        Ok(Ok(chunks)) => {
             if let Err(e) = catalog.upsert_chunk_embeddings(id, &chunks).await {
                 tracing::warn!(error = %e, "Failed to save chunk embeddings");
             } else {
@@ -393,16 +400,19 @@ pub(crate) async fn embed_and_store(
                 );
             }
         }
-        Err(e) => tracing::warn!(error = %e, "Failed to embed transcript chunks"),
+        Ok(Err(e)) => tracing::warn!(error = %e, "Failed to embed transcript chunks"),
+        Err(e) => tracing::warn!(error = %e, "chunk-embed task failed"),
     }
     // Keep the whole-recording vector in sync too (cheap; one extra embed).
-    match embedder.embed(transcript) {
-        Ok(vec) => {
+    let text = transcript.to_string();
+    match tokio::task::spawn_blocking(move || embedder.embed(&text)).await {
+        Ok(Ok(vec)) => {
             if let Err(e) = catalog.upsert_embedding(id, &vec).await {
                 tracing::warn!(error = %e, "Failed to save embedding to catalog");
             }
         }
-        Err(e) => tracing::warn!(error = %e, "Failed to embed transcript"),
+        Ok(Err(e)) => tracing::warn!(error = %e, "Failed to embed transcript"),
+        Err(e) => tracing::warn!(error = %e, "embed task failed"),
     }
 }
 
@@ -1518,11 +1528,13 @@ pub async fn run(
         }
     }
 
-    let embedder_guard = state.embedder.read().await;
-    if let Some(embedder) = embedder_guard.as_ref() {
+    // Clone the Arc out and drop the read-lock immediately — the inference now
+    // runs under spawn_blocking inside embed_and_store, so holding the guard
+    // across it would needlessly serialize a config reload / ReembedAll.
+    let embedder = state.embedder.read().await.as_ref().cloned();
+    if let Some(embedder) = embedder {
         embed_and_store(embedder, &state.catalog, &id, &transcript).await;
     }
-    drop(embedder_guard);
 
     // Hooks are optional. When `run_on_transcribe` is off, finalize the
     // recording right after transcription without firing hooks or the webhook;

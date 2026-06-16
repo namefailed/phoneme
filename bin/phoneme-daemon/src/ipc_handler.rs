@@ -404,7 +404,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                                             return;
                                         };
                                         crate::pipeline::embed_and_store(
-                                            &embedder,
+                                            embedder,
                                             &bg.catalog,
                                             &r.id,
                                             t,
@@ -496,12 +496,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         }
                     }
 
-                    let embedder_guard = state.embedder.read().await;
-                    if let Some(embedder) = embedder_guard.as_ref() {
+                    let embedder = state.embedder.read().await.as_ref().cloned();
+                    if let Some(embedder) = embedder {
                         crate::pipeline::embed_and_store(embedder, &state.catalog, &id, &text)
                             .await;
                     }
-                    drop(embedder_guard);
 
                     state.events.emit(DaemonEvent::TranscriptUpdated { id });
                     ok_null()
@@ -1549,12 +1548,11 @@ async fn rerun_cleanup(
 
                 // Re-embed the new text so semantic search stays consistent,
                 // mirroring the pipeline and UpdateTranscript paths.
-                let embedder_guard = task_state.embedder.read().await;
-                if let Some(embedder) = embedder_guard.as_ref() {
+                let embedder = task_state.embedder.read().await.as_ref().cloned();
+                if let Some(embedder) = embedder {
                     crate::pipeline::embed_and_store(embedder, &task_state.catalog, &id, &cleaned)
                         .await;
                 }
-                drop(embedder_guard);
 
                 // Emit the same event the UI already listens for after a manual
                 // transcript change so the detail/list views refresh in place.

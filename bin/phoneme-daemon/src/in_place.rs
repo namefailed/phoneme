@@ -188,8 +188,8 @@ async fn run(
             id: id.clone(),
             transcript: polished.clone(),
         });
-        let embedder_guard = state.embedder.read().await;
-        if let Some(embedder) = embedder_guard.as_ref() {
+        let embedder = state.embedder.read().await.as_ref().cloned();
+        if let Some(embedder) = embedder {
             crate::pipeline::embed_and_store(embedder, &state.catalog, id, &polished).await;
         }
     } else {

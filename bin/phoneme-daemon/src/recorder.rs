@@ -636,10 +636,26 @@ impl DaemonRecorder {
                     Err(_) => continue,
                 };
 
-                // Write a temp WAV and transcribe via the configured provider.
-                if let Err(e) = wav::write_wav(&tmp_wav, &samples, audio_cfg) {
-                    tracing::warn!(error = %e, "streaming preview: failed to write temp WAV; skipping tick");
-                    continue;
+                // Write a temp WAV and transcribe via the configured provider. The
+                // hound encode + std::fs syscalls are blocking, so run them on the
+                // blocking pool rather than stalling an async worker every tick
+                // (the preview runs ~1×/s for the whole recording). `samples` is
+                // moved in; the fixed `tmp_wav` path + `audio_cfg` (Copy) are cloned.
+                let wav_path = tmp_wav.clone();
+                let wav_res = tokio::task::spawn_blocking(move || {
+                    wav::write_wav(&wav_path, &samples, audio_cfg)
+                })
+                .await;
+                match wav_res {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "streaming preview: failed to write temp WAV; skipping tick");
+                        continue;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "streaming preview: WAV encode task failed; skipping tick");
+                        continue;
+                    }
                 }
                 let language = cfg.whisper.language.clone().filter(|s| !s.is_empty());
 

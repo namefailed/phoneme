@@ -1623,7 +1623,7 @@ impl Default for TrayConfig {
 }
 
 /// Which whisper-server a [`WhisperServerSpec`] is — the role the daemon
-/// supervises it under. The single source of truth for "what runs" is
+/// supervises it under. The canonical declaration of what runs is
 /// [`Config::needed_whisper_servers`]; this names each entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1660,8 +1660,11 @@ impl WhisperServerRole {
 
 /// One whisper-server the live config requires: its role plus a clone of the
 /// `[whisper]`-shaped provider that drives it (model, port, args). Returned by
-/// [`Config::needed_whisper_servers`] — the ONE place that decides what runs,
-/// so the supervisor and Doctor never disagree about the set.
+/// [`Config::needed_whisper_servers`], the canonical *declaration* of which local
+/// servers a config needs. NOTE: the daemon supervisor currently hand-rolls the
+/// equivalent per-loop gates (`run`/`run_preview`/`run_preview2`/`run_dictation`)
+/// rather than consuming this list directly, so the two must be kept in sync;
+/// this declaration is exercised by the config unit tests.
 #[derive(Debug, Clone)]
 pub struct WhisperServerSpec {
     /// Which server this is.
@@ -1790,8 +1793,9 @@ impl Config {
             .saturating_add(2)
     }
 
-    /// The EXACT set of whisper-servers the live config requires — the single
-    /// source of truth the supervisor spawns and the Doctor probes. "Never more
+    /// The EXACT set of whisper-servers the live config requires — the canonical
+    /// declaration of what should run (the supervisor currently hand-rolls the
+    /// matching gates rather than consuming this; keep them in sync). "Never more
     /// servers than needed": each entry is gated independently and only local
     /// bundled providers (the only kind the daemon supervises) ever appear.
     ///
