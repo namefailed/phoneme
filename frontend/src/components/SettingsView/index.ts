@@ -176,7 +176,16 @@ export class SettingsViewElement extends LitElement {
     if (this.floatMenuOpen) { this.closeFloatMenu(); return; }
     // A modal layered above Settings owns Escape (e.g. a model picker, the
     // unsaved-changes dialog). Don't close the panel out from under it.
-    if (document.querySelector(".modal-overlay")) return;
+    if (document.querySelector('[class*="modal-overlay"]')) return;
+    // Escape inside an active field deselects/blurs THAT control — it must not
+    // boot the user out of Settings mid-edit (only the search box stops its own
+    // Escape; every other section field bubbles here). A second Escape, now off
+    // the field, then leaves the panel as usual.
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
+      t.blur();
+      return;
+    }
     e.preventDefault();
     void this.handleClose();
   };

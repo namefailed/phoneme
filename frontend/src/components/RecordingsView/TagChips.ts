@@ -437,15 +437,17 @@ export class TagChipsElement extends LitElement {
                     display:flex; align-items:center; gap:8px; padding:8px;
                     background:var(--bg-elevated, #1e1e2e); border:1px solid var(--border-subtle, rgba(255,255,255,0.12));
                     border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
-                  <input type="color" class="tag-edit-color ${this.editActiveIndex === 0 ? "kbd-cursor" : ""}" .value=${this.editColor}
+                  <input type="color" tabindex="-1" class="tag-edit-color ${this.editActiveIndex === 0 ? "kbd-cursor" : ""}" .value=${this.editColor}
                     title="Tag color — Enter/Space opens the palette"
                     @input=${(e: Event) => this.editColor = (e.target as HTMLInputElement).value}
                     @keydown=${(e: KeyboardEvent) => {
-                      // Tab users can land here directly; Enter/Space opens the native palette.
-                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); (e.target as HTMLInputElement).showPicker?.(); }
+                      // Reachable by mouse click; Enter/Space opens the native palette.
+                      // stopPropagation so it doesn't ALSO bubble to the popover's
+                      // keydown and fire activateEditOption (a double action).
+                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); (e.target as HTMLInputElement).showPicker?.(); }
                     }}
                     style="width:28px; height:28px; padding:0; border:none; background:none; cursor:pointer;" />
-                  <input class="tag-edit-name ${this.editActiveIndex === 1 ? "kbd-cursor" : ""}" .value=${this.editName}
+                  <input tabindex="-1" class="tag-edit-name ${this.editActiveIndex === 1 ? "kbd-cursor" : ""}" .value=${this.editName}
                     placeholder="Tag name"
                     @input=${(e: Event) => this.editName = (e.target as HTMLInputElement).value}
                     @keydown=${(e: KeyboardEvent) => {
@@ -455,12 +457,18 @@ export class TagChipsElement extends LitElement {
                     }}
                     style="width:140px; padding:5px 8px; border-radius:6px; font-size: 0.9286rem;
                       background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);" />
-                  <button class="inline-button ${this.editActiveIndex === 2 ? "kbd-cursor" : ""}" title="Save changes" @click=${() => void this.saveEdit(t.id)}
+                  <!-- The popover is driven entirely by the roving cursor (editActiveIndex):
+                       h/l/j/k/arrows move it, Enter fires activateEditOption. The controls
+                       are tabindex="-1" so Tab can't move native focus onto one and desync it
+                       from the purple cursor — which would also let a focused button's native
+                       Enter fire alongside activateEditOption (a double action). Mouse clicks
+                       still work. -->
+                  <button tabindex="-1" class="inline-button ${this.editActiveIndex === 2 ? "kbd-cursor" : ""}" title="Save changes" @click=${() => void this.saveEdit(t.id)}
                     style="padding:5px 10px;">Save</button>
-                  <button class="inline-button ${this.editActiveIndex === 3 ? "kbd-cursor" : ""}" title="Remove this tag from this recording"
+                  <button tabindex="-1" class="inline-button ${this.editActiveIndex === 3 ? "kbd-cursor" : ""}" title="Remove this tag from this recording"
                     @click=${() => { this.editingTagId = null; void this.detach(t.id); window.dispatchEvent(new CustomEvent("phoneme:vim", { detail: { action: "focus-detail" } })); }}
                     style="padding:5px 10px;">Remove</button>
-                  <button class="inline-button ${this.editActiveIndex === 4 ? "kbd-cursor" : ""}" title="Cancel" @click=${() => this.cancelEdit()}
+                  <button tabindex="-1" class="inline-button ${this.editActiveIndex === 4 ? "kbd-cursor" : ""}" title="Cancel" @click=${() => this.cancelEdit()}
                     style="padding:5px 8px;">✕</button>
                 </div>
               ` : null}

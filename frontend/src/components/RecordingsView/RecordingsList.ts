@@ -295,11 +295,18 @@ export class RecordingsListElement extends LitElement {
       }
       rows = this.filterByKind(rows, f.kind);
       const ids = new Set(rows.map((r) => r.id));
+      const prevSelCount = this.multiSelected.size;
       const nextMulti = new Set<string>();
       this.multiSelected.forEach((id) => {
         if (ids.has(id)) nextMulti.add(id);
       });
       this.multiSelected = nextMulti;
+      // refresh() is the one selection mutator that prunes silently. Every other
+      // site fires onSelectionChangeCb to keep RecordingsView's mirror (which dd /
+      // Delete and the bulk bar read) in sync — so a row leaving the page (filter
+      // narrowed, deleted elsewhere) must do the same, or the mirror keeps a stale
+      // id that a later dd/Delete would wrongly act on.
+      if (nextMulti.size !== prevSelCount) this.onSelectionChangeCb(new Set(nextMulti));
       this.store.set({ ...this.store.get(), recordings: rows, loading: false });
     } catch (e) {
       this.store.set({ ...this.store.get(), error: errText(e), loading: false });

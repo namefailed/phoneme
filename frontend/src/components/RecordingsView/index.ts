@@ -1441,11 +1441,13 @@ export class RecordingsView {
       },
       onExpire: async () => {
         const { deleteRecording } = await import("../../services/ipc");
+        const failed: string[] = [];
         for (const id of ids) {
           try {
             await deleteRecording(id, keepAudio);
           } catch (err) {
             console.error("Failed to delete recording:", err);
+            failed.push(id);
           }
         }
         // Reconcile the store FIRST — the re-fetch drops the now-deleted rows
@@ -1455,6 +1457,18 @@ export class RecordingsView {
         // the store, flashing them back onto the list right before they vanish.
         await this.refresh();
         this.list.setPendingDelete(ids, false);
+        // A failed delete un-hides the row (it's still in the store), but the
+        // grace-period toast already showed "deleted" and dismissed itself — so
+        // say it plainly instead of leaving that misleading success as the only
+        // feedback.
+        if (failed.length) {
+          showToast(
+            failed.length === 1
+              ? "Couldn't delete the recording — it's still here."
+              : `Couldn't delete ${failed.length} recordings — they're still here.`,
+            "error",
+          );
+        }
       },
     });
   }
