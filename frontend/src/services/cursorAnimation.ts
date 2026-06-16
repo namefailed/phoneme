@@ -173,23 +173,19 @@ function place(el: HTMLElement, animate: boolean) {
   }
 
   // Streak (smear/trail): a box spanning the old + new rects, faded out over the
-  // move. ONLY drawn when that union stays close to the cursor's own size — i.e. a
-  // real trail of a moving box. Across a big jump (a wide list row → a small
-  // control in another pane) the union would span most of the window and flash
-  // "as big as the list pane", so we skip it and just glide.
+  // move — a directional trail of the moving cursor. Cross-pane / far jumps already
+  // faded out above, so here we only guard against a TALL union: moving onto the
+  // big transcript / notes editors (even when they're adjacent) would flash a
+  // pane-tall box. A WIDE-but-short union is fine — full-width list rows and header
+  // hops read as a clean horizontal smear — so width is unrestricted.
   if (animate && prev && (m === "smear" || m === "trail")) {
     const dist = Math.hypot(r.left - prev.left, r.top - prev.top);
     const left = Math.min(r.left, prev.left);
     const top = Math.min(r.top, prev.top);
     const uW = Math.max(r.right, prev.right) - left;
     const uH = Math.max(r.bottom, prev.bottom) - top;
-    // Proportionate to the SMALLER endpoint in BOTH dimensions — so a move to a
-    // large target (e.g. the tall transcript) doesn't let a pane-spanning union
-    // through. Catches the list → detail jump (tall union) and any cross-pane /
-    // size-mismatch move; those skip the streak and just glide.
-    const proportionate =
-      uW <= Math.min(prev.width, r.width) * 2.5 && uH <= Math.min(prev.height, r.height) * 2.5;
-    if (proportionate && (m === "trail" || dist > SMEAR_THRESHOLD)) {
+    const tallFlash = uH > 200; // a move onto a big editor — skip the streak
+    if (!tallFlash && (m === "trail" || dist > SMEAR_THRESHOLD)) {
       const t = tail!;
       t.style.transitionDuration = "0ms";
       t.style.left = `${left}px`;
