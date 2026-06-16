@@ -962,12 +962,28 @@ pub struct RecordingConfig {
     /// * `"toggle"` (default) — one preview loop follows a single track (the
     ///   mic first); the overlay's 🎤/🔊 button switches which track feeds it.
     ///   Same cost as a single-recording preview.
-    /// * `"both"` — two preview loops run concurrently, one per track, and the
-    ///   overlay shows both captions stacked. Roughly double the preview
-    ///   transcription work; the loops interleave on the shared transcription
-    ///   semaphore so they never run two requests at once.
+    /// * `"both"` — one preview loop per track, captions shown stacked. By
+    ///   default both loops share the single transcription permit, so they
+    ///   ALTERNATE (each track updates at ~half rate) and never run two whisper
+    ///   requests at once — light, but the two captions visibly lag. Enable
+    ///   [`Self::meeting_preview_own_server`] to give the second track its own
+    ///   preview server so the two stream truly concurrently (heavier).
     #[serde(default = "default_meeting_preview")]
     pub meeting_preview: String,
+    /// Meeting **"both"** mode only: spawn a SECOND live-preview whisper-server
+    /// so the two meeting tracks transcribe their captions CONCURRENTLY instead
+    /// of alternating on one shared server. Off by default. Only takes effect
+    /// when ALL of: streaming preview is on, `meeting_preview = "both"`, and the
+    /// preview source is a **local bundled model** (the dedicated preview server)
+    /// — see [`Config::second_preview_needs_own_server`]. It reuses the existing
+    /// `[preview_whisper]` model (no second model to pick), just on a distinct
+    /// port ([`Config::preview2_port`]).
+    ///
+    /// **Costs an extra resident model + a concurrent whisper inference**, so
+    /// it's strictly opt-in for users with the RAM/CPU headroom; the weak-box
+    /// default (off) is byte-for-byte unchanged.
+    #[serde(default)]
+    pub meeting_preview_own_server: bool,
     /// Peak-normalize the gain of a finished recording before it is written to
     /// disk, so a quiet microphone still hands transcription a healthy signal.
     ///
@@ -1617,6 +1633,13 @@ pub enum WhisperServerRole {
     /// The dedicated live-preview server (`[preview_whisper]`), only when
     /// [`Config::preview_needs_own_server`] is true.
     Preview,
+    /// An optional SECOND live-preview server, only for meeting **"both"** mode
+    /// when the user opts in (`recording.meeting_preview_own_server`), so the two
+    /// meeting tracks can stream their captions CONCURRENTLY instead of
+    /// alternating on one server. Runs the SAME `[preview_whisper]` model as
+    /// [`Self::Preview`] but on a distinct port (see [`Config::preview2_port`]).
+    /// Gated by [`Config::second_preview_needs_own_server`]; default off.
+    Preview2,
     /// The optional dedicated in-place / dictation server
     /// (`[in_place].stt` with `use_own_bundled_server`), only when
     /// [`Config::in_place_needs_own_server`] is true. Default off.
@@ -1629,6 +1652,7 @@ impl WhisperServerRole {
         match self {
             WhisperServerRole::Main => "Whisper server",
             WhisperServerRole::Preview => "Live-preview server",
+            WhisperServerRole::Preview2 => "Live-preview server (2nd track)",
             WhisperServerRole::InPlace => "Dictation server",
         }
     }
@@ -1741,6 +1765,31 @@ impl Config {
         }
     }
 
+    /// True when the daemon must supervise a SECOND live-preview server for
+    /// meeting **"both"** mode: streaming preview is on, `meeting_preview` is
+    /// `"both"`, the user opted in with `meeting_preview_own_server`, AND the
+    /// preview already runs on its own local bundled server
+    /// ([`preview_needs_own_server`] — the model this 2nd server reuses). Default
+    /// off; mirrors [`preview_needs_own_server`]/[`in_place_needs_own_server`] so
+    /// the whole "extra server" family gates consistently.
+    pub fn second_preview_needs_own_server(&self) -> bool {
+        self.recording.meeting_preview_own_server
+            && self.recording.meeting_preview == "both"
+            && self.preview_needs_own_server()
+    }
+
+    /// The conventional port for the SECOND live-preview server: the preview
+    /// server's configured port + 2, so it never collides with main (preview
+    /// port − 1 / the default 5809), the preview server itself (5810), or the
+    /// dedicated dictation server (preview port + 1 / the default 5811). With the
+    /// default ports that's `5812`. The supervisor still probes for a free port
+    /// and falls back if this one is taken; this is only the preferred value.
+    pub fn preview2_port(&self) -> u16 {
+        self.preview_provider_config()
+            .bundled_server_port
+            .saturating_add(2)
+    }
+
     /// The EXACT set of whisper-servers the live config requires — the single
     /// source of truth the supervisor spawns and the Doctor probes. "Never more
     /// servers than needed": each entry is gated independently and only local
@@ -1750,6 +1799,9 @@ impl Config {
     ///   supervisor's own gate). A cloud-provider bundled-mode config still
     ///   needs the local server, so this gates on MODE, not provider.
     /// - **Preview** — only when [`preview_needs_own_server`] is true.
+    /// - **Preview2** — only when [`second_preview_needs_own_server`] is true
+    ///   (meeting "both" mode opt-in; reuses the preview model on
+    ///   [`preview2_port`]).
     /// - **InPlace** — only when [`in_place_needs_own_server`] is true (the
     ///   power-user opt-in; default off).
     ///
@@ -1768,6 +1820,18 @@ impl Config {
                 out.push(WhisperServerSpec {
                     role: WhisperServerRole::Preview,
                     config: pv.clone(),
+                });
+            }
+        }
+        if self.second_preview_needs_own_server() {
+            if let Some(pv) = &self.preview_whisper {
+                // Same preview model, distinct port: the 2nd meeting track's
+                // caption server.
+                let mut cfg = pv.clone();
+                cfg.bundled_server_port = self.preview2_port();
+                out.push(WhisperServerSpec {
+                    role: WhisperServerRole::Preview2,
+                    config: cfg,
                 });
             }
         }
@@ -1816,6 +1880,7 @@ impl Default for Config {
                 streaming_preview: false,
                 auto_stop_on_silence: false,
                 meeting_preview: default_meeting_preview(),
+                meeting_preview_own_server: false,
                 normalize: false,
                 normalize_target_dbfs: default_normalize_target_dbfs(),
                 preview_adaptive: true,
@@ -1992,6 +2057,15 @@ impl Config {
             return Err(Error::InvalidConfig(format!(
                 "recording.channels must be 1 or 2 (got {})",
                 self.recording.channels
+            )));
+        }
+        // Catch a typo'd meeting-preview mode at save/load instead of silently
+        // falling back to "toggle" at runtime (the daemon defaults unknown values
+        // to toggle, which would mask a misconfigured "both").
+        if !matches!(self.recording.meeting_preview.as_str(), "toggle" | "both") {
+            return Err(Error::InvalidConfig(format!(
+                "recording.meeting_preview must be \"toggle\" or \"both\" (got {:?})",
+                self.recording.meeting_preview
             )));
         }
         if self.whisper.mode == WhisperMode::BundledModel && self.whisper.model_path.is_empty() {
@@ -2571,6 +2645,66 @@ mod tests {
             ]
         );
         assert_eq!(needed[2].config.bundled_server_port, 5811);
+    }
+
+    /// Meeting "both" mode with the 2nd-preview opt-in adds a FOURTH server
+    /// (Preview2) on the derived port — but only with all preconditions met.
+    #[test]
+    fn meeting_both_optin_adds_the_second_preview_server() {
+        let mut cfg = Config::default();
+        cfg.recording.streaming_preview = true;
+        cfg.recording.meeting_preview = "both".into();
+        cfg.recording.meeting_preview_own_server = true;
+        let mut pv = cfg.whisper.clone();
+        pv.bundled_server_port = 5810;
+        cfg.preview_whisper = Some(pv);
+
+        assert!(cfg.second_preview_needs_own_server());
+        assert_eq!(cfg.preview2_port(), 5812);
+        let needed = cfg.needed_whisper_servers();
+        let roles: Vec<_> = needed.iter().map(|s| s.role).collect();
+        assert_eq!(
+            roles,
+            vec![WhisperServerRole::Main, WhisperServerRole::Preview, WhisperServerRole::Preview2]
+        );
+        // The 2nd preview reuses the preview model on the derived port.
+        assert_eq!(needed[2].config.bundled_server_port, 5812);
+    }
+
+    /// The 2nd preview server stays OFF unless ALL preconditions hold: opt-in
+    /// flag, "both" mode, AND a dedicated local preview server.
+    #[test]
+    fn second_preview_server_gated_on_all_preconditions() {
+        // Opt-in + both, but preview reuses the main provider (no own server).
+        let mut cfg = Config::default();
+        cfg.recording.streaming_preview = true;
+        cfg.recording.meeting_preview = "both".into();
+        cfg.recording.meeting_preview_own_server = true;
+        assert!(!cfg.second_preview_needs_own_server(), "needs a dedicated preview server");
+
+        // Add the dedicated preview server but switch back to toggle mode.
+        let mut pv = cfg.whisper.clone();
+        pv.bundled_server_port = 5810;
+        cfg.preview_whisper = Some(pv);
+        cfg.recording.meeting_preview = "toggle".into();
+        assert!(!cfg.second_preview_needs_own_server(), "needs both mode");
+
+        // Both mode + dedicated preview but the opt-in flag is off (the default).
+        cfg.recording.meeting_preview = "both".into();
+        cfg.recording.meeting_preview_own_server = false;
+        assert!(!cfg.second_preview_needs_own_server(), "needs the opt-in flag");
+        assert_eq!(cfg.needed_whisper_servers().len(), 2, "main + preview only");
+    }
+
+    /// A typo'd meeting-preview mode fails validation instead of silently
+    /// degrading to toggle at runtime.
+    #[test]
+    fn invalid_meeting_preview_mode_fails_validation() {
+        let mut cfg = Config::default();
+        cfg.recording.meeting_preview = "stacked".into();
+        assert!(cfg.validate().is_err());
+        cfg.recording.meeting_preview = "both".into();
+        cfg.validate().expect("both is valid");
     }
 
     /// A cloud dictation provider never spawns a dedicated server, even with

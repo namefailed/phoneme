@@ -201,7 +201,8 @@ Stored results: `summary` and `summary_model` columns on the recording.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `meeting_preview` | `"toggle"` | How the live preview handles a meeting's two tracks (needs `streaming_preview`). `"toggle"` — one preview loop follows a single track; the overlay's 🎤/🔊 button switches it (same cost as a single recording). `"both"` — one loop per track, captions stacked in the overlay (~double the preview work; the loops interleave on the shared transcription semaphore). |
+| `meeting_preview` | `"toggle"` | How the live preview handles a meeting's two tracks (needs `streaming_preview`). `"toggle"` — one preview loop follows a single track; the overlay's 🎤/🔊 button switches it (same cost as a single recording). `"both"` — one loop per track, captions stacked in the overlay (the window grows to two lines). By default both loops **alternate** on the single preview server (each track at ~half rate); set `meeting_preview_own_server` to stream them concurrently. Validated to `"toggle"`/`"both"` at load. |
+| `meeting_preview_own_server` | bool | `false` | Meeting `"both"` mode only: spawn a **second** live-preview whisper-server so the two tracks caption **concurrently** instead of alternating. Reuses the `[preview_whisper]` model on a derived port (preview port + 2, default `5812`). ⚠️ Keeps a second model resident and runs a second concurrent transcription — opt-in for capable machines only. Takes effect only with `streaming_preview` + `meeting_preview = "both"` + a dedicated **local** preview server (`[preview_whisper]` local bundled). |
 
 ## `[auto_tag]`
 

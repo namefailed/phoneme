@@ -276,10 +276,25 @@ struct PreRoll {
     task: tokio::task::JoinHandle<Option<Box<dyn Source>>>,
 }
 
+/// Which kind of preview loop a [`PreviewTask`] is, so a meeting source-swap can
+/// tear down ONLY the caption loop(s) and leave the cheap waveform loop running
+/// (otherwise the first toggle permanently kills the "it hears me" pill).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreviewKind {
+    /// A `TranscriptionPartial` caption loop (whisper). Stopped on a source-swap.
+    Caption,
+    /// The cheap `AudioLevelSample` waveform loop (no whisper). Survives a
+    /// source-swap; only torn down when the whole recording/meeting stops.
+    Level,
+}
+
 /// A running streaming-preview loop: periodically transcribes the in-progress
-/// recording and emits `TranscriptionPartial` events. Present only while a
-/// recording is active *and* `recording.streaming_preview` is enabled.
+/// recording and emits `TranscriptionPartial` events (caption), or samples mic
+/// RMS for the waveform (level). Present only while a recording is active *and*
+/// the relevant feature is enabled.
 struct PreviewTask {
+    /// What this loop is — caption vs waveform. See [`PreviewKind`].
+    kind: PreviewKind,
     /// Sending (or dropping) tells the loop to stop and exit.
     stop_tx: tokio::sync::oneshot::Sender<()>,
     /// The loop's join handle — awaited on stop so it tears down cleanly.
@@ -521,6 +536,7 @@ impl DaemonRecorder {
         state: &AppState,
         id: RecordingId,
         snapshot: phoneme_audio::recorder::SnapshotHandle,
+        secondary: bool,
     ) {
         if !state.config.load().recording.streaming_preview {
             return;
@@ -536,9 +552,23 @@ impl DaemonRecorder {
             // Falls back to the main provider when unset (unchanged behavior).
             // `apply` swaps in the port the bundled server actually listens on
             // (it falls back from the configured port when another app holds it).
-            let preview_cfg = state
-                .whisper_ports
-                .apply(&cfg, cfg.preview_provider_config());
+            //
+            // `secondary` (meeting "both" mode, 2nd track) points this loop at the
+            // SECOND preview server (its derived port) and gates it on the
+            // independent `preview2_sem` — so the two meeting tracks transcribe
+            // CONCURRENTLY instead of alternating on the shared `whisper_sem`.
+            let preview_sem = if secondary {
+                state.preview2_sem.clone()
+            } else {
+                state.whisper_sem.clone()
+            };
+            let mut provider_cfg = cfg.preview_provider_config().clone();
+            if secondary {
+                // Same preview model, the 2nd server's port — `apply` then
+                // resolves it to the live port the 2nd server is listening on.
+                provider_cfg.bundled_server_port = cfg.preview2_port();
+            }
+            let preview_cfg = state.whisper_ports.apply(&cfg, &provider_cfg);
             let provider = state.transcription.provider(
                 &preview_cfg,
                 &phoneme_core::config::DiarizationConfig::default(),
@@ -595,12 +625,13 @@ impl DaemonRecorder {
                 last_len = total_len;
 
                 // Yield to final transcriptions: only run this preview tick if
-                // the whisper-server permit is free *right now*. If a final
-                // transcription holds it, skip — the preview must never pile onto
-                // the single serial server and starve the real transcription
-                // (which previously caused "Whisper timed out after 60s"). The
-                // permit is held for the duration of this tick's transcription.
-                let _preview_permit = match state.whisper_sem.try_acquire() {
+                // the permit is free *right now*. The primary loop holds
+                // `whisper_sem`, so it yields to the final transcription (which
+                // previously caused "Whisper timed out after 60s"); the secondary
+                // "both"-mode loop holds the independent `preview2_sem`, so it runs
+                // concurrently on its own server. The permit is held for the
+                // duration of this tick's transcription.
+                let _preview_permit = match preview_sem.try_acquire() {
                     Ok(p) => p,
                     Err(_) => continue,
                 };
@@ -660,11 +691,12 @@ impl DaemonRecorder {
             let _ = tokio::fs::remove_file(&tmp_wav).await;
         });
 
-        self.preview
-            .lock()
-            .await
-            .push(PreviewTask { stop_tx, task });
-        tracing::info!(id = %log_id, "streaming transcription preview started");
+        self.preview.lock().await.push(PreviewTask {
+            kind: PreviewKind::Caption,
+            stop_tx,
+            task,
+        });
+        tracing::info!(id = %log_id, secondary, "streaming transcription preview started");
     }
 
     /// Spawn the cheap live audio-level loop that feeds the overlay's waveform
@@ -706,10 +738,34 @@ impl DaemonRecorder {
                 });
             }
         });
-        self.preview
-            .lock()
-            .await
-            .push(PreviewTask { stop_tx, task });
+        self.preview.lock().await.push(PreviewTask {
+            kind: PreviewKind::Level,
+            stop_tx,
+            task,
+        });
+    }
+
+    /// Stop only the CAPTION preview loop(s), leaving the cheap waveform (level)
+    /// loop running. Used by a meeting source-swap so toggling which track feeds
+    /// the caption never kills the "it hears me" waveform (which follows the mic
+    /// for the whole meeting). `abort` tears the loop down without awaiting an
+    /// in-flight tick (see [`Self::stop_preview`]); the caller then cleans up the
+    /// caption loops' temp WAVs.
+    async fn stop_caption_loops(&self, abort: bool) {
+        let mut guard = self.preview.lock().await;
+        let (captions, keep): (Vec<PreviewTask>, Vec<PreviewTask>) = std::mem::take(&mut *guard)
+            .into_iter()
+            .partition(|t| t.kind == PreviewKind::Caption);
+        *guard = keep;
+        drop(guard);
+        for PreviewTask { stop_tx, task, .. } in captions {
+            let _ = stop_tx.send(());
+            if abort {
+                task.abort();
+            } else {
+                let _ = task.await;
+            }
+        }
     }
 
     /// Stop the streaming-preview loop (if running) and wait for it to exit so
@@ -725,7 +781,7 @@ impl DaemonRecorder {
     /// lets the loop delete its own temp WAV and must stay unchanged.
     async fn stop_preview(&self, abort: bool) {
         let tasks: Vec<PreviewTask> = std::mem::take(&mut *self.preview.lock().await);
-        for PreviewTask { stop_tx, task } in tasks {
+        for PreviewTask { stop_tx, task, .. } in tasks {
             let _ = stop_tx.send(());
             if abort {
                 task.abort();
@@ -740,10 +796,16 @@ impl DaemonRecorder {
     /// Errors when no meeting is active or the track label doesn't exist.
     /// Emits `PreviewSourceChanged` so the overlay's toggle reflects it.
     pub async fn set_preview_source(&self, state: &AppState, track: &str) -> Result<()> {
-        let entry = self
-            .meeting_preview_sources
-            .lock()
-            .await
+        let cfg = state.config.load();
+        // No caption to follow when preview is off, and the source toggle is a
+        // "toggle"-mode affordance only — "both" mode shows every track at once.
+        // The overlay hides the button in those cases, but guard the daemon too
+        // so a stray call is a harmless no-op rather than a confusing error.
+        if !cfg.recording.streaming_preview || cfg.recording.meeting_preview == "both" {
+            return Ok(());
+        }
+        let sources = self.meeting_preview_sources.lock().await.clone();
+        let entry = sources
             .iter()
             .find(|(_, t, _)| t == track)
             .map(|(id, t, h)| (id.clone(), t.clone(), h.clone()));
@@ -752,8 +814,20 @@ impl DaemonRecorder {
                 "no active meeting track {track:?} to preview"
             )));
         };
-        self.stop_preview(false).await;
-        self.start_preview(state, id, snapshot).await;
+        // Stop ONLY the caption loop (the waveform loop keeps running so the
+        // "it hears me" pill survives the swap), and ABORT it rather than await
+        // its in-flight tick — so the toggle is snappy even when a heavy preview
+        // model is mid-transcription. Aborting skips the loop's own temp-WAV
+        // cleanup, so remove every meeting track's preview WAV here best-effort.
+        self.stop_caption_loops(true).await;
+        for (sid, _, _) in &sources {
+            let tmp = std::env::temp_dir().join(format!("phoneme-preview-{}.wav", sid.file_stem()));
+            let _ = tokio::fs::remove_file(&tmp).await;
+        }
+        // The source toggle always feeds the primary preview server (secondary =
+        // false): the 2nd server only exists to run BOTH tracks at once, never
+        // for a one-track toggle.
+        self.start_preview(state, id, snapshot, false).await;
         state
             .events
             .emit(DaemonEvent::PreviewSourceChanged { track });
@@ -953,7 +1027,7 @@ impl DaemonRecorder {
         // an in-flight tick simply skips. The dictation stop path tears this
         // preview down WITHOUT awaiting (see `stop`), so a preview tick can
         // never delay the paste ("constantly listening, never pastes").
-        self.start_preview(state, id.clone(), preview_snapshot)
+        self.start_preview(state, id.clone(), preview_snapshot, false)
             .await;
         // The live audio-level waveform runs for every capture (including
         // in-place dictation), gated only on `recording.preview_waveform`. It's
@@ -1544,8 +1618,17 @@ impl DaemonRecorder {
             self.start_level_loop(state, id, snapshot).await;
         }
         if mode == "both" {
-            for (id, _, snapshot) in sources {
-                self.start_preview(state, id, snapshot).await;
+            // One caption loop per track. When the user opted into the second
+            // preview server (`second_preview_needs_own_server`), the FIRST track
+            // runs on the primary preview server (yielding to final on
+            // `whisper_sem`) and the SECOND on the dedicated 2nd server (its own
+            // `preview2_sem`) — so the two stream CONCURRENTLY. Without the opt-in
+            // (or its preconditions), every loop stays on the primary server and
+            // they alternate on the shared permit, exactly as before.
+            let dual = state.config.load().second_preview_needs_own_server();
+            for (idx, (id, _, snapshot)) in sources.into_iter().enumerate() {
+                let secondary = dual && idx > 0;
+                self.start_preview(state, id, snapshot, secondary).await;
             }
         } else {
             // "toggle": start on the mic (the dense local voice the user is
@@ -1557,7 +1640,7 @@ impl DaemonRecorder {
                 .or_else(|| sources.first())
                 .cloned();
             if let Some((id, track, snapshot)) = start {
-                self.start_preview(state, id, snapshot).await;
+                self.start_preview(state, id, snapshot, false).await;
                 state
                     .events
                     .emit(DaemonEvent::PreviewSourceChanged { track });

@@ -51,8 +51,10 @@ Landed most recently — verified against current code:
   editor/actions/dirty state, draggable ratio-persisted splitter, per-pane Esc);
   replaces the old side-by-side modal.
 - [x] **Meeting live preview** — live captions during meetings with a `toggle`
-  mode (🎤/🔊 source switch on the overlay) or an optional `both` mode streaming
-  the two tracks at once.
+  mode (🎤/🔊 source switch on the overlay) or a `both` mode that captions both
+  tracks (stacked). By default `both` alternates the two tracks on one preview
+  server; an opt-in `recording.meeting_preview_own_server` spawns a second
+  preview server so both tracks caption concurrently.
 - [x] **Keyboard & layout overhaul** — vim cursor persists across reload and pane
   switches (dimmed when unfocused), `zz` centers the list, `g d` jumps to the
   detail pane, `g /` to search, contextual `f` zen (recording open → focus mode,

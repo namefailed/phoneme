@@ -42,7 +42,8 @@
 
 use crate::app_state::AppState;
 use crate::shutdown::ShutdownSignal;
-use phoneme_core::config::WhisperMode;
+use phoneme_core::config::{WhisperMode, WhisperServerRole};
+use phoneme_core::Config;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -142,6 +143,53 @@ fn port_is_free(port: u16) -> bool {
 /// If every fallback attempt fails, the preferred port is returned anyway —
 /// the spawn then fails (or the server exits at bind) and the supervisor
 /// retries on its normal backoff, which matches the pre-probe behavior.
+/// Ports a freshly-(re)spawning whisper-server of role `me` must steer away
+/// from: every OTHER managed server's published (live) port AND its
+/// configured/derived port. Keeps the N servers from racing onto the same port
+/// on a simultaneous restart. One source of truth for all four loops so adding a
+/// server can never desync the exclusion lists (the old per-loop hand-wiring was
+/// O(N²) and easy to forget — exactly what made a 4th server risky).
+fn exclude_other_server_ports(me: WhisperServerRole, state: &AppState, cfg: &Config) -> Vec<u16> {
+    let mut out = Vec::new();
+    if me != WhisperServerRole::Main {
+        if let Some(p) = state.whisper_ports.main() {
+            out.push(p);
+        }
+        if cfg.whisper.mode != WhisperMode::External {
+            out.push(cfg.whisper.bundled_server_port);
+        }
+    }
+    if me != WhisperServerRole::Preview {
+        if let Some(p) = state.whisper_ports.preview() {
+            out.push(p);
+        }
+        if cfg.preview_needs_own_server() {
+            if let Some(pv) = cfg.preview_whisper.as_ref() {
+                out.push(pv.bundled_server_port);
+            }
+        }
+    }
+    if me != WhisperServerRole::Preview2 {
+        if let Some(p) = state.whisper_ports.preview2() {
+            out.push(p);
+        }
+        if cfg.second_preview_needs_own_server() {
+            out.push(cfg.preview2_port());
+        }
+    }
+    if me != WhisperServerRole::InPlace {
+        if let Some(p) = state.whisper_ports.dictation() {
+            out.push(p);
+        }
+        if cfg.in_place_needs_own_server() {
+            if let Some(stt) = cfg.in_place.stt.as_ref() {
+                out.push(stt.bundled_server_port);
+            }
+        }
+    }
+    out
+}
+
 fn choose_listen_port(preferred: u16, exclude: &[u16]) -> u16 {
     if !exclude.contains(&preferred) && port_is_free(preferred) {
         return preferred;
@@ -229,25 +277,7 @@ pub async fn run_with(
         // preview's published + configured ports are excluded so the two
         // servers can never choose the same one.
         let preferred_port = cfg.whisper.bundled_server_port;
-        let mut exclude = Vec::new();
-        if let Some(p) = state.whisper_ports.preview() {
-            exclude.push(p);
-        }
-        if cfg.preview_needs_own_server() {
-            if let Some(pv) = cfg.preview_whisper.as_ref() {
-                exclude.push(pv.bundled_server_port);
-            }
-        }
-        // Also steer around the dedicated dictation server's port so a 3-way
-        // restart can't make the main server land on it.
-        if let Some(p) = state.whisper_ports.dictation() {
-            exclude.push(p);
-        }
-        if cfg.in_place_needs_own_server() {
-            if let Some(stt) = cfg.in_place.stt.as_ref() {
-                exclude.push(stt.bundled_server_port);
-            }
-        }
+        let exclude = exclude_other_server_ports(WhisperServerRole::Main, &state, &cfg);
         let port = choose_listen_port(preferred_port, &exclude);
         if port != preferred_port {
             tracing::warn!(
@@ -458,27 +488,11 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
             }
         }
 
-        // Pre-flight port probe, mirroring the main supervisor's — and
-        // excluding the main server's published + configured ports so the
-        // preview can never land on (or race for) the main server's choice.
+        // Pre-flight port probe, mirroring the main supervisor's — steering
+        // around every sibling server's published + configured port so the
+        // preview can never land on (or race for) another server's choice.
         let preferred_port = pv.bundled_server_port;
-        let mut exclude = Vec::new();
-        if let Some(p) = state.whisper_ports.main() {
-            exclude.push(p);
-        }
-        if cfg.whisper.mode != WhisperMode::External {
-            exclude.push(cfg.whisper.bundled_server_port);
-        }
-        // Steer around the dedicated dictation server's port too — without
-        // this reciprocal exclusion a 3-way restart could collide.
-        if let Some(p) = state.whisper_ports.dictation() {
-            exclude.push(p);
-        }
-        if cfg.in_place_needs_own_server() {
-            if let Some(stt) = cfg.in_place.stt.as_ref() {
-                exclude.push(stt.bundled_server_port);
-            }
-        }
+        let exclude = exclude_other_server_ports(WhisperServerRole::Preview, &state, &cfg);
         let port = choose_listen_port(preferred_port, &exclude);
         if port != preferred_port {
             tracing::warn!(
@@ -608,6 +622,195 @@ pub async fn run_preview(state: AppState, mut shutdown: ShutdownSignal) -> anyho
     }
 }
 
+/// Supervises an OPTIONAL SECOND live-preview server — used only for meeting
+/// **"both"** mode when the user opts in
+/// (`recording.meeting_preview_own_server`, see
+/// [`phoneme_core::Config::second_preview_needs_own_server`]). It runs the SAME
+/// `[preview_whisper]` model as [`run_preview`] but on [`Config::preview2_port`],
+/// so the two meeting tracks can stream their captions concurrently instead of
+/// alternating on one server. Otherwise (single recordings, "toggle" mode, the
+/// opt-in off, or no dedicated preview server) this idles.
+///
+/// A faithful sibling of [`run_preview`]/[`run_dictation`]: the same self-polling
+/// idle gate, spec poll, crash backoff, and Doctor-restart handling — so add/
+/// remove on a config toggle works through the proven 5 s poll with no new
+/// wiring. Kept separate so neither the final server, the preview, nor dictation
+/// is ever bounced by a "both"-mode change.
+pub async fn run_preview2(state: AppState, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
+    let mut backoff = RESTART_BACKOFF_INITIAL;
+
+    loop {
+        if shutdown.is_shutting_down() {
+            return Ok(());
+        }
+
+        let raw = state.config.load();
+        let cfg = raw.expanded().unwrap_or_else(|_| (**raw).clone());
+
+        // Idle gate: the 2nd preview server runs ONLY for opted-in meeting "both"
+        // mode with a dedicated local preview model. When the flag flips off (or
+        // the mode/source changes), the next poll clears the port and idles.
+        if !cfg.second_preview_needs_own_server() {
+            state.whisper_ports.set_preview2(None);
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                _ = shutdown.wait() => return Ok(()),
+            }
+        }
+        // Safe: second_preview_needs_own_server() implies preview_whisper is Some.
+        let Some(pv) = cfg.preview_whisper.as_ref() else {
+            state.whisper_ports.set_preview2(None);
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            continue;
+        };
+
+        let server_path = match locate_bundled_server() {
+            Ok(p) => p,
+            Err(e) => {
+                state.whisper_ports.set_preview2(None);
+                tracing::error!(error = %e, "preview2: whisper-server binary not found, waiting...");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                    _ = shutdown.wait() => return Ok(()),
+                }
+            }
+        };
+
+        if pv.model_path.is_empty() || !std::path::Path::new(&pv.model_path).exists() {
+            state.whisper_ports.set_preview2(None);
+            tracing::info!("preview2 model_path empty or missing, waiting for download...");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(5)) => continue,
+                _ = shutdown.wait() => return Ok(()),
+            }
+        }
+
+        // Pre-flight port probe — the conventional 2nd-preview port (preview + 2),
+        // steering around every sibling's published + configured port.
+        let preferred_port = cfg.preview2_port();
+        let exclude = exclude_other_server_ports(WhisperServerRole::Preview2, &state, &cfg);
+        let port = choose_listen_port(preferred_port, &exclude);
+        if port != preferred_port {
+            tracing::warn!(
+                "preferred port {preferred_port} in use by another app — 2nd preview whisper-server starting on {port}"
+            );
+        }
+        state.whisper_ports.set_preview2(Some(port));
+
+        let mut command = Command::new(&server_path);
+        command
+            .arg("-m")
+            .arg(&pv.model_path)
+            .arg("--port")
+            .arg(port.to_string())
+            .arg("--host")
+            .arg("127.0.0.1")
+            .arg("--inference-path")
+            .arg("/v1/audio/transcriptions")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        // Cap threads unless the user explicitly set one in the preview args.
+        let mut args = pv.bundled_server_args.clone();
+        if !args.iter().any(|a| a == "-t" || a == "--threads") {
+            args.push("-t".into());
+            args.push(preview_thread_cap().to_string());
+        }
+        for extra in &args {
+            command.arg(extra);
+        }
+
+        let mut child = match command.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                state.whisper_ports.set_preview2(None);
+                tracing::error!(error = %e, "failed to spawn 2nd preview whisper-server");
+                match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                    BackoffWake::Shutdown => return Ok(()),
+                    BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                    BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+                }
+                continue;
+            }
+        };
+        assign_to_daemon_job(&state, &child);
+        tracing::info!(
+            pid = child.id().unwrap_or(0),
+            port,
+            "2nd preview whisper-server spawned"
+        );
+        let spawned_at = Instant::now();
+        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
+        check_interval.tick().await;
+
+        // Watch the (unexpanded) preview fields — the 2nd server reuses them, and
+        // a preview port change shifts preview2_port too, so a model/port/mode
+        // change must respawn this server.
+        let watch = raw.preview_whisper.clone();
+
+        let mut exited = false;
+        loop {
+            tokio::select! {
+                wait = child.wait() => {
+                    match wait {
+                        Ok(status) => tracing::warn!(?status, "2nd preview whisper-server exited"),
+                        Err(e) => tracing::warn!(error = %e, "wait on 2nd preview whisper-server failed"),
+                    }
+                    state.whisper_ports.set_preview2(None);
+                    if spawned_at.elapsed() >= Duration::from_secs(60) {
+                        backoff = RESTART_BACKOFF_INITIAL;
+                    }
+                    exited = true;
+                    break;
+                }
+                _ = state.whisper_restart.notified() => {
+                    tracing::info!("2nd preview whisper-server restart requested; bouncing");
+                    let _ = kill_gracefully(&mut child).await;
+                    backoff = RESTART_BACKOFF_INITIAL;
+                    break;
+                }
+                _ = check_interval.tick() => {
+                    let cur = state.config.load();
+                    let spec_changed = match (cur.preview_whisper.as_ref(), watch.as_ref()) {
+                        (Some(c), Some(w)) => {
+                            c.model_path != w.model_path
+                                || c.bundled_server_port != w.bundled_server_port
+                                || c.mode != w.mode
+                        }
+                        _ => true,
+                    };
+                    if spec_changed || !cur.second_preview_needs_own_server() {
+                        tracing::info!("2nd preview whisper-server config changed; restarting");
+                        let _ = kill_gracefully(&mut child).await;
+                        backoff = RESTART_BACKOFF_INITIAL;
+                        break;
+                    }
+                }
+                _ = shutdown.wait() => {
+                    tracing::info!("shutdown — killing 2nd preview whisper-server");
+                    let _ = kill_gracefully(&mut child).await;
+                    state.whisper_ports.set_preview2(None);
+                    return Ok(());
+                }
+            }
+        }
+        if exited {
+            match backoff_pause(backoff, &state.whisper_restart, &mut shutdown).await {
+                BackoffWake::Shutdown => return Ok(()),
+                BackoffWake::Restart => backoff = RESTART_BACKOFF_INITIAL,
+                BackoffWake::Elapsed => backoff = (backoff * 2).min(RESTART_BACKOFF_MAX),
+            }
+            continue;
+        }
+    }
+}
+
 /// Supervises an OPTIONAL THIRD whisper-server dedicated to in-place dictation
 /// — used only when the user opts in (`[in_place].stt` is a local bundled model
 /// with `use_own_bundled_server = true`, see
@@ -672,24 +875,10 @@ pub async fn run_dictation(state: AppState, mut shutdown: ShutdownSignal) -> any
             }
         }
 
-        // Pre-flight port probe — exclude BOTH siblings' published + configured
-        // ports so the three servers can never collide.
+        // Pre-flight port probe — exclude every sibling's published + configured
+        // port so the servers can never collide.
         let preferred_port = stt.bundled_server_port;
-        let mut exclude = Vec::new();
-        if let Some(p) = state.whisper_ports.main() {
-            exclude.push(p);
-        }
-        if cfg.whisper.mode != WhisperMode::External {
-            exclude.push(cfg.whisper.bundled_server_port);
-        }
-        if let Some(p) = state.whisper_ports.preview() {
-            exclude.push(p);
-        }
-        if cfg.preview_needs_own_server() {
-            if let Some(pv) = cfg.preview_whisper.as_ref() {
-                exclude.push(pv.bundled_server_port);
-            }
-        }
+        let exclude = exclude_other_server_ports(WhisperServerRole::InPlace, &state, &cfg);
         let port = choose_listen_port(preferred_port, &exclude);
         if port != preferred_port {
             tracing::warn!(

@@ -123,9 +123,25 @@ captions them:
 - **One track at a time** (default) — one caption line plus a **🎤/🔊 button**
   on the overlay that switches which track the preview follows. Starts on your
   mic; same cost as a single-recording preview.
-- **Both tracks at once** — two stacked caption lines, one per track, updating
-  together. Roughly double the preview transcription work — pair it with a
-  small dedicated preview model. The two loops take turns on the transcription
-  server, so they never run two requests at once.
+- **Both tracks at once** — two stacked caption lines, one per track. The
+  overlay grows to two lines so both stay visible. By default the two loops
+  **take turns** on the single preview server (each track updates at about half
+  the rate), so they never run two requests at once — light, but the captions
+  visibly lag. To stream them **concurrently**, enable the second preview server
+  below.
 
-Config: `recording.meeting_preview = "toggle" | "both"`.
+**Stream both tracks concurrently (opt-in).** Turn on
+**Settings → Transcription → Live Preview → "2nd preview server for 'both'"**
+(`recording.meeting_preview_own_server`) and Phoneme runs a **second** preview
+whisper-server so each meeting track captions on its own server, at full rate,
+at the same time. It reuses your existing dedicated preview model (no second
+model to choose) on a separate port (the preview port + 2, default `5812`).
+
+> ⚠️ **Heavy.** This keeps a *second copy* of the preview model resident and
+> runs a *second* transcription concurrently. Only enable it on a machine with
+> spare RAM/CPU. It requires **"Both tracks at once"** plus a **dedicated local
+> preview model** as the source — the toggle is disabled otherwise. Off by
+> default; the weak-box default is unchanged.
+
+Config: `recording.meeting_preview = "toggle" | "both"`,
+`recording.meeting_preview_own_server = false`.

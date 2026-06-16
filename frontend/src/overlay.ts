@@ -17,7 +17,7 @@ import "./styles/theme.css";
 import "./styles/overlay.css";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalPosition } from "@tauri-apps/api/dpi";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 
 const root = document.getElementById("overlay-root")!;
@@ -154,6 +154,30 @@ let activeTrack = "mic";
 const trackEls = new Map<string, HTMLElement>();
 let singleEl: HTMLElement | null = null;
 
+// Window height is mode-driven: one tight line for single recordings / meeting
+// "toggle" mode / the dummy preview, two lines for meeting "both" mode (two
+// stacked caption rows — otherwise the second track's caption is clipped by the
+// one-line window). Width is always preserved (the user's horizontal resize);
+// only the height switches. Kept in sync with overlay.rs (OVERLAY_H /
+// OVERLAY_H_BOTH, whose equal-min/max range allows exactly these two heights).
+const OV_H_SINGLE = 32;
+const OV_H_BOTH = 52;
+
+/** Resize the window height to fit the current shape, keeping the current width.
+ *  Always applied on a shape change (not cached), so a restored "both" height
+ *  can't leak into a later single recording. Best-effort: a teardown race just
+ *  leaves the OS-chosen size. */
+async function resizeForShape(s: Shape) {
+  try {
+    const sf = await win.scaleFactor();
+    const sz = await win.innerSize(); // physical px → logical width
+    const w = Math.round(sz.width / sf);
+    await win.setSize(new LogicalSize(w, s === "both" ? OV_H_BOTH : OV_H_SINGLE));
+  } catch {
+    /* window mid-teardown — leave it be */
+  }
+}
+
 function setShape(next: Shape) {
   shape = next;
   trackEls.clear();
@@ -176,6 +200,7 @@ function setShape(next: Shape) {
     });
   }
   updateSrcButton();
+  void resizeForShape(next);
 }
 setShape("single");
 
@@ -203,10 +228,18 @@ function updateSrcButton() {
 }
 
 srcBtn.addEventListener("click", () => {
+  const prev = activeTrack;
   const other = activeTrack === "mic" ? "system" : "mic";
+  // Optimistic: flip the icon to the target track immediately so the toggle feels
+  // instant, instead of waiting a round-trip for the daemon's PreviewSourceChanged
+  // (which still arrives and reconciles). Revert if the IPC call fails.
+  activeTrack = other;
+  updateSrcButton();
   srcBtn.disabled = true; // re-enabled when PreviewSourceChanged confirms
   void invoke("set_preview_source", { track: other }).catch(() => {
+    activeTrack = prev;
     srcBtn.disabled = false;
+    updateSrcButton();
   });
 });
 

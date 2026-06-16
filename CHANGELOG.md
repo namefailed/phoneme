@@ -69,6 +69,32 @@ trust boundary. Verified against current code.*
   `preview_reveal_words_per_sec` with the newest words kept on the line (older ones
   scroll off the left). The source-swap button now appears only for meetings, and
   the laggy fade in/out is gone.
+- [x] **Meeting "both" mode can now stream both tracks concurrently** — a new
+  opt-in spawns a **second** live-preview whisper-server so a meeting's mic and
+  system tracks caption at the same time instead of alternating on one server.
+  Previously "both" mode ran a loop per track but both shared the single
+  transcription permit, so only one transcribed per tick (the captions visibly
+  lagged at ~half rate); that light, shared-server behavior is still the default.
+  Enable **Settings → Transcription → Live Preview → "2nd preview server for
+  'both'"** (`recording.meeting_preview_own_server`) to run them concurrently —
+  it reuses your dedicated preview model on a derived port (default `5812`) via a
+  fourth supervised server (`Config::needed_whisper_servers` /
+  `second_preview_needs_own_server`), gated behind "both" mode + a local preview
+  model, with **strong warnings** since it keeps a second model resident and runs
+  a second concurrent transcription. The overlay now grows to **two lines** in
+  "both" mode so the second track's caption is actually visible (it was clipped
+  by the one-line window before). Off by default; the weak-box default is
+  byte-for-byte unchanged.
+- [x] **Smoother meeting source-swap** — toggling the overlay's 🎤/🔊 source is
+  now snappy and no longer breaks the waveform. The swap **aborts** the old
+  caption loop instead of waiting out its in-flight transcription (which blocked
+  the toggle for seconds on a heavy model), the overlay icon flips
+  **optimistically** on click, and — the real bug — the swap now stops *only* the
+  caption loop, so the cheap "it hears me" waveform survives (it used to be torn
+  down on the first toggle and never came back). The daemon also no-ops a stray
+  source-swap in non-toggle states instead of erroring, and a typo'd
+  `meeting_preview` mode now fails config validation instead of silently
+  degrading to toggle.
 - [x] **Minimal recording-indicator overlay** — a second, fully independent
   always-on-top pill for people who want a clear *"you're recording"* cue without
   the live-caption overlay. It shows **only** a pulsing record dot, an audio-reactive

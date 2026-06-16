@@ -141,6 +141,12 @@ export class SectionPreview {
     const waveform = this.config.recording?.preview_waveform !== false;
     const revealWps = this.config.recording?.preview_reveal_words_per_sec ?? 12;
     const idleMs = this.config.recording?.preview_idle_ms ?? 2500;
+    // The opt-in 2nd preview server only makes sense for "both" mode on a
+    // dedicated LOCAL preview model (it spawns a second copy of that server).
+    // Eligible only then; otherwise the toggle is shown disabled with a hint.
+    const both = (this.config.recording?.meeting_preview ?? "toggle") === "both";
+    const dualEligible = enabled && both && src === "local";
+    const dualOn = !!this.config.recording?.meeting_preview_own_server;
 
     this.container.innerHTML = `
       <div class="settings-section">
@@ -183,15 +189,29 @@ export class SectionPreview {
         <div class="settings-field">
           <label>Meetings (two tracks)
             <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              How the overlay captions a meeting's mic + system audio.
+              How the overlay captions a meeting's mic + system audio. ${enabled ? "" : "Turn on live preview to use this."}
             </span>
           </label>
           <div>
-            <select id="prev-meeting-mode">
-              <option value="toggle" ${(this.config.recording?.meeting_preview ?? "toggle") !== "both" ? "selected" : ""}>One track at a time — 🎤/🔊 toggle in the overlay (lighter)</option>
-              <option value="both" ${this.config.recording?.meeting_preview === "both" ? "selected" : ""}>Both tracks at once — stacked captions (~double the preview work)</option>
+            <select id="prev-meeting-mode" ${enabled ? "" : "disabled"}>
+              <option value="toggle" ${!both ? "selected" : ""}>One track at a time — 🎤/🔊 toggle in the overlay (lighter)</option>
+              <option value="both" ${both ? "selected" : ""}>Both tracks at once — stacked captions</option>
             </select>
           </div>
+        </div>
+
+        <div class="settings-field">
+          <label>2nd preview server for “both”
+            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
+              Stream <b>both</b> meeting tracks at once instead of taking turns: run a
+              <b>second</b> live-preview server so each track captions concurrently.
+              ⚠️ <b>Heavy</b> — a second copy of your preview model stays loaded and runs a
+              second transcription at the same time. Only enable if your machine has spare
+              RAM/CPU. ${both ? (src === "local" ? "" : "Needs a <b>dedicated local model</b> as the preview source (below).") : "Needs <b>“Both tracks at once”</b> selected above."}
+              Off by default — “both” otherwise alternates the two tracks on one server.
+            </span>
+          </label>
+          <div><input type="checkbox" class="toggle-switch" id="prev-meeting-own-server" ${dualOn ? "checked" : ""} ${dualEligible ? "" : "disabled"} /></div>
         </div>
 
         <div class="settings-field">
@@ -312,6 +332,12 @@ export class SectionPreview {
     });
     this.container.querySelector<HTMLSelectElement>("#prev-meeting-mode")?.addEventListener("change", (e) => {
       this.config.recording.meeting_preview = (e.target as HTMLSelectElement).value;
+      // Re-render so the "2nd preview server" toggle's eligibility (it needs
+      // "both") and its hint update immediately.
+      this.render();
+    });
+    this.container.querySelector<HTMLInputElement>("#prev-meeting-own-server")?.addEventListener("change", (e) => {
+      this.config.recording.meeting_preview_own_server = (e.target as HTMLInputElement).checked;
     });
     this.container.querySelector<HTMLSelectElement>("#prev-source")?.addEventListener("change", (e) => {
       const v = (e.target as HTMLSelectElement).value as PreviewSource;

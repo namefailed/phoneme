@@ -105,6 +105,14 @@ pub struct AppState {
     /// that caused "Whisper timed out after 60s" on long recordings while the
     /// preview hammered the server with a big model.
     pub whisper_sem: Arc<tokio::sync::Semaphore>,
+    /// Independent permit for the OPTIONAL second live-preview server (meeting
+    /// "both" mode opt-in). The second meeting track's caption loop try-acquires
+    /// THIS instead of [`Self::whisper_sem`], so it transcribes CONCURRENTLY with
+    /// the first track (which keeps yielding to final transcription on
+    /// `whisper_sem`) instead of alternating on one permit. Only ever contended
+    /// by that one loop, so it's effectively a dedicated gate for the 2nd server;
+    /// idle (and the 2nd server unspawned) unless the user opts in.
+    pub preview2_sem: Arc<tokio::sync::Semaphore>,
     /// The currently-processing recording and its cancellation token, set by the
     /// queue worker around each `pipeline::run` call and cleared after. The
     /// `CancelProcessing` IPC cancels this token to abort the in-flight item.
@@ -219,6 +227,11 @@ pub struct WhisperEffectivePorts {
     main: AtomicU16,
     /// The dedicated live-preview server's port; 0 = not running.
     preview: AtomicU16,
+    /// The OPTIONAL second live-preview server's port (meeting "both" mode opt-in
+    /// — `recording.meeting_preview_own_server`); 0 = not running. Runs the same
+    /// preview model as `preview` on a distinct port so the two meeting tracks
+    /// can stream concurrently.
+    preview2: AtomicU16,
     /// The optional dedicated in-place / dictation server's port; 0 = not
     /// running (the default — it only runs when the power-user opt-in is on).
     dictation: AtomicU16,
@@ -249,6 +262,19 @@ impl WhisperEffectivePorts {
     /// Publish (`Some`) or clear (`None`) the preview server's live port.
     pub fn set_preview(&self, port: Option<u16>) {
         self.preview.store(port.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// The second live-preview server's live port, when it is running.
+    pub fn preview2(&self) -> Option<u16> {
+        match self.preview2.load(Ordering::Relaxed) {
+            0 => None,
+            p => Some(p),
+        }
+    }
+
+    /// Publish (`Some`) or clear (`None`) the second preview server's live port.
+    pub fn set_preview2(&self, port: Option<u16>) {
+        self.preview2.store(port.unwrap_or(0), Ordering::Relaxed);
     }
 
     /// The dictation server's live port, when it is running.
@@ -291,6 +317,15 @@ impl WhisperEffectivePorts {
                 .is_some_and(|s| s.bundled_server_port == preferred)
         {
             if let Some(p) = self.dictation() {
+                return p;
+            }
+            return preferred;
+        }
+        // The second preview server (meeting "both" opt-in) is keyed by its
+        // derived port (preview port + 2). Checked before the plain preview arm
+        // so a caller asking for the 2nd server's port resolves to its live port.
+        if cfg.second_preview_needs_own_server() && preferred == cfg.preview2_port() {
+            if let Some(p) = self.preview2() {
                 return p;
             }
             return preferred;
@@ -396,6 +431,7 @@ impl AppState {
             webhook,
             embedder: Arc::new(tokio::sync::RwLock::new(embedder)),
             whisper_sem: Arc::new(tokio::sync::Semaphore::new(1)),
+            preview2_sem: Arc::new(tokio::sync::Semaphore::new(1)),
             processing: Arc::new(std::sync::Mutex::new(None)),
             whisper_model_override: Arc::new(WhisperModelOverride::default()),
             pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

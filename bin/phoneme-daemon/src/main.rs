@@ -183,6 +183,21 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Fourth supervisor for the OPTIONAL second live-preview server (meeting
+    // "both" mode opt-in). Idles unless `recording.meeting_preview_own_server` is
+    // on with a dedicated local preview model; never touches the main or first
+    // preview server. Kept (like the others) so shutdown awaits it and kills any
+    // child it owns; never in the crash-detect select (preview is non-critical).
+    let preview2_sup_state = state.clone();
+    let preview2_sup_signal = state.shutdown.signal.clone();
+    let preview2_supervisor_handle = tokio::spawn(async move {
+        if let Err(e) =
+            whisper_supervisor::run_preview2(preview2_sup_state, preview2_sup_signal).await
+        {
+            tracing::error!(error = %e, "2nd preview whisper supervisor terminated");
+        }
+    });
+
     // Third supervisor for the OPTIONAL dedicated dictation server. Idles unless
     // the user opts in (`[in_place].stt` local bundled + use_own_bundled_server);
     // the default/weak-box config never spawns it. Like the preview handle, kept
@@ -259,6 +274,9 @@ async fn main() -> Result<()> {
     // Wait for the preview supervisor too, so its dedicated whisper-server (if
     // any) is killed before we exit — same cleanup guarantee as the main server.
     let _ = preview_supervisor_handle.await;
+    // And the 2nd preview supervisor — its optional concurrent-"both" server (if
+    // the user opted in) must be killed before exit too.
+    let _ = preview2_supervisor_handle.await;
     // And the dictation supervisor — its optional third server (if the user
     // opted in) must be killed before exit too.
     let _ = dictation_supervisor_handle.await;

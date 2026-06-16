@@ -64,13 +64,6 @@ body {
   align-items: center;
   gap: 6px;
 }
-.ov-spacer {
-  /* No longer used for layout (the caption itself takes the slack); kept as a
-     zero-size no-op so the markup stays stable. */
-  flex: 0 0 0;
-  width: 0;
-}
-
 /* Live indicator. Calm by default: a small accent dot that only PULSES while
    words are flowing (body.ov-live); when merely listening it settles to a
    static, slightly dimmed dot — no alarm-y throb. Uses the theme accent, never
@@ -172,10 +165,11 @@ body.ov-live .ov-wave {
   justify-content: center;
   gap: 2px;
 }
-/* "Both" meeting mode keeps two horizontally-scrolling one-line rows. It can't
-   fit the strict one-line window height (see overlay.ts / overlay.rs note); the
-   single/toggle case is the priority. Each row is its own one-line caption with
-   a small track icon. */
+/* "Both" meeting mode shows two horizontally-scrolling one-line rows (one per
+   track). The window grows to a two-line height in this mode (overlay.ts
+   resizeForShape → OV_H_BOTH, allowed by overlay.rs's OVERLAY_H..OVERLAY_H_BOTH
+   range), so both rows are visible instead of being clipped. Each row is its own
+   one-line caption with a small track icon. */
 .ov-row {
   flex: 0 0 auto;
   display: flex;
@@ -219,9 +213,9 @@ body.ov-live .ov-wave {
   cursor: wait;
 }
 
-/* Small close button. Excluded from the drag region (see overlay.ts markup —
-   it's outside data-tauri-drag-region's effect via pointer handling) so a click
-   hides the window instead of dragging it. */
+/* Small close button. The manual pointer-drag handler in overlay.ts ignores
+   presses that land on a <button>, so clicking this hides the window instead of
+   starting a drag. */
 .ov-close {
   flex: 0 0 auto;
   width: 20px;

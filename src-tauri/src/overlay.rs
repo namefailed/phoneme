@@ -50,12 +50,18 @@ pub const OVERLAY_PREVIEW_EVENT: &str = "overlay-preview";
 /// from there; `tauri-plugin-window-state` then remembers whatever width the
 /// user picks.
 const OVERLAY_W: f64 = 540.0;
-/// The overlay is a strict ONE-LINE caption: a single tight row holding the live
-/// dot + label + waveform + controls and exactly one line of caption text. This
-/// height is fixed (see the builder: min height == max height pins the vertical
-/// axis so only the width is draggable). Tuned to fit the chrome row plus one
-/// line of `.ov-text` at the current font + the card's vertical padding.
+/// The overlay's ONE-LINE height: a single tight row holding the live dot +
+/// label + waveform + controls and exactly one line of caption text. The default
+/// and the height for single recordings, meeting "toggle" mode, and the dummy
+/// preview. Tuned to fit the chrome row plus one line of `.ov-text` at the
+/// current font + the card's vertical padding.
 const OVERLAY_H: f64 = 32.0;
+/// The overlay's TWO-LINE height, used ONLY for meeting "both" mode (two stacked
+/// per-track caption rows). The builder allows the inner height to range between
+/// [`OVERLAY_H`] and this; `overlay.ts` (`resizeForShape`) sets the exact height
+/// per shape, so the window is one line tall normally and grows to two only when
+/// showing both tracks. Kept in sync with `OV_H_BOTH` in `frontend/src/overlay.ts`.
+const OVERLAY_H_BOTH: f64 = 52.0;
 /// Minimum width so the window can't be dragged down to a useless sliver — still
 /// enough for the dot/label/controls plus a few words of caption.
 const OVERLAY_MIN_W: f64 = 300.0;
@@ -91,13 +97,15 @@ pub fn ensure(app: &AppHandle) {
     let builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
         .title("Phoneme Live Preview")
         .inner_size(OVERLAY_W, OVERLAY_H)
-        // Tauri has no per-axis resizable flag. We pin the VERTICAL axis by making
-        // the min and max inner HEIGHT equal (OVERLAY_H), while leaving the width
-        // free between OVERLAY_MIN_W and OVERLAY_MAX_W. Net effect: the user can
-        // drag the left/right edges to widen the caption, but the window stays
-        // exactly one line tall — never grows or shrinks vertically with text.
+        // Tauri has no per-axis resizable flag. We keep the VERTICAL axis on a
+        // tight rail — between one line (OVERLAY_H) and two (OVERLAY_H_BOTH) —
+        // while leaving the width free between OVERLAY_MIN_W and OVERLAY_MAX_W.
+        // `overlay.ts` (resizeForShape) sets the exact height per shape: one line
+        // for single/toggle/dummy, two lines only for meeting "both" mode. Net
+        // effect: the user drags the edges to widen the caption, but the height is
+        // driven by the caption layout, not free-dragged into an ugly tall box.
         .min_inner_size(OVERLAY_MIN_W, OVERLAY_H)
-        .max_inner_size(OVERLAY_MAX_W, OVERLAY_H)
+        .max_inner_size(OVERLAY_MAX_W, OVERLAY_H_BOTH)
         // Resizable so the WIDTH can be sized to taste; position AND width are
         // remembered by tauri-plugin-window-state. Frameless, so the resize grips
         // are the window edges. (Height is locked by the equal min/max above.)
@@ -121,16 +129,17 @@ pub fn ensure(app: &AppHandle) {
         }
     };
 
-    // Force-correct legacy/restored geometry: an earlier build allowed a tall,
-    // vertically-resizable overlay, so `tauri-plugin-window-state` may restore a
-    // height far larger than the new one-line OVERLAY_H. The equal min/max height
-    // on the builder only constrains user resizes, not a programmatic restore, so
-    // clamp the height back to OVERLAY_H here while KEEPING the restored/default
-    // width. Best-effort: any failure just leaves the OS-chosen size.
+    // Force-correct legacy/out-of-range geometry: an earlier build allowed a
+    // tall, freely vertically-resizable overlay, so `tauri-plugin-window-state`
+    // may restore a height outside the new [OVERLAY_H, OVERLAY_H_BOTH] rail. The
+    // min/max on the builder only constrains user resizes, not a programmatic
+    // restore, so clamp the height back into range here while KEEPING the
+    // restored/default width. `overlay.ts` then sets the precise per-shape height
+    // on the first recording. Best-effort: any failure leaves the OS-chosen size.
     if let Ok(scale) = window.scale_factor() {
         if let Ok(size) = window.inner_size() {
             let logical = size.to_logical::<f64>(scale);
-            if (logical.height - OVERLAY_H).abs() > 0.5 {
+            if logical.height < OVERLAY_H - 0.5 || logical.height > OVERLAY_H_BOTH + 0.5 {
                 let _ = window.set_size(tauri::LogicalSize::new(logical.width, OVERLAY_H));
             }
         }
