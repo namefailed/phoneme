@@ -7,6 +7,7 @@ import { Router, type ViewName } from "./router";
 import { onNav } from "./services/events";
 import { initKeyboard } from "./services/keyboard";
 import { initCursorAnimation } from "./services/cursorAnimation";
+import { initSmearCaret } from "./services/smearCaret";
 import { initStepNotifications } from "./services/notifications";
 import { setSettingsAnchor } from "./components/shared/settingsAnchor";
 import { invoke } from "@tauri-apps/api/core";
@@ -89,6 +90,8 @@ export class App {
     // Optional cursor-move animation for the roving keyboard cursor (opt-in,
     // Settings → Appearance; honors prefers-reduced-motion).
     initCursorAnimation();
+    // Smear caret for the CodeMirror editors — same cursor_animation setting.
+    initSmearCaret();
     // Pipeline progress + error toasts (lifetime subscription).
     void initStepNotifications();
 

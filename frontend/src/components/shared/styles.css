@@ -80,6 +80,33 @@ body.phoneme-hide-header-instant #hdr {
   }
 }
 
+/* Smear caret (services/smearCaret.ts): a single full-viewport SVG overlay whose
+   polygon stretches from the old caret to the new as it moves through a CodeMirror
+   editor, then fades as the native blinking caret takes back over at rest. */
+.smear-caret {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10002; /* above the cursor ghost (10001) and modals */
+  opacity: 0;
+  overflow: visible;
+  transition: opacity 90ms linear;
+}
+.smear-caret polygon {
+  fill: var(--accent);
+}
+/* While the smear is mid-move, hide CM's own caret so there aren't two. */
+.cm-editor.smear-caret-on .cm-cursor {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .smear-caret {
+    display: none !important;
+  }
+}
+
 /* vim header-nav: the roving cursor HIGHLIGHTS a control (the bar holds focus,
    not the control) so h/l can step across without the search box capturing
    keystrokes. Enter/i commits (focus the box to type / activate a button). */
