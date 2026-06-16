@@ -97,7 +97,34 @@ export function bindFieldEvents(root: HTMLElement, config: any) {
       el.addEventListener("input", handler);
       el.addEventListener("change", handler);
     }
+    // Accessibility: the sections render a visible `<label>` as a sibling of the
+    // control inside `.settings-field` but never wired `for`/`id`, so every input
+    // was unlabeled to a screen reader. Associate each control with its row's
+    // label (so clicking the label also focuses/toggles it); fall back to an
+    // aria-label derived from the key when there's no free visible label. Done
+    // here — once per render, over the same [data-key] set — so no section needs
+    // touching. Respects an aria-label the caller already set.
+    if (!el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby")) {
+      if (!el.id) el.id = `f-${key.replace(/[^a-z0-9]+/gi, "-")}`;
+      const label = el
+        .closest<HTMLElement>(".settings-field")
+        ?.querySelector<HTMLLabelElement>("label");
+      if (label && !label.htmlFor) {
+        label.htmlFor = el.id;
+      } else {
+        el.setAttribute("aria-label", labelFromKey(key));
+      }
+    }
   });
+}
+
+/** A human-readable label from a dotted config key, for the screen-reader
+ *  fallback when a control has no associated visible `<label>` (e.g. a second
+ *  control sharing a row). `whisper.timeout_secs` → "Timeout secs". */
+function labelFromKey(key: string): string {
+  const leaf = key.split(".").pop() ?? key;
+  const words = leaf.replace(/_/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

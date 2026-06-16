@@ -94,6 +94,7 @@ async fn resolve_tag(client: &mut Client, tag: Option<&str>) -> Result<Option<i6
 fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
     let status = args.status.as_deref().and_then(|s| match s {
         "recording" => Some(RecordingStatus::Recording),
+        "paused" => Some(RecordingStatus::Paused),
         "queued" => Some(RecordingStatus::Queued),
         "transcribing" => Some(RecordingStatus::Transcribing),
         "cleaning_up" => Some(RecordingStatus::CleaningUp),

@@ -244,7 +244,7 @@ export function mountConnectionField(host: HTMLElement, opts: ConnectionFieldOpt
       showRows && entry!.needsKey
         ? `<div class="cf-row">
              <label class="cf-mini-label">API key</label>
-             <input type="password" class="cf-key" value="${escAttr(opts.getApiKey())}" autocomplete="off" spellcheck="false" />
+             <input type="password" class="cf-key" aria-label="API key" value="${escAttr(opts.getApiKey())}" autocomplete="off" spellcheck="false" />
              ${entry!.keyUrl ? `<a class="cf-key-link" href="${escAttr(entry!.keyUrl)}" target="_blank" rel="noreferrer">Get a key ↗</a>` : ""}
            </div>`
         : "";
@@ -279,13 +279,13 @@ export function mountConnectionField(host: HTMLElement, opts: ConnectionFieldOpt
            </summary>
            <div class="cf-row" style="margin-top:8px;">
              <label class="cf-mini-label">Endpoint URL</label>
-             <input type="text" class="cf-url" value="${escAttr(opts.getApiUrl())}" placeholder="${escAttr(entry!.defaultUrl || "Provider default")}" spellcheck="false" />
+             <input type="text" class="cf-url" aria-label="Endpoint URL" value="${escAttr(opts.getApiUrl())}" placeholder="${escAttr(entry!.defaultUrl || "Provider default")}" spellcheck="false" />
            </div>
          </details>`;
 
     host.innerHTML = `
       <div class="cf">
-        <div class="cf-row"><select class="cf-provider">${options}</select></div>
+        <div class="cf-row"><select class="cf-provider" aria-label="Provider">${options}</select></div>
         ${hint ? `<div class="cf-hint cf-provider-hint">${escHtml(hint)}</div>` : ""}
         ${keyRow}
         ${testRow}

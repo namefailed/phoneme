@@ -217,6 +217,13 @@ export class RecordingsListElement extends LitElement {
     }
   }
 
+  /** Clear every active filter/search (including More-like-this mode) but keep
+   *  the chosen sort order, returning to the full list. Backs the "Clear filters"
+   *  action on the filter-aware empty state. */
+  private clearFilters(): void {
+    filterStore.set((prev) => ({ sort_desc: prev.sort_desc }));
+  }
+
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this.unsubStore) this.unsubStore();
@@ -674,8 +681,33 @@ export class RecordingsListElement extends LitElement {
       ? s.recordings.filter((r) => !this.pendingDelete.has(r.id))
       : s.recordings;
     if (recs.length === 0) {
+      // Distinguish an empty library (onboarding) from a filter/search that
+      // simply hid everything — otherwise the onboarding copy wrongly implies
+      // you have no recordings when you do, just none matching.
+      const f = filterStore.get();
+      const filtered = !!(
+        f.search ||
+        (f.kind && f.kind !== "all") ||
+        f.tag_id ||
+        f.status ||
+        f.since ||
+        f.until ||
+        f.like_id
+      );
+      if (filtered) {
+        const heading = f.like_id
+          ? "No similar recordings"
+          : "No recordings match your filters";
+        return html`<div class="empty">
+          <h3 style="margin-bottom: 8px; color: var(--fg-default);">${heading}</h3>
+          <p style="color: var(--fg-muted); margin-bottom: 12px;">
+            Nothing here with the current ${f.like_id ? "similarity search" : "search and filters"}.
+          </p>
+          <button class="inline-button" @click=${() => this.clearFilters()}>Clear filters</button>
+        </div>`;
+      }
       return html`<div class="empty">
-        <h3 style="margin-bottom: 8px; color: var(--fg-default);">No recordings found</h3>
+        <h3 style="margin-bottom: 8px; color: var(--fg-default);">No recordings yet</h3>
         <p style="color: var(--fg-muted); margin-bottom: 12px;">Press your global hotkey to start speaking, or click the Record button in the top right.</p>
         <p class="hint" style="font-size: 0.7857rem;">You can also use the CLI: <code>phoneme record --oneshot</code></p>
       </div>`;

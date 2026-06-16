@@ -173,8 +173,14 @@ pub struct ListArgs {
     /// ISO 8601 date (e.g. 2026-05-19). Upper bound (inclusive).
     #[arg(long)]
     pub until: Option<String>,
-    /// Filter by status.
-    #[arg(long)]
+    /// Filter by status. A typo'd value would otherwise silently match nothing
+    /// and return the whole library, so the valid set is enforced here.
+    #[arg(long, value_name = "STATUS", value_parser = [
+        "recording", "paused", "queued", "transcribing", "cleaning_up",
+        "summarizing", "tagging", "hook_running", "done", "transcribe_failed",
+        "hook_failed", "cleanup_failed", "summarize_failed", "title_failed",
+        "tag_failed", "cancelled",
+    ])]
     pub status: Option<String>,
     /// Filter by tag id or name.
     #[arg(long, value_name = "ID|NAME")]
