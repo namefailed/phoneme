@@ -80,6 +80,32 @@ function place(el: HTMLElement, animate: boolean) {
   const g = ghost!;
   const prev = current && current !== el && current.isConnected ? current.getBoundingClientRect() : null;
 
+  // Extreme size change (a tiny sidebar tag → the full transcript editor, say):
+  // morphing the box across that range looks silly, so just fade in at the new
+  // spot instead of gliding/stretching. Threshold: either dimension ≳ 2.5×.
+  const hugeJump =
+    !!prev &&
+    animate &&
+    (r.height > prev.height * 2.5 ||
+      prev.height > r.height * 2.5 ||
+      r.width > prev.width * 2.5 ||
+      prev.width > r.width * 2.5);
+  if (hugeJump) {
+    g.style.transitionProperty = "opacity"; // jump position/size, fade opacity
+    g.style.transitionDuration = "0ms";
+    g.style.left = `${r.left}px`;
+    g.style.top = `${r.top}px`;
+    g.style.width = `${r.width}px`;
+    g.style.height = `${r.height}px`;
+    g.style.opacity = "0";
+    requestAnimationFrame(() => {
+      g.style.transitionDuration = `${DUR[m]}ms`;
+      g.style.opacity = "1";
+    });
+    current = el;
+    return;
+  }
+
   // Streak (smear/trail): a rounded box spanning the old + new rects, faded out
   // over the move. Our nav is mostly orthogonal (j/k vertical, h/l horizontal),
   // so the union box reads as a clean directional streak.
@@ -103,6 +129,7 @@ function place(el: HTMLElement, animate: boolean) {
     }
   }
 
+  g.style.transitionProperty = "left, top, width, height, opacity"; // (a prior hugeJump may have narrowed it)
   g.style.transitionDuration = animate ? `${DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
@@ -119,20 +146,39 @@ function flush() {
   raf = 0;
   if (pending && pending.isConnected) {
     place(pending, true);
-  } else if (!document.querySelector(".kbd-cursor")) {
+  } else if (!document.querySelector(".kbd-cursor, .kbd-focused")) {
     hide();
   }
   pending = null;
 }
 
+/** Did `el` just GAIN class `cls` in this mutation (vs its old className)? */
+function gained(rec: MutationRecord, cls: string): boolean {
+  const el = rec.target as HTMLElement;
+  return el.classList.contains(cls) && !(rec.oldValue ?? "").split(/\s+/).includes(cls);
+}
+
 function onMutations(records: MutationRecord[]) {
+  let cursorGain: HTMLElement | null = null;
+  let paneGain: HTMLElement | null = null;
   for (const rec of records) {
     const el = rec.target as HTMLElement;
     if (el.nodeType !== 1) continue;
-    const had = (rec.oldValue ?? "").split(/\s+/).includes("kbd-cursor");
-    const has = el.classList.contains("kbd-cursor");
-    if (has && !had) pending = el; // newly activated → the live cursor
+    // The control the roving cursor just landed on: `.kbd-cursor` everywhere, PLUS
+    // the recordings list's own `.kbd-focused` row (its highlight class), so list
+    // j/k moves glide row-to-row like every other pane.
+    if (gained(rec, "kbd-cursor") || gained(rec, "kbd-focused")) cursorGain = el;
+    // A pane just took focus (sidebar / list / detail). Covers the case where the
+    // inner highlight class did NOT change — e.g. returning to the list with the
+    // same row focused — so the ghost still moves to that pane's live cursor
+    // instead of gliding from a stale spot in the pane you left.
+    else if (gained(rec, "rv-pane-focused")) {
+      const inner = el.querySelector<HTMLElement>(".kbd-cursor, .kbd-focused");
+      if (inner) paneGain = inner;
+    }
   }
+  const next = cursorGain ?? paneGain; // an explicit cursor move wins over pane-entry
+  if (next) pending = next;
   if (!raf) raf = requestAnimationFrame(flush);
 }
 
@@ -149,7 +195,7 @@ function connect() {
   window.addEventListener("scroll", onReflow, true);
   window.addEventListener("resize", onReflow);
   // Seed onto whatever is already highlighted.
-  const live = document.querySelector<HTMLElement>(".kbd-cursor");
+  const live = document.querySelector<HTMLElement>(".kbd-cursor, .kbd-focused");
   if (live) place(live, false);
 }
 
@@ -167,7 +213,11 @@ function disconnect() {
 }
 
 function onReflow() {
-  if (current && current.isConnected && current.classList.contains("kbd-cursor")) {
+  if (
+    current &&
+    current.isConnected &&
+    (current.classList.contains("kbd-cursor") || current.classList.contains("kbd-focused"))
+  ) {
     place(current, false);
   } else {
     hide();
