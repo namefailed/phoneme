@@ -83,8 +83,6 @@ function isEditing(t: EventTarget | null): boolean {
 
 /** Per-mode glide/streak duration (ms). */
 const DUR: Record<Exclude<Mode, "off">, number> = { glide: 130, smear: 170, trail: 220 };
-/** Minimum jump (px) before a streak is drawn (trail streaks on every move). */
-const SMEAR_THRESHOLD = 90;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -144,38 +142,16 @@ function place(el: HTMLElement, animate: boolean) {
       : "";
   g.style.setProperty("mask-image", mask);
   g.style.setProperty("-webkit-mask-image", mask);
-  const prevEl = current && current !== el && current.isConnected ? current : null;
-  const prev = prevEl ? clampRect(prevEl, prevEl.getBoundingClientRect()) : null;
-  const dist = prev ? Math.hypot(r.left - prev.left, r.top - prev.top) : 0;
-
-  // Streak (smear/trail): a box spanning the old + new rects, faded out over the
-  // move — a directional trail of the moving cursor. We guard against a TALL union:
-  // moving onto the big transcript / notes editors would flash a pane-tall box. A
-  // WIDE-but-short union is fine — full-width list rows and header hops read as a
-  // clean horizontal smear — so width is unrestricted.
-  if (animate && prev && (m === "smear" || m === "trail")) {
-    const left = Math.min(r.left, prev.left);
-    const top = Math.min(r.top, prev.top);
-    const uW = Math.max(r.right, prev.right) - left;
-    const uH = Math.max(r.bottom, prev.bottom) - top;
-    const tallFlash = uH > 200; // a move onto a big editor — skip the streak
-    if (!tallFlash && (m === "trail" || dist > SMEAR_THRESHOLD)) {
-      const t = tail!;
-      t.style.transitionDuration = "0ms";
-      t.style.left = `${left}px`;
-      t.style.top = `${top}px`;
-      t.style.width = `${uW}px`;
-      t.style.height = `${uH}px`;
-      t.style.opacity = m === "trail" ? "0.28" : "0.2";
-      // Next frame, fade it out over the glide duration.
-      requestAnimationFrame(() => {
-        t.style.transitionDuration = `${DUR[m]}ms`;
-        t.style.opacity = "0";
-      });
-    } else if (tail) {
-      tail.style.opacity = "0"; // big jump — no block streak
-    }
-  }
+  // THE FLASH WAS HERE. The old smear/trail "streak" drew a translucent box
+  // bounding the OLD and NEW rects (`min`/`max` of both) and faded it out. On a
+  // move where that bounding box was sizeable it appeared for a frame as a box
+  // AROUND THE WHOLE MOVE before fading — which read as a jarring flash, worst in
+  // the middle distance range (far moves were skipped via a tall-union guard, so
+  // they looked clean — hence "far good, middle bad"). It was a crude bounding
+  // box, never a real directional smear, so it's removed: every mode now just
+  // glides. A proper motion-trail smear (a tapered shape along the path, not a
+  // box) can be built separately if wanted.
+  if (tail) tail.style.opacity = "0";
 
   // Glide + resize together (mini.animate-style): position and size share one
   // duration so the glow eases between controls.
