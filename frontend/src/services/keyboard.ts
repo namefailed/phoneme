@@ -109,6 +109,15 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "Shift + Esc", label: "Leave the transcript / notes editor" },
     ],
   },
+  {
+    title: "Modals & popups (Re-run · Doctor · Tag Manager · confirmations)",
+    items: [
+      { combo: "Tab / Shift+Tab", label: "Move between the dialog's controls — always works, no nav layer needed" },
+      { combo: "h l j k / arrows", label: "Rove the cursor over the controls (with vim or arrow nav on)" },
+      { combo: "Enter / Space", label: "Activate the highlighted control (button fires · field opens to type)" },
+      { combo: "Esc", label: "Close the dialog" },
+    ],
+  },
 ];
 
 /** Shown in the help sheet only while `interface.vim_nav` is enabled. */
@@ -140,7 +149,6 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
     { combo: "i", label: "Edit the transcript directly" },
     { combo: "d d", label: "Delete the selection — all selected, else the focused one (with Undo)" },
-    { combo: "h l j k (popup)", label: "Move the cursor in a modal / popup — Enter selects, Esc closes" },
     { combo: "Esc", label: "Step back out a level" },
   ],
 };
@@ -155,7 +163,6 @@ const ARROW_HELP_GROUP: HelpGroup = {
     { combo: "↑ at list top", label: "Rise into the header controls (↓ to come back)" },
     { combo: "← → (header)", label: "Move across the header controls" },
     { combo: "Enter", label: "Open / activate the focused row, button, or dropdown" },
-    { combo: "← → ↑ ↓ (popup)", label: "Move the cursor in a modal / popup — Enter selects, Esc closes" },
     { combo: "Esc", label: "Step back out a level" },
   ],
 };

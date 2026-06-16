@@ -22,8 +22,10 @@ Both are independent of the transcript editor's own vim mode (`editor.vim_mode`)
 Manager, …): with either layer on, `h`/`l`/`j`/`k` and the arrow keys move a cursor
 across the dialog's controls, `Enter` activates the highlighted one (a button fires,
 a field opens for typing), and `Esc` closes the dialog — the same idiom as the rest
-of the app, so no dialog traps you on the mouse. (Settings is the one exception: it's
-not keyboard-navigated yet, but `Esc` leaves it.)
+of the app, so no dialog traps you on the mouse. With **neither** layer on, `Tab` /
+`Shift+Tab` walk the dialog's controls and `Esc` still closes it, so popups are fully
+keyboard-operable for everyone. (Settings is the one exception: it's not
+keyboard-navigated yet, but `Esc` leaves it.)
 
 ## Global
 
