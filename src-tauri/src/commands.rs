@@ -1065,7 +1065,13 @@ pub async fn write_config(
 ) -> Result<(), CommandError> {
     // The WebView only ever held masked keys; restore any unchanged secret from
     // the current on-disk config so saving doesn't overwrite it with the mask.
-    let current = config_io::read().unwrap_or_default();
+    // Propagate a read error rather than defaulting: `config_io::read` returns a
+    // default only when the file is ABSENT (first run, no secrets to lose), and
+    // errors only when an existing file is unparseable. Defaulting in that case
+    // would unmask every still-masked key to empty and silently WIPE the user's
+    // saved secrets on save — so abort loudly and leave the on-disk (encrypted)
+    // secrets intact instead.
+    let current = config_io::read().map_err(|e| CommandError::from(e.to_string()))?;
     unmask_config_secrets(&mut config, &current);
     let cfg = config.clone();
     tokio::task::spawn_blocking(move || config_io::write(&cfg))
@@ -2245,6 +2251,73 @@ mod tests {
         unmask_config_secrets(&mut incoming, &current);
         assert_eq!(incoming.llm_post_process.api_key_str(), "real-cleanup-key");
         assert_eq!(incoming.summary.api_key_str(), "new-summary-key");
+    }
+
+    /// Completeness guard: mask and unmask are hand-enumerated, so a new
+    /// secret-bearing field could be added to one but not the other (leaking a
+    /// key to the WebView, or losing it on save). Set EVERY secret to a unique
+    /// sentinel, then assert (a) each is masked, (b) no plaintext sentinel
+    /// survives anywhere in the JSON, and (c) unmask restores each — so the two
+    /// functions can't silently drift out of sync.
+    #[test]
+    fn mask_unmask_cover_every_secret_field() {
+        let mut cfg = Config::default();
+        cfg.whisper.set_api_key("SECRET-whisper");
+        cfg.llm_post_process.set_api_key("SECRET-cleanup");
+        cfg.summary.set_api_key("SECRET-summary");
+        cfg.auto_tag.set_api_key("SECRET-autotag");
+        cfg.title.set_api_key("SECRET-title");
+        let mut pw = cfg.whisper.clone();
+        pw.set_api_key("SECRET-preview");
+        cfg.preview_whisper = Some(pw);
+        let mut stt = cfg.whisper.clone();
+        stt.set_api_key("SECRET-dictation");
+        cfg.in_place.stt = Some(stt);
+        cfg.webhook.set_hmac_secret("SECRET-hmac");
+
+        let mut json = serde_json::to_value(&cfg).unwrap();
+        mask_config_secrets(&mut json);
+
+        // (a) every enumerated secret now reads as the sentinel.
+        assert_eq!(json["whisper"]["api_key"], MASKED_SECRET);
+        assert_eq!(json["llm_post_process"]["api_key"], MASKED_SECRET);
+        assert_eq!(json["summary"]["api_key"], MASKED_SECRET);
+        assert_eq!(json["auto_tag"]["api_key"], MASKED_SECRET);
+        assert_eq!(json["title"]["api_key"], MASKED_SECRET);
+        assert_eq!(json["preview_whisper"]["api_key"], MASKED_SECRET);
+        assert_eq!(json["in_place"]["stt"]["api_key"], MASKED_SECRET);
+        assert_eq!(json["webhook"]["hmac_secret"], MASKED_SECRET);
+
+        // (b) no plaintext sentinel survives anywhere — catches a future field
+        // that is serialized in the clear but forgotten by mask_config_secrets.
+        fn no_secret(v: &serde_json::Value) -> bool {
+            match v {
+                serde_json::Value::String(s) => !s.contains("SECRET-"),
+                serde_json::Value::Array(a) => a.iter().all(no_secret),
+                serde_json::Value::Object(o) => o.values().all(no_secret),
+                _ => true,
+            }
+        }
+        assert!(no_secret(&json), "a secret survived masking: {json}");
+
+        // (c) unmask restores every one of them (no key lost on save).
+        let current = cfg.clone();
+        let mut incoming: Config = serde_json::from_value(json).unwrap();
+        unmask_config_secrets(&mut incoming, &current);
+        assert_eq!(incoming.whisper.api_key_str(), "SECRET-whisper");
+        assert_eq!(incoming.llm_post_process.api_key_str(), "SECRET-cleanup");
+        assert_eq!(incoming.summary.api_key_str(), "SECRET-summary");
+        assert_eq!(incoming.auto_tag.api_key_str(), "SECRET-autotag");
+        assert_eq!(incoming.title.api_key_str(), "SECRET-title");
+        assert_eq!(
+            incoming.preview_whisper.as_ref().unwrap().api_key_str(),
+            "SECRET-preview"
+        );
+        assert_eq!(
+            incoming.in_place.stt.as_ref().unwrap().api_key_str(),
+            "SECRET-dictation"
+        );
+        assert_eq!(incoming.webhook.hmac_secret_str(), "SECRET-hmac");
     }
 
     // ── parse_id ──────────────────────────────────────────────────────────

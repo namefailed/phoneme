@@ -23,10 +23,23 @@ interface. Anything that can reach loopback can already drive the daemon through
 the `phoneme` CLI, so loopback is the boundary; exposing this surface to a
 network would widen it.
 
-There is **no authentication** — that is by design for a loopback-only,
+There is **no per-user token** — that is by design for a loopback-only,
 single-user surface. If you need remote access, terminate it behind an
 authenticating reverse proxy on the same host; **do not** change the bind
 address.
+
+A *browser* on the same machine is still in scope, though, so the server
+defends against the two ways a web page can reach a loopback service:
+
+- **DNS rebinding** — a request whose `Host` header is present and not
+  `127.0.0.1`/`localhost`/`[::1]` (any port) is refused with `403`. A page that
+  rebinds its own hostname to loopback always sends that foreign `Host`.
+- **CSRF** — a state-changing `POST` (`/api/record/start`, `/api/record/stop`)
+  whose `Origin` header is present and not a loopback origin is refused with
+  `403`. Cross-site `fetch`/form submits always carry a foreign `Origin`.
+
+Non-browser local clients (the `phoneme` CLI, `curl`, scripts) send neither
+header and are unaffected. Both checks live in `bin/phoneme-rest/src/server.rs`.
 
 ---
 

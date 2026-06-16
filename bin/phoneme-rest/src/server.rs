@@ -6,10 +6,68 @@
 //! `tower::ServiceExt::oneshot` (no socket needed) and the disabled-guard /
 //! bind logic stays in `main`.
 
+use axum::extract::Request;
+use axum::http::{header, Method, StatusCode};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 
 use crate::{handlers, sse};
+
+/// Whether a `Host` authority (e.g. `127.0.0.1:7777`, `localhost`, `[::1]:7777`)
+/// names the loopback interface. The port is ignored; only the host matters.
+fn host_is_loopback(host: &str) -> bool {
+    let h = host.trim();
+    // IPv6 literals are bracketed (`[::1]:port`); everything else splits on the
+    // LAST colon to drop an optional port without mangling an IPv6 address.
+    let name = if let Some(rest) = h.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        h.rsplit_once(':').map(|(host, _port)| host).unwrap_or(h)
+    };
+    matches!(name, "127.0.0.1" | "::1" | "localhost")
+}
+
+/// Whether an `Origin` header value points at the loopback interface. A
+/// sandboxed/opaque origin (`null`) is treated as foreign.
+fn origin_is_loopback(origin: &str) -> bool {
+    origin
+        .split_once("://")
+        .map(|(_scheme, rest)| host_is_loopback(rest.split('/').next().unwrap_or(rest)))
+        .unwrap_or(false)
+}
+
+/// Reject browser cross-origin / DNS-rebinding attacks against the loopback API.
+///
+/// The server binds to loopback, but a *browser* on the same machine can still
+/// reach it: a malicious page can POST to it (CSRF) or rebind a hostname it
+/// controls to `127.0.0.1` and read responses (DNS rebinding). Both always carry
+/// a foreign `Host` (rebinding) or `Origin` (cross-site fetch) header — a browser
+/// cannot forge those — so:
+/// * any request whose `Host` is present and NOT loopback is refused (rebinding);
+/// * any state-changing `POST` whose `Origin` is present and NOT loopback is
+///   refused (CSRF).
+/// Non-browser local clients (curl, the CLI) omit both headers and are unaffected.
+async fn loopback_guard(req: Request, next: Next) -> Response {
+    if let Some(host) = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()) {
+        if !host_is_loopback(host) {
+            return (StatusCode::FORBIDDEN, "host not allowed").into_response();
+        }
+    }
+    if req.method() == Method::POST {
+        if let Some(origin) = req
+            .headers()
+            .get(header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
+        {
+            if !origin_is_loopback(origin) {
+                return (StatusCode::FORBIDDEN, "cross-origin request rejected").into_response();
+            }
+        }
+    }
+    next.run(req).await
+}
 
 /// State shared by every handler: the daemon pipe to forward IPC over.
 ///
@@ -48,6 +106,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/record/start", post(handlers::record_start))
         .route("/api/record/stop", post(handlers::record_stop))
         .route("/api/events", get(sse::events))
+        .layer(axum::middleware::from_fn(loopback_guard))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -319,5 +378,85 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json = body_json(resp).await;
         assert_eq!(json["status"], "ok");
+    }
+
+    /// A request carrying a NON-loopback `Host` (the DNS-rebinding signature) is
+    /// refused with 403 before any IPC is forwarded.
+    #[tokio::test]
+    async fn spoofed_host_is_403_and_not_forwarded() {
+        let mock = MockDaemon::spawn("spoofhost", |_req| Response::Ok(serde_json::Value::Null));
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let resp = app
+            .oneshot(
+                HttpRequest::builder()
+                    .uri("/api/recordings")
+                    .header("host", "evil.example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert!(
+            mock.received().is_empty(),
+            "a spoofed Host must be rejected before any IPC request is sent"
+        );
+    }
+
+    /// A cross-origin `POST` (the CSRF signature) is refused with 403; a loopback
+    /// Origin on the same POST is allowed through.
+    #[tokio::test]
+    async fn cross_origin_post_is_403_loopback_origin_ok() {
+        let mock = MockDaemon::spawn("xorigin", |req| match req {
+            IpcRequest::RecordStart { .. } => Response::Ok(serde_json::json!({ "id": "r1" })),
+            _ => Response::Ok(serde_json::Value::Null),
+        });
+        let app = router(AppState {
+            pipe_name: mock.pipe_name.clone(),
+        });
+
+        let foreign = app
+            .clone()
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/record/start")
+                    .header("origin", "http://evil.example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
+
+        let local = app
+            .oneshot(
+                HttpRequest::builder()
+                    .method("POST")
+                    .uri("/api/record/start")
+                    .header("origin", "http://127.0.0.1:7777")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(local.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn loopback_host_and_origin_classification() {
+        for h in ["127.0.0.1", "127.0.0.1:7777", "localhost:80", "[::1]:7777"] {
+            assert!(host_is_loopback(h), "{h} should be loopback");
+        }
+        for h in ["evil.com", "evil.com:7777", "127.0.0.1.evil.com", "0.0.0.0"] {
+            assert!(!host_is_loopback(h), "{h} should NOT be loopback");
+        }
+        assert!(origin_is_loopback("http://localhost:7777"));
+        assert!(!origin_is_loopback("http://evil.com"));
+        assert!(!origin_is_loopback("null"));
     }
 }
