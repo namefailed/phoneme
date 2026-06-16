@@ -1753,7 +1753,7 @@ impl Config {
     /// AND the user opted in with `use_own_bundled_server`. Default off — the
     /// weak-box default leaves `in_place.stt = None`, and even a custom local
     /// dictation provider reuses the main/preview server unless the opt-in flag
-    /// is set. Mirrors [`preview_needs_own_server`] so the gate is consistent.
+    /// is set. Mirrors [`Self::preview_needs_own_server`] so the gate is consistent.
     pub fn in_place_needs_own_server(&self) -> bool {
         match &self.in_place.stt {
             Some(s) => {
@@ -1772,8 +1772,8 @@ impl Config {
     /// meeting **"both"** mode: streaming preview is on, `meeting_preview` is
     /// `"both"`, the user opted in with `meeting_preview_own_server`, AND the
     /// preview already runs on its own local bundled server
-    /// ([`preview_needs_own_server`] — the model this 2nd server reuses). Default
-    /// off; mirrors [`preview_needs_own_server`]/[`in_place_needs_own_server`] so
+    /// ([`Self::preview_needs_own_server`] — the model this 2nd server reuses). Default
+    /// off; mirrors [`Self::preview_needs_own_server`]/[`Self::in_place_needs_own_server`] so
     /// the whole "extra server" family gates consistently.
     pub fn second_preview_needs_own_server(&self) -> bool {
         self.recording.meeting_preview_own_server
@@ -1802,11 +1802,11 @@ impl Config {
     /// - **Main** — always, whenever `[whisper].mode != External` (matching the
     ///   supervisor's own gate). A cloud-provider bundled-mode config still
     ///   needs the local server, so this gates on MODE, not provider.
-    /// - **Preview** — only when [`preview_needs_own_server`] is true.
-    /// - **Preview2** — only when [`second_preview_needs_own_server`] is true
+    /// - **Preview** — only when [`Self::preview_needs_own_server`] is true.
+    /// - **Preview2** — only when [`Self::second_preview_needs_own_server`] is true
     ///   (meeting "both" mode opt-in; reuses the preview model on
-    ///   [`preview2_port`]).
-    /// - **InPlace** — only when [`in_place_needs_own_server`] is true (the
+    ///   [`Self::preview2_port`]).
+    /// - **InPlace** — only when [`Self::in_place_needs_own_server`] is true (the
     ///   power-user opt-in; default off).
     ///
     /// A default / unchanged config yields exactly `[Main]` (main server on
@@ -2523,8 +2523,10 @@ mod tests {
         // A per-app override wins over the global type_mode; case-insensitivity
         // is handled by the caller lowercasing the stem, so keys are matched as
         // stored. An unlisted app falls back to the global mode.
-        let mut ip = InPlaceConfig::default();
-        ip.type_mode = "type".into();
+        let mut ip = InPlaceConfig {
+            type_mode: "type".into(),
+            ..Default::default()
+        };
         ip.app_overrides.insert("code".into(), "paste".into());
         ip.app_overrides.insert("banking".into(), "off".into());
 
@@ -2551,7 +2553,9 @@ mod tests {
     #[test]
     fn in_place_phase2_round_trips_through_toml() {
         let mut cfg = Config::default();
-        cfg.in_place.app_overrides.insert("code".into(), "paste".into());
+        cfg.in_place
+            .app_overrides
+            .insert("code".into(), "paste".into());
         cfg.in_place.app_context = true;
         cfg.in_place.app_context_denylist.push("1password".into());
         cfg.in_place.stream_type = true;
@@ -2707,7 +2711,11 @@ mod tests {
         let roles: Vec<_> = needed.iter().map(|s| s.role).collect();
         assert_eq!(
             roles,
-            vec![WhisperServerRole::Main, WhisperServerRole::Preview, WhisperServerRole::Preview2]
+            vec![
+                WhisperServerRole::Main,
+                WhisperServerRole::Preview,
+                WhisperServerRole::Preview2
+            ]
         );
         // The 2nd preview reuses the preview model on the derived port.
         assert_eq!(needed[2].config.bundled_server_port, 5812);
@@ -2722,7 +2730,10 @@ mod tests {
         cfg.recording.streaming_preview = true;
         cfg.recording.meeting_preview = "both".into();
         cfg.recording.meeting_preview_own_server = true;
-        assert!(!cfg.second_preview_needs_own_server(), "needs a dedicated preview server");
+        assert!(
+            !cfg.second_preview_needs_own_server(),
+            "needs a dedicated preview server"
+        );
 
         // Add the dedicated preview server but switch back to toggle mode.
         let mut pv = cfg.whisper.clone();
@@ -2734,7 +2745,10 @@ mod tests {
         // Both mode + dedicated preview but the opt-in flag is off (the default).
         cfg.recording.meeting_preview = "both".into();
         cfg.recording.meeting_preview_own_server = false;
-        assert!(!cfg.second_preview_needs_own_server(), "needs the opt-in flag");
+        assert!(
+            !cfg.second_preview_needs_own_server(),
+            "needs the opt-in flag"
+        );
         assert_eq!(cfg.needed_whisper_servers().len(), 2, "main + preview only");
     }
 

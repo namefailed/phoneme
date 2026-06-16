@@ -324,7 +324,7 @@ impl Catalog {
     /// Persist one completed AI-activity session (a finished streaming LLM
     /// stage). Called by the daemon's `run_llm_stage` on success so the 🧠 popout
     /// can show the prompt + response after an app restart, not just live. Every
-    /// insert prunes the table back to the newest [`AI_ACTIVITY_KEEP`] rows so it
+    /// insert prunes the table back to the newest `AI_ACTIVITY_KEEP` rows so it
     /// can't grow without bound; `created_at` is stored as RFC3339 UTC.
     pub async fn insert_ai_activity(
         &self,
@@ -2369,9 +2369,15 @@ mod tests {
         assert!(db.list_ai_activity(None, 50).await.unwrap().is_empty());
 
         // Two sessions for recording "a", one for "b".
-        db.insert_ai_activity("a", "cleaning_up", "p1", "r1").await.unwrap();
-        db.insert_ai_activity("b", "summarizing", "p2", "r2").await.unwrap();
-        db.insert_ai_activity("a", "summarizing", "p3", "r3").await.unwrap();
+        db.insert_ai_activity("a", "cleaning_up", "p1", "r1")
+            .await
+            .unwrap();
+        db.insert_ai_activity("b", "summarizing", "p2", "r2")
+            .await
+            .unwrap();
+        db.insert_ai_activity("a", "summarizing", "p3", "r3")
+            .await
+            .unwrap();
 
         // Global list is newest-first (id DESC == insert order DESC).
         let all = db.list_ai_activity(None, 50).await.unwrap();

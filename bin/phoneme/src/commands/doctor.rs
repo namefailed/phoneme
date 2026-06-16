@@ -114,7 +114,10 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 return ExitCode::from(exit::GENERIC_FAIL);
             }
         };
-        match client.send(Request::ReimportFromDisk { dry_run: false }).await {
+        match client
+            .send(Request::ReimportFromDisk { dry_run: false })
+            .await
+        {
             Ok(v) => {
                 let n = v.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
                 println!("re-imported {n} recording(s) from disk");

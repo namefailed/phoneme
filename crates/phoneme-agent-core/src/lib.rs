@@ -167,7 +167,10 @@ impl Tool for ListRecent {
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
         let limit = opt_u32(args, "limit", DEFAULT_LIMIT);
         Ok(Request::ListRecordings {
-            filter: ListFilter { limit: Some(limit), ..Default::default() },
+            filter: ListFilter {
+                limit: Some(limit),
+                ..Default::default()
+            },
         })
     }
 }
@@ -237,7 +240,10 @@ impl Tool for StartRecording {
                 })
             }
         };
-        Ok(Request::RecordStart { mode, in_place: false })
+        Ok(Request::RecordStart {
+            mode,
+            in_place: false,
+        })
     }
 }
 
@@ -355,7 +361,11 @@ impl Tool for Summarize {
     }
     fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
         let id = require_recording_id(args, "summarize")?;
-        Ok(Request::RerunSummary { id, model: None, prompt: None })
+        Ok(Request::RerunSummary {
+            id,
+            model: None,
+            prompt: None,
+        })
     }
 }
 
@@ -492,11 +502,21 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         assert_eq!(
             r.to_request("list_recent", &json!({})).unwrap(),
-            Request::ListRecordings { filter: ListFilter { limit: Some(10), ..Default::default() } }
+            Request::ListRecordings {
+                filter: ListFilter {
+                    limit: Some(10),
+                    ..Default::default()
+                }
+            }
         );
         assert_eq!(
             r.to_request("list_recent", &json!({ "limit": 3 })).unwrap(),
-            Request::ListRecordings { filter: ListFilter { limit: Some(3), ..Default::default() } }
+            Request::ListRecordings {
+                filter: ListFilter {
+                    limit: Some(3),
+                    ..Default::default()
+                }
+            }
         );
     }
 
@@ -508,8 +528,12 @@ mod tests {
             Err(ToolError::BadArgs { .. })
         ));
         assert_eq!(
-            r.to_request("search_recordings", &json!({ "query": "api redesign" })).unwrap(),
-            Request::SemanticSearch { query: "api redesign".to_string(), limit: 10 }
+            r.to_request("search_recordings", &json!({ "query": "api redesign" }))
+                .unwrap(),
+            Request::SemanticSearch {
+                query: "api redesign".to_string(),
+                limit: 10
+            }
         );
     }
 
@@ -522,7 +546,8 @@ mod tests {
         ));
         let id = RecordingId::new();
         assert_eq!(
-            r.to_request("get_transcript", &json!({ "id": id.as_str() })).unwrap(),
+            r.to_request("get_transcript", &json!({ "id": id.as_str() }))
+                .unwrap(),
             Request::GetRecording { id }
         );
     }
@@ -532,11 +557,18 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         assert_eq!(
             r.to_request("start_recording", &json!({})).unwrap(),
-            Request::RecordStart { mode: RecordMode::Oneshot, in_place: false }
+            Request::RecordStart {
+                mode: RecordMode::Oneshot,
+                in_place: false
+            }
         );
         assert_eq!(
-            r.to_request("start_recording", &json!({ "mode": "hold" })).unwrap(),
-            Request::RecordStart { mode: RecordMode::Hold, in_place: false }
+            r.to_request("start_recording", &json!({ "mode": "hold" }))
+                .unwrap(),
+            Request::RecordStart {
+                mode: RecordMode::Hold,
+                in_place: false
+            }
         );
         assert!(matches!(
             r.to_request("start_recording", &json!({ "mode": "weird" })),
@@ -547,8 +579,14 @@ mod tests {
     #[test]
     fn stop_is_unit_and_unknown_tool_errors() {
         let r = ToolRegistry::with_phoneme_tools();
-        assert_eq!(r.to_request("stop_recording", &json!({})).unwrap(), Request::RecordStop);
-        assert!(matches!(r.to_request("nope", &json!({})), Err(ToolError::Unknown(_))));
+        assert_eq!(
+            r.to_request("stop_recording", &json!({})).unwrap(),
+            Request::RecordStop
+        );
+        assert!(matches!(
+            r.to_request("nope", &json!({})),
+            Err(ToolError::Unknown(_))
+        ));
     }
 
     #[test]
@@ -557,17 +595,29 @@ mod tests {
         let id = RecordingId::new();
         // A real title → Some.
         assert_eq!(
-            r.to_request("set_title", &json!({ "id": id.as_str(), "title": "Budget call" })).unwrap(),
-            Request::SetRecordingTitle { id: id.clone(), title: Some("Budget call".to_string()) }
+            r.to_request(
+                "set_title",
+                &json!({ "id": id.as_str(), "title": "Budget call" })
+            )
+            .unwrap(),
+            Request::SetRecordingTitle {
+                id: id.clone(),
+                title: Some("Budget call".to_string())
+            }
         );
         // Omitted title → None (revert to auto).
         assert_eq!(
-            r.to_request("set_title", &json!({ "id": id.as_str() })).unwrap(),
-            Request::SetRecordingTitle { id: id.clone(), title: None }
+            r.to_request("set_title", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::SetRecordingTitle {
+                id: id.clone(),
+                title: None
+            }
         );
         // Blank title → None.
         assert_eq!(
-            r.to_request("set_title", &json!({ "id": id.as_str(), "title": "   " })).unwrap(),
+            r.to_request("set_title", &json!({ "id": id.as_str(), "title": "   " }))
+                .unwrap(),
             Request::SetRecordingTitle { id, title: None }
         );
     }
@@ -577,8 +627,15 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         let id = RecordingId::new();
         assert_eq!(
-            r.to_request("set_favorite", &json!({ "id": id.as_str(), "favorite": true })).unwrap(),
-            Request::SetFavorite { id: id.clone(), favorite: true }
+            r.to_request(
+                "set_favorite",
+                &json!({ "id": id.as_str(), "favorite": true })
+            )
+            .unwrap(),
+            Request::SetFavorite {
+                id: id.clone(),
+                favorite: true
+            }
         );
         // Missing the required boolean → BadArgs.
         assert!(matches!(
@@ -592,10 +649,14 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         let id = RecordingId::new();
         assert_eq!(
-            r.to_request("suggest_tags", &json!({ "id": id.as_str() })).unwrap(),
+            r.to_request("suggest_tags", &json!({ "id": id.as_str() }))
+                .unwrap(),
             Request::SuggestTags { id }
         );
-        assert_eq!(r.to_request("list_tags", &json!({})).unwrap(), Request::ListAllTags);
+        assert_eq!(
+            r.to_request("list_tags", &json!({})).unwrap(),
+            Request::ListAllTags
+        );
     }
 
     #[test]
@@ -603,11 +664,17 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         let id = RecordingId::new();
         assert_eq!(
-            r.to_request("summarize", &json!({ "id": id.as_str() })).unwrap(),
-            Request::RerunSummary { id: id.clone(), model: None, prompt: None }
+            r.to_request("summarize", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::RerunSummary {
+                id: id.clone(),
+                model: None,
+                prompt: None
+            }
         );
         assert_eq!(
-            r.to_request("rerun_cleanup", &json!({ "id": id.as_str() })).unwrap(),
+            r.to_request("rerun_cleanup", &json!({ "id": id.as_str() }))
+                .unwrap(),
             Request::RerunCleanup {
                 id,
                 model: None,
@@ -625,7 +692,8 @@ mod tests {
         let id = RecordingId::new();
         // No model → None override.
         assert_eq!(
-            r.to_request("retranscribe", &json!({ "id": id.as_str() })).unwrap(),
+            r.to_request("retranscribe", &json!({ "id": id.as_str() }))
+                .unwrap(),
             Request::RetranscribeRecording {
                 id: id.clone(),
                 model: None,
@@ -636,7 +704,11 @@ mod tests {
         );
         // A model → Some override.
         assert_eq!(
-            r.to_request("retranscribe", &json!({ "id": id.as_str(), "model": "large-v3" })).unwrap(),
+            r.to_request(
+                "retranscribe",
+                &json!({ "id": id.as_str(), "model": "large-v3" })
+            )
+            .unwrap(),
             Request::RetranscribeRecording {
                 id,
                 model: Some("large-v3".to_string()),
@@ -652,11 +724,16 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         let id = RecordingId::new();
         assert_eq!(
-            r.to_request("more_like_this", &json!({ "id": id.as_str() })).unwrap(),
-            Request::MoreLikeThis { id: id.clone(), limit: 10 }
+            r.to_request("more_like_this", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::MoreLikeThis {
+                id: id.clone(),
+                limit: 10
+            }
         );
         assert_eq!(
-            r.to_request("more_like_this", &json!({ "id": id.as_str(), "limit": 3 })).unwrap(),
+            r.to_request("more_like_this", &json!({ "id": id.as_str(), "limit": 3 }))
+                .unwrap(),
             Request::MoreLikeThis { id, limit: 3 }
         );
     }
@@ -666,7 +743,8 @@ mod tests {
         let r = ToolRegistry::with_phoneme_tools();
         let id = RecordingId::new();
         assert_eq!(
-            r.to_request("get_words", &json!({ "id": id.as_str() })).unwrap(),
+            r.to_request("get_words", &json!({ "id": id.as_str() }))
+                .unwrap(),
             Request::GetWords { id }
         );
         // Invalid id → BadArgs (covers the new id-taking tools' shared path).

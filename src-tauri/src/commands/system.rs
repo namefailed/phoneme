@@ -49,7 +49,9 @@ pub async fn doctor_backend_checks(bridge: Br<'_>) -> Result<Vec<CheckResult>, C
     // when the daemon is down, just omit the check (the count is unknowable).
     if let Ok(v) = forward(&bridge, Request::ReimportFromDisk { dry_run: true }).await {
         if let Some(count) = v.get("count").and_then(|n| n.as_u64()) {
-            checks.push(phoneme_core::doctor::orphan_audio_check_result(count as usize));
+            checks.push(phoneme_core::doctor::orphan_audio_check_result(
+                count as usize,
+            ));
         }
     }
     Ok(checks)

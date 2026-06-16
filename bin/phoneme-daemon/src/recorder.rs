@@ -201,7 +201,7 @@ fn stitch_preview(committed: &str, window: &str) -> String {
             let tail = &committed_norm[committed_norm.len() - overlap..];
             let head = &window_norm[skip..skip + overlap];
             if tail == head {
-                if best.map_or(true, |(bo, _)| overlap > bo) {
+                if best.is_none_or(|(bo, _)| overlap > bo) {
                     best = Some((overlap, skip));
                 }
                 // Longest for this skip found — no shorter one can beat it.
@@ -895,7 +895,9 @@ impl DaemonRecorder {
             let exe = app.as_ref().map(|a| a.exe_name.clone());
             let title = app.filter(|a| {
                 !a.window_title.is_empty()
-                    && cfg.in_place.may_read_window_title(Some(a.exe_name.as_str()))
+                    && cfg
+                        .in_place
+                        .may_read_window_title(Some(a.exe_name.as_str()))
             });
             (exe, title.map(|a| a.window_title))
         } else {
@@ -1100,8 +1102,8 @@ impl DaemonRecorder {
         // them or their preview WAVs leak.
         self.stop_preview(active.in_place).await;
         if active.in_place {
-            let preview_wav = std::env::temp_dir()
-                .join(format!("phoneme-preview-{}.wav", active.id.file_stem()));
+            let preview_wav =
+                std::env::temp_dir().join(format!("phoneme-preview-{}.wav", active.id.file_stem()));
             let _ = tokio::fs::remove_file(&preview_wav).await;
         }
         let result = recorder.stop_and_finalize(&active.audio_path).await?;
@@ -2069,7 +2071,11 @@ mod tests {
             assert_eq!(occurrences, 1, "run {run:?} duplicated in {out:?}");
         }
         // "you" (the boundary word) must appear exactly once, not re-stated.
-        assert_eq!(words.iter().filter(|w| **w == "you").count(), 1, "in {out:?}");
+        assert_eq!(
+            words.iter().filter(|w| **w == "you").count(),
+            1,
+            "in {out:?}"
+        );
     }
 
     #[test]
@@ -2088,7 +2094,11 @@ mod tests {
         let second_window = "Will start at noon today in room five";
         let out = stitch_preview(&committed, second_window);
         assert_eq!(out, "the meeting will start at noon today in room five");
-        assert_eq!(out.matches("at noon today").count(), 1, "duplicated in {out:?}");
+        assert_eq!(
+            out.matches("at noon today").count(),
+            1,
+            "duplicated in {out:?}"
+        );
     }
 
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
@@ -2609,16 +2619,11 @@ mod tests {
             let _ = stop_rx.await;
             tokio::time::sleep(Duration::from_millis(1_500)).await;
         });
-        state
-            .recorder
-            .preview
-            .lock()
-            .await
-            .push(PreviewTask {
-                kind: PreviewKind::Caption,
-                stop_tx,
-                task,
-            });
+        state.recorder.preview.lock().await.push(PreviewTask {
+            kind: PreviewKind::Caption,
+            stop_tx,
+            task,
+        });
 
         let recorder = state.recorder.clone();
         let stop_state = state.clone();

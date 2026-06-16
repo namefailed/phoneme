@@ -46,7 +46,14 @@ pub async fn list_ai_activity(
     recording_id: Option<String>,
     limit: u32,
 ) -> Result<Value, CommandError> {
-    forward(&bridge, Request::ListAiActivity { recording_id, limit }).await
+    forward(
+        &bridge,
+        Request::ListAiActivity {
+            recording_id,
+            limit,
+        },
+    )
+    .await
 }
 
 /// Fetch all recordings belonging to a single meeting session (the two tracks

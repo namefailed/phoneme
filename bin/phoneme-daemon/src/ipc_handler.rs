@@ -1276,9 +1276,8 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::SubscribeEvents => Response::Err(IpcError {
             kind: IpcErrorKind::Internal,
-            message:
-                "subscribe_events is handled by the streaming path in handle_connection"
-                    .into(),
+            message: "subscribe_events is handled by the streaming path in handle_connection"
+                .into(),
         }),
     }
 }
@@ -1347,7 +1346,12 @@ async fn orphan_audio_check(state: &AppState) -> phoneme_core::doctor::CheckResu
     let audio_dir = state.paths.audio_dir.clone();
     let count = tokio::task::spawn_blocking(move || scan_audio_dir(&audio_dir))
         .await
-        .map(|cands| cands.into_iter().filter(|c| !existing.contains(&c.id)).count())
+        .map(|cands| {
+            cands
+                .into_iter()
+                .filter(|c| !existing.contains(&c.id))
+                .count()
+        })
         .unwrap_or(0);
     phoneme_core::doctor::orphan_audio_check_result(count)
 }

@@ -50,7 +50,13 @@ pub fn fast_polish(raw: &str) -> String {
 /// Anything not recognized is left exactly as dictated. With no command phrase
 /// present the input is returned byte-for-byte (normal dictation is untouched).
 pub fn apply_voice_commands(text: &str) -> String {
-    const PHRASES: &[&str] = &["new line", "newline", "new paragraph", "scratch that", "delete that"];
+    const PHRASES: &[&str] = &[
+        "new line",
+        "newline",
+        "new paragraph",
+        "scratch that",
+        "delete that",
+    ];
     let lower = text.to_ascii_lowercase();
     if !PHRASES.iter().any(|c| lower.contains(c)) {
         return text.to_string();

@@ -87,7 +87,9 @@ pub fn tail_log(name: String, max_lines: usize) -> Result<String, CommandError> 
             rd.filter_map(|e| e.ok())
                 .filter(|e| {
                     let fname = e.file_name();
-                    let Some(f) = fname.to_str() else { return false };
+                    let Some(f) = fname.to_str() else {
+                        return false;
+                    };
                     if f == name {
                         return true;
                     }

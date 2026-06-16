@@ -2,7 +2,7 @@
 //!
 //! Per the roadmap this layer is a *translator*, not a brain: each tool's
 //! `tools/call` arguments are validated into exactly one [`Request`], the
-//! daemon does the work, and the [`Response`] value is rendered back as MCP
+//! daemon does the work, and the [`phoneme_ipc::Response`] value is rendered back as MCP
 //! text content. The request-building is factored into the pure
 //! [`build_request`] function so it can be unit-tested without a live daemon
 //! (mirroring how `bin/phoneme`'s command tests assert the exact `Request` a
@@ -468,7 +468,7 @@ fn optional_limit(args: &Value) -> Result<u64, ToolError> {
     }
 }
 
-/// Render the daemon's successful [`Response`] value for a tool into the
+/// Render the daemon's successful [`phoneme_ipc::Response`] value for a tool into the
 /// human-readable text an MCP client shows.
 ///
 /// `tool` selects the shaping: ack-style tools echo the new id; the query tools
@@ -879,7 +879,11 @@ mod tests {
         let id = RecordingId::new();
         // A real title → Some.
         assert_eq!(
-            build_request("set_title", &json!({"id": id.as_str(), "title": "Budget call"})).unwrap(),
+            build_request(
+                "set_title",
+                &json!({"id": id.as_str(), "title": "Budget call"})
+            )
+            .unwrap(),
             Request::SetRecordingTitle {
                 id: id.clone(),
                 title: Some("Budget call".to_string())
@@ -904,7 +908,11 @@ mod tests {
     fn set_favorite_maps_and_requires_flag() {
         let id = RecordingId::new();
         assert_eq!(
-            build_request("set_favorite", &json!({"id": id.as_str(), "favorite": true})).unwrap(),
+            build_request(
+                "set_favorite",
+                &json!({"id": id.as_str(), "favorite": true})
+            )
+            .unwrap(),
             Request::SetFavorite {
                 id: id.clone(),
                 favorite: true
@@ -967,7 +975,11 @@ mod tests {
         );
         // A model → Some override.
         assert_eq!(
-            build_request("retranscribe", &json!({"id": id.as_str(), "model": "large-v3"})).unwrap(),
+            build_request(
+                "retranscribe",
+                &json!({"id": id.as_str(), "model": "large-v3"})
+            )
+            .unwrap(),
             Request::RetranscribeRecording {
                 id,
                 model: Some("large-v3".to_string()),
@@ -1019,7 +1031,10 @@ mod tests {
             render_result("suggest_tags", &Value::Null),
             "Tag suggestions generated."
         );
-        assert_eq!(render_result("summarize", &Value::Null), "Summary generated.");
+        assert_eq!(
+            render_result("summarize", &Value::Null),
+            "Summary generated."
+        );
         assert_eq!(
             render_result("rerun_cleanup", &Value::Null),
             "Cleanup re-run started."

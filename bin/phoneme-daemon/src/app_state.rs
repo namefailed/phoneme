@@ -470,9 +470,9 @@ impl AppState {
             processing: Arc::new(std::sync::Mutex::new(None)),
             whisper_model_override: Arc::new(WhisperModelOverride::default()),
             pending_overrides: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_all_overrides: Arc::new(std::sync::Mutex::new(
-                std::collections::HashMap::new(),
-            )),
+            pending_all_overrides: Arc::new(
+                std::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             whisper_ports: Arc::new(WhisperEffectivePorts::default()),
             whisper_restart: Arc::new(tokio::sync::Notify::new()),
             skip_stage: Arc::new(tokio::sync::Notify::new()),

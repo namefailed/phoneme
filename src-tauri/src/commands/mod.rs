@@ -47,17 +47,17 @@ use tauri::{Emitter, State};
 
 type Br<'r> = State<'r, BridgeSlot>;
 
-mod recordings;
 mod config;
+mod files;
+mod recordings;
 mod system;
 mod wizard;
-mod files;
 
-pub use recordings::*;
 pub use config::*;
+pub use files::*;
+pub use recordings::*;
 pub use system::*;
 pub use wizard::*;
-pub use files::*;
 
 /// Structured error returned by Tauri commands. Serializes to `{ kind, message }`
 /// so the WebView can branch on `kind` (e.g. tell `whisper_timeout` apart from

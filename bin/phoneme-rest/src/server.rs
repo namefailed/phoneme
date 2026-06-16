@@ -48,9 +48,14 @@ fn origin_is_loopback(origin: &str) -> bool {
 /// * any request whose `Host` is present and NOT loopback is refused (rebinding);
 /// * any state-changing `POST` whose `Origin` is present and NOT loopback is
 ///   refused (CSRF).
+///
 /// Non-browser local clients (curl, the CLI) omit both headers and are unaffected.
 async fn loopback_guard(req: Request, next: Next) -> Response {
-    if let Some(host) = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()) {
+    if let Some(host) = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+    {
         if !host_is_loopback(host) {
             return (StatusCode::FORBIDDEN, "host not allowed").into_response();
         }

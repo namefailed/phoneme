@@ -1146,7 +1146,7 @@ pub async fn run(
     // Dial the port the bundled server is ACTUALLY listening on: the
     // supervisor falls back to a free port when the configured one is held by
     // another app, and publishes the live value in `whisper_ports`.
-    let whisper_cfg = state.whisper_ports.apply(&cfg, &whisper_cfg);
+    let whisper_cfg = state.whisper_ports.apply(cfg, &whisper_cfg);
     let provider = state.transcription.provider(&whisper_cfg, &cfg.diarization);
 
     // Track-aware Meeting Mode: read this recording's track + meeting link
@@ -1503,7 +1503,7 @@ pub async fn run(
     // before TranscriptionDone fires, so the refreshed list shows the title
     // together with the new text. A retranscribe re-runs this and refreshes
     // auto titles; user-set titles are protected inside.
-    if let Some(msg) = maybe_auto_title(state, &cfg, &id, &transcript, &raw_transcript).await {
+    if let Some(msg) = maybe_auto_title(state, cfg, &id, &transcript, &raw_transcript).await {
         step_failure.get_or_insert((RecordingStatus::TitleFailed, msg));
     }
 
@@ -1547,22 +1547,22 @@ pub async fn run(
         // along after it (approve-to-apply, so they're side-effect free).
         // Statuses only flip when the step will actually run, so a recording
         // with summaries off never flashes "Summarizing".
-        if summary_enabled(&cfg) {
+        if summary_enabled(cfg) {
             let _ = state
                 .catalog
                 .update_status(&id, RecordingStatus::Summarizing)
                 .await;
         }
-        if let Some(msg) = maybe_auto_summarize(state, &cfg, &id, &transcript).await {
+        if let Some(msg) = maybe_auto_summarize(state, cfg, &id, &transcript).await {
             step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
         }
-        if auto_tag_enabled(&cfg) {
+        if auto_tag_enabled(cfg) {
             let _ = state
                 .catalog
                 .update_status(&id, RecordingStatus::Tagging)
                 .await;
         }
-        if let Some(msg) = maybe_auto_tag(state, &cfg, &id, &transcript).await {
+        if let Some(msg) = maybe_auto_tag(state, cfg, &id, &transcript).await {
             step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
         }
         // A failed optional step (cleanup/title/summary/tag) becomes the terminal
@@ -1680,22 +1680,22 @@ pub async fn run(
     // Auto-summary is the final step — runs after post-processing and hooks so
     // it summarizes the text the user actually sees; auto-tag suggestions ride
     // along after it (approve-to-apply, so they're side-effect free).
-    if summary_enabled(&cfg) {
+    if summary_enabled(cfg) {
         let _ = state
             .catalog
             .update_status(&id, RecordingStatus::Summarizing)
             .await;
     }
-    if let Some(msg) = maybe_auto_summarize(state, &cfg, &id, &payload.transcript).await {
+    if let Some(msg) = maybe_auto_summarize(state, cfg, &id, &payload.transcript).await {
         step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
     }
-    if auto_tag_enabled(&cfg) {
+    if auto_tag_enabled(cfg) {
         let _ = state
             .catalog
             .update_status(&id, RecordingStatus::Tagging)
             .await;
     }
-    if let Some(msg) = maybe_auto_tag(state, &cfg, &id, &payload.transcript).await {
+    if let Some(msg) = maybe_auto_tag(state, cfg, &id, &payload.transcript).await {
         step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
     }
 

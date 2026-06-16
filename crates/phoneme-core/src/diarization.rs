@@ -343,10 +343,10 @@ fn dominant_column(
 ///   "[Speaker 2]: it" flicker) is absorbed into its dominant neighbour, so a
 ///   one-voice recording collapses back to a single speaker (and the caller's
 ///   ≤1-speaker gate renders it as plain prose) instead of fragmenting. See
-///   [`smooth_word_speaker_runs`]. Pass `min_turn = 0.0` to disable it.
+///   `smooth_word_speaker_runs`. Pass `min_turn = 0.0` to disable it.
 ///
 /// `frame_step` / `frame_duration` are `speakrs::pipeline::FRAME_STEP_SECONDS` /
-/// `FRAME_DURATION_SECONDS` in production; `min_turn` is [`WORD_MIN_TURN_SECS`].
+/// `FRAME_DURATION_SECONDS` in production; `min_turn` is `WORD_MIN_TURN_SECS`.
 /// All three are parameters so the mapping + smoothing are unit-testable with a
 /// synthetic matrix (the geometry tests pass `min_turn = 0.0`).
 pub fn assign_words<'a>(
@@ -419,7 +419,7 @@ pub(crate) const WORD_MIN_TURN_SECS: f64 = 0.6;
 /// A speaker run no longer than this many words, when it sits as an "island"
 /// bracketed by the SAME speaker on both sides, is treated as per-frame flicker
 /// and absorbed into that surrounding speaker. This is the primary guard against
-/// the mid-sentence choppy splits the wall-clock-only [`WORD_MIN_TURN_SECS`]
+/// the mid-sentence choppy splits the wall-clock-only `WORD_MIN_TURN_SECS`
 /// missed: a 2–5 word island inside one continuous speaker's territory (e.g.
 /// "...the fact that women / [Speaker 2] going to do what they / [Speaker 1]
 /// want...") is almost always noise from per-word argmax over short, noisy frame
@@ -597,7 +597,7 @@ fn smooth_word_speaker_runs(words: &[&WordSpan], cols: &mut [Option<usize>], min
 /// Left untouched, such a word renders with no `[Speaker N]:` prefix AND splits
 /// the surrounding turn in two (the transcript builder starts a fresh turn on any
 /// speaker change, and `0`/unattributed counts as a change) — the orphaned-word
-/// chop the user sees as "all chopped up". [`smooth_word_speaker_runs`] can't fix
+/// chop the user sees as "all chopped up". `smooth_word_speaker_runs` can't fix
 /// it: it only ever rewrites `Some` runs and treats `None` as a gap.
 ///
 /// So after smoothing we assign each `None` word the speaker it most likely

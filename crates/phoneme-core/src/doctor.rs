@@ -2577,7 +2577,9 @@ mod tests {
         assert!(many.fix_hint.is_some());
 
         // Singular grammar for exactly one.
-        assert!(orphan_audio_check_result(1).detail.contains("1 audio file on"));
+        assert!(orphan_audio_check_result(1)
+            .detail
+            .contains("1 audio file on"));
     }
 
     #[tokio::test]
