@@ -69,6 +69,15 @@ trust boundary. Verified against current code.*
   `preview_reveal_words_per_sec` with the newest words kept on the line (older ones
   scroll off the left). The source-swap button now appears only for meetings, and
   the laggy fade in/out is gone.
+- [x] **Minimal recording-indicator overlay** — a second, fully independent
+  always-on-top pill for people who want a clear *"you're recording"* cue without
+  the live-caption overlay. It shows **only** a pulsing record dot, an audio-reactive
+  waveform, and an mm:ss elapsed timer — no transcription text — so it needs no
+  live preview at all and works even with preview entirely off. Separate window,
+  flag, and saved geometry from the caption overlay; either, both, or neither can
+  run. Gated on `interface.recording_indicator` (off by default); enable it under
+  **Settings → Live Preview → "Recording indicator"** (`src-tauri/src/indicator.rs`,
+  `frontend/indicator.*`).
 - [x] **Adaptive whisper-server supervision** — the daemon now spawns *exactly*
   the local whisper-servers the current config needs and no more, from a single
   source of truth (`Config::needed_whisper_servers`): the main server, the live-

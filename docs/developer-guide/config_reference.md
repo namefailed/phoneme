@@ -121,6 +121,7 @@ followed.
 | `visible_columns` | day, time, duration, status, transcript | List columns |
 | `column_widths` | px/fr strings | Resizable column layout |
 | `preview_overlay` | `false` | Float the live preview in a system-wide, always-on-top overlay window (requires `recording.streaming_preview`) |
+| `recording_indicator` | `false` | Show a minimal, always-on-top "recording indicator" pill while recording — only a pulsing record dot, an audio-reactive waveform, and an mm:ss elapsed timer (no caption text). A separate, independent window from `preview_overlay`; needs no streaming preview, so it works even with live preview off. Either, both, or neither can run. |
 | `vim_nav` | `false` | System-wide vim-style keyboard navigation (`h`/`l` across panes, `j`/`k` within the list, `gg`/`G`, `i`/`Enter`, `Esc`). Distinct from `editor.vim_mode`, which only affects the transcript editor. |
 | `animation_speed` | `normal` | Pane show/hide animation speed: `off` \| `fast` \| `normal` \| `slow`. `off` makes sidebar / detail-pane / focus-mode toggles instant. |
 | `ui_font` | `""` (Inter) | Base interface font family — a single CSS family name (e.g. `Segoe UI`, `JetBrains Mono`) prepended to the bundled Inter fallback stack, so an uninstalled font falls back cleanly. Empty = the bundled Inter stack. Transcript/code blocks keep their own monospace. Frontend-only. |
