@@ -33,6 +33,18 @@ use phoneme_ipc::DaemonEvent;
 use crate::daemon;
 use crate::server::AppState;
 
+/// Maximum number of concurrent `/api/events` SSE subscribers. Each one holds a
+/// dedicated daemon pipe subscription, so an unbounded fan-out — a local page
+/// opening hundreds of `EventSource`s — could exhaust the daemon's pipe
+/// instances and starve the CLI/GUI/MCP. A small cap keeps legitimate local
+/// dashboards working while bounding the blast radius.
+const MAX_SSE_CLIENTS: usize = 16;
+
+/// Process-global permit pool enforcing [`MAX_SSE_CLIENTS`]. `const_new` lets it
+/// live in a `static` with no lazy init; a permit is held for the lifetime of
+/// each stream and released when the client disconnects (the stream drops).
+static SSE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(MAX_SSE_CLIENTS);
+
 /// Serialize one [`DaemonEvent`] into an SSE [`Event`] whose `data:` line is the
 /// event's JSON. Factored out so the round-trip is unit-testable without a live
 /// daemon or HTTP server.
@@ -64,12 +76,33 @@ fn into_sse_stream(
 
 /// `GET /api/events` handler.
 ///
-/// Returns `503` if the daemon can't be reached to open the subscription;
-/// otherwise streams events until either side disconnects.
+/// Returns `503` if too many event streams are already open (the concurrency cap,
+/// [`MAX_SSE_CLIENTS`]) or if the daemon can't be reached to open the
+/// subscription; otherwise streams events until either side disconnects.
 pub async fn events(State(state): State<AppState>) -> impl IntoResponse {
+    // Cap concurrent subscribers before dialing the daemon, so a flood can't open
+    // a pipe subscription per request. The permit rides the stream and frees its
+    // slot only when the client disconnects (axum drops the stream).
+    let permit = match SSE_SLOTS.try_acquire() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "too many event streams",
+            )
+                .into_response()
+        }
+    };
     match daemon::subscribe(&state.pipe_name).await {
         Ok(events) => {
             let stream = into_sse_stream(events);
+            // Hold the permit for the whole stream lifetime: capturing it in the
+            // map closure means it drops (freeing the slot) when the stream is
+            // dropped on disconnect. A failed subscription drops it immediately.
+            let stream = stream.map(move |item| {
+                let _ = &permit;
+                item
+            });
             Sse::new(stream)
                 .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
                 .into_response()
@@ -113,6 +146,33 @@ mod tests {
         assert_eq!(parsed, event);
         // And the rendered SSE event is non-empty (carries our data).
         assert!(!rendered.is_empty());
+    }
+
+    /// With every SSE slot already taken, a further subscriber is turned away
+    /// with `503` and the cap-specific message — before it dials the daemon (the
+    /// pipe name here is never used, so a "too many" body proves the cap path,
+    /// not a daemon-unreachable 503). Releasing the held permits frees the slots.
+    #[tokio::test]
+    async fn sse_cap_rejects_extra_streams_with_503() {
+        let mut held = Vec::new();
+        for _ in 0..MAX_SSE_CLIENTS {
+            held.push(SSE_SLOTS.try_acquire().expect("a slot should be free at start"));
+        }
+        let resp = events(State(AppState {
+            pipe_name: "phoneme-rest-test-sse-cap-unused".into(),
+        }))
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            text.contains("too many event streams"),
+            "the cap rejection (not a daemon-unreachable 503) must surface, got: {text}"
+        );
+        drop(held); // free the slots for any other test
     }
 
     /// A serializable event with payload fields keeps every field in the SSE
