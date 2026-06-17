@@ -99,7 +99,7 @@ const MANAGERS: { id: string; label: string }[] = [
   { id: "managers/tags", label: "🏷️ Tags" },
   { id: "managers/profiles", label: "👤 Profiles" },
   { id: "managers/saved", label: "📌 Saved searches" },
-  { id: "managers/hooks", label: "🪝 Hooks" },
+  { id: "managers/hooks", label: "🪝 Hooks / Integrations" },
   { id: "managers/keybinds", label: "⚡ Keybinds" },
 ];
 
@@ -402,8 +402,8 @@ export class SettingsViewElement extends LitElement {
       { tab: "managers/saved", label: "Saved searches", mount: (h) => { new SectionSavedSearches(h, c); } },
       // Hook Manager — outbound (scripts + webhook) AND inbound (REST + MCP)
       // automation in one place.
-      { tab: "managers/hooks", label: "Hooks", mount: (h) => { new SectionHook(h, c); } },
-      { tab: "managers/hooks", label: "Hooks", mount: (h) => { new SectionIntegrations(h, c); } },
+      { tab: "managers/hooks", label: "Hooks / Integrations", mount: (h) => { new SectionHook(h, c); } },
+      { tab: "managers/hooks", label: "Hooks / Integrations", mount: (h) => { new SectionIntegrations(h, c); } },
       { tab: "managers/keybinds", label: "Keybinds", mount: (h) => { new SectionHotkey(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, c); } },
