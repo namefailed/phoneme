@@ -20,7 +20,13 @@
  */
 import { mockIPC } from "@tauri-apps/api/mocks";
 
-const TAGS = [
+/** A catalog tag (mirrors ipc.ts `Tag`); `color` is `#rrggbb` or null (accent). */
+type Tag = { id: number; name: string; color: string | null };
+
+// Mutable in the mock so add / rename / recolor / delete and attach / detach
+// actually stick — the tag surfaces (detail-pane chips, Tag Manager, sidebar)
+// can be driven end-to-end in the browser preview, not just rendered read-only.
+const TAGS: Tag[] = [
   { id: 1, name: "work", color: "#cba6f7" },
   { id: 2, name: "personal", color: "#89b4fa" },
   { id: 3, name: "ideas", color: "#a6e3a1" },
@@ -356,6 +362,35 @@ let config: Record<string, unknown> = {
   rest_api: { enabled: true, port: 3737 },
 };
 
+/** Next free tag id (max existing + 1). */
+function newTagId(): number {
+  return TAGS.reduce((mx, t) => Math.max(mx, t.id), 0) + 1;
+}
+/** A recording's live tag array (mutated in place by attach / detach). */
+function recTags(r: Record<string, unknown>): Tag[] {
+  return r.tags as Tag[];
+}
+
+// Daemon-event emission. The real tray bridge re-emits every daemon state change
+// as the Tauri event "daemon-event", and the whole UI re-fetches off it (see
+// services/events.ts). mockIPC doesn't deliver events, so we capture each
+// "daemon-event" listener's callback as it subscribes (below) and invoke them
+// ourselves — tag edits then refresh the sidebar + Tag Manager live, exactly as
+// in the native app, instead of only the surface that made the edit.
+const daemonListeners: Array<(payload: unknown) => void> = [];
+function emitDaemon(evt: Record<string, unknown>): void {
+  // Defer a microtask so the broadcast lands AFTER the triggering invoke resolves.
+  void Promise.resolve().then(() => {
+    for (const cb of daemonListeners) {
+      try {
+        cb({ event: "daemon-event", id: 0, payload: evt });
+      } catch {
+        /* a dead listener must not break the others */
+      }
+    }
+  });
+}
+
 function handle(cmd: string, args: Record<string, unknown>): unknown {
   const id = args.id as string | undefined;
   switch (cmd) {
@@ -397,10 +432,137 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       return RECORDINGS.filter((r) => r.meeting_id === mid)
         .sort((a, b) => String(a.track).localeCompare(String(b.track)));
     }
-    case "list_tags":
-    case "list_all_tags": return TAGS;
-    case "tags_for": return (RECORDINGS.find((r) => r.id === id)?.tags as unknown) ?? [];
-    case "tag_usage_counts": return { "1": 2, "2": 3, "3": 4, "4": 2 };
+    case "list_tags": // sidebar: only tags attached to ≥1 recording
+      return TAGS.filter((t) => RECORDINGS.some((r) => recTags(r).some((x) => x.id === t.id)));
+    case "list_all_tags": return TAGS; // Tag Manager: every tag, including orphans
+    case "tags_for": {
+      // The UI passes `recordingId`; tolerate `id` too.
+      const rid = (args.recordingId ?? args.id) as string | undefined;
+      return (RECORDINGS.find((r) => r.id === rid)?.tags as unknown) ?? [];
+    }
+    case "tag_usage_counts": {
+      const counts: Record<string, number> = {};
+      for (const r of RECORDINGS) for (const t of recTags(r)) counts[String(t.id)] = (counts[String(t.id)] ?? 0) + 1;
+      return counts;
+    }
+    // ── Tag mutations: mutate the in-memory catalog + broadcast the matching
+    //    daemon event so every tag surface refreshes, like the real daemon. ──
+    case "add_tag": {
+      const name = String(args.name ?? "").trim();
+      const existing = TAGS.find((t) => t.name.toLowerCase() === name.toLowerCase());
+      if (existing) return existing; // lenient (the real daemon rejects duplicates)
+      const tag: Tag = { id: newTagId(), name, color: (args.color as string | null) ?? null };
+      TAGS.push(tag);
+      emitDaemon({ event: "tag_created", id: tag.id });
+      return tag;
+    }
+    case "update_tag": {
+      const tag = TAGS.find((t) => t.id === (args.id as number));
+      if (tag) {
+        tag.name = String(args.name ?? tag.name);
+        tag.color = (args.color as string | null) ?? null;
+        emitDaemon({ event: "tag_updated", id: tag.id });
+      }
+      return tag ?? null;
+    }
+    case "delete_tag": {
+      const tid = args.id as number;
+      const i = TAGS.findIndex((t) => t.id === tid);
+      if (i >= 0) TAGS.splice(i, 1);
+      for (const r of RECORDINGS) {
+        const ts = recTags(r);
+        const j = ts.findIndex((t) => t.id === tid);
+        if (j >= 0) ts.splice(j, 1);
+      }
+      emitDaemon({ event: "tag_deleted", id: tid });
+      return undefined;
+    }
+    case "attach_tag": {
+      const r = RECORDINGS.find((x) => x.id === (args.recordingId as string));
+      const tag = TAGS.find((t) => t.id === (args.tagId as number));
+      if (r && tag && !recTags(r).some((t) => t.id === tag.id)) recTags(r).push(tag);
+      emitDaemon({ event: "tag_attached", tag_id: args.tagId });
+      return undefined;
+    }
+    case "detach_tag": {
+      const r = RECORDINGS.find((x) => x.id === (args.recordingId as string));
+      if (r) {
+        const ts = recTags(r);
+        const j = ts.findIndex((t) => t.id === (args.tagId as number));
+        if (j >= 0) ts.splice(j, 1);
+      }
+      emitDaemon({ event: "tag_detached", tag_id: args.tagId });
+      return undefined;
+    }
+    case "merge_tags": {
+      const from = args.fromId as number, into = args.intoId as number;
+      if (from !== into) {
+        const intoTag = TAGS.find((t) => t.id === into);
+        for (const r of RECORDINGS) {
+          const ts = recTags(r);
+          const j = ts.findIndex((t) => t.id === from);
+          if (j >= 0) {
+            ts.splice(j, 1);
+            if (intoTag && !ts.some((t) => t.id === into)) ts.push(intoTag);
+          }
+        }
+        const i = TAGS.findIndex((t) => t.id === from);
+        if (i >= 0) TAGS.splice(i, 1);
+        emitDaemon({ event: "tag_deleted", id: from });
+      }
+      return undefined;
+    }
+    // ── Tag suggestions (the ✨ chips): synthesize a few proposals so approve /
+    //    dismiss / approve-all can be exercised too. ──
+    case "suggest_tags": {
+      const r = RECORDINGS.find((x) => x.id === id);
+      if (r) {
+        const have = new Set(recTags(r).map((t) => t.name));
+        r.tag_suggestions = ["meeting", "follow-up", "important", "draft", "review"]
+          .filter((n) => !have.has(n))
+          .slice(0, 3);
+        emitDaemon({ event: "tag_suggestions_updated", id });
+      }
+      return undefined;
+    }
+    case "approve_tag_suggestion": {
+      const r = RECORDINGS.find((x) => x.id === id);
+      const name = String(args.name ?? "");
+      let tag = TAGS.find((t) => t.name.toLowerCase() === name.toLowerCase());
+      if (!tag) {
+        tag = { id: newTagId(), name, color: null };
+        TAGS.push(tag);
+        emitDaemon({ event: "tag_created", id: tag.id });
+      }
+      if (r) {
+        if (!recTags(r).some((t) => t.id === tag!.id)) recTags(r).push(tag);
+        r.tag_suggestions = ((r.tag_suggestions as string[]) ?? []).filter((n) => n !== name);
+        emitDaemon({ event: "tag_attached", tag_id: tag.id });
+        emitDaemon({ event: "tag_suggestions_updated", id });
+      }
+      return tag;
+    }
+    case "dismiss_tag_suggestion": {
+      const r = RECORDINGS.find((x) => x.id === id);
+      if (r) {
+        r.tag_suggestions = ((r.tag_suggestions as string[]) ?? []).filter((n) => n !== args.name);
+        emitDaemon({ event: "tag_suggestions_updated", id });
+      }
+      return undefined;
+    }
+    case "clear_all_tag_suggestions": {
+      let cleared = 0;
+      for (const r of RECORDINGS) {
+        const s = r.tag_suggestions as string[] | undefined;
+        if (s && s.length) {
+          cleared++;
+          r.tag_suggestions = [];
+          emitDaemon({ event: "tag_suggestions_updated", id: r.id });
+        }
+      }
+      emitDaemon({ event: "all_tag_suggestions_cleared", cleared });
+      return { cleared };
+    }
     case "kind_counts": return {
       all: RECORDINGS.length,
       single: RECORDINGS.filter((r) => r.meeting_id == null).length,
@@ -424,8 +586,17 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "more_like_this": return [];
     case "list_profiles": return ["default"];
     case "list_profiles_detailed": return [{ name: "default", modified_ms: null }];
-    // Event plumbing: accept listen/unlisten so subscribe() resolves; we never emit.
-    case "plugin:event|listen": return ++eventId;
+    // Event plumbing: accept listen/unlisten so subscribe() resolves. For the
+    // "daemon-event" stream we ALSO capture the listener's callback (Tauri stores
+    // it on window as `_<handler>` via transformCallback) so emitDaemon can drive
+    // it — tag edits then refresh every subscribed surface, like the real bridge.
+    case "plugin:event|listen": {
+      if (args.event === "daemon-event" && typeof args.handler === "number") {
+        const cb = (window as unknown as Record<string, unknown>)["_" + args.handler];
+        if (typeof cb === "function") daemonListeners.push(cb as (p: unknown) => void);
+      }
+      return ++eventId;
+    }
     case "plugin:event|unlisten":
     case "plugin:event|emit":
     case "plugin:event|emit_to": return undefined;
