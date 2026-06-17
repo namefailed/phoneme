@@ -323,7 +323,7 @@ export class SectionWhisper {
                 this.config.whisper.model_path,
               )}
             </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; max-width: 800px; margin-left: 256px;">
+            <div style="display: flex; flex-direction: column; gap: 4px; max-width: 800px;">
               ${modelCardsHtml}
               <div style="margin-top: 8px;">
                  <button class="inline-button" id="pick-model" style="font-size: 0.7857rem;">Browse for custom .bin…</button>

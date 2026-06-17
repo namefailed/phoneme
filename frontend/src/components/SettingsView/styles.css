@@ -441,6 +441,18 @@ mark.settings-hit {
   line-height: 1.5;
   margin-top: 2px;
 }
+/* "stacked" fields hold a control too wide for the 240px-label / 1fr-control
+   split — the bundled-model list, the webhook-header and keyword-rule editors.
+   Collapse to a single full-width column so the label sits on its own line with
+   the control full-width beneath it: no hardcoded indent is needed and the whole
+   field shrinks cleanly in a narrow / split window instead of overflowing. */
+.settings-field.stacked {
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+.settings-field.stacked > span {
+  grid-column: 1;
+}
 /* Narrow window: collapse the fixed 240px label column so each label stacks
    above its control instead of squeezing the control column until inputs
    overflow. The Settings window is usually opened wide, so this is just a
