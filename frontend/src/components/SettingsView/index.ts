@@ -718,7 +718,7 @@ export class SettingsViewElement extends LitElement {
           <h2>Settings</h2>
           <div class="sv-search-wrap">
             <svg class="sv-search-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            <input type="search" class="settings-search" placeholder="Search all settings…" @input=${this.handleSearch} @keydown=${this.handleSearchKeydown} />
+            <input type="search" class="settings-search" placeholder="Search settings…" @input=${this.handleSearch} @keydown=${this.handleSearchKeydown} />
             <button type="button" class="sv-search-clear ${isSearching ? "" : "is-hidden"}" title="Clear search (Esc)" aria-label="Clear search" @click=${this.clearSearch}>✕</button>
           </div>
 
