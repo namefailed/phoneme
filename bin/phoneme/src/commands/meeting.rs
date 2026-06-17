@@ -4,13 +4,13 @@
 //! as two separate recordings linked by a shared `meeting_id`; both are
 //! transcribed independently through the normal pipeline.
 //!
-//! Each subcommand maps 1:1 to an IPC request on the spawning path:
-//! `start` → `StartMeeting`, `stop` → `StopMeeting`, `toggle` →
-//! `MeetingToggle` (atomic, for hotkey-style bindings), `tracks
-//! <meeting_id>` → `ListMeeting` (rendered like `phoneme list`), and
-//! `rename <meeting_id> <name>` → `UpdateMeetingName`. The start/stop/
-//! toggle replies print the `meeting_id` so scripts can chain into
-//! `tracks`.
+//! Each subcommand maps 1:1 to an IPC request. The mutating verbs ride the
+//! spawning path: `start` → `StartMeeting`, `stop` → `StopMeeting`, `toggle`
+//! → `MeetingToggle` (atomic, for hotkey-style bindings), and `rename
+//! <meeting_id> <name>` (or `--clear`) → `UpdateMeetingName`. `tracks
+//! <meeting_id>` → `ListMeeting` (rendered like `phoneme list`) is read-only,
+//! so it uses the observe-only path like `list`. The start/stop/toggle
+//! replies print the `meeting_id` so scripts can chain into `tracks`.
 
 use crate::args::{MeetingAction, MeetingArgs};
 use crate::client::Client;
@@ -20,14 +20,15 @@ use phoneme_ipc::Request;
 use std::process::ExitCode;
 
 pub async fn run(args: MeetingArgs, cfg: &Config, json: bool) -> ExitCode {
-    let mut client = match Client::connect(cfg).await {
-        Ok(c) => c,
-        Err(code) => return code,
-    };
-
     // `tracks` returns a list of recordings, so it gets its own rendering path
-    // (table / JSON-lines) rather than the meeting_id-printing path below.
+    // (table / JSON-lines) rather than the meeting_id-printing path below. It is
+    // a read-only inspection (like `list`), so it uses the observe-only path:
+    // a down daemon is the answer, not something to fix by spawning one.
     if let MeetingAction::Tracks { meeting_id } = &args.action {
+        let mut client = match Client::connect_observe(cfg).await {
+            Ok(c) => c,
+            Err(code) => return code,
+        };
         let value = match client
             .send(Request::ListMeeting {
                 meeting_id: meeting_id.clone(),
@@ -52,15 +53,26 @@ pub async fn run(args: MeetingArgs, cfg: &Config, json: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // Start/stop/toggle/rename mutate daemon state, so they ride the spawning
+    // path: a missing daemon is started rather than treated as the answer.
+    let mut client = match Client::connect(cfg).await {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+
     let req = match args.action {
         MeetingAction::Start => Request::StartMeeting,
         MeetingAction::Stop => Request::StopMeeting,
         MeetingAction::Toggle => Request::MeetingToggle,
         MeetingAction::Tracks { .. } => unreachable!("handled above"),
-        MeetingAction::Rename { meeting_id, name } => Request::UpdateMeetingName {
+        // `--clear` (no NAME) sends `None`, which the daemon stores as a NULL
+        // meeting_name (auto-generated label); a NAME sends `Some(name)`. An
+        // empty positional NAME is rejected by clap's required/conflicts rules.
+        MeetingAction::Rename {
             meeting_id,
-            name: Some(name),
-        },
+            name,
+            clear: _,
+        } => Request::UpdateMeetingName { meeting_id, name },
     };
 
     match client.send(req).await {

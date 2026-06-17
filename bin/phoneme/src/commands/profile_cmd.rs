@@ -101,7 +101,10 @@ async fn switch(cfg: &Config, name: &str) -> ExitCode {
 /// Write `config` to the resolved config.toml path atomically (temp + rename).
 fn write_config(config: &Config) -> Result<(), String> {
     config.validate().map_err(|e| e.to_string())?;
-    let path = phoneme_core::config::default_config_path()
+    // Write to the config file the daemon actually reads — honoring
+    // PHONEME_CONFIG — so `profile use` under an env override updates the live
+    // config instead of the default path.
+    let path = phoneme_core::config::resolved_config_path()
         .ok_or_else(|| "could not resolve config path".to_string())?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

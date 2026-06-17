@@ -156,8 +156,19 @@ pub enum MeetingAction {
     Toggle,
     /// List every recording (track) belonging to a meeting session.
     Tracks { meeting_id: String },
-    /// Rename a meeting session.
-    Rename { meeting_id: String, name: String },
+    /// Set or clear a meeting session's display name. Give a NAME to set it, or
+    /// pass --clear (with no NAME) to remove the name and fall back to the
+    /// auto-generated label.
+    Rename {
+        meeting_id: String,
+        /// The new display name. Omit it together with --clear to remove the
+        /// name entirely.
+        #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+        name: Option<String>,
+        /// Clear the name (revert to the auto-generated meeting label).
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 #[derive(Debug, clap::Args)]

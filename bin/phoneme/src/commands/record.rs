@@ -96,14 +96,26 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         .map(str::to_owned);
 
     if matches!(mode, RecordMode::Hold) {
-        // Wait for the user to hit Enter or close stdin.
+        // Wait for the user to hit Enter / close stdin (normal stop) OR press
+        // Ctrl+C. Without the Ctrl+C arm an interrupt would tear the process
+        // down while the daemon kept recording indefinitely — the take would
+        // leak. On Ctrl+C we discard the in-progress recording (RecordCancel)
+        // and exit; a clean Enter/EOF stops and keeps it (RecordStop).
         use tokio::io::{AsyncBufReadExt, BufReader};
         let stdin = tokio::io::stdin();
         let mut reader = BufReader::new(stdin);
         let mut line = String::new();
-        let _ = reader.read_line(&mut line).await;
-        if let Err(code) = control.send_silent(Request::RecordStop).await {
-            return code;
+        tokio::select! {
+            _ = reader.read_line(&mut line) => {
+                if let Err(code) = control.send_silent(Request::RecordStop).await {
+                    return code;
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                let _ = control.send_silent(Request::RecordCancel).await;
+                eprintln!("interrupted — discarded the in-progress recording");
+                return ExitCode::from(exit::GENERIC_FAIL);
+            }
         }
     }
 

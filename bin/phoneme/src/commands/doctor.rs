@@ -70,11 +70,12 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
             }
         }
 
-        // Delete the catalog database
-        let dirs = directories::ProjectDirs::from("", "", "phoneme")
-            .ok_or_else(|| anyhow::anyhow!("could not resolve project directories"));
-        if let Ok(dirs) = dirs {
-            let catalog_path = dirs.data_local_dir().join("catalog.db");
+        // Delete the catalog database. Resolve the data-local root the same way
+        // the daemon does — honoring PHONEME_DATA_LOCAL — so an overridden data
+        // directory is the one we touch instead of always deleting the default
+        // catalog.db out from under a daemon pointed elsewhere.
+        if let Some(data_local) = resolve_data_local_dir() {
+            let catalog_path = data_local.join("catalog.db");
             if catalog_path.exists() {
                 if let Err(e) = std::fs::remove_file(&catalog_path) {
                     eprintln!("error: failed to delete catalog.db: {e}");
@@ -84,7 +85,7 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
                 // catalog.db-wal next to a brand-new database is at best dead
                 // weight and at worst a confusing recovery candidate.
                 for ext in ["db-wal", "db-shm"] {
-                    let sidecar = dirs.data_local_dir().join(format!("catalog.{ext}"));
+                    let sidecar = data_local.join(format!("catalog.{ext}"));
                     let _ = std::fs::remove_file(sidecar);
                 }
                 println!("deleted catalog.db");
@@ -313,4 +314,17 @@ pub async fn run(args: DoctorArgs, cfg: &Config, json: bool) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Resolve the local app-data root (where catalog.db lives) the same way the
+/// daemon and the shared doctor checks do: the `PHONEME_DATA_LOCAL` override
+/// wins, otherwise the platform default. Keeps `--rebuild-catalog` pointed at
+/// the volume the daemon actually writes to.
+fn resolve_data_local_dir() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("PHONEME_DATA_LOCAL") {
+        if !p.is_empty() {
+            return Some(std::path::PathBuf::from(p));
+        }
+    }
+    directories::ProjectDirs::from("", "", "phoneme").map(|d| d.data_local_dir().to_path_buf())
 }

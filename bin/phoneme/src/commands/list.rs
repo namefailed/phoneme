@@ -111,10 +111,21 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         "cancelled" => Some(RecordingStatus::Cancelled),
         _ => None,
     });
+    // The flag's help advertises bare dates (e.g. 2026-05-19), but a full
+    // RFC 3339 timestamp is also accepted. Try RFC 3339 first; on failure fall
+    // back to a date-only parse interpreted at local start-of-day, so the
+    // documented date form actually filters instead of being silently dropped.
     let parse_date = |s: String| {
-        chrono::DateTime::parse_from_rfc3339(&s)
+        if let Ok(d) = chrono::DateTime::parse_from_rfc3339(&s) {
+            return Some(d.with_timezone(&chrono::Local));
+        }
+        chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
             .ok()
-            .map(|d| d.with_timezone(&chrono::Local))
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .and_then(|naive| {
+                use chrono::TimeZone;
+                chrono::Local.from_local_datetime(&naive).single()
+            })
     };
     let since = args.since.and_then(parse_date);
     let until = args.until.and_then(parse_date);
