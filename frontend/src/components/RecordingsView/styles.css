@@ -2278,7 +2278,7 @@ ph-sidebar .queue-item-main.kbd-cursor {
   border-radius: 50%;
   margin-right: 6px;
 }
-/* "All Tags" gets a rainbow dot since it represents every tag at once. */
+/* "Tagged" gets a rainbow dot since it spans every tag at once. */
 .sidebar-dot-rainbow {
   background: conic-gradient(
     from 0deg,

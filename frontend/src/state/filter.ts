@@ -15,7 +15,7 @@ export type RecordingKind = "all" | "single" | "meeting" | "in_place" | "favorit
 
 /** Tag-presence filter, independent of `kind` and `tag_id`: only recordings
  *  with ≥1 tag, only recordings with 0 tags, or no constraint. Powers the
- *  sidebar's toggleable "All Tags" / "Untagged" rows. */
+ *  sidebar's toggleable "Untagged" / "Tagged" rows. */
 export type TagState = "tagged" | "untagged" | null;
 
 /**

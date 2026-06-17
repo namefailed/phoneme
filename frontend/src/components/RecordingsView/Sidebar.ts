@@ -130,12 +130,12 @@ export class SidebarElement extends LitElement {
 
   private setTagFilter(id: number | null) {
     // Kind and tag are independent filters and combine (e.g. Meetings + #tacos).
-    // A specific tag is narrower than the "All Tags" presence filter, so picking
+    // A specific tag is narrower than the "Tagged" presence filter, so picking
     // one clears that constraint (it'd be redundant — the tag implies "tagged").
     filterStore.set({ ...this.filterState, tag_id: id, tagState: null });
   }
 
-  /** Toggle the tag-presence filter ("All Tags" = tagged, "Untagged" = none).
+  /** Toggle the tag-presence filter ("Tagged" = has tags, "Untagged" = none).
    *  Clicking the already-active row turns it off (back to All Recordings).
    *  Independent of the Library `kind`, but clears any single-tag selection so
    *  "every tagged note" doesn't silently stay narrowed to one tag. */
@@ -194,20 +194,20 @@ export class SidebarElement extends LitElement {
           </div>
           ${this.tagsOpen ? html`
             <div class="sidebar-list">
-              <div class="sidebar-item ${f.tagState === 'tagged' ? 'active' : ''}" @click=${() => this.setTagState('tagged')}>
-                <span class="sidebar-icon" style="color: var(--accent);">#</span>
-                <span class="sidebar-label">All Tags</span>
-                <span class="sidebar-dot sidebar-dot-rainbow" title="Recordings with at least one tag"></span>
-                ${this.kindTotals
-                  ? html`<span class="sidebar-count" title="${this.kindTotals.tagged} recording${this.kindTotals.tagged === 1 ? "" : "s"} with at least one tag">${this.kindTotals.tagged}</span>`
-                  : ""}
-              </div>
               <div class="sidebar-item ${f.tagState === 'untagged' ? 'active' : ''}" @click=${() => this.setTagState('untagged')}>
                 <span class="sidebar-icon" style="color: var(--fg-faded);">#</span>
                 <span class="sidebar-label">Untagged</span>
                 <span class="sidebar-dot sidebar-dot-none" title="Recordings with no tags"></span>
                 ${this.kindTotals
                   ? html`<span class="sidebar-count" title="${this.kindTotals.untagged} recording${this.kindTotals.untagged === 1 ? "" : "s"} with no tags">${this.kindTotals.untagged}</span>`
+                  : ""}
+              </div>
+              <div class="sidebar-item ${f.tagState === 'tagged' ? 'active' : ''}" @click=${() => this.setTagState('tagged')}>
+                <span class="sidebar-icon" style="color: var(--accent);">#</span>
+                <span class="sidebar-label">Tagged</span>
+                <span class="sidebar-dot sidebar-dot-rainbow" title="Recordings with at least one tag"></span>
+                ${this.kindTotals
+                  ? html`<span class="sidebar-count" title="${this.kindTotals.tagged} recording${this.kindTotals.tagged === 1 ? "" : "s"} with at least one tag">${this.kindTotals.tagged}</span>`
                   : ""}
               </div>
               ${this.tags.length === 0 ? html`
