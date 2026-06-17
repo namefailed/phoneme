@@ -93,7 +93,7 @@ export class SectionHook {
   private render(container: HTMLElement) {
     container.innerHTML = `
       <div class="settings-section">
-        <h3>Destination & Integrations</h3>
+        <h3>Hooks &amp; webhooks</h3>
         <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Phoneme can automatically pass your voice notes to other applications or save them to disk by executing local scripts. Point these at a <code>.bat</code> or <code>.ps1</code> file to save notes to Obsidian, Word, or anything else. Multiple commands run sequentially in order.
         </p>

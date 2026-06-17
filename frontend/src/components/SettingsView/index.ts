@@ -87,18 +87,32 @@ const SETTINGS_TABS: { id: string; label: string }[] = [
   { id: "postprocessing", label: "✨ Post-Processing" },
   { id: "recall", label: "🔮 Recall" },
   { id: "appearance", label: "🎨 Appearance" },
-  { id: "managers", label: "🗂️ Managers" },
   { id: "system", label: "⚙️ System" },
 ];
 
-/** Legacy deep-link tab ids → current ids, so openers that predate the
- *  re-taxonomy (header jump-menu, g-chords, the Re-run "enable cleanup" link)
- *  and any saved links keep resolving after a tab rename. `tags` is the old
- *  standalone Tags tab, now a Managers sub-tab; `ai` was a brief rename of
- *  Post-Processing. */
+/** The interactive manager surfaces — each is its own entry in the rail under a
+ *  "Managers" group header, NOT a config tab (CRUD with side effects vs. the
+ *  config-bound fields above). Ids are `managers/<x>` so the existing g-chord /
+ *  header deep-links ("managers/profiles", "managers/saved") resolve straight
+ *  here. Rendered between Appearance and System (see the rail in render()). */
+const MANAGERS: { id: string; label: string }[] = [
+  { id: "managers/tags", label: "🏷️ Tags" },
+  { id: "managers/profiles", label: "👤 Profiles" },
+  { id: "managers/saved", label: "📌 Saved searches" },
+  { id: "managers/hooks", label: "🪝 Hooks" },
+  { id: "managers/keybinds", label: "⚡ Keybinds" },
+];
+
+/** Legacy deep-link ids → current ids, so openers that predate the re-taxonomy
+ *  (header jump-menu, g-chords, the Re-run "enable cleanup" link, saved links)
+ *  keep resolving. `ai` was a brief rename of Post-Processing; the bare
+ *  `managers`/`tags`/… ids now point at the corresponding rail entry. */
 const LEGACY_TAB_ALIASES: Record<string, string> = {
-  tags: "managers",
   ai: "postprocessing",
+  managers: "managers/tags",
+  tags: "managers/tags",
+  profiles: "managers/profiles",
+  saved: "managers/saved",
 };
 function resolveTab(rawTab: string): string {
   return LEGACY_TAB_ALIASES[rawTab] ?? rawTab;
@@ -138,9 +152,6 @@ export class SettingsViewElement extends LitElement {
   // Public so an opener (e.g. the Re-run "Enable cleanup in Settings" shortcut)
   // can deep-link to a tab; also mutated internally by switchTab.
   @property({ type: String }) activeTab: string = "transcription";
-  /** Sub-tab within the Managers tab (Tags · Profiles · Saved searches). Set
-   *  by the sub-tab bar and by composite deep-links ("managers/profiles"). */
-  private managersSub: "tags" | "profiles" | "saved" = "tags";
   @state() private config: any = null;
   @state() private searchQuery: string = "";
   /** In-panel ⚙ Settings split-button dropdown (mirrors the header's) (L). */
@@ -356,22 +367,12 @@ export class SettingsViewElement extends LitElement {
       }
       this.applySearchFilter();
     } else {
-      // The tab may arrive as a composite deep-link ("managers/profiles") from
-      // the g-chords or another component — split off the sub-tab. "tags" is a
-      // legacy alias for the standalone Tags tab, now a Managers sub-tab.
-      const [rawTab, sub] = this.activeTab.split("/");
-      if (sub === "tags" || sub === "profiles" || sub === "saved") this.managersSub = sub;
-      const tab = resolveTab(rawTab);
-      if (rawTab === "tags") this.managersSub = "tags";
-      if (tab === "managers") {
-        // Managers keeps its own sub-tab strip (Tags · Profiles · Saved).
-        this.mountManagers(createSubHost());
-      } else {
-        // Every other tab is registry-driven: mount, in order, each section
-        // whose `tab` matches. One source of truth shared with search above.
-        for (const s of this.sectionRegistry()) {
-          if (s.tab === tab) s.mount(createSubHost());
-        }
+      // Config tab OR a manager id ("managers/hooks") — both are registry-driven
+      // now (managers are their own rail entries, no sub-tab strip). Mount, in
+      // order, each section whose `tab` matches. One source of truth with search.
+      const tab = resolveTab(this.activeTab);
+      for (const s of this.sectionRegistry()) {
+        if (s.tab === tab) s.mount(createSubHost());
       }
     }
   }
@@ -389,73 +390,25 @@ export class SettingsViewElement extends LitElement {
       { tab: "preview", label: "Live Preview", mount: (h) => { new SectionPreview(h, c); } },
       { tab: "diarization", label: "Diarization", mount: (h) => { new SectionDiarization(h, c); } },
       { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, c); } },
-      { tab: "capture", label: "Capture", mount: (h) => { new SectionHotkey(h, c); } },
       { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, c); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, c); } },
       { tab: "recall", label: "Recall", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, c); } },
-      { tab: "managers", label: "Managers", mount: (h) => { new SectionTags(h, c); } },
-      { tab: "managers", label: "Managers", mount: (h) => { new SectionProfiles(h, c); } },
-      { tab: "managers", label: "Managers", mount: (h) => { new SectionSavedSearches(h, c); } },
+      // Managers (each its own rail entry under the "Managers" group).
+      { tab: "managers/tags", label: "Tags", mount: (h) => { new SectionTags(h, c); } },
+      { tab: "managers/profiles", label: "Profiles", mount: (h) => { new SectionProfiles(h, c); } },
+      { tab: "managers/saved", label: "Saved searches", mount: (h) => { new SectionSavedSearches(h, c); } },
+      // Hook Manager — outbound (scripts + webhook) AND inbound (REST + MCP)
+      // automation in one place.
+      { tab: "managers/hooks", label: "Hooks", mount: (h) => { new SectionHook(h, c); } },
+      { tab: "managers/hooks", label: "Hooks", mount: (h) => { new SectionIntegrations(h, c); } },
+      { tab: "managers/keybinds", label: "Keybinds", mount: (h) => { new SectionHotkey(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionIntegrations(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, c, this.onNavigateToWizard); } },
     ];
-  }
-
-  /** The Managers tab: a top sub-tab strip (Tags · Profiles · Saved searches)
-   *  over the chosen manager section. Sub-tab clicks re-mount in place. */
-  private mountManagers(host: HTMLElement) {
-    const subs = [
-      { id: "tags" as const, label: "🏷️ Tags" },
-      { id: "profiles" as const, label: "👤 Profiles" },
-      { id: "saved" as const, label: "📌 Saved searches" },
-    ];
-    host.innerHTML = `
-      <div class="managers-subtabs">
-        ${subs
-          .map(
-            (s) =>
-              `<button class="managers-subtab ${this.managersSub === s.id ? "active" : ""}" data-sub="${s.id}">${s.label}</button>`,
-          )
-          .join("")}
-      </div>
-      <div id="managers-body"></div>
-      <style>
-        .managers-subtabs {
-          display: flex; gap: 6px; margin-bottom: 14px;
-          border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;
-        }
-        .managers-subtab {
-          background: var(--bg-surface); border: 1px solid var(--border-subtle);
-          color: var(--fg-muted); font-size: 0.9286rem; padding: 6px 14px;
-          border-radius: 8px; cursor: pointer;
-          transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
-        }
-        .managers-subtab:hover { color: var(--fg-default); }
-        .managers-subtab.active {
-          background: color-mix(in srgb, var(--accent) 16%, transparent);
-          border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-          color: var(--accent); font-weight: 600;
-        }
-      </style>
-    `;
-    const body = host.querySelector<HTMLElement>("#managers-body")!;
-    if (this.managersSub === "profiles") new SectionProfiles(body, this.config);
-    else if (this.managersSub === "saved") new SectionSavedSearches(body, this.config);
-    else new SectionTags(body, this.config);
-    host.querySelectorAll<HTMLButtonElement>(".managers-subtab").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        this.managersSub = btn.dataset.sub as "tags" | "profiles" | "saved";
-        // Normalize a composite deep-link tab so re-mounts don't re-apply it.
-        if (this.activeTab.includes("/")) this.activeTab = "managers";
-        this.mountManagers(host);
-      });
-    });
   }
 
   /**
@@ -722,13 +675,22 @@ export class SettingsViewElement extends LitElement {
     }
 
     const isSearching = this.searchQuery.trim().length > 0;
-    // The active tab may be a composite deep-link ("managers/profiles") or a
-    // legacy id ("postprocessing") — resolve the base for highlighting.
-    const tab = resolveTab(this.activeTab.split("/")[0]);
+    // The active tab is a config id, a manager id ("managers/hooks"), or a
+    // legacy id ("ai"/"tags") — resolve it to the current id for highlighting.
+    const tab = resolveTab(this.activeTab);
 
     return html`
       <div class="settings-layout">
         <div class="settings-sidebar">
+          <style>
+            .sv-rail-group {
+              font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em;
+              text-transform: uppercase; color: var(--fg-faded);
+              padding: 6px 10px 4px; margin: 10px 0 2px;
+              border-top: 1px solid var(--border-subtle);
+            }
+            .sv-tab.sv-tab-manager { margin-left: 8px; }
+          </style>
           <h2>Settings</h2>
           <div class="sv-search-wrap">
             <svg class="sv-search-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -736,12 +698,21 @@ export class SettingsViewElement extends LitElement {
             <button type="button" class="sv-search-clear ${isSearching ? "" : "is-hidden"}" title="Clear search (Esc)" aria-label="Clear search" @click=${this.clearSearch}>✕</button>
           </div>
 
-          ${SETTINGS_TABS.map(
-            (t) => html`<div
-              class="sv-tab ${tab === t.id && !isSearching ? "active" : ""}"
-              @click=${() => this.switchTab(t.id)}
-            >${t.label}</div>`,
-          )}
+          ${(() => {
+            // Config tabs, then a "Managers" group header with each manager as
+            // its own rail entry, then System last (see SETTINGS_TABS / MANAGERS).
+            const chip = (id: string, label: string, extra = "") => html`<div
+              class="sv-tab ${extra} ${tab === id && !isSearching ? "active" : ""}"
+              @click=${() => this.switchTab(id)}
+            >${label}</div>`;
+            const sys = SETTINGS_TABS.find((t) => t.id === "system");
+            return html`
+              ${SETTINGS_TABS.filter((t) => t.id !== "system").map((t) => chip(t.id, t.label))}
+              <div class="sv-rail-group">Managers</div>
+              ${MANAGERS.map((m) => chip(m.id, m.label, "sv-tab-manager"))}
+              ${sys ? chip(sys.id, sys.label) : ""}
+            `;
+          })()}
 
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
@@ -756,7 +727,7 @@ export class SettingsViewElement extends LitElement {
               <button class="hb-menu-item" role="menuitem" @click=${this.openFloatModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
               <div class="hb-menu-sep"></div>
               <div class="hb-menu-label">Jump to section</div>
-              ${SETTINGS_TABS.map((t) => {
+              ${[...SETTINGS_TABS, ...MANAGERS].map((t) => {
                 // Split the leading emoji off the label so it sits in the icon slot.
                 const sp = t.label.indexOf(" ");
                 const ico = sp > 0 ? t.label.slice(0, sp) : "";
