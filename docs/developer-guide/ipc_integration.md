@@ -61,7 +61,7 @@ here, because those drift; the field names below are just enough to orient you.
 - `start_meeting`, `stop_meeting`, `meeting_toggle`
 
 **Catalog & import:**
-- `list_recordings` (with a `filter`), `get_recording`, `list_meeting`, `get_segments` (machine transcript segments with ms timing + speaker labels; empty list when none are stored)
+- `list_recordings` (with a `filter`), `kind_counts` (per-Library-kind totals for the sidebar badges), `get_recording`, `list_meeting`, `get_segments` (machine transcript segments with ms timing + speaker labels; empty list when none are stored)
 - `get_words` (machine transcript **words** — the finer per-word layer beneath `get_segments`; ordered JSON array of `{ idx, start_ms, end_ms, text, speaker, confidence }`, where `confidence` is a 0..1 per-word score or `null` when the provider gives none — whisper-family endpoints emit only segment-level logprobs, so only Deepgram/AssemblyAI populate it. `speaker` is the `[Speaker N]` label (or `null` when undiarized): Deepgram/AssemblyAI tag words from their own speaker labels, and local diarization now tags each word too — it assigns speakers per word off the diarizer's per-frame activation matrix rather than per whole segment. Empty list when none are stored. Fetched lazily by the word-level features — word↔waveform seek and confidence highlighting)
 - `delete_recording` (`keep_audio` bool), `import_recording` (`.wav`/`.mp3`/`.m4a`/`.flac`)
 - `list_ai_activity` (`recording_id` optional, `limit`) — the persisted AI-activity log: completed streaming LLM sessions (cleanup/summary and their re-runs) with the exact prompt + response, newest first. Powers the 🧠 popout's history so it survives app restarts. `recording_id` filters to one recording; omit it for the whole library's recent activity. The daemon prunes the table to a bounded recent window.
@@ -77,11 +77,16 @@ here, because those drift; the field names below are just enough to orient you.
 
 The `list_recordings` filter takes `limit`/`offset` (pagination),
 `since`/`until` (RFC 3339), `status` (one of the recording statuses below),
-`search` (FTS5), `tag_id`, `sort_desc`, plus two type filters applied in SQL
+`search` (FTS5), `tag_id`, `sort_desc`, plus three type filters applied in SQL
 **before** pagination so pages stay full: `kind` (`"single"` voice notes /
-`"meeting"` tracks; omit for all) and `favorite` (`true` = starred only,
-`false` = unstarred only). All fields are optional; older clients that omit
-the newer ones keep working.
+`"meeting"` tracks; omit for all), `favorite` (`true` = starred only,
+`false` = unstarred only), and `in_place` (`true` = only in-place-dictation
+recordings). All fields are optional; older clients that omit the newer ones
+keep working.
+
+`kind_counts` returns full-corpus recording counts per Library kind as a JSON
+object — `{all, single, meeting, in_place, favorite}` (one SQL pass,
+`Catalog::kind_counts`) — powering the sidebar's Library count badges.
 
 Recording `status` values: `recording`, `paused`, `queued`, `transcribing`,
 `cleaning_up`, `summarizing`, `tagging`, `hook_running`, `done`,

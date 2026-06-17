@@ -419,6 +419,21 @@ trust boundary. Verified against current code.*
   from where you clicked rather than gliding in from a stale spot.
 - [x] **Settings consistency** — Live Preview field hints moved to the shared
   value-column help style; the bundled-model list aligns with the other inputs.
+- [x] **Library count badges** — the sidebar's Library rows (All Recordings /
+  Voice Notes / Meetings / In-Place / Favorites) now carry the same right-anchored
+  count badge as the tag rows, fed by a single `kind_counts` IPC (one SQL pass;
+  `Catalog::kind_counts`) and refreshed off recording lifecycle + favorite events.
+- [x] **In-Place Library filter** — a new **In-Place** row (above Favorites) filters
+  to recordings captured via in-place dictation, applied in SQL before pagination
+  (`ListFilter.in_place`) so pages stay full.
+- [x] **Status filter dropdown** matches its pill width — the popup is pinned to the
+  button via the customizable-`<select>` model (`appearance: base-select` +
+  `anchor-size`), instead of the native popup spilling wider; degrades to the
+  classic select on older runtimes.
+- [x] **Escape closes every dropdown** — the Speed / Export action-row menus and the
+  Saved-searches dropdown now close on Escape (they only closed on outside-click
+  before), matching the Views / Versions / Pipeline menus and modals. Escape never
+  bubbles up to close the open recording.
 
 - [x] **Safe "Re-import recordings from disk"** — a NON-destructive recovery path
   (`ReimportFromDisk` IPC, `phoneme doctor --reimport`): scans the audio directory
