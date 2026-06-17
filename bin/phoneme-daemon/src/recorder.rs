@@ -321,6 +321,34 @@ struct ActiveMeeting {
     paused: bool,
     /// Wall-clock instant when the meeting session began (before per-track setup).
     wall_started: Instant,
+    /// When currently paused, the wall-offset (ms since `wall_started`) the pause
+    /// began; `None` while running. Set on pause, cleared (into `pause_spans_ms`)
+    /// on resume.
+    paused_at_ms: Option<i64>,
+    /// Completed pause spans as `[start_ms, end_ms]` wall-offsets. Every track
+    /// discards audio while paused, so its captured timeline is COMPRESSED by
+    /// these spans; `stop_meeting` folds them out of the wall clock (duration and
+    /// each track's first-content offset) so both tracks align on the same
+    /// active-only clock instead of desyncing by the pause length.
+    pause_spans_ms: Vec<(i64, i64)>,
+}
+
+/// Total paused time (ms) across a meeting's completed pause spans. Pure helper
+/// for the active-clock conversion in `stop_meeting`.
+fn total_paused_ms(spans: &[(i64, i64)]) -> i64 {
+    spans.iter().map(|(s, e)| (e - s).max(0)).sum()
+}
+
+/// Paused time (ms) that elapsed strictly BEFORE wall-offset `t_ms` — the spans
+/// fully before it. First content is only ever stamped while running, so a span
+/// never straddles `t_ms`; this is what shifts a track's first-content anchor
+/// onto the active clock. Pure helper.
+fn paused_before_ms(spans: &[(i64, i64)], t_ms: i64) -> i64 {
+    spans
+        .iter()
+        .filter(|(_, e)| *e <= t_ms)
+        .map(|(s, e)| (e - s).max(0))
+        .sum()
 }
 
 /// One meeting track that stopped cleanly and has been aligned to the shared
@@ -385,6 +413,14 @@ impl DaemonRecorder {
         } else {
             false
         }
+    }
+
+    /// Whether a single recording OR a meeting is currently in flight. Used to
+    /// refuse destructive whole-catalog operations (the rebuild) while capture
+    /// is live, so we never wipe the row of a recording that's still being
+    /// written.
+    pub async fn is_busy(&self) -> bool {
+        self.active.lock().await.is_some() || self.meeting.lock().await.is_some()
     }
 
     /// Start idle pre-roll pre-capture if it's enabled for the current config
@@ -1279,6 +1315,10 @@ impl DaemonRecorder {
                     });
                 }
                 meeting.paused = true;
+                // Mark when (on the meeting's wall clock) this pause began, so
+                // stop_meeting can fold the paused span out of the timeline.
+                meeting.paused_at_ms =
+                    Some(Instant::now().duration_since(meeting.wall_started).as_millis() as i64);
                 tracing::info!(session = %meeting.meeting_id, "meeting paused");
                 return Ok(meeting.tracks[0].id.clone());
             }
@@ -1333,6 +1373,12 @@ impl DaemonRecorder {
                     });
                 }
                 meeting.paused = false;
+                // Close the open pause span on the meeting's wall clock.
+                if let Some(start_ms) = meeting.paused_at_ms.take() {
+                    let end_ms =
+                        Instant::now().duration_since(meeting.wall_started).as_millis() as i64;
+                    meeting.pause_spans_ms.push((start_ms, end_ms));
+                }
                 tracing::info!(session = %meeting.meeting_id, "meeting resumed");
                 return Ok(meeting.tracks[0].id.clone());
             }
@@ -1611,6 +1657,8 @@ impl DaemonRecorder {
             tracks,
             paused: false,
             wall_started,
+            paused_at_ms: None,
+            pause_spans_ms: Vec::new(),
         });
         // Release the meeting lock before spawning the preview loops (they don't
         // touch `meeting`, but keep lock scopes tight).
@@ -1703,8 +1751,23 @@ impl DaemonRecorder {
         let target_duration_ms = stop_at.duration_since(wall_started).as_millis() as i64;
         let sample_rate = phoneme_audio::format::SampleRate::HZ_16K.as_u32();
 
+        // Fold paused spans out of the wall clock. While paused, every track
+        // discards audio, so the captured buffers are COMPRESSED by the paused
+        // total — align and store against this active-only duration (and shift
+        // each track's first-content anchor below by the pause time before it),
+        // or the loopback track lands a full pause-length late vs the mic.
+        let mut pause_spans_ms = meeting.pause_spans_ms.clone();
+        if let Some(start_ms) = meeting.paused_at_ms {
+            // Stopped while still paused — close the open span at stop time.
+            pause_spans_ms.push((start_ms, target_duration_ms));
+        }
+        let total_paused_ms = total_paused_ms(&pause_spans_ms);
+        let active_duration_ms = (target_duration_ms - total_paused_ms).max(0);
+
         tracing::info!(
             target_duration_ms = target_duration_ms,
+            active_duration_ms = active_duration_ms,
+            total_paused_ms = total_paused_ms,
             "meeting wall-clock duration for track alignment"
         );
 
@@ -1752,8 +1815,13 @@ impl DaemonRecorder {
         for (id, audio_path, started_at, track, track_late_by_ms, stop_result) in stop_results {
             match stop_result {
                 Ok((raw_samples, _duration_ms, first_non_silent_at)) => {
-                    let first_content_from_wall_ms = first_non_silent_at
-                        .map(|t| t.duration_since(wall_started).as_millis() as i64);
+                    // Anchor first content on the active clock too: remove any
+                    // paused time that elapsed before it (a track's buffer has no
+                    // paused audio, so its first sample sits at the active offset).
+                    let first_content_from_wall_ms = first_non_silent_at.map(|t| {
+                        let wall_ms = t.duration_since(wall_started).as_millis() as i64;
+                        (wall_ms - paused_before_ms(&pause_spans_ms, wall_ms)).max(0)
+                    });
                     stopped.push(StoppedTrack {
                         id,
                         audio_path,
@@ -1788,12 +1856,12 @@ impl DaemonRecorder {
                 dense: matches!(t.track, MeetingTrack::Mic),
             })
             .collect();
-        let aligned = align_meeting_tracks(&align_inputs, target_duration_ms, sample_rate);
+        let aligned = align_meeting_tracks(&align_inputs, active_duration_ms, sample_rate);
 
         let mut track_data: Vec<FinalizedTrack> = Vec::new();
 
         for (meta, aligned_track) in stopped.into_iter().zip(aligned) {
-            let capture_window_ms = (target_duration_ms - meta.track_late_by_ms).max(0);
+            let capture_window_ms = (active_duration_ms - meta.track_late_by_ms).max(0);
             let expected_raw =
                 phoneme_audio::meeting_align::ms_to_samples(capture_window_ms, sample_rate);
 
@@ -1816,7 +1884,7 @@ impl DaemonRecorder {
                 started_at: meta.started_at,
                 track: meta.track,
                 samples: aligned_track.samples,
-                duration_ms: target_duration_ms,
+                duration_ms: active_duration_ms,
             });
         }
 
@@ -1935,6 +2003,35 @@ mod tests {
     use phoneme_audio::format::AudioConfig;
     use phoneme_audio::source::{GeneratorSource, SyntheticSource};
     use phoneme_core::{Config, ListFilter};
+
+    // ── meeting pause → active-clock folding ──────────────────────────────
+
+    #[test]
+    fn paused_totals_and_active_duration() {
+        // No pauses: active == wall, no shift.
+        assert_eq!(total_paused_ms(&[]), 0);
+        assert_eq!(paused_before_ms(&[], 5_000), 0);
+
+        // Two pause spans (1s and 2s); a 30s meeting → 27s active.
+        let spans = [(2_000, 3_000), (10_000, 12_000)];
+        assert_eq!(total_paused_ms(&spans), 3_000);
+        let wall = 30_000;
+        assert_eq!((wall - total_paused_ms(&spans)).max(0), 27_000);
+    }
+
+    #[test]
+    fn paused_before_only_counts_earlier_spans() {
+        let spans = [(2_000, 3_000), (10_000, 12_000)];
+        // First content at 1s — before any pause: no shift.
+        assert_eq!(paused_before_ms(&spans, 1_000), 0);
+        // First content at 5s — after the first (1s) pause only.
+        assert_eq!(paused_before_ms(&spans, 5_000), 1_000);
+        // First content at 20s — after both pauses (1s + 2s).
+        assert_eq!(paused_before_ms(&spans, 20_000), 3_000);
+        // The loopback's wall first-content of 5s folds to 4s on the active clock,
+        // matching a mic whose buffer (also pause-compressed) starts at 0.
+        assert_eq!(5_000 - paused_before_ms(&spans, 5_000), 4_000);
+    }
 
     // ── stitch_preview (pure caption stitching) ───────────────────────────
 
