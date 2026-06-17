@@ -24,7 +24,7 @@ export class SectionStorage {
   private render(container: HTMLElement) {
     container.innerHTML = `
       <div class="settings-section">
-        <h3>Storage</h3>
+        <h3>Storage &amp; backup</h3>
         <div class="settings-field">
           <label>Audio directory</label>
           <div>

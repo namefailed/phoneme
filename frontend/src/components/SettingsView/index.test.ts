@@ -99,11 +99,11 @@ describe("SettingsView", () => {
     element.switchTab("system");
     await element.updateComplete;
     
-    // Check that SectionTray (System) and Storage and Advanced are in the system tab
+    // Check that Storage & backup, Startup & tray, and Diagnostics are in the system tab
     const headingsInSystem = Array.from(element.querySelectorAll("h3")).map((h: any) => h.textContent);
-    expect(headingsInSystem).toContain("System");
-    expect(headingsInSystem).toContain("Storage");
-    expect(headingsInSystem).toContain("Advanced");
+    expect(headingsInSystem).toContain("Storage & backup");
+    expect(headingsInSystem).toContain("Startup & tray");
+    expect(headingsInSystem).toContain("Diagnostics");
     
     container.remove();
   });

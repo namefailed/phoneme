@@ -21,7 +21,7 @@ export class SectionAdvanced {
   private render(container: HTMLElement) {
     container.innerHTML = `
       <div class="settings-section">
-        <h3>Advanced</h3>
+        <h3>Diagnostics</h3>
         <div class="settings-field">
           <label>Daemon log level</label>
           <div>${renderField(

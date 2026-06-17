@@ -58,8 +58,8 @@ const COLUMN_CATALOG: { value: string; label: string }[] = [
 
 /**
  * Settings → Interface: the look-and-feel knobs under `config.interface` —
- * theme, 24h time, titlebar stripping, vim navigation, animation speed, step
- * notifications, quit semantics (`quit_stops_daemon`) — plus the recordings
+ * theme, typography, 24h time, vim/arrow navigation, animation speed, step
+ * notifications — plus the recordings
  * list's column layout: a drag-to-reorder, toggleable list driving
  * `interface.visible_columns` (order = display order; see COLUMN_CATALOG),
  * with a reset-to-defaults action. Also hosts the "Reset interface
@@ -359,40 +359,6 @@ export class SectionInterface {
               Show a toast as each processing step finishes (transcribed, cleaned up, summarized,
               tags suggested) and when a recording is fully ready. Errors always notify, even
               with this off.
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <h3>Window</h3>
-
-        <div class="settings-field">
-          <label>Strip system titlebar</label>
-          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
-            <div>${renderField(
-              { key: "interface.strip_titlebar", label: "", kind: "checkbox" },
-              config.interface.strip_titlebar,
-            )}</div>
-            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
-              Removes the default OS window decorations. The top header will become draggable. Stripping the bar applies live; turning it back ON needs an app restart (Windows can't re-add the native title bar to a running window).
-            </span>
-          </div>
-        </div>
-
-        <div class="settings-field">
-          <label>Quit stops the engine</label>
-          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
-            <div>${renderField(
-              { key: "interface.quit_stops_daemon", label: "", kind: "checkbox" },
-              config.interface.quit_stops_daemon ?? true,
-            )}</div>
-            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
-              Quitting the tray also shuts down the background engine: an in-flight recording is
-              finalized and queued first, and everything Phoneme started (whisper-server, an
-              auto-launched Ollama) stops with it. Turn off to keep the engine running after the
-              tray quits — hotkeyless/headless use. The OS-level tie to the tray's own death
-              applies from the next engine start.
             </span>
           </div>
         </div>
