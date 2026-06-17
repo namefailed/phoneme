@@ -303,7 +303,6 @@ body.phoneme-hide-header-instant #hdr {
 .headerbar .search:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .headerbar .filter-pill {
