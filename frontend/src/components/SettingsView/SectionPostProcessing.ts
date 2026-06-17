@@ -157,9 +157,9 @@ export class SectionPostProcessing {
             </span>
           </div>
         </div>
+      </div>
 
-        <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 20px 0 16px;" />
-
+      <div class="settings-section">
         <h3 style="margin-bottom: 4px;">Auto AI Summary</h3>
         <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Generate a short AI summary of each transcript. You can always summarize a single
@@ -217,9 +217,9 @@ export class SectionPostProcessing {
             </span>
           </div>
         </div>
+      </div>
 
-        <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 20px 0 16px;" />
-
+      <div class="settings-section">
         <h3 style="margin-bottom: 4px;">Auto Titles</h3>
         <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Name each recording from its first meaningful sentence — free, instant, and fully

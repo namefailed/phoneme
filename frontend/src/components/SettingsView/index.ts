@@ -84,7 +84,7 @@ const SETTINGS_TABS: { id: string; label: string }[] = [
   { id: "diarization", label: "👥 Diarization" },
   { id: "capture", label: "🎙️ Capture" },
   { id: "dictation", label: "⌨️ Dictation" },
-  { id: "ai", label: "✨ AI" },
+  { id: "postprocessing", label: "✨ Post-Processing" },
   { id: "recall", label: "🔮 Recall" },
   { id: "appearance", label: "🎨 Appearance" },
   { id: "managers", label: "🗂️ Managers" },
@@ -94,10 +94,11 @@ const SETTINGS_TABS: { id: string; label: string }[] = [
 /** Legacy deep-link tab ids → current ids, so openers that predate the
  *  re-taxonomy (header jump-menu, g-chords, the Re-run "enable cleanup" link)
  *  and any saved links keep resolving after a tab rename. `tags` is the old
- *  standalone Tags tab, now a Managers sub-tab. */
+ *  standalone Tags tab, now a Managers sub-tab; `ai` was a brief rename of
+ *  Post-Processing. */
 const LEGACY_TAB_ALIASES: Record<string, string> = {
   tags: "managers",
-  postprocessing: "ai",
+  ai: "postprocessing",
 };
 function resolveTab(rawTab: string): string {
   return LEGACY_TAB_ALIASES[rawTab] ?? rawTab;
@@ -390,9 +391,9 @@ export class SettingsViewElement extends LitElement {
       { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, c); } },
       { tab: "capture", label: "Capture", mount: (h) => { new SectionHotkey(h, c); } },
       { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
-      { tab: "ai", label: "AI", mount: (h) => { new SectionPostProcessing(h, c); } },
-      { tab: "ai", label: "AI", mount: (h) => { new SectionAutoTag(h, c); } },
-      { tab: "ai", label: "AI", mount: (h) => { new SectionHook(h, c); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, c); } },
+      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, c); } },
       { tab: "recall", label: "Recall", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, c); } },
