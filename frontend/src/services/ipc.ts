@@ -102,6 +102,20 @@ export type SpeakerName = { speaker_label: number; name: string };
  *  seconds. See services/recordStopMode.ts for the UI-level mapping. */
 export type RecordMode = "hold" | "oneshot" | `duration:${number}`;
 
+/** One user-defined global shortcut in `config.hotkeys` — the extra keybinds
+ *  beyond the three built-ins (record / meeting / in-place). Each fires app-wide
+ *  via the tray's global-shortcut registration. `id` is stable (generated once);
+ *  `combo` is a tauri-plugin-global-shortcut string (e.g. "Ctrl+Alt+E"); `mode`
+ *  is hold (push-to-talk) vs. toggle; `action` is which capture it triggers. */
+export type HotkeyBinding = {
+  id: string;
+  label: string;
+  enabled: boolean;
+  combo: string;
+  mode: "hold" | "toggle";
+  action: "record" | "in_place" | "meeting";
+};
+
 /** Server-side query filter for `listRecordings` (wire shape — snake_case
  *  fields, applied in SQL before pagination). The UI builds it from the
  *  richer `UiFilter` via `state/filter.ts` `toWireFilter`. */

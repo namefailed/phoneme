@@ -12,7 +12,7 @@ import { SectionWhisper } from "./SectionWhisper";
 import { SectionPreview } from "./SectionPreview";
 import { SectionDiarization } from "./SectionDiarization";
 import { SectionRecording } from "./SectionRecording";
-import { SectionHotkey } from "./SectionHotkey";
+import { SectionHotkeys } from "./SectionHotkeys";
 import { SectionHook } from "./SectionHook";
 import { SectionStorage } from "./SectionStorage";
 import { SectionSemantic } from "./SectionSemantic";
@@ -404,7 +404,7 @@ export class SettingsViewElement extends LitElement {
       // automation in one place.
       { tab: "managers/hooks", label: "Hooks / Integrations", mount: (h) => { new SectionHook(h, c); } },
       { tab: "managers/hooks", label: "Hooks / Integrations", mount: (h) => { new SectionIntegrations(h, c); } },
-      { tab: "managers/keybinds", label: "Keybinds", mount: (h) => { new SectionHotkey(h, c); } },
+      { tab: "managers/keybinds", label: "Keybinds", mount: (h) => { new SectionHotkeys(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, c, this.onNavigateToWizard); } },

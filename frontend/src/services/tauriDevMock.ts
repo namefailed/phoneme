@@ -331,6 +331,10 @@ let config: Record<string, unknown> = {
   hotkey: { enabled: true, combo: "Alt+V", mode: "hold" },
   in_place_hotkey: { enabled: true, combo: "Shift+Alt+V", mode: "hold" },
   meeting_hotkey: { enabled: true, combo: "Ctrl+Alt+V", mode: "hold" },
+  hotkeys: [
+    { id: "demo-1", label: "Quick note", enabled: true, combo: "Ctrl+Alt+N", mode: "hold", action: "record" },
+    { id: "demo-2", label: "Dictate into window", enabled: false, combo: "Ctrl+Alt+D", mode: "toggle", action: "in_place" },
+  ],
   tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: true },
   editor: { vim_mode: true, vimrc: "", vimrc_path: "", resync_views_on_edit: true },
   diarization: { provider: "local", local_model_path: "", models_dir: "", solo_one_speaker: false, merge_gap_secs: 0.25, speaker_keep_threshold: 0.0000001, reconstruct_method: "smoothed", reconstruct_method_epsilon: 0.1 },

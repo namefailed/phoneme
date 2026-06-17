@@ -107,6 +107,10 @@ pub struct Config {
     /// (simultaneous mic + system audio).
     #[serde(default = "default_meeting_hotkey")]
     pub meeting_hotkey: HotkeyConfig,
+    /// User-defined custom keybinds beyond the three built-ins above (Settings →
+    /// Keybinds). Empty by default, so every existing config.toml loads unchanged.
+    #[serde(default)]
+    pub hotkeys: Vec<HotkeyBinding>,
     /// Frontend OS-level tray behavior.
     pub tray: TrayConfig,
     /// Settings for the built-in transcript editor.
@@ -1375,13 +1379,51 @@ fn default_in_place_hotkey() -> HotkeyConfig {
 }
 
 /// The behavioral mode of the global recording hotkey.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum HotkeyMode {
     /// Recording only happens while the key combination is physically held down.
+    #[default]
     Hold,
     /// Pressing the combination toggles recording on; pressing it again toggles it off.
     Toggle,
+}
+
+/// What a custom keybind ([`HotkeyBinding`]) triggers when pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HotkeyAction {
+    /// Start/stop a normal recording (the default).
+    #[default]
+    Record,
+    /// In-place dictation — typed straight into the focused window.
+    InPlace,
+    /// A multi-track meeting recording (mic + system audio).
+    Meeting,
+}
+
+/// A user-defined custom keybind, beyond the three built-ins (record / in-place /
+/// meeting). Configured in Settings → Keybinds and stored in [`Config::hotkeys`];
+/// each binds a key combo to an action + mode. Persisted so the manager
+/// round-trips — daemon registration of these bindings is wired separately.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HotkeyBinding {
+    /// Stable unique id (the UI mints a uuid) — the registration key + payload tag.
+    pub id: String,
+    /// User-facing label shown in the manager.
+    #[serde(default)]
+    pub label: String,
+    /// Whether this binding is active.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// The key combination, e.g. `"Ctrl+Alt+N"`.
+    pub combo: String,
+    /// Hold (push-to-talk) vs Toggle.
+    #[serde(default)]
+    pub mode: HotkeyMode,
+    /// What pressing the combo does.
+    #[serde(default)]
+    pub action: HotkeyAction,
 }
 
 /// Frontend OS-level tray behavior.
@@ -1938,6 +1980,7 @@ impl Default for Config {
             in_place_hotkey: default_in_place_hotkey(),
             in_place: InPlaceConfig::default(),
             meeting_hotkey: default_meeting_hotkey(),
+            hotkeys: Vec::new(),
             tray: TrayConfig {
                 show_on_startup: true,
                 minimize_to_tray: true,
