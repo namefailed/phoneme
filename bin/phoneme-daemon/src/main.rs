@@ -92,6 +92,22 @@ async fn main() -> Result<()> {
 
     reconcile::run(&state).await?;
 
+    // Optionally warm the local diarization models now (opt-in
+    // `[diarization].preload_at_startup`, local backend only), so the first
+    // diarized recording doesn't pay the multi-second, ~500 MB load inline.
+    // Runs on the blocking pool so it never delays the rest of startup; a load
+    // failure is logged and the next real run retries.
+    {
+        let cfg = state.config.load();
+        if cfg.diarization.preload_at_startup {
+            let cache = state.transcription.diarizer_cache().clone();
+            let diar_cfg = cfg.diarization.clone();
+            tokio::task::spawn_blocking(move || {
+                phoneme_core::diarization::preload_local_diarizer(&cache, &diar_cfg);
+            });
+        }
+    }
+
     // Background task to (re-)embed recordings that lack per-chunk embeddings.
     // This doubles as the migration from the legacy whole-recording `embeddings`
     // table to sentence-aware chunk vectors: any recording with a transcript but

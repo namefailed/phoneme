@@ -1171,6 +1171,26 @@ fn parse_speaker_column(label: &str) -> Option<usize> {
     label.strip_prefix("SPEAKER_").and_then(|n| n.parse().ok())
 }
 
+/// Warm the local diarization pipeline into `cache` ahead of time — e.g. at
+/// daemon startup when `[diarization].preload_at_startup` is on — so the first
+/// diarized recording doesn't pay the multi-second, ~500 MB model load inline.
+///
+/// A no-op unless the backend is `Local` (only it loads models). Blocking and
+/// allocation-heavy: call from `spawn_blocking`, never on the async runtime. A
+/// load error is logged and swallowed (errors are never cached), so the next
+/// real run simply retries the load.
+pub fn preload_local_diarizer(cache: &LocalDiarizerCache, cfg: &DiarizationConfig) {
+    if cfg.provider != crate::config::DiarizationBackend::Local {
+        return;
+    }
+    match cache.get_or_load(cfg, || QueuedDiarizer::load(cfg)) {
+        Ok(_) => tracing::info!("local diarization models preloaded at startup"),
+        Err(e) => {
+            tracing::warn!(error = %e, "diarization preload failed; will retry on first use")
+        }
+    }
+}
+
 /// Run local diarization on a 16 kHz mono WAV, returning the cleaned speaker
 /// turns alongside the raw model arrays (see [`LocalDiarization`]). The pipeline
 /// comes from `cache` — loaded on first use, then reused across recordings (the

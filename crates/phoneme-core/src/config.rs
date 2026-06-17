@@ -211,6 +211,14 @@ pub struct DiarizationConfig {
     /// Default 0.1 (speakrs' default). Ignored when method is `"standard"`.
     #[serde(default = "default_reconstruct_epsilon")]
     pub reconstruct_method_epsilon: f64,
+    /// Warm the local diarization models at daemon startup instead of lazily on
+    /// the first recording that needs them. Off by default so most users (who
+    /// keep diarization off, or rarely diarize) don't pay the ~500 MB RAM up
+    /// front; turn it on to trade that memory for a fast first diarized
+    /// recording. Only the `local` backend loads models, so this is a no-op for
+    /// `none`/cloud providers.
+    #[serde(default)]
+    pub preload_at_startup: bool,
 }
 
 fn default_merge_gap_secs() -> f64 {
@@ -237,6 +245,7 @@ impl Default for DiarizationConfig {
             speaker_keep_threshold: default_speaker_keep_threshold(),
             reconstruct_method: default_reconstruct_method(),
             reconstruct_method_epsilon: default_reconstruct_epsilon(),
+            preload_at_startup: false,
         }
     }
 }

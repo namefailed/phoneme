@@ -112,6 +112,17 @@ export class SectionDiarization {
             </span>
           </div>
 
+          <div class="settings-field">
+            <label>Preload at startup</label>
+            <div>${renderField(
+              { key: "diarization.preload_at_startup", label: "", kind: "checkbox" },
+              this.config.diarization?.preload_at_startup ?? false,
+            )}</div>
+            <span style="${HELP}">
+              Load the ~500MB diarization models when the daemon starts instead of on your first diarized recording. Trades that memory up front for a fast first recording. Off by default.
+            </span>
+          </div>
+
           <details class="settings-advanced">
             <summary>
               <svg class="settings-advanced-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
