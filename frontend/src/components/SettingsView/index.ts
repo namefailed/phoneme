@@ -83,12 +83,25 @@ const SETTINGS_TABS: { id: string; label: string }[] = [
   { id: "preview", label: "👁️ Live Preview" },
   { id: "diarization", label: "👥 Diarization" },
   { id: "capture", label: "🎙️ Capture" },
-  { id: "postprocessing", label: "✨ Post-Processing" },
-  { id: "appearance", label: "🎨 Appearance" },
+  { id: "dictation", label: "⌨️ Dictation" },
+  { id: "ai", label: "✨ AI" },
   { id: "recall", label: "🔮 Recall" },
+  { id: "appearance", label: "🎨 Appearance" },
   { id: "managers", label: "🗂️ Managers" },
   { id: "system", label: "⚙️ System" },
 ];
+
+/** Legacy deep-link tab ids → current ids, so openers that predate the
+ *  re-taxonomy (header jump-menu, g-chords, the Re-run "enable cleanup" link)
+ *  and any saved links keep resolving after a tab rename. `tags` is the old
+ *  standalone Tags tab, now a Managers sub-tab. */
+const LEGACY_TAB_ALIASES: Record<string, string> = {
+  tags: "managers",
+  postprocessing: "ai",
+};
+function resolveTab(rawTab: string): string {
+  return LEGACY_TAB_ALIASES[rawTab] ?? rawTab;
+}
 
 /**
  * The Settings view (the "settings" route): a tab rail + one mounted section
@@ -347,7 +360,7 @@ export class SettingsViewElement extends LitElement {
       // legacy alias for the standalone Tags tab, now a Managers sub-tab.
       const [rawTab, sub] = this.activeTab.split("/");
       if (sub === "tags" || sub === "profiles" || sub === "saved") this.managersSub = sub;
-      const tab = rawTab === "tags" ? "managers" : rawTab;
+      const tab = resolveTab(rawTab);
       if (rawTab === "tags") this.managersSub = "tags";
       if (tab === "managers") {
         // Managers keeps its own sub-tab strip (Tags · Profiles · Saved).
@@ -375,14 +388,14 @@ export class SettingsViewElement extends LitElement {
       { tab: "preview", label: "Live Preview", mount: (h) => { new SectionPreview(h, c); } },
       { tab: "diarization", label: "Diarization", mount: (h) => { new SectionDiarization(h, c); } },
       { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, c); } },
-      { tab: "capture", label: "Capture", mount: (h) => { new SectionInPlace(h, c); } },
       { tab: "capture", label: "Capture", mount: (h) => { new SectionHotkey(h, c); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, c); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionHook(h, c); } },
+      { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
+      { tab: "ai", label: "AI", mount: (h) => { new SectionPostProcessing(h, c); } },
+      { tab: "ai", label: "AI", mount: (h) => { new SectionAutoTag(h, c); } },
+      { tab: "ai", label: "AI", mount: (h) => { new SectionHook(h, c); } },
+      { tab: "recall", label: "Recall", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, c); } },
-      { tab: "recall", label: "Recall", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "managers", label: "Managers", mount: (h) => { new SectionTags(h, c); } },
       { tab: "managers", label: "Managers", mount: (h) => { new SectionProfiles(h, c); } },
       { tab: "managers", label: "Managers", mount: (h) => { new SectionSavedSearches(h, c); } },
@@ -708,9 +721,9 @@ export class SettingsViewElement extends LitElement {
     }
 
     const isSearching = this.searchQuery.trim().length > 0;
-    // The active tab may be a composite deep-link ("managers/profiles") —
-    // compare the base for highlighting.
-    const tab = this.activeTab.split("/")[0];
+    // The active tab may be a composite deep-link ("managers/profiles") or a
+    // legacy id ("postprocessing") — resolve the base for highlighting.
+    const tab = resolveTab(this.activeTab.split("/")[0]);
 
     return html`
       <div class="settings-layout">
@@ -724,7 +737,7 @@ export class SettingsViewElement extends LitElement {
 
           ${SETTINGS_TABS.map(
             (t) => html`<div
-              class="sv-tab ${(tab === t.id || (t.id === "managers" && tab === "tags")) && !isSearching ? "active" : ""}"
+              class="sv-tab ${tab === t.id && !isSearching ? "active" : ""}"
               @click=${() => this.switchTab(t.id)}
             >${t.label}</div>`,
           )}
