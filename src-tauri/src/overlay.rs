@@ -70,6 +70,13 @@ const OVERLAY_MIN_W: f64 = 300.0;
 const OVERLAY_MAX_W: f64 = 4000.0;
 /// Inset from the bottom of the work area for the first-run placement.
 const BOTTOM_MARGIN: f64 = 96.0;
+/// Off-screen sentinel position the builder uses so a never-saved window starts
+/// off every monitor. `tauri-plugin-window-state` overwrites it only when it has
+/// a remembered position to restore, so "is the window on a monitor?" cleanly
+/// distinguishes first-run (sentinel → off-screen → place) from a restored
+/// position (on a monitor → respect) — without guessing from coordinate signs,
+/// which mis-flagged monitors arranged left of / above the primary.
+const OFFSCREEN_SENTINEL: f64 = -32000.0;
 
 /// Whether the overlay window currently exists.
 pub fn exists(app: &AppHandle) -> bool {
@@ -97,6 +104,10 @@ pub fn ensure(app: &AppHandle) {
     let builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
         .title("Phoneme Live Preview")
         .inner_size(OVERLAY_W, OVERLAY_H)
+        // Start off every monitor (hidden) so first-run placement is detectable
+        // as "not on any monitor"; the window-state plugin overrides this with a
+        // remembered position when one exists. See `place_default_if_unpositioned`.
+        .position(OFFSCREEN_SENTINEL, OFFSCREEN_SENTINEL)
         // Tauri has no per-axis resizable flag. We keep the VERTICAL axis on a
         // tight rail — between one line (OVERLAY_H) and two (OVERLAY_H_BOTH) —
         // while leaving the width free between OVERLAY_MIN_W and OVERLAY_MAX_W.
@@ -145,11 +156,11 @@ pub fn ensure(app: &AppHandle) {
         }
     }
 
-    // First-run placement: if `tauri-plugin-window-state` had a saved position
-    // it has already been applied to the builder via its on-window-created hook,
-    // and the geometry will differ from our default. We can't easily tell here,
-    // so we only nudge to bottom-center when the window is still at the origin
-    // (0,0) — the position a freshly-built, never-saved window reports.
+    // First-run placement: if `tauri-plugin-window-state` had a saved position it
+    // has already overwritten the builder's off-screen sentinel via its
+    // on-window-created hook. So "is the window on a connected monitor?" tells us
+    // whether to nudge to bottom-center (no remembered position, or it lived on a
+    // now-unplugged monitor) or leave it where it was restored.
     place_default_if_unpositioned(&window);
 
     tracing::info!("live-preview overlay window created (hidden)");
@@ -177,15 +188,15 @@ pub fn sync(app: &AppHandle, enabled: bool) {
 }
 
 /// Place the overlay at the bottom-center of its monitor's work area, but only
-/// if it's still sitting at the origin (i.e. no saved position was restored).
-/// Best-effort: any failure just leaves the window where the OS put it.
+/// when there's no remembered position to honor — detected by the window not
+/// sitting on any currently-connected monitor (the off-screen builder sentinel
+/// on first run, or a saved position whose monitor was unplugged). A restored
+/// position on ANY monitor (including ones arranged left of / above the primary,
+/// at negative coordinates) is respected. Best-effort: any failure just leaves
+/// the window where the OS / plugin put it.
 fn place_default_if_unpositioned(window: &tauri::WebviewWindow) {
-    let at_origin = window
-        .outer_position()
-        .map(|p| p.x <= 0 && p.y <= 0)
-        .unwrap_or(true);
-    if !at_origin {
-        return; // a remembered position was restored — respect it
+    if position_is_on_a_monitor(window) {
+        return; // a remembered, on-screen position was restored — respect it
     }
 
     let Ok(Some(monitor)) = window.current_monitor() else {
@@ -198,4 +209,25 @@ fn place_default_if_unpositioned(window: &tauri::WebviewWindow) {
     let x = pos.x + (size.width - OVERLAY_W) / 2.0;
     let y = pos.y + size.height - OVERLAY_H - BOTTOM_MARGIN;
     let _ = window.set_position(tauri::LogicalPosition::new(x.max(pos.x), y.max(pos.y)));
+}
+
+/// Whether the window's top-left corner falls within any connected monitor's
+/// bounds. Used to tell a restored on-screen position from the off-screen
+/// first-run sentinel (or a position on a now-disconnected monitor). On any
+/// error reading the position or enumerating monitors, returns `false` so the
+/// caller falls back to placing the window rather than leaving it off-screen.
+fn position_is_on_a_monitor(window: &tauri::WebviewWindow) -> bool {
+    let Ok(p) = window.outer_position() else {
+        return false;
+    };
+    let Ok(monitors) = window.available_monitors() else {
+        return false;
+    };
+    monitors.iter().any(|m| {
+        let mp = m.position();
+        let ms = m.size();
+        let right = mp.x + ms.width as i32;
+        let bottom = mp.y + ms.height as i32;
+        p.x >= mp.x && p.x < right && p.y >= mp.y && p.y < bottom
+    })
 }
