@@ -1,0 +1,63 @@
+/* App-health pill (<ph-health-pill>), shared by the header bar and the Settings
+   page. Global because the pill renders into the light DOM in both places and the
+   header bar — which used to carry these rules inline — is removed from the layout
+   while Settings is open. Green dot = all Doctor checks pass; red + count = problems
+   (the header banner carries the detail). Click opens the Doctor. */
+ph-health-pill {
+  display: inline-flex;
+  align-items: center;
+}
+/* Far-right of the header bar. The bar's right padding (14px) sets the gap to the
+   window edge; add 4px to the 10px inter-control gap so the gap to the ⚙ Settings
+   button on the left is also 14px — equal spacing on both sides of the pill. */
+.headerbar ph-health-pill {
+  margin-left: 4px;
+}
+.hb-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.hb-health:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-subtle);
+}
+.hb-health-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg-faded);
+  flex: 0 0 auto;
+}
+.hb-health.ok .hb-health-dot {
+  background: var(--ok, #a6e3a1);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ok, #a6e3a1) 60%, transparent);
+}
+.hb-health.bad .hb-health-dot {
+  background: var(--err, #f38ba8);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--err, #f38ba8) 70%, transparent);
+  animation: hbHealthBlink 1.2s ease-in-out infinite;
+}
+/* The failure count, shown only when health is bad. Healthy/unknown is a single
+   centred dot — equal padding on both sides keeps it symmetric (no resize between
+   unknown and ok, so it never jitters on load in the common healthy case). */
+.hb-health-n {
+  font-size: 0.7857rem;
+  font-weight: 700;
+  color: var(--err, #f38ba8);
+}
+@keyframes hbHealthBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

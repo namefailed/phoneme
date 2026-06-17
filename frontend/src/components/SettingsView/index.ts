@@ -255,7 +255,34 @@ export class SettingsViewElement extends LitElement {
    *  a keyboard shortcut or deep link, with no captured anchor). */
   private floatAnchorStyle(): string {
     const a = getSettingsAnchor();
-    return a ? `position: fixed; top: ${a.top}px; left: ${a.left}px; right: auto;` : "";
+    // Match the header button's exact pixel height too, not just its position.
+    // The header ⚙ takes its height from the header-bar row (which doesn't grow
+    // with the UI font size), whereas the float button would otherwise size to
+    // its own font + padding and end up taller off the default font size. Pin
+    // the group to the captured height; `.anchored` drops the children's vertical
+    // padding so they stretch to fill it (see styles.css).
+    return a
+      ? `position: fixed; top: ${a.top}px; left: ${a.left}px; right: auto; height: ${a.height}px;`
+      : "";
+  }
+
+  /** Inline position for the app-health pill: the far-right-most control, pinned
+   *  14px from the window's right edge and vertically aligned to the captured
+   *  ⚙-button band — the SAME screen spot (and the same button→pill / pill→edge
+   *  gaps) as the header's pill, so the two views are identical. */
+  private healthPillStyle(): string {
+    const a = getSettingsAnchor();
+    return a
+      ? `position: fixed; top: ${a.top}px; height: ${a.height}px; right: 14px;`
+      : `position: absolute; top: 18px; height: 32px; right: 14px;`;
+  }
+
+  /** Pin the toggle to the header ⚙ button's captured width so its "← Go Back"
+   *  label (shorter than the header's "⚙ Settings") doesn't shrink the split
+   *  button or shift the caret/pill. Centre the shorter label in that fixed box. */
+  private floatToggleStyle(): string {
+    const a = getSettingsAnchor();
+    return a ? `box-sizing: border-box; width: ${a.width}px; justify-content: center;` : "";
   }
 
   private async handleSave() {
@@ -705,8 +732,8 @@ export class SettingsViewElement extends LitElement {
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
         <div class="settings-main">
-          <div class="settings-float-group" style=${this.floatAnchorStyle()}>
-            <button class="settings-float-toggle" title="Close settings" aria-label="Close settings" @click=${this.handleClose}>⚙ Settings</button>
+          <div class="settings-float-group ${getSettingsAnchor() ? "anchored" : ""}" style=${this.floatAnchorStyle()}>
+            <button class="settings-float-toggle" style=${this.floatToggleStyle()} title="Go back" aria-label="Go back" @click=${this.handleClose}>← Go Back</button>
             <button class="settings-float-caret ${this.floatMenuOpen ? "active" : ""}" aria-label="Quick settings &amp; actions" aria-haspopup="menu" aria-expanded=${this.floatMenuOpen} title="Quick settings &amp; actions" @click=${this.toggleFloatMenu}>
               <svg class="ph-caret-ico ${this.floatMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
@@ -724,6 +751,11 @@ export class SettingsViewElement extends LitElement {
               })}
             </div>
           </div>
+          <!-- The app-health pill, placed at the exact same screen spot as the
+               header's far-right one: pinned 14px from the window edge, aligned to
+               the captured ⚙-button band — so both views look identical. Kept OUT
+               of the float group so it never shifts the ⚙ button off its anchor. -->
+          <ph-health-pill class="sv-health" style=${this.healthPillStyle()}></ph-health-pill>
           <div class="settings-body" id="settings-body"></div>
           <div class="settings-float-actions">
             <button id="settings-close" @click=${this.handleClose}>Close</button>

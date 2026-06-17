@@ -314,7 +314,7 @@ export class SectionWhisper {
         </div>
 
         <div id="whisper-local">
-          <div class="settings-field stacked">
+          <div class="settings-field" style="align-items: start;">
             <label>Bundled Model</label>
             <!-- Hidden input to maintain form binding -->
             <div style="display:none;">
@@ -323,7 +323,7 @@ export class SectionWhisper {
                 this.config.whisper.model_path,
               )}
             </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; max-width: 800px;">
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: stretch; max-width: 580px;">
               ${modelCardsHtml}
               <div style="margin-top: 8px;">
                  <button class="inline-button" id="pick-model" style="font-size: 0.7857rem;">Browse for custom .bin…</button>

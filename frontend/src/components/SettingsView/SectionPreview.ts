@@ -163,55 +163,42 @@ export class SectionPreview {
         </div>
 
         <div class="settings-field">
-          <label>System-wide overlay
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              Float the live text in an always-on-top window over the whole desktop
-              (draggable; remembers where you put it). Auto-shows when recording starts.
-            </span>
-          </label>
+          <label>System-wide overlay</label>
           <div style="display:flex; align-items:center; gap:10px;">
             <input type="checkbox" class="toggle-switch" id="prev-overlay" ${overlay ? "checked" : ""} ${enabled ? "" : "disabled"} />
             <button class="inline-button" id="prev-overlay-test" ${overlay ? "" : "disabled"}>Preview</button>
           </div>
+          <span>Float the live text in an always-on-top window over the whole desktop (draggable; remembers where you put it). Auto-shows when recording starts.</span>
         </div>
 
         <div class="settings-field">
-          <label>Recording indicator
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              A minimal always-on-top pill (record dot + waveform + timer) that shows while recording —
-              no captions, works with live preview off. Independent of the caption overlay above
-              (you can run either or both).
-            </span>
-          </label>
+          <label>Recording indicator</label>
           <div><input type="checkbox" class="toggle-switch" id="prev-indicator" ${indicator ? "checked" : ""} /></div>
+          <span>A minimal always-on-top pill (record dot + waveform + timer) that shows while recording — no captions, works with live preview off. Independent of the caption overlay above (you can run either or both).</span>
         </div>
 
         <div class="settings-field">
-          <label>Meetings (two tracks)
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              How the overlay captions a meeting's mic + system audio. ${enabled ? "" : "Turn on live preview to use this."}
-            </span>
-          </label>
+          <label>Meetings (two tracks)</label>
           <div>
             <select id="prev-meeting-mode" ${enabled ? "" : "disabled"}>
               <option value="toggle" ${!both ? "selected" : ""}>One track at a time — 🎤/🔊 toggle in the overlay (lighter)</option>
               <option value="both" ${both ? "selected" : ""}>Both tracks at once — stacked captions</option>
             </select>
           </div>
+          <span>How the overlay captions a meeting's mic + system audio. ${enabled ? "" : "Turn on live preview to use this."}</span>
         </div>
 
         <div class="settings-field">
-          <label>2nd preview server for “both”
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              Stream <b>both</b> meeting tracks at once instead of taking turns: run a
-              <b>second</b> live-preview server so each track captions concurrently.
-              ⚠️ <b>Heavy</b> — a second copy of your preview model stays loaded and runs a
-              second transcription at the same time. Only enable if your machine has spare
-              RAM/CPU. ${both ? (src === "local" ? "" : "Needs a <b>dedicated local model</b> as the preview source (below).") : "Needs <b>“Both tracks at once”</b> selected above."}
-              Off by default — “both” otherwise alternates the two tracks on one server.
-            </span>
-          </label>
+          <label>2nd preview server for “both”</label>
           <div><input type="checkbox" class="toggle-switch" id="prev-meeting-own-server" ${dualOn ? "checked" : ""} ${dualEligible ? "" : "disabled"} /></div>
+          <span>
+            Stream <b>both</b> meeting tracks at once instead of taking turns: run a
+            <b>second</b> live-preview server so each track captions concurrently.
+            ⚠️ <b>Heavy</b> — a second copy of your preview model stays loaded and runs a
+            second transcription at the same time. Only enable if your machine has spare
+            RAM/CPU. ${both ? (src === "local" ? "" : "Needs a <b>dedicated local model</b> as the preview source (below).") : "Needs <b>“Both tracks at once”</b> selected above."}
+            Off by default — “both” otherwise alternates the two tracks on one server.
+          </span>
         </div>
 
         <div class="settings-field">
@@ -230,49 +217,33 @@ export class SectionPreview {
         <h4 style="margin:14px 0 6px; font-size: 0.9286rem; color:var(--fg-muted);">Feel &amp; performance</h4>
 
         <div class="settings-field">
-          <label>Auto-throttle on slow machines
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              When a preview update takes too long, the daemon automatically slows the cadence so
-              recording never lags. Leave on unless you want a fixed update rate.
-            </span>
-          </label>
+          <label>Auto-throttle on slow machines</label>
           <div><input type="checkbox" class="toggle-switch" id="prev-adaptive" ${adaptive ? "checked" : ""} ${enabled ? "" : "disabled"} /></div>
+          <span>When a preview update takes too long, the daemon automatically slows the cadence so recording never lags. Leave on unless you want a fixed update rate.</span>
         </div>
 
         <div class="settings-field">
-          <label>Reveal speed
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              How fast words stream into the overlay, word by word. <b>Higher = a smoother crawl</b>
-              (12 is a good default). <b>0 = each update appears instantly</b>, no smoothing — not a
-              slower crawl. Applies to the recording overlay; dictation types straight at your cursor.
-            </span>
-          </label>
+          <label>Reveal speed</label>
           <div>
             <input type="number" id="prev-reveal-wps" min="0" max="60" step="1" value="${revealWps}" style="width:90px;" ${enabled ? "" : "disabled"} />
             <span style="color:var(--fg-muted); font-size: 0.8571rem; margin-left:6px;">words / sec</span>
           </div>
+          <span>How fast words stream into the overlay, word by word. <b>Higher = a smoother crawl</b> (12 is a good default). <b>0 = each update appears instantly</b>, no smoothing — not a slower crawl. Applies to the recording overlay; dictation types straight at your cursor.</span>
         </div>
 
         <div class="settings-field">
-          <label>Overlay waveform
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              Show the “it hears me” bars in the desktop overlay so you can see audio is being captured,
-              even between words.
-            </span>
-          </label>
+          <label>Overlay waveform</label>
           <div><input type="checkbox" class="toggle-switch" id="prev-waveform" ${waveform ? "checked" : ""} ${overlay ? "" : "disabled"} /></div>
+          <span>Show the “it hears me” bars in the desktop overlay so you can see audio is being captured, even between words.</span>
         </div>
 
         <div class="settings-field">
-          <label>“Listening” after
-            <br><span style="font-size: 0.7857rem; color:var(--fg-muted); font-weight:normal;">
-              When no new words arrive for this long, the overlay label calms from <b>LIVE</b> to <b>LISTENING</b>.
-            </span>
-          </label>
+          <label>“Listening” after</label>
           <div>
             <input type="number" id="prev-idle-ms" min="500" max="20000" step="250" value="${idleMs}" style="width:110px;" ${overlay ? "" : "disabled"} />
             <span style="color:var(--fg-muted); font-size: 0.8571rem; margin-left:6px;">ms</span>
           </div>
+          <span>When no new words arrive for this long, the overlay label calms from <b>LIVE</b> to <b>LISTENING</b>.</span>
         </div>
       </div>
     `;

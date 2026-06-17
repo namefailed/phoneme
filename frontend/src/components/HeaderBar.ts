@@ -3,7 +3,8 @@ import { LitElement, html } from 'lit';
 import { customElement, state, property } from 'lit/decorators.js';
 
 import { filterStore, clearMoreLikeThis, type UiFilter } from '../state/filter';
-import { listTags, runDoctor, listProfiles, switchProfile, type Tag } from '../services/ipc';
+import { listTags, listProfiles, switchProfile, type Tag } from '../services/ipc';
+import { subscribeHealth, refreshHealth, startHealthPolling } from '../state/health';
 import {
   loadStopMode, saveStopMode, stopModeToRecordMode, resolveRecordStartMode,
   stopModeTitle, clampDurationSecs, DEFAULT_DURATION_SECS, MIN_DURATION_SECS,
@@ -14,6 +15,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
 import { setSettingsAnchor } from './shared/settingsAnchor';
 import './SavedSearches';
+import './HealthPill';
 
 /** Callbacks App threads in: the ⚙ button (toggles Settings open/closed) and
  *  the ☰ sidebar toggle (forwarded to RecordingsView when it's mounted). */
@@ -74,22 +76,13 @@ export class HeaderBarElement extends LitElement {
    *  and the button tooltip reflect the real default when no explicit
    *  stop-mode choice is stored. */
   @state() private autoStopConfig = false;
-  /** App health from the Doctor checks: drives the header pill, the pulsing
-   *  Settings button, and the failure banner. "unknown" until the first run. */
+  /** App health, mirrored from the shared Doctor-check store ({@link subscribeHealth}):
+   *  drives the pulsing Settings button and the failure banner. The pill itself is
+   *  now the standalone <ph-health-pill> (far right + Settings page). */
   @state() private health: "ok" | "bad" | "unknown" = "unknown";
   @state() private healthIssues: { name: string; fix: string | null }[] = [];
   @state() private bannerDismissed = false;
-  private healthTimer: number | null = null;
-  /** Set when a scheduled health check came due while the window was hidden
-   *  (minimized / in the tray) — it runs the moment the window shows again. */
-  private healthCheckDue = false;
-  /** Re-run a deferred health check as soon as the window becomes visible. */
-  private visibilityHandler = () => {
-    if (document.visibilityState === "visible" && this.healthCheckDue) {
-      this.healthCheckDue = false;
-      void this.checkHealth();
-    }
-  };
+  private unsubHealth: (() => void) | null = null;
   @state() private settingsMenuOpen = false;
   @state() private previewText: string | null = null;
   /** When the system-wide desktop preview overlay is on, the in-app live-preview
@@ -151,21 +144,16 @@ export class HeaderBarElement extends LitElement {
     void this.syncStatusFromDaemon();
     void this.initSemanticDefault();
     void this.loadConfigPrefs();
-    // Health: run the Doctor checks now and every 30s — but only while the
-    // window is actually visible. The checks include backend probes (Whisper /
-    // provider reachability), so a tray-minimized window shouldn't keep paying
-    // for them; a check that comes due while hidden runs the moment the window
-    // shows again (visibilityHandler). The whisper_status_changed event below
-    // still re-checks immediately on a transition, hidden or not.
-    void this.checkHealth();
-    this.healthTimer = window.setInterval(() => {
-      if (document.visibilityState === "hidden") {
-        this.healthCheckDue = true;
-        return;
-      }
-      void this.checkHealth();
-    }, 30000);
-    document.addEventListener("visibilitychange", this.visibilityHandler);
+    // App health: subscribe to the shared Doctor-check store, which owns the 30s
+    // poll (visibility-aware) so the pill stays live even in Settings where this
+    // bar is hidden. Mirror its snapshot into local state for the failure banner,
+    // and re-arm the banner whenever health returns to ok.
+    startHealthPolling();
+    this.unsubHealth = subscribeHealth((s) => {
+      if (s.level === "ok") this.bannerDismissed = false;
+      this.health = s.level;
+      this.healthIssues = s.issues;
+    });
     // Re-read the overlay pref on every settings save so toggling it takes effect
     // immediately (no reload).
     window.addEventListener("config:saved", this.onConfigSavedOverlay);
@@ -207,8 +195,8 @@ export class HeaderBarElement extends LitElement {
       } else if (eventName === "recording_resumed") {
         this.isPaused = false;
       } else if (eventName === "whisper_status_changed") {
-        // A reachability flip — refresh the health pill/banner right away.
-        void this.checkHealth();
+        // A reachability flip — refresh the shared health store right away.
+        void refreshHealth();
         // (summary_failed toasts — including the "skipped by user" case — are
         // handled centrally in services/notifications.ts with the other
         // pipeline step/failure toasts.)
@@ -243,23 +231,6 @@ export class HeaderBarElement extends LitElement {
     });
   }
 
-  /** Run the shared Doctor checks and distill app health. A check marked
-   *  "(optional)" never fails health; a daemon that can't even answer is the
-   *  reddest possible state. Re-arms the banner when health returns to ok. */
-  private async checkHealth() {
-    try {
-      const checks = await runDoctor();
-      const failing = checks.filter((c) => !c.ok && !c.name.toLowerCase().includes("(optional)"));
-      this.healthIssues = failing.map((c) => ({ name: c.name, fix: c.fix_action ?? null }));
-      const next: "ok" | "bad" = failing.length ? "bad" : "ok";
-      if (next === "ok") this.bannerDismissed = false;
-      this.health = next;
-    } catch {
-      this.healthIssues = [{ name: "Daemon not reachable", fix: "start_daemon" }];
-      this.health = "bad";
-    }
-  }
-
   /** Banner "Fix now": run the first failing check's one-click remediation
    *  (restart the whisper-server / relaunch the daemon), then re-check. */
   private async fixNow() {
@@ -279,7 +250,7 @@ export class HeaderBarElement extends LitElement {
         void this.openDoctor();
         return;
       }
-      window.setTimeout(() => void this.checkHealth(), 5000);
+      window.setTimeout(() => void refreshHealth(), 5000);
     } catch (e) {
       showToast(`Fix failed: ${errText(e)} — opening Doctor`, "error");
       void this.openDoctor();
@@ -288,11 +259,8 @@ export class HeaderBarElement extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    if (this.healthTimer !== null) {
-      clearInterval(this.healthTimer);
-      this.healthTimer = null;
-    }
-    document.removeEventListener("visibilitychange", this.visibilityHandler);
+    this.unsubHealth?.();
+    this.unsubHealth = null;
     if (this.docClickHandler) {
       document.removeEventListener("click", this.docClickHandler);
     }
@@ -758,12 +726,6 @@ export class HeaderBarElement extends LitElement {
           <option value="tag_failed" ?selected=${f.status === "tag_failed"}>Tagging Failed</option>
           <option value="cancelled" ?selected=${f.status === "cancelled"}>Cancelled</option>
         </select>
-        <button class="hb-health ${this.health}" title=${this.health === "bad"
-            ? `Problems found: ${this.healthIssues.map((i) => i.name).join(", ")} — click to open Doctor`
-            : this.health === "ok" ? "All systems healthy — click to open Doctor" : "Checking health…"}
-          aria-label="App health" @click=${this.openDoctor}>
-          <span class="hb-health-dot" aria-hidden="true"></span>${this.health === "bad" ? html`<span class="hb-health-n">${this.healthIssues.length}</span>` : null}
-        </button>
         <div class="hb-status-cluster" style="display: flex; align-items: center; gap: 6px;">
           <button class="record-btn" style="display:${(this.isRecording || this.isMeeting) ? "flex" : "none"}; background: rgba(137,180,250,0.15); color: var(--accent); border-color: rgba(137,180,250,0.4); font-size: 0.8571rem; padding: 6px 12px;"
             title="Pause / Resume recording" @click=${this.pauseRecording}>${this.isPaused ? "▶ Resume" : "⏸ Pause"}</button>
@@ -868,23 +830,6 @@ export class HeaderBarElement extends LitElement {
         </div>
         <div class="hb-settings-group" style="position: relative; display: inline-flex;">
           <style>
-            /* Health pill (sits between the status filter and the Record button):
-               green dot = all checks pass, red = something the Doctor can explain
-               is wrong; the banner carries the detail. Click opens the Doctor. */
-            .hb-health {
-              display: inline-flex; align-items: center; gap: 5px;
-              background: none; border: 1px solid transparent; border-radius: 999px;
-              padding: 5px 8px; cursor: pointer;
-              transition: background 0.15s ease, border-color 0.15s ease;
-            }
-            .hb-health:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--border-subtle); }
-            .hb-health-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-faded); }
-            .hb-health.ok .hb-health-dot { background: var(--ok, #a6e3a1); box-shadow: 0 0 6px color-mix(in srgb, var(--ok, #a6e3a1) 60%, transparent); }
-            .hb-health.bad .hb-health-dot { background: var(--err, #f38ba8); box-shadow: 0 0 8px color-mix(in srgb, var(--err, #f38ba8) 70%, transparent); animation: hbHealthBlink 1.2s ease-in-out infinite; }
-            .hb-health-n { font-size: 0.7857rem; font-weight: 700; color: var(--err, #f38ba8); }
-            @keyframes hbHealthBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-          </style>
-          <style>
             .hb-settings-menu { animation: hbMenuIn 0.12s ease-out; }
             .hb-menu-item {
               display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
@@ -902,7 +847,7 @@ export class HeaderBarElement extends LitElement {
             style="border-top-right-radius:0; border-bottom-right-radius:0; gap:6px; padding:0 11px;" @click=${this.openAllSettings}>⚙ Settings</button>
           <button class="icon-btn hb-settings-caret ${this.settingsMenuOpen ? 'active' : ''}" aria-label="Quick settings &amp; actions" aria-haspopup="menu"
             aria-expanded=${this.settingsMenuOpen} title="Quick settings &amp; actions"
-            style="padding:6px 7px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
+            style="box-sizing:border-box; width:28px; padding:6px 0; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid var(--border-subtle, rgba(255,255,255,0.12));"
             @click=${this.toggleSettingsMenu}><svg class="ph-caret-ico ${this.settingsMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
           <div class="hb-settings-menu" role="menu" ?hidden=${!this.settingsMenuOpen}
             style="position:absolute; top:calc(100% + 6px); right:0; z-index:60; min-width:230px; background:var(--bg-elevated, #1e1e2e); border:var(--popup-border); border-radius:10px; padding:5px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
@@ -917,6 +862,9 @@ export class HeaderBarElement extends LitElement {
             <button class="hb-menu-item" role="menuitem" @click=${this.openAllSettings}><span class="hb-menu-ico">⚙</span>All settings…</button>
           </div>
         </div>
+        <!-- App-health pill — the far-right-most control of the bar (same element
+             and styling as the Settings page's, via HealthPill.ts / health-pill.css). -->
+        <ph-health-pill></ph-health-pill>
       </div>
       <div class="hb-preview ${this.previewText ? 'visible' : ''}" role="status" aria-live="polite"
         title="Live transcription preview — updates as you speak while recording">

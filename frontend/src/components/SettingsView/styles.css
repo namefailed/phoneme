@@ -238,20 +238,33 @@ mark.settings-hit {
   display: inline-flex;
   align-items: stretch;
 }
+/* The shared app-health pill — the far-right-most control, placed (via the inline
+   healthPillStyle) at the same screen spot as the header's. Centre the dot in the
+   pinned vertical band; positioning itself is inline. */
+.sv-health {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  z-index: 6;
+}
 .settings-float-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   background: var(--bg-deep);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
-  border-right: none;
+  /* Keep the right border (the header toggle has one) — without it this split
+     button is ~1px narrower than the header's at non-100% display scaling. */
   border-radius: 6px 0 0 6px;
   padding: 4px 11px;
   font-size: 1.1429rem;
   color: var(--fg-muted);
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: all 0.15s ease-out;
+  /* Transition only the hover colours — NOT `all`, which would animate the box's
+     size/padding as it mounts into the height-pinned group and make the button
+     visibly shrink on entry. Matches the header split button's transition. */
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
 }
 /* Hovering EITHER half highlights the whole split button (matches the header
    split button). */
@@ -267,18 +280,39 @@ mark.settings-hit {
   justify-content: center;
   background: var(--bg-deep);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  /* Divider between the toggle and caret matches the header's (border-subtle). */
+  border-left-color: var(--border-subtle, rgba(255, 255, 255, 0.12));
   border-radius: 0 6px 6px 0;
-  padding: 4px 7px;
+  /* Locked to a whole-pixel box (border-box) so it can't snap to a different
+     device-pixel width than the header caret at non-100% display scaling — which
+     made it look a hair smaller in this view. Matches the header caret exactly. */
+  box-sizing: border-box;
+  width: 28px;
+  padding: 4px 0;
+  /* Same font-size as the header caret (the .icon-btn 1.1429rem) so the split
+     button is byte-for-byte the same in both views, not the inherited 12px. */
+  font-size: 1.1429rem;
   color: var(--fg-muted);
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: all 0.15s ease-out;
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out, color 0.15s ease-out;
 }
 .settings-float-caret:hover,
 .settings-float-caret.active {
   background: var(--border-subtle);
   color: var(--fg-default);
   border-color: var(--accent);
+}
+/* When snapped to the header button's captured rect (`.anchored`), the group is
+   pinned to that exact pixel height (floatAnchorStyle). Drop the children's
+   vertical padding so they stretch to fill it and centre their content — matching
+   the header ⚙, whose height comes from the header-bar row, not its own font.
+   Without this the float button grows taller than the header off the default UI
+   font size (its padding + scaled font outgrow the header's fixed row height). */
+.settings-float-group.anchored .settings-float-toggle,
+.settings-float-group.anchored .settings-float-caret {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 .settings-float-caret .ph-caret-ico { transition: transform 0.15s ease; }
 .settings-float-caret .ph-caret-ico.open { transform: rotate(180deg); }
@@ -393,9 +427,11 @@ mark.settings-hit {
      the footer (the classic flex-column overflow gotcha). */
   min-height: 0;
   overflow-y: auto;
-  /* Extra bottom padding clears the floating Save/Close buttons so the last bit
-     of a long tab never hides underneath them. */
-  padding: 24px 24px 76px;
+  /* Top padding starts the panels BELOW the floating ⚙ Settings button (which is
+     pinned at the top-right, ~42px tall from the top), so the first section never
+     sits underneath it. Bottom padding likewise clears the floating Save/Close
+     buttons so the last bit of a long tab never hides under them. */
+  padding: 56px 24px 76px;
 }
 .settings-section {
   background: var(--bg-elevated);

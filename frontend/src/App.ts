@@ -211,7 +211,17 @@ export class App {
       const btn = document.querySelector<HTMLElement>(".hb-settings-main");
       if (btn) {
         const r = btn.getBoundingClientRect();
-        setSettingsAnchor({ top: r.top, left: r.left, width: r.width, height: r.height });
+        // Round to whole pixels: the float button (and the health pill/chevron it
+        // carries) is positioned at these coords, and a fractional left/top makes
+        // the thin-stroked caret straddle the pixel grid and render a hair soft —
+        // looking very slightly smaller than the header's grid-aligned one. The
+        // sub-pixel shift is invisible (the header is hidden while Settings shows).
+        setSettingsAnchor({
+          top: Math.round(r.top),
+          left: Math.round(r.left),
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+        });
       }
     }
     // The top header bar is useless in Settings / the setup wizard — hide it

@@ -14,9 +14,11 @@ import "./styles/theme.css";
 import "./styles/reset.css";
 import "./styles/toast.css";
 import { App } from "./App";
+import "./components/HealthPill"; // registers <ph-health-pill> (header + Settings)
 import "./components/modal.css";
 import "./components/model-picker.css";
 import "./components/tag-manager.css";
+import "./components/health-pill.css";
 
 const root = document.getElementById("app");
 if (root) {
