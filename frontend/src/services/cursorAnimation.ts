@@ -199,7 +199,14 @@ function onMutations(records: MutationRecord[]) {
     // The control the roving cursor just landed on: `.kbd-cursor` everywhere, PLUS
     // the recordings list's own `.kbd-focused` row (its highlight class), so list
     // j/k moves glide row-to-row like every other pane.
-    if (gained(rec, "kbd-cursor") || gained(rec, "kbd-focused")) cursorGain = el;
+    if (gained(rec, "kbd-cursor") || gained(rec, "kbd-focused")) {
+      // Don't follow the cursor INTO a modal / popup (Doctor, Re-run, Quick model
+      // switcher, …): the modal's own `.kbd-cursor` border marks the selection,
+      // and the glow stays on the control that opened it (behind the backdrop),
+      // reappearing there when the modal closes — never stranded inside a dialog.
+      if (el.closest('[class*="modal-overlay"]')) continue;
+      cursorGain = el;
+    }
     // A pane just took focus (sidebar / list / detail). Covers the case where the
     // inner highlight class did NOT change — e.g. returning to the list with the
     // same row focused — so the ghost still moves to that pane's live cursor

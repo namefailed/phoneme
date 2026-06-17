@@ -95,13 +95,15 @@ body.phoneme-hide-header-instant #hdr {
   will-change: left, top, width, height, opacity;
 }
 .kbd-cursor-ghost {
-  /* a soft accent wash that chases the cursor and settles on the control */
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+  /* a soft wash that chases the cursor and settles on the control — uses the
+     dedicated `--kbd-cursor` color (NOT `--accent`) so it stays visible even on
+     accent-colored controls like the Play button. */
+  background: color-mix(in srgb, var(--kbd-cursor) 26%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbd-cursor) 55%, transparent);
 }
 .kbd-cursor-ghost-tail {
   /* the streak connecting old → new during a smear/trail move */
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--kbd-cursor) 32%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
   .kbd-cursor-ghost,
@@ -145,7 +147,7 @@ body.phoneme-hide-header-instant #hdr {
   outline: none;
 }
 .headerbar .kbd-cursor {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--kbd-cursor);
   outline-offset: 2px;
   border-radius: 8px;
 }
@@ -165,7 +167,7 @@ body.phoneme-hide-header-instant #hdr {
    accent box marks the control that h/l/j/k + arrows are on; Enter activates it.
    Matches the `.modal-overlay` convention and the `*-modal-overlay` variants. */
 [class*="modal-overlay"] .kbd-cursor {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--kbd-cursor);
   outline-offset: 1px;
   border-radius: 6px;
 }
@@ -197,9 +199,9 @@ body.phoneme-hide-header-instant #hdr {
    can't pop open from JS, so this is the affordance instead. */
 .headerbar .kbd-cycle {
   outline-width: 3px;
-  border-color: var(--accent) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent),
-    0 0 10px color-mix(in srgb, var(--accent) 45%, transparent);
+  border-color: var(--kbd-cursor) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbd-cursor) 50%, transparent),
+    0 0 10px color-mix(in srgb, var(--kbd-cursor) 45%, transparent);
 }
 /* The keyboard "cycle" list we render beside a native <select> (status filter)
    while j/k cycle it — so the options, their order, and the current one are
@@ -222,8 +224,8 @@ body.phoneme-hide-header-instant #hdr {
   white-space: nowrap;
 }
 .hb-select-cycle-item.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--kbd-cursor) 18%, transparent);
+  color: var(--kbd-cursor);
   font-weight: 600;
 }
 .headerbar {
@@ -231,13 +233,37 @@ body.phoneme-hide-header-instant #hdr {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   display: flex;
-  /* Wrap to a second row on a narrow window instead of squishing/clipping the
-     right-side Record + Settings split buttons. No effect when there's room. */
-  flex-wrap: wrap;
+  /* Stay on ONE row. As the window narrows we progressively HIDE the optional
+     filters (date range, then the status select) — see the breakpoints below —
+     rather than letting the bar double over onto a second row. `nowrap` keeps
+     it a single line; the search box flexes to absorb the slack. */
+  flex-wrap: nowrap;
   gap: 10px;
   align-items: center;
   flex-shrink: 0;
   position: relative;
+}
+/* ── Header responsiveness ────────────────────────────────────────────────
+   Below the app's minimum comfortable width the bar can't fit every control on
+   one line, so drop the least-used ones in order (dates first, then status)
+   instead of wrapping. The search box, record, and settings always stay. The
+   window itself is clamped to a minimum size (tauri.conf.json) so we never go
+   below the narrowest layout here. */
+/* `!important` is needed: the date range carries an inline `display:flex` (only
+   `!important` beats an inline style), and the status-select rule is defined
+   later in this file (so a plain media rule here would lose on source order). */
+@media (max-width: 1080px) {
+  .headerbar .hb-date-range { display: none !important; }
+}
+@media (max-width: 900px) {
+  .headerbar .hb-status-select { display: none !important; }
+  .headerbar { gap: 8px; }
+}
+@media (max-width: 760px) {
+  /* Tightest supported layout: just toggle · sort · search · record · settings.
+     Trim the sort label to its arrow so the search keeps room. */
+  .headerbar .hb-sort-btn { font-size: 0; gap: 0; padding: 6px 8px; }
+  .headerbar .hb-sort-btn::before { content: "↕"; font-size: 0.9286rem; }
 }
 /* Lift the whole header column above the main view so its dropdowns paint over
    the list/detail splitter (which sits in #main, a later sibling, and would
@@ -303,7 +329,57 @@ body.phoneme-hide-header-instant #hdr {
   line-height: 1;
   display: inline-flex;
   align-items: center;
+  /* Fixed width sized to the longest option ("Transcription Failed" + the
+     selected-row checkmark), so the box and its anchored dropdown popup are the
+     same width AND every label fits on one line. Short selections (e.g. "All
+     status") just leave trailing space — the pill stays a consistent size. */
+  width: 172px;
 }
+/* Pin the dropdown popup to the SAME width as the closed pill. A classic native
+   <select> popup is sized to its widest option plus the browser's own popup
+   chrome, so it spills wider than the box. Opting this one select into the
+   customizable-select model (Chromium 135+) turns the popup into the stylable
+   `::picker(select)`, which we size to the button via `anchor-size`. On runtimes
+   without it the declaration is dropped and the select falls back to the classic
+   look above — no breakage. The pill keeps its own background arrow, so hide the
+   picker's default icon to avoid a double chevron. */
+.headerbar .hb-status-select,
+.headerbar .hb-status-select::picker(select) {
+  appearance: base-select;
+}
+.headerbar .hb-status-select::picker(select) {
+  width: anchor-size(width);
+  box-sizing: border-box;
+  background: var(--bg-surface);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  padding: 3px;
+  margin-top: 4px;
+  /* The longest labels ("Transcription Failed") fit the button width, but keep
+     a vertical scroll for short viewports and never a horizontal one. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.headerbar .hb-status-select::picker-icon { display: none; }
+.headerbar .hb-status-select option {
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 0.8571rem;
+  white-space: nowrap;
+}
+.headerbar .hb-status-select option:hover,
+.headerbar .hb-status-select option:focus {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--fg-default);
+}
+.headerbar .hb-status-select option:checked {
+  color: var(--accent);
+}
+/* The base-select model auto-adds a checkmark column for the selected option;
+   the status pill already shows the current value, so drop it to keep the
+   narrow popup tidy. */
+.headerbar .hb-status-select option::checkmark { display: none; }
 .headerbar .filter-pill:hover {
   background: var(--border-subtle);
   border-color: var(--accent);

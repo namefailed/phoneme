@@ -17,6 +17,13 @@
      Defined on :root so every dark theme inherits a readable orange; the light
      themes override it below for contrast. */
   --peach: #fab387;
+  /* Keyboard-cursor highlight color — DELIBERATELY NOT `--accent` (the roving
+     glow + rings land on accent-colored controls like the Play button, where an
+     accent-colored cursor vanishes). Each theme picks a palette-native hue that
+     is COMPLEMENTARY to its own accent — pretty and harmonious, but distinct
+     enough that you can always tell what's selected. EVERY theme block below
+     sets its own; this Mocha value (sapphire, vs the mauve accent) is the base. */
+  --kbd-cursor: #74c7ec;
   /* Shared border for popups/dropdowns/modals — matches the subtle accent-tinted
      border the buttons use. Defined once on :root; resolves var(--accent) per
      theme at use time, so it stays correct across all themes. */
@@ -38,6 +45,7 @@ html[data-theme="catppuccin-macchiato"] {
   --warn: #eed49f;
   --err: #ed8796;
   --info: #8aadf4;
+  --kbd-cursor: #7dc4e4; /* sapphire — vs the mauve accent */
 }
 
 html[data-theme="tokyo-night"] {
@@ -55,6 +63,7 @@ html[data-theme="tokyo-night"] {
   --warn: #e0af68;
   --err: #f7768e;
   --info: #7bc5e4;
+  --kbd-cursor: #bb9af7; /* magenta — vs the blue accent */
 }
 
 html[data-theme="one-dark"] {
@@ -72,6 +81,7 @@ html[data-theme="one-dark"] {
   --warn: #d19a66;
   --err: #e06c75;
   --info: #56b6c2;
+  --kbd-cursor: #c678dd; /* purple — vs the blue accent */
 }
 
 html[data-theme="nord"] {
@@ -89,6 +99,7 @@ html[data-theme="nord"] {
   --warn: #ebcb8b;
   --err: #bf616a;
   --info: #81a1c1;
+  --kbd-cursor: #b48ead; /* aurora purple — vs the frost-cyan accent */
 }
 
 html[data-theme="gruvbox"] {
@@ -106,6 +117,7 @@ html[data-theme="gruvbox"] {
   --warn: #fabd2f;
   --err: #fb4934;
   --info: #83a598;
+  --kbd-cursor: #8ec07c; /* aqua — vs the pink accent */
 }
 
 html[data-theme="dracula"] {
@@ -123,6 +135,7 @@ html[data-theme="dracula"] {
   --warn: #f1fa8c;
   --err: #ff5555;
   --info: #8be9fd;
+  --kbd-cursor: #8be9fd; /* cyan — vs the pink accent */
 }
 
 /* ── Dark: Everforest ───────────────────────────────────────────────────── */
@@ -141,6 +154,7 @@ html[data-theme="everforest"] {
   --warn: #dbbc7f;
   --err: #e67e80;
   --info: #7fbbb3;
+  --kbd-cursor: #d699b6; /* purple — vs the green accent */
 }
 
 /* ── Dark: Rosé Pine ────────────────────────────────────────────────────── */
@@ -159,6 +173,7 @@ html[data-theme="rose-pine"] {
   --warn: #f6c177;
   --err: #eb6f92;
   --info: #31748f;
+  --kbd-cursor: #9ccfd8; /* foam — vs the iris accent */
 }
 
 /* ── Light: Catppuccin Latte ────────────────────────────────────────────── */
@@ -178,6 +193,7 @@ html[data-theme="catppuccin-latte"] {
   --err: #d20f39;
   --info: #1e66f5;
   --peach: #fe640b;
+  --kbd-cursor: #209fb5; /* sapphire — vs the purple accent (light theme) */
 }
 
 /* ── Light: Solarized Light ─────────────────────────────────────────────── */
@@ -197,5 +213,6 @@ html[data-theme="solarized-light"] {
   --err: #dc322f;
   --info: #2aa198;
   --peach: #cb4b16;
+  --kbd-cursor: #d33682; /* magenta — vs the blue accent (light theme) */
 }
 

@@ -89,16 +89,36 @@ export class ActionRowElement extends LitElement {
     }
   };
 
+  /** Escape closes an open Speed/Export menu (mouse-opened — the keyboard layer
+   *  already routes Escape through `closeDetailSub` when it's driving the menu).
+   *  Capture-phase + stopPropagation so it never bubbles to the global handler,
+   *  which would close the whole recording. Defers (returns) when the menu has a
+   *  keyboard-highlighted item so the grid layer can close it AND return the glow
+   *  to the trigger — mirrors the Views/Versions handler in RecordingDetail. */
+  private escHandler = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    if (!this.exportMenuOpen && !this.speedMenuOpen) return;
+    const speedMenu = this.querySelector(".speed-dropdown .th-menu");
+    const exportMenu = this.querySelector(".export-menu");
+    if (speedMenu?.querySelector(".kbd-cursor") || exportMenu?.querySelector(".kbd-cursor")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.speedMenuOpen = false;
+    this.exportMenuOpen = false;
+  };
+
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener("phoneme:action", this.actionHandler);
     document.addEventListener("click", this.outsideClickHandler);
+    document.addEventListener("keydown", this.escHandler, true);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("phoneme:action", this.actionHandler);
     document.removeEventListener("click", this.outsideClickHandler);
+    document.removeEventListener("keydown", this.escHandler, true);
   }
 
   private handlePlay() {

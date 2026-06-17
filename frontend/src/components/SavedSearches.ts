@@ -36,14 +36,27 @@ export class SavedSearchesElement extends LitElement {
     }
   };
 
+  /** Escape closes the open dropdown (capture-phase + stopPropagation so it
+   *  never bubbles to the global handler). When renaming, the first Escape
+   *  cancels the name field (handled by `onNameKey` on the input) and only a
+   *  second one closes the dropdown — so defer while `naming`. */
+  private escKey = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || !this.open || this.naming) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.open = false;
+  };
+
   connectedCallback() {
     super.connectedCallback();
     document.addEventListener("click", this.docClick);
+    document.addEventListener("keydown", this.escKey, true);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("click", this.docClick);
+    document.removeEventListener("keydown", this.escKey, true);
   }
 
   private toggle(e: Event) {

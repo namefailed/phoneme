@@ -1,6 +1,13 @@
 *, *::before, *::after {
   box-sizing: border-box;
 }
+/* No rubber-band / elastic overscroll past a scroll boundary, anywhere. Every
+   scroll region in the app is internal (list, detail pane, editors, modals), so
+   hitting a limit should just STOP — not bounce back. `none` also blocks scroll
+   chaining to ancestors. Harmless on non-scrolling elements. */
+* {
+  overscroll-behavior: none;
+}
 html, body, #app {
   margin: 0;
   padding: 0;

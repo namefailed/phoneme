@@ -153,18 +153,18 @@
 .rec-table.vim-on .rec-row.kbd-focused:not(.active),
 .rec-table.vim-on .rec-group-head.kbd-focused:not(.active) {
   outline: none;
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 45%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--kbd-cursor) 45%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--kbd-cursor) 24%, transparent);
+  background: color-mix(in srgb, var(--kbd-cursor) 6%, transparent);
 }
 /* …and full-strength while the list itself holds focus. (Without vim nav this
    focus-scoped rule is the only one, so non-vim behavior is unchanged.) */
 .rec-table:focus-within .rec-row.kbd-focused:not(.active),
 .rec-table:focus-within .rec-group-head.kbd-focused:not(.active) {
   outline: none;
-  box-shadow: inset 3px 0 0 var(--accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--kbd-cursor),
+    inset 0 0 0 1px color-mix(in srgb, var(--kbd-cursor) 55%, transparent);
+  background: color-mix(in srgb, var(--kbd-cursor) 12%, transparent);
 }
 .rec-table:focus {
   outline: none;
@@ -1160,6 +1160,9 @@ mark.search-hit {
 .rv-list {
   height: 100%;
   overflow: hidden;
+  /* Positioning context for the floating "back to top" button (and nothing
+     else — every dropdown/checkbox inside has its own relative wrapper). */
+  position: relative;
 }
 .rv-splitter {
   background: var(--border-subtle);
@@ -1183,6 +1186,58 @@ mark.search-hit {
 .rv-detail {
   height: 100%;
   overflow: hidden;
+  /* Positioning context for the floating "back to top" button. */
+  position: relative;
+}
+
+/* ── Back-to-top button ───────────────────────────────────────────────────
+   A floating round button that appears in the bottom-right of the recordings
+   list and each transcription-detail pane once the user has scrolled down a
+   bit, mirroring the familiar web pattern. It lives on the stable pane host
+   (#rv-list / #rv-detail / #rv-detail2) — NOT inside the re-rendered scroller —
+   so it survives list/detail re-renders; RecordingsView wires the scroll +
+   click behaviour. Hidden (and click-through) until `.visible` is added. */
+.back-to-top {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+  cursor: pointer;
+  /* Hidden state lifts slightly UP (it lives at the top now) and is centered. */
+  opacity: 0;
+  transform: translate(-50%, -8px);
+  pointer-events: none;
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out,
+    color 0.15s ease-out, border-color 0.15s ease-out, background 0.15s ease-out;
+}
+.back-to-top.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+.back-to-top:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-deep);
+}
+.back-to-top:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.back-to-top svg {
+  display: block;
 }
 
 /* ── Vim navigation: focus ring on the active pane ────────────────────────── */
@@ -1198,7 +1253,7 @@ mark.search-hit {
 /* vim j/k cursor on a detail-pane option button (so it's clear what you're on).
    Tight to the control — a wide outline-offset reads as an oversized halo. */
 .rv-detail .kbd-cursor {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--kbd-cursor);
   outline-offset: -1px;
   border-radius: 6px;
 }
@@ -1209,6 +1264,22 @@ mark.search-hit {
 .rv-detail #detail-title.kbd-cursor {
   outline-offset: 2px;
   border-radius: 8px;
+}
+/* Keyboard cursor on an OPEN dropdown's option (Views / Versions / Pipeline /
+   Speed / Export). The cursor glow stays parked on the trigger button while a
+   dropdown is open, so the highlighted row needs its own unmistakable marker —
+   a bright accent ring PLUS a fill tint — otherwise it's easy to miss which row
+   j/k is on inside the popup. Scoped to the menu classes (not `.rv-detail`) so
+   it applies wherever the popup renders. Inset offset keeps the ring tight to
+   the row and clear of the menu's padding. */
+.th-menu .th-menu-item.kbd-cursor,
+.export-menu [role="menuitem"].kbd-cursor,
+#detail-pipeline-pop .dp-row.kbd-cursor {
+  outline: 2px solid var(--kbd-cursor);
+  outline-offset: -2px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--kbd-cursor) 22%, transparent);
+  color: var(--fg-default);
 }
 /* The list scroll-area and the detail/sidebar containers take focus (tabindex)
    so h/l can move between them; suppress the browser's own focus outline in
@@ -1449,9 +1520,9 @@ body.phoneme-hide-header ph-header-bar {
 .bulk-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 /* Keyboard cursor inside the Tag/Export dropdown (j/k). */
 .bulk-menu-item.kbd-cursor {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--accent);
-  outline: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--kbd-cursor) 16%, transparent);
+  color: var(--kbd-cursor);
+  outline: 2px solid var(--kbd-cursor);
   outline-offset: -2px;
 }
 .bulk-menu-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
@@ -1482,10 +1553,10 @@ body.phoneme-hide-header ph-header-bar {
 }
 /* Keyboard roving cursor inside the bulk bar (Shift+Enter → h/l/Enter). */
 .bulk-btn.kbd-cursor {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--kbd-cursor);
   outline-offset: 2px;
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--kbd-cursor);
+  color: var(--kbd-cursor);
 }
 .bulk-btn:hover:not(:disabled) {
   border-color: var(--accent);
@@ -1575,8 +1646,28 @@ body.phoneme-hide-header ph-header-bar {
   color: var(--accent);
 }
 .rec-group-title {
+  /* inline-flex + centered so the meeting emoji and the name share one vertical
+     center line with the date/time meta and the caret (the bare emoji used to
+     ride high and throw the title out of line). */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.2;
   font-weight: 600;
   white-space: nowrap;
+}
+.rec-group-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 0.9286rem;
+}
+/* The date · time separator: a quiet, evenly-spaced divider (more faded than the
+   meta text itself) so it reads as punctuation, not a competing glyph. */
+.rec-group-sep {
+  color: var(--fg-faded);
+  margin: 0 6px;
 }
 /* Explicit rename affordance — hidden until the group row is hovered so the
    rename action is deliberate (replaces the too-easy double-click). */
@@ -2159,23 +2250,23 @@ ph-sidebar {
    vertical lists: 3px accent rail + faint accent ring + accent-tinted fill
    (was a thin 2px rail + a plain white wash, the odd one out app-wide). */
 .sidebar-item.kbd-cursor {
-  box-shadow: inset 3px 0 0 var(--accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--kbd-cursor),
+    inset 0 0 0 1px color-mix(in srgb, var(--kbd-cursor) 55%, transparent);
+  background: color-mix(in srgb, var(--kbd-cursor) 12%, transparent);
   color: var(--fg-default);
 }
 /* Sidebar grid cursor on everything that ISN'T a filter row — section headers,
    the queue header, queue item cells and their buttons. Same accent outline the
    detail pane's grid cursor uses, for one keyboard look app-wide. */
 ph-sidebar .kbd-cursor:not(.sidebar-item) {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--kbd-cursor);
   outline-offset: -1px;
   border-radius: 6px;
 }
 /* The queue item's clickable main area is a plain div — give the cursor a hint
    of fill so it reads as the focused row, not just an outline. */
 ph-sidebar .queue-item-main.kbd-cursor {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--kbd-cursor) 10%, transparent);
 }
 .sidebar-icon {
   font-size: 1rem;
@@ -2747,7 +2838,8 @@ ph-sidebar .queue-item-main.kbd-cursor {
 .chrono-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  padding: 4px 2px;
 }
 .chrono-row {
   display: flex;
@@ -2755,34 +2847,41 @@ ph-sidebar .queue-item-main.kbd-cursor {
 }
 .chrono-row--right { justify-content: flex-end; }
 .chrono-bubble {
-  max-width: 78%;
-  padding: 6px 10px;
-  border-radius: 10px;
-  background: var(--bg-surface);
+  max-width: 80%;
+  padding: 9px 14px;
+  /* Asymmetric radius gives the chat-bubble feel; the speaker-colored edge
+     (a soft wash + a solid edge bar) ties each turn to its speaker. */
+  border-radius: 14px 14px 14px 4px;
+  background: color-mix(in srgb, var(--spk, var(--accent)) 7%, var(--bg-surface));
   border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--spk, var(--border-subtle));
+  border-left: 3px solid color-mix(in srgb, var(--spk, var(--accent)) 65%, transparent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 .chrono-row--right .chrono-bubble {
+  /* Mirror the tail + speaker edge to the right for the other side. */
+  border-radius: 14px 14px 4px 14px;
   border-left: 1px solid var(--border-subtle);
-  border-right: 3px solid var(--spk, var(--border-subtle));
-  background: var(--bg-raised);
+  border-right: 3px solid color-mix(in srgb, var(--spk, var(--accent)) 65%, transparent);
 }
 .chrono-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
+  gap: 7px;
+  margin-bottom: 3px;
   font-size: 0.7857rem;
-  color: var(--fg-muted);
+  font-weight: 600;
+  color: var(--spk, var(--fg-muted));
 }
 .chrono-time {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 400;
   color: var(--fg-faded);
 }
-.chrono-source { font-size: 0.8571rem; }
+.chrono-source { font-size: 0.9286rem; }
 .chrono-text {
-  font-size: 0.9286rem;
-  line-height: 1.55;
+  font-size: 0.9643rem;
+  line-height: 1.6;
+  color: var(--fg-default);
   white-space: pre-wrap;
   word-break: break-word;
 }

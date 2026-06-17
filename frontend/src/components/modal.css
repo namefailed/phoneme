@@ -30,6 +30,17 @@
   max-width: calc(100vw - 48px);
   animation: modal-slide-in 0.14s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+/* The dialog / overlay container is focused programmatically (tabindex=-1) purely
+   to route keys to the roving cursor when a modal is opened by keyboard — it's not
+   a visible target, so suppress its browser focus ring. Without this the WebView
+   draws its default outline (the OS accent, e.g. a hideous orange box) around the
+   whole dialog. The roving .kbd-cursor on the active control is the only highlight. */
+.modal-dialog:focus,
+.modal-dialog:focus-visible,
+[class*="modal-overlay"]:focus,
+[class*="modal-overlay"]:focus-visible {
+  outline: none;
+}
 
 @keyframes modal-slide-in {
   from { transform: translateY(-8px) scale(0.97); opacity: 0; }

@@ -264,6 +264,7 @@ export class RecordingsView {
 
     this.applyLayout();
     this.setupSidebarResize();
+    this.setupBackToTop();
     // List zoom (per-device): restore + apply; Ctrl+scroll over the list pane
     // adjusts it live (Ctrl+= / Ctrl+- / Ctrl+0 work too — see handleKeydown).
     const z = Number((() => { try { return localStorage.getItem(LS_LIST_ZOOM); } catch { return null; } })());
@@ -1688,6 +1689,65 @@ export class RecordingsView {
   }
 
   /** Drag-to-resize the left sidebar; width persists per device. */
+  /** Floating "back to top" buttons for the recordings list and each
+   *  transcription-detail pane (and nothing else). The scrollers inside these
+   *  hosts — `.rec-table` for the list, `.detail` for a recording — are torn
+   *  down and rebuilt on every re-render, so we can't pin a listener to them.
+   *  Instead the button + a capture-phase scroll listener live on the STABLE
+   *  pane host; capture catches scroll from the (current) descendant scroller,
+   *  and a MutationObserver re-evaluates visibility after re-renders reset the
+   *  scroll position. */
+  private setupBackToTop() {
+    const SHOW_AFTER = 240; // px scrolled before the button fades in
+    const targets: Array<{ hostId: string; scroller: string }> = [
+      { hostId: "rv-list", scroller: ".rec-table" },
+      { hostId: "rv-detail", scroller: ".detail" },
+      { hostId: "rv-detail2", scroller: ".detail" },
+    ];
+    for (const { hostId, scroller } of targets) {
+      const host = this.container.querySelector<HTMLElement>(`#${hostId}`);
+      if (!host) continue;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "back-to-top";
+      btn.title = "Back to top";
+      btn.setAttribute("aria-label", "Back to top");
+      btn.innerHTML =
+        '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">' +
+        '<path d="M12 6l-6 6h4v6h4v-6h4z" fill="currentColor"/></svg>' +
+        "<span>Back to top</span>";
+      host.appendChild(btn);
+      const reeval = () => {
+        const sc = host.querySelector<HTMLElement>(scroller);
+        btn.classList.toggle("visible", !!sc && sc.scrollTop > SHOW_AFTER);
+      };
+      btn.addEventListener("click", () => {
+        host.querySelector<HTMLElement>(scroller)?.scrollTo({ top: 0, behavior: "smooth" });
+      });
+      // scroll doesn't bubble, but capture sees it from the descendant scroller.
+      host.addEventListener(
+        "scroll",
+        (e) => {
+          const sc = e.target as HTMLElement | null;
+          if (sc && typeof sc.matches === "function" && sc.matches(scroller)) reeval();
+        },
+        true,
+      );
+      // Re-renders swap the scroller (and usually reset it to the top); re-check
+      // once per frame so the button hides/shows correctly afterwards.
+      let pending = false;
+      const mo = new MutationObserver(() => {
+        if (pending) return;
+        pending = true;
+        requestAnimationFrame(() => {
+          pending = false;
+          reeval();
+        });
+      });
+      mo.observe(host, { childList: true, subtree: true });
+    }
+  }
+
   private setupSidebarResize() {
     const handle = this.container.querySelector<HTMLElement>("#rv-sidebar-resize");
     if (!handle) return;
