@@ -78,12 +78,16 @@ function bestKeywordScore(query: string, words: string[]): number | null {
  *  registry's `tab` field) which sections mount under each tab. The trio at the
  *  top mirrors the transcription pipeline; the heavier groups (Recall, System)
  *  are their own tabs rather than one overloaded catch-all. */
+// Ordered by a recording's journey: how it's captured → transcribed → enriched →
+// found, then (in render) the managers, then the app-level tabs (Appearance,
+// System) last. Appearance + System are pulled to the end of the rail in
+// render() so they sit together after the managers.
 const SETTINGS_TABS: { id: string; label: string }[] = [
+  { id: "capture", label: "🎙️ Capture" },
+  { id: "dictation", label: "⌨️ Dictation" },
   { id: "transcription", label: "🗣️ Transcription" },
   { id: "preview", label: "👁️ Live Preview" },
   { id: "diarization", label: "👥 Diarization" },
-  { id: "capture", label: "🎙️ Capture" },
-  { id: "dictation", label: "⌨️ Dictation" },
   { id: "postprocessing", label: "✨ Post-Processing" },
   { id: "recall", label: "🔮 Recall" },
   { id: "appearance", label: "🎨 Appearance" },
@@ -97,8 +101,8 @@ const SETTINGS_TABS: { id: string; label: string }[] = [
  *  here. Rendered between Appearance and System (see the rail in render()). */
 const MANAGERS: { id: string; label: string }[] = [
   { id: "managers/tags", label: "🏷️ Tags" },
-  { id: "managers/profiles", label: "👤 Profiles" },
   { id: "managers/saved", label: "📌 Saved searches" },
+  { id: "managers/profiles", label: "👤 Profiles" },
   { id: "managers/hooks", label: "🪝 Integrations" },
   { id: "managers/keybinds", label: "⚡ Keybinds" },
 ];
@@ -697,11 +701,14 @@ export class SettingsViewElement extends LitElement {
               class="sv-tab ${tab === id && !isSearching ? "active" : ""}"
               @click=${() => this.switchTab(id)}
             >${label}</div>`;
-            const sys = SETTINGS_TABS.find((t) => t.id === "system");
+            // Pipeline tabs first, then the managers, then the app-level tabs
+            // (Appearance, System) last — grouped at the bottom after the managers.
+            const APP_TABS = ["appearance", "system"];
+            const appTabs = APP_TABS.map((id) => SETTINGS_TABS.find((t) => t.id === id)).filter(Boolean) as { id: string; label: string }[];
             return html`
-              ${SETTINGS_TABS.filter((t) => t.id !== "system").map((t) => chip(t.id, t.label))}
+              ${SETTINGS_TABS.filter((t) => !APP_TABS.includes(t.id)).map((t) => chip(t.id, t.label))}
               ${MANAGERS.map((m) => chip(m.id, m.label))}
-              ${sys ? chip(sys.id, sys.label) : ""}
+              ${appTabs.map((t) => chip(t.id, t.label))}
             `;
           })()}
 
@@ -718,7 +725,11 @@ export class SettingsViewElement extends LitElement {
               <button class="hb-menu-item" role="menuitem" @click=${this.openFloatModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
               <div class="hb-menu-sep"></div>
               <div class="hb-menu-label">Jump to section</div>
-              ${[...SETTINGS_TABS, ...MANAGERS].map((t) => {
+              ${[
+                ...SETTINGS_TABS.filter((t) => t.id !== "appearance" && t.id !== "system"),
+                ...MANAGERS,
+                ...SETTINGS_TABS.filter((t) => t.id === "appearance" || t.id === "system"),
+              ].map((t) => {
                 // Split the leading emoji off the label so it sits in the icon slot.
                 const sp = t.label.indexOf(" ");
                 const ico = sp > 0 ? t.label.slice(0, sp) : "";
