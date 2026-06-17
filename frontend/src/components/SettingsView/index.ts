@@ -682,15 +682,6 @@ export class SettingsViewElement extends LitElement {
     return html`
       <div class="settings-layout">
         <div class="settings-sidebar">
-          <style>
-            .sv-rail-group {
-              font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em;
-              text-transform: uppercase; color: var(--fg-faded);
-              padding: 6px 10px 4px; margin: 10px 0 2px;
-              border-top: 1px solid var(--border-subtle);
-            }
-            .sv-tab.sv-tab-manager { margin-left: 8px; }
-          </style>
           <h2>Settings</h2>
           <div class="sv-search-wrap">
             <svg class="sv-search-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -699,17 +690,17 @@ export class SettingsViewElement extends LitElement {
           </div>
 
           ${(() => {
-            // Config tabs, then a "Managers" group header with each manager as
-            // its own rail entry, then System last (see SETTINGS_TABS / MANAGERS).
-            const chip = (id: string, label: string, extra = "") => html`<div
-              class="sv-tab ${extra} ${tab === id && !isSearching ? "active" : ""}"
+            // All tabs render flat in the rail: the config tabs, then each
+            // manager (Tags · Profiles · … · Keybinds) as its own plain tab, then
+            // System last (see SETTINGS_TABS / MANAGERS).
+            const chip = (id: string, label: string) => html`<div
+              class="sv-tab ${tab === id && !isSearching ? "active" : ""}"
               @click=${() => this.switchTab(id)}
             >${label}</div>`;
             const sys = SETTINGS_TABS.find((t) => t.id === "system");
             return html`
               ${SETTINGS_TABS.filter((t) => t.id !== "system").map((t) => chip(t.id, t.label))}
-              <div class="sv-rail-group">Managers</div>
-              ${MANAGERS.map((m) => chip(m.id, m.label, "sv-tab-manager"))}
+              ${MANAGERS.map((m) => chip(m.id, m.label))}
               ${sys ? chip(sys.id, sys.label) : ""}
             `;
           })()}

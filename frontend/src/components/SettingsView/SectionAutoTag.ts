@@ -74,11 +74,12 @@ export class SectionAutoTag {
           <div><input type="number" id="at-max" data-key="auto_tag.max_tags" min="1" max="12" value="${Number(t.max_tags) || 5}" style="width:80px;" /></div>
         </div>
 
-        <div class="settings-field">
+        <div class="settings-field ai-prompt-field">
           <label>Auto-tag instructions</label>
-          <div>
-            <textarea id="at-prompt" data-key="auto_tag.prompt" rows="3" style="width:100%; resize:vertical; font-family:inherit;"
+          <div class="ai-prompt-controls">
+            <textarea id="at-prompt" data-key="auto_tag.prompt" rows="8" style="resize:vertical; min-height:140px; font-size:0.9286rem; padding:8px; font-family:inherit;"
               placeholder="How the AI should pick tags (your tag list and the transcript are appended automatically)">${escapeHtml(t.prompt ?? "")}</textarea>
+            <span class="settings-help-text">How the AI should pick tags (your tag list and the transcript are appended automatically).</span>
           </div>
         </div>
 

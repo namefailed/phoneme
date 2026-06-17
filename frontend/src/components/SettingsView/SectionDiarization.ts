@@ -112,35 +112,42 @@ export class SectionDiarization {
             </span>
           </div>
 
-          <h4 style="margin:14px 0 6px; font-size: 0.9286rem; color:var(--fg-muted);">Tuning</h4>
-          <div class="settings-field">
-            <label>Merge gap (seconds)</label>
-            <div><input type="number" id="diar-merge-gap" min="0" max="5" step="0.05" style="width:110px;"
-              value="${this.config.diarization?.merge_gap_secs ?? 0.25}" /></div>
-            <span style="${HELP}">Adjacent turns from the same speaker closer than this are merged into one. Lower = more, shorter turns. Default 0.25.</span>
-          </div>
-          <div class="settings-field">
-            <label>Speaker keep threshold</label>
-            <div><input type="text" id="diar-keep-threshold" inputmode="decimal" style="width:150px;"
-              value="${formatDecimal(this.config.diarization?.speaker_keep_threshold ?? 0.0000001)}" /></div>
-            <span style="${HELP}">Advanced sensitivity value — drops speaker clusters weaker than this. Raise it to suppress spurious extra speakers; most users never need to change it. Default 0.0000001.</span>
-          </div>
-          <div class="settings-field">
-            <label>Turn reconstruction</label>
-            <div>
-              <select id="diar-reconstruct" style="min-width:220px; width:auto;">
-                <option value="smoothed" ${(this.config.diarization?.reconstruct_method ?? "smoothed") !== "standard" ? "selected" : ""}>Smoothed (recommended)</option>
-                <option value="standard" ${this.config.diarization?.reconstruct_method === "standard" ? "selected" : ""}>Standard</option>
-              </select>
+          <details class="settings-advanced">
+            <summary>
+              <svg class="settings-advanced-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              Advanced — diarization tuning
+            </summary>
+            <div class="settings-field">
+              <label>Merge gap (seconds)</label>
+              <div><input type="number" id="diar-merge-gap" min="0" max="5" step="0.05" style="width:110px;"
+                value="${this.config.diarization?.merge_gap_secs ?? 0.25}" /></div>
+              <span style="${HELP}">Adjacent turns from the same speaker closer than this are merged into one. Lower = more, shorter turns. Default 0.25.</span>
             </div>
-            <span style="${HELP}">How turn boundaries are reconstructed — Smoothed softens them; Standard uses hard cuts.</span>
-          </div>
-          <div class="settings-field" id="diar-epsilon-row">
-            <label>Smoothing strength</label>
-            <div><input type="number" id="diar-epsilon" min="0" max="1" step="0.05" style="width:110px;"
-              value="${this.config.diarization?.reconstruct_method_epsilon ?? 0.1}" /></div>
-            <span style="${HELP}">Only for Smoothed reconstruction. 0–1; higher = more smoothing. Default 0.1.</span>
-          </div>
+            <div class="settings-field">
+              <label>Speaker keep threshold</label>
+              <div><input type="text" id="diar-keep-threshold" inputmode="decimal" style="width:150px;"
+                value="${formatDecimal(this.config.diarization?.speaker_keep_threshold ?? 0.0000001)}" /></div>
+              <span style="${HELP}">Advanced sensitivity value — drops speaker clusters weaker than this. Raise it to suppress spurious extra speakers; most users never need to change it. Default 0.0000001.</span>
+            </div>
+            <div class="settings-field">
+              <label>Turn reconstruction</label>
+              <div>
+                <select id="diar-reconstruct" style="min-width:220px; width:auto;">
+                  <option value="smoothed" ${(this.config.diarization?.reconstruct_method ?? "smoothed") !== "standard" ? "selected" : ""}>Smoothed (recommended)</option>
+                  <option value="standard" ${this.config.diarization?.reconstruct_method === "standard" ? "selected" : ""}>Standard</option>
+                </select>
+              </div>
+              <span style="${HELP}">How turn boundaries are reconstructed — Smoothed softens them; Standard uses hard cuts.</span>
+            </div>
+            <div class="settings-field" id="diar-epsilon-row">
+              <label>Smoothing strength</label>
+              <div><input type="number" id="diar-epsilon" min="0" max="1" step="0.05" style="width:110px;"
+                value="${this.config.diarization?.reconstruct_method_epsilon ?? 0.1}" /></div>
+              <span style="${HELP}">Only for Smoothed reconstruction. 0–1; higher = more smoothing. Default 0.1.</span>
+            </div>
+          </details>
         </div>
 
         <div id="diarize-cloud" style="display:none">
