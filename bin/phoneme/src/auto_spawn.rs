@@ -36,7 +36,12 @@ async fn daemon_version_matches(t: &mut NamedPipeTransport) -> bool {
 
 /// Poll until the named pipe is no longer reachable (the old daemon exited).
 async fn wait_for_pipe_gone(pipe_name: &str) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    // Give a shutting-down daemon enough time to release the pipe before the
+    // fresh one tries to bind it (first-pipe-instance wins); 5s was occasionally
+    // too tight and the new daemon would lose the bind race. Still bounded so a
+    // wedged daemon never hangs the CLI — the loop returns the instant the pipe
+    // disappears.
+    let deadline = std::time::Instant::now() + Duration::from_secs(12);
     while std::time::Instant::now() < deadline {
         if NamedPipeTransport::connect(pipe_name).await.is_err() {
             return;

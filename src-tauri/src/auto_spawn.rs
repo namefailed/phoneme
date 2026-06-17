@@ -119,7 +119,14 @@ async fn daemon_is_busy(t: &mut NamedPipeTransport) -> bool {
 /// and released its server handle) so a fresh daemon can bind it. Bounded so a
 /// daemon that refuses to die doesn't hang startup forever.
 async fn wait_for_pipe_gone(pipe_name: &str) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    // A daemon asked to shut down has to finish its in-flight request handling
+    // and release the pipe before a fresh daemon can bind it (first-pipe-instance
+    // wins). 5s was occasionally too tight for a daemon mid-cleanup, leaving the
+    // new daemon to lose the bind race and exit; the old one then keeps serving
+    // and the upgrade silently slips to the next idle start. A longer window
+    // closes that race. Still bounded so a daemon that refuses to die never hangs
+    // startup — the loop returns the instant the pipe goes away.
+    let deadline = std::time::Instant::now() + Duration::from_secs(12);
     while std::time::Instant::now() < deadline {
         if NamedPipeTransport::connect(pipe_name).await.is_err() {
             return;

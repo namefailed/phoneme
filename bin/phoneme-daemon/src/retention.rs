@@ -68,7 +68,15 @@ async fn run_once(state: &AppState, last_warning: &mut Option<Instant>) {
             tracing::info!(count = paths.len(), "retention cleanup removed recordings");
             for path in &paths {
                 if let Err(e) = tokio::fs::remove_file(path).await {
-                    tracing::warn!(path = %path, error = %e, "could not remove audio file");
+                    // A WAV already gone (manual delete, an earlier partial sweep,
+                    // or an ephemeral dictation) is the expected steady state for a
+                    // pruned row — not worth a warning. Anything else (permissions,
+                    // a locked file) still surfaces.
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        tracing::debug!(path = %path, "audio file already gone; nothing to remove");
+                    } else {
+                        tracing::warn!(path = %path, error = %e, "could not remove audio file");
+                    }
                 }
             }
         }

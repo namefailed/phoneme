@@ -368,8 +368,17 @@ fn paste_blocking(text: &str) -> Result<(), String> {
     use enigo::{Direction, Key, Keyboard};
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| format!("clipboard unavailable: {e}"))?;
-    // Best-effort restore — a non-text clipboard (image) simply isn't put back.
-    let previous = clipboard.get_text().ok();
+    // Back up whatever the user had on the clipboard so the transcript doesn't
+    // clobber it: prefer text, and when there is none, fall back to a copied
+    // image (a screenshot the user was about to paste, say). Formats arboard
+    // can't read (file lists, custom types) still can't be preserved, but the
+    // common image case no longer vanishes. Best-effort throughout.
+    let previous_text = clipboard.get_text().ok();
+    let previous_image = if previous_text.is_none() {
+        clipboard.get_image().ok()
+    } else {
+        None
+    };
     clipboard
         .set_text(text)
         .map_err(|e| format!("clipboard write failed: {e}"))?;
@@ -385,8 +394,10 @@ fn paste_blocking(text: &str) -> Result<(), String> {
     // Give the target app time to consume the clipboard before restoring it —
     // Ctrl+V is processed asynchronously by the receiving window.
     std::thread::sleep(std::time::Duration::from_millis(150));
-    if let Some(prev) = previous {
+    if let Some(prev) = previous_text {
         let _ = clipboard.set_text(prev);
+    } else if let Some(img) = previous_image {
+        let _ = clipboard.set_image(img);
     }
     Ok(())
 }
