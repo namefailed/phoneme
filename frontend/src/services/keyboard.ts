@@ -1046,6 +1046,55 @@ function activateModalControl(el: HTMLElement, overlay: HTMLElement) {
   });
 }
 
+/** Move the modal cursor as a 2-D GRID, not a flat ring: `h`/`l` step to the
+ *  nearest control in the same row (left/right), `j`/`k` jump to the row
+ *  above/below, landing on the control whose horizontal centre is closest — so a
+ *  multi-control modal (Quick model switcher, Tag manager, Doctor with inline
+ *  buttons) navigates the way it looks. Falls back to a plain linear ±1 step when
+ *  there's no neighbour in that direction (e.g. `h`/`l` in a single-column list,
+ *  or `j`/`k` off the last row), so vertical-list modals never feel stuck — a
+ *  strict superset of the old flat cycle. Geometry is read fresh each call. */
+function modalGridMove(controls: HTMLElement[], current: number, dir: string): number {
+  const n = controls.length;
+  if (n <= 1) return current;
+  const rects = controls.map((c) => c.getBoundingClientRect());
+  const cur = rects[current];
+  const curX = cur.left + cur.width / 2;
+  const curY = cur.top + cur.height / 2;
+  // Two controls share a "row" when their vertical centres are within this band.
+  const rowTol = Math.max(10, cur.height * 0.6);
+  const midX = (i: number) => rects[i].left + rects[i].width / 2;
+  const midY = (i: number) => rects[i].top + rects[i].height / 2;
+
+  if (dir === "h" || dir === "l") {
+    const sign = dir === "l" ? 1 : -1;
+    let best = -1;
+    let bestDX = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (i === current) continue;
+      if (Math.abs(midY(i) - curY) > rowTol) continue; // different row
+      const dx = (midX(i) - curX) * sign;
+      if (dx > 1 && dx < bestDX) { bestDX = dx; best = i; }
+    }
+    return best >= 0 ? best : (current + sign + n) % n; // fallback: linear
+  }
+
+  // j / k — pick the nearest row in that direction, then the closest column.
+  const sign = dir === "j" ? 1 : -1;
+  const cands: Array<{ i: number; dy: number; dx: number }> = [];
+  for (let i = 0; i < n; i++) {
+    if (i === current) continue;
+    const dy = (midY(i) - curY) * sign;
+    if (dy <= rowTol * 0.5) continue; // not in a further row in this direction
+    cands.push({ i, dy, dx: Math.abs(midX(i) - curX) });
+  }
+  if (!cands.length) return (current + sign + n) % n; // fallback: linear
+  const minDy = Math.min(...cands.map((c) => c.dy));
+  cands.sort((a, b) => a.dx - b.dx);
+  const inNearestRow = cands.filter((c) => c.dy <= minDy + rowTol);
+  return (inNearestRow.length ? inNearestRow : cands).sort((a, b) => a.dx - b.dx)[0].i;
+}
+
 /** Roving keyboard nav inside the topmost modal. Returns true when it consumed
  *  the key. Esc / Tab are left for the modal's own handlers (Esc closes it, Tab
  *  walks native focus). Typing in a focused field never reaches here — onKeyDown's
@@ -1053,8 +1102,8 @@ function activateModalControl(el: HTMLElement, overlay: HTMLElement) {
 function handleModalNav(e: KeyboardEvent, overlay: HTMLElement): boolean {
   if (e.key === "Escape" || e.key === "Tab") return false;
   const nav = motionToken(e);
-  const step = nav === "j" || nav === "l" ? 1 : nav === "k" || nav === "h" ? -1 : 0;
-  if (step === 0 && nav !== "Enter" && nav !== " ") return false; // not a nav key for this layer
+  const isDir = nav === "h" || nav === "j" || nav === "k" || nav === "l";
+  if (!isDir && nav !== "Enter" && nav !== " ") return false; // not a nav key for this layer
   if (overlay !== modalCursorOverlay) { modalCursorOverlay = overlay; modalCursor = -1; }
   const controls = modalControls(overlay);
   if (!controls.length) { e.preventDefault(); return true; }
@@ -1082,9 +1131,9 @@ function handleModalNav(e: KeyboardEvent, overlay: HTMLElement): boolean {
     if (mi >= 0) modalCursor = mi;
   }
   modalCursor = Math.min(modalCursor, controls.length - 1);
-  if (step !== 0) {
+  if (isDir) {
     e.preventDefault();
-    modalCursor = (modalCursor + step + controls.length) % controls.length;
+    modalCursor = modalGridMove(controls, modalCursor, nav);
     highlightModalCursor(controls);
     return true;
   }
