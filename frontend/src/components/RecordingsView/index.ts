@@ -598,6 +598,12 @@ export class RecordingsView {
     if (!this.vimNav && !this.arrowNav) return;
     const target = e.target as HTMLElement | null;
     if (!target) return;
+    // Clicking an option inside a transient dropdown (Views / Versions / Speed /
+    // Export / Pipeline) is a SELECTION, not navigation — and the menu closes on
+    // click, removing the option node. Moving the roving cursor onto it would
+    // strand the glow on the gone node. Leave the cursor on the trigger, exactly
+    // as keyboard mode does (the glow stays on the parent control).
+    if (typeof target.closest === "function" && target.closest('[role="menu"], #detail-pipeline-pop')) return;
     const pane = this.paneFromTarget(target);
     if (!pane || !this.panesInOrder().includes(pane)) return;
     const crossPane = pane !== this.focusedPane;

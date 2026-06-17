@@ -30,6 +30,11 @@ let observer: MutationObserver | null = null;
 let paneObserver: ResizeObserver | null = null;
 let observedList: HTMLElement | null = null;
 let paneRaf = 0;
+/** Watches the control the glow currently sits on, so it re-fits when that control
+ *  changes size IN PLACE (a split button swapping its label: Record → "End
+ *  Meeting"/"Stop", Play → "Pause"). */
+let sizeObserver: ResizeObserver | null = null;
+let sizedEl: HTMLElement | null = null;
 let installed = false;
 /** Hidden while focus is in a text-editing surface (a CodeMirror editor, a tag
  *  name input): the glow sits right over what you're typing into, so it gets out
@@ -136,6 +141,7 @@ function place(el: HTMLElement, animate: boolean) {
   // remember it here. Otherwise `current` goes stale and, on exit, the glow glides
   // back from wherever it last showed instead of appearing where you now are.
   current = el;
+  observeCurrentSize(el); // re-fit the glow if this control resizes in place
   // Feather the right edge when the rect got clipped to its pane (a full-width
   // list row clipped at the detail-pane boundary): the cut dissolves instead of
   // showing a hard line, so it reads as tucked behind the pane rather than as a
@@ -200,11 +206,13 @@ function onMutations(records: MutationRecord[]) {
     // the recordings list's own `.kbd-focused` row (its highlight class), so list
     // j/k moves glide row-to-row like every other pane.
     if (gained(rec, "kbd-cursor") || gained(rec, "kbd-focused")) {
-      // Don't follow the cursor INTO a modal / popup (Doctor, Re-run, Quick model
-      // switcher, …): the modal's own `.kbd-cursor` border marks the selection,
-      // and the glow stays on the control that opened it (behind the backdrop),
-      // reappearing there when the modal closes — never stranded inside a dialog.
-      if (el.closest('[class*="modal-overlay"]')) continue;
+      // Don't follow the cursor INTO a modal OR a dropdown popup (Doctor, Re-run,
+      // Quick model switcher, Views/Versions/Speed/Export/Pipeline menus): the
+      // popup's own `.kbd-cursor` border marks the highlighted option, and the
+      // glow stays on the control that opened it — never stranded inside a dialog
+      // or on a menu item that vanishes when the menu closes on click. Mirrors the
+      // keyboard behaviour (glow stays on the trigger).
+      if (el.closest('[class*="modal-overlay"], [role="menu"], #detail-pipeline-pop')) continue;
       cursorGain = el;
     }
     // A pane just took focus (sidebar / list / detail). Covers the case where the
@@ -275,6 +283,9 @@ function disconnect() {
   paneObserver?.disconnect();
   paneObserver = null;
   observedList = null;
+  sizeObserver?.disconnect();
+  sizeObserver = null;
+  sizedEl = null;
   window.removeEventListener("scroll", onReflow, true);
   window.removeEventListener("resize", onReflow);
   document.removeEventListener("focusin", onFocusIn);
@@ -338,6 +349,25 @@ function ensureListObserved() {
   if (observedList) paneObserver.unobserve(observedList);
   observedList = list;
   if (list) paneObserver.observe(list);
+}
+
+/** Track the size of the control the glow currently sits on, so when that control
+ *  grows or shrinks IN PLACE — a split button swapping its label (Record → "End
+ *  Meeting"/"Stop"), Play ↔ Pause — the glow re-fits the new box instead of
+ *  keeping the old one's frame. Re-targets whenever `current` changes; a no-op
+ *  when it's already the node we watch. The re-fit is INSTANT (no glide): the glow
+ *  should hug the control as it resizes, not lag a frame behind its own edge. */
+function observeCurrentSize(el: HTMLElement) {
+  if (typeof ResizeObserver === "undefined") return;
+  if (sizedEl === el) return;
+  if (!sizeObserver) sizeObserver = new ResizeObserver(onCurrentResize);
+  if (sizedEl) sizeObserver.unobserve(sizedEl);
+  sizedEl = el;
+  sizeObserver.observe(el);
+}
+
+function onCurrentResize() {
+  if (current && current.isConnected) place(current, false);
 }
 
 function setMode(next: Mode) {
