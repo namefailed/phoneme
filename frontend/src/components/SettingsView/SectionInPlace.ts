@@ -251,7 +251,7 @@ export class SectionInPlace {
 
     this.container.innerHTML = `
       <div class="settings-section">
-        <h3>Dictation (in-place)</h3>
+        <h3>Dictation engine</h3>
         <p style="font-size: 0.8571rem; color: var(--fg-muted); margin: 0 0 12px; line-height: 1.5;">
           The in-place hotkey types what you say straight into the focused window.
           Dictations take a <b>fast lane</b>: they skip the processing queue and the
@@ -280,6 +280,10 @@ export class SectionInPlace {
           </div>
         </div>
         <div id="ip-stt-detail"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Text delivery</h3>
 
         <div class="settings-field">
           <label>Text polish</label>
@@ -373,6 +377,10 @@ export class SectionInPlace {
         </div>`
             : ""
         }
+      </div>
+
+      <div class="settings-section">
+        <h3>Dictation pipeline</h3>
 
         <div class="settings-field">
           <label>Keep dictations in the library</label>
