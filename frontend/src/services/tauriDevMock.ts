@@ -155,6 +155,7 @@ let config: Record<string, unknown> = {
   interface: {
     strip_titlebar: false,
     format_24h: true,
+    date_day_first: false,
     theme: "catppuccin-mocha",
     visible_columns: ["day", "time", "duration", "title", "status", "model", "cleanup_model", "user_edited", "transcript"],
     column_widths: ["40px", "117px", "66px", "84px", "159px", "156px", "176px", "145px", "390px", "80px", "69px", "124px", "408px", "1fr"],

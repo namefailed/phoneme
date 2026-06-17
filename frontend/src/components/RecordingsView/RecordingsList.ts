@@ -6,7 +6,7 @@ import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
 import { filterStore, toWireFilter, type RecordingKind } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
-import { formatDay } from "../../utils/date";
+import { formatDayDate } from "../../utils/date";
 import {
   formatDuration,
   formatTime,
@@ -951,7 +951,7 @@ export class RecordingsListElement extends LitElement {
     const kbFocused = index === this.focusedIndex;
     const multiChecked = this.multiSelected.has(r.id);
 
-    const day = formatDay(r.started_at);
+    const day = formatDayDate(r.started_at, this.config?.interface?.date_day_first ?? false);
     const use24h = this.config?.interface?.format_24h ?? false;
     const time = formatTime(r.started_at, use24h);
     const dur = formatDuration(r.duration_ms);
@@ -1054,7 +1054,7 @@ export class RecordingsListElement extends LitElement {
     const use24h = this.config?.interface?.format_24h ?? false;
     const startIso = tracks.map((t) => t.started_at).sort()[0];
     const time = formatTime(startIso, use24h);
-    const day = formatDay(startIso);
+    const day = formatDayDate(startIso, this.config?.interface?.date_day_first ?? false);
     const count = tracks.length;
     
     const selectedCount = tracks.filter((t) => this.multiSelected.has(t.id)).length;

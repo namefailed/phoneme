@@ -354,6 +354,8 @@ pipe_name = "phoneme-daemon"
 strip_titlebar = false
 # Use 24-hour time format in the UI.
 format_24h = false
+# Show the recordings list's Day column day-first (DD/MM) instead of month-first (MM/DD).
+date_day_first = false
 # Active CSS theme id (e.g. "catppuccin-mocha", "tokyo-night").
 theme = "catppuccin-mocha"
 # Columns shown in the main list view.

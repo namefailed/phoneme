@@ -234,6 +234,15 @@ export class SectionInterface {
         </div>
 
         <div class="settings-field">
+          <label>Day-first dates</label>
+          <div>${renderField(
+            { key: "interface.date_day_first", label: "", kind: "checkbox" },
+            config.interface.date_day_first ?? false,
+          )}</div>
+          <span>Show the recordings list's Day column as <b>DD/MM</b> instead of <b>MM/DD</b>.</span>
+        </div>
+
+        <div class="settings-field">
           <label>Interface font</label>
           <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
             <select id="ui-font">

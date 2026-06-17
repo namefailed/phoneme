@@ -117,6 +117,7 @@ followed.
 |-----|---------|-------------|
 | `strip_titlebar` | `false` | Custom window chrome (no OS title bar). Turning it **on** applies live; turning it back **off** needs an app restart on Windows — the chrome mode is set once at Tauri init. |
 | `format_24h` | `false` | 24-hour timestamps |
+| `date_day_first` | `false` | Day column shows `DD/MM` instead of `MM/DD` |
 | `theme` | `catppuccin-mocha` | CSS theme id |
 | `visible_columns` | day, time, duration, status, transcript | List columns |
 | `column_widths` | px/fr strings | Resizable column layout |

@@ -1404,6 +1404,10 @@ pub struct InterfaceConfig {
     /// If true, use 24-hour time format in the UI.
     #[serde(default)]
     pub format_24h: bool,
+    /// If true, the recordings list's Day column shows dates day-first (`DD/MM`)
+    /// instead of month-first (`MM/DD`).
+    #[serde(default)]
+    pub date_day_first: bool,
     /// The active CSS theme identifier (e.g., `"catppuccin-mocha"`, `"tokyo-night"`).
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -1942,6 +1946,7 @@ impl Default for Config {
             interface: InterfaceConfig {
                 strip_titlebar: false,
                 format_24h: false,
+                date_day_first: false,
                 theme: "catppuccin-mocha".into(),
                 visible_columns: vec![
                     "day".into(),

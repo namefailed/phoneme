@@ -1,5 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { formatDay } from "./date";
+import { formatDay, formatDayDate } from "./date";
+
+describe("formatDayDate", () => {
+  it("formats month-first (MM/DD) by default", () => {
+    expect(formatDayDate("2026-01-05T09:30:00")).toBe("01/05");
+    expect(formatDayDate("2026-12-31T23:59:00")).toBe("12/31");
+  });
+
+  it("formats day-first (DD/MM) when dayFirst is set", () => {
+    expect(formatDayDate("2026-01-05T09:30:00", true)).toBe("05/01");
+    expect(formatDayDate("2026-12-31T23:59:00", true)).toBe("31/12");
+  });
+
+  it("zero-pads both fields", () => {
+    expect(formatDayDate("2026-03-09T00:00:00")).toBe("03/09");
+    expect(formatDayDate("2026-03-09T00:00:00", true)).toBe("09/03");
+  });
+});
 
 describe("formatDay", () => {
   beforeEach(() => {

@@ -23,3 +23,16 @@ export function formatDay(iso: string): string {
   if (diffDays <= 30) return "Last 30 Days";
   return "Older";
 }
+
+/**
+ * The Day column's calendar date for a timestamp — a compact zero-padded
+ * `MM/DD` (month first, the default) or `DD/MM` when `dayFirst` is set
+ * (`interface.date_day_first`). No year, to stay narrow. Replaces the relative
+ * "Today / Yesterday" bucket label as the Day column's per-row value.
+ */
+export function formatDayDate(iso: string, dayFirst = false): string {
+  const d = new Date(iso);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return dayFirst ? `${dd}/${mm}` : `${mm}/${dd}`;
+}
