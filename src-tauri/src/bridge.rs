@@ -186,6 +186,12 @@ fn is_retry_safe(req: &Request) -> bool {
         // Library mutations — ImportRecording mints a fresh RecordingId per
         // call, so a re-send duplicates the recording (the motivating bug).
         | DeleteRecording { .. }
+        // Deletes a whole meeting's tracks; a blind re-send after a lost reply
+        // could race a partially-applied cascade, so single-attempt only.
+        | DeleteSession { .. }
+        // Destructive: clears the catalog and re-imports + re-enqueues every
+        // recording. Never blind-retry.
+        | RebuildCatalog
         | ImportRecording { .. }
         // Re-import inserts catalog rows + enqueues; a blind re-send could
         // double-enqueue freshly-relinked files, so single-attempt only.

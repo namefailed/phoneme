@@ -465,6 +465,50 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(None) => not_found(format!("recording {id} not found")),
             Err(e) => err_response(&e),
         },
+        Request::DeleteSession {
+            meeting_id,
+            keep_audio,
+        } => match state.catalog.list_by_meeting(&meeting_id).await {
+            Ok(tracks) if !tracks.is_empty() => {
+                // Delete each track exactly like DeleteRecording: row first (an
+                // error there leaves that track's audio untouched), then the WAV
+                // unless keep_audio — and only when it's under our audio dir. One
+                // track failing doesn't abandon the rest; each removed track emits
+                // its own RecordingDeleted so every view drops it.
+                let mut deleted = 0usize;
+                let mut last_err = None;
+                for r in tracks {
+                    if let Err(e) = state.catalog.delete(&r.id).await {
+                        tracing::warn!(id = %r.id, session = %meeting_id, error = %e, "session delete: track row delete failed");
+                        last_err = Some(e);
+                        continue;
+                    }
+                    if !keep_audio {
+                        if audio_path_is_ours(&r.audio_path, &state.paths.audio_dir) {
+                            if let Err(e) = tokio::fs::remove_file(&r.audio_path).await {
+                                tracing::warn!(path = %r.audio_path, error = %e, "session delete: audio removal failed");
+                            }
+                        } else {
+                            tracing::warn!(path = %r.audio_path, "refusing to delete audio file outside the audio directory");
+                        }
+                    }
+                    state
+                        .events
+                        .emit(DaemonEvent::RecordingDeleted { id: r.id.clone() });
+                    deleted += 1;
+                }
+                if deleted > 0 {
+                    ok_null()
+                } else {
+                    match last_err {
+                        Some(e) => err_response(&e),
+                        None => not_found(format!("meeting {meeting_id} had no deletable tracks")),
+                    }
+                }
+            }
+            Ok(_) => not_found(format!("meeting {meeting_id} not found")),
+            Err(e) => err_response(&e),
+        },
         Request::UpdateTranscript { id, text } => {
             match state.catalog.update_user_transcript(&id, &text).await {
                 Ok(()) => {
@@ -672,6 +716,29 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
         }
         Request::ImportRecording { path } => import_recording(state, path).await,
         Request::ReimportFromDisk { dry_run } => reimport_from_disk(state, dry_run).await,
+        Request::RebuildCatalog => {
+            // Refuse while capture is live — clearing the table would orphan a
+            // row still being written. The user must stop recording first.
+            if state.recorder.is_busy().await {
+                return Response::Err(IpcError {
+                    kind: IpcErrorKind::AlreadyRecording,
+                    message: "can't rebuild the catalog while recording — stop the recording first"
+                        .into(),
+                });
+            }
+            // Clear every row (cascade takes tags/segments/words/embeddings), then
+            // re-import from disk: with the table empty, every WAV is an orphan, so
+            // the existing reimport re-links them all as Queued. WAVs are never
+            // touched, so this is recoverable to the audio even though transcripts
+            // and tags are lost (and re-derived by re-transcription).
+            match state.catalog.clear_all_recordings().await {
+                Ok(removed) => {
+                    tracing::info!(removed, "catalog rebuild: cleared all rows; re-importing from disk");
+                    reimport_from_disk(state, false).await
+                }
+                Err(e) => err_response(&e),
+            }
+        }
         Request::RetranscribeRecording {
             id,
             model,

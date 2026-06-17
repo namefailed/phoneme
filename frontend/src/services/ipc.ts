@@ -152,7 +152,7 @@ export type ListFilter = {
   /** Server-side tag-presence filter: `true` = only recordings with at least one
    *  tag, `false` = only recordings with no tags, omit/null = no filter. Applied
    *  in SQL before pagination. Independent of `tag_id` (which scopes to a single
-   *  tag). Powers the sidebar's "All Tags" / "Untagged" rows. */
+   *  tag). Powers the sidebar's "Untagged" / "Tagged" rows. */
   tagged?: boolean | null;
 };
 
@@ -297,6 +297,15 @@ export async function deleteRecording(id: string, keepAudio = false): Promise<vo
 }
 
 /**
+ * Delete a whole meeting session — every track sharing `meetingId` — in one
+ * call. Each track emits its own `recording_deleted` event so views drop them.
+ * If `keepAudio` is false the tracks' `.wav` files are also removed.
+ */
+export async function deleteSession(meetingId: string, keepAudio = false): Promise<void> {
+  await tauriInvoke("delete_session", { meetingId, keepAudio });
+}
+
+/**
  * Initiates a new recording session. Returns the generated recording ID.
  */
 export async function recordStart(mode: RecordMode): Promise<{ id: string }> {
@@ -398,6 +407,16 @@ export async function reimportFromDisk(
   dryRun: boolean,
 ): Promise<{ count: number; paths?: string[] }> {
   return await tauriInvoke<{ count: number; paths?: string[] }>("reimport_from_disk", { dryRun });
+}
+
+/**
+ * Destructive catalog rebuild from disk: clears every recording (losing
+ * transcripts, edits, tags) and re-imports each WAV as a fresh `Queued`
+ * recording. The daemon does it in-process and refuses while a recording is
+ * active. Returns the number of recordings re-imported.
+ */
+export async function rebuildCatalog(): Promise<{ count: number }> {
+  return await tauriInvoke<{ count: number }>("rebuild_catalog", {});
 }
 
 /** File extensions accepted by the import flow (no leading dot). */
@@ -743,7 +762,7 @@ export type KindCounts = {
   meeting: number;
   in_place: number;
   favorite: number;
-  /** Distinct recordings carrying at least one tag (the sidebar "All Tags" badge). */
+  /** Distinct recordings carrying at least one tag (the sidebar "Tagged" badge). */
   tagged: number;
   /** Recordings carrying no tags (the sidebar "Untagged" badge). */
   untagged: number;

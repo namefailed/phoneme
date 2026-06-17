@@ -9,7 +9,7 @@ import {
   type DoctorCheckInfo,
 } from "../doctorChecks";
 import { showToast } from "../../utils/toast";
-import { reimportFromDisk } from "../../services/ipc";
+import { reimportFromDisk, rebuildCatalog } from "../../services/ipc";
 
 // Import styles
 import "../SettingsView/styles.css";
@@ -45,10 +45,22 @@ export class DoctorViewElement extends LitElement {
    *  → running. Two clicks: the first counts orphaned files, the second runs it. */
   @state() private reimport: "idle" | "checking" | "confirm" | "running" = "idle";
   private reimportFound = 0;
+  /** Destructive rebuild: idle → confirm (armed, auto-reverts) → running. Two
+   *  deliberate clicks, because it wipes transcripts/tags and re-transcribes. */
+  @state() private rebuild: "idle" | "confirm" | "running" = "idle";
+  private rebuildRevert: number | null = null;
 
   connectedCallback() {
     super.connectedCallback();
     void this.runChecks();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.rebuildRevert) {
+      window.clearTimeout(this.rebuildRevert);
+      this.rebuildRevert = null;
+    }
   }
 
   private async runChecks() {
@@ -97,6 +109,41 @@ export class DoctorViewElement extends LitElement {
         showToast(`Re-import failed: ${e}`, "error");
       }
       this.reimport = "idle";
+      void this.runChecks();
+    }
+  }
+
+  /** Destructive catalog rebuild from disk. First click arms (and auto-disarms
+   *  after a few seconds so a stray click can't wipe); the second click wipes
+   *  every recording row and re-imports the audio as fresh, re-transcribed
+   *  recordings. For a corrupt catalog.db the daemon can't open, the CLI
+   *  `phoneme doctor --rebuild-catalog` is the tool instead. */
+  private async handleRebuild() {
+    if (this.rebuild === "idle") {
+      this.rebuild = "confirm";
+      if (this.rebuildRevert) window.clearTimeout(this.rebuildRevert);
+      this.rebuildRevert = window.setTimeout(() => {
+        this.rebuild = "idle";
+        this.rebuildRevert = null;
+      }, 5000);
+      return;
+    }
+    if (this.rebuild === "confirm") {
+      if (this.rebuildRevert) {
+        window.clearTimeout(this.rebuildRevert);
+        this.rebuildRevert = null;
+      }
+      this.rebuild = "running";
+      try {
+        const { count } = await rebuildCatalog();
+        showToast(
+          `Catalog rebuilt — re-imported ${count} recording(s) from disk. Transcripts will regenerate.`,
+          "success",
+        );
+      } catch (e) {
+        showToast(`Rebuild failed: ${e}`, "error");
+      }
+      this.rebuild = "idle";
       void this.runChecks();
     }
   }
@@ -305,6 +352,15 @@ export class DoctorViewElement extends LitElement {
                   : this.reimport === "running" ? "Re-importing…"
                   : this.reimport === "confirm" ? `Re-import ${this.reimportFound} found?`
                   : "↻ Re-import from disk"}
+              </button>
+              <button id="doctor-rebuild"
+                ?disabled=${this.rebuild === "running"}
+                style=${this.rebuild === "confirm" ? "border-color: var(--err, #f38ba8); color: var(--err, #f38ba8);" : ""}
+                title="Wipe the library and re-import every recording from the audio folder. Destructive: transcripts, edits, and tags are lost and re-derived by re-transcription. For a corrupt catalog, use the CLI: phoneme doctor --rebuild-catalog."
+                @click=${this.handleRebuild}>
+                ${this.rebuild === "running" ? "Rebuilding…"
+                  : this.rebuild === "confirm" ? "⚠ Wipe & rebuild — click to confirm"
+                  : "⟳ Rebuild catalog from disk"}
               </button>
             </div>
           </div>

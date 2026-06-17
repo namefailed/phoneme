@@ -1451,7 +1451,8 @@ export class RecordingsView {
    * Delete one or more recordings with a grace-period Undo: the rows vanish
    * immediately, but the real (permanent) delete only fires when the Undo toast
    * expires — clicking Undo cancels it entirely, so nothing is ever lost to a
-   * stray keystroke. Sessions are skipped (they're deleted via their own flow).
+   * stray keystroke. A `session:<id>` entry deletes the whole meeting as a unit
+   * (every track) via {@link runUndoableSessionDelete}.
    *
    * The confirm dialog also picks the delete mode — "Delete everything" or
    * "Keep the audio file" (the CLI's `--keep-audio`) — and a bulk delete
@@ -1459,12 +1460,18 @@ export class RecordingsView {
    * again" pref answers immediately with the remembered mode.
    */
   private requestUndoableDelete(rawIds: string[]) {
-    const ids = [...new Set(rawIds)].filter((id) => id && !id.startsWith("session:"));
-    if (!ids.length || this.deletePromptOpen) return;
+    const unique = [...new Set(rawIds)].filter(Boolean);
+    const sessionIds = unique.filter((id) => id.startsWith("session:"));
+    const recordingIds = unique.filter((id) => !id.startsWith("session:"));
+    const count = recordingIds.length + sessionIds.length;
+    if (!count || this.deletePromptOpen) return;
     this.deletePromptOpen = true;
-    void confirmRecordingDelete(ids.length)
+    void confirmRecordingDelete(count)
       .then((mode) => {
-        if (mode) this.runUndoableDelete(ids, deleteModeKeepsAudio(mode));
+        if (!mode) return;
+        const keepAudio = deleteModeKeepsAudio(mode);
+        if (recordingIds.length) this.runUndoableDelete(recordingIds, keepAudio);
+        for (const sid of sessionIds) this.runUndoableSessionDelete(sid, keepAudio);
       })
       .finally(() => {
         this.deletePromptOpen = false;
@@ -1521,6 +1528,51 @@ export class RecordingsView {
               : `Couldn't delete ${failed.length} recordings — they're still here.`,
             "error",
           );
+        }
+      },
+    });
+  }
+
+  /** Grace-period delete of a whole meeting session: optimistically hide its
+   *  member tracks now, then fire a single `DeleteSession` (every track at once)
+   *  when the Undo toast lapses. The session header isn't itself a deletable
+   *  list row, so the hide is keyed by the member track ids from the store. */
+  private runUndoableSessionDelete(sessionId: string, keepAudio: boolean) {
+    const meetingId = sessionId.replace("session:", "");
+    const trackIds = this.state
+      .get()
+      .recordings.filter((r) => r.meeting_id === meetingId)
+      .map((r) => r.id);
+    this.list.setPendingDelete(trackIds, true);
+    this.list.clearSelection();
+    const sel = this.state.get().selectedId;
+    if (sel === sessionId || (sel && trackIds.includes(sel))) this.deselect();
+
+    const label = keepAudio ? "Meeting removed — audio kept" : "Meeting deleted";
+    showActionToast({
+      message: label,
+      actionLabel: "Undo",
+      icon: "🗑",
+      durationMs: 6000,
+      onAction: () => {
+        // Cancelled — un-hide the tracks; nothing was sent to the backend.
+        this.list.setPendingDelete(trackIds, false);
+      },
+      onExpire: async () => {
+        const { deleteSession } = await import("../../services/ipc");
+        let failed = false;
+        try {
+          await deleteSession(meetingId, keepAudio);
+        } catch (err) {
+          console.error("Failed to delete meeting session:", err);
+          failed = true;
+        }
+        // Reconcile first (the daemon already dropped the rows), then un-hide —
+        // same ordering as the per-recording flow to avoid a flash-back.
+        await this.refresh();
+        this.list.setPendingDelete(trackIds, false);
+        if (failed) {
+          showToast("Couldn't delete the meeting — it's still here.", "error");
         }
       },
     });

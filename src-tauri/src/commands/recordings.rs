@@ -107,6 +107,33 @@ pub async fn delete_recording(
     forward(&bridge, Request::DeleteRecording { id, keep_audio }).await
 }
 
+/// Delete an entire meeting session — every track sharing `meeting_id` — in one
+/// request. If `keep_audio` is false the tracks' `.wav` files are also removed.
+#[tauri::command]
+pub async fn delete_session(
+    bridge: Br<'_>,
+    meeting_id: String,
+    keep_audio: bool,
+) -> Result<Value, CommandError> {
+    forward(
+        &bridge,
+        Request::DeleteSession {
+            meeting_id,
+            keep_audio,
+        },
+    )
+    .await
+}
+
+/// Destructive catalog rebuild from disk: clears every recording row (losing
+/// transcripts, edits, tags) and re-imports every WAV as a fresh recording. The
+/// daemon does it in-process and refuses while a recording is active. For a
+/// corrupt catalog.db, the CLI `phoneme doctor --rebuild-catalog` is the tool.
+#[tauri::command]
+pub async fn rebuild_catalog(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RebuildCatalog).await
+}
+
 /// Signal the daemon to start recording audio from the active input device.
 /// The `mode` dictates whether this is a continuous push-to-talk (`hold`), a `oneshot`,
 /// or a fixed duration recording (`duration:X`).

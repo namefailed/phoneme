@@ -354,7 +354,7 @@ let config: Record<string, unknown> = {
   ],
   tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: true },
   editor: { vim_mode: true, vimrc: "", vimrc_path: "", resync_views_on_edit: true },
-  diarization: { provider: "local", local_model_path: "", models_dir: "", solo_one_speaker: false, merge_gap_secs: 0.25, speaker_keep_threshold: 0.0000001, reconstruct_method: "smoothed", reconstruct_method_epsilon: 0.1 },
+  diarization: { provider: "local", local_model_path: "", models_dir: "", solo_one_speaker: false, merge_gap_secs: 0.25, speaker_keep_threshold: 0.0000001, reconstruct_method: "smoothed", reconstruct_method_epsilon: 0.1, preload_at_startup: false },
   daemon: { log_level: "trace", log_max_size_mb: 10, log_max_files: 5, pipe_name: "phoneme-daemon" },
   interface: {
     strip_titlebar: false,
@@ -500,6 +500,31 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       }
       emitDaemon({ event: "tag_deleted", id: tid });
       return undefined;
+    }
+    case "delete_recording": {
+      const id = args.id as string;
+      const i = RECORDINGS.findIndex((x) => x.id === id);
+      if (i >= 0) RECORDINGS.splice(i, 1);
+      emitDaemon({ event: "recording_deleted", id });
+      return undefined;
+    }
+    case "delete_session": {
+      const mid = args.meetingId as string;
+      // Remove every track of the meeting, emitting one event per track (the
+      // real daemon does the same), so list + counts reconcile in the preview.
+      for (let i = RECORDINGS.length - 1; i >= 0; i--) {
+        if (RECORDINGS[i].meeting_id === mid) {
+          const { id } = RECORDINGS[i];
+          RECORDINGS.splice(i, 1);
+          emitDaemon({ event: "recording_deleted", id });
+        }
+      }
+      return undefined;
+    }
+    case "rebuild_catalog": {
+      // Preview no-op: report the current count so the Doctor button works
+      // without wiping the demo dataset (the real daemon clears + re-imports).
+      return { count: RECORDINGS.length };
     }
     case "attach_tag": {
       const r = RECORDINGS.find((x) => x.id === (args.recordingId as string));

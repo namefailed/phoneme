@@ -217,6 +217,18 @@ pub enum Request {
         /// `true` = remove only the catalog row and keep the WAV on disk.
         keep_audio: bool,
     },
+    /// Delete an entire meeting session — every track sharing `meeting_id` — in
+    /// one request, so the GUI can remove a meeting as a unit instead of track
+    /// by track. Each track is deleted like [`Request::DeleteRecording`] (row
+    /// first, then its WAV unless `keep_audio`, audio-dir-guarded) and emits its
+    /// own [`DaemonEvent::RecordingDeleted`]. Ok `null`; NotFound when the
+    /// meeting has no tracks.
+    DeleteSession {
+        /// The meeting id whose tracks to delete.
+        meeting_id: String,
+        /// `true` = remove only the catalog rows and keep the WAVs on disk.
+        keep_audio: bool,
+    },
 
     /// Import an existing audio file (wav/mp3/m4a/flac) as a new recording.
     /// The daemon canonicalizes the path, enforces a 2 GiB size cap, decodes
@@ -246,6 +258,15 @@ pub enum Request {
         #[serde(default)]
         dry_run: bool,
     },
+    /// Destructive catalog rebuild **from disk**, in-process (the daemon owns
+    /// the DB, so no stop/restart dance like the CLI's `doctor
+    /// --rebuild-catalog`): clear every recording row — losing transcripts,
+    /// edits, tags, summaries — then re-import every WAV under the audio dir as
+    /// a fresh `Queued` recording (re-transcribed by the pipeline). Refused
+    /// while a recording/meeting is in flight. For a CORRUPT catalog.db (the
+    /// daemon can't open it) use the CLI instead. Ok `{"count":N}` (rows
+    /// re-imported). Settings → Doctor, behind a type-to-confirm.
+    RebuildCatalog,
 
     // ── Library: re-runs ─────────────────────────────────────────────────
     // Re-execute pipeline stages for an already-stored recording. All four
