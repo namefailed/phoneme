@@ -145,6 +145,30 @@ const M3_SYS: Seg[] = [
   seg(11200, 15500, "Same — and the merged meeting view needs a real polish pass.", "2"),
   seg(22500, 32500, "Works for me. Can we also reserve a little time for the smaller UI papercuts?", "1"),
 ];
+// More meetings, scattered deeper in the list (days 4 / 8 / 14) so the merged +
+// grouped meeting UI shows up at several scroll depths, not just near the top.
+const M4_MIC: Seg[] = [
+  seg(0, 4500, "Quick sync on the onboarding flow — where did we land on the wizard copy?"),
+  seg(12000, 17000, "Got it. I'll tighten the review step and ship it behind the flag."),
+];
+const M4_SYS: Seg[] = [
+  seg(5000, 11500, "We simplified it to three steps; the copy still needs a pass.", "1"),
+];
+const M5_MIC: Seg[] = [
+  seg(0, 5000, "Retro time. What went well and what slowed us down this cycle?"),
+  seg(20000, 26000, "Fair. Let's add a buffer for the diarization rework next time."),
+];
+const M5_SYS: Seg[] = [
+  seg(5500, 12000, "Shipping the live preview felt great. The model thrash bug cost us a day.", "1"),
+  seg(12200, 19000, "Agreed — and reviews piled up mid-week, that's the real slowdown.", "2"),
+];
+const M6_MIC: Seg[] = [
+  seg(0, 4800, "Client check-in — they want the export formats and the saved searches."),
+  seg(16000, 22000, "Perfect. I'll demo both on Thursday and send notes after."),
+];
+const M6_SYS: Seg[] = [
+  seg(5200, 11000, "Both are in already; we just need to walk them through it.", "1"),
+];
 
 /** Build a track transcript from its segments: `[Speaker N]:` turns when the
  *  segments are diarized (matches the merged view's marker parsing), else plain
@@ -160,6 +184,9 @@ const SEGMENTS: Record<string, Seg[]> = {
   m1a: M1_MIC, m1b: M1_SYS,
   m2a: M2_MIC, m2b: M2_SYS,
   m3a: M3_MIC, m3b: M3_SYS,
+  m4a: M4_MIC, m4b: M4_SYS,
+  m5a: M5_MIC, m5b: M5_SYS,
+  m6a: M6_MIC, m6b: M6_SYS,
 };
 
 /** A meeting track recording: shares `meeting_id` + `meeting_name`, tagged with
@@ -233,11 +260,18 @@ const RECORDINGS: Array<Record<string, unknown>> = [
   rec("r11", 6, 1, 50, 215000, "Two-person conversation sample", [2, 4], true, CONVERSATION),
   rec("r12", 6, 16, 44, 53300, "Reading list voice memo", [4], false, `A longer placeholder note covering a few unrelated sample topics.\n\n${PARA}`),
   ...moreRecordings(),
-  // Meeting 3 (≈11 days ago) — sits further down the list, after the bulk of the
-  // generated singles, so the merged/grouped meeting UI can be tested deep in a
-  // long scroll. Two tracks kept adjacent so the list folds them into one group.
+  // Meetings scattered deeper in the list (days 4 / 8 / 11 / 14). list_recordings
+  // sorts by start time, so these land at their date — spread through the scroll,
+  // not clustered. Each meeting's two tracks share a timestamp and stay adjacent,
+  // so the list folds each into one group.
+  track("m4a", "m4", "Onboarding sync", "mic", 4, 11, 15, M4_MIC, [3]),
+  track("m4b", "m4", "Onboarding sync", "system", 4, 11, 15, M4_SYS, [3]),
+  track("m5a", "m5", "Cycle retro", "mic", 8, 16, 20, M5_MIC, [1]),
+  track("m5b", "m5", "Cycle retro", "system", 8, 16, 20, M5_SYS, [1]),
   track("m3a", "m3", "Quarterly planning", "mic", 11, 14, 0, M3_MIC, [1, 3]),
   track("m3b", "m3", "Quarterly planning", "system", 11, 14, 0, M3_SYS, [1, 3]),
+  track("m6a", "m6", "Client check-in", "mic", 14, 10, 45, M6_MIC, [2]),
+  track("m6b", "m6", "Client check-in", "system", 14, 10, 45, M6_SYS, [2]),
 ];
 
 /** A short, speech-shaped fake WAV synthesized once and shared by every recording
@@ -342,7 +376,12 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "record_start": return { id: "mock-rec" };
     case "list_recordings": {
       const f = (args.filter ?? {}) as Record<string, unknown>;
-      let rows = RECORDINGS;
+      // Sort newest-first like the real daemon does, so the date groups render in
+      // order and the scattered meetings land at their real dates. A meeting's two
+      // tracks share a timestamp; the stable sort keeps them adjacent for grouping.
+      let rows = [...RECORDINGS].sort((a, b) =>
+        String(b.started_at).localeCompare(String(a.started_at)),
+      );
       if (f.favorite === true) rows = rows.filter((r) => r.favorite);
       if (f.in_place === true) rows = rows.filter((r) => r.in_place);
       if (f.kind === "single") rows = rows.filter((r) => r.meeting_id == null);
