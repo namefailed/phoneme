@@ -73,37 +73,26 @@ function bestKeywordScore(query: string, words: string[]): number | null {
   return best;
 }
 
-/** The Settings tab rail, in display order. A single source of truth that drives
- *  the sidebar buttons, the ⚙ float-menu jump list, and (via the section
- *  registry's `tab` field) which sections mount under each tab. The trio at the
- *  top mirrors the transcription pipeline; the heavier groups (Recall, System)
- *  are their own tabs rather than one overloaded catch-all. */
-// Rail order: Appearance pinned to the TOP, then a recording's journey (captured
-// → transcribed → enriched → found), then (in render) the managers, then System
-// last. Appearance is pulled to the front and System to the end in render().
-const SETTINGS_TABS: { id: string; label: string }[] = [
+/** The Settings rail, in display order — the single source of truth for the
+ *  sidebar buttons and the ⚙ float-menu jump list. One flat, explicitly-ordered
+ *  list that interleaves config tabs and manager surfaces (`managers/<x>` ids);
+ *  each id maps to its mounted section(s) via the registry below, and
+ *  `managers/*` ids resolve g-chord / header deep-links unchanged. */
+const RAIL: { id: string; label: string }[] = [
   { id: "appearance", label: "🎨 Appearance" },
+  { id: "transcription", label: "🗣️ Transcription" },
   { id: "capture", label: "🎙️ Capture" },
   { id: "dictation", label: "⌨️ Dictation" },
-  { id: "transcription", label: "🗣️ Transcription" },
   { id: "preview", label: "👁️ Live Preview" },
-  { id: "diarization", label: "👥 Diarization" },
   { id: "postprocessing", label: "✨ Post-Processing" },
-  { id: "recall", label: "🔮 Recall" },
-  { id: "system", label: "⚙️ System" },
-];
-
-/** The interactive manager surfaces — each is its own entry in the rail under a
- *  "Managers" group header, NOT a config tab (CRUD with side effects vs. the
- *  config-bound fields above). Ids are `managers/<x>` so the existing g-chord /
- *  header deep-links ("managers/profiles", "managers/saved") resolve straight
- *  here. Rendered between Appearance and System (see the rail in render()). */
-const MANAGERS: { id: string; label: string }[] = [
-  { id: "managers/tags", label: "🏷️ Tags" },
-  { id: "managers/saved", label: "📌 Saved searches" },
-  { id: "managers/profiles", label: "👤 Profiles" },
   { id: "managers/hooks", label: "🪝 Integrations" },
   { id: "managers/keybinds", label: "⚡ Keybinds" },
+  { id: "diarization", label: "👥 Diarization" },
+  { id: "managers/tags", label: "🏷️ Tags" },
+  { id: "recall", label: "🔮 Recall" },
+  { id: "managers/saved", label: "📌 Saved searches" },
+  { id: "managers/profiles", label: "👤 Profiles" },
+  { id: "system", label: "⚙️ System" },
 ];
 
 /** Legacy deep-link ids → current ids, so openers that predate the re-taxonomy
@@ -692,25 +681,12 @@ export class SettingsViewElement extends LitElement {
             <button type="button" class="sv-search-clear ${isSearching ? "" : "is-hidden"}" title="Clear search (Esc)" aria-label="Clear search" @click=${this.clearSearch}>✕</button>
           </div>
 
-          ${(() => {
-            // All tabs render flat in the rail: the config tabs, then each
-            // manager (Tags · Profiles · … · Keybinds) as its own plain tab, then
-            // System last (see SETTINGS_TABS / MANAGERS).
-            const chip = (id: string, label: string) => html`<div
-              class="sv-tab ${tab === id && !isSearching ? "active" : ""}"
-              @click=${() => this.switchTab(id)}
-            >${label}</div>`;
-            // Appearance pinned to the top, then the pipeline tabs, then the
-            // managers, then System pinned last.
-            const appearance = SETTINGS_TABS.find((t) => t.id === "appearance");
-            const sys = SETTINGS_TABS.find((t) => t.id === "system");
-            return html`
-              ${appearance ? chip(appearance.id, appearance.label) : ""}
-              ${SETTINGS_TABS.filter((t) => t.id !== "appearance" && t.id !== "system").map((t) => chip(t.id, t.label))}
-              ${MANAGERS.map((m) => chip(m.id, m.label))}
-              ${sys ? chip(sys.id, sys.label) : ""}
-            `;
-          })()}
+          ${RAIL.map(
+            (t) => html`<div
+              class="sv-tab ${tab === t.id && !isSearching ? "active" : ""}"
+              @click=${() => this.switchTab(t.id)}
+            >${t.label}</div>`,
+          )}
 
           ${isSearching ? html`<div class="sv-tab active" style="margin-top: 12px; font-style: italic;">Search Results</div>` : ""}
         </div>
@@ -725,12 +701,7 @@ export class SettingsViewElement extends LitElement {
               <button class="hb-menu-item" role="menuitem" @click=${this.openFloatModels}><span class="hb-menu-ico">🎛</span>Quick model switch…</button>
               <div class="hb-menu-sep"></div>
               <div class="hb-menu-label">Jump to section</div>
-              ${[
-                ...SETTINGS_TABS.filter((t) => t.id === "appearance"),
-                ...SETTINGS_TABS.filter((t) => t.id !== "appearance" && t.id !== "system"),
-                ...MANAGERS,
-                ...SETTINGS_TABS.filter((t) => t.id === "system"),
-              ].map((t) => {
+              ${RAIL.map((t) => {
                 // Split the leading emoji off the label so it sits in the icon slot.
                 const sp = t.label.indexOf(" ");
                 const ico = sp > 0 ? t.label.slice(0, sp) : "";
