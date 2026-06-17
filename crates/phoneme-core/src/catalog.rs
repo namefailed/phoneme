@@ -1002,36 +1002,46 @@ impl Catalog {
         let corpus = self.embedding_corpus().await?;
 
         let dim = query_vec.len();
-        // Best (id, score) per result key — meeting_id when present, else the
-        // recording id — so a meeting contributes at most one result.
-        let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
-            std::collections::HashMap::new();
+        let query: Vec<f32> = query_vec.to_vec();
 
-        for cv in &corpus.legacy {
-            let Some(vec) = cv.vector.as_deref() else {
-                continue; // corrupt blob, already warned at load
-            };
-            if vec.len() != dim {
-                tracing::warn!(id = %cv.id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
-                continue;
-            }
+        // The cosine scan over the legacy corpus is CPU-bound — up to
+        // MAX_CACHED_VECTORS dot products — so run it on the blocking pool. On a
+        // large library / slow box, doing it inline would starve the async
+        // executor (IPC named-pipe reads, audio streaming) between await points.
+        let best = tokio::task::spawn_blocking(move || {
+            // Best (id, score) per result key — meeting_id when present, else the
+            // recording id — so a meeting contributes at most one result.
+            let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
+                std::collections::HashMap::new();
+            for cv in &corpus.legacy {
+                let Some(vec) = cv.vector.as_deref() else {
+                    continue; // corrupt blob, already warned at load
+                };
+                if vec.len() != dim {
+                    tracing::warn!(id = %cv.id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
+                    continue;
+                }
 
-            let score = crate::embed::Embedder::cosine_similarity(query_vec, vec);
-            if score < min_score {
-                continue;
+                let score = crate::embed::Embedder::cosine_similarity(&query, vec);
+                if score < min_score {
+                    continue;
+                }
+                let Some(rec_id) = RecordingId::parse(cv.id.clone()) else {
+                    continue;
+                };
+                let key = cv.meeting_id.clone().unwrap_or_else(|| cv.id.clone());
+                best.entry(key)
+                    .and_modify(|e| {
+                        if score > e.1 {
+                            *e = (rec_id.clone(), score);
+                        }
+                    })
+                    .or_insert((rec_id, score));
             }
-            let Some(rec_id) = RecordingId::parse(cv.id.clone()) else {
-                continue;
-            };
-            let key = cv.meeting_id.clone().unwrap_or_else(|| cv.id.clone());
-            best.entry(key)
-                .and_modify(|e| {
-                    if score > e.1 {
-                        *e = (rec_id.clone(), score);
-                    }
-                })
-                .or_insert((rec_id, score));
-        }
+            best
+        })
+        .await
+        .map_err(|e| crate::error::Error::Internal(format!("semantic search task failed: {e}")))?;
 
         let mut scores: Vec<(RecordingId, f32)> = best.into_values().collect();
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -1056,52 +1066,64 @@ impl Catalog {
     /// vectors are skipped (same guard as [`Self::semantic_search`]).
     async fn vector_ranking(&self, query_vec: &[f32]) -> Result<Vec<(String, RecordingId, f32)>> {
         let dim = query_vec.len();
-        // best raw cosine per dedupe key (meeting_id or recording id).
-        let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
-            std::collections::HashMap::new();
-
-        // Score one pre-decoded vector into `best`. A corrupt blob (vector None)
-        // or a dimension mismatch is skipped, exactly as the inline decode did.
-        let mut consider = |cv: &CachedVector| {
-            let Some(vec) = cv.vector.as_deref() else {
-                return; // corrupt blob, already warned at load
-            };
-            if vec.len() != dim {
-                tracing::warn!(id = %cv.id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
-                return;
-            }
-            let score = crate::embed::Embedder::cosine_similarity(query_vec, vec);
-            let Some(rec_id) = RecordingId::parse(cv.id.clone()) else {
-                return;
-            };
-            let key = cv.meeting_id.clone().unwrap_or_else(|| cv.id.clone());
-            best.entry(key)
-                .and_modify(|e| {
-                    if score > e.1 {
-                        *e = (rec_id.clone(), score);
-                    }
-                })
-                .or_insert((rec_id, score));
-        };
-
+        let query: Vec<f32> = query_vec.to_vec();
         // The decoded corpus (cached across queries; rebuilt after any write).
         let corpus = self.embedding_corpus().await?;
 
-        // Per-chunk vectors (the primary, high-recall path).
-        let mut have_chunks: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for cv in &corpus.chunks {
-            have_chunks.insert(cv.id.as_str());
-            consider(cv);
-        }
+        // Best-chunk cosine over the whole corpus is CPU-bound — up to
+        // MAX_CACHED_VECTORS dot products — so run it on the blocking pool rather
+        // than inline on the async executor, where a large library would stall
+        // IPC reads / audio streaming between await points.
+        let best = tokio::task::spawn_blocking(move || {
+            // best raw cosine per dedupe key (meeting_id or recording id).
+            let mut best: std::collections::HashMap<String, (RecordingId, f32)> =
+                std::collections::HashMap::new();
 
-        // Legacy whole-recording vectors, only for recordings not yet chunked, so
-        // the library stays searchable while the backfill runs.
-        for cv in &corpus.legacy {
-            if have_chunks.contains(cv.id.as_str()) {
-                continue; // chunks supersede the legacy whole-recording vector
+            // Score one pre-decoded vector into `best`. A corrupt blob (vector
+            // None) or a dimension mismatch is skipped, exactly as the inline
+            // decode did.
+            let mut consider = |cv: &CachedVector| {
+                let Some(vec) = cv.vector.as_deref() else {
+                    return; // corrupt blob, already warned at load
+                };
+                if vec.len() != dim {
+                    tracing::warn!(id = %cv.id, dim = vec.len(), query_dim = dim, "skipping embedding: dimension mismatch");
+                    return;
+                }
+                let score = crate::embed::Embedder::cosine_similarity(&query, vec);
+                let Some(rec_id) = RecordingId::parse(cv.id.clone()) else {
+                    return;
+                };
+                let key = cv.meeting_id.clone().unwrap_or_else(|| cv.id.clone());
+                best.entry(key)
+                    .and_modify(|e| {
+                        if score > e.1 {
+                            *e = (rec_id.clone(), score);
+                        }
+                    })
+                    .or_insert((rec_id, score));
+            };
+
+            // Per-chunk vectors (the primary, high-recall path).
+            let mut have_chunks: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for cv in &corpus.chunks {
+                have_chunks.insert(cv.id.as_str());
+                consider(cv);
             }
-            consider(cv);
-        }
+
+            // Legacy whole-recording vectors, only for recordings not yet chunked,
+            // so the library stays searchable while the backfill runs.
+            for cv in &corpus.legacy {
+                if have_chunks.contains(cv.id.as_str()) {
+                    continue; // chunks supersede the legacy whole-recording vector
+                }
+                consider(cv);
+            }
+            best
+        })
+        .await
+        .map_err(|e| crate::error::Error::Internal(format!("vector ranking task failed: {e}")))?;
 
         let mut ranking: Vec<(String, RecordingId, f32)> = best
             .into_iter()
@@ -1610,6 +1632,19 @@ impl Catalog {
         // snapshot so a deleted recording can't keep surfacing in search.
         self.invalidate_embedding_cache();
         Ok(())
+    }
+
+    /// Delete EVERY recording row — and, via the same cascade as [`delete`], all
+    /// their tags, segments, words, speaker names, and embeddings. Used by the
+    /// destructive catalog rebuild, which then re-imports the audio from disk.
+    /// Returns the number of rows removed. The caller leaves the WAV files on
+    /// disk (the rebuild re-links them).
+    pub async fn clear_all_recordings(&self) -> Result<u64> {
+        let res = sqlx::query("DELETE FROM recordings")
+            .execute(&self.pool)
+            .await?;
+        self.invalidate_embedding_cache();
+        Ok(res.rows_affected())
     }
 
     /// Run an explicit WAL checkpoint. PASSIVE mode is non-blocking — readers
