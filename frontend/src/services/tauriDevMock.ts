@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 /**
- * Dev-only Tauri IPC mock — lets phoneme render in a plain browser (the Claude
- * Code preview, or `vite` opened directly), where `window.__TAURI_INTERNALS__`
+ * Dev-only Tauri IPC mock — lets phoneme render in a plain browser (a preview
+ * pane, or `vite` opened directly), where `window.__TAURI_INTERNALS__`
  * doesn't exist and every `invoke()` would otherwise throw "Cannot read
  * properties of undefined (reading 'invoke')". It feeds canned recordings / tags
  * / config so the list, sidebar, and detail pane populate and the roving keyboard

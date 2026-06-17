@@ -6,7 +6,7 @@
  * `#app`. The separate live-preview overlay window has its own entry point
  * (`overlay.ts`); nothing here runs in that window.
  */
-// Dev-only: in a plain browser (Claude preview / bare `vite`) there's no Tauri
+// Dev-only: in a plain browser (a preview pane / bare `vite`) there's no Tauri
 // runtime, so this installs a mock IPC with canned data. No-op in the real app
 // (cargo tauri dev / production). Must run before any invoke() — hence first.
 import "./services/tauriDevMock";
