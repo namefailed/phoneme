@@ -40,6 +40,12 @@ let installed = false;
  *  name input): the glow sits right over what you're typing into, so it gets out
  *  of the way until you leave the field, then returns. */
 let suppressed = false;
+/** The glow is a KEYBOARD-navigation affordance, so it only shows while you're
+ *  driving with the keyboard. A mouse click hides it (and flips this false) but
+ *  the roving cursor's POSITION still updates underneath (the panes' own
+ *  focus-follow), so taking over with the keyboard resumes from where you
+ *  clicked — the glow just reappears there on the next key, never on a click. */
+let keyboardMode = false;
 
 /** Panes the ghost must stay WITHIN — its rect is clamped to the nearest of these,
  *  so a full-width list row (which underlaps the detail pane) can't glow over the
@@ -174,7 +180,10 @@ function place(el: HTMLElement, animate: boolean) {
   g.style.top = `${r.top}px`;
   g.style.width = `${r.width}px`;
   g.style.height = `${r.height}px`;
-  g.style.opacity = suppressed ? "0" : "1";
+  // Show only when driving by keyboard (and not typing): a mouse click still runs
+  // place() to keep `current` tracking what you clicked, but the glow stays hidden
+  // until you take over with the keyboard.
+  g.style.opacity = suppressed || !keyboardMode ? "0" : "1";
 }
 
 /** The element the roving cursor most recently landed on, or null. There can be
@@ -250,6 +259,29 @@ function onFocusOut(e: FocusEvent) {
   });
 }
 
+/** A mouse click → mouse mode: hide the glow now and keep it hidden as the
+ *  panes' focus-follow moves the roving cursor underneath (place() still tracks
+ *  `current`, it just stays invisible). Capture phase so this lands before the
+ *  pane click-handlers update the cursor. */
+function onPointerInput() {
+  keyboardMode = false;
+  if (ghost) ghost.style.opacity = "0";
+  if (tail) tail.style.opacity = "0";
+}
+
+/** A real keypress → keyboard mode: the user is taking over from the keyboard,
+ *  so reveal the glow at the current cursor (the spot a prior mouse click left
+ *  it). Bare modifier presses don't count. Capture phase so the flag is set
+ *  before a nav key moves the cursor and the resulting place() shows it. */
+function onKeyInput(e: KeyboardEvent) {
+  if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
+  if (keyboardMode) return;
+  keyboardMode = true;
+  // Fade in at the saved spot (no pop). If this key also moves the cursor, the
+  // resulting place() glides on from here a moment later.
+  if (current && current.isConnected && !suppressed) place(current, true);
+}
+
 function connect() {
   if (observer) return;
   observer = new MutationObserver(onMutations);
@@ -272,7 +304,11 @@ function connect() {
   // Hide the glow while typing into an editor / input; restore on the way out.
   document.addEventListener("focusin", onFocusIn);
   document.addEventListener("focusout", onFocusOut);
-  // Seed onto whatever is already highlighted.
+  // Track input modality so the glow only shows under keyboard control (capture
+  // phase: settle the flag before the pane/keyboard handlers run).
+  document.addEventListener("pointerdown", onPointerInput, true);
+  document.addEventListener("keydown", onKeyInput, true);
+  // Seed onto whatever is already highlighted (stays hidden until a keypress).
   const live = document.querySelector<HTMLElement>(".kbd-cursor, .kbd-focused");
   if (live) place(live, false);
 }
@@ -290,6 +326,8 @@ function disconnect() {
   window.removeEventListener("resize", onReflow);
   document.removeEventListener("focusin", onFocusIn);
   document.removeEventListener("focusout", onFocusOut);
+  document.removeEventListener("pointerdown", onPointerInput, true);
+  document.removeEventListener("keydown", onKeyInput, true);
   if (raf) {
     cancelAnimationFrame(raf);
     raf = 0;
