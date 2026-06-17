@@ -4,7 +4,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { listRecordings, semanticSearch, moreLikeThis, updateMeetingName, setFavorite, type Recording } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { Store } from "../../state/store";
-import { filterStore, toWireFilter, type RecordingKind } from "../../state/filter";
+import { filterStore, toWireFilter, type RecordingKind, type UiFilter } from "../../state/filter";
 import { invoke } from "@tauri-apps/api/core";
 import { formatDayDate } from "../../utils/date";
 import {
@@ -266,6 +266,19 @@ export class RecordingsListElement extends LitElement {
     return rows.filter((r) => !!r.meeting_id);
   }
 
+  /** Apply the sidebar tag filter (a single tag, or the Tagged/Untagged presence
+   *  toggle) client-side. The plain list path already enforces these in SQL, but
+   *  the semantic-search and "more like this" paths don't carry the filter to the
+   *  backend — so without this a sidebar tag is silently ignored whenever a
+   *  search/▸similar is active. No-op on the list path (server already filtered). */
+  private filterByTag(rows: Recording[], f: UiFilter): Recording[] {
+    let out = rows;
+    if (f.tag_id != null) out = out.filter((r) => (r.tags ?? []).some((t) => t.id === f.tag_id));
+    if (f.tagState === "tagged") out = out.filter((r) => (r.tags ?? []).length > 0);
+    else if (f.tagState === "untagged") out = out.filter((r) => (r.tags ?? []).length === 0);
+    return out;
+  }
+
   /** Toggle the star/favorite flag on a recording (optimistic; persisted via IPC). */
   private async toggleFavorite(r: Recording) {
     const next = !r.favorite;
@@ -329,6 +342,9 @@ export class RecordingsListElement extends LitElement {
         this.reachedEnd = rows.length < this.pageSize;
       }
       rows = this.filterByKind(rows, f.kind);
+      // Enforce the sidebar tag filter too — the semantic/like paths above don't
+      // send it to the backend, so it'd otherwise be ignored mid-search.
+      rows = this.filterByTag(rows, f);
       const ids = new Set(rows.map((r) => r.id));
       const prevSelCount = this.multiSelected.size;
       const nextMulti = new Set<string>();
