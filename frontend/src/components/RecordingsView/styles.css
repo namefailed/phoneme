@@ -2306,7 +2306,11 @@ ph-sidebar .queue-item-main.kbd-cursor {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  /* Wrap instead of overlapping: when the pane is too narrow for the title +
+     actions on one line, the actions drop to their own line below (and wrap
+     among themselves — see .merged-actions). */
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 .merged-title {
   margin: 0;
@@ -2316,6 +2320,8 @@ ph-sidebar .queue-item-main.kbd-cursor {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Take the row's slack and let the name ellipsize rather than force width. */
+  flex: 1 1 12ch;
   min-width: 0;
 }
 .merged-name {
@@ -2324,6 +2330,11 @@ ph-sidebar .queue-item-main.kbd-cursor {
   border: 1px solid transparent;
   outline: none;
   transition: border-color 0.15s ease, background 0.15s ease;
+  /* Don't let a long meeting name push the actions off the row; ellipsize it. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .merged-name:hover {
   border-color: var(--border-subtle);
@@ -2334,6 +2345,8 @@ ph-sidebar .queue-item-main.kbd-cursor {
 }
 .merged-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -2849,17 +2862,17 @@ ph-sidebar .queue-item-main.kbd-cursor {
 .chrono-bubble {
   max-width: 80%;
   padding: 9px 14px;
-  /* Asymmetric radius gives the chat-bubble feel; the speaker-colored edge
-     (a soft wash + a solid edge bar) ties each turn to its speaker. */
-  border-radius: 14px 14px 14px 4px;
+  /* Evenly rounded on all corners (no squared "tail" — that read as broken).
+     The speaker-colored edge (a soft wash + a solid side bar) ties each turn to
+     its speaker. */
+  border-radius: 12px;
   background: color-mix(in srgb, var(--spk, var(--accent)) 7%, var(--bg-surface));
   border: 1px solid var(--border-subtle);
   border-left: 3px solid color-mix(in srgb, var(--spk, var(--accent)) 65%, transparent);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 .chrono-row--right .chrono-bubble {
-  /* Mirror the tail + speaker edge to the right for the other side. */
-  border-radius: 14px 14px 4px 14px;
+  /* Mirror the speaker edge to the right for the other side; corners stay even. */
   border-left: 1px solid var(--border-subtle);
   border-right: 3px solid color-mix(in srgb, var(--spk, var(--accent)) 65%, transparent);
 }
