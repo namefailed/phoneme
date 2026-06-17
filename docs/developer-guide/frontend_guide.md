@@ -322,6 +322,24 @@ Real examples to copy (each named test file demonstrates the idiom):
 
 When adding a feature, mirror the nearest test file's approach. New IPC wrappers get a payload-pinning test; new event consumers get a captured-handler test; new pure helpers get direct tests.
 
+### 4.3 Browser preview without the daemon (`tauriDevMock`)
+
+The frontend normally talks to the Rust daemon over Tauri IPC, so opening it in a plain browser would throw on the first `invoke()` (`window.__TAURI_INTERNALS__` doesn't exist). [`services/tauriDevMock.ts`](../../frontend/src/services/tauriDevMock.ts) — imported **first** in `main.ts` — installs a mock IPC with canned data so the whole UI renders in a bare browser. Handy for iterating on layout, the keyboard/roving-cursor layer, and the glow animations, and for screenshotting, without launching the native window or a daemon.
+
+```powershell
+cd frontend
+npm run dev            # vite on http://localhost:5173 — open it in any browser
+```
+
+It is **dev-only and self-disabling** — it never touches the shipped app:
+
+- Installs **only** when `import.meta.env.DEV` is true **and** no real Tauri runtime is present. Under `cargo tauri dev` (and production) Tauri injects `__TAURI_INTERNALS__`, so the mock no-ops.
+- In a production `vite build`, `import.meta.env.DEV` is statically `false`, so the whole module (and its `@tauri-apps/api/mocks` import) is dead-code-eliminated.
+
+What it provides: a small set of **fully synthetic** recordings / tags / config (placeholder text only — no real content or secrets; see the anonymization note below), a once-synthesized speech-shaped WAV returned via `convertFileSrc` so the waveform draws, and an in-memory config that `write_config` mutates so Settings round-trips. It mocks the commands the UI calls on mount and common interactions; `listen()` resolves but **events are never emitted** (no live recording/transcription in the browser).
+
+> **Anonymization (public repo).** The canned config mirrors the real one's *shape* so the preview matches the app, but every secret is blanked (`api_key`/`hmac_secret` → `""`) and model/audio paths are de-usernamed (`C:\Users\<name>\…` → `~/…`). Recordings are Lorem-ipsum placeholders. Keep it that way when editing the mock.
+
 ---
 
 ## 5. 🧭 Where do I change X? (cookbook)

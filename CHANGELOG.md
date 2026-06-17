@@ -378,6 +378,14 @@ trust boundary. Verified against current code.*
 
 ### Developer experience
 
+- [x] **Browser preview without the daemon** — a dev-only mock IPC
+  (`frontend/src/services/tauriDevMock.ts`) feeds canned, fully-synthetic data so
+  the whole UI renders in a plain browser (`cd frontend; npm run dev`), for fast
+  layout / keyboard-nav / animation work and screenshots without launching the
+  native window. Installs only in a Vite dev build with no real Tauri runtime, and
+  is dead-code-eliminated from production builds. See the Frontend Developer Guide
+  §4.3.
+
 - [x] `phoneme completions <bash|zsh|fish|powershell|elvish>` prints a shell-completion script to stdout (pure local, no daemon needed).
 
 - [x] A fully-commented `config.example.toml` and `.env.example` at the repo
@@ -391,6 +399,26 @@ trust boundary. Verified against current code.*
   delete, bounded for large libraries.
 
 ### Reliability & polish
+
+- [x] **Transcript / notes editors render reliably** — pinned a single
+  `@codemirror/state` instance (Vite `resolve.dedupe` + `optimizeDeps`) so the
+  editors never hit "Unrecognized extension value" and fail to mount.
+- [x] **App-health pill** moved to the far right of the header bar and mirrored
+  into the Settings page (shared `state/health.ts` store → one Doctor poll feeds
+  the header pill, the Settings pill, and the failure banner); both pills are
+  pixel-identical and the dot no longer resizes as health resolves.
+- [x] **Settings ⚙ split button** is byte-identical between the header and the
+  Settings page at any UI font size / display scaling (height, caret box, and
+  divider matched; whole-pixel anchor); inside Settings it reads **← Go Back** at
+  the same size. The Settings panel content now starts below the floating button.
+- [x] **Keyboard glow consistency** — in the detail-pane dropdowns (Views /
+  Versions / Pipeline / Speed / Export) the cursor glow now stays on the trigger
+  button and the option shows its own border (matching the header dropdowns),
+  instead of following into the popup and stranding on Escape. And the glow now
+  tracks a click into an editor while it's hidden, so exiting (Shift+Esc) resumes
+  from where you clicked rather than gliding in from a stale spot.
+- [x] **Settings consistency** — Live Preview field hints moved to the shared
+  value-column help style; the bundled-model list aligns with the other inputs.
 
 - [x] **Safe "Re-import recordings from disk"** — a NON-destructive recovery path
   (`ReimportFromDisk` IPC, `phoneme doctor --reimport`): scans the audio directory
