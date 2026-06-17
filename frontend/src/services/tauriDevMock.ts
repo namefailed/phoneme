@@ -123,46 +123,59 @@ function fakeWavUrl(): string {
   return wavUrl;
 }
 
-// Full config mirroring crates/phoneme-core defaults (config.example.toml), so
-// every Settings tab is populated. Mutable: write_config replaces it and
-// read_config returns it, so edits persist + round-trip within the session.
+// Mirrors the maintainer's real config so the preview matches the actual app.
+// SCRUBBED for the public repo: the llm_post_process API key (a DPAPI secret) is
+// blanked, and model paths are de-usernamed (C:\Users\<name> -> ~). Mutable:
+// write_config replaces it and read_config returns it, so Settings round-trips.
+const STT = (port: number, model: string) => ({
+  mode: "bundled_model", external_url: "http://127.0.0.1:5809",
+  model_path: `~/AppData/Local/phoneme/data/models/${model}`,
+  bundled_server_port: port, bundled_server_args: [], timeout_secs: 9999,
+  language: "en", provider: "local", api_key: "", model: "", api_url: "",
+  use_own_bundled_server: false,
+});
 let config: Record<string, unknown> = {
-  whisper: { mode: "bundled_download", provider: "local", external_url: "http://127.0.0.1:5809", model_path: "", bundled_server_port: 5809, bundled_server_args: [], timeout_secs: 60, model: "", api_url: "", api_key: "" },
-  recording: { audio_dir: "~/Documents/phoneme/audio", sample_rate: 16000, channels: 1, silence_threshold_dbfs: -45.0, silence_window_ms: 3000, max_duration_secs: 300, input_device: "default", source: "microphone", pre_roll_ms: 1500, streaming_preview: false, auto_stop_on_silence: false, normalize: false, normalize_target_dbfs: -1.0, meeting_preview: "toggle" },
-  in_place: { cleanup: "fast", type_mode: "type", save_to_library: true, full_pipeline: false, type_first: false },
-  hook: { commands: ["powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1"], timeout_secs: 30, run_on_transcribe: true, keyword_rules: [] },
+  whisper: { ...STT(5809, "ggml-medium.en.bin"), mode: "bundled_download" },
+  preview_whisper: STT(5810, "ggml-base.en.bin"),
+  in_place: {
+    cleanup: "fast", full_pipeline: false, type_first: true, save_to_library: true,
+    type_mode: "paste", app_context: true, app_context_denylist: ["code"], stream_type: false,
+    stt: STT(5810, "ggml-base.en.bin"), app_overrides: {},
+  },
+  recording: { audio_dir: "~/Documents/phoneme/audio", sample_rate: 16000, channels: 1, silence_threshold_dbfs: -50.0, silence_window_ms: 3000, max_duration_secs: 300, input_device: "default", source: "microphone", pre_roll_ms: 1000, streaming_preview: true, auto_stop_on_silence: false, meeting_preview: "toggle", meeting_preview_own_server: true, normalize: false, normalize_target_dbfs: -1.0, preview_adaptive: true, preview_reveal_words_per_sec: 12.0, preview_idle_ms: 10000, preview_waveform: true },
+  hook: { commands: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Set-Clipboard -Value $d.transcript"'], timeout_secs: 30, run_on_transcribe: true, keyword_rules: [] },
   webhook: { allow_private_network: false, allow_http: false, hmac_secret: "", custom_headers: {} },
-  hotkey: { enabled: false, combo: "Ctrl+Alt+Space", mode: "hold" },
-  in_place_hotkey: { enabled: false, combo: "Ctrl+Alt+I", mode: "hold" },
-  meeting_hotkey: { enabled: false, combo: "Ctrl+Alt+M", mode: "toggle" },
-  tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: false },
-  editor: { vim_mode: false, vimrc: "", vimrc_path: "" },
-  diarization: { provider: "none", local_model_path: "" },
-  daemon: { log_level: "info", log_max_size_mb: 10, log_max_files: 5, pipe_name: "phoneme-daemon" },
+  hotkey: { enabled: true, combo: "Alt+V", mode: "hold" },
+  in_place_hotkey: { enabled: true, combo: "Shift+Alt+V", mode: "hold" },
+  meeting_hotkey: { enabled: true, combo: "Ctrl+Alt+V", mode: "hold" },
+  tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: true },
+  editor: { vim_mode: true, vimrc: "", vimrc_path: "", resync_views_on_edit: true },
+  diarization: { provider: "local", local_model_path: "", models_dir: "", solo_one_speaker: false, merge_gap_secs: 0.25, speaker_keep_threshold: 0.0000001, reconstruct_method: "smoothed", reconstruct_method_epsilon: 0.1 },
+  daemon: { log_level: "trace", log_max_size_mb: 10, log_max_files: 5, pipe_name: "phoneme-daemon" },
   interface: {
     strip_titlebar: false,
-    format_24h: false,
-    theme: "one-dark",
-    visible_columns: ["day", "time", "duration", "status", "transcript"],
-    column_widths: ["100px", "60px", "60px", "100px", "1fr"],
-    preview_overlay: false,
+    format_24h: true,
+    theme: "catppuccin-mocha",
+    visible_columns: ["day", "time", "duration", "title", "status", "model", "cleanup_model", "user_edited", "transcript"],
+    column_widths: ["40px", "117px", "66px", "84px", "159px", "156px", "176px", "145px", "390px", "80px", "69px", "124px", "408px", "1fr"],
+    preview_overlay: true,
     recording_indicator: false,
     vim_nav: true,
-    arrow_nav: false,
-    cursor_animation: "trail",
+    arrow_nav: true,
     animation_speed: "normal",
+    cursor_animation: "glide",
+    ui_font: "Cascadia Code",
+    ui_font_size: 12,
     step_notifications: true,
     quit_stops_daemon: true,
-    ui_font: "",
-    ui_font_size: 14,
   },
-  llm_post_process: { enabled: false, provider: "none", api_url: "", model: "llama3.2:3b", prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.", timeout_secs: 30, autostart_ollama: true, api_key: "" },
-  summary: { auto: false, provider: "", api_url: "", model: "", prompt: "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.", api_key: "" },
-  auto_tag: { auto: false, provider: "", api_url: "", model: "", prompt: "You tag voice-note transcripts. Suggest concise topical tags (1-3 words each). Reply with ONLY a JSON array of tag-name strings.", max_tags: 5, auto_accept_existing: false, api_key: "" },
-  title: { enabled: true, use_llm: false, provider: "", api_url: "", model: "", prompt: "You title voice-note transcripts. Reply with ONLY a short title: at most 8 words, plain text, no quotes, no preamble.", api_key: "" },
-  semantic_search: { enabled: false, model_dir: "", max_tokens: 256, pooling: "mean", token_type_ids: true, query_prefix: "", passage_prefix: "" },
+  llm_post_process: { enabled: true, provider: "ollama", api_key: "", api_url: "http://127.0.0.1:11434/api/generate", model: "gemma3:4b", prompt: "Clean up the following transcript. Maintain original tone. Provide only the transcript and things pertaining to it, not your replies. Do not provide any meta information, clean up lists and make the information readable and pretty.", timeout_secs: 30, autostart_ollama: true },
+  summary: { auto: true, provider: "", api_key: "", api_url: "", model: "", prompt: "Summarize the following transcript concisely as clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble. Provide only the summary, make sure the summary is readable and beautiful." },
+  auto_tag: { auto: true, provider: "", api_key: "", api_url: "", model: "", prompt: "You tag voice-note transcripts. Suggest concise topical tags (1-2 words each). Reuse tags from the EXISTING TAGS list when they genuinely fit, AND coin new tags for topics no existing tag covers. Reply with ONLY a JSON array of tag-name strings — no preamble, no explanations.", max_tags: 10, auto_accept_existing: true },
+  title: { enabled: true, use_llm: true, provider: "", api_key: "", api_url: "", model: "", prompt: "You title voice-note transcripts. Reply with ONLY a short title for the transcript: at most 8 words, plain text, no quotes, no trailing punctuation, no preamble. Provide only the title and make sure they're beautiful and clearly title the transcript." },
+  semantic_search: { enabled: true, model_dir: "~/AppData/Local/phoneme/data/models/semantic", max_tokens: 256, pooling: "mean", token_type_ids: true, query_prefix: "", passage_prefix: "" },
   retention: { delete_audio: false },
-  rest_api: { enabled: false, port: 3737 },
+  rest_api: { enabled: true, port: 3737 },
 };
 
 function handle(cmd: string, args: Record<string, unknown>): unknown {
