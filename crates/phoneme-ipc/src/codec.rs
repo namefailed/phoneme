@@ -58,8 +58,13 @@ impl<T: DeserializeOwned> Decoder for JsonLineCodec<T> {
                 }
                 return Ok(None);
             };
-            let line = src.split_to(pos);
+            let mut line = src.split_to(pos);
             src.advance(1); // consume the newline
+            // A CRLF blank line leaves a lone `\r`; trim it so the line counts as
+            // empty rather than parsing `"\r"` as JSON and erroring out the stream.
+            if line.last() == Some(&b'\r') {
+                line.truncate(line.len() - 1);
+            }
             if line.is_empty() {
                 continue; // blank line: keep scanning for the next frame
             }

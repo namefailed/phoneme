@@ -183,12 +183,16 @@ impl NamedPipeListener {
             .current
             .take()
             .ok_or_else(|| IpcTransportError::Internal("listener empty".into()))?;
-        server.connect().await?;
 
-        // Immediately create the next listener instance — same owner-only ACL.
+        // Re-arm the listener BEFORE awaiting connect. If the client closes early
+        // or connect otherwise fails, the `?` below must not leave `self.current`
+        // as None — that would make every later accept() fail with "listener
+        // empty", locking out all IPC until the daemon restarts.
         let next = create_secured_server(&ServerOptions::new(), &pipe_path(&self.name))
             .map_err(IpcTransportError::Connect)?;
         self.current = Some(next);
+
+        server.connect().await?;
 
         let framed = Framed::new(server, JsonLineCodec::<ServerRequest>::new());
         Ok(NamedPipeConnection { framed_in: framed })
