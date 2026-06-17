@@ -258,11 +258,15 @@ impl LlmProvider for OllamaProvider {
         }
 
         // NDJSON: one JSON object per line. reqwest hands us arbitrary byte
-        // chunks, so buffer and split on '\n' rather than assuming a chunk is a
-        // whole line. Each chunk read is bounded by `idle` so a genuinely stalled
-        // stream fails fast while a slow-but-progressing one keeps going.
+        // chunks, so buffer the RAW bytes and split on '\n' rather than assuming a
+        // chunk is a whole line. Decoding each network chunk to UTF-8 on its own
+        // would corrupt any multi-byte character straddling a chunk boundary
+        // (each half lossily becomes U+FFFD); decoding only once a full line is
+        // assembled keeps multi-byte text intact. Each chunk read is bounded by
+        // `idle` so a genuinely stalled stream fails fast while a slow-but-
+        // progressing one keeps going.
         let mut acc = String::new();
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let mut resp = resp;
         loop {
             let chunk = match tokio::time::timeout(idle, resp.chunk()).await {
@@ -278,9 +282,10 @@ impl LlmProvider for OllamaProvider {
                 Ok(Ok(None)) => break,
                 Ok(Err(e)) => return Err(Error::Internal(format!("Ollama stream error: {e}"))),
             };
-            buf.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(nl) = buf.find('\n') {
-                let line: String = buf.drain(..=nl).collect();
+            buf.extend_from_slice(&chunk);
+            while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = buf.drain(..=nl).collect();
+                let line = String::from_utf8_lossy(&line_bytes);
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
@@ -297,7 +302,8 @@ impl LlmProvider for OllamaProvider {
             }
         }
         // Stream ended without an explicit done — flush any trailing line.
-        let tail = buf.trim();
+        let tail = String::from_utf8_lossy(&buf);
+        let tail = tail.trim();
         if !tail.is_empty() {
             if let Ok(obj) = serde_json::from_str::<OllamaStreamChunk>(tail) {
                 if !obj.response.is_empty() {
@@ -342,6 +348,10 @@ struct OpenAiChatResponse {
 #[derive(Debug, Deserialize)]
 struct OpenAiChoice {
     message: OpenAiMessage,
+    /// "stop", "length", "content_filter", … — "length" means the model hit the
+    /// output token cap and the content is truncated. Absent on some endpoints.
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -362,12 +372,20 @@ impl LlmProvider for OpenAiChatProvider {
             req = req.bearer_auth(&self.api_key);
         }
         let parsed: OpenAiChatResponse = send_json(req, "OpenAI-compatible").await?;
-        parsed
+        let choice = parsed
             .choices
             .into_iter()
             .next()
-            .map(|c| normalize_response(&c.message.content))
-            .ok_or_else(|| Error::Internal("OpenAI-compatible response had no choices".into()))
+            .ok_or_else(|| Error::Internal("OpenAI-compatible response had no choices".into()))?;
+        // Don't return content the model truncated at its output-token cap — fail
+        // so the (non-fatal) post-processing step falls back to the raw transcript
+        // rather than silently overwriting it with a cut-off result.
+        if choice.finish_reason.as_deref() == Some("length") {
+            return Err(Error::Internal(
+                "OpenAI-compatible response truncated at the output token limit".into(),
+            ));
+        }
+        Ok(normalize_response(&choice.message.content))
     }
 }
 

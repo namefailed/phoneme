@@ -172,6 +172,8 @@ impl Catalog {
     ///   the checkpoint, so `Catalog::checkpoint()` is called explicitly from
     ///   the daemon on idle to keep WAL growth bounded.
     /// - `journal_size_limit=67108864` caps the WAL at 64 MB regardless.
+    /// - `busy_timeout=5s` makes a connection wait for a contended lock rather
+    ///   than failing immediately with SQLITE_BUSY ("database is locked").
     pub async fn open(path: &Path) -> Result<Self> {
         let path_str = path.to_str().ok_or_else(|| {
             crate::error::Error::Internal("catalog path is not valid utf-8".into())
@@ -182,6 +184,12 @@ impl Catalog {
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
             .foreign_keys(true)
+            // Without a busy timeout SQLite returns SQLITE_BUSY ("database is
+            // locked") the instant a connection can't take the lock. With a
+            // small pool (max_connections below) a reader and the daemon's
+            // writer can briefly contend, so wait up to 5s for the lock instead
+            // of failing the whole query immediately.
+            .busy_timeout(std::time::Duration::from_secs(5))
             .pragma("wal_autocheckpoint", "1000")
             .pragma("journal_size_limit", "67108864");
 

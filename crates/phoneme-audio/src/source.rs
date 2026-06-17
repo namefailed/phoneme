@@ -576,6 +576,13 @@ impl CpalSource {
             // 100 ms at 16 kHz — only fill gaps larger than this so ordinary
             // scheduling jitter between callbacks is never mistaken for silence.
             let fill_tolerance = target_rate as usize / 10;
+            // Cap a single fill-silence allocation at 1 s of canonical samples.
+            // A very long silent gap (e.g. an overnight loopback recording with
+            // nothing playing) would otherwise allocate one enormous `vec![0; gap]`
+            // — hundreds of MB — and append it downstream in one shot. Emitting the
+            // gap in bounded blocks keeps memory flat and lets the recorder apply
+            // its max-duration cap between blocks instead of after a giant append.
+            let fill_block_max = target_rate as usize;
 
             while let Some(mut raw) = raw_rx.recv().await {
                 if fill_gaps {
@@ -601,8 +608,15 @@ impl CpalSource {
                         (fill_start.elapsed().as_secs_f64() * target_rate as f64) as usize;
                     let gap = gap_fill_len(expected, delivered, fill_tolerance);
                     if gap > 0 {
-                        if out_tx.send(vec![0i16; gap]).await.is_err() {
-                            return;
+                        // Emit the gap as bounded blocks (<=1 s each) rather than
+                        // one allocation, so a long silent stretch can't OOM.
+                        let mut remaining = gap;
+                        while remaining > 0 {
+                            let block = remaining.min(fill_block_max);
+                            if out_tx.send(vec![0i16; block]).await.is_err() {
+                                return;
+                            }
+                            remaining -= block;
                         }
                         filled += gap;
                     }

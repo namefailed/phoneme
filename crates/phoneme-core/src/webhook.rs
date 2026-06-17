@@ -19,7 +19,7 @@ use crate::types::HookPayload;
 use hmac::{Hmac, Mac};
 use secrecy::ExposeSecret;
 use sha2::Sha256;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 /// The header carrying the HMAC-SHA256 signature of the request body. The value
@@ -145,7 +145,18 @@ fn classify_resolved(addrs: &[IpAddr]) -> HostClass {
 /// `localhost` short-circuits to loopback without touching the resolver, and
 /// the `url` parser canonicalizes IPv4 trickery (decimal/octal literals) into
 /// dotted-quad form before classification.
-async fn check_target(url: &str, policy: &WebhookConfig) -> Result<()> {
+///
+/// On success returns the connection PIN: `Some((host, addrs))` for a resolved
+/// DNS name — the exact validated socket addresses the POST must connect to —
+/// or `None` when no pin is needed (an IP literal, which reqwest dials directly,
+/// or `localhost`, hardcoded to loopback). Pinning closes a TOCTOU window: if
+/// the POST re-resolved the hostname, a hostile/rebinding DNS server could
+/// answer the guard's lookup with a public IP and the send's lookup with an
+/// internal one (S-H1).
+async fn check_target(
+    url: &str,
+    policy: &WebhookConfig,
+) -> Result<Option<(String, Vec<SocketAddr>)>> {
     let parsed = reqwest::Url::parse(url)
         .map_err(|e| Error::InvalidConfig(format!("webhook URL {url:?} is invalid: {e}")))?;
     let scheme = parsed.scheme().to_ascii_lowercase();
@@ -156,33 +167,40 @@ async fn check_target(url: &str, policy: &WebhookConfig) -> Result<()> {
 
     // `host_str` wraps IPv6 literals in brackets; strip them for parsing.
     let bare = host.trim_start_matches('[').trim_end_matches(']');
-    let (class, resolved) = if host.eq_ignore_ascii_case("localhost") {
-        (HostClass::Loopback, None)
+    let (class, resolved, pin) = if host.eq_ignore_ascii_case("localhost") {
+        (HostClass::Loopback, None, None)
     } else if let Ok(ip) = bare.parse::<IpAddr>() {
-        (classify_ip(ip), None)
+        (classify_ip(ip), None, None)
     } else {
         // The port only matters to the resolver call's shape, not the verdict.
         let port = parsed.port_or_known_default().unwrap_or(443);
-        let addrs: Vec<IpAddr> = tokio::net::lookup_host((bare, port))
+        let socket_addrs: Vec<SocketAddr> = tokio::net::lookup_host((bare, port))
             .await
             .map_err(|e| {
                 Error::InvalidConfig(format!("webhook host {host:?} did not resolve: {e}"))
             })?
-            .map(|sa| sa.ip())
             .collect();
-        if addrs.is_empty() {
+        if socket_addrs.is_empty() {
             return Err(Error::InvalidConfig(format!(
                 "webhook host {host:?} did not resolve to any address"
             )));
         }
-        (classify_resolved(&addrs), Some(addrs))
+        let addrs: Vec<IpAddr> = socket_addrs.iter().map(|sa| sa.ip()).collect();
+        // Pin to the host name reqwest will look up (the URL host, already
+        // lowercased by the `url` parser) → the exact addresses we just
+        // classified, so the send can't connect anywhere we didn't validate.
+        (
+            classify_resolved(&addrs),
+            Some(addrs),
+            Some((host.clone(), socket_addrs)),
+        )
     };
 
     match class {
-        HostClass::Loopback => Ok(()),
+        HostClass::Loopback => Ok(pin),
         HostClass::Private => {
             if policy.allow_private_network {
-                Ok(())
+                Ok(pin)
             } else {
                 let what = match resolved
                     .as_deref()
@@ -199,7 +217,7 @@ async fn check_target(url: &str, policy: &WebhookConfig) -> Result<()> {
         }
         HostClass::Public => {
             if scheme == "https" || policy.allow_http {
-                Ok(())
+                Ok(pin)
             } else {
                 Err(Error::InvalidConfig(format!(
                     "webhook target {host} is a public host reached over plain {scheme}; \
@@ -257,8 +275,9 @@ impl WebhookClient {
         payload: &HookPayload,
         policy: &WebhookConfig,
     ) -> Result<()> {
-        // The SSRF guard runs first so a blocked target never sees a packet.
-        check_target(url, policy).await?;
+        // The SSRF guard runs first so a blocked target never sees a packet. It
+        // also hands back the validated addresses to pin the connection to.
+        let pin = check_target(url, policy).await?;
 
         // Serialize the body ourselves so the signature is over the EXACT bytes
         // that go on the wire (rather than trusting `.json()` to round-trip
@@ -266,8 +285,23 @@ impl WebhookClient {
         let body = serde_json::to_vec(payload)
             .map_err(|e| Error::Internal(format!("webhook payload serialization failed: {e}")))?;
 
-        let mut request = self
-            .http
+        // For a resolved DNS name, send through a client that resolves the host
+        // ONLY to the addresses the guard already validated — so reqwest's
+        // own second resolution at send time can't rebind the name to an
+        // internal IP. IP-literal / localhost targets need no pin and reuse the
+        // shared client. The pinned client keeps the same no-redirect policy.
+        let http = match &pin {
+            Some((host, addrs)) => reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .resolve_to_addrs(host, addrs)
+                .build()
+                .map_err(|e| {
+                    Error::Internal(format!("failed to build pinned webhook client: {e}"))
+                })?,
+            None => self.http.clone(),
+        };
+
+        let mut request = http
             .post(url)
             .timeout(timeout)
             .header("content-type", "application/json")
@@ -592,6 +626,33 @@ mod tests {
         check_target("http://8.8.8.8/hook", &open)
             .await
             .expect("public http allowed once opted in");
+    }
+
+    /// The connection-PIN contract: an IP-literal target needs no pin (reqwest
+    /// dials the literal directly, no second resolution) and `localhost` is
+    /// hardcoded to loopback, so both return `None`. Only a resolved DNS name —
+    /// the path exposed to a second resolution at send time — yields a pin, so
+    /// `post` can lock the connection to the validated addresses. Deterministic:
+    /// every case here classifies without touching the resolver.
+    #[tokio::test]
+    async fn pin_is_none_for_ip_literals_and_localhost() {
+        let policy = WebhookConfig {
+            allow_http: true,
+            allow_private_network: true,
+            ..Default::default()
+        };
+        for url in [
+            "http://127.0.0.1:9999/hook",
+            "http://[::1]:8123/hook",
+            "http://10.0.0.5/hook",
+            "https://8.8.8.8/hook",
+            "http://localhost:5678/hook",
+        ] {
+            let pin = check_target(url, &policy)
+                .await
+                .unwrap_or_else(|e| panic!("{url} must pass the guard: {e}"));
+            assert!(pin.is_none(), "{url} must not need a connection pin");
+        }
     }
 
     /// `post` runs the guard before building a request, so a blocked target

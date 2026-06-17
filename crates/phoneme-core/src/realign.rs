@@ -234,6 +234,17 @@ fn align(edited: &[EditedWord], old: &[OldWord]) -> Vec<Option<usize>> {
     if p == 0 || q == 0 {
         return out;
     }
+    // The LCS DP table is `(p+1)*(q+1)` `u32` cells. Edits are normally local, so
+    // after prefix/suffix trimming the residual is tiny; but a wholesale rewrite
+    // of a very long transcript could make `p*q` enormous (~20k×20k ≈ 1.6 GB).
+    // Cap the table size: beyond it, skip the diff and leave the residual words
+    // unmatched so they interpolate across the span between the trimmed anchors —
+    // the same graceful behavior a fully-rewritten turn already gets — instead of
+    // allocating a pathological matrix.
+    const MAX_LCS_CELLS: u64 = 16_000_000;
+    if (p as u64) * (q as u64) > MAX_LCS_CELLS {
+        return out;
+    }
     // dp[i][j] = LCS length of edited[lo+i..] and old[lo+j..].
     let mut dp = vec![vec![0u32; q + 1]; p + 1];
     for i in (0..p).rev() {
