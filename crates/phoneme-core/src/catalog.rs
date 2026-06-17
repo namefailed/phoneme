@@ -1487,6 +1487,11 @@ impl Catalog {
             Some(false) => sql.push_str(" AND recordings.favorite = 0"),
             None => {}
         }
+        match filter.in_place {
+            Some(true) => sql.push_str(" AND recordings.in_place = 1"),
+            Some(false) => sql.push_str(" AND recordings.in_place = 0"),
+            None => {}
+        }
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
@@ -1763,6 +1768,32 @@ impl Catalog {
             map.insert(id, cnt);
         }
         Ok(map)
+    }
+
+    /// Full-corpus recording counts per Library kind (all / single / meeting /
+    /// in-place / favorite), computed in one SQL pass. Powers the sidebar's
+    /// Library count badges (the GUI counterpart of `tag_usage_counts`).
+    pub async fn kind_counts(&self) -> Result<crate::types::KindCounts> {
+        let row = sqlx::query(
+            "SELECT
+                COUNT(*) AS all_count,
+                COALESCE(SUM(CASE WHEN meeting_id IS NULL THEN 1 ELSE 0 END), 0) AS single_count,
+                COALESCE(SUM(CASE WHEN meeting_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS meeting_count,
+                COALESCE(SUM(CASE WHEN in_place = 1 THEN 1 ELSE 0 END), 0) AS in_place_count,
+                COALESCE(SUM(CASE WHEN favorite = 1 THEN 1 ELSE 0 END), 0) AS favorite_count,
+                (SELECT COUNT(DISTINCT recording_id) FROM recording_tags) AS tagged_count
+             FROM recordings",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(crate::types::KindCounts {
+            all: row.try_get("all_count")?,
+            single: row.try_get("single_count")?,
+            meeting: row.try_get("meeting_count")?,
+            in_place: row.try_get("in_place_count")?,
+            favorite: row.try_get("favorite_count")?,
+            tagged: row.try_get("tagged_count")?,
+        })
     }
 
     /// Merge `from_id` into `into_id`: every recording tagged `from_id` becomes

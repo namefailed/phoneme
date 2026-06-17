@@ -123,6 +123,9 @@ export type ListFilter = {
   /** Server-side favorites flag: `true` = starred only, `false` = unstarred
    *  only, omit = no filter. Applied in SQL before pagination. */
   favorite?: boolean | null;
+  /** Server-side in-place-dictation flag: `true` = only recordings captured via
+   *  in-place dictation, omit = no filter. Applied in SQL before pagination. */
+  in_place?: boolean | null;
 };
 
 /**
@@ -702,6 +705,23 @@ export async function tagsFor(recordingId: string): Promise<Tag[]> {
  */
 export async function tagUsageCounts(): Promise<Record<string, number>> {
   return await tauriInvoke<Record<string, number>>("tag_usage_counts");
+}
+
+/** Recording counts per Library type-filter, computed in SQL in one pass. Powers
+ *  the sidebar's Library count badges (mirrors the tag usage counts). */
+export type KindCounts = {
+  all: number;
+  single: number;
+  meeting: number;
+  in_place: number;
+  favorite: number;
+  /** Distinct recordings carrying at least one tag (the sidebar "All Tags" badge). */
+  tagged: number;
+};
+
+/** Fetch the per-kind recording counts for the Library section badges. */
+export async function kindCounts(): Promise<KindCounts> {
+  return await tauriInvoke<KindCounts>("kind_counts");
 }
 
 /**

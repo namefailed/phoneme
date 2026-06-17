@@ -262,6 +262,7 @@ export class RecordingsListElement extends LitElement {
     if (!kind || kind === "all") return rows;
     if (kind === "single") return rows.filter((r) => !r.meeting_id);
     if (kind === "favorite") return rows.filter((r) => !!r.favorite);
+    if (kind === "in_place") return rows.filter((r) => !!r.in_place);
     return rows.filter((r) => !!r.meeting_id);
   }
 
@@ -284,6 +285,9 @@ export class RecordingsListElement extends LitElement {
     this.requestUpdate();
     try {
       await setFavorite(r.id, next);
+      // Favorites have no daemon event; nudge the sidebar to refresh its
+      // Library "Favorites" count badge.
+      window.dispatchEvent(new CustomEvent("phoneme:counts-stale"));
     } catch (e) {
       r.favorite = !next; // revert on failure
       this.requestUpdate();
@@ -1088,7 +1092,7 @@ export class RecordingsListElement extends LitElement {
           <span class="rec-group-chevron ${expanded ? "expanded" : ""}" aria-hidden="true">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>
           </span>
-          <span class="rec-group-meta" style="margin-right: 8px;">${day} · ${time}</span>
+          <span class="rec-group-meta" style="margin-right: 8px;">${day}<span class="rec-group-sep">·</span>${time}</span>
           ${isEditing ? html`
             <span class="rec-rename" @click=${(e: Event) => e.stopPropagation()}>
               <button
@@ -1146,7 +1150,7 @@ export class RecordingsListElement extends LitElement {
               ` : ""}
             </span>
           ` : html`
-            <span class="rec-group-title"><span style="margin-right: 5px;">${meetingIcon(meetingId)}</span>${meetingName}</span>
+            <span class="rec-group-title"><span class="rec-group-icon">${meetingIcon(meetingId)}</span>${meetingName}</span>
             <button
               class="rec-group-rename"
               title="Rename meeting"

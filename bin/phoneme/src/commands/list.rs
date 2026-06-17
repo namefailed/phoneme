@@ -134,6 +134,7 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         sort_desc: None,
         until,
         kind,
-        favorite: None, // no CLI flag for this yet
+        favorite: None,  // no CLI flag for this yet
+        in_place: None,  // no CLI flag for this yet
     }
 }

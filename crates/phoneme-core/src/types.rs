@@ -450,6 +450,31 @@ pub struct ListFilter {
     /// recordings, `Some(false)` = only unstarred, `None` = no filter.
     #[serde(default)]
     pub favorite: Option<bool>,
+    /// In-place-dictation flag, applied in SQL like `favorite`: `Some(true)` =
+    /// only recordings captured via in-place dictation, `Some(false)` = only the
+    /// rest, `None` = no filter. Powers the GUI Library "In-Place" filter.
+    /// Serde-defaulted: older clients that omit it still deserialize.
+    #[serde(default)]
+    pub in_place: Option<bool>,
+}
+
+/// Per-Library-kind recording counts, returned by [`Request::KindCounts`] and
+/// rendered as the sidebar's Library count badges. Each is a full-corpus count
+/// (no pagination), computed in one SQL pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KindCounts {
+    /// Every recording.
+    pub all: i64,
+    /// Single voice notes (`meeting_id IS NULL`).
+    pub single: i64,
+    /// Meeting tracks (`meeting_id IS NOT NULL`).
+    pub meeting: i64,
+    /// In-place dictations (`in_place = 1`).
+    pub in_place: i64,
+    /// Starred recordings (`favorite = 1`).
+    pub favorite: i64,
+    /// Distinct recordings carrying at least one tag (the sidebar "All Tags" badge).
+    pub tagged: i64,
 }
 
 /// The payload sent to hook scripts on stdin (and stored verbatim in inbox JSON).

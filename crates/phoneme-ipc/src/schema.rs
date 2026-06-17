@@ -704,6 +704,11 @@ pub enum Request {
     /// by tag id (as a string) with usage counts as values. GUI Tag Manager
     /// usage column, `phoneme tag usage`.
     TagUsageCounts,
+    /// Full-corpus recording counts per Library kind (all / single / meeting /
+    /// in-place / favorite). Ok = a JSON object with those integer fields
+    /// (see [`phoneme_core::types::KindCounts`]). Powers the GUI sidebar's
+    /// Library count badges.
+    KindCounts,
     /// Merge one tag into another: re-point all recordings, then delete
     /// `from_id`. Ok `null`; emits [`DaemonEvent::TagDeleted`] for the
     /// source tag (consumers refresh on it). GUI Tag Manager merge,

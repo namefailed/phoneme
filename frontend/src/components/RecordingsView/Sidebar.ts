@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { listTags, tagUsageCounts, type Tag } from "../../services/ipc";
+import { listTags, tagUsageCounts, kindCounts, type Tag, type KindCounts } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
 import { filterStore, type UiFilter, type RecordingKind } from "../../state/filter";
 import "./QueuePanel";
@@ -31,6 +31,10 @@ export class SidebarElement extends LitElement {
   /** Recordings-per-tag, keyed by tag id (stringified over IPC). Drives the
    *  right-anchored count beside each tag row. */
   @state() private counts: Record<string, number> = {};
+  /** Recordings-per-Library-kind, for the count badge beside each Library row
+   *  (mirrors the per-tag counts). Null until first loaded; badges only render
+   *  once it's known, so they never flash a wrong/zero value. */
+  @state() private kindTotals: KindCounts | null = null;
   @state() private filterState: UiFilter = filterStore.get();
   @state() private libraryOpen = localStorage.getItem("phoneme.sidebar.libraryOpen") !== "false";
   @state() private tagsOpen = localStorage.getItem("phoneme.sidebar.tagsOpen") !== "false";
@@ -47,12 +51,18 @@ export class SidebarElement extends LitElement {
     }
   }
 
+  /** Favorites toggle from the list has no daemon event (it's an optimistic
+   *  client update), so the list pings us directly to refresh the badge. */
+  private onCountsStale = () => void this.loadKindCounts();
+
   async connectedCallback() {
     super.connectedCallback();
     this.unsubFilter = filterStore.subscribe((f) => {
       this.filterState = f;
     });
     void this.loadTags();
+    void this.loadKindCounts();
+    window.addEventListener("phoneme:counts-stale", this.onCountsStale);
     await this.subscribeToEvents();
   }
 
@@ -60,6 +70,17 @@ export class SidebarElement extends LitElement {
     super.disconnectedCallback();
     if (this.unsubFilter) this.unsubFilter();
     if (this.unsubEvents) this.unsubEvents();
+    window.removeEventListener("phoneme:counts-stale", this.onCountsStale);
+  }
+
+  /** Load the per-kind recording counts for the Library badges. Failures leave
+   *  the previous values (badges hide entirely until the first success). */
+  private async loadKindCounts() {
+    try {
+      this.kindTotals = await kindCounts();
+    } catch {
+      /* daemon unavailable / older build without the command — hide badges */
+    }
   }
 
   private async loadTags() {
@@ -89,6 +110,16 @@ export class SidebarElement extends LitElement {
       ) {
         void this.loadTags();
       }
+      // Recording lifecycle events shift the Library counts (a row appears,
+      // finishes, or is removed); refresh the badges off the same triggers.
+      if (
+        eventName === "recording_stopped" ||
+        eventName === "recording_deleted" ||
+        eventName === "recording_cancelled" ||
+        eventName === "transcription_done"
+      ) {
+        void this.loadKindCounts();
+      }
     });
   }
 
@@ -102,14 +133,20 @@ export class SidebarElement extends LitElement {
     filterStore.set({ ...this.filterState, kind });
   }
 
-  /** A Library type-filter row. Active when its kind matches (independent of tag). */
+  /** A Library type-filter row. Active when its kind matches (independent of tag).
+   *  Carries the same right-anchored count badge as the tag rows once the
+   *  per-kind totals have loaded. */
   private renderKindItem(kind: RecordingKind, icon: string, label: string) {
     const f = this.filterState;
     const active = (f.kind ?? "all") === kind;
+    const count = this.kindTotals ? this.kindTotals[kind as keyof KindCounts] : null;
     return html`
       <div class="sidebar-item ${active ? "active" : ""}" @click=${() => this.setKind(kind)}>
         <span class="sidebar-icon">${icon}</span>
-        <span>${label}</span>
+        <span class="sidebar-label">${label}</span>
+        ${count != null
+          ? html`<span class="sidebar-count" title="${count} recording${count === 1 ? "" : "s"}">${count}</span>`
+          : ""}
       </div>
     `;
   }
@@ -126,9 +163,10 @@ export class SidebarElement extends LitElement {
           ${this.libraryOpen ? html`
             <div class="sidebar-list">
               ${this.renderKindItem("all", "📚", "All Recordings")}
+              ${this.renderKindItem("favorite", "⭐", "Favorites")}
               ${this.renderKindItem("single", "🎙️", "Voice Notes")}
               ${this.renderKindItem("meeting", "👥", "Meetings")}
-              ${this.renderKindItem("favorite", "⭐", "Favorites")}
+              ${this.renderKindItem("in_place", "⌨️", "In-Place")}
             </div>
           ` : ""}
 
@@ -140,8 +178,11 @@ export class SidebarElement extends LitElement {
             <div class="sidebar-list">
               <div class="sidebar-item ${!f.tag_id ? 'active' : ''}" @click=${() => this.setTagFilter(null)}>
                 <span class="sidebar-icon" style="color: var(--accent);">#</span>
-                <span>All Tags</span>
+                <span class="sidebar-label">All Tags</span>
                 <span class="sidebar-dot sidebar-dot-rainbow" title="All tags"></span>
+                ${this.kindTotals
+                  ? html`<span class="sidebar-count" title="${this.kindTotals.tagged} recording${this.kindTotals.tagged === 1 ? "" : "s"} with at least one tag">${this.kindTotals.tagged}</span>`
+                  : ""}
               </div>
               ${this.tags.length === 0 ? html`
                 <div style="padding: 12px; font-size: 0.7857rem; color: var(--fg-faded); text-align: center;">No tags yet. Add tags from a note's detail view.</div>

@@ -811,6 +811,13 @@ pub async fn tag_usage_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::TagUsageCounts).await
 }
 
+/// Per-Library-kind recording counts (all / single / meeting / in-place /
+/// favorite). Powers the sidebar's Library count badges.
+#[tauri::command]
+pub async fn kind_counts(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::KindCounts).await
+}
+
 /// Merge one tag into another: re-point all of `from_id`'s recordings onto
 /// `into_id`, then delete `from_id`.
 #[tauri::command]

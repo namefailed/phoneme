@@ -8,9 +8,10 @@
 import { Store } from "./store";
 import type { ListFilter } from "../services/ipc";
 
-/** Library type-filter: all recordings, single-track only, meetings only, or
- *  starred (favorites). */
-export type RecordingKind = "all" | "single" | "meeting" | "favorite";
+/** Library type-filter: all recordings, single-track only, meetings only,
+ *  in-place dictations (typed straight into another app), or starred
+ *  (favorites). */
+export type RecordingKind = "all" | "single" | "meeting" | "in_place" | "favorite";
 
 /**
  * The library filter as the UI models it: the daemon's `ListFilter` extended
@@ -56,6 +57,7 @@ export function toWireFilter(f: UiFilter): ListFilter {
     sort_desc: f.sort_desc,
   };
   if (f.kind === "single" || f.kind === "meeting") wire.kind = f.kind;
+  else if (f.kind === "in_place") wire.in_place = true;
   else if (f.kind === "favorite") wire.favorite = true;
   return wire;
 }

@@ -405,6 +405,7 @@ pub fn run() {
             commands::detach_tag,
             commands::tags_for,
             commands::tag_usage_counts,
+            commands::kind_counts,
             commands::merge_tags,
             commands::wizard_download_model,
             commands::wizard_download_semantic_model,

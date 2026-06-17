@@ -1218,6 +1218,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(counts) => Response::Ok(serde_json::to_value(counts).unwrap_or_default()),
             Err(e) => err_response(&e),
         },
+        Request::KindCounts => match state.catalog.kind_counts().await {
+            Ok(counts) => Response::Ok(serde_json::to_value(counts).unwrap_or_default()),
+            Err(e) => err_response(&e),
+        },
         Request::MergeTags { from_id, into_id } => {
             match state.catalog.merge_tags(from_id, into_id).await {
                 Ok(()) => {

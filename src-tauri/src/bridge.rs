@@ -168,6 +168,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListAllTags
         | TagsFor { .. }
         | TagUsageCounts
+        | KindCounts
         | SemanticSearch { .. }
         | MoreLikeThis { .. } => true,
 
