@@ -9,6 +9,25 @@ export default defineConfig({
     strictPort: true,
   },
   envPrefix: ["VITE_", "TAURI_"],
+  // CodeMirror's extension system relies on `instanceof` against a single
+  // `@codemirror/state` module. `@replit/codemirror-vim` re-imports state/view,
+  // and Vite's dep pre-bundler can otherwise optimize them into a SECOND copy —
+  // which makes `EditorState.create` throw "Unrecognized extension value" and
+  // leaves both the transcript and notes editors blank. Deduping the resolution
+  // and pre-bundling the whole CodeMirror set in one pass guarantees one copy.
+  resolve: {
+    dedupe: ["@codemirror/state", "@codemirror/view"],
+  },
+  optimizeDeps: {
+    include: [
+      "@codemirror/state",
+      "@codemirror/view",
+      "@codemirror/commands",
+      "@codemirror/language",
+      "@replit/codemirror-vim",
+      "codemirror",
+    ],
+  },
   build: {
     target: "esnext",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,

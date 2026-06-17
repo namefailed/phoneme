@@ -114,6 +114,12 @@ export class TranscriptEditorElement extends LitElement {
       }
     }
 
+    // Ensure the host has rendered so #cm-editor-root exists before CodeMirror
+    // attaches to it. The read_config await above is normally slow enough (an IPC
+    // round-trip) that the first render already happened, but a fast/synchronous
+    // config (a cached or mocked backend) can resolve before the first paint —
+    // which left CodeMirror parented to a missing node, i.e. an empty box.
+    await this.updateComplete;
     this.mountEditor(vimrc);
   }
 
