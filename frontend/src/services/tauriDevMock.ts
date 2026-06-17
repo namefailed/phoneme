@@ -46,6 +46,9 @@ function rec(
   tagIds: number[],
   favorite: boolean,
   transcript: string,
+  // Meeting tracks add `meeting_id` / `track` / `meeting_name` (and override
+  // `diarized`) through this; standalone recordings leave it empty.
+  extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     id,
@@ -65,6 +68,11 @@ function rec(
     tags: tagIds.map((t) => TAGS.find((x) => x.id === t)).filter(Boolean),
     speaker_names: [],
     tag_suggestions: [],
+    meeting_id: null,
+    track: null,
+    meeting_name: null,
+    in_place: false,
+    ...extra,
   };
 }
 
@@ -82,19 +90,154 @@ const CONVERSATION = [
   "[Speaker 2]: That's fine. Let's note the risk and move on to the open questions for now.",
 ].join("\n\n");
 
+/* ── Synthetic meetings ────────────────────────────────────────────────────
+   A meeting is 2+ recordings sharing a non-null `meeting_id`, one per captured
+   track ("mic" = your voice, "system" = everyone on the call). The list folds
+   the tracks into a single expandable group (groupRecordings), and the merged
+   view interleaves them chronologically from each track's stored segments
+   (mergeChronological) — which is the UI we want this fake data to exercise.
+
+   Each segment is `{ start_ms, end_ms, text, speaker? }`, offsets into that
+   track's audio; the tracks share a wall clock, so equal offsets are "the same
+   moment". A system track can carry diarized `[Speaker N]:` turns (speaker set
+   on its segments); a mic track is a single voice (speaker null). Both tracks
+   MUST have segments or the merge falls back to the coarse by-source order. */
+type Seg = { start_ms: number; end_ms: number; text: string; speaker: string | null };
+const seg = (start_ms: number, end_ms: number, text: string, speaker: string | null = null): Seg =>
+  ({ start_ms, end_ms, text, speaker });
+
+// Meeting 1 — "Product sync call": your mic + a 2-person call on system audio.
+const M1_MIC: Seg[] = [
+  seg(0, 4200, "Hey everyone, thanks for hopping on. Can you both hear me okay?"),
+  seg(13800, 18200, "Let's do it. The first milestone is basically done — we shipped the preview pane this week."),
+  seg(24300, 29500, "It could slip a couple of days. The merged-view work is bigger than we scoped."),
+  seg(35300, 39000, "Sounds good. I'll write that up right after the call."),
+];
+const M1_SYS: Seg[] = [
+  seg(4500, 8800, "Yep, loud and clear on our end.", "1"),
+  seg(9000, 13500, "Same here. Should we start with the roadmap?", "2"),
+  seg(18500, 24000, "Nice. How's the second milestone looking? I heard it might slip.", "1"),
+  seg(29800, 35000, "That's fine on our side. Let's just flag the risk in the notes and move on.", "2"),
+];
+
+// Meeting 2 — "Design critique": your mic + a teammate on system audio (single
+// voice each, no diarization), a simpler two-source interleave.
+const M2_MIC: Seg[] = [
+  seg(0, 3800, "Alright, go ahead and share — I can see it."),
+  seg(10300, 15000, "I like it. The Live Preview section finally lines up with the rest of the panel."),
+  seg(21300, 25500, "Good call. I'll add those to the list and the detail view this afternoon."),
+];
+const M2_SYS: Seg[] = [
+  seg(4000, 10000, "So this is the redesigned settings panel. The help text reads a lot more consistently now."),
+  seg(15300, 21000, "Right. The only thing left is a back-to-top button on the long scrolling pages."),
+];
+
+// Meeting 3 — "Quarterly planning" — placed further down the list (older), a
+// 2-person call diarized on the system track, to test the merged view + grouping
+// deeper in a long, scrollable list.
+const M3_MIC: Seg[] = [
+  seg(0, 5200, "Thanks for making time. I want to lock the top three priorities for next quarter."),
+  seg(16000, 22000, "Agreed. Let's put recall quality first, then the meeting views, then polish."),
+  seg(33000, 39500, "Perfect. I'll write these up and circulate before Friday."),
+];
+const M3_SYS: Seg[] = [
+  seg(5500, 11000, "Sounds good. My vote is we keep search quality at the very top.", "1"),
+  seg(11200, 15500, "Same — and the merged meeting view needs a real polish pass.", "2"),
+  seg(22500, 32500, "Works for me. Can we also reserve a little time for the smaller UI papercuts?", "1"),
+];
+
+/** Build a track transcript from its segments: `[Speaker N]:` turns when the
+ *  segments are diarized (matches the merged view's marker parsing), else plain
+ *  prose joined by blank lines. */
+function trackTranscript(segs: Seg[]): string {
+  return segs
+    .map((s) => (s.speaker != null ? `[Speaker ${s.speaker}]: ${s.text}` : s.text))
+    .join("\n\n");
+}
+
+/** Map of track id → its stored segment timeline (drives get_segments). */
+const SEGMENTS: Record<string, Seg[]> = {
+  m1a: M1_MIC, m1b: M1_SYS,
+  m2a: M2_MIC, m2b: M2_SYS,
+  m3a: M3_MIC, m3b: M3_SYS,
+};
+
+/** A meeting track recording: shares `meeting_id` + `meeting_name`, tagged with
+ *  its `track`, transcript derived from its segments. */
+function track(
+  id: string, meetingId: string, name: string, trackKind: "mic" | "system",
+  daysAgo: number, h: number, m: number, segs: Seg[], tagIds: number[],
+): Record<string, unknown> {
+  const durMs = segs.length ? segs[segs.length - 1].end_ms : 0;
+  const diarized = segs.some((s) => s.speaker != null);
+  return rec(id, daysAgo, h, m, durMs, name, tagIds, false, trackTranscript(segs), {
+    meeting_id: meetingId, track: trackKind, meeting_name: name, diarized,
+  });
+}
+
+// A deliberately LONG transcript (the synthetic paragraphs repeated) so the
+// detail pane scrolls far enough to exercise the "back to top" button + long-
+// content layout.
+const LONG = Array.from({ length: 12 }, (_, i) => `${i + 1}. ${i % 2 ? P1 : P2}`).join("\n\n");
+const MORE_TITLES = [
+  "Sprint retro notes", "Customer call summary", "Reading notes — chapter 3",
+  "Weekend project ideas", "Standup follow-ups", "Book club discussion",
+  "Travel planning memo", "Recipe dictation", "Workout log", "Lecture: intro",
+  "1:1 talking points", "Release checklist", "Brainstorm: naming", "Daily journal",
+  "Voicemail draft", "Errand list", "Meeting prep", "Idea: side feature",
+  "Research summary", "Phone call notes",
+];
+/** A bigger batch of synthetic recordings (r13…) so the list is comfortably
+ *  scrollable, spanning every type — single / favorite / in-place — with a few
+ *  very long transcripts for the detail-pane scroll + back-to-top test. Fully
+ *  synthetic; index-driven (no randomness) so the mock is stable across reloads. */
+function moreRecordings(): Array<Record<string, unknown>> {
+  const tagSets = [[1], [2], [3], [4], [1, 2], [2, 3], [3, 4], [1, 4], [], [1, 3]];
+  const out: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < 30; i++) {
+    const id = `r${String(i + 13).padStart(2, "0")}`;
+    const daysAgo = 7 + Math.floor(i / 3); // spread across older days
+    const h = 8 + (i % 12);
+    const m = (i * 7) % 60;
+    const favorite = i % 5 === 0;
+    const inPlace = i % 7 === 3;
+    const isLong = i % 6 === 2;
+    const title = MORE_TITLES[i % MORE_TITLES.length];
+    const tags = tagSets[i % tagSets.length];
+    const dur = 6000 + (i % 9) * 4200 + (isLong ? 360000 : 0);
+    const transcript = isLong
+      ? `${title} — extended sample.\n\n${LONG}`
+      : `${title}. Placeholder transcript for layout testing.\n\n${i % 2 ? PARA : P1}`;
+    out.push(rec(id, daysAgo, h, m, dur, title, tags, favorite, transcript, inPlace ? { in_place: true } : {}));
+  }
+  return out;
+}
+
 const RECORDINGS: Array<Record<string, unknown>> = [
   rec("r01", 0, 15, 11, 12200, "Sample voice note", [1], true, `Placeholder transcript used to render the preview without a backend.\n\n${PARA}`),
+  // Meeting 1 (day 0, 10:05) — two tracks kept adjacent so the list groups them.
+  track("m1a", "m1", "Product sync call", "mic", 0, 10, 5, M1_MIC, [1]),
+  track("m1b", "m1", "Product sync call", "system", 0, 10, 5, M1_SYS, [1]),
+  // Meeting 2 (day 1, 09:30).
+  track("m2a", "m2", "Design critique", "mic", 1, 9, 30, M2_MIC, [1, 3]),
+  track("m2b", "m2", "Design critique", "system", 1, 9, 30, M2_SYS, [1, 3]),
   rec("r02", 1, 1, 43, 5900, "Weekly standup recap", [1], false, `Mock standup notes for layout testing.\n\n${P1}`),
   rec("r03", 1, 1, 40, 18000, "Project kickoff notes", [1, 3], false, `Sample meeting notes. The quick brown fox jumps over the lazy dog.\n\n${PARA}`),
-  rec("r04", 1, 1, 23, 8400, "Grocery list memo", [2], true, "Eggs, milk, bread, coffee, olive oil, and a bag of rice. Mock content for layout testing only."),
+  rec("r04", 1, 1, 23, 8400, "Grocery list memo", [2], true, "Eggs, milk, bread, coffee, olive oil, and a bag of rice. Mock content for layout testing only.", { in_place: true }),
   rec("r05", 1, 1, 21, 6900, "Podcast idea brainstorm", [3], false, `A few placeholder ideas for a future episode.\n\n${P1}`),
   rec("r06", 1, 1, 7, 20700, "Interview practice run", [2], false, `Tell me about yourself — sample answer text for the preview mock.\n\n${PARA}`),
   rec("r07", 1, 1, 6, 13800, "Lecture summary", [3], false, `Chapter one covers the basics and a couple of worked examples.\n\n${P2}`),
-  rec("r08", 1, 1, 6, 7300, "Daily journal entry", [2], false, `Today was a normal day. Fake journal text for the demo.\n\n${P1}`),
+  rec("r08", 1, 1, 6, 7300, "Quick reply dictated in-place", [2], false, "Typed straight into the chat box via in-place dictation. Mock content for layout testing only.", { in_place: true }),
   rec("r09", 6, 19, 57, 13700, "Bug triage discussion", [1], false, `Reviewed a few sample issues. Mock transcript, no real data.\n\n${PARA}`),
   rec("r10", 6, 12, 32, 15500, "Design review notes", [1, 3], false, `Feedback on the sample mockups. Placeholder content only.\n\n${P2}`),
   rec("r11", 6, 1, 50, 215000, "Two-person conversation sample", [2, 4], true, CONVERSATION),
   rec("r12", 6, 16, 44, 53300, "Reading list voice memo", [4], false, `A longer placeholder note covering a few unrelated sample topics.\n\n${PARA}`),
+  ...moreRecordings(),
+  // Meeting 3 (≈11 days ago) — sits further down the list, after the bulk of the
+  // generated singles, so the merged/grouped meeting UI can be tested deep in a
+  // long scroll. Two tracks kept adjacent so the list folds them into one group.
+  track("m3a", "m3", "Quarterly planning", "mic", 11, 14, 0, M3_MIC, [1, 3]),
+  track("m3b", "m3", "Quarterly planning", "system", 11, 14, 0, M3_SYS, [1, 3]),
 ];
 
 /** A short, speech-shaped fake WAV synthesized once and shared by every recording
@@ -201,17 +344,33 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       const f = (args.filter ?? {}) as Record<string, unknown>;
       let rows = RECORDINGS;
       if (f.favorite === true) rows = rows.filter((r) => r.favorite);
+      if (f.in_place === true) rows = rows.filter((r) => r.in_place);
+      if (f.kind === "single") rows = rows.filter((r) => r.meeting_id == null);
+      if (f.kind === "meeting") rows = rows.filter((r) => r.meeting_id != null);
       const tagId = f.tag_id as number | undefined;
       if (tagId != null) rows = rows.filter((r) => (r.tags as Array<{ id: number }>).some((t) => t.id === tagId));
       return rows;
     }
     case "get_recording": return RECORDINGS.find((r) => r.id === id) ?? RECORDINGS[0];
-    case "list_meeting": return [];
+    case "list_meeting": {
+      // The session's tracks (mic before system), ordered as the merged view expects.
+      const mid = args.meetingId as string | undefined;
+      return RECORDINGS.filter((r) => r.meeting_id === mid)
+        .sort((a, b) => String(a.track).localeCompare(String(b.track)));
+    }
     case "list_tags":
     case "list_all_tags": return TAGS;
     case "tags_for": return (RECORDINGS.find((r) => r.id === id)?.tags as unknown) ?? [];
     case "tag_usage_counts": return { "1": 2, "2": 3, "3": 4, "4": 2 };
-    case "get_segments":
+    case "kind_counts": return {
+      all: RECORDINGS.length,
+      single: RECORDINGS.filter((r) => r.meeting_id == null).length,
+      meeting: RECORDINGS.filter((r) => r.meeting_id != null).length,
+      in_place: RECORDINGS.filter((r) => r.in_place).length,
+      favorite: RECORDINGS.filter((r) => r.favorite).length,
+      tagged: RECORDINGS.filter((r) => Array.isArray(r.tags) && (r.tags as unknown[]).length > 0).length,
+    };
+    case "get_segments": return id ? (SEGMENTS[id] ?? []) : [];
     case "get_words": return [];
     case "get_original_transcript":
     case "get_clean_transcript": return null;
