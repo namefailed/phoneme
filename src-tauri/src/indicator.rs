@@ -2,8 +2,8 @@
 //!
 //! A second, frameless, always-on-top [`WebviewWindow`] (label
 //! [`INDICATOR_LABEL`]) — a small bottom-center pill that shows ONLY a recording
-//! cue while capture is live: a pulsing record dot + an audio-reactive waveform +
-//! an mm:ss elapsed timer. Deliberately NO transcription text. It's for users who
+//! cue while capture is live: an audio-reactive waveform (WhisperFlow-style — no
+//! record dot, no timer). Deliberately NO transcription text. It's for users who
 //! want a clear "you're recording" indicator WITHOUT the live-caption overlay,
 //! and it works even when live preview is fully off.
 //!
@@ -21,8 +21,8 @@
 //! `app.emit("daemon-event", …)`, and Tauri's `Emitter::emit` broadcasts to
 //! **all** webviews. So the moment this window exists it receives the same
 //! `recording_started` / `audio_level_sample` / `recording_stopped` stream the
-//! main window does, and `indicator.ts` drives show/hide + the waveform + the
-//! timer from it. No transcription/preview is involved.
+//! main window does, and `indicator.ts` drives show/hide + the waveform from it.
+//! No transcription/preview is involved.
 //!
 //! ## Window lifecycle
 //! * Created **hidden** at startup when the setting is on (so the very first
@@ -47,12 +47,12 @@ use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 /// this) and the `windows` allowlist in `src-tauri/capabilities/default.json`.
 pub const INDICATOR_LABEL: &str = "recording-indicator";
 
-/// Indicator width (logical px). A small fixed pill: record dot + waveform +
-/// mm:ss timer on a single row. Fixed size (the height is pinned too) — this is a
-/// tiny status cue, not a resizable panel.
-const INDICATOR_W: f64 = 210.0;
-/// Indicator height (logical px). One tight row.
-const INDICATOR_H: f64 = 40.0;
+/// Indicator width (logical px). A small fixed pill holding just the centered
+/// audio waveform (WhisperFlow-style) — no dot, no timer. Fixed size (the height
+/// is pinned too) — this is a tiny status cue, not a resizable panel.
+const INDICATOR_W: f64 = 150.0;
+/// Indicator height (logical px). Sized to the waveform pill.
+const INDICATOR_H: f64 = 36.0;
 /// Inset from the bottom of the work area for the first-run placement.
 const BOTTOM_MARGIN: f64 = 96.0;
 

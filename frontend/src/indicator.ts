@@ -3,10 +3,9 @@
 // This runs in its OWN Tauri WebviewWindow (label "recording-indicator"), created
 // at runtime by the tray when the "recording indicator" setting is on (see
 // src-tauri/src/indicator.rs). It is a SLIM sibling of the live-preview overlay
-// (src/overlay.ts): a tiny always-on-top pill showing ONLY a recording cue — a
-// pulsing record dot + an audio-reactive waveform + an mm:ss elapsed timer. There
-// is deliberately NO transcription text, so it needs no live preview at all and
-// works even when live preview is fully off.
+// (src/overlay.ts): a tiny always-on-top pill showing ONLY an audio-reactive
+// waveform — no record dot, no timer, no transcription text (WhisperFlow-style).
+// It needs no live preview at all and works even when live preview is fully off.
 //
 // It listens to the same global `daemon-event` stream the main window does:
 // shows on `recording_started`, drives the waveform from `audio_level_sample`,
@@ -22,13 +21,10 @@ import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 
 const root = document.getElementById("indicator-root")!;
-// Layout: one tight centered row — the record dot, the waveform, the mm:ss timer.
-// The window is a FIXED small pill (size pinned in indicator.rs); nothing wraps.
+// Just the waveform, centered in a small fixed pill (size pinned in indicator.rs).
 root.innerHTML = `
   <div class="ri-card">
-    <span class="ri-dot" aria-hidden="true"></span>
     <span class="ri-wave" id="ri-wave" aria-hidden="true"></span>
-    <span class="ri-time" id="ri-time">0:00</span>
   </div>
 `;
 
@@ -38,7 +34,7 @@ const win = getCurrentWindow();
 // A row of bars driven by the daemon's audio_level_sample events (cheap mic RMS,
 // no transcription). Built once; heights animate via CSS transform. This is the
 // same perceptual sqrt-curve + gain the caption overlay uses (src/overlay.ts).
-const WAVE_BARS = 7;
+const WAVE_BARS = 13;
 const waveEl = document.getElementById("ri-wave") as HTMLElement;
 for (let i = 0; i < WAVE_BARS; i++) {
   const b = document.createElement("span");
@@ -66,34 +62,6 @@ function resetWave() {
   waveBars.forEach((b) => (b.style.transform = "scaleY(0.15)"));
 }
 resetWave();
-
-// ── Elapsed timer ────────────────────────────────────────────────────────────
-// mm:ss since the recording started, ticked once a second while shown.
-const timeEl = document.getElementById("ri-time") as HTMLElement;
-let startedAt = 0;
-let tick: number | null = null;
-
-function fmt(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-function renderTime() {
-  timeEl.textContent = startedAt ? fmt(Date.now() - startedAt) : "0:00";
-}
-function startTimer() {
-  stopTimer();
-  startedAt = Date.now();
-  renderTime();
-  tick = window.setInterval(renderTime, 1000);
-}
-function stopTimer() {
-  if (tick !== null) {
-    clearInterval(tick);
-    tick = null;
-  }
-}
 
 // Apply the saved theme so the pill matches the app's look. Falls back to the CSS
 // default if the config read fails — the indicator must never block on it.
@@ -124,11 +92,8 @@ async function showIndicator() {
 
 function hideIndicator() {
   // Crisp single-step hide — no dim stage, no fade (matches the caption overlay's
-  // teardown). Settle the waveform + timer for the next show.
+  // teardown). Settle the waveform for the next show.
   document.body.classList.remove("ri-live");
-  stopTimer();
-  startedAt = 0;
-  renderTime();
   resetWave();
   void win.hide().catch(() => {});
 }
@@ -152,7 +117,6 @@ void listen<any>("daemon-event", async (e) => {
         meetingTracks.clear();
       }
       resetWave();
-      startTimer();
       await showIndicator();
       break;
     }
