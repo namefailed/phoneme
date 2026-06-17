@@ -1402,10 +1402,39 @@ pub enum HotkeyAction {
     Meeting,
 }
 
+/// Which AI pipeline steps run for a recording captured with a custom keybind
+/// ([`HotkeyBinding`]). Lets one keybind clean up + title without a summary or
+/// tags, while another runs everything. Defaults to the full pipeline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HotkeyPipeline {
+    /// Run LLM post-processing / cleanup.
+    #[serde(default = "default_true")]
+    pub cleanup: bool,
+    /// Generate a title.
+    #[serde(default = "default_true")]
+    pub title: bool,
+    /// Generate a summary.
+    #[serde(default = "default_true")]
+    pub summary: bool,
+    /// Run auto-tagging.
+    #[serde(default = "default_true")]
+    pub auto_tag: bool,
+}
+
+impl Default for HotkeyPipeline {
+    /// A keybind with no explicit pipeline runs the whole thing.
+    fn default() -> Self {
+        Self { cleanup: true, title: true, summary: true, auto_tag: true }
+    }
+}
+
 /// A user-defined custom keybind, beyond the three built-ins (record / in-place /
 /// meeting). Configured in Settings → Keybinds and stored in [`Config::hotkeys`];
-/// each binds a key combo to an action + mode. Persisted so the manager
-/// round-trips — daemon registration of these bindings is wired separately.
+/// each binds a key combo to an action + mode, and carries its OWN pipeline and
+/// hooks so different keybinds can do different things (e.g. one cleans up +
+/// titles and posts to a journal; another runs the full pipeline + a webhook).
+/// Persisted so the manager round-trips — daemon registration of these bindings
+/// (applying the per-binding pipeline + hooks) is wired separately.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HotkeyBinding {
     /// Stable unique id (the UI mints a uuid) — the registration key + payload tag.
@@ -1424,6 +1453,14 @@ pub struct HotkeyBinding {
     /// What pressing the combo does.
     #[serde(default)]
     pub action: HotkeyAction,
+    /// Which AI steps run for this keybind's recordings (its own pipeline).
+    #[serde(default)]
+    pub pipeline: HotkeyPipeline,
+    /// Hook commands (shell scripts / webhook calls) fired after this keybind's
+    /// recording, independent of the global hooks. Each runs like an Integration
+    /// Script — it receives the recording JSON on stdin.
+    #[serde(default)]
+    pub hooks: Vec<String>,
 }
 
 /// Frontend OS-level tray behavior.

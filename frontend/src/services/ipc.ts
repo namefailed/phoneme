@@ -114,6 +114,12 @@ export type HotkeyBinding = {
   combo: string;
   mode: "hold" | "toggle";
   action: "record" | "in_place" | "meeting";
+  /** This keybind's own pipeline — which AI steps run for its recordings, so one
+   *  keybind can clean up + title without summary/tags while another runs all. */
+  pipeline: { cleanup: boolean; title: boolean; summary: boolean; auto_tag: boolean };
+  /** Hook commands (shell / webhook) fired after this keybind's recording,
+   *  independent of the global hooks — each gets the recording JSON on stdin. */
+  hooks: string[];
 };
 
 /** Server-side query filter for `listRecordings` (wire shape — snake_case

@@ -332,8 +332,14 @@ let config: Record<string, unknown> = {
   in_place_hotkey: { enabled: true, combo: "Shift+Alt+V", mode: "hold" },
   meeting_hotkey: { enabled: true, combo: "Ctrl+Alt+V", mode: "hold" },
   hotkeys: [
-    { id: "demo-1", label: "Quick note", enabled: true, combo: "Ctrl+Alt+N", mode: "hold", action: "record" },
-    { id: "demo-2", label: "Dictate into window", enabled: false, combo: "Ctrl+Alt+D", mode: "toggle", action: "in_place" },
+    // Cleans up + titles, no summary/tags, and posts to a journal script.
+    { id: "demo-1", label: "Journal note", enabled: true, combo: "Ctrl+Alt+N", mode: "hold", action: "record",
+      pipeline: { cleanup: true, title: true, summary: false, auto_tag: false },
+      hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Add-Content $HOME\\\\journal.md $d.transcript"'] },
+    // The whole pipeline, plus a webhook.
+    { id: "demo-2", label: "Meeting + webhook", enabled: true, combo: "Ctrl+Alt+M", mode: "toggle", action: "meeting",
+      pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
+      hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Invoke-RestMethod -Uri \'https://example.com/webhook\' -Method Post -Body (@{text=$d.transcript}|ConvertTo-Json) -ContentType \'application/json\'"'] },
   ],
   tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: true },
   editor: { vim_mode: true, vimrc: "", vimrc_path: "", resync_views_on_edit: true },
