@@ -4,6 +4,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { listSession, setSpeakerName, getSegments, saveTextExport, type Recording, type TranscriptSegment } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { formatDuration, fmtClock } from "../../utils/format";
+import { invoke } from "@tauri-apps/api/core";
 import {
   mergeMeeting,
   mergedPlainText,
@@ -65,6 +66,29 @@ export class MergedConversationDetail extends LitElement {
   /** The speaker chip currently being renamed (which track + which 1-based
    *  label), or null when none. Click a chip to edit; commit on Enter/blur. */
   @state() private editing: { recordingId: string; label: number } | null = null;
+  /** App config, for the `interface.format_24h` time-of-day preference shown on
+   *  chronological turns. Loaded once and refreshed on `config:saved` (same as
+   *  the recordings list). */
+  @state() private config: any = null;
+
+  private onConfigSaved = (e: Event) => {
+    this.config = (e as CustomEvent).detail ?? null;
+  };
+
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener("config:saved", this.onConfigSaved);
+    if (!this.config) {
+      invoke("read_config").then((cfg) => {
+        this.config = cfg;
+      }).catch(console.error);
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("config:saved", this.onConfigSaved);
+  }
 
   async updated(changedProperties: PropertyValues) {
     if (changedProperties.has("meetingId")) {
@@ -316,18 +340,43 @@ export class MergedConversationDetail extends LitElement {
     `;
   }
 
+  /** The real wall-clock time-of-day of a turn, as `HH:MM:SS`. The tracks
+   *  share a wall clock at capture, so the turn happened at the meeting's
+   *  `started_at` plus the turn's file offset. Honours the
+   *  `interface.format_24h` preference, the same way the recordings list
+   *  renders its time-of-day column (see `formatTime`). Returns "" when the
+   *  meeting start is unknown. */
+  private clockTimeOfDay(offsetMs: number): string {
+    const startIso = this.recordings[0]?.started_at;
+    if (!startIso) return "";
+    const d = new Date(new Date(startIso).getTime() + offsetMs);
+    const use24h = this.config?.interface?.format_24h ?? false;
+    return d.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: !use24h,
+    });
+  }
+
   /** Render one CHRONOLOGICAL turn as a chat row: mic ("you") on the left,
-   *  everything else (the meeting) on the right, stamped with its clock
-   *  offset. Numeric speakers keep the renamable chip; cloud letter labels
-   *  render as static text. */
+   *  everything else (the meeting) on the right, stamped with both the real
+   *  wall-clock time-of-day and the file offset (`10:05:13 · 0:13`). Numeric
+   *  speakers keep the renamable chip; cloud letter labels render as static
+   *  text. */
   private renderChronoBlock(b: ChronoBlock) {
     const isMic = b.source.track === "mic";
     const color = b.speaker != null ? speakerColor(b.speaker) : "var(--fg-faded)";
+    const clock = this.clockTimeOfDay(b.startMs);
     return html`
       <div class="chrono-row ${isMic ? "" : "chrono-row--right"}" data-track=${b.source.track}>
         <div class="chrono-bubble" style=${`--spk:${color}`}>
           <div class="chrono-head">
-            <span class="chrono-time">${fmtClock(b.startMs)}</span>
+            <span class="chrono-time"
+              >${clock
+                ? html`<span title="Time of day">${clock}</span> <span style="opacity:0.6" title="Offset from the start of the recording">· ${fmtClock(b.startMs)}</span>`
+                : fmtClock(b.startMs)}</span
+            >
             <span class="chrono-source" aria-hidden="true" title=${b.source.label}>${b.source.icon}</span>
             ${b.speaker != null
               ? this.renderSpeakerChip(b)
