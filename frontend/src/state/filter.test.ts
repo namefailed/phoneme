@@ -61,6 +61,18 @@ describe('toWireFilter', () => {
       expect(f.favorite).toBeUndefined();
     }
   });
+
+  it('maps the tag-presence state onto the wire tagged flag', () => {
+    expect(toWireFilter({ tagState: 'tagged' }).tagged).toBe(true);
+    expect(toWireFilter({ tagState: 'untagged' }).tagged).toBe(false);
+  });
+
+  it('omits the tagged flag when no tag-presence state is set', () => {
+    for (const f of [toWireFilter({ tagState: null }), toWireFilter({})]) {
+      expect(f.tagged).toBeUndefined();
+      expect('tagged' in f).toBe(false);
+    }
+  });
 });
 
 describe('More-like-this filter helpers', () => {

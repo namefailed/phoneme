@@ -126,6 +126,11 @@ export type ListFilter = {
   /** Server-side in-place-dictation flag: `true` = only recordings captured via
    *  in-place dictation, omit = no filter. Applied in SQL before pagination. */
   in_place?: boolean | null;
+  /** Server-side tag-presence filter: `true` = only recordings with at least one
+   *  tag, `false` = only recordings with no tags, omit/null = no filter. Applied
+   *  in SQL before pagination. Independent of `tag_id` (which scopes to a single
+   *  tag). Powers the sidebar's "All Tags" / "Untagged" rows. */
+  tagged?: boolean | null;
 };
 
 /**
@@ -717,6 +722,8 @@ export type KindCounts = {
   favorite: number;
   /** Distinct recordings carrying at least one tag (the sidebar "All Tags" badge). */
   tagged: number;
+  /** Recordings carrying no tags (the sidebar "Untagged" badge). */
+  untagged: number;
 };
 
 /** Fetch the per-kind recording counts for the Library section badges. */

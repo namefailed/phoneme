@@ -423,6 +423,9 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       if (f.kind === "meeting") rows = rows.filter((r) => r.meeting_id != null);
       const tagId = f.tag_id as number | undefined;
       if (tagId != null) rows = rows.filter((r) => (r.tags as Array<{ id: number }>).some((t) => t.id === tagId));
+      // Tag-presence filter ("All Tags" = true, "Untagged" = false).
+      if (f.tagged === true) rows = rows.filter((r) => (r.tags as unknown[]).length > 0);
+      else if (f.tagged === false) rows = rows.filter((r) => (r.tags as unknown[]).length === 0);
       return rows;
     }
     case "get_recording": return RECORDINGS.find((r) => r.id === id) ?? RECORDINGS[0];
@@ -570,6 +573,7 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
       in_place: RECORDINGS.filter((r) => r.in_place).length,
       favorite: RECORDINGS.filter((r) => r.favorite).length,
       tagged: RECORDINGS.filter((r) => Array.isArray(r.tags) && (r.tags as unknown[]).length > 0).length,
+      untagged: RECORDINGS.filter((r) => !Array.isArray(r.tags) || (r.tags as unknown[]).length === 0).length,
     };
     case "get_segments": return id ? (SEGMENTS[id] ?? []) : [];
     case "get_words": return [];

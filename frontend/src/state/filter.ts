@@ -13,6 +13,11 @@ import type { ListFilter } from "../services/ipc";
  *  (favorites). */
 export type RecordingKind = "all" | "single" | "meeting" | "in_place" | "favorite";
 
+/** Tag-presence filter, independent of `kind` and `tag_id`: only recordings
+ *  with ≥1 tag, only recordings with 0 tags, or no constraint. Powers the
+ *  sidebar's toggleable "All Tags" / "Untagged" rows. */
+export type TagState = "tagged" | "untagged" | null;
+
 /**
  * The library filter as the UI models it: the daemon's `ListFilter` extended
  * with UI-only state that is never sent over the wire (`semantic`, the
@@ -24,6 +29,9 @@ export type UiFilter = Omit<ListFilter, "kind" | "favorite"> & {
   /** Library type-filter as the UI models it (one dropdown of four choices).
    *  `toWireFilter` maps it onto the daemon's `kind` / `favorite` fields. */
   kind?: RecordingKind;
+  /** Tag-presence filter, independent of `kind`/`tag_id`. `toWireFilter` maps it
+   *  onto the daemon's `tagged` flag (true = tagged only, false = untagged only). */
+  tagState?: TagState;
   /** UI-only "More like this" mode: when set, the list shows recordings
    *  semantically similar to this recording (by its stored vectors) instead
    *  of the normal filtered list. Takes precedence over `search`. */
@@ -59,6 +67,10 @@ export function toWireFilter(f: UiFilter): ListFilter {
   if (f.kind === "single" || f.kind === "meeting") wire.kind = f.kind;
   else if (f.kind === "in_place") wire.in_place = true;
   else if (f.kind === "favorite") wire.favorite = true;
+  // Tag-presence ("All Tags" / "Untagged") rides its own flag, independent of
+  // the kind/tag_id filters it combines with.
+  if (f.tagState === "tagged") wire.tagged = true;
+  else if (f.tagState === "untagged") wire.tagged = false;
   return wire;
 }
 

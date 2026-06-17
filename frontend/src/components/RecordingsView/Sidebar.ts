@@ -2,7 +2,7 @@ import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { listTags, tagUsageCounts, kindCounts, type Tag, type KindCounts } from "../../services/ipc";
 import { subscribe, type DaemonEvent } from "../../services/events";
-import { filterStore, type UiFilter, type RecordingKind } from "../../state/filter";
+import { filterStore, type UiFilter, type RecordingKind, type TagState } from "../../state/filter";
 import "./QueuePanel";
 
 /**
@@ -125,12 +125,25 @@ export class SidebarElement extends LitElement {
 
   private setTagFilter(id: number | null) {
     // Kind and tag are independent filters and combine (e.g. Meetings + #tacos).
-    filterStore.set({ ...this.filterState, tag_id: id });
+    // A specific tag is narrower than the "All Tags" presence filter, so picking
+    // one clears that constraint (it'd be redundant — the tag implies "tagged").
+    filterStore.set({ ...this.filterState, tag_id: id, tagState: null });
   }
 
-  /** Set the Library type-filter. Independent of the tag filter (they combine). */
+  /** Toggle the tag-presence filter ("All Tags" = tagged, "Untagged" = none).
+   *  Clicking the already-active row turns it off (back to All Recordings).
+   *  Independent of the Library `kind`, but clears any single-tag selection so
+   *  "every tagged note" doesn't silently stay narrowed to one tag. */
+  private setTagState(next: TagState) {
+    const active = this.filterState.tagState === next ? null : next;
+    filterStore.set({ ...this.filterState, tagState: active, tag_id: null });
+  }
+
+  /** Set the Library type-filter. Independent of the tag filter (they combine).
+   *  Clears the tag-presence filter so its highlight doesn't linger after the
+   *  user has moved to a Library row. */
   private setKind(kind: RecordingKind) {
-    filterStore.set({ ...this.filterState, kind });
+    filterStore.set({ ...this.filterState, kind, tagState: null });
   }
 
   /** A Library type-filter row. Active when its kind matches (independent of tag).
@@ -176,12 +189,19 @@ export class SidebarElement extends LitElement {
           </div>
           ${this.tagsOpen ? html`
             <div class="sidebar-list">
-              <div class="sidebar-item ${!f.tag_id ? 'active' : ''}" @click=${() => this.setTagFilter(null)}>
+              <div class="sidebar-item ${f.tagState === 'tagged' ? 'active' : ''}" @click=${() => this.setTagState('tagged')}>
                 <span class="sidebar-icon" style="color: var(--accent);">#</span>
                 <span class="sidebar-label">All Tags</span>
-                <span class="sidebar-dot sidebar-dot-rainbow" title="All tags"></span>
+                <span class="sidebar-dot sidebar-dot-rainbow" title="Recordings with at least one tag"></span>
                 ${this.kindTotals
                   ? html`<span class="sidebar-count" title="${this.kindTotals.tagged} recording${this.kindTotals.tagged === 1 ? "" : "s"} with at least one tag">${this.kindTotals.tagged}</span>`
+                  : ""}
+              </div>
+              <div class="sidebar-item ${f.tagState === 'untagged' ? 'active' : ''}" @click=${() => this.setTagState('untagged')}>
+                <span class="sidebar-icon" style="color: var(--fg-faded);">#</span>
+                <span class="sidebar-label">Untagged</span>
+                ${this.kindTotals
+                  ? html`<span class="sidebar-count" title="${this.kindTotals.untagged} recording${this.kindTotals.untagged === 1 ? "" : "s"} with no tags">${this.kindTotals.untagged}</span>`
                   : ""}
               </div>
               ${this.tags.length === 0 ? html`
