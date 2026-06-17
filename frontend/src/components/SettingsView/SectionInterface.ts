@@ -178,25 +178,26 @@ export class SectionInterface {
   private renderShell() {
     const config = this.config;
     this.container.innerHTML = `
+      <style>
+        #col-list { max-width: 320px; }
+        #col-list .col-row {
+          display: flex; align-items: center; justify-content: space-between; gap: 10px;
+          padding: 3px 6px; border-radius: 6px; transition: background 0.12s ease;
+        }
+        #col-list .col-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+        #col-list .col-move { display: inline-flex; flex-direction: column; gap: 1px; }
+        #col-list .col-move button {
+          background: transparent; border: none; color: var(--fg-faded);
+          width: 22px; height: 14px; line-height: 1; font-size: 0.6429rem; padding: 0;
+          border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+        }
+        #col-list .col-move button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+        #col-list .col-move button:disabled { opacity: 0.25; cursor: default; }
+        #col-list .col-label { display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; }
+      </style>
+
       <div class="settings-section">
-        <style>
-          #col-list { max-width: 320px; }
-          #col-list .col-row {
-            display: flex; align-items: center; justify-content: space-between; gap: 10px;
-            padding: 3px 6px; border-radius: 6px; transition: background 0.12s ease;
-          }
-          #col-list .col-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-          #col-list .col-move { display: inline-flex; flex-direction: column; gap: 1px; }
-          #col-list .col-move button {
-            background: transparent; border: none; color: var(--fg-faded);
-            width: 22px; height: 14px; line-height: 1; font-size: 0.6429rem; padding: 0;
-            border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
-          }
-          #col-list .col-move button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
-          #col-list .col-move button:disabled { opacity: 0.25; cursor: default; }
-          #col-list .col-label { display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; }
-        </style>
-        <h3>Interface</h3>
+        <h3>Theme</h3>
 
         <div class="settings-field">
           <label>Theme</label>
@@ -224,23 +225,10 @@ export class SectionInterface {
             )}
           </div>
         </div>
+      </div>
 
-        <div class="settings-field">
-          <label>24-hour time format</label>
-          <div>${renderField(
-            { key: "interface.format_24h", label: "", kind: "checkbox" },
-            config.interface.format_24h,
-          )}</div>
-        </div>
-
-        <div class="settings-field">
-          <label>Day-first dates</label>
-          <div>${renderField(
-            { key: "interface.date_day_first", label: "", kind: "checkbox" },
-            config.interface.date_day_first ?? false,
-          )}</div>
-          <span>Show the recordings list's Day column as <b>DD/MM</b> instead of <b>MM/DD</b>.</span>
-        </div>
+      <div class="settings-section">
+        <h3>Typography &amp; format</h3>
 
         <div class="settings-field">
           <label>Interface font</label>
@@ -274,17 +262,25 @@ export class SectionInterface {
         </div>
 
         <div class="settings-field">
-          <label>Strip system titlebar</label>
-          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
-            <div>${renderField(
-              { key: "interface.strip_titlebar", label: "", kind: "checkbox" },
-              config.interface.strip_titlebar,
-            )}</div>
-            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
-              Removes the default OS window decorations. The top header will become draggable. Stripping the bar applies live; turning it back ON needs an app restart (Windows can't re-add the native title bar to a running window).
-            </span>
-          </div>
+          <label>24-hour time format</label>
+          <div>${renderField(
+            { key: "interface.format_24h", label: "", kind: "checkbox" },
+            config.interface.format_24h,
+          )}</div>
         </div>
+
+        <div class="settings-field">
+          <label>Day-first dates</label>
+          <div>${renderField(
+            { key: "interface.date_day_first", label: "", kind: "checkbox" },
+            config.interface.date_day_first ?? false,
+          )}</div>
+          <span>Show the recordings list's Day column as <b>DD/MM</b> instead of <b>MM/DD</b>.</span>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Motion &amp; navigation</h3>
 
         <div class="settings-field">
           <label>Arrow-key navigation</label>
@@ -366,6 +362,23 @@ export class SectionInterface {
             </span>
           </div>
         </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Window</h3>
+
+        <div class="settings-field">
+          <label>Strip system titlebar</label>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%;">
+            <div>${renderField(
+              { key: "interface.strip_titlebar", label: "", kind: "checkbox" },
+              config.interface.strip_titlebar,
+            )}</div>
+            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+              Removes the default OS window decorations. The top header will become draggable. Stripping the bar applies live; turning it back ON needs an app restart (Windows can't re-add the native title bar to a running window).
+            </span>
+          </div>
+        </div>
 
         <div class="settings-field">
           <label>Quit stops the engine</label>
@@ -383,6 +396,10 @@ export class SectionInterface {
             </span>
           </div>
         </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Library layout</h3>
 
         <div class="settings-field" style="align-items: flex-start;">
           <label style="margin-top: 8px;">Visible Columns</label>
@@ -403,7 +420,6 @@ export class SectionInterface {
             "don't ask again" prompts — back to defaults, then reloads.
           </span>
         </div>
-
       </div>
     `;
     bindFieldEvents(this.container, config);
