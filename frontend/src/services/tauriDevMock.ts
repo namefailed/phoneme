@@ -123,29 +123,66 @@ function fakeWavUrl(): string {
   return wavUrl;
 }
 
-const CONFIG = {
+// Full config mirroring crates/phoneme-core defaults (config.example.toml), so
+// every Settings tab is populated. Mutable: write_config replaces it and
+// read_config returns it, so edits persist + round-trip within the session.
+let config: Record<string, unknown> = {
+  whisper: { mode: "bundled_download", provider: "local", external_url: "http://127.0.0.1:5809", model_path: "", bundled_server_port: 5809, bundled_server_args: [], timeout_secs: 60, model: "", api_url: "", api_key: "" },
+  recording: { audio_dir: "~/Documents/phoneme/audio", sample_rate: 16000, channels: 1, silence_threshold_dbfs: -45.0, silence_window_ms: 3000, max_duration_secs: 300, input_device: "default", source: "microphone", pre_roll_ms: 1500, streaming_preview: false, auto_stop_on_silence: false, normalize: false, normalize_target_dbfs: -1.0, meeting_preview: "toggle" },
+  in_place: { cleanup: "fast", type_mode: "type", save_to_library: true, full_pipeline: false, type_first: false },
+  hook: { commands: ["powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1"], timeout_secs: 30, run_on_transcribe: true, keyword_rules: [] },
+  webhook: { allow_private_network: false, allow_http: false, hmac_secret: "", custom_headers: {} },
+  hotkey: { enabled: false, combo: "Ctrl+Alt+Space", mode: "hold" },
+  in_place_hotkey: { enabled: false, combo: "Ctrl+Alt+I", mode: "hold" },
+  meeting_hotkey: { enabled: false, combo: "Ctrl+Alt+M", mode: "toggle" },
+  tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: false },
+  editor: { vim_mode: false, vimrc: "", vimrc_path: "" },
+  diarization: { provider: "none", local_model_path: "" },
+  daemon: { log_level: "info", log_max_size_mb: 10, log_max_files: 5, pipe_name: "phoneme-daemon" },
   interface: {
+    strip_titlebar: false,
+    format_24h: false,
     theme: "one-dark",
+    visible_columns: ["day", "time", "duration", "status", "transcript"],
+    column_widths: ["100px", "60px", "60px", "100px", "1fr"],
+    preview_overlay: false,
+    recording_indicator: false,
     vim_nav: true,
     arrow_nav: false,
     cursor_animation: "trail",
     animation_speed: "normal",
+    step_notifications: true,
+    quit_stops_daemon: true,
     ui_font: "",
     ui_font_size: 14,
-    strip_titlebar: false,
-    step_notifications: true,
-    preview_overlay: false,
-    recording_indicator: false,
-    quit_stops_daemon: false,
   },
-  semantic_search: { enabled: false },
+  llm_post_process: { enabled: false, provider: "none", api_url: "", model: "llama3.2:3b", prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.", timeout_secs: 30, autostart_ollama: true, api_key: "" },
+  summary: { auto: false, provider: "", api_url: "", model: "", prompt: "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.", api_key: "" },
+  auto_tag: { auto: false, provider: "", api_url: "", model: "", prompt: "You tag voice-note transcripts. Suggest concise topical tags (1-3 words each). Reply with ONLY a JSON array of tag-name strings.", max_tags: 5, auto_accept_existing: false, api_key: "" },
+  title: { enabled: true, use_llm: false, provider: "", api_url: "", model: "", prompt: "You title voice-note transcripts. Reply with ONLY a short title: at most 8 words, plain text, no quotes, no preamble.", api_key: "" },
+  semantic_search: { enabled: false, model_dir: "", max_tokens: 256, pooling: "mean", token_type_ids: true, query_prefix: "", passage_prefix: "" },
+  retention: { delete_audio: false },
+  rest_api: { enabled: false, port: 3737 },
 };
 
 function handle(cmd: string, args: Record<string, unknown>): unknown {
   const id = args.id as string | undefined;
   switch (cmd) {
     case "config_exists": return true;
-    case "read_config": return CONFIG;
+    case "read_config": return config;
+    // Persist edits in-memory so Settings round-trips: Save writes the whole
+    // config back, and the next read_config (and the config:saved event the view
+    // dispatches itself) reflects it — theme / cursor / nav changes apply live.
+    case "write_config": { if (args.config) config = args.config as Record<string, unknown>; return undefined; }
+    case "reload_config": return undefined;
+    // Settings / wizard side-effects that don't apply in a browser: accept them.
+    case "open_file":
+    case "set_overlay":
+    case "record_stop":
+    case "wizard_download_diarization_model":
+    case "wizard_pull_ollama_model":
+    case "wizard_run_installer": return undefined;
+    case "record_start": return { id: "mock-rec" };
     case "list_recordings": {
       const f = (args.filter ?? {}) as Record<string, unknown>;
       let rows = RECORDINGS;
