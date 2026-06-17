@@ -456,6 +456,13 @@ pub struct ListFilter {
     /// Serde-defaulted: older clients that omit it still deserialize.
     #[serde(default)]
     pub in_place: Option<bool>,
+    /// Tag-presence filter, applied in SQL like `favorite`: `Some(true)` = only
+    /// recordings carrying at least one tag, `Some(false)` = only untagged
+    /// recordings, `None` = no filter. Powers the GUI sidebar's "All Tags" /
+    /// "Untagged" rows. Independent of `tag_id` (a single specific tag).
+    /// Serde-defaulted: older clients that omit it still deserialize.
+    #[serde(default)]
+    pub tagged: Option<bool>,
 }
 
 /// Per-Library-kind recording counts, returned by [`Request::KindCounts`] and
@@ -475,6 +482,8 @@ pub struct KindCounts {
     pub favorite: i64,
     /// Distinct recordings carrying at least one tag (the sidebar "All Tags" badge).
     pub tagged: i64,
+    /// Recordings carrying NO tags (the sidebar "Untagged" badge). `all - tagged`.
+    pub untagged: i64,
 }
 
 /// The payload sent to hook scripts on stdin (and stored verbatim in inbox JSON).

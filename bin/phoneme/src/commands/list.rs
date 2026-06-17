@@ -136,5 +136,6 @@ fn build_filter(args: ListArgs, tag_id: Option<i64>) -> ListFilter {
         kind,
         favorite: None,  // no CLI flag for this yet
         in_place: None,  // no CLI flag for this yet
+        tagged: None,    // no CLI flag for this yet
     }
 }

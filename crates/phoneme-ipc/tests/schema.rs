@@ -39,6 +39,8 @@ fn list_recordings_request_roundtrips() {
         sort_desc: None,
         kind: Some(ListKind::Single),
         favorite: Some(true),
+        in_place: None,
+        tagged: None,
     };
     roundtrip(&Request::ListRecordings { filter });
 }

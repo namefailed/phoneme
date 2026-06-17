@@ -1492,6 +1492,16 @@ impl Catalog {
             Some(false) => sql.push_str(" AND recordings.in_place = 0"),
             None => {}
         }
+        // Tag-presence filter (sidebar "All Tags" / "Untagged"). A static subquery
+        // over recording_tags — no bound params, injection-safe. Independent of
+        // the `tag_id` (single-tag) JOIN above, so the two compose.
+        match filter.tagged {
+            Some(true) => sql
+                .push_str(" AND recordings.id IN (SELECT recording_id FROM recording_tags)"),
+            Some(false) => sql
+                .push_str(" AND recordings.id NOT IN (SELECT recording_id FROM recording_tags)"),
+            None => {}
+        }
         if filter.since.is_some() {
             sql.push_str(" AND recordings.started_at >= ?");
         }
@@ -1781,7 +1791,8 @@ impl Catalog {
                 COALESCE(SUM(CASE WHEN meeting_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS meeting_count,
                 COALESCE(SUM(CASE WHEN in_place = 1 THEN 1 ELSE 0 END), 0) AS in_place_count,
                 COALESCE(SUM(CASE WHEN favorite = 1 THEN 1 ELSE 0 END), 0) AS favorite_count,
-                (SELECT COUNT(DISTINCT recording_id) FROM recording_tags) AS tagged_count
+                (SELECT COUNT(DISTINCT recording_id) FROM recording_tags) AS tagged_count,
+                (COUNT(*) - (SELECT COUNT(DISTINCT recording_id) FROM recording_tags)) AS untagged_count
              FROM recordings",
         )
         .fetch_one(&self.pool)
@@ -1793,6 +1804,7 @@ impl Catalog {
             in_place: row.try_get("in_place_count")?,
             favorite: row.try_get("favorite_count")?,
             tagged: row.try_get("tagged_count")?,
+            untagged: row.try_get("untagged_count")?,
         })
     }
 
