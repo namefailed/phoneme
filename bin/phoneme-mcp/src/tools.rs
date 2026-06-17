@@ -11,7 +11,8 @@
 //! The surface stays in lockstep with the in-tree `phoneme-agent-core` registry
 //! (same names, same `Request`s, opposite direction). Beyond the original
 //! read-only five it now exposes "act on it" tools (set title/favorite, suggest
-//! & list tags, summarize, re-run cleanup, retranscribe, more-like-this, words).
+//! & list tags, summarize, re-run cleanup, retranscribe, more-like-this, words)
+//! and the destructive prune tools (delete a recording / delete a tag).
 //!
 //! Tools:
 //!
@@ -31,6 +32,8 @@
 //! | `retranscribe`      | [`Request::RetranscribeRecording`]|
 //! | `more_like_this`    | [`Request::MoreLikeThis`]        |
 //! | `get_words`         | [`Request::GetWords`]            |
+//! | `delete_recording`  | [`Request::DeleteRecording`]     |
+//! | `delete_tag`        | [`Request::DeleteTag`]           |
 
 use phoneme_core::{ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::Request;
@@ -313,6 +316,43 @@ pub fn tools_list() -> Value {
                     "required": ["id"],
                     "additionalProperties": false
                 }
+            },
+            {
+                "name": "delete_recording",
+                "description": "Permanently delete a recording (and, by default, its \
+                    audio file). Irreversible — confirm with the user before calling.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "The recording id."
+                        },
+                        "keep_audio": {
+                            "type": "boolean",
+                            "description": "true = remove only the catalog row and \
+                                leave the WAV on disk (default false)."
+                        }
+                    },
+                    "required": ["id"],
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "delete_tag",
+                "description": "Delete a tag everywhere, detaching it from every \
+                    recording. Irreversible — confirm with the user before calling.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "integer",
+                            "description": "The tag's id (from list_tags)."
+                        }
+                    },
+                    "required": ["id"],
+                    "additionalProperties": false
+                }
             }
         ]
     })
@@ -426,6 +466,21 @@ pub fn build_request(name: &str, arguments: &Value) -> Result<Request, ToolError
             let id = require_recording_id(args)?;
             Ok(Request::GetWords { id })
         }
+        "delete_recording" => {
+            let id = require_recording_id(args)?;
+            let keep_audio = args
+                .get("keep_audio")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            Ok(Request::DeleteRecording { id, keep_audio })
+        }
+        "delete_tag" => {
+            let id = args
+                .get("id")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| ToolError::new("missing required integer 'id'"))?;
+            Ok(Request::DeleteTag { id })
+        }
         other => Err(ToolError::new(format!("unknown tool '{other}'"))),
     }
 }
@@ -500,6 +555,8 @@ pub fn render_result(tool: &str, value: &Value) -> String {
         "summarize" => "Summary generated.".to_string(),
         "rerun_cleanup" => "Cleanup re-run started.".to_string(),
         "retranscribe" => "Re-transcription started.".to_string(),
+        "delete_recording" => "Recording deleted.".to_string(),
+        "delete_tag" => "Tag deleted.".to_string(),
         _ => pretty(value),
     }
 }
@@ -636,7 +693,7 @@ mod tests {
     use super::*;
 
     /// Every tool name this bridge exposes, in `tools/list` order.
-    const EXPECTED_TOOLS: [&str; 14] = [
+    const EXPECTED_TOOLS: [&str; 16] = [
         "start_recording",
         "stop_recording",
         "get_transcript",
@@ -651,6 +708,8 @@ mod tests {
         "retranscribe",
         "more_like_this",
         "get_words",
+        "delete_recording",
+        "delete_tag",
     ];
 
     #[test]
@@ -1069,6 +1128,51 @@ mod tests {
             render_result("get_words", &json!([])).contains("No word-level timings"),
             "empty words should note none yet"
         );
+    }
+
+    #[test]
+    fn delete_recording_defaults_keep_audio_false() {
+        let id = RecordingId::new();
+        assert_eq!(
+            build_request("delete_recording", &json!({"id": id.as_str()})).unwrap(),
+            Request::DeleteRecording {
+                id: id.clone(),
+                keep_audio: false
+            }
+        );
+        assert_eq!(
+            build_request(
+                "delete_recording",
+                &json!({"id": id.as_str(), "keep_audio": true})
+            )
+            .unwrap(),
+            Request::DeleteRecording {
+                id,
+                keep_audio: true
+            }
+        );
+        // Bad/missing id → tool error, never the daemon.
+        assert!(build_request("delete_recording", &json!({"id": "nope"})).is_err());
+        assert!(build_request("delete_recording", &json!({})).is_err());
+    }
+
+    #[test]
+    fn delete_tag_requires_integer_id() {
+        assert_eq!(
+            build_request("delete_tag", &json!({"id": 7})).unwrap(),
+            Request::DeleteTag { id: 7 }
+        );
+        assert!(build_request("delete_tag", &json!({})).is_err());
+        assert!(build_request("delete_tag", &json!({"id": "nope"})).is_err());
+    }
+
+    #[test]
+    fn render_delete_tools_confirm() {
+        assert_eq!(
+            render_result("delete_recording", &Value::Null),
+            "Recording deleted."
+        );
+        assert_eq!(render_result("delete_tag", &Value::Null), "Tag deleted.");
     }
 
     #[test]

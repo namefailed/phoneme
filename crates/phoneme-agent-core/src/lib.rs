@@ -15,8 +15,8 @@
 //! `phoneme-mcp`'s external surface: the same tool names, mapped to the same
 //! `Request`s. Beyond the original five read-only tools (list/search/get/start/
 //! stop) it now exposes "act on it" capabilities — set title/favorite, suggest &
-//! list tags, summarize, re-run cleanup, retranscribe, more-like-this, and
-//! per-word timings.
+//! list tags, summarize, re-run cleanup, retranscribe, more-like-this, per-word
+//! timings, and the destructive prune tools (delete a recording / delete a tag).
 
 use phoneme_core::{ListFilter, RecordMode, RecordingId};
 use phoneme_ipc::Request;
@@ -65,7 +65,7 @@ impl ToolRegistry {
     /// exposes externally, in the same order. The read-only core (list / search /
     /// get / start / stop) plus the "act on it" tools (set title/favorite,
     /// suggest & list tags, summarize, re-run cleanup, retranscribe, more-like-
-    /// this, words).
+    /// this, words) and the destructive prune tools (delete recording / tag).
     pub fn with_phoneme_tools() -> Self {
         let mut r = Self::new();
         r.register(Box::new(ListRecent));
@@ -82,6 +82,8 @@ impl ToolRegistry {
         r.register(Box::new(Retranscribe));
         r.register(Box::new(MoreLikeThis));
         r.register(Box::new(GetWords));
+        r.register(Box::new(DeleteRecordingTool));
+        r.register(Box::new(DeleteTagTool));
         r
     }
 
@@ -140,6 +142,16 @@ fn require_recording_id(args: &Value, tool: &str) -> Result<RecordingId, ToolErr
         tool: tool.to_string(),
         reason: "`id` is not a valid recording id".to_string(),
     })
+}
+
+/// Pull a required integer argument (e.g. a tag id), or a `BadArgs` error.
+fn require_i64(args: &Value, key: &str, tool: &str) -> Result<i64, ToolError> {
+    args.get(key)
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ToolError::BadArgs {
+            tool: tool.to_string(),
+            reason: format!("missing required integer `{key}`"),
+        })
 }
 
 /// Read an optional string argument, normalized to `Some(non-empty)` or `None`
@@ -466,6 +478,53 @@ impl Tool for GetWords {
     }
 }
 
+struct DeleteRecordingTool;
+impl Tool for DeleteRecordingTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "delete_recording",
+            description: "Permanently delete a recording (and, by default, its audio file). Irreversible — confirm with the user before calling.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Recording id from list/search." },
+                    "keep_audio": { "type": "boolean", "description": "true = remove only the catalog row and leave the WAV on disk (default false)." }
+                },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_recording_id(args, "delete_recording")?;
+        let keep_audio = args
+            .get("keep_audio")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        Ok(Request::DeleteRecording { id, keep_audio })
+    }
+}
+
+struct DeleteTagTool;
+impl Tool for DeleteTagTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "delete_tag",
+            description: "Delete a tag everywhere, detaching it from every recording. Irreversible — confirm with the user before calling.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "The tag's id (from list_tags)." }
+                },
+                "required": ["id"]
+            }),
+        }
+    }
+    fn to_request(&self, args: &Value) -> Result<Request, ToolError> {
+        let id = require_i64(args, "id", "delete_tag")?;
+        Ok(Request::DeleteTag { id })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,6 +550,8 @@ mod tests {
                 "retranscribe",
                 "more_like_this",
                 "get_words",
+                "delete_recording",
+                "delete_tag",
             ]
         );
         // Every spec carries an object schema.
@@ -750,6 +811,51 @@ mod tests {
         // Invalid id → BadArgs (covers the new id-taking tools' shared path).
         assert!(matches!(
             r.to_request("get_words", &json!({ "id": "not-an-id" })),
+            Err(ToolError::BadArgs { .. })
+        ));
+    }
+
+    #[test]
+    fn delete_recording_defaults_keep_audio_false() {
+        let r = ToolRegistry::with_phoneme_tools();
+        let id = RecordingId::new();
+        // No keep_audio → false (delete the WAV too).
+        assert_eq!(
+            r.to_request("delete_recording", &json!({ "id": id.as_str() }))
+                .unwrap(),
+            Request::DeleteRecording {
+                id: id.clone(),
+                keep_audio: false
+            }
+        );
+        // keep_audio: true → keep the WAV.
+        assert_eq!(
+            r.to_request(
+                "delete_recording",
+                &json!({ "id": id.as_str(), "keep_audio": true })
+            )
+            .unwrap(),
+            Request::DeleteRecording {
+                id,
+                keep_audio: true
+            }
+        );
+    }
+
+    #[test]
+    fn delete_tag_requires_integer_id() {
+        let r = ToolRegistry::with_phoneme_tools();
+        assert_eq!(
+            r.to_request("delete_tag", &json!({ "id": 7 })).unwrap(),
+            Request::DeleteTag { id: 7 }
+        );
+        // Missing / non-integer id → BadArgs.
+        assert!(matches!(
+            r.to_request("delete_tag", &json!({})),
+            Err(ToolError::BadArgs { .. })
+        ));
+        assert!(matches!(
+            r.to_request("delete_tag", &json!({ "id": "nope" })),
             Err(ToolError::BadArgs { .. })
         ));
     }

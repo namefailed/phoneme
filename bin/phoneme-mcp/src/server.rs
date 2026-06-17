@@ -248,7 +248,7 @@ mod tests {
     async fn tools_list_returns_all_tools() {
         let (srv, _) = server_with(|_| ok_null());
         let r = unwrap_response(srv.handle("tools/list", &json!({}), json!(2)).await);
-        assert_eq!(r.result["tools"].as_array().unwrap().len(), 14);
+        assert_eq!(r.result["tools"].as_array().unwrap().len(), 16);
     }
 
     #[tokio::test]

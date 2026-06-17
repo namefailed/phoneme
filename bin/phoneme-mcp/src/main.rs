@@ -176,7 +176,7 @@ mod tests {
 
         let list: Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(list["id"], 2);
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 14);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 16);
     }
 
     /// A malformed JSON line is answered with a parse error and the loop keeps
