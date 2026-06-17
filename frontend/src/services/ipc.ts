@@ -120,6 +120,9 @@ export type HotkeyBinding = {
   /** Hook commands (shell / webhook) fired after this keybind's recording,
    *  independent of the global hooks — each gets the recording JSON on stdin. */
   hooks: string[];
+  /** In-place-dictation options (only used when action === "in_place"):
+   *  fast type-only vs. run the pipeline first, and how to insert the text. */
+  in_place: { full_pipeline: boolean; type_mode: "type" | "paste" | "off" };
 };
 
 /** Server-side query filter for `listRecordings` (wire shape — snake_case

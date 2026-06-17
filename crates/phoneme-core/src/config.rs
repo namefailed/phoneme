@@ -1428,6 +1428,32 @@ impl Default for HotkeyPipeline {
     }
 }
 
+fn default_type_mode() -> String {
+    "type".into()
+}
+
+/// In-place-dictation options for a custom keybind whose action is `InPlace`.
+/// Lets one in-place keybind type FAST (the fast lane — quick transcription
+/// straight to the cursor) and another run the full pipeline first (e.g. an LLM
+/// cleanup that reshapes the transcript into a prompt) before inserting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HotkeyInPlace {
+    /// `false` = fast lane: type the quick transcription immediately. `true` =
+    /// run this keybind's `pipeline` (cleanup / LLM, …) before inserting — slower.
+    #[serde(default)]
+    pub full_pipeline: bool,
+    /// How the text is inserted: `"type"` (keystrokes), `"paste"` (clipboard), or
+    /// `"off"` (don't auto-insert; still saved to the library).
+    #[serde(default = "default_type_mode")]
+    pub type_mode: String,
+}
+
+impl Default for HotkeyInPlace {
+    fn default() -> Self {
+        Self { full_pipeline: false, type_mode: "type".into() }
+    }
+}
+
 /// A user-defined custom keybind, beyond the three built-ins (record / in-place /
 /// meeting). Configured in Settings → Keybinds and stored in [`Config::hotkeys`];
 /// each binds a key combo to an action + mode, and carries its OWN pipeline and
@@ -1461,6 +1487,10 @@ pub struct HotkeyBinding {
     /// Script — it receives the recording JSON on stdin.
     #[serde(default)]
     pub hooks: Vec<String>,
+    /// In-place-dictation options — only meaningful when `action` is `InPlace`
+    /// (fast type-only vs. run the pipeline first; how to insert the text).
+    #[serde(default)]
+    pub in_place: HotkeyInPlace,
 }
 
 /// Frontend OS-level tray behavior.

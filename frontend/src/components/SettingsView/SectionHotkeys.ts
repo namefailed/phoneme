@@ -51,6 +51,7 @@ export class SectionHotkeys {
     (config.hotkeys as Array<Record<string, unknown>>).forEach((b) => {
       if (!b.pipeline) b.pipeline = { cleanup: true, title: true, summary: true, auto_tag: true };
       if (!Array.isArray(b.hooks)) b.hooks = [];
+      if (!b.in_place) b.in_place = { full_pipeline: false, type_mode: "type" };
     });
     this.bindings = config.hotkeys as HotkeyBinding[];
 
@@ -101,6 +102,7 @@ export class SectionHotkeys {
       action: "record",
       pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
       hooks: [],
+      in_place: { full_pipeline: false, type_mode: "type" },
     });
     this.expanded.add(id); // open the new card so its pipeline/hooks are visible
     this.renderRows();
@@ -151,6 +153,22 @@ export class SectionHotkeys {
             <button class="inline-button hk-delete" type="button" title="Delete keybind" aria-label="Delete keybind">✕</button>
           </div>
           <div class="hk-detail" style="display: ${open ? "block" : "none"}; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
+            ${
+              b.action === "in_place"
+                ? `<div class="hk-inplace" style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px dashed var(--border-subtle);">
+                     <span style="font-size: 0.7857rem; color: var(--fg-faded);">In-place:</span>
+                     <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8571rem; cursor: pointer;"><input type="checkbox" class="toggle-switch hk-ip-full" ${b.in_place.full_pipeline ? "checked" : ""} />Run full pipeline first</label>
+                     <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8571rem;">Insert by
+                       <select class="hk-ip-type">
+                         <option value="type" ${b.in_place.type_mode === "type" ? "selected" : ""}>Type</option>
+                         <option value="paste" ${b.in_place.type_mode === "paste" ? "selected" : ""}>Paste</option>
+                         <option value="off" ${b.in_place.type_mode === "off" ? "selected" : ""}>Off</option>
+                       </select>
+                     </label>
+                     <span style="flex-basis: 100%; font-size: 0.7857rem; color: var(--fg-faded);">Off = fast lane (type the quick transcription immediately). On = run the Pipeline below first — e.g. an LLM cleanup that reshapes the transcript into a prompt — then insert.</span>
+                   </div>`
+                : ""
+            }
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 12px;">
               <span style="font-size: 0.7857rem; color: var(--fg-faded);">Pipeline:</span>
               ${PIPELINE_STEPS.map((s) => `<label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8571rem; cursor: pointer;"><input type="checkbox" class="toggle-switch hk-pipe" data-step="${s.key}" ${b.pipeline[s.key] ? "checked" : ""} />${s.label}</label>`).join("")}
@@ -179,6 +197,19 @@ export class SectionHotkeys {
       });
       card.querySelector<HTMLSelectElement>(".hk-action")?.addEventListener("change", (e) => {
         binding.action = (e.target as HTMLSelectElement).value as HotkeyBinding["action"];
+        // Re-render so the in-place options panel shows/hides for this action;
+        // keep the card open so the change is visible.
+        this.expanded.add(id);
+        this.renderRows();
+        this.notifyChanged();
+      });
+      // In-place options (only present when action === "in_place").
+      card.querySelector<HTMLInputElement>(".hk-ip-full")?.addEventListener("change", (e) => {
+        binding.in_place.full_pipeline = (e.target as HTMLInputElement).checked;
+        this.notifyChanged();
+      });
+      card.querySelector<HTMLSelectElement>(".hk-ip-type")?.addEventListener("change", (e) => {
+        binding.in_place.type_mode = (e.target as HTMLSelectElement).value as HotkeyBinding["in_place"]["type_mode"];
         this.notifyChanged();
       });
       card.querySelector<HTMLSelectElement>(".hk-mode")?.addEventListener("change", (e) => {

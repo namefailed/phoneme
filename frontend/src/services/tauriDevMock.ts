@@ -335,11 +335,22 @@ let config: Record<string, unknown> = {
     // Cleans up + titles, no summary/tags, and posts to a journal script.
     { id: "demo-1", label: "Journal note", enabled: true, combo: "Ctrl+Alt+N", mode: "hold", action: "record",
       pipeline: { cleanup: true, title: true, summary: false, auto_tag: false },
-      hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Add-Content $HOME\\\\journal.md $d.transcript"'] },
+      hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Add-Content $HOME\\\\journal.md $d.transcript"'],
+      in_place: { full_pipeline: false, type_mode: "type" } },
     // The whole pipeline, plus a webhook.
     { id: "demo-2", label: "Meeting + webhook", enabled: true, combo: "Ctrl+Alt+M", mode: "toggle", action: "meeting",
       pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
-      hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Invoke-RestMethod -Uri \'https://example.com/webhook\' -Method Post -Body (@{text=$d.transcript}|ConvertTo-Json) -ContentType \'application/json\'"'] },
+      hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Invoke-RestMethod -Uri \'https://example.com/webhook\' -Method Post -Body (@{text=$d.transcript}|ConvertTo-Json) -ContentType \'application/json\'"'],
+      in_place: { full_pipeline: false, type_mode: "type" } },
+    // Fast in-place: type the quick transcription straight to the cursor, no pipeline.
+    { id: "demo-3", label: "Fast dictate", enabled: true, combo: "Ctrl+Alt+D", mode: "hold", action: "in_place",
+      pipeline: { cleanup: false, title: false, summary: false, auto_tag: false },
+      hooks: [], in_place: { full_pipeline: false, type_mode: "type" } },
+    // Slow in-place: run the pipeline (LLM cleanup) to reshape the transcript into
+    // a prompt, then paste it.
+    { id: "demo-4", label: "Dictate → LLM prompt", enabled: true, combo: "Ctrl+Alt+P", mode: "hold", action: "in_place",
+      pipeline: { cleanup: true, title: false, summary: false, auto_tag: false },
+      hooks: [], in_place: { full_pipeline: true, type_mode: "paste" } },
   ],
   tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: true },
   editor: { vim_mode: true, vimrc: "", vimrc_path: "", resync_views_on_edit: true },
