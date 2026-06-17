@@ -146,7 +146,7 @@ export class FailedPanelElement extends LitElement {
     super.connectedCallback();
     document.addEventListener("keydown", this.keyHandler);
     void this.load();
-    this.unsub = await subscribe((event: DaemonEvent) => {
+    const unsub = await subscribe((event: DaemonEvent) => {
       // New failures land while the panel is open: capture the live error
       // text first, then refresh so the row appears with it.
       if (event.event === "transcription_failed") {
@@ -173,6 +173,11 @@ export class FailedPanelElement extends LitElement {
         this.inboxFailed = event.failed;
       }
     });
+    // If the element disconnected while the subscription was awaiting (a fast
+    // open-then-close), disconnectedCallback already ran with this.unsub null —
+    // tear the late listener down now instead of leaking it.
+    if (!this.isConnected) unsub();
+    else this.unsub = unsub;
   }
 
   disconnectedCallback() {

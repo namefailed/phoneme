@@ -2285,6 +2285,11 @@ ph-sidebar .queue-item-main.kbd-cursor {
     #ff5d5d, #ffae4a, #ffe24a, #5dd85d, #4ab6ff, #8a7bff, #ff6ad5, #ff5d5d
   );
 }
+/* "Untagged" gets a muted grey dot — it stands for the absence of any tag colour. */
+.sidebar-dot-none {
+  background: var(--fg-faded);
+  opacity: 0.45;
+}
 
 /* ── Merged meeting view ──────────────────────────────────────────────────── */
 .merged-detail {

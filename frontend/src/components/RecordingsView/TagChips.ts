@@ -93,7 +93,13 @@ export class TagChipsElement extends LitElement {
         // suggestion run may have ATTACHED tags too — show those chips as well.
         void this.load();
       }
-    }).then((un) => { this.unsubEvents = un; });
+    }).then((un) => {
+      // If the element disconnected while subscribe was pending,
+      // disconnectedCallback already ran with this.unsubEvents null — tear the
+      // late listener down now instead of leaking it.
+      if (!this.isConnected) un();
+      else this.unsubEvents = un;
+    });
   }
 
   disconnectedCallback() {

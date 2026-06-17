@@ -79,7 +79,7 @@ export class QueuePanelElement extends LitElement {
       invoke<any>("read_config").then((c) => { this.use24h = !!c?.interface?.format_24h; }).catch(() => { /* keep 12h */ }),
     );
     void this.load();
-    this.unsub = await subscribe((event: DaemonEvent) => {
+    const unsub = await subscribe((event: DaemonEvent) => {
       // The depth event carries the failed count directly — reflect it at once
       // (load() also reconciles it, but this avoids a round-trip on every tick).
       if (event.event === "queue_depth_changed") {
@@ -121,6 +121,15 @@ export class QueuePanelElement extends LitElement {
         void this.load();
       }
     });
+    // If the element disconnected while the subscription was awaiting (a fast
+    // mount/unmount across a page switch), disconnectedCallback already ran with
+    // this.unsub null — tear the late listener down instead of leaking it, and
+    // skip starting the poll timer (nothing would ever clear it).
+    if (!this.isConnected) {
+      unsub();
+      return;
+    }
+    this.unsub = unsub;
     // Belt-and-suspenders: a light poll so the queue stays fresh even if an
     // event is missed (rapid enqueues, claim races, etc.). Cheap local IPC.
     this.pollTimer = window.setInterval(() => void this.load(), 3000);

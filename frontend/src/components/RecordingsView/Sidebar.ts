@@ -99,7 +99,7 @@ export class SidebarElement extends LitElement {
   }
 
   private async subscribeToEvents() {
-    this.unsubEvents = await subscribe((event: DaemonEvent) => {
+    const unsub = await subscribe((event: DaemonEvent) => {
       const eventName = (event as { event: string }).event;
       if (
         eventName === "tag_created" ||
@@ -121,6 +121,11 @@ export class SidebarElement extends LitElement {
         void this.loadKindCounts();
       }
     });
+    // If the element disconnected while subscribe was awaiting,
+    // disconnectedCallback already ran with this.unsubEvents null — tear the
+    // late listener down now instead of leaking it.
+    if (!this.isConnected) unsub();
+    else this.unsubEvents = unsub;
   }
 
   private setTagFilter(id: number | null) {
@@ -200,6 +205,7 @@ export class SidebarElement extends LitElement {
               <div class="sidebar-item ${f.tagState === 'untagged' ? 'active' : ''}" @click=${() => this.setTagState('untagged')}>
                 <span class="sidebar-icon" style="color: var(--fg-faded);">#</span>
                 <span class="sidebar-label">Untagged</span>
+                <span class="sidebar-dot sidebar-dot-none" title="Recordings with no tags"></span>
                 ${this.kindTotals
                   ? html`<span class="sidebar-count" title="${this.kindTotals.untagged} recording${this.kindTotals.untagged === 1 ? "" : "s"} with no tags">${this.kindTotals.untagged}</span>`
                   : ""}

@@ -110,7 +110,7 @@ export class ThinkingPopoutElement extends LitElement {
     // Seed the log with persisted history so the panel isn't empty after a
     // restart — the live stream below only carries what happens from now on.
     await this.loadHistory();
-    this.unsub = await subscribe((event: DaemonEvent) => {
+    const unsub = await subscribe((event: DaemonEvent) => {
       if (event.event !== "llm_activity") return;
       const key = `${event.id}|${event.stage}`;
       // A non-empty prompt marks the start of a new session → new log entry.
@@ -139,6 +139,11 @@ export class ThinkingPopoutElement extends LitElement {
       }
       this.rev++;
     });
+    // If the element disconnected while loadHistory/subscribe were awaiting,
+    // disconnectedCallback already ran with this.unsub null — tear the late
+    // listener down now rather than leaking it.
+    if (!this.isConnected) unsub();
+    else this.unsub = unsub;
   }
 
   private pushEntry(entry: ActivityEntry) {
