@@ -70,21 +70,58 @@ function rec(
 
 // Fully synthetic placeholder data — no real content. Only here to render the UI
 // in a browser preview; never shipped (see the import.meta.env.DEV guard).
-const LOREM = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.";
+const P1 =
+  "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.";
+const P2 =
+  "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+const PARA = `${P1}\n\n${P2}`;
+const CONVERSATION = [
+  "[Speaker 1]: Hello, how are you today? I wanted to walk through the agenda before we get started.",
+  "[Speaker 2]: Doing well, thanks. That sounds good — I think we should cover the timeline first.",
+  "[Speaker 1]: Agreed. The first milestone is on track, but the second one might slip by a few days.",
+  "[Speaker 2]: That's fine. Let's note the risk and move on to the open questions for now.",
+].join("\n\n");
+
 const RECORDINGS: Array<Record<string, unknown>> = [
-  rec("r01", 0, 15, 11, 12200, "Sample voice note", [1], true, "Placeholder transcript used to render the preview without a backend. " + LOREM),
-  rec("r02", 1, 1, 43, 5900, "Weekly standup recap", [1], false, "Mock standup notes. " + LOREM),
-  rec("r03", 1, 1, 40, 18000, "Project kickoff notes", [1, 3], false, "Sample meeting notes. The quick brown fox jumps over the lazy dog."),
-  rec("r04", 1, 1, 23, 8400, "Grocery list memo", [2], true, "Eggs, milk, bread, coffee. Mock content for layout testing only."),
-  rec("r05", 1, 1, 21, 6900, "Podcast idea brainstorm", [3], false, "A few placeholder ideas for a future episode. " + LOREM),
-  rec("r06", 1, 1, 7, 20700, "Interview practice run", [2], false, "Tell me about yourself — sample answer text for the preview mock."),
-  rec("r07", 1, 1, 6, 13800, "Lecture summary", [3], false, "Chapter one covers the basics. " + LOREM),
-  rec("r08", 1, 1, 6, 7300, "Daily journal entry", [2], false, "Today was a normal day. Fake journal text for the demo."),
-  rec("r09", 6, 19, 57, 13700, "Bug triage discussion", [1], false, "Reviewed a few sample issues. Mock transcript, no real data."),
-  rec("r10", 6, 12, 32, 15500, "Design review notes", [1, 3], false, "Feedback on the sample mockups. Placeholder content only."),
-  rec("r11", 6, 1, 50, 215000, "Two-person conversation sample", [2, 4], true, "[Speaker 1]: Hello, how are you today? [Speaker 2]: Doing well, thanks — just testing the diarized layout."),
-  rec("r12", 6, 16, 44, 53300, "Reading list voice memo", [4], false, "A longer placeholder note covering a few unrelated sample topics. " + LOREM),
+  rec("r01", 0, 15, 11, 12200, "Sample voice note", [1], true, `Placeholder transcript used to render the preview without a backend.\n\n${PARA}`),
+  rec("r02", 1, 1, 43, 5900, "Weekly standup recap", [1], false, `Mock standup notes for layout testing.\n\n${P1}`),
+  rec("r03", 1, 1, 40, 18000, "Project kickoff notes", [1, 3], false, `Sample meeting notes. The quick brown fox jumps over the lazy dog.\n\n${PARA}`),
+  rec("r04", 1, 1, 23, 8400, "Grocery list memo", [2], true, "Eggs, milk, bread, coffee, olive oil, and a bag of rice. Mock content for layout testing only."),
+  rec("r05", 1, 1, 21, 6900, "Podcast idea brainstorm", [3], false, `A few placeholder ideas for a future episode.\n\n${P1}`),
+  rec("r06", 1, 1, 7, 20700, "Interview practice run", [2], false, `Tell me about yourself — sample answer text for the preview mock.\n\n${PARA}`),
+  rec("r07", 1, 1, 6, 13800, "Lecture summary", [3], false, `Chapter one covers the basics and a couple of worked examples.\n\n${P2}`),
+  rec("r08", 1, 1, 6, 7300, "Daily journal entry", [2], false, `Today was a normal day. Fake journal text for the demo.\n\n${P1}`),
+  rec("r09", 6, 19, 57, 13700, "Bug triage discussion", [1], false, `Reviewed a few sample issues. Mock transcript, no real data.\n\n${PARA}`),
+  rec("r10", 6, 12, 32, 15500, "Design review notes", [1, 3], false, `Feedback on the sample mockups. Placeholder content only.\n\n${P2}`),
+  rec("r11", 6, 1, 50, 215000, "Two-person conversation sample", [2, 4], true, CONVERSATION),
+  rec("r12", 6, 16, 44, 53300, "Reading list voice memo", [4], false, `A longer placeholder note covering a few unrelated sample topics.\n\n${PARA}`),
 ];
+
+/** A short, speech-shaped fake WAV synthesized once and shared by every recording
+ *  (returned via the mocked convertFileSrc), so WaveSurfer has audio to draw —
+ *  no binary committed to the repo. */
+let wavUrl: string | null = null;
+function fakeWavUrl(): string {
+  if (wavUrl) return wavUrl;
+  const sr = 8000;
+  const n = sr * 6; // 6 seconds, mono, 16-bit PCM
+  const buf = new ArrayBuffer(44 + n * 2);
+  const dv = new DataView(buf);
+  const str = (off: number, s: string) => { for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); dv.setUint32(4, 36 + n * 2, true); str(8, "WAVE");
+  str(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  str(36, "data"); dv.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const word = Math.max(0, Math.sin(t * 3.1)) ** 2; // bursts ≈ words
+    const syllable = 0.55 + 0.45 * Math.sin(t * 38); // intra-word flutter
+    const s = (Math.random() * 2 - 1) * word * syllable * 0.85;
+    dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s)) * 32767, true);
+  }
+  wavUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  return wavUrl;
+}
 
 const CONFIG = {
   interface: {
@@ -154,6 +191,10 @@ export function installTauriDevMock(): void {
   if (!import.meta.env.DEV) return;
   if ((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return;
   mockIPC((cmd, payload) => handle(cmd, (payload ?? {}) as Record<string, unknown>));
+  // mockIPC doesn't provide convertFileSrc; point every audio path at the shared
+  // synthetic WAV so the WaveformPlayer has something to render.
+  const internals = (window as unknown as { __TAURI_INTERNALS__: Record<string, unknown> }).__TAURI_INTERNALS__;
+  internals.convertFileSrc = () => fakeWavUrl();
   // eslint-disable-next-line no-console
   console.info("[phoneme] Tauri dev mock active — canned data, no daemon (browser preview).");
 }
