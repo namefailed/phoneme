@@ -1346,6 +1346,14 @@ export class RecordingsView {
       el.classList.add("kbd-cursor");
       el.scrollIntoView({ block: "nearest" });
     }
+    // Keep the cursor GLOW on the trigger button, not the highlighted option: the
+    // option shows the selection with its own `.kbd-cursor` border, but the glow
+    // stays on the parent (matching the header Record/Settings dropdowns the user
+    // prefers). The glow follows whichever element GAINED `.kbd-cursor` last in the
+    // mutation batch, so re-adding it to the trigger here makes the trigger the
+    // target — and means the glow is never left stranded over a popout on Escape.
+    sub.trigger.classList.remove("kbd-cursor");
+    sub.trigger.classList.add("kbd-cursor");
   }
 
   /** j/k inside an open dropdown. */

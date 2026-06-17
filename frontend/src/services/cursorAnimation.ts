@@ -122,16 +122,20 @@ function hide() {
 function place(el: HTMLElement, animate: boolean) {
   const m = effective();
   if (!m) return;
-  if (suppressed) return; // typing into this control — stay out of the way
   ensureListObserved(); // lazily attach once the list pane exists (cheap when set)
   const natural = el.getBoundingClientRect();
   const r = clampRect(el, natural);
   if (r.width <= 0 || r.height <= 0) {
-    hide();
+    if (!suppressed) hide();
     return;
   }
   ensureEls();
   const g = ghost!;
+  // Track the latest target even while suppressed (typing into a control): a mouse
+  // click can move the roving cursor into the editor while the glow is hidden, so
+  // remember it here. Otherwise `current` goes stale and, on exit, the glow glides
+  // back from wherever it last showed instead of appearing where you now are.
+  current = el;
   // Feather the right edge when the rect got clipped to its pane (a full-width
   // list row clipped at the detail-pane boundary): the cut dissolves instead of
   // showing a hard line, so it reads as tucked behind the pane rather than as a
@@ -154,15 +158,17 @@ function place(el: HTMLElement, animate: boolean) {
   if (tail) tail.style.opacity = "0";
 
   // Glide + resize together (mini.animate-style): position and size share one
-  // duration so the glow eases between controls.
+  // duration so the glow eases between controls. While suppressed (typing), keep
+  // it hidden but SNAP it (no glide) to the tracked target so it's already in the
+  // right place when editing ends — then it fades in there instead of gliding in
+  // from a stale spot.
   g.style.transitionProperty = "left, top, width, height, opacity";
-  g.style.transitionDuration = animate ? `${DUR[m]}ms` : "0ms";
+  g.style.transitionDuration = !suppressed && animate ? `${DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
   g.style.width = `${r.width}px`;
   g.style.height = `${r.height}px`;
-  g.style.opacity = "1";
-  current = el;
+  g.style.opacity = suppressed ? "0" : "1";
 }
 
 /** The element the roving cursor most recently landed on, or null. There can be

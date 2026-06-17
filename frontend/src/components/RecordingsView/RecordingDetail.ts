@@ -549,6 +549,13 @@ export class RecordingDetail {
       // any keyboard capture so vim nav resumes (a no-op when mouse-opened).
       const onEscKey = (e: KeyboardEvent) => {
         if (e.key !== "Escape") return;
+        // If the keyboard layer is driving this menu (an item is keyboard-
+        // highlighted), let Escape fall through to the detail-grid dropdown layer
+        // (keyboard.ts → closeDetailSub) so it returns the roving cursor AND its
+        // glow to the trigger. Handling it here (capture-phase + stopPropagation)
+        // would close the menu but strand the glow over the option, because the
+        // bubble-phase grid handler never runs.
+        if (viewsMenu?.querySelector(".kbd-cursor") || versionsMenu?.querySelector(".kbd-cursor")) return;
         e.preventDefault();
         e.stopPropagation();
         closeMenus();
