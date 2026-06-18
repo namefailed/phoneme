@@ -51,6 +51,10 @@ export class ThinkingPopoutElement extends LitElement {
    *  anchor — the button fades out at the old spot, snaps to the new one while
    *  hidden, then fades back in (instead of jumping across the layout). */
   @state() private fabMoving = false;
+  /** Like `fabMoving`, but for the open panel: true while it crossfades after the
+   *  sidebar toggle re-anchored it. Only set when the panel actually moves on its
+   *  own (open + default-anchored); a user drag/resize never sets it. */
+  @state() private panelMoving = false;
 
   /** Complete, ordered log of every AI-activity session since launch. */
   private log: ActivityEntry[] = [];
@@ -69,6 +73,10 @@ export class ThinkingPopoutElement extends LitElement {
   private onSidebarChange = () => {
     if (this.fabPos) return;
     this.fabMoving = true; // fade out at the current spot
+    // The open panel re-anchors to the FAB too — but ONLY when it's at its default
+    // position (no saved geometry). A user-dragged/resized panel stays put, so it
+    // doesn't move and mustn't fade.
+    if (this.open && !this.geom) this.panelMoving = true;
     // The sidebar dispatches this twice (immediately + after its ~300ms slide).
     // Arm ONE timer on the first and let it ride (don't reset) so the fade-in
     // fires once, ~400ms later — past both events, by which point the sidebar has
@@ -78,6 +86,7 @@ export class ThinkingPopoutElement extends LitElement {
       this.fabMoveTimer = window.setTimeout(() => {
         this.fabMoveTimer = null;
         this.fabMoving = false; // re-render at the new anchor + fade back in
+        this.panelMoving = false;
       }, 400);
     }
   };
@@ -496,7 +505,7 @@ export class ThinkingPopoutElement extends LitElement {
       </button>
       ${this.open
         ? html`
-            <div class="thinking-popout">
+            <div class="thinking-popout ${this.panelMoving ? "thinking-popout--moving" : ""}">
               <div class="thinking-head" title="Drag to move · Ctrl+Shift+click to reset size & position" @mousedown=${(e: MouseEvent) => this.startHeadDrag(e)}>
                 <span class="thinking-title">
                   <span class="thinking-title-icon" aria-hidden="true">🧠</span>

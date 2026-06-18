@@ -748,7 +748,13 @@ mark.search-hit {
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
   overflow: hidden;
   /* Resized via custom handles on all four edges + corners (see .thinking-rz). */
+  /* Crossfade when the panel re-anchors ON ITS OWN (the sidebar toggle moved the
+     default FAB it hangs off) — matches the FAB's fade. Only opacity transitions,
+     so the reposition itself is instant (hidden) and never reads as a slide.
+     Dragging/resizing the panel never adds `--moving`, so those stay live. */
+  transition: opacity 150ms ease;
 }
+.thinking-popout--moving { opacity: 0; pointer-events: none; }
 /* Resize handles — thin strips on each edge and small squares at the corners.
    Placed last in the DOM so they sit above the content and are grabbable
    anywhere along the edge. */
