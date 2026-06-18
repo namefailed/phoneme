@@ -861,6 +861,7 @@ export class HeaderBarElement extends LitElement {
             <div class="hb-menu-label">Jump to settings</div>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("transcription")}><span class="hb-menu-ico">🗣️</span>Transcription</button>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("postprocessing")}><span class="hb-menu-ico">✨</span>Post-Processing</button>
+            <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("managers/playbook")}><span class="hb-menu-ico">🎭</span>Playbook</button>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("capture")}><span class="hb-menu-ico">🎙️</span>Capture &amp; hotkeys</button>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("dictation")}><span class="hb-menu-ico">⌨️</span>Dictation</button>
             <button class="hb-menu-item" role="menuitem" @click=${() => this.jumpSettings("appearance")}><span class="hb-menu-ico">🎨</span>Appearance</button>
