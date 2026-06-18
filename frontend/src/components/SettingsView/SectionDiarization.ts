@@ -123,6 +123,17 @@ export class SectionDiarization {
             </span>
           </div>
 
+          <div class="settings-field">
+            <label>Solo = one speaker</label>
+            <div>${renderField(
+              { key: "diarization.solo_one_speaker", label: "", kind: "checkbox" },
+              this.config.diarization?.solo_one_speaker ?? false,
+            )}</div>
+            <span style="${HELP}">
+              Treat a single (non-meeting) recording as one speaker — skip diarization for it so solo dictation reads as plain prose instead of being split into [Speaker N] turns. Meetings and genuinely multi-speaker files are unaffected. Off by default.
+            </span>
+          </div>
+
           <details class="settings-advanced">
             <summary>
               <svg class="settings-advanced-chev" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
