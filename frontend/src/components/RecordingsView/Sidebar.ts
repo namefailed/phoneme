@@ -109,6 +109,11 @@ export class SidebarElement extends LitElement {
         eventName === "tag_detached"
       ) {
         void this.loadTags();
+        // Attaching/detaching (or deleting) a tag shifts the tagged↔untagged
+        // split, so the Tagged/Untagged badges (from kindTotals) must refresh too
+        // — not just the per-tag counts. Otherwise "Untagged 8" lingers after you
+        // tag everything, until a reload.
+        void this.loadKindCounts();
       }
       // Recording lifecycle events shift the Library counts (a row appears,
       // finishes, or is removed); refresh the badges off the same triggers.

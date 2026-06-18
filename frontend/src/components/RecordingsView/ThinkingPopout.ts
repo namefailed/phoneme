@@ -261,20 +261,27 @@ export class ThinkingPopoutElement extends LitElement {
    *  viewport so nothing is cut off. Applied per-property so a later resize
    *  survives re-renders. The FAB is 40px square. */
   private applyPosition(panel: HTMLElement) {
-    const { x, y } = this.fabXY();
+    const { x, y } = this.fabXY(); // the FAB's CURRENT top-left (recomputed each
+    // render, so this re-anchors when the sidebar toggle moves the default button)
+    const fab = 40; // the FAB is 40px square
     const w = panel.offsetWidth || 560;
     const h = panel.offsetHeight || 600;
-    const m = 8;
+    const m = 8; // viewport margin
+    const gap = 6; // tiny gap so the panel reads as attached, not covering the button
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const cx = x + fab / 2;
+    const cy = y + fab / 2;
 
-    // Open DIAGONALLY away from the button toward the side with the most room,
-    // so the button sits just off the panel's nearest corner. Default
-    // (bottom-right button) → the panel pops up and to the left.
-    const openLeft = x > vw * 0.5;
-    const openUp = y > vh * 0.45;
-    let left = openLeft ? x + 20 - w : x + 20;
-    let top = openUp ? y - 12 - h : y + 52;
+    // Pop OUT of the button: anchor the panel's NEAREST corner to the button and
+    // grow toward whichever side has room, so it looks like it unfolds from the
+    // FAB. Default button (bottom-left of the list area) → bottom-left corner on
+    // the button, panel grows up-and-right. Re-derived from the live FAB position,
+    // so closing the sidebar (which slides the default button) re-anchors it.
+    const openLeft = cx > vw / 2; // button on the right half → grow leftward
+    const openUp = cy > vh / 2; // button on the bottom half → grow upward
+    let left = openLeft ? x + fab - w : x; // right edge at button-right, else left edge at button-left
+    let top = openUp ? y - gap - h : y + fab + gap; // just above the button, else just below
 
     left = Math.max(m, Math.min(left, vw - w - m));
     top = Math.max(m, Math.min(top, vh - h - m));
