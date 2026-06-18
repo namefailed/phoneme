@@ -14,6 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { showToast } from '../utils/toast';
 import { setSettingsAnchor } from './shared/settingsAnchor';
+import { refreshHeaderCursor } from '../services/keyboard';
 import './SavedSearches';
 import './HealthPill';
 
@@ -287,6 +288,10 @@ export class HeaderBarElement extends LitElement {
       const el = this.renderRoot.querySelector<HTMLElement>(".hb-preview-text");
       if (el) el.scrollLeft = el.scrollWidth;
     }
+    // A re-render (e.g. starting/stopping a recording relabels Record and reveals
+    // Pause/Cancel) clobbers the roving cursor's `.kbd-cursor` class and moves the
+    // control — re-assert it so the keyboard cursor + its glow track the change.
+    refreshHeaderCursor();
   }
 
   private async loadTags() {

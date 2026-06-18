@@ -275,6 +275,16 @@ mark.search-hit {
 .detail-title {
   font-size: 1rem;
   color: var(--fg-default);
+  /* Hug the text (not the full header width) and carry a little padding, so the
+     keyboard-cursor ring has breathing room around the title instead of hugging
+     the glyphs — most noticeable on a short, single-line title. The negative
+     left margin cancels the left padding so the text stays aligned with the meta
+     row beneath it. */
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 8px;
+  margin-left: -8px;
+  border-radius: 6px;
 }
 .detail-meta {
   color: var(--fg-muted);
@@ -486,7 +496,7 @@ mark.search-hit {
    them so focusing the transcript/notes still reads as "active". */
 .transcript-block:focus-within,
 .notes-block:focus-within {
-  border-color: var(--accent);
+  border-color: var(--kbd-cursor);
 }
 /* Speakers panel — one renamable row per diarized [Speaker N] label. Matches
    the transcript/notes boxes so it reads as part of the same stack. */
@@ -1087,6 +1097,13 @@ mark.search-hit {
   width: 120px;
   flex-shrink: 0;
 }
+/* Light up with the same colour as the transcript / notes / search boxes when
+   focused (was the browser-default outline), so every input box reads "active"
+   the same way. */
+.tag-add:focus {
+  outline: none;
+  border-color: var(--kbd-cursor);
+}
 .tag-input-wrapper {
   position: relative;
   display: inline-block;
@@ -1210,25 +1227,31 @@ mark.search-hit {
    click behaviour. Hidden (and click-through) until `.visible` is added. */
 .back-to-top {
   position: absolute;
-  top: 12px;
+  bottom: 16px;
   left: 50%;
   z-index: 40;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  /* Very see-through — a barely-there fill + faint border so the content scrolls
+     visibly behind it; a small backdrop blur keeps the label readable over busy
+     text without making the pill opaque. */
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 999px;
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--bg-elevated) 18%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
   color: var(--fg-muted);
   font-size: 0.8571rem;
   font-weight: 600;
   white-space: nowrap;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
   cursor: pointer;
-  /* Hidden state lifts slightly UP (it lives at the top now) and is centered. */
+  /* Hidden state sinks slightly DOWN (it lives at the bottom now) and is centered;
+     it rises up into view when shown. */
   opacity: 0;
-  transform: translate(-50%, -8px);
+  transform: translate(-50%, 8px);
   pointer-events: none;
   transition: opacity 0.18s ease-out, transform 0.18s ease-out,
     color 0.15s ease-out, border-color 0.15s ease-out, background 0.15s ease-out;
@@ -1240,8 +1263,8 @@ mark.search-hit {
 }
 .back-to-top:hover {
   color: var(--accent);
-  border-color: var(--accent);
-  background: var(--bg-deep);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
 }
 .back-to-top:focus-visible {
   outline: 2px solid var(--accent);
@@ -1269,12 +1292,13 @@ mark.search-hit {
   border-radius: 6px;
 }
 /* The title is large display text, so the tight inset ring used for the small
-   option buttons reads as cramped on it — give it a little outward breathing
-   room. Kept small (2px) because the title sits near the detail pane's top edge,
-   and a bigger offset pokes up under the top bar and gets clipped. */
+   option buttons reads as cramped on it. Its own padding (see .detail-title) now
+   supplies the breathing room, so the ring sits right on the padded box with a
+   standard 6px radius — matching every other rounded element in the app (the old
+   8px read as conspicuously rounder). */
 .rv-detail #detail-title.kbd-cursor {
-  outline-offset: 2px;
-  border-radius: 8px;
+  outline-offset: 1px;
+  border-radius: 6px;
 }
 /* Keyboard cursor on an OPEN dropdown's option (Views / Versions / Pipeline /
    Speed / Export). The cursor glow stays parked on the trigger button while a
@@ -1432,14 +1456,15 @@ body.phoneme-hide-header ph-header-bar {
   border-color: color-mix(in srgb, var(--accent) 85%, transparent) !important;
   background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
 }
-/* Inside a chip's keyboard sub-step, the armed ✓ / × gets its own clear ring +
-   fill (a dedicated class, not `.kbd-cursor`, so the cursor glow stays on the
-   chip — the chip is the unit, this just shows which action Enter will fire). */
+/* Inside a chip's keyboard sub-step the roving cursor + glow MOVE onto the armed
+   ✓ / × (so the small action you're choosing is unmistakable — the whole-chip +
+   tiny-button double highlight was hard to read). The button gets its ring + glow
+   from `.rv-detail .kbd-cursor`; this just adds a matching fill so it reads as a
+   solid target. Covers both buttons. */
+.tag-chip--suggested .tag-ok.suggest-focus,
 .tag-chip--suggested .tag-x.suggest-focus {
-  outline: 2px solid var(--kbd-cursor);
-  outline-offset: 1px;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--kbd-cursor) 22%, transparent);
+  background: color-mix(in srgb, var(--kbd-cursor) 26%, transparent);
 }
 .tag-suggest:disabled { opacity: 0.6; cursor: wait; }
 

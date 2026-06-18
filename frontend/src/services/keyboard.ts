@@ -349,16 +349,41 @@ function removeStatusOverlay() {
   statusOverlay = null;
 }
 
+/** The header control the cursor currently sits on, tracked by IDENTITY (not just
+ *  index) so we can re-find it after the header re-renders — starting a recording
+ *  reveals Pause/Cancel and relabels Record, which shifts the control's index. */
+let headerCurrentEl: HTMLElement | null = null;
+
 function highlightHeaderCursor() {
   // Roving the header means we're no longer cycling a <select> — drop its overlay.
   removeStatusOverlay();
   const items = headerControls();
   items.forEach((el) => el.classList.remove("kbd-cursor", "kbd-cycle"));
   const el = items[headerCursor];
+  headerCurrentEl = el ?? null;
   if (el) {
     el.classList.add("kbd-cursor");
     el.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
+}
+
+/** Re-assert the header roving cursor after the header re-renders. Lit rewrites
+ *  the Record button's `class` on a state change (clobbering the `.kbd-cursor` it
+ *  doesn't know about), and revealing Pause/Cancel shifts the button sideways and
+ *  resizes it — so without this the cursor's glow is stranded at the old box. We
+ *  re-find the SAME control by identity and re-paint it, which also re-fits the
+ *  glow to its new size/position. No-op unless we're actually roving the header. */
+export function refreshHeaderCursor() {
+  if (headerCursor < 0) return;
+  if (headerSub) { highlightHeaderSub(); return; }
+  const items = headerControls();
+  if (!items.length) return;
+  if (headerCurrentEl && headerCurrentEl.isConnected) {
+    const idx = items.indexOf(headerCurrentEl);
+    if (idx >= 0) headerCursor = idx;
+  }
+  if (headerCursor >= items.length) headerCursor = items.length - 1;
+  highlightHeaderCursor();
 }
 
 function exitHeaderNav() {
@@ -367,6 +392,7 @@ function exitHeaderNav() {
   // Remember the spot so coming back up (k at the list/sidebar top) restores it.
   if (headerCursor >= 0) lastHeaderCursor = headerCursor;
   headerCursor = -1;
+  headerCurrentEl = null;
 }
 
 /** Enter "header nav": HIGHLIGHT (not focus) the search box so h/l can roam the

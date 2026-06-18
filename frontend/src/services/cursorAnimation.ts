@@ -149,6 +149,19 @@ function place(el: HTMLElement, animate: boolean) {
   }
   ensureEls();
   const g = ghost!;
+  // Decide glide-vs-snap BEFORE reassigning `current` (we compare the OLD target).
+  // The glow should glide only for row-to-row moves WITHIN one pane. It must SNAP
+  // (instant) when the cursor crosses into a different pane, or when the ghost is
+  // currently hidden — otherwise it visibly "flies" across the whole window from
+  // wherever it last sat. That stale spot is most often a LIST row: the first time
+  // a detail pane opens, its editors haven't laid out, so the transcript cell's
+  // place() gets clipped/skipped and `current` stays on the list — then the next
+  // detail cell (e.g. notes) would glide all the way from the list. Snapping
+  // cross-pane kills that fly while keeping the in-pane glide.
+  const prevPane = current?.closest<HTMLElement>(PANE_SEL) ?? null;
+  const nextPane = el.closest<HTMLElement>(PANE_SEL) ?? null;
+  const crossedPanes = prevPane !== nextPane;
+  const wasHidden = g.style.opacity !== "1";
   // Track the latest target even while suppressed (typing into a control): a mouse
   // click can move the roving cursor into the editor while the glow is hidden, so
   // remember it here. Otherwise `current` goes stale and, on exit, the glow glides
@@ -182,7 +195,8 @@ function place(el: HTMLElement, animate: boolean) {
   // right place when editing ends — then it fades in there instead of gliding in
   // from a stale spot.
   g.style.transitionProperty = "left, top, width, height, opacity";
-  g.style.transitionDuration = !suppressed && animate ? `${DUR[m]}ms` : "0ms";
+  const glide = !suppressed && animate && !crossedPanes && !wasHidden;
+  g.style.transitionDuration = glide ? `${DUR[m]}ms` : "0ms";
   g.style.left = `${r.left}px`;
   g.style.top = `${r.top}px`;
   g.style.width = `${r.width}px`;

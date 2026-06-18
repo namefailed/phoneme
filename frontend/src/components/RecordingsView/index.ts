@@ -1235,7 +1235,17 @@ export class RecordingsView {
     const cell = row[this.detailCol];
     if (cell) {
       cell.el.classList.add("kbd-cursor");
-      cell.el.scrollIntoView({ block: "nearest" });
+      // On the first/last row, scroll the pane all the way to the top/bottom (not
+      // just the cell into view) so reaching the ends reveals the title's top
+      // margin / the footer + any slack beneath it — landing flush at the edge.
+      const scroller = cell.el.closest<HTMLElement>(".detail");
+      if (scroller && this.detailRow === 0) {
+        scroller.scrollTo({ top: 0 });
+      } else if (scroller && this.detailRow === grid.length - 1) {
+        scroller.scrollTo({ top: scroller.scrollHeight });
+      } else {
+        cell.el.scrollIntoView({ block: "nearest" });
+      }
     }
   }
 
@@ -1471,8 +1481,9 @@ export class RecordingsView {
   }
 
   /** Enter a tag-suggestion chip's approve/dismiss sub-step (Enter on a
-   *  `suggestion` cell). The chip keeps the grid cursor (its border + glow); the
-   *  ✓ (approve) starts focused. Routes h/l/Enter/Esc here via `detail-capture`. */
+   *  `suggestion` cell). The roving cursor + glow move ONTO the armed ✓/× button
+   *  (the chip hands off its cursor for the duration), starting on ✓ (approve).
+   *  h/l/Enter/Esc route here via `detail-capture`. */
   private enterSuggestSub(chip: HTMLElement) {
     const ok = chip.querySelector<HTMLElement>(".tag-ok");
     const x = chip.querySelector<HTMLElement>(".tag-x:not(.tag-ok)");
@@ -1483,14 +1494,20 @@ export class RecordingsView {
     window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: "suggest" }));
   }
 
-  /** Paint the `.suggest-focus` ring on the focused ✓/× inside the active chip.
-   *  Uses a dedicated class (not `.kbd-cursor`) so the cursor glow stays parked on
-   *  the chip — the chip is the unit, the button just shows which action is armed. */
+  /** Move the roving cursor + glow ONTO the armed ✓/× inside the active chip, and
+   *  off the chip itself — so the small action you're choosing is the clear focus
+   *  (the chip-plus-button double highlight was hard to read). `.suggest-focus`
+   *  adds a matching fill; `.kbd-cursor` brings the ring + animated glow. */
   private highlightSuggestSub() {
     const sub = this.suggestSub;
     if (!sub) return;
-    sub.buttons.forEach((el) => el.classList.remove("suggest-focus"));
-    sub.buttons[sub.index]?.classList.add("suggest-focus");
+    sub.chip.classList.remove("kbd-cursor");
+    sub.buttons.forEach((el) => el.classList.remove("kbd-cursor", "suggest-focus"));
+    const active = sub.buttons[sub.index];
+    if (active) {
+      active.classList.add("kbd-cursor", "suggest-focus");
+      seedCursorGlow(active);
+    }
   }
 
   /** h/l between ✓ and × — clamped (no wrap), so l on × and h on ✓ are no-ops. */
@@ -1510,10 +1527,15 @@ export class RecordingsView {
     this.suggestSub = null;
     window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: null }));
     if (!sub) return;
-    sub.buttons.forEach((el) => el.classList.remove("suggest-focus"));
+    sub.buttons.forEach((el) => el.classList.remove("kbd-cursor", "suggest-focus"));
+    // Either way the cursor leaves the ✓/× — restore it to the grid: on activate
+    // the row re-renders (tag_suggestions_updated) so clamp onto the next chip/row;
+    // on a plain exit (Esc/j/k) re-paint the chip that handed off its cursor.
     if (activate) {
       sub.buttons[sub.index]?.click();
       requestAnimationFrame(() => this.highlightDetail());
+    } else {
+      this.highlightDetail();
     }
   }
 
