@@ -185,7 +185,18 @@ export class BulkActionBarElement extends LitElement {
         this.navIndex = Math.min(btns.length - 1, this.navIndex + 1); this.highlightBulkNav(); return;
       case "Enter": case " ":
         e.preventDefault(); e.stopPropagation();
-        btns[this.navIndex]?.click(); return;
+        btns[this.navIndex]?.click();
+        // After the action settles (one frame, so a modal/menu has mounted): if it
+        // opened an in-bar dropdown (Tag/Export) or a modal (Re-run), those own the
+        // keyboard next — leave the cursor be. Otherwise the action closed the bar
+        // (Delete/Deselect clear the selection and unmount it), so hand the cursor
+        // and its glow back to the list instead of stranding it on the removed
+        // button.
+        requestAnimationFrame(() => {
+          const modalOpen = !!document.querySelector('[class*="modal-overlay"]');
+          if (this.navIndex >= 0 && !this.openMenu && !modalOpen) this.exitBulkNav();
+        });
+        return;
       case "j": case "k": case "ArrowDown": case "ArrowUp": case "Escape":
         e.preventDefault(); e.stopPropagation();
         this.exitBulkNav(); return;
