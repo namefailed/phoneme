@@ -1413,6 +1413,23 @@ body.phoneme-hide-header ph-header-bar {
   color: var(--ok, #a6e3a1);
   font-weight: 700;
 }
+/* Hover the WHOLE chip, not the tiny ✓/× — a solid accent border + brighter fill
+   makes the chip read as one target you're about to act on. (Keyboard mode gets
+   the same whole-chip outline via `.rv-detail .kbd-cursor` above.) */
+.tag-chip--suggested:hover {
+  border-style: solid !important;
+  border-color: color-mix(in srgb, var(--accent) 85%, transparent) !important;
+  background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+}
+/* Inside a chip's keyboard sub-step, the armed ✓ / × gets its own clear ring +
+   fill (a dedicated class, not `.kbd-cursor`, so the cursor glow stays on the
+   chip — the chip is the unit, this just shows which action Enter will fire). */
+.tag-chip--suggested .tag-x.suggest-focus {
+  outline: 2px solid var(--kbd-cursor);
+  outline-offset: 1px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--kbd-cursor) 22%, transparent);
+}
 .tag-suggest:disabled { opacity: 0.6; cursor: wait; }
 
 /* Favorites star — the compact toggle in the leading list column (and its

@@ -145,6 +145,7 @@ const VIM_HELP_GROUP: HelpGroup = {
     { combo: "Enter (detail)", label: "Edit the box / press the button / open a dropdown" },
     { combo: "j k · Enter · Esc", label: "Drive a detail dropdown (Speed/Export/Views/Pipeline)" },
     { combo: "Enter (waveform)", label: "Scrub mode: h/l ±1s, H/L ±5s, Space play, Esc leaves" },
+    { combo: "Enter (tag suggestion)", label: "Enter the chip: h/l pick ✓ apply / × dismiss, Enter acts, Esc backs out" },
     { combo: "h  l (split view)", label: "Cross between the two panes (at a row's edge)" },
     { combo: "Shift+Enter (tags)", label: "Open the Tag Manager" },
     { combo: "i", label: "Edit the transcript directly" },
@@ -192,11 +193,12 @@ let vimNav = false;
  *  same pane/grid cursor as vim, but via the arrow keys, for non-vim users. */
 let arrowNav = false;
 
-/** When the detail pane has "captured" the keys for an open dropdown ("sub") or
- *  the waveform scrub mode ("wave"), route j/k/h/l/H/L/Enter/Esc to that instead
- *  of the normal grid nav. RecordingsView owns the state and announces it via the
- *  `phoneme:detail-capture` event (detail = "sub" | "wave" | null). */
-let detailCapture: "sub" | "wave" | null = null;
+/** When the detail pane has "captured" the keys for an open dropdown ("sub"), the
+ *  waveform scrub mode ("wave"), or a tag-suggestion chip's ✓/× sub-step
+ *  ("suggest"), route j/k/h/l/H/L/Enter/Esc to that instead of the normal grid
+ *  nav. RecordingsView owns the state and announces it via the
+ *  `phoneme:detail-capture` event (detail = "sub" | "wave" | "suggest" | null). */
+let detailCapture: "sub" | "wave" | "suggest" | null = null;
 
 function isTypingTarget(el: Element | null): boolean {
   if (!el) return false;
@@ -708,6 +710,15 @@ function handleVimNav(e: KeyboardEvent): boolean {
       case "j": e.preventDefault(); dispatchVim("wave-exit-down"); return true;
     }
     return true; // swallow other keys while scrubbing
+  }
+  if (detailCapture === "suggest" && activeWithin(".rv-detail")) {
+    switch (nav) {
+      case "h": e.preventDefault(); dispatchVim("suggest-prev"); return true;
+      case "l": e.preventDefault(); dispatchVim("suggest-next"); return true;
+      case "Enter": case "i": case " ": e.preventDefault(); dispatchVim("suggest-activate"); return true;
+      case "Escape": case "j": case "k": e.preventDefault(); dispatchVim("suggest-exit"); return true;
+    }
+    return true; // swallow other keys while a suggestion chip is entered
   }
   // Header strip: when focus is on a header control (a button — the search box
   // is a typing target handled above), h/l move across the header's controls
@@ -1435,9 +1446,10 @@ export function initKeyboard() {
     }
   }).observe(document.body, { childList: true, subtree: true });
   // RecordingsView announces when the detail pane has captured the keys for an
-  // open dropdown ("sub") or the waveform scrub mode ("wave"), or released them
-  // (null), so the layer above can route j/k/h/l/H/L/Enter/Esc accordingly.
+  // open dropdown ("sub"), the waveform scrub mode ("wave"), or a tag-suggestion
+  // chip's ✓/× sub-step ("suggest"), or released them (null), so the layer above
+  // can route j/k/h/l/H/L/Enter/Esc accordingly.
   window.addEventListener("phoneme:detail-capture", (e: Event) => {
-    detailCapture = ((e as CustomEvent).detail as "sub" | "wave" | null) ?? null;
+    detailCapture = ((e as CustomEvent).detail as "sub" | "wave" | "suggest" | null) ?? null;
   });
 }

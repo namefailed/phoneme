@@ -593,7 +593,7 @@ export class TagChipsElement extends LitElement {
           <div class="tags-row tags-suggest-row">
             <span class="tag-suggestions" title="AI-suggested tags — ✓ applies one, ✕ dismisses it">
               ${this.suggestions.map((name) => html`
-                <span class="tag-chip tag-chip--suggested">
+                <span class="tag-chip tag-chip--suggested" data-suggest=${name}>
                   ${name}
                   <button class="tag-x tag-ok" title="Apply this tag" @click=${(e: Event) => { e.stopPropagation(); void this.approveSuggestion(name); }}>✓</button>
                   <button class="tag-x" title="Dismiss this suggestion" @click=${(e: Event) => { e.stopPropagation(); void this.dismissSuggestion(name); }}>×</button>

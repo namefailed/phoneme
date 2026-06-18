@@ -89,8 +89,41 @@ function readStoredSidebar(): boolean {
 
 /** One keyboard-navigable target in the detail pane's 2D grid. `button` clicks
  *  on Enter; `tags` focuses the add-tag input (Shift+Enter → Tag Manager);
- *  `editor` focuses the editable area inside its block (transcript / notes). */
-type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" | "waveform" };
+ *  `editor` focuses the editable area inside its block (transcript / notes);
+ *  `suggestion` is a whole AI tag-suggestion chip — Enter drops into a sub-step
+ *  where h/l pick its ✓ (approve) / × (dismiss). */
+type DetailCell = { el: HTMLElement; kind: "button" | "tags" | "editor" | "waveform" | "suggestion" };
+
+/** Group detail-pane cells into grid rows by their on-screen vertical position so
+ *  navigation follows the VISIBLE layout — a button row that wraps at a narrow
+ *  pane width becomes several grid rows automatically. Buckets by each cell's TOP
+ *  edge (within a tolerance), NOT by vertical range overlap: a tall block like the
+ *  transcript box must stay its own row while the buttons nested at its bottom
+ *  (Speakers · Views · Versions) fall to the next row — overlap-grouping would
+ *  wrongly merge them. Within a row, cells are ordered left→right. */
+function bucketCellsByRow(cells: DetailCell[]): DetailCell[][] {
+  const TOL = 10; // px; same-line cells share a top within this, a wrap exceeds it
+  const withRects = cells
+    .map((c) => ({ c, r: c.el.getBoundingClientRect() }))
+    .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
+  const rows: DetailCell[][] = [];
+  let bucket: { c: DetailCell; r: DOMRect }[] = [];
+  let rowTop = -Infinity;
+  const flush = () => {
+    if (bucket.length) rows.push(bucket.sort((a, b) => a.r.left - b.r.left).map((x) => x.c));
+  };
+  for (const item of withRects) {
+    if (item.r.top - rowTop > TOL) {
+      flush();
+      bucket = [item];
+      rowTop = item.r.top;
+    } else {
+      bucket.push(item);
+    }
+  }
+  flush();
+  return rows;
+}
 
 /** The home view (see the file-top comment for the full picture). Public
  *  surface: `refresh()` re-queries the list; `toggleSidebar()` /
@@ -146,6 +179,11 @@ export class RecordingsView {
   /** Open detail-pane dropdown being keyboard-driven (Speed / Export / Views /
    *  Versions / Pipeline): j/k cycle its items, Enter activates, Esc closes. */
   private detailSub: { trigger: HTMLElement; items: HTMLElement[]; index: number } | null = null;
+  /** A tag-suggestion chip entered for its approve/dismiss sub-step (Enter on a
+   *  `suggestion` cell): `buttons` = [✓ approve, × dismiss], h/l move between them,
+   *  Enter acts, Esc/j/k back out. The chip keeps the grid cursor (border + glow);
+   *  the focused button gets a `.suggest-focus` ring. */
+  private suggestSub: { chip: HTMLElement; buttons: HTMLElement[]; index: number } | null = null;
   /** Waveform "scrub mode" (Enter on the waveform cell): h/l ±1s, H/L ±5s,
    *  Space toggles play, Esc/j/k leave. */
   private waveMode = false;
@@ -795,6 +833,12 @@ export class RecordingsView {
       case "detail-sub-prev": this.moveDetailSub(-1); break;
       case "detail-sub-activate": this.closeDetailSub(true); break;
       case "detail-sub-close": this.closeDetailSub(false); break;
+
+      // Tag-suggestion chip sub-step: h/l between ✓/×, Enter acts, Esc/j/k exits.
+      case "suggest-prev": this.moveSuggestSub(-1); break;
+      case "suggest-next": this.moveSuggestSub(1); break;
+      case "suggest-activate": this.closeSuggestSub(true); break;
+      case "suggest-exit": this.closeSuggestSub(false); break;
       // Waveform scrub mode (h/l ±1s, H/L ±5s, Space toggles, Esc/j/k leave).
       case "wave-back-1": this.waveEl()?.seekBy?.(-1); break;
       case "wave-fwd-1": this.waveEl()?.seekBy?.(1); break;
@@ -1107,54 +1151,45 @@ export class RecordingsView {
       const el = this.container.querySelector<HTMLElement>(sel);
       return el && el.offsetParent !== null ? el : null;
     };
-    const btns = (sel: string): DetailCell[] => qa(sel).map((el) => ({ el, kind: "button" as const }));
-    const rows: DetailCell[][] = [];
     const root = this.detailRootSel();
-    // Title row: the editable title (Enter → edit it) followed by the title-bar
-    // buttons (Similar · Focus · Close).
-    const titleEl = q1(`${root} #detail-title`);
-    const top: DetailCell[] = [];
-    if (titleEl) top.push({ el: titleEl, kind: "button" });
-    top.push(...btns(`${root} .detail-header button`));
-    if (top.length) rows.push(top);
+
+    // Collect every navigable cell with its `kind`, ORDER-INDEPENDENT — the
+    // geometry pass below sorts them into rows/columns by where they actually sit
+    // on screen, so a row that WRAPS at a narrow width becomes multiple grid rows
+    // and j/k/h/l always follow the visible layout instead of a hardcoded grouping.
+    const cells: DetailCell[] = [];
+    const add = (el: HTMLElement | null, kind: DetailCell["kind"]) => { if (el) cells.push({ el, kind }); };
+    const addAll = (sel: string, kind: DetailCell["kind"]) => { for (const el of qa(sel)) cells.push({ el, kind }); };
+
+    // Title (Enter → edit) + the title-bar buttons (Similar · Focus · Close).
+    add(q1(`${root} #detail-title`), "button");
+    addAll(`${root} .detail-header button`, "button");
     // Waveform player: Enter drops into scrub mode (h/l ±1s, H/L ±5s, Esc exits).
-    const wave = q1(`${root} .waveform`);
-    if (wave) rows.push([{ el: wave, kind: "waveform" }]);
-    const action = btns(`${root} #actions button`);
-    if (action.length) rows.push(action);
-    // Tags split into up to three rows: the applied chips, the input + its
-    // controls, and the pending AI suggestions (each ✓/✗ navigable).
-    const appliedChips = btns(`${root} #tags .tags-applied .tag-chip`);
-    if (appliedChips.length) rows.push(appliedChips);
-    const tagAdd = q1(`${root} #tags .tag-add`);
-    const ctrl: DetailCell[] = [];
-    if (tagAdd) ctrl.push({ el: tagAdd, kind: "tags" });
-    ctrl.push(...btns(`${root} #tags .tags-controls button`));
-    if (ctrl.length) rows.push(ctrl);
-    const sugg = btns(`${root} #tags .tags-suggest-row button`);
-    if (sugg.length) rows.push(sugg);
-    const transcript = q1(`${root} .transcript-block`);
-    if (transcript) rows.push([{ el: transcript, kind: "editor" }]);
+    add(q1(`${root} .waveform`), "waveform");
+    // Action buttons (Play · Speed · Re-run · Export · Delete).
+    addAll(`${root} #actions button`, "button");
+    // Tags: applied chips, the add-tag input + its controls, and the pending AI
+    // suggestions. Each SUGGESTION is one cell (the whole chip) — Enter drops into
+    // its ✓/× sub-step (see activateDetail) instead of tabbing the tiny buttons.
+    addAll(`${root} #tags .tags-applied .tag-chip`, "button");
+    add(q1(`${root} #tags .tag-add`), "tags");
+    addAll(`${root} #tags .tags-controls button`, "button");
+    addAll(`${root} #tags .tags-suggest-row .tag-chip--suggested`, "suggestion");
+    // Transcript editor.
+    add(q1(`${root} .transcript-block`), "editor");
     // When a Views/Versions "peek" (Original/Unedited/Summary) hijacks the editor,
     // the .transcript-block is hidden — surface the VISIBLE peek's buttons (e.g.
-    // "Restore raw transcript") as a row so they're keyboard-reachable.
-    const peekBtns = btns(`${root} #original-peek button, ${root} #unedited-peek button, ${root} #summary-peek button`);
-    if (peekBtns.length) rows.push(peekBtns);
-    // The buttons INSIDE the transcript box (Speakers · Views · Versions) get
-    // their own row, between the transcript and notes.
-    const tbtns = btns(`${root} .transcript-history button`);
-    if (tbtns.length) rows.push(tbtns);
-    const notes = q1(`${root} .notes-block`);
-    if (notes) rows.push([{ el: notes, kind: "editor" }]);
-    // Footer: the Pipeline provenance button (Enter opens its popover) then the
-    // clickable file path (l reaches it; Enter reveals the file in the OS).
-    const pipe = q1(`${root} #detail-pipeline-btn`);
-    const path = q1(`${root} #detail-reveal-path`);
-    const footer: DetailCell[] = [];
-    if (pipe) footer.push({ el: pipe, kind: "button" });
-    if (path) footer.push({ el: path, kind: "button" });
-    if (footer.length) rows.push(footer);
-    return rows;
+    // "Restore raw transcript") so they're keyboard-reachable.
+    addAll(`${root} #original-peek button, ${root} #unedited-peek button, ${root} #summary-peek button`, "button");
+    // Buttons INSIDE the transcript box (Speakers · Views · Versions).
+    addAll(`${root} .transcript-history button`, "button");
+    // Notes editor.
+    add(q1(`${root} .notes-block`), "editor");
+    // Footer: Pipeline provenance button + the clickable reveal path.
+    add(q1(`${root} #detail-pipeline-btn`), "button");
+    add(q1(`${root} #detail-reveal-path`), "button");
+
+    return bucketCellsByRow(cells);
   }
 
   /** Paint the grid cursor on the current (row, col) cell, clamping the cursor
@@ -1280,6 +1315,8 @@ export class RecordingsView {
         // the cursor back onto the live grid after the DOM settles.
         requestAnimationFrame(() => this.highlightDetail());
       }
+    } else if (cell.kind === "suggestion") {
+      this.enterSuggestSub(cell.el);
     } else if (cell.kind === "tags") {
       if (shift) void this.openTagManagerModal();
       else cell.el.focus();
@@ -1393,6 +1430,53 @@ export class RecordingsView {
       // closed dropdown's items. Seed it explicitly.
       seedCursorGlow(sub.trigger);
     });
+  }
+
+  /** Enter a tag-suggestion chip's approve/dismiss sub-step (Enter on a
+   *  `suggestion` cell). The chip keeps the grid cursor (its border + glow); the
+   *  ✓ (approve) starts focused. Routes h/l/Enter/Esc here via `detail-capture`. */
+  private enterSuggestSub(chip: HTMLElement) {
+    const ok = chip.querySelector<HTMLElement>(".tag-ok");
+    const x = chip.querySelector<HTMLElement>(".tag-x:not(.tag-ok)");
+    const buttons = [ok, x].filter(Boolean) as HTMLElement[];
+    if (!buttons.length) return;
+    this.suggestSub = { chip, buttons, index: 0 };
+    this.highlightSuggestSub();
+    window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: "suggest" }));
+  }
+
+  /** Paint the `.suggest-focus` ring on the focused ✓/× inside the active chip.
+   *  Uses a dedicated class (not `.kbd-cursor`) so the cursor glow stays parked on
+   *  the chip — the chip is the unit, the button just shows which action is armed. */
+  private highlightSuggestSub() {
+    const sub = this.suggestSub;
+    if (!sub) return;
+    sub.buttons.forEach((el) => el.classList.remove("suggest-focus"));
+    sub.buttons[sub.index]?.classList.add("suggest-focus");
+  }
+
+  /** h/l between ✓ and × — clamped (no wrap), so l on × and h on ✓ are no-ops. */
+  private moveSuggestSub(delta: number) {
+    const sub = this.suggestSub;
+    if (!sub) return;
+    sub.index = Math.max(0, Math.min(sub.buttons.length - 1, sub.index + delta));
+    this.highlightSuggestSub();
+  }
+
+  /** Leave the suggestion sub-step. `activate` clicks the armed ✓/× first (approve
+   *  / dismiss), which re-renders the row via `tag_suggestions_updated` — re-clamp
+   *  the grid cursor onto the next chip/row after the DOM settles. A plain exit
+   *  leaves the chip's grid cursor + glow exactly where they were. */
+  private closeSuggestSub(activate: boolean) {
+    const sub = this.suggestSub;
+    this.suggestSub = null;
+    window.dispatchEvent(new CustomEvent("phoneme:detail-capture", { detail: null }));
+    if (!sub) return;
+    sub.buttons.forEach((el) => el.classList.remove("suggest-focus"));
+    if (activate) {
+      sub.buttons[sub.index]?.click();
+      requestAnimationFrame(() => this.highlightDetail());
+    }
   }
 
   /** Enter the waveform scrub mode (Enter on the waveform cell). */
