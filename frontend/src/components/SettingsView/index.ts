@@ -25,7 +25,6 @@ import { SectionAdvanced } from "./SectionAdvanced";
 import { SectionTags } from "./SectionTags";
 import { SectionProfiles } from "./SectionProfiles";
 import { SectionSavedSearches } from "./SectionSavedSearches";
-import { SectionAutoTag } from "./SectionAutoTag";
 import { SectionInPlace } from "./SectionInPlace";
 import { SectionIntegrations } from "./SectionIntegrations";
 import "./styles.css";
@@ -389,7 +388,6 @@ export class SettingsViewElement extends LitElement {
       { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, c); } },
       { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
-      { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, c); } },
       { tab: "managers/playbook", label: "Playbook", mount: (h) => { new SectionPlaybook(h, c); } },
       { tab: "search", label: "Search", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
@@ -398,10 +396,10 @@ export class SettingsViewElement extends LitElement {
       { tab: "managers/tags", label: "Tags", mount: (h) => { new SectionTags(h, c); } },
       { tab: "managers/profiles", label: "Profiles", mount: (h) => { new SectionProfiles(h, c); } },
       { tab: "search", label: "Search", mount: (h) => { new SectionSavedSearches(h, c); } },
-      // Hook Manager — outbound (scripts + webhook) AND inbound (REST + MCP)
-      // automation in one place.
-      { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionHook(h, c); } },
+      // Integrations tab — inbound automation (REST + MCP) shown FIRST, then the
+      // outbound hooks/webhooks below it.
       { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionIntegrations(h, c); } },
+      { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionHook(h, c); } },
       { tab: "managers/keybinds", label: "Hotkeys", mount: (h) => { new SectionHotkeys(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, c); } },

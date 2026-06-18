@@ -2,7 +2,7 @@ import { SectionHotkey } from "./SectionHotkey";
 import { escapeAttr, escapeHtml } from "../../utils/format";
 import { mountModelField } from "./modelField";
 import { curatedSttModels } from "../../services/sttProviders";
-import { curatedTranscriptionModels } from "../../data/curatedModels";
+import { curatedTranscriptionModels, CURATED_LOCAL_WHISPER } from "../../data/curatedModels";
 import type { HotkeyBinding, PlaybookRecipe } from "../../services/ipc";
 
 /** Action choices for a custom hotkey — which capture the shortcut fires. */
@@ -311,6 +311,13 @@ export class SectionHotkeys {
       const modelHost = card.querySelector<HTMLElement>(".hk-model-host");
       if (modelHost) {
         const provider = () => String(this.config.whisper?.provider ?? "");
+        // The default/bundled engine is local whisper.cpp, whose models live in
+        // CURATED_LOCAL_WHISPER (the Tiny→Large sizes), NOT the cloud
+        // CURATED_TRANSCRIPTION table. So for the local provider feed those sizes
+        // — exactly what "pick a bigger/smaller model for this hotkey" means —
+        // matching the dropdowns in Dictation / Live Preview. Cloud providers use
+        // their curated catalog as before.
+        const isLocal = (p: string) => p === "" || p === "local";
         mountModelField(modelHost, {
           mode: "curated",
           getProvider: provider,
@@ -321,8 +328,8 @@ export class SectionHotkeys {
             binding.whisper_model = m;
             this.notifyChanged();
           },
-          curated: () => curatedSttModels(provider()),
-          curatedRich: () => curatedTranscriptionModels(provider()),
+          curated: () => (isLocal(provider()) ? CURATED_LOCAL_WHISPER.map((m) => m.id) : curatedSttModels(provider())),
+          curatedRich: () => (isLocal(provider()) ? CURATED_LOCAL_WHISPER : curatedTranscriptionModels(provider())),
           blankLabel: "Use the configured model",
         });
       }

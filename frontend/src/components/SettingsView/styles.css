@@ -1263,3 +1263,113 @@ select[data-key="daemon.log_level"] {
   font-variant-numeric: tabular-nums;
   margin-right: 2px;
 }
+
+/* Raw editable controls inside Playbook / Hotkey cards: recessed (bg-deep) +
+   bordered so a text box / dropdown never blends into the surface-colored card.
+   (The shared model + connection pickers style themselves; the inline
+   title/subtitle inputs opt out via .pb-idcol above.) */
+.pb-prompt,
+.pb-timeout,
+.pb-kind,
+.pb-target,
+.pb-target-custom,
+.pb-hook-cmd,
+.pb-hook-url,
+.pb-hook-timeout,
+.pb-add-step,
+.hk-label,
+.hk-combo,
+.hk-action,
+.hk-mode,
+.hk-recipe,
+.hk-ip-type {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-default);
+}
+.pb-prompt:focus,
+.pb-timeout:focus,
+.pb-kind:focus,
+.pb-target:focus,
+.pb-target-custom:focus,
+.pb-hook-cmd:focus,
+.pb-hook-url:focus,
+.pb-hook-timeout:focus,
+.pb-add-step:focus,
+.hk-label:focus,
+.hk-combo:focus,
+.hk-action:focus,
+.hk-mode:focus,
+.hk-recipe:focus,
+.hk-ip-type:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Built-in pipeline steps (Post-Processing): a recessed row per built-in step
+   with a toggle, a short blurb, its behaviour knobs, and a Playbook link. */
+.pp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pp-step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px 12px;
+  align-items: start;
+  padding: 10px 12px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.pp-step .pp-step-main {
+  min-width: 0;
+}
+.pp-step .pp-step-name {
+  font-size: 0.9286rem;
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.pp-step .pp-step-blurb {
+  font-size: 0.7857rem;
+  color: var(--fg-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.pp-step .pp-step-link {
+  font-size: 0.7857rem;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+  align-self: center;
+}
+.pp-step .pp-step-link:hover {
+  text-decoration: underline;
+}
+/* Per-step behaviour knobs (e.g. Tags: max + auto-apply) span the full width
+   below the row, only when the step is on. */
+.pp-step .pp-step-knobs {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-subtle);
+}
+.pp-step .pp-step-knobs label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8214rem;
+  color: var(--fg-muted);
+}
+.pp-step .pp-step-knobs input[type="number"] {
+  width: 64px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}

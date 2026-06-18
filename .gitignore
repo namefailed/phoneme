@@ -72,3 +72,6 @@ frontend/pnpm-workspace.yaml
 # Local git worktrees (parallel branches)
 .worktrees/
 target-test
+
+# Isolated cargo target dir used by audit verifiers (not for commit)
+target-verify/

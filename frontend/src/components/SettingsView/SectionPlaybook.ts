@@ -96,10 +96,13 @@ export class SectionPlaybook {
     container.innerHTML = `
       <div class="settings-section">
         <h3>Playbook entries</h3>
-        <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin: -6px 0 12px;">
-          Reusable AI "moves" — the building blocks of every recording's pipeline and your Custom Hotkeys.
-          A <b>Transform</b> rewrites the transcript text; an <b>Enrichment</b> fills a field (title, summary,
-          tags, or one of your own); a <b>Hook</b> runs a command or webhook. Edit the provided examples, or add your own.
+        <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin: -6px 0 12px; line-height: 1.5;">
+          The Playbook is your library of AI steps. An <b>entry</b> is one step:
+          a <b>Transform</b> rewrites the transcript text, an <b>Enrichment</b> fills a field
+          (title, summary, tags, or one of your own), a <b>Hook</b> runs a command or webhook.
+          A <b>recipe</b> (below) chains entries into a pipeline — every recording runs the
+          <b>Default pipeline</b>, and a Custom Hotkey can run any recipe you build.
+          Edit the provided examples or add your own; turn the built-in steps on/off in Post-Processing.
         </span>
         <div id="pb-entries" style="display: flex; flex-direction: column; gap: 16px;"></div>
         <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
