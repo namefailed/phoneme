@@ -61,7 +61,13 @@ async fn seed_recording(
     (id, audio_path)
 }
 
-async fn test_state(tmp: &std::path::Path, cfg: Config) -> AppState {
+async fn test_state(tmp: &std::path::Path, mut cfg: Config) -> AppState {
+    // Mirror the daemon's startup: reconcile the Playbook entries from the
+    // config's LIVE cleanup/title/summary/auto_tag values BEFORE the recipe
+    // executor runs, so each built-in step's prompt/model/provider in the
+    // entries matches what the test configured. In production `main` does this
+    // once and persists it; here we do it in-memory per test.
+    cfg.migrate_playbook();
     // Explicit data-local (no global `set_var`) so parallel tests don't race on
     // the shared `PHONEME_DATA_LOCAL` env var — see `AppState::new_in`.
     AppState::new_in(cfg, Some(tmp.join("data")))
@@ -727,8 +733,29 @@ fn rerun_overrides_apply_to_a_clone_only() {
     assert!(all.title.enabled && all.title.use_llm);
     assert_eq!(all.title.model, "qwen2.5:0.5b");
 
+    // The recipe executor reads the cleanup step from the Playbook ENTRY, so the
+    // one-shot cleanup override must be mirrored onto the `cleanup` entry of the
+    // clone — otherwise a Re-run → "All" custom cleanup model would be ignored.
+    let cleanup_entry = all.playbook.iter().find(|e| e.id == "cleanup").unwrap();
+    assert_eq!(cleanup_entry.llm.model, "llama3.2:3b");
+
     // The base config is untouched — overrides went onto the clone.
     assert_eq!(base.summary.auto, Config::default().summary.auto);
+    assert_eq!(
+        base.playbook
+            .iter()
+            .find(|e| e.id == "cleanup")
+            .unwrap()
+            .llm
+            .model,
+        Config::default()
+            .playbook
+            .iter()
+            .find(|e| e.id == "cleanup")
+            .unwrap()
+            .llm
+            .model
+    );
 }
 
 /// A TRANSIENT transcribe failure (server unreachable) must leave the

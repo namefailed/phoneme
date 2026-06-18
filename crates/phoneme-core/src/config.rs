@@ -121,6 +121,14 @@ pub struct Config {
     /// recording pipeline. Seeded via `default_recipes` when absent.
     #[serde(default = "default_recipes")]
     pub recipes: Vec<PlaybookRecipe>,
+    /// Whether the one-time Playbook migration has run for this config. Defaults
+    /// to `false` so every pre-Playbook config.toml is reconciled exactly once:
+    /// [`Config::migrate_playbook`] copies the user's LIVE resolved cleanup /
+    /// title / summary / auto-tag values into the built-in entries and rebuilds
+    /// the `default` recipe from the legacy enable flags, then sets this `true`
+    /// so it never re-runs (and never clobbers later Playbook edits).
+    #[serde(default)]
+    pub playbook_migrated: bool,
     /// Frontend OS-level tray behavior.
     pub tray: TrayConfig,
     /// Settings for the built-in transcript editor.
@@ -2118,6 +2126,195 @@ impl Config {
         }
     }
 
+    /// Persist this config to the *active* config file (the `PHONEME_CONFIG`
+    /// override if set, else the per-user default) atomically: validate, write a
+    /// sibling temp file, then rename over the target — so a crash mid-write can
+    /// never leave a truncated config that bricks the next load. Re-serializing
+    /// runs the secret serializer, so any encrypted key stays encrypted.
+    ///
+    /// The canonical daemon/CLI counterpart to [`Self::load_resolved`], used by
+    /// the one-time Playbook migration to freeze the reconciled entries once.
+    pub fn write_resolved(&self) -> Result<()> {
+        self.validate()?;
+        let path = resolved_config_path()
+            .ok_or_else(|| Error::Internal("could not resolve config path".into()))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let body = toml::to_string_pretty(self)
+            .map_err(|e| Error::Internal(format!("failed to serialize config: {e}")))?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, body)?;
+        if let Err(e) = std::fs::rename(&tmp, &path) {
+            // Windows rename can fail if the target is momentarily locked; don't
+            // leave the tmp file behind in that case.
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        Ok(())
+    }
+
+    /// One-time reconcile that makes the Playbook the source of truth (Strategy
+    /// B). Copies the user's LIVE, inheritance-resolved cleanup / title /
+    /// summary / auto-tag values into the four built-in `[[playbook]]` entries
+    /// and rebuilds the `default` recipe's step list from the legacy ENABLE
+    /// flags — so an existing user sees byte-for-byte the same pipeline, but
+    /// from then on the Playbook entries (not the legacy `[llm_post_process]` /
+    /// `[summary]` / `[title]` / `[auto_tag]` sections) drive each built-in step.
+    ///
+    /// Idempotent: a no-op (returns `false`) once [`Self::playbook_migrated`] is
+    /// set. On the first run it returns `true`, and the caller must persist the
+    /// config exactly once so the reconciled entries (and the flag) are frozen
+    /// BEFORE any unrelated `write_config` could overwrite the seeds.
+    ///
+    /// Inheritance mirrors the daemon's per-step `*_llm_config` builders exactly:
+    /// each step's provider / model / api_url / timeout falls back to the
+    /// `[llm_post_process]` (cleanup) value when its own field is blank, so the
+    /// entry stores the SAME effective connection the step would have resolved at
+    /// run time. The API key is NEVER copied into an entry — keys stay in their
+    /// existing sections and are inherited at run time (`PlaybookLlm` carries an
+    /// `api_key` only for genuinely user-authored entries). The auto-tag prompt
+    /// is copied from the LIVE `auto_tag.prompt` (the JSON-array runtime default,
+    /// not the comma-separated seed in `default_playbook`).
+    ///
+    /// Returns whether a migration actually happened.
+    pub fn migrate_playbook(&mut self) -> bool {
+        if self.playbook_migrated {
+            return false;
+        }
+
+        // The cleanup connection is the inheritance base for every other step,
+        // matching `summary_llm_config` / `auto_tag_llm_config` / `title_llm_config`.
+        let base = &self.llm_post_process;
+
+        // Resolve one step's effective (provider, model, api_url, timeout_secs),
+        // inheriting the cleanup value on a blank field — the exact rule the
+        // daemon's `*_llm_config` overlays apply. The api_key is intentionally
+        // never returned: it is inherited at run time and never stored per entry.
+        let resolve = |provider: &str, model: &str, api_url: &str, timeout: u64| -> PlaybookLlm {
+            let provider = if provider.trim().is_empty() {
+                base.provider.clone()
+            } else {
+                provider.to_string()
+            };
+            let model = if model.trim().is_empty() {
+                base.model.clone()
+            } else {
+                model.to_string()
+            };
+            let api_url = if api_url.trim().is_empty() {
+                base.api_url.clone()
+            } else {
+                api_url.to_string()
+            };
+            // A blank per-step timeout means "use the default 30s" rather than
+            // literally 0; the step builders never override timeout, so the
+            // cleanup timeout is the right inherited value here.
+            let timeout_secs = if timeout == 0 { base.timeout_secs } else { timeout };
+            PlaybookLlm {
+                provider,
+                model,
+                api_url,
+                timeout_secs,
+                // Prompt + key are filled in per entry below; never the key.
+                ..PlaybookLlm::default()
+            }
+        };
+
+        // Build each built-in entry's resolved LLM half. Prompts come from the
+        // matching LIVE section (the auto-tag prompt from `auto_tag.prompt`, NOT
+        // the seed) so a user's customised prompt carries over verbatim.
+        let cleanup_llm = {
+            let mut l = resolve(
+                &base.provider,
+                &base.model,
+                &base.api_url,
+                base.timeout_secs,
+            );
+            l.prompt = base.prompt.clone();
+            l
+        };
+        let title_llm = {
+            let t = &self.title;
+            let mut l = resolve(&t.provider, &t.model, &t.api_url, base.timeout_secs);
+            l.prompt = t.prompt.clone();
+            l
+        };
+        let summary_llm = {
+            let s = &self.summary;
+            let mut l = resolve(&s.provider, &s.model, &s.api_url, base.timeout_secs);
+            l.prompt = s.prompt.clone();
+            l
+        };
+        let auto_tag_llm = {
+            let a = &self.auto_tag;
+            let mut l = resolve(&a.provider, &a.model, &a.api_url, base.timeout_secs);
+            l.prompt = a.prompt.clone();
+            l
+        };
+
+        // Overwrite the LLM half of each built-in entry in place, leaving any
+        // user-added entries and the entries' id/name/description/kind/target
+        // untouched. A missing built-in entry (a user deleted it) is simply not
+        // reconciled — the recipe step would dangle and the executor skips it.
+        for entry in &mut self.playbook {
+            let resolved = match entry.id.as_str() {
+                "cleanup" => &cleanup_llm,
+                "title" => &title_llm,
+                "summary" => &summary_llm,
+                "auto_tag" => &auto_tag_llm,
+                _ => continue,
+            };
+            // Preserve any per-entry key the user may already have set; the
+            // migration never touches it (we only copy the inherited connection).
+            entry.llm.provider = resolved.provider.clone();
+            entry.llm.model = resolved.model.clone();
+            entry.llm.api_url = resolved.api_url.clone();
+            entry.llm.prompt = resolved.prompt.clone();
+            entry.llm.timeout_secs = resolved.timeout_secs;
+        }
+
+        // Rebuild the `default` recipe's step list from the legacy ENABLE flags
+        // so a step that was OFF doesn't silently start running: cleanup iff a
+        // post-processing provider is set (provider != none/blank — the runtime
+        // gate is `llm_provider_for_run` resolving a provider), title iff
+        // `title.enabled`, summary iff `summary.auto`, tags iff `auto_tag.auto`.
+        let cleanup_on = {
+            let p = self.llm_post_process.provider.trim();
+            !p.is_empty() && p != "none"
+        };
+        let mut steps: Vec<String> = Vec::new();
+        if cleanup_on {
+            steps.push("cleanup".into());
+        }
+        if self.title.enabled {
+            steps.push("title".into());
+        }
+        if self.summary.auto {
+            steps.push("summary".into());
+        }
+        if self.auto_tag.auto {
+            steps.push("auto_tag".into());
+        }
+        if let Some(recipe) = self.recipes.iter_mut().find(|r| r.id == "default") {
+            recipe.steps = steps;
+        } else {
+            // No `default` recipe at all (a user deleted it): re-seed one with
+            // the flag-derived steps so normal recordings still have a recipe.
+            self.recipes.push(PlaybookRecipe {
+                id: "default".into(),
+                name: "Default pipeline".into(),
+                description:
+                    "What every normal recording runs, migrated from your existing settings.".into(),
+                builtin: true,
+                steps,
+            });
+        }
+
+        self.playbook_migrated = true;
+        true
+    }
+
     /// The transcription provider config the **live preview** should use:
     /// the dedicated [`preview_whisper`](Self::preview_whisper) when set,
     /// otherwise the main [`whisper`](Self::whisper) provider. The final
@@ -2334,6 +2531,12 @@ impl Default for Config {
             hotkeys: Vec::new(),
             playbook: default_playbook(),
             recipes: default_recipes(),
+            // A fresh config's seeds already mirror the legacy defaults, so a
+            // brand-new install needs no reconcile — but leave this `false` so
+            // the migration's idempotent no-op path is exercised uniformly and a
+            // default built from `Config::default()` then customised + saved
+            // (e.g. the first-run wizard) still reconciles on next load.
+            playbook_migrated: false,
             tray: TrayConfig {
                 show_on_startup: true,
                 minimize_to_tray: true,
@@ -2700,6 +2903,113 @@ pub fn ensure_config_dir() -> Result<PathBuf> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn migrate_playbook_copies_live_values_and_builds_recipe() {
+        let mut cfg = Config::default();
+
+        // A customized legacy config: a cloud cleanup connection with a key, a
+        // summary that overrides only the model (inherits the rest), an LLM
+        // title with its own provider, an auto-tag with a customized prompt, and
+        // every step turned ON.
+        cfg.llm_post_process.enabled = true;
+        cfg.llm_post_process.provider = "openai".into();
+        cfg.llm_post_process.model = "gpt-4o-mini".into();
+        cfg.llm_post_process.api_url = "https://api.openai.com/v1".into();
+        cfg.llm_post_process.prompt = "Custom cleanup prompt.".into();
+        cfg.llm_post_process.set_api_key("sk-live-cleanup-secret");
+        cfg.llm_post_process.timeout_secs = 45;
+
+        cfg.summary.auto = true;
+        cfg.summary.model = "gpt-4o".into(); // overrides model; inherits provider/url
+        cfg.summary.prompt = "Custom summary prompt.".into();
+
+        cfg.title.enabled = true;
+        cfg.title.use_llm = true;
+        cfg.title.provider = "groq".into(); // its own provider
+        cfg.title.prompt = "Custom title prompt.".into();
+
+        cfg.auto_tag.auto = true;
+        cfg.auto_tag.prompt = "Custom auto-tag prompt — coin new tags.".into();
+
+        assert!(!cfg.playbook_migrated, "starts un-migrated");
+        let migrated = cfg.migrate_playbook();
+        assert!(migrated, "first migration runs");
+        assert!(cfg.playbook_migrated, "flag is now set");
+
+        let entry = |id: &str| cfg.playbook.iter().find(|e| e.id == id).unwrap();
+
+        // Cleanup entry == the live llm_post_process values (no key copied).
+        let cleanup = entry("cleanup");
+        assert_eq!(cleanup.llm.provider, "openai");
+        assert_eq!(cleanup.llm.model, "gpt-4o-mini");
+        assert_eq!(cleanup.llm.api_url, "https://api.openai.com/v1");
+        assert_eq!(cleanup.llm.prompt, "Custom cleanup prompt.");
+        assert_eq!(cleanup.llm.timeout_secs, 45);
+
+        // Summary inherits provider/url from cleanup (blank in [summary]) but
+        // keeps its own model + prompt.
+        let summary = entry("summary");
+        assert_eq!(summary.llm.provider, "openai", "inherits cleanup provider");
+        assert_eq!(summary.llm.api_url, "https://api.openai.com/v1");
+        assert_eq!(summary.llm.model, "gpt-4o");
+        assert_eq!(summary.llm.prompt, "Custom summary prompt.");
+
+        // Title keeps its own provider, inherits the cleanup model.
+        let title = entry("title");
+        assert_eq!(title.llm.provider, "groq");
+        assert_eq!(title.llm.model, "gpt-4o-mini", "inherits cleanup model");
+        assert_eq!(title.llm.prompt, "Custom title prompt.");
+
+        // Auto-tag copies the LIVE prompt, NOT the seed.
+        let auto_tag = entry("auto_tag");
+        assert_eq!(auto_tag.llm.prompt, "Custom auto-tag prompt — coin new tags.");
+        assert_ne!(
+            auto_tag.llm.prompt,
+            default_playbook()
+                .iter()
+                .find(|e| e.id == "auto_tag")
+                .unwrap()
+                .llm
+                .prompt,
+            "must copy the live prompt, not the comma-separated seed"
+        );
+
+        // The api_key is NEVER copied into any entry.
+        for e in &cfg.playbook {
+            assert!(
+                e.llm.api_key_str().is_empty(),
+                "entry {} must not carry a key",
+                e.id
+            );
+        }
+
+        // The default recipe lists all four steps, in cleanup → title → summary
+        // → auto_tag order (everything was enabled).
+        let recipe = cfg.recipes.iter().find(|r| r.id == "default").unwrap();
+        assert_eq!(recipe.steps, ["cleanup", "title", "summary", "auto_tag"]);
+
+        // Idempotent: a second call is a no-op and changes nothing.
+        let before = cfg.clone();
+        assert!(!cfg.migrate_playbook(), "second migration is a no-op");
+        assert_eq!(cfg, before, "config unchanged after a redundant migration");
+    }
+
+    #[test]
+    fn migrate_playbook_recipe_omits_disabled_steps() {
+        // Disabled cleanup (provider none) + summary off + tags off, only the
+        // heuristic title on → the recipe contains exactly `title`.
+        let mut cfg = Config::default();
+        cfg.llm_post_process.enabled = false;
+        cfg.llm_post_process.provider = "none".into();
+        cfg.summary.auto = false;
+        cfg.auto_tag.auto = false;
+        cfg.title.enabled = true;
+
+        assert!(cfg.migrate_playbook());
+        let recipe = cfg.recipes.iter().find(|r| r.id == "default").unwrap();
+        assert_eq!(recipe.steps, ["title"], "only the enabled step is a member");
+    }
 
     #[test]
     fn recording_source_defaults_to_microphone() {

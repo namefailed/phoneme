@@ -198,6 +198,25 @@ fn apply_rerun_overrides(
         if let Some(u) = ov.cleanup_api_url {
             cfg.llm_post_process.api_url = u;
         }
+        // The recipe executor reads the cleanup step's prompt/model/provider/url
+        // from the `cleanup` Playbook ENTRY (Strategy B), so mirror the one-shot
+        // cleanup overrides into that entry on this per-job CLONE. Without this a
+        // Re-run → "All" with a custom cleanup model/prompt would be silently
+        // ignored for the Transform step. The clone is discarded after the run,
+        // so the persisted Playbook is never touched; the api_key is never set
+        // here (it inherits the cleanup section, as always).
+        let (cp, cm, cpr, cu) = (
+            cfg.llm_post_process.provider.clone(),
+            cfg.llm_post_process.model.clone(),
+            cfg.llm_post_process.prompt.clone(),
+            cfg.llm_post_process.api_url.clone(),
+        );
+        if let Some(entry) = cfg.playbook.iter_mut().find(|e| e.id == "cleanup") {
+            entry.llm.provider = cp;
+            entry.llm.model = cm;
+            entry.llm.prompt = cpr;
+            entry.llm.api_url = cu;
+        }
         cfg.summary.auto = true;
         if let Some(m) = ov.summary_model {
             cfg.summary.model = m;
@@ -1068,6 +1087,278 @@ async fn finalize_canceled(state: &AppState, id: &RecordingId) {
     tracing::info!(id = %id, "in-flight recording canceled by user");
 }
 
+// ── Recipe executor ──────────────────────────────────────────────────────────
+// The pipeline's cleanup → title → summary → tags interior is driven by a
+// resolved Playbook recipe instead of a hardcoded sequence. The executor is a
+// thin DISPATCHER over the proven helpers (`run_llm_stage`, `maybe_auto_title`,
+// `maybe_auto_summarize`, `maybe_auto_tag`) — it never reimplements their
+// event/persistence logic, so parity (and IPC-re-run identicality) is automatic.
+// Hooks stay OUTSIDE the recipe loop (`cfg.hook`), exactly as before.
+
+/// The recipe id the normal recording pipeline runs.
+const DEFAULT_RECIPE_ID: &str = "default";
+
+/// One resolved built-in step, ready to dispatch. The schema's `custom:<key>`
+/// enrichment has no persistence path yet, so it is carried as a forward-compat
+/// no-op (warn-only) rather than dropped silently or treated as a failure.
+enum ResolvedStep {
+    /// A Transform (cleanup-style) step: rewrite the running transcript in place.
+    /// Carries the entry-derived, inheritance-resolved LLM config + its prompt.
+    Transform {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
+    /// Enrichment writing the recording title (dispatches to `maybe_auto_title`).
+    Title,
+    /// Enrichment writing the summary (dispatches to `maybe_auto_summarize`).
+    Summary,
+    /// Enrichment writing tag suggestions (dispatches to `maybe_auto_tag`).
+    Tags,
+    /// An enrichment whose target has no backing store yet (`custom:<key>` or an
+    /// unrecognized target). No-op + warn; never fails the recording.
+    UnsupportedEnrichment { target: String },
+}
+
+/// Overlay a Playbook entry's LLM half onto a clone of `[llm_post_process]`,
+/// mirroring the daemon's per-step `*_llm_config` builders EXACTLY: `enabled`
+/// forced true, each blank field inheriting the cleanup value (inherit-on-blank),
+/// and the API key inherited from the cleanup section unless the entry carries
+/// its own non-blank key. Built-in migrated entries carry no key, so they
+/// inherit exactly as the legacy pipeline did.
+fn entry_llm_config(cfg: &Config, entry: &phoneme_core::config::PlaybookLlm) -> LlmPostProcessConfig {
+    let mut llm = cfg.llm_post_process.clone();
+    llm.enabled = true;
+    if !entry.provider.trim().is_empty() {
+        llm.provider = entry.provider.clone();
+    }
+    if !entry.api_url.trim().is_empty() {
+        llm.api_url = entry.api_url.clone();
+    }
+    let key = entry.api_key_str();
+    if !key.trim().is_empty() {
+        llm.set_api_key(key.to_string());
+    }
+    if !entry.model.trim().is_empty() {
+        llm.model = entry.model.clone();
+    }
+    llm
+}
+
+/// Resolve the recording's recipe into an ordered list of dispatchable steps.
+///
+/// Picks the `default` recipe from `cfg.recipes` (falling back to the seeded
+/// `default_recipes()` if a user deleted it / an empty config), then maps each
+/// step id to its `PlaybookEntry`. A dangling id (entry deleted) or a `Hook`
+/// entry (hooks run outside the loop in v1) is skipped with a warning — never a
+/// panic and never an abort. An empty recipe yields an empty list: a bare
+/// transcribe-only run.
+fn resolve_recipe(cfg: &Config) -> Vec<ResolvedStep> {
+    use phoneme_core::config::PlaybookKind;
+
+    let seeded = phoneme_core::config::default_recipes();
+    let recipe = cfg
+        .recipes
+        .iter()
+        .find(|r| r.id == DEFAULT_RECIPE_ID)
+        .or_else(|| seeded.iter().find(|r| r.id == DEFAULT_RECIPE_ID));
+    let Some(recipe) = recipe else {
+        tracing::warn!("no `default` recipe found; running transcribe-only");
+        return Vec::new();
+    };
+
+    let mut steps = Vec::with_capacity(recipe.steps.len());
+    for step_id in &recipe.steps {
+        let Some(entry) = cfg.playbook.iter().find(|e| &e.id == step_id) else {
+            tracing::warn!(step = %step_id, "recipe references a missing Playbook entry; skipping");
+            continue;
+        };
+        match entry.kind {
+            PlaybookKind::Transform => steps.push(ResolvedStep::Transform {
+                llm_cfg: entry_llm_config(cfg, &entry.llm),
+                prompt: entry.llm.prompt.clone(),
+            }),
+            PlaybookKind::Enrichment => {
+                let target = entry.target.trim();
+                match target {
+                    "title" => steps.push(ResolvedStep::Title),
+                    "summary" => steps.push(ResolvedStep::Summary),
+                    "tags" => steps.push(ResolvedStep::Tags),
+                    other => steps.push(ResolvedStep::UnsupportedEnrichment {
+                        target: other.to_string(),
+                    }),
+                }
+            }
+            PlaybookKind::Hook => {
+                // Hooks are driven by `cfg.hook` (run_on_transcribe / commands /
+                // keyword_rules / webhook) OUTSIDE the recipe loop in v1; a Hook
+                // entry inside a recipe has no executor semantics yet.
+                tracing::warn!(
+                    step = %step_id,
+                    "Hook entries are not recipe steps yet; hooks run via [hook] config"
+                );
+            }
+        }
+    }
+    steps
+}
+
+/// Run the recipe's Transform steps (cleanup) — the IN-MEMORY text rewrites that
+/// must happen BEFORE the transcript-commit writes. Returns the (possibly
+/// rewritten) transcript and the model that produced the LAST transform (the
+/// `cleanup_model` recorded in processing meta).
+///
+/// Each Transform: best-effort `CleaningUp` status + `PipelineStageChanged`,
+/// then a cancel-raced `run_llm_stage`. On success the running transcript is
+/// replaced and feeds the next Transform; on a real failure (not a user-skip)
+/// the earliest `CleanupFailed` is recorded in `step_failure`. Cancellation
+/// inside a Transform finalizes and returns `None` via the `Cancelled` signal —
+/// the caller treats that as a return from `run`.
+///
+/// Today's default recipe has exactly one Transform (cleanup); the loop also
+/// supports chained Transforms (each rewrites the text), with only the last
+/// transform's model recorded as `cleanup_model`.
+async fn run_transform_steps(
+    state: &AppState,
+    id: &RecordingId,
+    cancel: &tokio_util::sync::CancellationToken,
+    steps: &[ResolvedStep],
+    transcript: String,
+    step_failure: &mut Option<(RecordingStatus, String)>,
+) -> std::result::Result<(String, Option<String>), Canceled> {
+    let mut transcript = transcript;
+    let mut cleanup_model: Option<String> = None;
+    for step in steps {
+        let ResolvedStep::Transform { llm_cfg, prompt } = step else {
+            continue;
+        };
+        let Some(llm) = llm_provider_for_run(state, llm_cfg).await else {
+            // No usable provider for this Transform — same as the legacy gate
+            // (`llm_provider_for_run` None): skip silently, keep the transcript.
+            continue;
+        };
+        // The list/detail/activity views read the DB status, so it tracks the
+        // stage events step for step. Best-effort: a status write failing must
+        // not kill the stage itself.
+        let _ = state
+            .catalog
+            .update_status(id, RecordingStatus::CleaningUp)
+            .await;
+        state.events.emit(DaemonEvent::PipelineStageChanged {
+            id: id.clone(),
+            stage: PipelineStage::CleaningUp,
+        });
+        let cleanup_result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                finalize_canceled(state, id).await;
+                return Err(Canceled);
+            }
+            r = run_llm_stage(state, id, PipelineStage::CleaningUp, &*llm, prompt, &transcript) => r,
+        };
+        match cleanup_result {
+            Ok(processed) => {
+                tracing::info!("LLM post-processing succeeded");
+                transcript = processed;
+                cleanup_model = Some(llm_cfg.model.clone());
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "LLM post-processing failed, falling back to raw transcript");
+                // Best-effort step: the raw transcript is kept and the recording
+                // stays usable — surface the failure for a toast without flipping
+                // to a terminal status. (Carries the skip sentinel when skipped.)
+                let msg = e.to_string();
+                state.events.emit(DaemonEvent::CleanupFailed {
+                    id: id.clone(),
+                    error: msg.clone(),
+                });
+                if !stage_skipped(&e) {
+                    step_failure.get_or_insert((RecordingStatus::CleanupFailed, msg));
+                }
+            }
+        }
+    }
+    Ok((transcript, cleanup_model))
+}
+
+/// Marker that a step was canceled mid-flight; the caller returns `Ok(())` from
+/// `run` (the cancel has already been finalized via `finalize_canceled`).
+struct Canceled;
+
+/// Run the recipe's Enrichment steps that write the title (the only enrichment
+/// that lands BEFORE the transcript-commit's downstream events — same position
+/// as the legacy `maybe_auto_title` call). Title self-gates on `cfg.title.enabled`
+/// and emits no status/PipelineStageChanged. Returns nothing; folds a real
+/// failure into `step_failure`.
+async fn run_title_steps(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    steps: &[ResolvedStep],
+    transcript: &str,
+    raw_transcript: &str,
+    step_failure: &mut Option<(RecordingStatus, String)>,
+) {
+    for step in steps {
+        if !matches!(step, ResolvedStep::Title) {
+            continue;
+        }
+        if let Some(msg) = maybe_auto_title(state, cfg, id, transcript, raw_transcript).await {
+            step_failure.get_or_insert((RecordingStatus::TitleFailed, msg));
+        }
+    }
+}
+
+/// Run the recipe's summary + tags enrichments (the AFTER-commit, after-hooks
+/// enrichments), in recipe order. Summary/tags each self-gate on their legacy
+/// flag inside the helper and emit their own `PipelineStageChanged`; the
+/// `Summarizing`/`Tagging` status is written ONLY when that step will actually
+/// run, so a disabled step never flashes in the UI. Unsupported `custom:` targets
+/// are a no-op + warn. Folds real failures into `step_failure`.
+async fn run_enrichment_steps(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    steps: &[ResolvedStep],
+    transcript: &str,
+    step_failure: &mut Option<(RecordingStatus, String)>,
+) {
+    for step in steps {
+        match step {
+            ResolvedStep::Summary => {
+                if summary_enabled(cfg) {
+                    let _ = state
+                        .catalog
+                        .update_status(id, RecordingStatus::Summarizing)
+                        .await;
+                }
+                if let Some(msg) = maybe_auto_summarize(state, cfg, id, transcript).await {
+                    step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
+                }
+            }
+            ResolvedStep::Tags => {
+                if auto_tag_enabled(cfg) {
+                    let _ = state
+                        .catalog
+                        .update_status(id, RecordingStatus::Tagging)
+                        .await;
+                }
+                if let Some(msg) = maybe_auto_tag(state, cfg, id, transcript).await {
+                    step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
+                }
+            }
+            ResolvedStep::UnsupportedEnrichment { target } => {
+                tracing::warn!(
+                    target = %target,
+                    "recipe enrichment target has no backing store yet; skipping"
+                );
+            }
+            // Transform + Title are handled in their own phases (before the
+            // commit); ignore them here.
+            ResolvedStep::Transform { .. } | ResolvedStep::Title => {}
+        }
+    }
+}
+
 /// Process a single claimed payload through the full pipeline.
 ///
 /// Updates catalog, fires events, moves inbox files to done/ or failed/.
@@ -1333,10 +1624,15 @@ pub async fn run(
     // always restore to this via "View original transcript" in the detail pane.
     let raw_transcript = transcript.clone();
 
-    // Optional LLM post-processing. Non-fatal: on any failure we keep the raw
-    // transcript. `provider()` returns None when disabled or provider = none.
-    let mut transcript = transcript;
-    let mut cleanup_model: Option<String> = None;
+    // Resolve the recording's recipe (the `default` Playbook recipe) into an
+    // ordered list of dispatchable steps. The migration encoded the legacy
+    // enable flags into recipe MEMBERSHIP, so a step runs iff it's present here;
+    // the per-step on/off semantics (a provider must resolve for cleanup, the
+    // legacy flag still self-gates inside each enrichment helper) are preserved
+    // by the dispatchers below. A dangling step id / empty recipe degrades to a
+    // bare transcribe-only run, never a panic.
+    let recipe = resolve_recipe(cfg);
+
     // The earliest optional step (cleanup → title → summary → tag) that REALLY
     // failed (a user-skip doesn't count) becomes the recording's terminal status
     // instead of `Done`, so a failed enrichment is filterable/searchable — like
@@ -1345,56 +1641,24 @@ pub async fn run(
     // the paired message is persisted as the row's error so the failed panel +
     // logs show WHY, surviving a restart (see `finalize_step_status`).
     let mut step_failure: Option<(RecordingStatus, String)> = None;
-    if let Some(llm) = llm_provider_for_run(state, &cfg.llm_post_process).await {
-        // The list/detail/activity views read the DB status, so it tracks the
-        // stage events step for step — "transcribing" no longer covers the
-        // whole pipeline. Best-effort: a status write failing must not kill
-        // the stage itself.
-        let _ = state
-            .catalog
-            .update_status(&id, RecordingStatus::CleaningUp)
-            .await;
-        state.events.emit(DaemonEvent::PipelineStageChanged {
-            id: id.clone(),
-            stage: PipelineStage::CleaningUp,
-        });
-        let cleanup_result = tokio::select! {
-            biased;
-            _ = cancel.cancelled() => {
-                finalize_canceled(state, &id).await;
-                return Ok(());
-            }
-            r = run_llm_stage(
-                state,
-                &id,
-                PipelineStage::CleaningUp,
-                &*llm,
-                &cfg.llm_post_process.prompt,
-                &transcript,
-            ) => r,
-        };
-        match cleanup_result {
-            Ok(processed) => {
-                tracing::info!("LLM post-processing succeeded");
-                transcript = processed;
-                cleanup_model = Some(cfg.llm_post_process.model.clone());
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "LLM post-processing failed, falling back to raw transcript");
-                // Best-effort step: the raw transcript is kept and the recording
-                // stays usable — surface the failure for a toast without flipping
-                // to a terminal status. (Carries the skip sentinel when skipped.)
-                let msg = e.to_string();
-                state.events.emit(DaemonEvent::CleanupFailed {
-                    id: id.clone(),
-                    error: msg.clone(),
-                });
-                if !stage_skipped(&e) {
-                    step_failure.get_or_insert((RecordingStatus::CleanupFailed, msg));
-                }
-            }
-        }
-    }
+
+    // PHASE 1 — Transform steps (cleanup): IN-MEMORY text rewrites that must
+    // happen BEFORE the transcript-commit writes below. Non-fatal: on any
+    // failure the raw transcript is kept. Cancellation inside a Transform has
+    // already finalized the recording, so we return `Ok(())` here.
+    let (transcript, cleanup_model) = match run_transform_steps(
+        state,
+        &id,
+        &cancel,
+        &recipe,
+        transcript,
+        &mut step_failure,
+    )
+    .await
+    {
+        Ok(out) => out,
+        Err(Canceled) => return Ok(()),
+    };
 
     payload.transcript = transcript.clone();
     // Record the model that actually ran, from the per-job whisper config so a
@@ -1499,13 +1763,22 @@ pub async fn run(
         )
         .await?;
 
-    // Auto title, right after the transcript settles (cleanup included) and
-    // before TranscriptionDone fires, so the refreshed list shows the title
-    // together with the new text. A retranscribe re-runs this and refreshes
-    // auto titles; user-set titles are protected inside.
-    if let Some(msg) = maybe_auto_title(state, cfg, &id, &transcript, &raw_transcript).await {
-        step_failure.get_or_insert((RecordingStatus::TitleFailed, msg));
-    }
+    // PHASE 2a — title enrichment, right after the transcript settles (cleanup
+    // included) and before TranscriptionDone fires, so the refreshed list shows
+    // the title together with the new text. A retranscribe re-runs this and
+    // refreshes auto titles; user-set titles are protected inside. Runs only
+    // when the recipe contains a `title` step (membership gate); `maybe_auto_title`
+    // additionally self-gates on `cfg.title.enabled`.
+    run_title_steps(
+        state,
+        cfg,
+        &id,
+        &recipe,
+        &transcript,
+        &raw_transcript,
+        &mut step_failure,
+    )
+    .await;
 
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {
@@ -1542,29 +1815,13 @@ pub async fn run(
     // lets a re-transcription update the text without re-triggering side effects
     // (e.g. re-appending to an Obsidian daily note).
     if !cfg.hook.run_on_transcribe {
-        // Auto-summary is the final step — runs after post-processing so it
-        // summarizes the text the user actually sees; auto-tag suggestions ride
-        // along after it (approve-to-apply, so they're side-effect free).
-        // Statuses only flip when the step will actually run, so a recording
-        // with summaries off never flashes "Summarizing".
-        if summary_enabled(cfg) {
-            let _ = state
-                .catalog
-                .update_status(&id, RecordingStatus::Summarizing)
-                .await;
-        }
-        if let Some(msg) = maybe_auto_summarize(state, cfg, &id, &transcript).await {
-            step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
-        }
-        if auto_tag_enabled(cfg) {
-            let _ = state
-                .catalog
-                .update_status(&id, RecordingStatus::Tagging)
-                .await;
-        }
-        if let Some(msg) = maybe_auto_tag(state, cfg, &id, &transcript).await {
-            step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
-        }
+        // PHASE 2b — summary + tags enrichments (the recipe's remaining
+        // Enrichment steps), in recipe order. They run after post-processing so
+        // they see the text the user actually sees; tag suggestions are
+        // approve-to-apply (side-effect free). Each self-gates on its legacy
+        // flag and writes its own status only when it will actually run, so a
+        // disabled step never flashes in the UI.
+        run_enrichment_steps(state, cfg, &id, &recipe, &transcript, &mut step_failure).await;
         // A failed optional step (cleanup/title/summary/tag) becomes the terminal
         // status — like hook_failed, the transcript is intact and usable, but the
         // failure is now filterable, with the reason persisted. No failure → Done.
@@ -1677,27 +1934,19 @@ pub async fn run(
         }
     }
 
-    // Auto-summary is the final step — runs after post-processing and hooks so
-    // it summarizes the text the user actually sees; auto-tag suggestions ride
-    // along after it (approve-to-apply, so they're side-effect free).
-    if summary_enabled(cfg) {
-        let _ = state
-            .catalog
-            .update_status(&id, RecordingStatus::Summarizing)
-            .await;
-    }
-    if let Some(msg) = maybe_auto_summarize(state, cfg, &id, &payload.transcript).await {
-        step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
-    }
-    if auto_tag_enabled(cfg) {
-        let _ = state
-            .catalog
-            .update_status(&id, RecordingStatus::Tagging)
-            .await;
-    }
-    if let Some(msg) = maybe_auto_tag(state, cfg, &id, &payload.transcript).await {
-        step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
-    }
+    // PHASE 2b (hooks-ON) — summary + tags enrichments, after post-processing
+    // AND hooks so they see the text the user actually sees; tag suggestions are
+    // approve-to-apply (side-effect free). Same recipe-driven dispatch as the
+    // hooks-OFF arm, over the (post-processed) payload transcript.
+    run_enrichment_steps(
+        state,
+        cfg,
+        &id,
+        &recipe,
+        &payload.transcript,
+        &mut step_failure,
+    )
+    .await;
 
     state
         .catalog

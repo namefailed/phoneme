@@ -70,7 +70,20 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let cfg = load_config()?;
+    let mut cfg = load_config()?;
+    // One-time Playbook reconcile (Strategy B): copy the user's LIVE cleanup /
+    // title / summary / auto-tag values into the built-in Playbook entries and
+    // rebuild the `default` recipe from the legacy enable flags, so the executor
+    // can drive the pipeline off the Playbook with zero behavior change. Persist
+    // exactly once, BEFORE building AppState (so the in-memory config the daemon
+    // runs on is the migrated one) and BEFORE any unrelated write could freeze
+    // the un-migrated seeds. A persist failure is non-fatal — the in-memory
+    // migration still applies for this run and the next startup retries.
+    if cfg.migrate_playbook() {
+        if let Err(e) = cfg.write_resolved() {
+            tracing::warn!(error = %e, "failed to persist Playbook migration; will retry next startup");
+        }
+    }
     let state = AppState::new(cfg).await?;
     let _guard = logging::init(&state.config.load(), &state.paths.log_dir, args.foreground)?;
 
