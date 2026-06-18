@@ -280,6 +280,30 @@ const RECORDINGS: Array<Record<string, unknown>> = [
   track("m6b", "m6", "Client check-in", "system", 14, 10, 45, M6_SYS, [2]),
 ];
 
+// Seed pending auto-tag suggestions on most standalone recordings so the
+// suggestion chips (approve / dismiss), the queue's tagging step, and the detail
+// pane's "Suggestions pending" provenance line are all visible in the preview
+// without running an LLM. Deterministic + index-driven (no randomness) so the
+// mock is stable across reloads; ~1 in 6 rows is left empty so the no-suggestions
+// state still renders. Meeting tracks are skipped. A suggested name is never one
+// the row already carries as a real tag (you don't suggest a tag it already has).
+const SUGGESTION_POOL = [
+  "follow-up", "important", "draft", "review", "research", "client",
+  "urgent", "q3-planning", "design", "bug", "decision", "action-items",
+];
+RECORDINGS.forEach((r, i) => {
+  if (r.meeting_id != null) return; // skip meeting tracks (grouped UI)
+  if (i % 6 === 5) return; // leave some without, for contrast
+  const have = new Set((r.tags as Tag[]).map((t) => t.name));
+  const want = 1 + (i % 3); // 1–3 suggestions per row
+  const picks: string[] = [];
+  for (let k = 0; picks.length < want && k < SUGGESTION_POOL.length; k++) {
+    const name = SUGGESTION_POOL[(i * 2 + k) % SUGGESTION_POOL.length];
+    if (!have.has(name) && !picks.includes(name)) picks.push(name);
+  }
+  r.tag_suggestions = picks;
+});
+
 /** A short, speech-shaped fake WAV synthesized once and shared by every recording
  *  (returned via the mocked convertFileSrc), so WaveSurfer has audio to draw —
  *  no binary committed to the repo. */
