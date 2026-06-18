@@ -86,11 +86,10 @@ const RAIL: { id: string; label: string }[] = [
   { id: "preview", label: "👁️ Live Preview" },
   { id: "postprocessing", label: "✨ Post-Processing" },
   { id: "managers/hooks", label: "🪝 Integrations" },
-  { id: "managers/keybinds", label: "⚡ Keybinds" },
+  { id: "managers/keybinds", label: "⚡ Hotkeys" },
   { id: "diarization", label: "👥 Diarization" },
   { id: "managers/tags", label: "🏷️ Tags" },
-  { id: "recall", label: "🔮 Recall" },
-  { id: "managers/saved", label: "📌 Saved searches" },
+  { id: "search", label: "🔍 Search" },
   { id: "managers/profiles", label: "👤 Profiles" },
   { id: "system", label: "⚙️ System" },
 ];
@@ -104,7 +103,11 @@ const LEGACY_TAB_ALIASES: Record<string, string> = {
   managers: "managers/tags",
   tags: "managers/tags",
   profiles: "managers/profiles",
-  saved: "managers/saved",
+  // Recall + Saved searches were merged into one "Search" tab; old deep-links
+  // (g-chords, saved links, the brief separate ids) keep resolving there.
+  saved: "search",
+  "managers/saved": "search",
+  recall: "search",
 };
 function resolveTab(rawTab: string): string {
   return LEGACY_TAB_ALIASES[rawTab] ?? rawTab;
@@ -385,18 +388,18 @@ export class SettingsViewElement extends LitElement {
       { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, c); } },
-      { tab: "recall", label: "Recall", mount: (h) => { new SectionSemantic(h, c); } },
+      { tab: "search", label: "Search", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, c); } },
       // Managers (each its own rail entry under the "Managers" group).
       { tab: "managers/tags", label: "Tags", mount: (h) => { new SectionTags(h, c); } },
       { tab: "managers/profiles", label: "Profiles", mount: (h) => { new SectionProfiles(h, c); } },
-      { tab: "managers/saved", label: "Saved searches", mount: (h) => { new SectionSavedSearches(h, c); } },
+      { tab: "search", label: "Search", mount: (h) => { new SectionSavedSearches(h, c); } },
       // Hook Manager — outbound (scripts + webhook) AND inbound (REST + MCP)
       // automation in one place.
       { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionHook(h, c); } },
       { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionIntegrations(h, c); } },
-      { tab: "managers/keybinds", label: "Keybinds", mount: (h) => { new SectionHotkeys(h, c); } },
+      { tab: "managers/keybinds", label: "Hotkeys", mount: (h) => { new SectionHotkeys(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, c, this.onNavigateToWizard); } },

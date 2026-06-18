@@ -59,7 +59,7 @@ const BASE_HELP_GROUPS: HelpGroup[] = [
       { combo: "g then 1 / 2", label: "Jump to the left / right split pane" },
       { combo: "g then T", label: "Open the Tag Manager" },
       { combo: "g then P", label: "Managers → Profiles" },
-      { combo: "g then S", label: "Managers → Saved searches" },
+      { combo: "g then S", label: "Settings → Search" },
       { combo: "Ctrl + ,", label: "Open Settings" },
       { combo: "Ctrl + B", label: "Toggle the sidebar" },
       { combo: "Ctrl + \\ / Ctrl + D", label: "Toggle the detail pane" },
@@ -531,7 +531,7 @@ function handleGChord(e: KeyboardEvent) {
     // g P / g S = Settings → Managers deep-linked to Profiles / Saved searches.
     if (e.key === "T") { e.preventDefault(); dispatchVim("open-tag-manager"); return; }
     if (e.key === "P") { e.preventDefault(); navigate("settings", "managers/profiles"); return; }
-    if (e.key === "S") { e.preventDefault(); navigate("settings", "managers/saved"); return; }
+    if (e.key === "S") { e.preventDefault(); navigate("settings", "search"); return; }
     // g 1 / g 2 — jump straight to the left (1) / right (2) recording pane in
     // split view (g 1 also just focuses the detail pane outside split). A "go to
     // a pane" DESTINATION chord, so — like g d / g l — it works for everyone, not
