@@ -71,7 +71,7 @@ const WHISPER_READY_TIMEOUT: Duration = Duration::from_secs(30);
 /// error, cancel) without each path having to remember to clear it. A no-op
 /// (`inner = None`) when the job had no override or used a cloud backend (no
 /// server to restore).
-struct WhisperOverrideGuard {
+pub(crate) struct WhisperOverrideGuard {
     inner: Option<Arc<WhisperModelOverride>>,
 }
 
@@ -104,7 +104,7 @@ impl Drop for WhisperOverrideGuard {
 /// Runs while the caller holds the `whisper_sem` permit, so for the local case
 /// the restart + readiness wait is serialized against the preview and any other
 /// final transcription.
-async fn apply_model_override(
+pub(crate) async fn apply_model_override(
     state: &AppState,
     configured: &WhisperConfig,
     requested: Option<String>,

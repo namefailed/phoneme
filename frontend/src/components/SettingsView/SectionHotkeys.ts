@@ -17,6 +17,12 @@ const ACTION_OPTIONS: { value: HotkeyBinding["action"]; label: string }[] = [
  *  from a named recipe so the <select> can offer it as the first option. */
 const DEFAULT_RECIPE_VALUE = "";
 
+/** The id of the seeded `default` recipe in `config.recipes`. The empty-value
+ *  "Default pipeline" option already stands in for it, so it is skipped when
+ *  iterating `config.recipes` to avoid a duplicate option (`resolve_recipe` on
+ *  the daemon maps both "" and "default" to the same chain). */
+const DEFAULT_RECIPE_ID = "default";
+
 /**
  * Settings → Keybinds: the full hotkey manager. Two cards on the shared config:
  *
@@ -154,6 +160,12 @@ export class SectionHotkeys {
       ];
       let matched = selected === DEFAULT_RECIPE_VALUE;
       for (const r of this.recipes) {
+        // The seeded `default` recipe is already represented by the empty-value
+        // "Default pipeline" option above — skip it here so the picker doesn't
+        // show two identical "Default pipeline" entries. (A binding that somehow
+        // stored the literal "default" id still resolves to the default chain on
+        // the daemon, and the empty option stays selected as the equivalent.)
+        if (r.id === DEFAULT_RECIPE_ID) continue;
         const sel = r.id === selected;
         if (sel) matched = true;
         opts.push(
@@ -204,24 +216,37 @@ export class SectionHotkeys {
                    </div>`
                 : ""
             }
-            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 8px;">
-              <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 0.8571rem;">
-                <span style="color: var(--fg-faded);">Recipe</span>
-                <select class="hk-recipe" style="min-width: 200px;">${recipeOptions(b.recipe_id ?? "")}</select>
-              </label>
-            </div>
-            <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin-bottom: 12px;">
-              The Playbook chain this hotkey's recordings run. <b>Default pipeline</b> = whatever normal
-              recordings run. Build or edit chains in the <b>Playbook</b> settings section.
-            </span>
-            <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px;">
-              <span style="font-size: 0.8571rem; color: var(--fg-faded);">Whisper model (this hotkey)</span>
-              <div class="hk-model-host"></div>
-              <span style="font-size: 0.7857rem; color: var(--fg-faded);">
-                Leave on the configured model, or pick a bigger/smaller one just for this hotkey's
-                recordings.
-              </span>
-            </div>
+            ${
+              // The recipe + Whisper-model pickers only apply to recordings the
+              // hotkey itself processes (a voice note or in-place dictation). A
+              // meeting binding dispatches MeetingToggle, which carries neither a
+              // recipe nor a model — its tracks run the configured meeting
+              // pipeline — so both pickers are hidden (showing them would be
+              // inert). A short note explains why instead.
+              b.action === "meeting"
+                ? `<span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
+                     Meeting hotkeys start or stop a meeting recording. They use the app's configured
+                     pipeline and Whisper model — there's no per-hotkey recipe or model to set here.
+                   </span>`
+                : `<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 8px;">
+                     <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 0.8571rem;">
+                       <span style="color: var(--fg-faded);">Recipe</span>
+                       <select class="hk-recipe" style="min-width: 200px;">${recipeOptions(b.recipe_id ?? "")}</select>
+                     </label>
+                   </div>
+                   <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin-bottom: 12px;">
+                     The Playbook chain this hotkey's recordings run. <b>Default pipeline</b> = whatever normal
+                     recordings run. Build or edit chains in the <b>Playbook</b> settings section.
+                   </span>
+                   <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px;">
+                     <span style="font-size: 0.8571rem; color: var(--fg-faded);">Whisper model (this hotkey)</span>
+                     <div class="hk-model-host"></div>
+                     <span style="font-size: 0.7857rem; color: var(--fg-faded);">
+                       Leave on the configured model, or pick a bigger/smaller one just for this hotkey's
+                       recordings.
+                     </span>
+                   </div>`
+            }
           </div>
         </div>`;
       })

@@ -400,6 +400,19 @@ fn preroll_enabled(cfg: &phoneme_core::Config) -> bool {
     cfg.recording.pre_roll_ms > 0 && cfg.recording.source == CaptureSource::Microphone
 }
 
+/// Whether a just-stopped recording takes the dictation FAST LANE
+/// ([`crate::in_place::spawn_fast_lane`]) rather than the queued full pipeline.
+///
+/// Only in-place dictations are ever eligible. Of those, `[in_place].full_pipeline`
+/// already routes the recording through the full pipeline (transcribe → recipe →
+/// type). The added gate is `has_recipe`: a custom-hotkey in-place binding that
+/// names a NON-EMPTY recipe must run the full pipeline too, because the fast lane
+/// never enters `pipeline::run` and so would silently drop the recipe. Pure, so
+/// the routing decision is unit-testable without a live recorder.
+fn wants_fast_lane(in_place: bool, full_pipeline: bool, has_recipe: bool) -> bool {
+    in_place && !full_pipeline && !has_recipe
+}
+
 impl DaemonRecorder {
     pub async fn current(&self) -> Option<ActiveRecording> {
         self.active.lock().await.clone()
@@ -1157,15 +1170,50 @@ impl DaemonRecorder {
         // queue and the full pipeline (cleanup/summary/tags/hooks) unless
         // `[in_place].full_pipeline` opts back in — transcribe → polish →
         // type, with persistence off the latency path. See `in_place.rs`.
+        //
+        // A custom-hotkey in-place binding that names a NON-EMPTY recipe is the
+        // exception: the fast lane never enters `pipeline::run`, so its recipe
+        // would never execute. Such a recording takes the FULL pipeline instead
+        // (so the recipe runs and reshapes the text), and the pipeline's
+        // end-of-run typing then inserts the recipe's result in place — exactly
+        // the `full_pipeline = true` flow, just opted into per-binding. The
+        // recipe ledger is only PEEKED here; `pipeline::run` claims-and-removes
+        // it (and the model override) the same way it does for a normal queued
+        // recording.
         let in_place_cfg = state.config.load().in_place.clone();
-        let fast_lane = active.in_place && !in_place_cfg.full_pipeline;
+        let has_recipe = active.in_place
+            && state
+                .pending_recipe
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&active.id)
+                .is_some_and(|r| !r.trim().is_empty());
+        let fast_lane = wants_fast_lane(active.in_place, in_place_cfg.full_pipeline, has_recipe);
         if fast_lane {
+            // A genuine fast-lane dictation never reaches `pipeline::run`, the
+            // sole place the per-recording ledgers are claimed. Claim them HERE
+            // so nothing leaks keyed by this (soon-dead) id: the model override
+            // (if the binding carried one) is threaded into the fast-lane
+            // transcription, and any stray recipe entry — there is none for a
+            // true fast lane, since a recipe forces the full pipeline above, but
+            // a defensive remove keeps the contract airtight — is dropped.
+            let fast_lane_model = state
+                .pending_overrides
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&active.id);
+            state
+                .pending_recipe
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&active.id);
             crate::in_place::spawn_fast_lane(
                 state.clone(),
                 active.id.clone(),
                 active.audio_path.clone(),
                 active.focused_app.clone(),
                 active.focused_window_title.clone(),
+                fast_lane_model,
             );
         } else {
             // Full-pipeline dictation with `type_first`: the text shouldn't
@@ -2739,6 +2787,72 @@ mod tests {
 
         let stopped = stop_task.await.expect("join stop task");
         assert!(stopped.is_ok(), "stop must still succeed: {stopped:?}");
+        std::env::remove_var("PHONEME_AUDIO_BACKEND");
+    }
+
+    /// The fast-lane routing rule (custom-hotkey FIX 1): a NON-EMPTY recipe on an
+    /// in-place binding forces the full pipeline (so the recipe runs), while a
+    /// plain in-place dictation (no recipe, default `full_pipeline = false`) keeps
+    /// the fast lane. Normal recordings are never fast-laned, and the explicit
+    /// `full_pipeline = true` opt-in already leaves the fast lane.
+    #[test]
+    fn wants_fast_lane_routes_recipe_in_place_to_the_full_pipeline() {
+        // Plain in-place dictation, no recipe → fast lane (today's behaviour).
+        assert!(wants_fast_lane(true, false, false));
+        // In-place dictation carrying a recipe → FULL pipeline (FIX 1): the fast
+        // lane never runs `pipeline::run`, so a recipe must not be fast-laned.
+        assert!(!wants_fast_lane(true, false, true));
+        // Explicit `full_pipeline` opt-in always leaves the fast lane.
+        assert!(!wants_fast_lane(true, true, false));
+        assert!(!wants_fast_lane(true, true, true));
+        // A normal (non-in-place) recording is never fast-laned.
+        assert!(!wants_fast_lane(false, false, false));
+        assert!(!wants_fast_lane(false, false, true));
+    }
+
+    /// LEDGER LEAK (custom-hotkey FIX 2): a genuine fast-lane in-place recording
+    /// never enters `pipeline::run` — the sole place the per-recording ledgers are
+    /// claimed — so `stop()` itself must claim-and-remove them. A binding that
+    /// carried only a Whisper-model override (no recipe → still the fast lane)
+    /// must leave NO `pending_overrides` / `pending_recipe` entry keyed by its
+    /// (now-dead) id once `stop()` returns. The detached fast-lane transcription
+    /// that `stop()` spawns is irrelevant here: the claim is synchronous, before
+    /// the spawn.
+    #[tokio::test]
+    async fn fast_lane_in_place_leaves_no_pending_ledger_entry() {
+        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+
+        // Start an IN-PLACE synthetic recording (default `[in_place].full_pipeline
+        // = false`, no recipe → the fast lane).
+        let id = state
+            .recorder
+            .start(&state, RecordMode::Hold, true)
+            .await
+            .expect("start synthetic in-place recording");
+
+        // The binding carried a per-recording Whisper-model override only — the
+        // exact case FIX 2 must not leak (a recipe would force the full pipeline).
+        state
+            .pending_overrides
+            .lock()
+            .unwrap()
+            .insert(id.clone(), "hotkey-stt".into());
+
+        let stopped = state.recorder.stop(&state).await;
+        assert!(stopped.is_ok(), "in-place stop must succeed: {stopped:?}");
+
+        // The fast lane claimed-and-removed both ledgers in `stop()` (before the
+        // detached transcription was even spawned) — nothing leaks for the id.
+        assert!(
+            state.pending_overrides.lock().unwrap().get(&id).is_none(),
+            "a fast-lane in-place recording must not leave a pending model override"
+        );
+        assert!(
+            state.pending_recipe.lock().unwrap().get(&id).is_none(),
+            "a fast-lane in-place recording must not leave a pending recipe entry"
+        );
         std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }
 }

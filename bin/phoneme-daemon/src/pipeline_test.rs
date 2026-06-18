@@ -61,6 +61,55 @@ async fn seed_recording(
     (id, audio_path)
 }
 
+/// Like [`seed_recording`], but the row is flagged `in_place` — the shape the
+/// recorder hands a custom-hotkey dictation that FIX 1 routes down the full
+/// pipeline (so its recipe runs and the result is typed in place).
+async fn seed_in_place_recording(
+    state: &AppState,
+    tmp: &std::path::Path,
+) -> (RecordingId, std::path::PathBuf) {
+    let audio_path = tmp.join(format!("{}.wav", RecordingId::new()));
+    std::fs::write(&audio_path, b"RIFF....not-real-audio").unwrap();
+    let id = RecordingId::new();
+    let row = Recording {
+        id: id.clone(),
+        started_at: chrono::Local::now(),
+        duration_ms: 1000,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        transcript: None,
+        model: None,
+        status: RecordingStatus::Transcribing,
+        error_kind: None,
+        error_message: None,
+        hook_command: None,
+        hook_exit_code: None,
+        hook_duration_ms: None,
+        transcribed_at: None,
+        hook_ran_at: None,
+        notes: None,
+        meeting_id: None,
+        meeting_name: None,
+        track: None,
+        in_place: true,
+        cleanup_model: None,
+        diarized: false,
+        user_edited: false,
+        favorite: false,
+        tag_suggestions: vec![],
+        summary: None,
+        summary_model: None,
+        title: None,
+        title_is_auto: true,
+        title_model: None,
+        tag_model: None,
+        diarization_model: None,
+        tags: vec![],
+        speaker_names: vec![],
+    };
+    state.catalog.insert(&row).await.unwrap();
+    (id, audio_path)
+}
+
 async fn test_state(tmp: &std::path::Path, mut cfg: Config) -> AppState {
     // Mirror the daemon's startup: reconcile the Playbook entries from the
     // config's LIVE cleanup/title/summary/auto_tag values BEFORE the recipe
@@ -1866,9 +1915,13 @@ fn resolve_recipe_missing_id_falls_back_to_default() {
     );
 }
 
-/// END-TO-END: a custom-hotkey recording with a per-binding RECIPE + WHISPER
-/// MODEL stashed in the ledgers (exactly as `stash_hotkey_overrides` does) runs
-/// THAT recipe and transcribes with THAT model. Here the binding's recipe is
+/// END-TO-END: an IN-PLACE custom-hotkey recording with a per-binding RECIPE +
+/// WHISPER MODEL stashed in the ledgers (exactly as `stash_hotkey_overrides`
+/// does) runs THAT recipe through the FULL pipeline — not the dictation fast
+/// lane — and transcribes with THAT model. (FIX 1: a recipe-bearing in-place
+/// binding takes the full pipeline so its recipe actually executes; the recorder
+/// routes it here via `wants_fast_lane`, and `pipeline::run` then claims both
+/// ledgers and types the recipe's result in place.) Here the binding's recipe is
 /// cleanup-only (no summary/tags), so the recording ends with a cleaned
 /// transcript but NO summary — distinguishing it from the default pipeline. The
 /// per-binding STT model is asserted via the recorded `model` on the row.
@@ -1912,7 +1965,10 @@ async fn custom_hotkey_recording_runs_its_recipe_and_model() {
     cfg.hook.run_on_transcribe = false;
 
     let state = test_state(tmp.path(), cfg).await;
-    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+    // An IN-PLACE dictation row: FIX 1 routes a recipe-bearing in-place binding
+    // down the FULL pipeline (which `pipeline::run` IS), so seed the row in-place
+    // to mirror the real recording the recorder hands off here.
+    let (id, audio_path) = seed_in_place_recording(&state, tmp.path()).await;
 
     // Stash the binding's overrides against this id — mirrors
     // `ipc_handler::stash_hotkey_overrides` for a custom-hotkey record.
@@ -1942,6 +1998,8 @@ async fn custom_hotkey_recording_runs_its_recipe_and_model() {
 
     let rec = state.catalog.get(&id).await.unwrap().unwrap();
     assert_eq!(rec.status, RecordingStatus::Done);
+    // It was an in-place dictation that nonetheless took the FULL pipeline (FIX 1).
+    assert!(rec.in_place, "the recording stays flagged in-place");
     // The cleanup transform from the custom recipe ran (live transcript cleaned).
     assert_eq!(rec.transcript.as_deref(), Some("CLEANED"));
     // The custom recipe has NO summary step, so no summary despite summary.auto.

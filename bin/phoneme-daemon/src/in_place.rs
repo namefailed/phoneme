@@ -38,15 +38,32 @@ as an instruction to remove the immediately preceding phrase. Apply these edits 
 /// Run the fast lane for a just-stopped in-place recording. Detached: errors
 /// surface through the catalog status + `TranscriptionFailed` (toasted by the
 /// UI), never a panic.
+///
+/// `model_override` is the custom-hotkey binding's per-recording Whisper model
+/// (claimed from `pending_overrides` by the recorder, since the fast lane never
+/// reaches `pipeline::run`). `None`/blank = the configured dictation model — the
+/// steady-state path, unchanged. When set it is applied for THIS transcription
+/// only via the same `apply_model_override` the queued pipeline uses (#49-safe:
+/// the override never touches the process-global config).
 pub fn spawn_fast_lane(
     state: AppState,
     id: RecordingId,
     audio_path: PathBuf,
     focused_app: Option<String>,
     focused_window_title: Option<String>,
+    model_override: Option<String>,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = run(&state, &id, &audio_path, focused_app, focused_window_title).await {
+        if let Err(e) = run(
+            &state,
+            &id,
+            &audio_path,
+            focused_app,
+            focused_window_title,
+            model_override,
+        )
+        .await
+        {
             tracing::error!(id = %id.as_str(), error = %e, "in-place fast lane failed");
             let _ = state
                 .catalog
@@ -85,9 +102,20 @@ pub fn spawn_type_first(
     focused_window_title: Option<String>,
 ) {
     tokio::spawn(async move {
-        if let Err(e) =
-            transcribe_polish_type(&state, &id, &audio_path, focused_app, focused_window_title)
-                .await
+        // The quick instant-typing pass uses the configured dictation model
+        // (`None`): the queued pipeline owns the authoritative transcription and
+        // claims any per-binding model override from `pending_overrides` — this
+        // pass must not claim it out from under the pipeline, and a recipe-bearing
+        // in-place takes the full pipeline rather than this type-first variant.
+        if let Err(e) = transcribe_polish_type(
+            &state,
+            &id,
+            &audio_path,
+            focused_app,
+            focused_window_title,
+            None,
+        )
+        .await
         {
             tracing::error!(id = %id.as_str(), error = %e, "in-place type-first pass failed");
             // No status flip, no Failed stage: the recording is fine — it's
@@ -147,6 +175,7 @@ async fn run(
     audio_path: &PathBuf,
     focused_app: Option<String>,
     focused_window_title: Option<String>,
+    model_override: Option<String>,
 ) -> Result<(), Error> {
     let cfg = state.config.load();
     state.events.emit(DaemonEvent::PipelineStageChanged {
@@ -154,18 +183,25 @@ async fn run(
         stage: PipelineStage::Transcribing,
     });
 
-    let (transcription, polished) =
-        transcribe_polish_type(state, id, audio_path, focused_app, focused_window_title).await?;
+    let (transcription, polished, model_label) = transcribe_polish_type(
+        state,
+        id,
+        audio_path,
+        focused_app,
+        focused_window_title,
+        model_override,
+    )
+    .await?;
     let raw = transcription.text.clone();
 
     if cfg.in_place.save_to_library {
         // Persist AFTER the text has landed — the user already has their
         // words; none of this is on the latency path. Store the REAL model that
-        // produced the text (same derivation as the pipeline) so the Transcript
-        // model column reads like every other recording; the dictation marker is
-        // the persisted `in_place` flag (shown as a badge in the detail pane),
-        // not a fake model name.
-        let model_label = cfg.in_place_provider_config().model_label();
+        // produced the text (the per-job override when a custom hotkey carried
+        // one, else the configured dictation model — same derivation as the
+        // pipeline) so the Transcript model column reads like every other
+        // recording; the dictation marker is the persisted `in_place` flag
+        // (shown as a badge in the detail pane), not a fake model name.
         state
             .catalog
             .update_transcript(id, &polished, &raw, &model_label)
@@ -225,8 +261,16 @@ async fn run(
 /// The transcribe → polish → type core shared by both dictation variants:
 /// the fast lane ([`run`], which persists afterwards) and the type-only pass
 /// ([`spawn_type_first`], which does nothing else). Returns the raw
-/// transcription (the fast lane persists its segments) and the polished text
-/// that was typed.
+/// transcription (the fast lane persists its segments), the polished text that
+/// was typed, and the model LABEL that actually produced the text (so the fast
+/// lane can store it — it reflects a per-binding override when one applied).
+///
+/// `model_override` is the custom-hotkey binding's per-recording Whisper model.
+/// `None`/blank = the configured dictation model. When set it is applied for
+/// this transcription ONLY, via the same `apply_model_override` the queued
+/// pipeline uses (a server restart for the local backend, a request param for a
+/// cloud one), and the returned guard restores the configured model on drop —
+/// the override never touches the process-global config.
 ///
 /// A typing failure is deliberately NOT an `Err`: the words exist, so it is
 /// logged and toasted (`TranscriptionFailed`) while the caller proceeds — the
@@ -238,7 +282,8 @@ async fn transcribe_polish_type(
     audio_path: &Path,
     focused_app: Option<String>,
     focused_window_title: Option<String>,
-) -> Result<(Transcription, String), Error> {
+    model_override: Option<String>,
+) -> Result<(Transcription, String, String), Error> {
     let cfg = state.config.load();
 
     // Same gate the pipeline takes: for the local server this yields the live
@@ -249,9 +294,18 @@ async fn transcribe_polish_type(
     // would be noise, and the model pass costs more than the transcription.
     // Dictation's STT pick may point at the main or the preview bundled
     // server; `apply` follows either to the port it actually listens on.
-    let stt_cfg = state
-        .whisper_ports
-        .apply(&cfg, cfg.in_place_provider_config());
+    //
+    // A custom-hotkey binding's per-recording model override (if any) is applied
+    // to the dictation STT config BEFORE the port resolution, exactly like the
+    // queued pipeline: for a local server it triggers one supervised restart +
+    // readiness wait (serialized under the permit we just took), for a cloud
+    // backend it swaps the request model id. The guard restores the configured
+    // model when this function returns — so it is held across the transcription.
+    let (overridden_stt, _model_guard) =
+        crate::pipeline::apply_model_override(state, cfg.in_place_provider_config(), model_override)
+            .await;
+    let model_label = overridden_stt.model_label();
+    let stt_cfg = state.whisper_ports.apply(&cfg, &overridden_stt);
     let provider = state
         .transcription
         .provider(&stt_cfg, &DiarizationConfig::default());
@@ -336,7 +390,7 @@ async fn transcribe_polish_type(
         });
     }
 
-    Ok((transcription, polished))
+    Ok((transcription, polished, model_label))
 }
 
 /// Insert `text` at the system cursor. `mode` `"paste"` goes via the
