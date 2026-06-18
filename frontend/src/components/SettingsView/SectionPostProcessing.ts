@@ -3,23 +3,29 @@ import { mountModelField } from "./modelField";
 import { mountConnectionField, deriveConnectionEntry } from "./connectionField";
 
 /**
- * Settings → Post-Processing: every LLM-over-the-transcript feature in one
- * tab — cleanup (`config.llm_post_process`: enable, the shared
- * connection/model fields, prompt, timeout, Ollama autostart), auto-summary
- * (`config.summary`), and auto titles (`config.title`, heuristic vs LLM).
- * The summary/title connection fields INHERIT the cleanup connection when
- * left blank — mirroring the daemon's fallback — so most users configure one
- * provider here and everything else rides it.
+ * Settings → Post-Processing: the BASE AI connection for every LLM-over-the-
+ * transcript step. The individual instructions (cleanup, summary, title, tags)
+ * now live in the Playbook — each Playbook entry carries its own
+ * provider/model/prompt and INHERITS this connection wherever its own fields are
+ * left blank. So this section is deliberately thin: the master on/off switch,
+ * the shared provider/endpoint/key/model + timeout + Ollama autostart, and a
+ * link over to the Playbook where the actual instructions are authored.
  *
- * The constructor seeds any missing config tables with the documented
- * defaults before rendering (older configs predate these features). Plain
- * section class composing the shared connectionField/modelField mounts over
- * the form.ts binding.
+ * `llm_post_process.enabled` is still the master switch the migration reads to
+ * decide whether the `default` recipe includes the `cleanup` step, so its key /
+ * semantics are unchanged — only the label/help are reframed.
+ *
+ * The constructor seeds `config.llm_post_process` with the documented defaults
+ * before rendering (older configs predate this feature). Plain section class
+ * composing the shared connectionField/modelField mounts over the form.ts
+ * binding.
  */
 export class SectionPostProcessing {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(container: HTMLElement, config: any) {
-    // Ensure nested object exists in the loaded config to prevent undefined errors
+    // Ensure the nested object exists in the loaded config to prevent undefined
+    // errors. `prompt` is preserved for round-trip / the migration source, but
+    // it is no longer authored here — the Playbook's `cleanup` entry owns it.
     if (!config.llm_post_process) {
       config.llm_post_process = {
         enabled: false,
@@ -33,36 +39,6 @@ export class SectionPostProcessing {
       };
     }
 
-    // Auto-summary settings. Each provider field falls back to the cleanup
-    // connection when left blank, so summaries can run on a fully independent
-    // provider+model or just reuse the post-processing provider above.
-    if (!config.summary) {
-      config.summary = {
-        auto: false,
-        provider: "",
-        api_key: "",
-        api_url: "",
-        model: "",
-        prompt: "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.",
-      };
-    }
-
-    // Auto titles. The heuristic (first meaningful sentence) is free and on
-    // by default; the LLM pass is opt-in and falls back to the heuristic on
-    // any error. Connection fields inherit the cleanup connection when blank,
-    // exactly like summaries. The prompt default mirrors the daemon's.
-    if (!config.title) {
-      config.title = {
-        enabled: true,
-        use_llm: false,
-        provider: "",
-        api_key: "",
-        api_url: "",
-        model: "",
-        prompt: "You title voice-note transcripts. Reply with ONLY a short title for the transcript: at most 8 words, plain text, no quotes, no trailing punctuation, no preamble.",
-      };
-    }
-
     const lp = config.llm_post_process;
 
     // The effective cleanup connection. The shared connection block writes the
@@ -73,10 +49,20 @@ export class SectionPostProcessing {
 
     container.innerHTML = `
       <div class="settings-section">
-        <h3>AI Post-Processing</h3>
+        <h3>AI Connection</h3>
         <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-          Automatically edit, reformat, and clean up your transcript using a local or remote LLM.
+          The shared AI provider for editing, summarizing, titling, and tagging your transcripts.
+          This is the <strong>base connection</strong> every Playbook step inherits when its own
+          provider/model fields are left blank.
         </p>
+
+        <div style="background-color: var(--bg-deep); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 16px; font-size: 0.8571rem; color: var(--fg-muted); line-height: 1.5;">
+          🎭 <strong style="color: var(--fg-default);">Instructions live in the Playbook.</strong>
+          Cleanup, summary, title, and tag prompts (and their per-step model overrides) are now
+          authored in the <strong>Playbook</strong>. This section just sets the connection they
+          fall back to.
+          <a href="#" id="open-playbook-link" style="color: var(--accent); text-decoration: none; white-space: nowrap;">Open the Playbook →</a>
+        </div>
 
         <div style="background-color: var(--bg-deep); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 16px; font-size: 0.8571rem; color: var(--fg-muted); line-height: 1.5;">
           💡 <strong style="color: var(--fg-default);">Free &amp; offline:</strong> the first-run setup wizard installs
@@ -90,6 +76,10 @@ export class SectionPostProcessing {
             { key: "llm_post_process.enabled", label: "", kind: "checkbox" },
             lp.enabled,
           )}</div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
+            Master switch for AI steps. When off, the default recording pipeline skips its
+            cleanup step. Individual steps are still chosen in the Playbook.
+          </span>
         </div>
 
         <div class="settings-field conn-field">
@@ -129,153 +119,6 @@ export class SectionPostProcessing {
             lp.timeout_secs ?? 30,
           )}</div>
         </div>
-
-        <div class="settings-field ai-prompt-field">
-          <label>Cleanup instructions</label>
-          <div class="ai-prompt-controls">
-            <div class="ai-preset-row">
-              <select id="prompt-preset-select" class="ai-preset-select">
-                <option value="">— Choose a preset —</option>
-                <option value="Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.">Clean up audio (Default)</option>
-                <option value="Fix grammar and punctuation only. Keep the exact words and meaning intact. Do not summarize.">Grammar &amp; Punctuation only</option>
-                <option value="Format the transcript as a bulleted list of key takeaways and action items.">Extract action items</option>
-                <option value="Summarize the core message of this transcript in 2-3 sentences.">Summarize</option>
-                <option value="Rewrite this transcript into a professional, polished email draft.">Write an email</option>
-                <option value="Translate this transcript into clear, fluent English.">Translate to English</option>
-                <option value="Format this transcript into a structured markdown document with clear headings, bullet points, and bolded key terms.">Structured Markdown Notes</option>
-                <option value="I have a speech impediment that causes me to stutter and repeat sounds. Carefully clean up the transcript so it flows perfectly, removing any dysfluency while preserving my intended meaning. Reply ONLY with the cleaned text.">Dysfluency &amp; Stuttering Assist</option>
-                <option value="Format this raw transcript into a clean, professional journal entry or meeting note. Use bullet points or headings if appropriate. Output ONLY the formatted notes and absolutely no conversational filler.">Professional Notes &amp; Journal</option>
-              </select>
-              <span class="ai-preset-hint">Presets auto-fill the field below</span>
-            </div>
-            ${renderField(
-              { key: "llm_post_process.prompt", label: "", kind: "textarea" },
-              lp.prompt || "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
-            )}
-            <span class="settings-help-text">
-              Tell the AI how to edit your transcript. Finish with "Reply ONLY with the final text."
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <h3 style="margin-bottom: 4px;">Auto AI Summary</h3>
-        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-          Generate a short AI summary of each transcript. You can always summarize a single
-          recording on demand with the <b>View summary</b> button in its detail view — enabling
-          this just runs it automatically as the <b>last step</b> of every recording's pipeline.
-          By default summaries reuse your post-processing provider; point them at a different
-          provider and model below if you want.
-        </p>
-
-        <div class="settings-field">
-          <label>Summarize every recording</label>
-          <div>${renderField(
-            { key: "summary.auto", label: "", kind: "checkbox" },
-            config.summary.auto,
-          )}</div>
-          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
-            When off, summaries are still available on demand per recording.
-          </span>
-        </div>
-
-        <div class="settings-field conn-field">
-          <label>Summary provider</label>
-          <div id="summary-conn-host"></div>
-        </div>
-
-        <div class="settings-field">
-          <label>Summary model (optional)</label>
-          <div id="summary-model-host"></div>
-          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
-            Leave on "Same as cleanup model" to reuse the post-processing model, or pick a different
-            one (e.g. a smaller/faster model just for summaries).
-          </span>
-        </div>
-
-        <div class="settings-field ai-prompt-field">
-          <label>Summary instructions</label>
-          <div class="ai-prompt-controls">
-            <div class="ai-preset-row">
-              <select id="summary-preset-select" class="ai-preset-select">
-                <option value="">— Choose a preset —</option>
-                <option value="Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.">Bullet-point summary (Default)</option>
-                <option value="Summarize the core message of this transcript in 2-3 sentences. Output only the summary.">2-3 sentence summary</option>
-                <option value="Extract only the action items and decisions from this transcript as a checklist. Output only the list.">Action items &amp; decisions</option>
-                <option value="Write a short paragraph (TL;DR) summarizing what this transcript is about. Output only the paragraph.">TL;DR paragraph</option>
-                <option value="Summarize this meeting transcript: list attendees/speakers if identifiable, key discussion points, decisions made, and action items with owners. Output only the structured summary.">Meeting minutes</option>
-              </select>
-              <span class="ai-preset-hint">Presets auto-fill the field below</span>
-            </div>
-            ${renderField(
-              { key: "summary.prompt", label: "", kind: "textarea" },
-              config.summary.prompt || "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.",
-            )}
-            <span class="settings-help-text">
-              How the AI should summarize the transcript.
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <h3 style="margin-bottom: 4px;">Auto Titles</h3>
-        <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
-          Name each recording from its first meaningful sentence — free, instant, and fully
-          offline. Optionally let the AI write a short title instead; if the AI fails for any
-          reason, the built-in heuristic still applies. A title you type on a recording yourself
-          is <b>never</b> overwritten; clear it (save an empty title) to go back to automatic.
-        </p>
-
-        <div class="settings-field">
-          <label>Title every recording</label>
-          <div>${renderField(
-            { key: "title.enabled", label: "", kind: "checkbox" },
-            config.title.enabled,
-          )}</div>
-        </div>
-
-        <div class="settings-field">
-          <label>Use the AI for titles</label>
-          <div>${renderField(
-            { key: "title.use_llm", label: "", kind: "checkbox" },
-            config.title.use_llm,
-          )}</div>
-          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
-            Off = the built-in heuristic (first sentence of the transcript). On = ask the model
-            below for a short title, falling back to the heuristic on any error.
-          </span>
-        </div>
-
-        <div id="title-llm-fields" style="${config.title.use_llm ? "" : "display: none;"}">
-          <div class="settings-field conn-field">
-            <label>Title provider</label>
-            <div id="title-conn-host"></div>
-          </div>
-
-          <div class="settings-field">
-            <label>Title model (optional)</label>
-            <div id="title-model-host"></div>
-            <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
-              Leave on "Same as cleanup model" to reuse the post-processing model, or pick a
-              small/fast one just for titles.
-            </span>
-          </div>
-
-          <div class="settings-field ai-prompt-field">
-            <label>Title instructions</label>
-            <div class="ai-prompt-controls">
-              ${renderField(
-                { key: "title.prompt", label: "", kind: "textarea" },
-                config.title.prompt ?? "",
-              )}
-              <span class="settings-help-text">
-                How the AI should title the transcript (the transcript is appended automatically).
-              </span>
-            </div>
-          </div>
-        </div>
       </div>
     `;
 
@@ -288,7 +131,7 @@ export class SectionPostProcessing {
     // writes config.llm_post_process.model itself.
     const cleanupModelHost = container.querySelector<HTMLElement>("#cleanup-model-host");
     // Re-mount only when the connection actually changes (provider|url|key); a
-    // keystroke in the prompt or timeout must not reset the picker.
+    // keystroke in the timeout must not reset the picker.
     let cleanupMountKey = "";
     const mountCleanupModel = () => {
       if (!cleanupModelHost) return;
@@ -348,6 +191,19 @@ export class SectionPostProcessing {
     updateCleanupVisibility();
     mountCleanupModel();
 
+    // Jump to the Playbook tab where the cleanup/summary/title/tag instructions
+    // are authored. Uses the same in-app navigation the rest of Settings uses
+    // (the `phoneme:navigate` window event → App.tryNavigate → the Playbook
+    // tab); routing it through App keeps the unsaved-edits guard in play.
+    container
+      .querySelector<HTMLAnchorElement>("#open-playbook-link")
+      ?.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("phoneme:navigate", {
+          detail: { view: "settings", section: "managers/playbook" },
+        }));
+      });
+
     // Open the Ollama download page in the user's browser. (Was a broken inline
     // `onclick="require(...)"` — `require` doesn't exist in the Vite/ESM bundle,
     // so the link silently threw. Use the shell plugin like the rest of the app.)
@@ -357,143 +213,6 @@ export class SectionPostProcessing {
         e.preventDefault();
         const { open } = await import("@tauri-apps/plugin-shell");
         await open("https://ollama.com/download").catch(() => {});
-      });
-
-    const presetSelect = container.querySelector<HTMLSelectElement>("#prompt-preset-select");
-    const promptArea = container.querySelector<HTMLTextAreaElement>("[data-key='llm_post_process.prompt']");
-    if (presetSelect && promptArea) {
-      presetSelect.addEventListener("change", () => {
-        if (presetSelect.value) {
-          promptArea.value = presetSelect.value;
-          promptArea.dispatchEvent(new Event("input"));
-          presetSelect.value = ""; // Reset dropdown to placeholder after applying
-        }
-      });
-    }
-
-    const summaryPresetSelect = container.querySelector<HTMLSelectElement>("#summary-preset-select");
-    const summaryPromptArea = container.querySelector<HTMLTextAreaElement>("[data-key='summary.prompt']");
-    if (summaryPresetSelect && summaryPromptArea) {
-      summaryPresetSelect.addEventListener("change", () => {
-        if (summaryPresetSelect.value) {
-          summaryPromptArea.value = summaryPresetSelect.value;
-          summaryPromptArea.dispatchEvent(new Event("input"));
-          summaryPresetSelect.value = "";
-        }
-      });
-    }
-
-    // ── Summary connection + model ───────────────────────────────────────────
-    // Same connection block with a leading "Same as Post-Processing" anchor:
-    // choosing it blanks the summary's own provider/url/key, which is the
-    // daemon's inherit-when-blank contract. The model field lists models for
-    // the EFFECTIVE connection (the summary's own fields, falling back
-    // per-field to the cleanup connection — what will actually run).
-    const summaryEff = (which: "provider" | "api_url" | "api_key") => {
-      const s = (config.summary[which] ?? "").toString().trim();
-      return s || (lp[which] ?? "").toString();
-    };
-    const summaryModelHost = container.querySelector<HTMLElement>("#summary-model-host");
-    let summaryMountKey: string | null = null;
-    const mountSummaryModel = () => {
-      if (!summaryModelHost) return;
-      const key = `${summaryEff("provider")}|${summaryEff("api_url")}|${summaryEff("api_key")}`;
-      if (key === summaryMountKey) return;
-      summaryMountKey = key;
-      mountModelField(summaryModelHost, {
-        mode: "llm",
-        blankLabel: "Same as cleanup model",
-        getProvider: () => summaryEff("provider"),
-        getApiUrl: () => summaryEff("api_url"),
-        getApiKey: () => summaryEff("api_key"),
-        getModel: () => config.summary.model || "",
-        setModel: (m) => { config.summary.model = m; },
-      });
-    };
-
-    const summaryConnHost = container.querySelector<HTMLElement>("#summary-conn-host");
-    if (summaryConnHost) {
-      mountConnectionField(summaryConnHost, {
-        catalog: "llm",
-        inheritLabel: "Same as Post-Processing",
-        getKind: () => (config.summary.provider ?? "").toString(),
-        setKind: (k) => { config.summary.provider = k; },
-        getApiUrl: () => (config.summary.api_url ?? "").toString(),
-        setApiUrl: (u) => { config.summary.api_url = u; },
-        getApiKey: () => (config.summary.api_key ?? "").toString(),
-        setApiKey: (k) => { config.summary.api_key = k; },
-        onProviderChanged: () => mountSummaryModel(),
-      });
-      summaryConnHost.addEventListener("input", () => mountSummaryModel());
-    }
-    mountSummaryModel();
-
-    // The cleanup connection is also the summary's fallback: while the summary
-    // inherits (blank fields), a cleanup provider/url/key edit changes what the
-    // summary model field should list. "input" covers typed url/key edits,
-    // "change" the provider select; the mount-key guard drops the no-ops.
-    cleanupConnHost?.addEventListener("input", () => mountSummaryModel());
-    cleanupConnHost?.addEventListener("change", () => mountSummaryModel());
-
-    // ── Title connection + model ─────────────────────────────────────────────
-    // Same shared blocks as the summary: a leading "Same as Post-Processing"
-    // anchor blanks the title's own provider/url/key (the daemon's
-    // inherit-when-blank contract), and the model field lists models for the
-    // EFFECTIVE connection (own fields falling back per-field to cleanup).
-    const t = config.title;
-    const titleEff = (which: "provider" | "api_url" | "api_key") => {
-      const own = (t[which] ?? "").toString().trim();
-      return own || (lp[which] ?? "").toString();
-    };
-    const titleModelHost = container.querySelector<HTMLElement>("#title-model-host");
-    let titleMountKey: string | null = null;
-    const mountTitleModel = () => {
-      if (!titleModelHost) return;
-      const key = `${titleEff("provider")}|${titleEff("api_url")}|${titleEff("api_key")}`;
-      if (key === titleMountKey) return;
-      titleMountKey = key;
-      mountModelField(titleModelHost, {
-        mode: "llm",
-        blankLabel: "Same as cleanup model",
-        getProvider: () => titleEff("provider"),
-        getApiUrl: () => titleEff("api_url"),
-        getApiKey: () => titleEff("api_key"),
-        getModel: () => t.model || "",
-        setModel: (m) => { t.model = m; },
-      });
-    };
-
-    const titleConnHost = container.querySelector<HTMLElement>("#title-conn-host");
-    if (titleConnHost) {
-      mountConnectionField(titleConnHost, {
-        catalog: "llm",
-        inheritLabel: "Same as Post-Processing",
-        getKind: () => (t.provider ?? "").toString(),
-        setKind: (k) => { t.provider = k; },
-        getApiUrl: () => (t.api_url ?? "").toString(),
-        setApiUrl: (u) => { t.api_url = u; },
-        getApiKey: () => (t.api_key ?? "").toString(),
-        setApiKey: (k) => { t.api_key = k; },
-        onProviderChanged: () => mountTitleModel(),
-      });
-      titleConnHost.addEventListener("input", () => mountTitleModel());
-    }
-    mountTitleModel();
-
-    // While the title inherits, cleanup connection edits change what its model
-    // field should list — same forwarding the summary block does.
-    cleanupConnHost?.addEventListener("input", () => mountTitleModel());
-    cleanupConnHost?.addEventListener("change", () => mountTitleModel());
-
-    // The provider/model/prompt rows only matter when the LLM pass is on; the
-    // heuristic needs no configuration.
-    const titleLlmFields = container.querySelector<HTMLElement>("#title-llm-fields");
-    container
-      .querySelector<HTMLInputElement>("[data-key='title.use_llm']")
-      ?.addEventListener("change", (e) => {
-        if (titleLlmFields) {
-          titleLlmFields.style.display = (e.target as HTMLInputElement).checked ? "" : "none";
-        }
       });
   }
 }

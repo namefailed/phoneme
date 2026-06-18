@@ -648,7 +648,22 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             message: "recording has no transcript to tag yet".into(),
                         })
                     } else {
-                        crate::pipeline::suggest_tags(state, &cfg, &id, &transcript).await;
+                        // Read the migrated `tags` Enrichment ENTRY (provider /
+                        // model / prompt) so editing it in the Playbook changes
+                        // what an on-demand re-run does — the Playbook is the
+                        // source of truth. Fall back to the legacy `[auto_tag]`
+                        // section when no such entry exists (a user deleted it).
+                        match crate::pipeline::entry_config_for_target(&cfg, "tags") {
+                            Some((llm_cfg, prompt)) => {
+                                crate::pipeline::suggest_tags_with(
+                                    state, &cfg, &id, &transcript, llm_cfg, &prompt,
+                                )
+                                .await;
+                            }
+                            None => {
+                                crate::pipeline::suggest_tags(state, &cfg, &id, &transcript).await;
+                            }
+                        }
                         ok_null()
                     }
                 }
@@ -1752,32 +1767,77 @@ async fn rerun_summary(
         });
     }
 
-    // Clone the live config and apply the one-time summary overrides. Summaries
-    // reuse the [llm_post_process] provider connection; only model/prompt are
-    // summary-specific.
-    let mut cfg = (**state.config.load()).clone();
-    if let Some(m) = model {
-        if !m.trim().is_empty() {
-            cfg.summary.model = m;
-        }
-    }
-    if let Some(p) = prompt {
-        if !p.trim().is_empty() {
-            cfg.summary.prompt = p;
-        }
+    // Resolve the BASE (llm_cfg, prompt) from the migrated `summary` Playbook
+    // ENTRY so editing it in the Playbook changes what an on-demand re-run does
+    // — the Playbook is the source of truth. The Re-run modal's one-time
+    // overrides (a non-empty model / prompt) then layer ON TOP and still win.
+    // When no `summary` entry exists (a user deleted it) fall back to the legacy
+    // [summary]/[llm_post_process] path (`generate_summary`) so behavior is never
+    // worse than today. `Resolution` carries whichever path we took to the probe
+    // and the spawned task.
+    let cfg = (**state.config.load()).clone();
+    let model = model.filter(|m| !m.trim().is_empty());
+    let prompt = prompt.filter(|p| !p.trim().is_empty());
+
+    enum Resolution {
+        /// The migrated `summary` entry drives this run; one-shot overrides
+        /// already layered on. `generate_summary_with` dispatches it directly.
+        Entry {
+            llm_cfg: phoneme_core::config::LlmPostProcessConfig,
+            prompt: String,
+            endpoint_hint: Option<String>,
+        },
+        /// No `summary` entry — the legacy `[summary]` section drives this run
+        /// via `generate_summary`, with the one-shot overrides baked into `cfg`.
+        Legacy { cfg: phoneme_core::config::Config },
     }
 
-    // Require a usable LLM provider up front so the user gets a clear error
-    // rather than a silent no-op. `generate_summary` re-checks defensively.
-    {
-        let probe = crate::pipeline::summary_llm_config(&cfg);
-        if state.llm.provider(&probe).is_none() {
-            return Response::Err(IpcError {
-                kind: IpcErrorKind::InvalidConfig,
-                message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)"
-                    .into(),
-            });
+    let resolution = match crate::pipeline::entry_config_for_target(&cfg, "summary") {
+        Some((mut llm_cfg, mut entry_prompt)) => {
+            if let Some(m) = &model {
+                llm_cfg.model = m.clone();
+            }
+            if let Some(p) = &prompt {
+                entry_prompt = p.clone();
+            }
+            // Name the endpoint in any real-error message (a stale per-step URL
+            // is the classic cause and invisible in a generic message).
+            let endpoint_hint = {
+                let url = llm_cfg.api_url.trim();
+                (!url.is_empty()).then(|| url.to_string())
+            };
+            Resolution::Entry {
+                llm_cfg,
+                prompt: entry_prompt,
+                endpoint_hint,
+            }
         }
+        None => {
+            // Bake the one-shot overrides into the [summary] section of a clone,
+            // then let `generate_summary` resolve it exactly as it did before.
+            let mut cfg_legacy = cfg.clone();
+            if let Some(m) = &model {
+                cfg_legacy.summary.model = m.clone();
+            }
+            if let Some(p) = &prompt {
+                cfg_legacy.summary.prompt = p.clone();
+            }
+            Resolution::Legacy { cfg: cfg_legacy }
+        }
+    };
+
+    // Require a usable LLM provider up front so the user gets a clear error
+    // rather than a silent no-op. The summary generators re-check defensively.
+    let probe = match &resolution {
+        Resolution::Entry { llm_cfg, .. } => llm_cfg.clone(),
+        Resolution::Legacy { cfg } => crate::pipeline::summary_llm_config(cfg),
+    };
+    if state.llm.provider(&probe).is_none() {
+        return Response::Err(IpcError {
+            kind: IpcErrorKind::InvalidConfig,
+            message: "no LLM provider configured for summaries (set a summary or [llm_post_process] provider)"
+                .into(),
+        });
     }
 
     let task_state = state.clone();
@@ -1787,7 +1847,27 @@ async fn rerun_summary(
             id: id.clone(),
             stage: PipelineStage::Summarizing,
         });
-        match crate::pipeline::generate_summary(&task_state, &cfg, &id, &transcript).await {
+        let result = match resolution {
+            Resolution::Entry {
+                llm_cfg,
+                prompt,
+                endpoint_hint,
+            } => {
+                crate::pipeline::generate_summary_with(
+                    &task_state,
+                    &id,
+                    &transcript,
+                    llm_cfg,
+                    &prompt,
+                    endpoint_hint.as_deref(),
+                )
+                .await
+            }
+            Resolution::Legacy { cfg } => {
+                crate::pipeline::generate_summary(&task_state, &cfg, &id, &transcript).await
+            }
+        };
+        match result {
             Ok((summary, model)) => {
                 if let Err(e) = task_state
                     .catalog

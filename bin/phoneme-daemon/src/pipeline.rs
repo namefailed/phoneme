@@ -1340,6 +1340,25 @@ fn entry_llm_config(cfg: &Config, entry: &phoneme_core::config::PlaybookLlm) -> 
     llm
 }
 
+/// Resolve the migrated Enrichment ENTRY for a given `target` ("summary" /
+/// "tags" / "title") into the same `(LlmPostProcessConfig, prompt)` pair the
+/// recipe executor dispatches with — so on-demand re-runs (SuggestTags,
+/// rerun_summary) read the SAME Playbook entry the auto-pipeline does, not the
+/// legacy `[summary]` / `[auto_tag]` sections. The first Enrichment whose
+/// trimmed `target` matches wins; returns `None` when no such entry exists (a
+/// user deleted it), letting callers fall back to the legacy path so behavior is
+/// never worse than today.
+pub(crate) fn entry_config_for_target(
+    cfg: &Config,
+    target: &str,
+) -> Option<(LlmPostProcessConfig, String)> {
+    use phoneme_core::config::PlaybookKind;
+    cfg.playbook
+        .iter()
+        .find(|e| e.kind == PlaybookKind::Enrichment && e.target.trim() == target)
+        .map(|e| (entry_llm_config(cfg, &e.llm), e.llm.prompt.clone()))
+}
+
 /// Resolve `recipe_id` into an ordered list of dispatchable steps.
 ///
 /// `recipe_id` is `default` for every normal recording and the firing custom

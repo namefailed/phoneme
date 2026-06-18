@@ -2118,3 +2118,94 @@ async fn normal_recording_runs_default_recipe_and_configured_model() {
     // The configured STT model is recorded (no override).
     assert_eq!(rec.model.as_deref(), Some("configured-stt"));
 }
+
+/// `entry_config_for_target` resolves the migrated Enrichment ENTRY for a target
+/// into the same (LlmPostProcessConfig, prompt) the recipe executor dispatches:
+/// it must find the `summary`/`tags` entries (target-matched, not id-matched),
+/// carry their resolved provider/model, and return the entry's prompt — so the
+/// on-demand SuggestTags / rerun_summary paths read the SAME entry the auto
+/// pipeline does. A target with no Enrichment entry returns `None`.
+#[test]
+fn entry_config_for_target_resolves_summary_and_tags_entries() {
+    let mut cfg = Config::default();
+    // The base connection every entry inherits when its own fields are blank.
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = "http://base.example/v1/chat/completions".into();
+    cfg.llm_post_process.model = "base-model".into();
+    // Distinct legacy prompts so we can prove the prompt comes from the right entry.
+    cfg.summary.prompt = "SUMMARIZE THIS".into();
+    cfg.auto_tag.prompt = "TAG THIS".into();
+    // Migrate copies the live section values into the matching built-in entries.
+    cfg.migrate_playbook();
+
+    let (summary_cfg, summary_prompt) =
+        super::entry_config_for_target(&cfg, "summary").expect("a summary entry exists");
+    assert_eq!(summary_prompt, "SUMMARIZE THIS", "prompt comes from the summary entry");
+    assert_eq!(
+        summary_cfg.model, "base-model",
+        "blank entry model inherits the base connection"
+    );
+    assert_eq!(summary_cfg.provider, "openai");
+    assert!(summary_cfg.enabled, "entry_llm_config forces enabled");
+
+    let (tags_cfg, tags_prompt) =
+        super::entry_config_for_target(&cfg, "tags").expect("a tags entry exists");
+    assert_eq!(tags_prompt, "TAG THIS", "prompt comes from the auto_tag entry (target=tags)");
+    assert_eq!(tags_cfg.provider, "openai");
+
+    // A target with no Enrichment entry → None (callers fall back to legacy).
+    assert!(
+        super::entry_config_for_target(&cfg, "nonexistent").is_none(),
+        "an unknown target has no entry"
+    );
+
+    // Pin the id→target mapping: the auto_tag ENTRY writes the `tags` target, so
+    // looking up by the literal id would miss it — the lookup is by `target`.
+    assert!(
+        cfg.playbook
+            .iter()
+            .any(|e| e.id == "auto_tag" && e.target == "tags"),
+        "the auto_tag entry's target is `tags`"
+    );
+}
+
+/// The rerun_summary RESOLUTION seam: the BASE (model, prompt) comes from the
+/// migrated `summary` ENTRY, and the Re-run modal's one-shot model/prompt
+/// overrides layer ON TOP and still win. This mirrors `rerun_summary`'s logic
+/// (entry as base + non-empty overrides replace) without a live LLM call.
+#[test]
+fn rerun_summary_base_is_entry_and_oneshot_override_wins() {
+    let mut cfg = Config::default();
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.model = "base-model".into();
+    cfg.summary.prompt = "ENTRY SUMMARY PROMPT".into();
+    cfg.summary.model = "entry-summary-model".into();
+    cfg.migrate_playbook();
+
+    // The base, exactly as rerun_summary resolves it.
+    let (mut llm_cfg, mut prompt) =
+        super::entry_config_for_target(&cfg, "summary").expect("a summary entry exists");
+    assert_eq!(llm_cfg.model, "entry-summary-model", "base model is the entry's");
+    assert_eq!(prompt, "ENTRY SUMMARY PROMPT", "base prompt is the entry's");
+
+    // A blank/None override is a no-op (the modal's empty fields don't clobber).
+    let blank_model: Option<String> = Some("   ".into());
+    let blank_model = blank_model.filter(|m| !m.trim().is_empty());
+    assert!(blank_model.is_none(), "a whitespace override is dropped");
+
+    // Non-empty one-shot overrides replace the base — the Re-run modal still wins.
+    let model_override: Option<String> =
+        Some("oneshot-model".to_string()).filter(|m| !m.trim().is_empty());
+    let prompt_override: Option<String> =
+        Some("ONESHOT PROMPT".to_string()).filter(|p| !p.trim().is_empty());
+    if let Some(m) = &model_override {
+        llm_cfg.model = m.clone();
+    }
+    if let Some(p) = &prompt_override {
+        prompt = p.clone();
+    }
+    assert_eq!(llm_cfg.model, "oneshot-model", "a one-shot model override wins over the entry");
+    assert_eq!(prompt, "ONESHOT PROMPT", "a one-shot prompt override wins over the entry");
+    // The provider still comes from the entry/base — the override is model+prompt only.
+    assert_eq!(llm_cfg.provider, "openai");
+}
