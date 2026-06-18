@@ -46,6 +46,13 @@ let suppressed = false;
  *  focus-follow), so taking over with the keyboard resumes from where you
  *  clicked — the glow just reappears there on the next key, never on a click. */
 let keyboardMode = false;
+/** The AI Activity popout (`ph-thinking-popout[data-open]`) is a floating panel
+ *  that sits at a LOW z-index, while the glow rides high (10001, so it can show
+ *  inside real modals). Without this, a cursor parked on a control BEHIND the
+ *  panel would bleed its glow up over the panel's content. So while the panel is
+ *  open the glow is suppressed (like editing); it reappears where it was on close.
+ *  Bumping the panel's z-index instead would wrongly hide real modals behind it. */
+let overlayOpen = false;
 
 /** Panes the ghost must stay WITHIN — its rect is clamped to the nearest of these,
  *  so a full-width list row (which underlaps the detail pane) can't glow over the
@@ -180,10 +187,10 @@ function place(el: HTMLElement, animate: boolean) {
   g.style.top = `${r.top}px`;
   g.style.width = `${r.width}px`;
   g.style.height = `${r.height}px`;
-  // Show only when driving by keyboard (and not typing): a mouse click still runs
-  // place() to keep `current` tracking what you clicked, but the glow stays hidden
-  // until you take over with the keyboard.
-  g.style.opacity = suppressed || !keyboardMode ? "0" : "1";
+  // Show only when driving by keyboard (and not typing, and no AI-activity panel
+  // open over the UI): a mouse click still runs place() to keep `current` tracking
+  // what you clicked, but the glow stays hidden until you take over with the keyboard.
+  g.style.opacity = suppressed || overlayOpen || !keyboardMode ? "0" : "1";
 }
 
 /** The element the roving cursor most recently landed on, or null. There can be
@@ -211,6 +218,19 @@ function onMutations(records: MutationRecord[]) {
   for (const rec of records) {
     const el = rec.target as HTMLElement;
     if (el.nodeType !== 1) continue;
+    // The AI Activity popout opened/closed (it reflects `data-open`). Suppress the
+    // glow while it's up so a cursor parked behind it can't bleed over the panel;
+    // restore onto the live cursor when it closes.
+    if (rec.attributeName === "data-open" && el.tagName === "PH-THINKING-POPOUT") {
+      overlayOpen = el.hasAttribute("data-open");
+      if (overlayOpen) {
+        if (ghost) ghost.style.opacity = "0";
+        if (tail) tail.style.opacity = "0";
+      } else if (current && current.isConnected && keyboardMode && !suppressed) {
+        place(current, true);
+      }
+      continue;
+    }
     // The control the roving cursor just landed on: `.kbd-cursor` everywhere, PLUS
     // the recordings list's own `.kbd-focused` row (its highlight class), so list
     // j/k moves glide row-to-row like every other pane.
@@ -278,8 +298,9 @@ function onKeyInput(e: KeyboardEvent) {
   if (keyboardMode) return;
   keyboardMode = true;
   // Fade in at the saved spot (no pop). If this key also moves the cursor, the
-  // resulting place() glides on from here a moment later.
-  if (current && current.isConnected && !suppressed) place(current, true);
+  // resulting place() glides on from here a moment later. Stay hidden while the
+  // AI Activity panel is open (it floats below the high-z glow).
+  if (current && current.isConnected && !suppressed && !overlayOpen) place(current, true);
 }
 
 function connect() {
@@ -289,7 +310,7 @@ function connect() {
     subtree: true,
     attributes: true,
     attributeOldValue: true,
-    attributeFilter: ["class"],
+    attributeFilter: ["class", "data-open"],
   });
   // Keep the fixed ghost glued to its control as the page scrolls/resizes.
   window.addEventListener("scroll", onReflow, true);
@@ -308,6 +329,9 @@ function connect() {
   // phase: settle the flag before the pane/keyboard handlers run).
   document.addEventListener("pointerdown", onPointerInput, true);
   document.addEventListener("keydown", onKeyInput, true);
+  // Honor an AI Activity panel that's already open at startup (its open state is
+  // persisted), so the glow doesn't seed visible over it.
+  overlayOpen = !!document.querySelector("ph-thinking-popout[data-open]");
   // Seed onto whatever is already highlighted (stays hidden until a keypress).
   const live = document.querySelector<HTMLElement>(".kbd-cursor, .kbd-focused");
   if (live) place(live, false);
@@ -338,6 +362,7 @@ function disconnect() {
   }
   pending = null;
   suppressed = false;
+  overlayOpen = false;
   hide();
 }
 
