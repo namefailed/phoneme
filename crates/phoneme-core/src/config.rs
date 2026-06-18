@@ -1512,7 +1512,7 @@ pub enum PlaybookKind {
 /// The LLM half of a Playbook entry (used when `kind` is `Transform`/`Enrichment`).
 /// A leaner sibling of [`LlmPostProcessConfig`]: the API key is resolved from the
 /// matching provider section at run time, so it is never stored per entry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PlaybookLlm {
     /// Provider id (`ollama` / `openai` / `groq` / `anthropic` / …). Empty means
     /// "inherit the default post-processing provider" when the entry runs.
@@ -1527,6 +1527,15 @@ pub struct PlaybookLlm {
     /// Override base URL; empty uses the provider default.
     #[serde(default)]
     pub api_url: String,
+    /// Per-entry API key. Encrypted at rest (DPAPI) and masked out before the
+    /// config ever reaches the WebView, exactly like the other key fields. Empty
+    /// when the entry inherits the default Post-Processing connection.
+    #[serde(
+        default = "default_secret_string",
+        serialize_with = "serialize_secret_string",
+        deserialize_with = "deserialize_secret_string"
+    )]
+    pub api_key: SecretString,
     /// Max seconds to wait before falling back (idle-based, like the other LLM steps).
     #[serde(default = "default_llm_timeout_secs")]
     pub timeout_secs: u64,
@@ -1539,8 +1548,47 @@ impl Default for PlaybookLlm {
             model: String::new(),
             prompt: String::new(),
             api_url: String::new(),
+            api_key: default_secret_string(),
             timeout_secs: default_llm_timeout_secs(),
         }
+    }
+}
+
+// Manual Debug/PartialEq because SecretString deliberately implements neither in
+// a way we want (redact the key; compare the exposed value), mirroring
+// LlmPostProcessConfig.
+impl std::fmt::Debug for PlaybookLlm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlaybookLlm")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("prompt", &self.prompt)
+            .field("api_url", &self.api_url)
+            .field("api_key", &redact_key(self.api_key.expose_secret()))
+            .field("timeout_secs", &self.timeout_secs)
+            .finish()
+    }
+}
+
+impl PartialEq for PlaybookLlm {
+    fn eq(&self, other: &Self) -> bool {
+        self.provider == other.provider
+            && self.model == other.model
+            && self.prompt == other.prompt
+            && self.api_url == other.api_url
+            && self.api_key.expose_secret() == other.api_key.expose_secret()
+            && self.timeout_secs == other.timeout_secs
+    }
+}
+
+impl PlaybookLlm {
+    /// Plain-text view of the API key (for masking/unmasking in the command layer).
+    pub fn api_key_str(&self) -> &str {
+        self.api_key.expose_secret()
+    }
+    /// Replace the API key from a plain `String` without callers depending on `secrecy`.
+    pub fn set_api_key(&mut self, key: impl Into<String>) {
+        self.api_key = SecretString::from(key.into());
     }
 }
 

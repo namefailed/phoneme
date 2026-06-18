@@ -184,6 +184,16 @@ fn mask_config_secrets(v: &mut Value) {
             *key = Value::String(MASKED_SECRET.to_string());
         }
     }
+    // Playbook entries each carry their own LLM key (`playbook[].llm.api_key`).
+    if let Some(arr) = v.get_mut("playbook").and_then(|p| p.as_array_mut()) {
+        for entry in arr {
+            if let Some(key) = entry.get_mut("llm").and_then(|l| l.get_mut("api_key")) {
+                if key.as_str().is_some_and(|k| !k.is_empty()) {
+                    *key = Value::String(MASKED_SECRET.to_string());
+                }
+            }
+        }
+    }
 }
 
 /// Restore any masked key in an incoming config from the current on-disk config,
@@ -241,6 +251,19 @@ fn unmask_config_secrets(incoming: &mut Config, current: &Config) {
         incoming
             .webhook
             .set_hmac_secret(current.webhook.hmac_secret_str().to_owned());
+    }
+    // Playbook entries: restore each entry's masked llm.api_key from the on-disk
+    // config by id, so saving without retyping a key keeps it.
+    for entry in incoming.playbook.iter_mut() {
+        if entry.llm.api_key_str() == MASKED_SECRET {
+            let cur = current
+                .playbook
+                .iter()
+                .find(|e| e.id == entry.id)
+                .map(|e| e.llm.api_key_str().to_owned())
+                .unwrap_or_default();
+            entry.llm.set_api_key(cur);
+        }
     }
 }
 

@@ -133,10 +133,14 @@ export type PlaybookKind = "transform" | "enrichment" | "hook";
 /** The LLM half of a Playbook entry (used for transform/enrichment). The API key
  *  is resolved from the matching provider section at run time, never stored here. */
 export type PlaybookLlm = {
+  /** Provider id; empty = inherit the default Post-Processing connection. */
   provider: string;
   model: string;
   prompt: string;
   api_url: string;
+  /** Per-entry API key (masked to the WebView like other key fields). Empty
+   *  when the entry inherits the default connection. */
+  api_key: string;
   timeout_secs: number;
 };
 

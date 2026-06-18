@@ -1,4 +1,6 @@
 import { escapeAttr, escapeHtml } from "../../utils/format";
+import { mountModelField } from "./modelField";
+import { mountConnectionField } from "./connectionField";
 import type { PlaybookEntry, PlaybookKind, PlaybookRecipe } from "../../services/ipc";
 
 /**
@@ -27,13 +29,10 @@ const KINDS: { value: PlaybookKind; label: string; blurb: string }[] = [
   { value: "hook", label: "Hook", blurb: "Runs a shell command or webhook with the recording JSON." },
 ];
 
-/** Empty = inherit the default Post-Processing provider when the step runs. */
-const PROVIDERS = ["", "ollama", "openai", "groq", "anthropic"] as const;
-
 /** Built-in enrichment targets (plus `custom:<key>` entered free-form). */
 const BUILTIN_TARGETS = ["title", "summary", "tags"] as const;
 
-const DEFAULT_LLM = () => ({ provider: "", model: "", prompt: "", api_url: "", timeout_secs: 30 });
+const DEFAULT_LLM = () => ({ provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 30 });
 const DEFAULT_HOOK = () => ({ command: "", webhook_url: "", timeout_secs: 60 });
 
 /** TS mirror of the Rust `default_playbook()` seeds — used to seed a config that
@@ -83,6 +82,7 @@ export class SectionPlaybook {
     // Normalize partial entries so the editor never reads undefined sub-objects.
     (config.playbook as Array<Record<string, unknown>>).forEach((e) => {
       if (!e.llm) e.llm = DEFAULT_LLM();
+      else { const l = e.llm as Record<string, unknown>; if (typeof l.api_key !== "string") l.api_key = ""; if (typeof l.api_url !== "string") l.api_url = ""; }
       if (!e.hook) e.hook = DEFAULT_HOOK();
       if (typeof e.target !== "string") e.target = "";
       if (!e.kind) e.kind = "transform";
@@ -254,30 +254,26 @@ export class SectionPlaybook {
         </div>`;
     }
 
-    // transform / enrichment → LLM fields
+    // transform / enrichment → full provider + model selection (the SAME shared
+    // connection/model pickers Post-Processing uses), so an entry can pick any
+    // provider, key, endpoint, and a curated model — or inherit the default.
     const targetRow = e.kind === "enrichment" ? this.targetRow(e) : "";
     return `
-      <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; flex-direction: column; gap: 12px;">
         <div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: center;">
           ${kindSel}
-          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8571rem;">Provider
-            <select class="pb-prov">
-              ${PROVIDERS.map((p) => `<option value="${p}" ${p === e.llm.provider ? "selected" : ""}>${p || "Same as default"}</option>`).join("")}
-            </select>
-          </label>
-          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8571rem;">Model
-            <input type="text" class="pb-model" value="${escapeAttr(e.llm.model)}" placeholder="(default)" style="width: 140px;" />
-          </label>
           <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8571rem;">Timeout (s)
             <input type="number" class="pb-timeout" value="${e.llm.timeout_secs}" min="1" style="width: 72px;" />
           </label>
         </div>
+        <div class="pb-conn-host"></div>
+        <div class="pb-model-field settings-field" style="display: none;">
+          <label class="settings-label">Model</label>
+          <div class="pb-model-host"></div>
+        </div>
         ${targetRow}
         <label style="font-size: 0.8571rem; display: flex; flex-direction: column; gap: 4px;">Prompt
           <textarea class="pb-prompt" rows="4" style="resize: vertical; font-family: inherit; font-size: 0.8571rem; padding: 6px;" placeholder="The instruction for this step…">${escapeHtml(e.llm.prompt)}</textarea>
-        </label>
-        <label style="font-size: 0.8571rem; display: flex; flex-direction: column; gap: 4px;">API URL (optional)
-          <input type="text" class="pb-apiurl" value="${escapeAttr(e.llm.api_url)}" placeholder="(provider default)" />
         </label>
       </div>`;
   }
@@ -329,12 +325,10 @@ export class SectionPlaybook {
       this.notifyChanged();
     });
 
-    // LLM fields
-    card.querySelector<HTMLSelectElement>(".pb-prov")?.addEventListener("change", (ev) => { e.llm.provider = (ev.target as HTMLSelectElement).value; this.notifyChanged(); });
-    card.querySelector<HTMLInputElement>(".pb-model")?.addEventListener("input", (ev) => { e.llm.model = (ev.target as HTMLInputElement).value; this.notifyChanged(); });
+    // LLM fields — prompt + timeout are plain; provider/model use the shared pickers.
     card.querySelector<HTMLTextAreaElement>(".pb-prompt")?.addEventListener("input", (ev) => { e.llm.prompt = (ev.target as HTMLTextAreaElement).value; this.notifyChanged(); });
-    card.querySelector<HTMLInputElement>(".pb-apiurl")?.addEventListener("input", (ev) => { e.llm.api_url = (ev.target as HTMLInputElement).value; this.notifyChanged(); });
     card.querySelector<HTMLInputElement>(".pb-timeout")?.addEventListener("input", (ev) => { e.llm.timeout_secs = Number((ev.target as HTMLInputElement).value) || 30; this.notifyChanged(); });
+    if (this.expanded.has(id) && e.kind !== "hook") this.mountLlmFields(card, e);
 
     // Enrichment target
     const customInput = card.querySelector<HTMLInputElement>(".pb-target-custom");
@@ -355,6 +349,53 @@ export class SectionPlaybook {
     card.querySelector<HTMLTextAreaElement>(".pb-hook-cmd")?.addEventListener("input", (ev) => { e.hook.command = (ev.target as HTMLTextAreaElement).value; this.notifyChanged(); });
     card.querySelector<HTMLInputElement>(".pb-hook-url")?.addEventListener("input", (ev) => { e.hook.webhook_url = (ev.target as HTMLInputElement).value; this.notifyChanged(); });
     card.querySelector<HTMLInputElement>(".pb-hook-timeout")?.addEventListener("input", (ev) => { e.hook.timeout_secs = Number((ev.target as HTMLInputElement).value) || 60; this.notifyChanged(); });
+  }
+
+  /** Mount the SHARED connection + model pickers into an open LLM entry card —
+   *  the same full provider/key/endpoint + curated-model UX as Post-Processing,
+   *  bound to this entry's `llm`. "Same as Post-Processing default" inherits the
+   *  global connection (empty provider); a specific provider gets its own creds
+   *  + model. The model field hides while inheriting (model inherits too). */
+  private mountLlmFields(card: HTMLElement, e: PlaybookEntry) {
+    const connHost = card.querySelector<HTMLElement>(".pb-conn-host");
+    const modelHost = card.querySelector<HTMLElement>(".pb-model-host");
+    const modelField = card.querySelector<HTMLElement>(".pb-model-field");
+    if (!connHost || !modelHost) return;
+
+    const updateVisibility = () => {
+      // Empty provider = "Same as default" → the model inherits, so hide it.
+      const off = !e.llm.provider || e.llm.provider === "none";
+      if (modelField) modelField.style.display = off ? "none" : "grid";
+    };
+
+    let modelKey = "";
+    const mountModel = () => {
+      const key = `${e.llm.provider}|${e.llm.api_url}|${e.llm.api_key}`;
+      if (key === modelKey) return;
+      modelKey = key;
+      mountModelField(modelHost, {
+        mode: "llm",
+        getProvider: () => e.llm.provider,
+        getApiUrl: () => e.llm.api_url,
+        getApiKey: () => e.llm.api_key,
+        getModel: () => e.llm.model || "",
+        setModel: (m) => { e.llm.model = m; this.notifyChanged(); },
+      });
+    };
+
+    mountConnectionField(connHost, {
+      catalog: "llm",
+      inheritLabel: "Same as Post-Processing default",
+      getKind: () => e.llm.provider,
+      setKind: (k) => { e.llm.provider = k; this.notifyChanged(); },
+      getApiUrl: () => e.llm.api_url,
+      setApiUrl: (u) => { e.llm.api_url = u; this.notifyChanged(); },
+      getApiKey: () => e.llm.api_key,
+      setApiKey: (k) => { e.llm.api_key = k; this.notifyChanged(); },
+      onProviderChanged: () => { updateVisibility(); mountModel(); },
+    });
+    updateVisibility();
+    mountModel();
   }
 
   // ── Recipes ────────────────────────────────────────────────────────────
