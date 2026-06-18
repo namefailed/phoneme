@@ -204,6 +204,12 @@ trust boundary. Verified against current code.*
     whichever shape the provider returns, and keeps whisper.cpp's per-word
     probability as confidence. (Cloud transcription was already fine.) Existing
     recordings backfill on the next **Transcribe** re-run.
+- [x] **Confidence highlighting** — the **🔤 Synced** peek now flags words the
+  provider scored below 0.5 with a subtle warning squiggle and a `· N% confidence`
+  note in the tooltip, so likely mistranscriptions are easy to spot and check
+  against the audio. Words with no reported confidence (whisper-family, most cloud
+  STT) are left unmarked rather than mislabelled. Built directly on the word-level
+  `confidence` substrate above.
 - [x] **Word-level speaker attribution** — local diarization now assigns speakers
   **per word** instead of per whole segment. Building on the word-timestamp
   substrate, each word's time span is mapped onto the diarizer's per-frame

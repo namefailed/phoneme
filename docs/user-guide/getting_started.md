@@ -116,7 +116,7 @@ Here you can:
 - **View summary**: Generate (or view) an AI summary of the recording on demand.
 - **View unedited transcript** / **Restore unedited**: see (or restore) the transcript exactly as the pipeline produced it — transcribed and cleaned — *before* your hand edits.
 - **View original transcript** / **Restore raw**: see (or restore) the raw machine transcript, *before* any AI cleanup.
-- **Word-synced transcript**: click **🔤 Synced** in the transcript box to read the machine transcript as a flow of clickable words. **Click any word to jump playback to that exact moment**, and as audio plays the word under the playhead stays highlighted so you can follow along. This is a read-only view — your edits live in the normal transcript editor and are never touched here.
+- **Word-synced transcript**: click **🔤 Synced** in the transcript box to read the machine transcript as a flow of clickable words. **Click any word to jump playback to that exact moment**, and as audio plays the word under the playhead stays highlighted so you can follow along. Words the transcriber wasn't sure about (where the provider reports a low confidence) get a subtle underline squiggle, with the exact percentage in their tooltip — so likely mistranscriptions are easy to spot and double-check against the audio. This is a read-only view — your edits live in the normal transcript editor and are never touched here.
 
 > [!NOTE]
 > Word timings are captured at transcription time, so recordings transcribed

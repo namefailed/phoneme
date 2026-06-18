@@ -2842,6 +2842,14 @@ ph-sidebar .queue-item-main.kbd-cursor {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
+/* Low-confidence words (provider score < LOW_CONFIDENCE in SyncedTranscript.ts):
+   a subtle warning squiggle so likely mistranscriptions stand out for checking
+   against the audio. Words without a reported confidence are left unmarked. */
+.st-word.st-low-conf {
+  text-decoration: underline wavy color-mix(in srgb, var(--warn, #f9e2af) 70%, transparent);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 2px;
+}
 .st-empty,
 .st-loading {
   color: var(--fg-muted);

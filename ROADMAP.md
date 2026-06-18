@@ -558,9 +558,15 @@ explicit roadmap line here saying why not).
   one-click **Retry** / **Retry all**.
 - [ ] **Per-recording hook override** — this one goes to Discord, that one stays
   local. (Today hook config is global; re-fire is manual.)
-- [ ] **Confidence highlighting** — low-confidence words underlined; click to fix.
-  *(Needs word-level probabilities + segment storage — pairs with v1.9 word-level
-  infra.)*
+- [x] **Confidence highlighting** — in the **🔤 Synced** peek, words the provider
+  scored below `LOW_CONFIDENCE` (0.5) get a subtle warning squiggle and a
+  `· N% confidence` note in their tooltip, so likely mistranscriptions are easy to
+  spot and check against the audio. Words with no reported confidence
+  (whisper-family, most cloud STT) are left unmarked — better plain than a
+  misleading "low confidence". Clicking the word seeks playback to it (the Synced
+  view is read-only machine truth; corrections happen in the editable transcript).
+  *(`SyncedTranscript.ts`; `.st-low-conf` in `RecordingsView/styles.css`; built on
+  the v1.9 word-level `confidence` substrate.)*
 
 ---
 

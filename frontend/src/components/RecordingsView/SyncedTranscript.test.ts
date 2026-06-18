@@ -84,6 +84,31 @@ describe("SyncedTranscript", () => {
     view.dispose();
   });
 
+  it("marks only words scored below LOW_CONFIDENCE, leaving unscored ones plain", async () => {
+    // Provider confidence: 0.97 (high), null (unscored), 0.3 (low), 0.8 (high).
+    // Only the 0.3 word should get the squiggle; null must NOT be flagged.
+    vi.mocked(getWords).mockResolvedValue([
+      { idx: 0, start_ms: 0, end_ms: 500, text: "clear", speaker: "1", confidence: 0.97 },
+      { idx: 1, start_ms: 500, end_ms: 1000, text: "unscored", speaker: "1", confidence: null },
+      { idx: 2, start_ms: 1000, end_ms: 1500, text: "mumbled", speaker: "1", confidence: 0.3 },
+      { idx: 3, start_ms: 1500, end_ms: 2000, text: "fine", speaker: "1", confidence: 0.8 },
+    ]);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = new SyncedTranscript(host, "rec-1", { onSeek: vi.fn() });
+    await tick();
+
+    const low = host.querySelectorAll(".st-word.st-low-conf");
+    expect(low.length).toBe(1);
+    expect((low[0] as HTMLElement).textContent).toBe("mumbled");
+    // The percentage hint rides along in the tooltip.
+    expect((low[0] as HTMLElement).title).toContain("30% confidence");
+    // The unscored word stays plain — no misleading "low confidence" mark.
+    const unscored = host.querySelector('.st-word[data-idx="1"]') as HTMLElement;
+    expect(unscored.classList.contains("st-low-conf")).toBe(false);
+    view.dispose();
+  });
+
   it("maps numeric speaker labels through the recording's custom names", async () => {
     vi.mocked(getWords).mockResolvedValue(WORDS);
     const host = document.createElement("div");

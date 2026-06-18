@@ -25,6 +25,12 @@ import { speakerDisplayName } from "./mergeMeeting";
 import { escapeHtml, fmtClock } from "../../utils/format";
 import { errText } from "../../utils/error";
 
+/** Words the provider scored below this 0..1 confidence get a subtle squiggle so
+ *  likely mistranscriptions are easy to spot and check against the audio. Words
+ *  with no reported confidence (whisper-family, most cloud STT) are never marked
+ *  — better unmarked than a misleading "low confidence". */
+export const LOW_CONFIDENCE = 0.5;
+
 /** Index of the word whose `[start_ms, end_ms)` window contains `ms` — the word
  *  "under the playhead". Falls back to the last word that started at/before `ms`
  *  when the playhead sits in a gap between words (so the highlight tracks
@@ -130,7 +136,13 @@ export class SyncedTranscript {
             // false), so chips read "don't" / "overstepped" / "weapon?" rather
             // than "don 't" / "weapon ?". The space is a text node between chips.
             const sep = i > 0 && w.leading_space !== false ? " " : "";
-            return `${sep}<span class="st-word" data-idx="${w.idx}" title="Jump playback to ${fmtClock(w.start_ms)}">${escapeHtml(w.text)}</span>`;
+            // Flag low-confidence words with a squiggle + a % hint in the tooltip.
+            // Only when the provider actually reported a confidence.
+            const conf = typeof w.confidence === "number" ? w.confidence : null;
+            const lowConf = conf !== null && conf < LOW_CONFIDENCE;
+            const cls = lowConf ? "st-word st-low-conf" : "st-word";
+            const confNote = lowConf ? ` · ${Math.round(conf * 100)}% confidence` : "";
+            return `${sep}<span class="${cls}" data-idx="${w.idx}" title="Jump playback to ${fmtClock(w.start_ms)}${confNote}">${escapeHtml(w.text)}</span>`;
           })
           .join("");
         return `
