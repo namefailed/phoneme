@@ -264,24 +264,29 @@ export class ThinkingPopoutElement extends LitElement {
     const { x, y } = this.fabXY(); // the FAB's CURRENT top-left (recomputed each
     // render, so this re-anchors when the sidebar toggle moves the default button)
     const fab = 40; // the FAB is 40px square
+    const r = fab / 2;
     const w = panel.offsetWidth || 560;
     const h = panel.offsetHeight || 600;
     const m = 8; // viewport margin
-    const gap = 6; // tiny gap so the panel reads as attached, not covering the button
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const cx = x + fab / 2;
-    const cy = y + fab / 2;
+    const cx = x + r;
+    const cy = y + r;
 
-    // Pop OUT of the button: anchor the panel's NEAREST corner to the button and
-    // grow toward whichever side has room, so it looks like it unfolds from the
-    // FAB. Default button (bottom-left of the list area) → bottom-left corner on
-    // the button, panel grows up-and-right. Re-derived from the live FAB position,
-    // so closing the sidebar (which slides the default button) re-anchors it.
+    // Unfold the panel DIAGONALLY out of the FAB: its near corner sits just past
+    // the button's centre along the diagonal, so the button pokes out of that
+    // corner at an angle (rather than the panel sitting squarely on top of it).
+    // Grows toward whichever side has room — default button (bottom-left of the
+    // list area) → panel grows up-and-right with the FAB at its bottom-left corner.
+    // Re-derived from the live FAB position, so closing the sidebar (which slides
+    // the default button) re-anchors the open panel.
     const openLeft = cx > vw / 2; // button on the right half → grow leftward
     const openUp = cy > vh / 2; // button on the bottom half → grow upward
-    let left = openLeft ? x + fab - w : x; // right edge at button-right, else left edge at button-left
-    let top = openUp ? y - gap - h : y + fab + gap; // just above the button, else just below
+    const poke = 8; // how far the panel's corner sits past the button centre
+    const cornerX = openLeft ? cx - poke : cx + poke;
+    const cornerY = openUp ? cy - poke : cy + poke;
+    let left = openLeft ? cornerX - w : cornerX;
+    let top = openUp ? cornerY - h : cornerY;
 
     left = Math.max(m, Math.min(left, vw - w - m));
     top = Math.max(m, Math.min(top, vh - h - m));
