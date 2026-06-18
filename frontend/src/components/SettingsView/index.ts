@@ -19,6 +19,7 @@ import { SectionSemantic } from "./SectionSemantic";
 import { SectionTray } from "./SectionTray";
 import { SectionInterface } from "./SectionInterface";
 import { SectionPostProcessing } from "./SectionPostProcessing";
+import { SectionPlaybook } from "./SectionPlaybook";
 import { SectionEditor } from "./SectionEditor";
 import { SectionAdvanced } from "./SectionAdvanced";
 import { SectionTags } from "./SectionTags";
@@ -85,6 +86,7 @@ const RAIL: { id: string; label: string }[] = [
   { id: "dictation", label: "⌨️ Dictation" },
   { id: "preview", label: "👁️ Live Preview" },
   { id: "postprocessing", label: "✨ Post-Processing" },
+  { id: "managers/playbook", label: "🎭 Playbook" },
   { id: "managers/hooks", label: "🪝 Integrations" },
   { id: "managers/keybinds", label: "⚡ Hotkeys" },
   { id: "diarization", label: "👥 Diarization" },
@@ -388,6 +390,7 @@ export class SettingsViewElement extends LitElement {
       { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionAutoTag(h, c); } },
+      { tab: "managers/playbook", label: "Playbook", mount: (h) => { new SectionPlaybook(h, c); } },
       { tab: "search", label: "Search", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, c); } },

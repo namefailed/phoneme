@@ -125,6 +125,53 @@ export type HotkeyBinding = {
   in_place: { full_pipeline: boolean; type_mode: "type" | "paste" | "off" };
 };
 
+/** What a {@link PlaybookEntry} does (mirrors the Rust `PlaybookKind`):
+ *  `transform` rewrites the running transcript text; `enrichment` writes a
+ *  named field (see `target`); `hook` fires a command/webhook. */
+export type PlaybookKind = "transform" | "enrichment" | "hook";
+
+/** The LLM half of a Playbook entry (used for transform/enrichment). The API key
+ *  is resolved from the matching provider section at run time, never stored here. */
+export type PlaybookLlm = {
+  provider: string;
+  model: string;
+  prompt: string;
+  api_url: string;
+  timeout_secs: number;
+};
+
+/** The hook half of a Playbook entry (used for `kind: "hook"`). */
+export type PlaybookHook = {
+  command: string;
+  webhook_url: string;
+  timeout_secs: number;
+};
+
+/** One reusable "move" in the Playbook (`config.playbook`) — a curated or custom
+ *  LLM/hook step. `kind` selects which sub-object applies; `target` (enrichment
+ *  only) is `title` | `summary` | `tags` | `custom:<key>`. `builtin` entries are
+ *  seeded by Phoneme (editable; resettable to their seed). */
+export type PlaybookEntry = {
+  id: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  kind: PlaybookKind;
+  llm: PlaybookLlm;
+  target: string;
+  hook: PlaybookHook;
+};
+
+/** A named, ordered chain of {@link PlaybookEntry} ids (`config.recipes`) — what
+ *  the default recording pipeline and Custom Hotkeys run. */
+export type PlaybookRecipe = {
+  id: string;
+  name: string;
+  description: string;
+  builtin: boolean;
+  steps: string[];
+};
+
 /** Server-side query filter for `listRecordings` (wire shape — snake_case
  *  fields, applied in SQL before pagination). The UI builds it from the
  *  richer `UiFilter` via `state/filter.ts` `toWireFilter`. */
