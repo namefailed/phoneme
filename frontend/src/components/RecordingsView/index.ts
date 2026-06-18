@@ -125,6 +125,29 @@ function bucketCellsByRow(cells: DetailCell[]): DetailCell[][] {
   return rows;
 }
 
+/** A detail cell's horizontal center (viewport px) — the anchor for sticky-column
+ *  vertical nav. */
+function cellCenterX(cell: DetailCell | undefined): number {
+  if (!cell) return 0;
+  const r = cell.el.getBoundingClientRect();
+  return r.left + r.width / 2;
+}
+
+/** Index of the cell in `row` whose center sits nearest `x` — so j/k lands on the
+ *  item spatially above/below where you were, not always the first one. */
+function nearestColTo(row: DetailCell[], x: number): number {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < row.length; i++) {
+    const dist = Math.abs(cellCenterX(row[i]) - x);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return best;
+}
+
 /** The home view (see the file-top comment for the full picture). Public
  *  surface: `refresh()` re-queries the list; `toggleSidebar()` /
  *  `toggleDetail()` / `toggleFocusMode()` drive the chrome (header button,
@@ -171,6 +194,11 @@ export class RecordingsView {
    *  that row. row -1 = not in detail nav. */
   private detailRow = -1;
   private detailCol = 0;
+  /** The horizontal anchor (viewport px) for sticky-column vertical nav: j/k land
+   *  on the item nearest this x in the next row instead of always the first one.
+   *  Seeded from the current cell on the first vertical move of a run and kept
+   *  across the run; h/l (or a fresh entry / click) clears it so it re-seeds. */
+  private detailDesiredX: number | null = null;
   /** Where the detail cursor was when you last stepped OUT to the list (tagged
    *  with the recording id). Re-entering the SAME recording's detail restores it
    *  (h→list then l back, or g d), so a round-trip remembers where you were;
@@ -660,7 +688,7 @@ export class RecordingsView {
       if (pos) { this.sidebarRow = pos.row; this.sidebarCol = pos.col; this.highlightSidebar(); }
     } else {
       const pos = this.detailCellAt(target);
-      if (pos) { this.detailRow = pos.row; this.detailCol = pos.col; this.highlightDetail(); }
+      if (pos) { this.detailRow = pos.row; this.detailCol = pos.col; this.detailDesiredX = null; this.highlightDetail(); }
     }
   }
 
@@ -820,11 +848,12 @@ export class RecordingsView {
       case "sidebar-activate": this.activateSidebarCell(); break;
       case "detail-down": this.moveDetailRow(1); break;
       case "detail-up": this.moveDetailRow(-1); break;
-      case "detail-top": this.detailRow = 0; this.detailCol = 0; this.highlightDetail(); break;
+      case "detail-top": this.detailRow = 0; this.detailCol = 0; this.detailDesiredX = null; this.highlightDetail(); break;
       case "detail-bottom": {
         const rows = this.detailGrid();
         this.detailRow = Math.max(0, rows.length - 1);
         this.detailCol = 0;
+        this.detailDesiredX = null;
         this.highlightDetail();
         break;
       }
@@ -1215,6 +1244,7 @@ export class RecordingsView {
   private enterDetailNav() {
     const rows = this.detailGrid();
     if (!rows.length) return;
+    this.detailDesiredX = null; // fresh entry — re-seed sticky-x on the next j/k
     // Returning to the SAME recording's detail? Restore where you stepped out
     // from (h→list then back), if that cell still exists. Otherwise land on the
     // transcript — the natural entry point.
@@ -1236,12 +1266,17 @@ export class RecordingsView {
   }
 
   /** j/k: move down/up a row. Up past the top row drops into the header search
-   *  box (like the list); down past the last row stays put. Always lands on the
-   *  first item of the new row. */
+   *  box (like the list); down past the last row stays put. Lands on the item
+   *  spatially nearest the column you came from (sticky x) — not always the first
+   *  — so vertical moves read like a real 2D grid. */
   private moveDetailRow(delta: number) {
     const rows = this.detailGrid();
     if (!rows.length) return;
     if (this.detailRow < 0) { this.enterDetailNav(); return; }
+    // Seed the horizontal anchor once per vertical run, from where we are now.
+    if (this.detailDesiredX == null) {
+      this.detailDesiredX = cellCenterX(rows[this.detailRow]?.[this.detailCol]);
+    }
     const next = this.detailRow + delta;
     if (next < 0) {
       // Up past the top row → the header search bar in ROVING (highlight) mode —
@@ -1253,13 +1288,14 @@ export class RecordingsView {
       this.paneEl("detail")?.classList.remove("rv-pane-focused");
       this.detailRow = -1;
       this.detailCol = 0;
+      this.detailDesiredX = null;
       this.focusedPane = null;
       window.dispatchEvent(new CustomEvent("phoneme:enter-header-nav"));
       return;
     }
     if (next >= rows.length) return;
     this.detailRow = next;
-    this.detailCol = 0;
+    this.detailCol = nearestColTo(rows[next], this.detailDesiredX ?? 0);
     this.highlightDetail();
   }
 
@@ -1286,6 +1322,8 @@ export class RecordingsView {
       return;
     }
     this.detailCol = next;
+    // A horizontal move re-anchors the sticky-x: the next j/k seeds from here.
+    this.detailDesiredX = null;
     this.highlightDetail();
   }
 

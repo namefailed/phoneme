@@ -347,6 +347,21 @@ export class ThinkingPopoutElement extends LitElement {
    *  drags that start on the close button. */
   private startHeadDrag(e: MouseEvent) {
     if ((e.target as HTMLElement).closest(".thinking-close")) return;
+    // Ctrl+Shift+click the title → reset the panel to its default size + position
+    // (mirrors the FAB's Ctrl+Shift+click reset). Drop the saved geometry and the
+    // inline width/height so the CSS default (560×600) and FAB-anchored placement
+    // both come back.
+    if (e.ctrlKey && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.geom = null;
+      try { localStorage.removeItem(ThinkingPopoutElement.GEOM_LS); } catch { /* ignore */ }
+      const reset = this.renderRoot.querySelector<HTMLElement>(".thinking-popout");
+      if (reset) { reset.style.width = ""; reset.style.height = ""; }
+      this.requestUpdate();
+      showToast("AI Activity panel reset to default", "success");
+      return;
+    }
     e.preventDefault();
     const panel = this.renderRoot.querySelector<HTMLElement>(".thinking-popout");
     if (!panel) return;
@@ -442,7 +457,7 @@ export class ThinkingPopoutElement extends LitElement {
       ${this.open
         ? html`
             <div class="thinking-popout">
-              <div class="thinking-head" @mousedown=${(e: MouseEvent) => this.startHeadDrag(e)}>
+              <div class="thinking-head" title="Drag to move · Ctrl+Shift+click to reset size & position" @mousedown=${(e: MouseEvent) => this.startHeadDrag(e)}>
                 <span class="thinking-title">
                   <span class="thinking-title-icon" aria-hidden="true">🧠</span>
                   <span class="thinking-title-text">AI Activity</span>
