@@ -132,7 +132,10 @@ export class SidebarElement extends LitElement {
     // Kind and tag are independent filters and combine (e.g. Meetings + #tacos).
     // A specific tag is narrower than the "Tagged" presence filter, so picking
     // one clears that constraint (it'd be redundant — the tag implies "tagged").
-    filterStore.set({ ...this.filterState, tag_id: id, tagState: null });
+    // Clicking the already-selected tag turns it off (back to All Recordings),
+    // matching the Tagged/Untagged rows' toggle behavior.
+    const next = this.filterState.tag_id === id ? null : id;
+    filterStore.set({ ...this.filterState, tag_id: next, tagState: null });
   }
 
   /** Toggle the tag-presence filter ("Tagged" = has tags, "Untagged" = none).
