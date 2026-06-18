@@ -284,10 +284,12 @@ export class ThinkingPopoutElement extends LitElement {
     const openUp = cy > vh / 2; // button on the bottom half → grow upward
     const gap = 10; // clear space between the button's edge and the panel's corner
     const off = r + gap; // distance from the button CENTRE to the panel's corner
+    const dropY = 14; // nudge the panel down a touch so it sits a bit lower than
+    // a pure corner-anchor (tuned to taste against the reference screenshot)
     const cornerX = openLeft ? cx - off : cx + off;
     const cornerY = openUp ? cy - off : cy + off;
     let left = openLeft ? cornerX - w : cornerX;
-    let top = openUp ? cornerY - h : cornerY;
+    let top = (openUp ? cornerY - h : cornerY) + dropY;
 
     left = Math.max(m, Math.min(left, vw - w - m));
     top = Math.max(m, Math.min(top, vh - h - m));
