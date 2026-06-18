@@ -30,7 +30,7 @@ const FIRST_CONTENT_MIN_LOUD_SAMPLES: usize = 32;
 fn block_has_content(block: &[i16]) -> bool {
     block
         .iter()
-        .filter(|&&s| s.abs() > FIRST_CONTENT_THRESHOLD)
+        .filter(|&&s| s.saturating_abs() > FIRST_CONTENT_THRESHOLD)
         .count()
         >= FIRST_CONTENT_MIN_LOUD_SAMPLES
 }

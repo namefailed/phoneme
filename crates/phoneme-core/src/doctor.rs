@@ -566,8 +566,11 @@ pub fn run_local_checks(cfg: &Config) -> Vec<CheckResult> {
     // Semantic-search embedding model (when enabled): model.onnx must be a
     // plausible model; tokenizer.json only needs to exist and be non-empty
     // (it is legitimately well under 1 MiB).
-    if cfg.semantic_search.enabled {
-        let dir = &cfg.semantic_search.model_dir;
+    if xcfg.semantic_search.enabled {
+        // Read the EXPANDED model_dir so a `~/` / `%APPDATA%` embedding path is
+        // probed at its real location — matching what the embedder loads at
+        // runtime (see `Config::expanded`).
+        let dir = &xcfg.semantic_search.model_dir;
         let model = dir.join("model.onnx");
         let tokenizer = dir.join("tokenizer.json");
         let mut check = model_integrity_check(

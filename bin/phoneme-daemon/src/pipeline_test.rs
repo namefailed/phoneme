@@ -2275,3 +2275,160 @@ fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
     assert_eq!(legacy_llm.model, "base-model", "fallback model is the legacy section's");
     assert_eq!(legacy_prompt, "ENTRY CLEANUP PROMPT", "fallback prompt is the legacy section's");
 }
+
+/// FIX 1: the per-recording `pending_focused_app` side-channel is CLAIMED
+/// (removed) by `pipeline::run`, exactly like `pending_recipe` /
+/// `pending_overrides`. The recorder stashes the focused app for a non-fast-lane
+/// in-place dictation so the pipeline's end-of-run typing can honor the per-app
+/// type/paste/off override; the ledger must not leak keyed by a (soon-dead) id.
+#[tokio::test]
+async fn run_claims_and_removes_pending_focused_app() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "raw words from whisper",
+            "segments": [{"start": 0.0, "end": 1.0, "text": " raw words"}]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "configured-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.llm_post_process.enabled = false; // keep this to transcription only
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_in_place_recording(&state, tmp.path()).await;
+
+    // Stash a focused-app entry exactly as the recorder does for a NON-fast-lane
+    // in-place dictation.
+    state
+        .pending_focused_app
+        .lock()
+        .unwrap()
+        .insert(id.clone(), "code".into());
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("pipeline run should succeed");
+
+    // The side-channel was consumed — no stale entry keyed by this id.
+    assert!(
+        state.pending_focused_app.lock().unwrap().is_empty(),
+        "the pending focused-app entry should be removed once claimed"
+    );
+}
+
+/// FIX 1 (cont.): a `pending_focused_app` entry is claimed EARLY — before the
+/// transcription/cancel select — so a canceled recording can't leave a stale
+/// entry keyed by a dead id. The token is already canceled when `run` checks it,
+/// settling the recording as Cancelled, yet the ledger is still cleared.
+#[tokio::test]
+async fn pending_focused_app_absent_after_cancel() {
+    let server = MockServer::start().await;
+    // Never reached: the token below is canceled before transcription starts.
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "x" })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.llm_post_process.enabled = false;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_in_place_recording(&state, tmp.path()).await;
+    seed_processing_inbox(&state, &id, &audio_path, chrono::Local::now()).await;
+    state
+        .pending_focused_app
+        .lock()
+        .unwrap()
+        .insert(id.clone(), "code".into());
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    let token = CancellationToken::new();
+    token.cancel();
+    let result = crate::pipeline::run(&state, payload, token).await;
+    assert!(result.is_ok(), "a cancel settles cleanly, not as an error");
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(
+        rec.status,
+        RecordingStatus::Cancelled,
+        "a user cancel must read Cancelled"
+    );
+    // The early claim ran before the cancel select, so the ledger is clear.
+    assert!(
+        state.pending_focused_app.lock().unwrap().is_empty(),
+        "the pending focused-app entry must not survive a canceled run"
+    );
+}
+
+/// FIX 1 (pure seam): a per-app "off" override resolves through
+/// `resolve_type_mode` and is an ADDITIONAL typing skip layered on top of the
+/// outer `pipeline_should_type` gate — that gate still says "type" (it governs
+/// the type-first split), and the pipeline then suppresses the insert because the
+/// resolved mode is "off". A listed app maps to its override; an unlisted one
+/// falls back to the global mode.
+#[test]
+fn resolved_off_app_suppresses_pipeline_typing() {
+    let mut cfg = Config::default();
+    // A full-pipeline in-place dictation that WOULD type at the end of the run.
+    cfg.in_place.full_pipeline = true;
+    cfg.in_place.type_first = false;
+    cfg.in_place.type_mode = "type".into();
+    cfg.in_place
+        .app_overrides
+        .insert("secret".into(), "off".into());
+
+    // The outer gate (mirrors the recorder's type-first split) still permits this
+    // run to be the one insertion — so without the per-app layer the text types.
+    assert!(
+        super::pipeline_should_type(&cfg.in_place, /*rec_in_place*/ true, /*recipe_routed*/ false, "hello"),
+        "the full-pipeline path is the insertion point — pipeline_should_type is true"
+    );
+
+    // The per-app override is the additional skip: the off-mapped app resolves to
+    // "off" (suppress typing), while an unlisted app falls back to the global mode.
+    assert_eq!(
+        cfg.in_place.resolve_type_mode(Some("secret")),
+        "off",
+        "the off-mapped app suppresses the pipeline insert"
+    );
+    assert_eq!(
+        cfg.in_place.resolve_type_mode(Some("notepad")),
+        "type",
+        "an unlisted app falls back to the global type_mode"
+    );
+    assert_eq!(
+        cfg.in_place.resolve_type_mode(None),
+        "type",
+        "an undetectable app falls back to the global type_mode"
+    );
+}

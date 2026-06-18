@@ -187,6 +187,21 @@ pub struct AppState {
     /// can't leave a stale entry keyed by a dead id.
     pub pending_recipe:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
+    /// Per-recording focused-app side-channel, keyed by recording id. Written by
+    /// `recorder.rs` when a NON-fast-lane in-place dictation (full pipeline or a
+    /// recipe-bearing binding) is enqueued and the foreground app at start was
+    /// known; consumed-and-removed by `pipeline::run`, which feeds it to
+    /// `in_place.resolve_type_mode` so the end-of-run typing honors the per-app
+    /// type/paste/off override exactly like the dictation fast lane does (the
+    /// fast lane passes `focused_app` directly, so it's NOT populated there). The
+    /// focused-app sibling of `pending_recipe` / `pending_overrides`: same per-id,
+    /// in-memory, ephemeral contract — a daemon restart drops it and the run
+    /// falls back to the global `type_mode`. `pipeline::run` removes the entry
+    /// EARLY (next to the recipe/model/all-overrides removals, before
+    /// transcription) so a permanently-failed / canceled recording can't leave a
+    /// stale entry keyed by a dead id.
+    pub pending_focused_app:
+        Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
     /// The ports the bundled whisper-servers are ACTUALLY listening on,
     /// published by the supervisors on every (re)spawn. The configured
     /// `bundled_server_port`s are preferences: when a foreign process already
@@ -512,6 +527,7 @@ impl AppState {
                 std::sync::Mutex::new(std::collections::HashMap::new()),
             ),
             pending_recipe: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_focused_app: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             whisper_ports: Arc::new(WhisperEffectivePorts::default()),
             whisper_restart: Arc::new(tokio::sync::Notify::new()),
             skip_stage: Arc::new(tokio::sync::Notify::new()),

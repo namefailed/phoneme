@@ -1231,6 +1231,28 @@ impl DaemonRecorder {
                 fast_lane_model,
             );
         } else {
+            // A NON-fast-lane in-place dictation (full pipeline, or a
+            // recipe-bearing binding) types its result from the END of
+            // `pipeline::run`. The fast lane passes `focused_app` directly to its
+            // typing; the pipeline can't see this recording's foreground app, so
+            // stash it in the side-channel keyed by id — `pipeline::run` claims it
+            // and resolves the per-app type/paste/off override, exactly like the
+            // fast lane. Only for an in-place recording with a known foreground
+            // app; mirrors how `pending_recipe` is populated. (Don't populate for
+            // the fast lane — it already has `focused_app` in hand.)
+            if active.in_place {
+                if let Some(app) = active
+                    .focused_app
+                    .as_ref()
+                    .filter(|a| !a.trim().is_empty())
+                {
+                    state
+                        .pending_focused_app
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(active.id.clone(), app.clone());
+                }
+            }
             // Full-pipeline dictation with `type_first`: the text shouldn't
             // wait for the queue, so a type-only pass types the quick
             // transcription NOW, alongside the normal enqueue below — the
@@ -1361,6 +1383,15 @@ impl DaemonRecorder {
                     .remove(&active.id);
                 state
                     .pending_recipe
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&active.id);
+                // The focused-app side-channel is only ever populated for a
+                // NON-fast-lane in-place dictation at enqueue time, so a cancel
+                // here normally has nothing to drop — but mirror the recipe /
+                // overrides removals defensively so no terminal path can leak it.
+                state
+                    .pending_focused_app
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(&active.id);

@@ -2819,6 +2819,12 @@ impl Config {
         if let Some(stt) = out.in_place.stt.as_mut() {
             stt.model_path = expand_path(&stt.model_path)?;
         }
+        // The semantic-search embedding model dir is a user path too — a `~/` or
+        // `%APPDATA%` model_dir must resolve to a real location so the embedder
+        // load and the Doctor's model-integrity probe both see the same files.
+        // `expand_path` no-ops on the empty default, so no extra guard is needed.
+        out.semantic_search.model_dir =
+            expand_path(&out.semantic_search.model_dir.to_string_lossy())?.into();
         // Hook commands are arbitrary shell strings that may contain $variables
         // used at runtime by the shell (e.g. `$payload`, `$input` in PowerShell).
         // Only expand the known Phoneme path tokens (%APPDATA%, ~/) — do NOT
@@ -3675,6 +3681,21 @@ mod tests {
                 || expanded.recording.audio_dir.ends_with("\\test")
         );
     }
+    #[test]
+    fn tilde_expansion_in_semantic_search_model_dir() {
+        // A `~/`-prefixed embedding model dir must resolve to a real path so the
+        // embedder load and the Doctor probe both see the same files (P6 FIX 5).
+        let mut cfg = Config::default();
+        cfg.semantic_search.model_dir = "~/models/embed".into();
+        let expanded = cfg.expanded().unwrap();
+        let dir = expanded.semantic_search.model_dir.to_string_lossy();
+        assert!(!dir.starts_with('~'), "tilde should be expanded, got: {dir}");
+        assert!(
+            dir.ends_with("/models/embed") || dir.ends_with("\\models\\embed"),
+            "the path suffix should be preserved, got: {dir}"
+        );
+    }
+
     #[test]
     fn parses_legacy_config_without_llm() {
         let dir = TempDir::new().unwrap();

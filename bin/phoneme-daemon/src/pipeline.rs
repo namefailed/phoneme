@@ -1753,6 +1753,16 @@ pub async fn run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
+    // Claim this recording's focused-app override (if any) at the SAME early
+    // point — BEFORE transcription — so a transcribe failure / cancel can't leave
+    // a stale entry keyed by a dead id (the end-of-run typing is much later, past
+    // the failure paths). Only ever populated for a NON-fast-lane in-place
+    // dictation; `None` degrades to the global `type_mode` in `resolve_type_mode`.
+    let focused_app = state
+        .pending_focused_app
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     // A non-empty bound recipe means this recording was routed off the dictation
     // fast lane into the full pipeline *because* of its recipe (see the recorder's
     // `wants_fast_lane`). It governs the end-of-run typing decision: such an
@@ -2118,24 +2128,42 @@ pub async fn run(
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {
         if pipeline_should_type(&cfg.in_place, rec.in_place, recipe_routed, &transcript) {
-            tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
-            // This is the FULL-PIPELINE dictation path: either [in_place].
-            // full_pipeline = true without `type_first`, or a recipe-bearing
-            // in-place binding (always full-pipeline). The text lands only after
-            // every configured step — for a recipe binding that is the recipe's
-            // RESULT, the single insertion. (With plain `type_first` the
-            // recorder's type-only pass already typed it, so
-            // `pipeline_should_type` keeps this run from landing it twice; for a
-            // recipe binding the recorder skips type-first, so this run owns the
-            // sole insertion.) The insertion itself (typing vs
-            // clipboard-paste, input-simulator failure modes) lives in
-            // `in_place::type_at_cursor`, shared with the fast lane.
-            // Best-effort — a failure is logged loudly but never fails the
-            // recording.
-            if let Err(e) =
-                crate::in_place::type_at_cursor(&transcript, &cfg.in_place.type_mode).await
-            {
-                tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to insert transcript");
+            // Resolve how the text lands for the focused app captured at start:
+            // a per-app override ("type"/"paste"/"off") wins over the global
+            // `type_mode`; an unlisted (or undetectable) app falls back to the
+            // global mode. This mirrors the dictation FAST LANE exactly — the
+            // pipeline previously typed with the bare global `type_mode`, so a
+            // recipe-routed / full-pipeline in-place recording ignored a per-app
+            // "off" (and any per-app paste/type) the fast lane would honor.
+            // `focused_app` is the side-channel value claimed early above; `None`
+            // (no stash, or a daemon-restart drop) degrades to the global mode.
+            let type_mode = cfg.in_place.resolve_type_mode(focused_app.as_deref());
+            if type_mode == "off" {
+                // The user asked dictation NOT to auto-deliver for this app — the
+                // transcript still rides the pipeline into the library, it just
+                // doesn't land at the cursor. Same skip the fast lane does.
+                tracing::info!(
+                    id = %id.as_str(),
+                    "in-place dictation: per-app override is \"off\" for the focused app; not typing"
+                );
+            } else {
+                tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
+                // This is the FULL-PIPELINE dictation path: either [in_place].
+                // full_pipeline = true without `type_first`, or a recipe-bearing
+                // in-place binding (always full-pipeline). The text lands only
+                // after every configured step — for a recipe binding that is the
+                // recipe's RESULT, the single insertion. (With plain `type_first`
+                // the recorder's type-only pass already typed it, so
+                // `pipeline_should_type` keeps this run from landing it twice; for
+                // a recipe binding the recorder skips type-first, so this run owns
+                // the sole insertion.) The insertion itself (typing vs
+                // clipboard-paste, input-simulator failure modes) lives in
+                // `in_place::type_at_cursor`, shared with the fast lane.
+                // Best-effort — a failure is logged loudly but never fails the
+                // recording.
+                if let Err(e) = crate::in_place::type_at_cursor(&transcript, type_mode).await {
+                    tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to insert transcript");
+                }
             }
         }
     }

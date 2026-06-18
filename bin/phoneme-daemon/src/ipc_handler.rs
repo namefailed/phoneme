@@ -813,7 +813,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         state
                             .pending_overrides
                             .lock()
-                            .unwrap()
+                            .unwrap_or_else(|e| e.into_inner())
                             .insert(id.clone(), m.to_string());
                     }
                 }
@@ -866,7 +866,33 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         }
                         ok_null()
                     }
-                    Err(e) => err_response(&e),
+                    Err(e) => {
+                        // Enqueue failed: this job never reaches `pipeline::run`
+                        // (the sole place these per-recording ledgers are
+                        // otherwise claimed), so the entries we just stashed
+                        // would leak keyed by this id. Drop them on this terminal
+                        // path — honoring the "removed on every terminal path"
+                        // invariant — recovering from a poisoned lock like the
+                        // other pending_* sites do. `pending_focused_app` isn't
+                        // populated for a retranscribe, but a defensive remove
+                        // keeps the contract airtight.
+                        state
+                            .pending_overrides
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&id);
+                        state
+                            .pending_all_overrides
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&id);
+                        state
+                            .pending_focused_app
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&id);
+                        err_response(&e)
+                    }
                 }
             }
             Ok(None) => not_found(format!("recording {id} not found")),

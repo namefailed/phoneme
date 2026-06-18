@@ -148,7 +148,7 @@ fn align_one_track(
 fn leading_quiet_len(samples: &[i16]) -> usize {
     samples
         .iter()
-        .take_while(|s| s.abs() <= QUIET_THRESHOLD)
+        .take_while(|s| s.saturating_abs() <= QUIET_THRESHOLD)
         .count()
 }
 
@@ -344,7 +344,7 @@ mod tests {
         );
         let loud_before = sys[..video_start]
             .iter()
-            .filter(|&&s| s.abs() > 100)
+            .filter(|&&s| s.saturating_abs() > 100)
             .count();
         assert_eq!(loud_before, 0, "no audio before video start");
     }

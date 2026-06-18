@@ -220,7 +220,7 @@ export class SectionPlaybook {
   private entryCard(e: PlaybookEntry): string {
     const open = this.expanded.has(e.id);
     return `
-      <div class="pb-card" data-id="${e.id}">
+      <div class="pb-card" data-id="${escapeAttr(e.id)}">
         <div class="pb-row">
           <div class="pb-idcol">
             <input type="text" class="pb-name" value="${escapeAttr(e.name)}" placeholder="Name" aria-label="Entry name" />
@@ -445,7 +445,7 @@ export class SectionPlaybook {
             </div>`).join("")
         : `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No steps yet — add entries below.</span>`;
       return `
-        <div class="pb-recipe" data-id="${r.id}">
+        <div class="pb-recipe" data-id="${escapeAttr(r.id)}">
           <div class="pb-row">
             <div class="pb-idcol">
               <input type="text" class="pb-r-name" value="${escapeAttr(r.name)}" placeholder="Recipe name" aria-label="Recipe name" />
