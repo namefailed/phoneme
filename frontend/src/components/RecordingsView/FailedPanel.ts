@@ -360,10 +360,18 @@ export class FailedPanelElement extends LitElement {
               : this.error
                 ? html`<div class="failed-empty err">${this.error}</div>`
                 : n === 0
-                  ? html`<div class="failed-empty">
-                      Nothing has failed. Recordings that hit a permanent transcription or hook error show up
-                      here with the reason.
-                    </div>`
+                  ? this.inboxFailed > 0
+                    ? html`<div class="failed-empty">
+                        No recording currently has a <strong>Failed</strong> status — but the queue's failed
+                        marker still counts ${this.inboxFailed} item${this.inboxFailed === 1 ? "" : "s"}. That's
+                        left behind when a recording is removed before it finishes (e.g. you deleted one before
+                        it transcribed), so there's nothing to list here. Use
+                        <strong>Clear failed (${this.inboxFailed})</strong> below to reset the marker.
+                      </div>`
+                    : html`<div class="failed-empty">
+                        Nothing has failed. Recordings that hit a permanent transcription or hook error show up
+                        here with the reason.
+                      </div>`
                   : this.rows.map((r) => this.renderRow(r))}
           </div>
 
