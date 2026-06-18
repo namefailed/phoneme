@@ -55,6 +55,18 @@ trust boundary. Verified against current code.*
   so it stays user-renamable and the merged-meeting view is unchanged. Normal single
   recordings and the system track are completely unaffected.
 
+### Transcription
+
+- [x] **Custom vocabulary / glossary** — a new **Settings → Transcription → Custom
+  vocabulary** field (`[whisper] initial_prompt`) where you list the names, jargon,
+  and acronyms the transcriber keeps mis-hearing (e.g. `Phoneme, pyannote, WebView2,
+  Namef`). It's sent as the OpenAI `prompt` field to the whisper-family providers —
+  the local `whisper.cpp` server, OpenAI, Groq, and Custom OpenAI-compatible
+  endpoints — and as `set_initial_prompt` on the in-process native path, biasing
+  decoding toward those terms. Empty by default (wire format unchanged); kept short
+  since Whisper only conditions on ~the last 224 prompt tokens. Deepgram, AssemblyAI,
+  and ElevenLabs ignore it for now (they expose different keyword mechanisms).
+
 ### Recording
 
 - [x] **Live preview now works during in-place dictation** — dictation previously

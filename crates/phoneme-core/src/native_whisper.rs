@@ -20,17 +20,24 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 /// runs a GGML Whisper model in-process via whisper-rs.
 pub struct NativeWhisperProvider {
     context: WhisperContext,
+    /// Custom-vocabulary hint (`[whisper] initial_prompt`) applied to each decode
+    /// via `FullParams::set_initial_prompt`. `None`/empty leaves decoding default.
+    prompt: Option<String>,
 }
 
 impl NativeWhisperProvider {
     /// Load the GGML model at `model_path` into a reusable context. Errors if the
-    /// file can't be loaded as a Whisper model.
-    pub fn new(model_path: &Path) -> Result<Self> {
+    /// file can't be loaded as a Whisper model. `prompt` biases decoding toward
+    /// supplied names/jargon (empty/`None` for none).
+    pub fn new(model_path: &Path, prompt: Option<String>) -> Result<Self> {
         let params = WhisperContextParameters::default();
         let context =
             WhisperContext::new_with_params(model_path.to_string_lossy().as_ref(), params)
                 .context("failed to load native whisper model")?;
-        Ok(Self { context })
+        Ok(Self {
+            context,
+            prompt: prompt.filter(|p| !p.trim().is_empty()),
+        })
     }
 
     fn read_wav_f32(path: &Path) -> Result<Vec<f32>> {
@@ -73,6 +80,10 @@ impl crate::transcription::TranscriptionProvider for NativeWhisperProvider {
             params.set_language(Some(lang));
         } else {
             params.set_language(Some("en"));
+        }
+        // Custom-vocabulary hint: bias decoding toward the configured names/jargon.
+        if let Some(prompt) = &self.prompt {
+            params.set_initial_prompt(prompt);
         }
 
         params.set_print_progress(false);

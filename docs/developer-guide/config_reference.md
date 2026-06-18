@@ -24,6 +24,7 @@ A fully-commented `config.example.toml` and `.env.example` live at the **repo ro
 | `bundled_server_args` | string[] | `[]` | Extra whisper-server CLI args |
 | `timeout_secs` | u64 | `60` | Transcription HTTP timeout |
 | `language` | string? | `null` | BCP-47 hint; omit for auto-detect |
+| `initial_prompt` | string | `""` | Custom-vocabulary hint — names/jargon/acronyms to bias decoding toward (e.g. `"Phoneme, pyannote, WebView2"`). Sent as the OpenAI `prompt` field on the whisper-family path (local `whisper.cpp`, `openai`, `groq`, `custom`) and as `initial_prompt` on the native path. Keep it short (Whisper conditions on ~the last 224 tokens). `deepgram`/`assemblyai`/`elevenlabs` ignore it. |
 | `api_key` | string | `""` | Cloud provider key (redacted in logs) |
 | `model` | string | `""` | Cloud model id |
 | `api_url` | string | `""` | Custom provider base URL |

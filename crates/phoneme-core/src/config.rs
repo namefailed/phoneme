@@ -789,6 +789,15 @@ pub struct WhisperConfig {
     /// `None` means auto-detect (recommended unless you know the language).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// Custom-vocabulary hint — a short free-text prompt biasing the transcriber
+    /// toward names/jargon it would otherwise mis-hear ("Phoneme, pyannote, Namef,
+    /// WebView2…"). Sent as the OpenAI `prompt` field on the whisper-family HTTP
+    /// path (local whisper.cpp server, OpenAI, Groq, Custom) and as
+    /// `initial_prompt` on the native path; empty means none. Cloud diarizers with
+    /// their own keyword mechanisms (Deepgram/AssemblyAI/ElevenLabs) ignore it for
+    /// now. Keep it short — Whisper only conditions on the last ~224 prompt tokens.
+    #[serde(default)]
+    pub initial_prompt: String,
     /// Which transcription backend handles audio. Defaults to the local
     /// whisper server; cloud options send audio off-device.
     #[serde(default)]
@@ -829,6 +838,7 @@ impl std::fmt::Debug for WhisperConfig {
             .field("bundled_server_args", &self.bundled_server_args)
             .field("timeout_secs", &self.timeout_secs)
             .field("language", &self.language)
+            .field("initial_prompt", &self.initial_prompt)
             .field("provider", &self.provider)
             .field("api_key", &redact_key(self.api_key.expose_secret()))
             .field("model", &self.model)
@@ -847,6 +857,7 @@ impl PartialEq for WhisperConfig {
             && self.bundled_server_args == other.bundled_server_args
             && self.timeout_secs == other.timeout_secs
             && self.language == other.language
+            && self.initial_prompt == other.initial_prompt
             && self.provider == other.provider
             && self.api_key.expose_secret() == other.api_key.expose_secret()
             && self.model == other.model
@@ -2004,6 +2015,7 @@ impl Default for Config {
                 bundled_server_args: vec![],
                 timeout_secs: 60,
                 language: None,
+                initial_prompt: String::new(),
                 provider: TranscriptionBackend::Local,
                 api_key: SecretString::from(String::new()),
                 model: String::new(),

@@ -69,6 +69,17 @@ const EXACT: Record<string, string[]> = {
     "word timings after editing",
     "click to seek after edit",
   ],
+  "whisper.initial_prompt": [
+    "custom vocabulary",
+    "glossary",
+    "jargon",
+    "spelling",
+    "names",
+    "acronyms",
+    "initial prompt",
+    "bias",
+    "dictionary",
+  ],
 };
 
 /** All intent keywords for a field's config path (`data-key`). */

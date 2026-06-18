@@ -211,6 +211,56 @@ async fn sends_model_field_when_set() {
     assert_eq!(result, "modeled");
 }
 
+#[tokio::test]
+async fn sends_prompt_field_when_set() {
+    // Custom-vocabulary hint (`[whisper] initial_prompt`) rides as the OpenAI
+    // `prompt` multipart field. The mock only matches if it's present.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .and(body_string_contains("pyannote"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "primed"})),
+        )
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let provider = local_provider(server.uri(), Duration::from_secs(5))
+        .with_prompt(Some("Phoneme, pyannote, WebView2".into()));
+    let result = provider.transcribe(&wav, None).await.unwrap();
+    assert_eq!(result, "primed");
+}
+
+#[tokio::test]
+async fn omits_prompt_field_when_empty() {
+    // No prompt set → the request must NOT carry a `prompt` field, keeping the
+    // wire format unchanged for users who never configure custom vocabulary.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .and(body_string_contains("name=\"prompt\""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "x"})))
+        .expect(0) // this matcher should never fire
+        .mount(&server)
+        .await;
+    // A catch-all that actually answers the (prompt-less) request.
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "plain"})),
+        )
+        .mount(&server)
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let wav = fake_wav(&dir).await;
+    let provider = local_provider(server.uri(), Duration::from_secs(5));
+    let result = provider.transcribe(&wav, None).await.unwrap();
+    assert_eq!(result, "plain");
+}
+
 /// End-to-end: a `provider = openai` config flows through `Transcriber::provider`
 /// to a cloud provider that sends bearer auth + the configured model. The
 /// `api_url` override points it at the mock instead of api.openai.com.

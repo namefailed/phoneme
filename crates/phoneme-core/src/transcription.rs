@@ -197,6 +197,9 @@ impl Transcriber {
         // under, so every minted provider reuses one loaded pipeline.
         let local_diar = (diarization.provider == crate::config::DiarizationBackend::Local)
             .then(|| LocalDiarizer::new(self.diarizer.clone(), diarization.clone()));
+        // Custom-vocabulary hint shared by every whisper-family HTTP provider.
+        // `None` when empty so the request wire format is unchanged.
+        let prompt = non_empty(&whisper.initial_prompt);
         match whisper.provider {
             TranscriptionBackend::Local => {
                 #[cfg(feature = "native-whisper")]
@@ -208,23 +211,27 @@ impl Transcriber {
                     if !native_path.is_empty() {
                         if let Ok(provider) = crate::native_whisper::NativeWhisperProvider::new(
                             std::path::Path::new(native_path),
+                            prompt.clone(),
                         ) {
                             return Box::new(provider);
                         }
                     }
                 }
 
-                Box::new(OpenAiCompatProvider::new(
-                    self.http.clone(),
-                    whisper.server_base_url(),
-                    None,
-                    None,
-                    timeout,
-                    local_diar,
-                    // whisper.cpp always supports verbose_json — capture
-                    // segment timing even with diarization off.
-                    true,
-                ))
+                Box::new(
+                    OpenAiCompatProvider::new(
+                        self.http.clone(),
+                        whisper.server_base_url(),
+                        None,
+                        None,
+                        timeout,
+                        local_diar,
+                        // whisper.cpp always supports verbose_json — capture
+                        // segment timing even with diarization off.
+                        true,
+                    )
+                    .with_prompt(prompt),
+                )
             }
             TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
@@ -238,7 +245,7 @@ impl Transcriber {
                 // it is never requested unconditionally here.
                 local_diar,
                 false,
-            )),
+            ).with_prompt(prompt)),
             TranscriptionBackend::Groq => Box::new(OpenAiCompatProvider::new(
                 self.http.clone(),
                 cloud_base_url(&whisper.api_url, crate::endpoints::GROQ_STT_BASE),
@@ -247,7 +254,7 @@ impl Transcriber {
                 timeout,
                 local_diar,
                 false,
-            )),
+            ).with_prompt(prompt)),
 
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
                 self.http.clone(),
@@ -287,7 +294,7 @@ impl Transcriber {
                 // asks for it — an arbitrary endpoint may not accept it.
                 local_diar,
                 false,
-            )),
+            ).with_prompt(prompt)),
         }
     }
 }
@@ -394,6 +401,10 @@ pub struct OpenAiCompatProvider {
     /// when diarization needs it, since some OpenAI-compatible backends (e.g.
     /// `gpt-4o-transcribe`) reject the verbose format.
     request_segments: bool,
+    /// Custom-vocabulary hint sent as the OpenAI `prompt` field (`[whisper]
+    /// initial_prompt`): biases the transcriber toward names/jargon. `None` (or
+    /// empty) omits it entirely, keeping the wire format unchanged.
+    prompt: Option<String>,
 }
 
 // Manual `Debug` so the API key is never rendered verbatim into logs.
@@ -434,7 +445,16 @@ impl OpenAiCompatProvider {
             timeout,
             local_diarize,
             request_segments,
+            prompt: None,
         }
+    }
+
+    /// Attach a custom-vocabulary `prompt` (`[whisper] initial_prompt`). Builder
+    /// style so the all-args `new` stays unchanged for the test call sites; the
+    /// daemon's `Transcriber::provider` chains this on. `None`/empty is a no-op.
+    pub fn with_prompt(mut self, prompt: Option<String>) -> Self {
+        self.prompt = prompt;
+        self
     }
 }
 
@@ -472,6 +492,13 @@ impl TranscriptionProvider for OpenAiCompatProvider {
         // Omitted entirely when unset so the local wire format is unchanged.
         if let Some(model) = &self.model {
             form = form.text("model", model.clone());
+        }
+        // Custom-vocabulary hint (`[whisper] initial_prompt`): the OpenAI `prompt`
+        // field, which whisper.cpp's server, OpenAI, and Groq all accept and use
+        // to bias decoding toward the supplied names/jargon. Omitted when empty so
+        // the wire format is unchanged for users who don't set one.
+        if let Some(prompt) = &self.prompt {
+            form = form.text("prompt", prompt.clone());
         }
         // Force the JSON response shape (`{ "text": ... }`) that OpenAiResponse
         // decodes below. OpenAI/Groq already default to this, but a Custom

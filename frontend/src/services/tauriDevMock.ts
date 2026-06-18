@@ -315,6 +315,7 @@ const STT = (port: number, model: string) => ({
   model_path: `~/AppData/Local/phoneme/data/models/${model}`,
   bundled_server_port: port, bundled_server_args: [], timeout_secs: 9999,
   language: "en", provider: "local", api_key: "", model: "", api_url: "",
+  initial_prompt: "Phoneme, pyannote, WebView2",
   use_own_bundled_server: false,
 });
 let config: Record<string, unknown> = {

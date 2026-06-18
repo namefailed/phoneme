@@ -406,6 +406,19 @@ export class SectionWhisper {
             Hint the language of your speech to improve accuracy. Leave on <b>Auto-detect</b> if you record in multiple languages.
           </span>
         </div>
+        <div class="settings-field">
+          <label>Custom vocabulary</label>
+          <div>${renderField(
+            { key: "whisper.initial_prompt", label: "", kind: "textarea" },
+            this.config.whisper.initial_prompt ?? "",
+          )}</div>
+          <span style="${HELP}">
+            Names, jargon, and acronyms the transcriber keeps mis-hearing — list them here and Whisper will lean toward them
+            (e.g. <code>Phoneme, pyannote, WebView2, Namef</code>). Sent as the prompt to <b>Whisper-based</b> providers (the local
+            <code>whisper.cpp</code> server, OpenAI, Groq, and Custom endpoints); keep it short — only the last ~224 tokens are used.
+            Deepgram, AssemblyAI, and ElevenLabs ignore it for now.
+          </span>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);

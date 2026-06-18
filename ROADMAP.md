@@ -540,13 +540,19 @@ explicit roadmap line here saying why not).
     provider/model picker (shipped), and the granular status/event plumbing
     (shipped). Pairs naturally with the v2.0 MCP server — same tool registry,
     opposite direction.
-- [ ] **Transcript ↔ waveform sync** — click a paragraph → seek playback. *(Needs
-  word-level timestamps from v1.9.)*
+- [x] **Transcript ↔ waveform sync** — shipped on the v1.9 word-level substrate:
+  the **🔤 Synced** peek (`SyncedTranscript.ts`) renders the machine transcript as
+  clickable, time-coded words — click any word to seek the waveform, and the word
+  under the playhead highlights as audio plays. The **Timeline** peek does the same
+  at segment granularity. Edited transcripts re-derive both via `realign`.
 - [x] **Compare transcript versions** — side-by-side diff of original Whisper vs
   cleaned vs the current edit (`TranscriptDiff.ts`); audited clean.
-- [ ] **Custom vocabulary / glossary** — names like "Phoneme", "pyannote", client
-  acronyms transcribed correctly via Whisper's `initial_prompt`. (Dictator persona,
-  Whisper-native.)
+- [x] **Custom vocabulary / glossary** — shipped as **Settings → Transcription →
+  Custom vocabulary** (`[whisper] initial_prompt`): names/jargon/acronyms biasing
+  the transcriber, sent as the OpenAI `prompt` field on the whisper-family path
+  (local `whisper.cpp`, OpenAI, Groq, Custom) and `set_initial_prompt` on the native
+  path. Empty by default; Deepgram/AssemblyAI/ElevenLabs (their own keyword
+  mechanisms) ignore it for now. *(2 wire tests in `tests/transcription.rs`.)*
 - [x] **Auto-tag suggestions** — *shipped* as a full pipeline stage with
   approve/dismiss UX, its own `[auto_tag]` provider config, and auto-accept for
   tags the library already has. Smart **titles** are the remaining half — tracked
