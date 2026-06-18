@@ -111,6 +111,16 @@ pub struct Config {
     /// Keybinds). Empty by default, so every existing config.toml loads unchanged.
     #[serde(default)]
     pub hotkeys: Vec<HotkeyBinding>,
+    /// The Playbook: reusable LLM/hook "moves" that power the default recording
+    /// pipeline and Custom Hotkey chains. Seeded with curated, editable entries;
+    /// a config with no `[[playbook]]` tables loads the seeds via `default_playbook`.
+    /// Additive in Phase 1 — present but not yet read by the pipeline.
+    #[serde(default = "default_playbook")]
+    pub playbook: Vec<PlaybookEntry>,
+    /// Named, ordered chains of `playbook` entry ids. `default` is the normal-
+    /// recording pipeline. Seeded via `default_recipes` when absent.
+    #[serde(default = "default_recipes")]
+    pub recipes: Vec<PlaybookRecipe>,
     /// Frontend OS-level tray behavior.
     pub tray: TrayConfig,
     /// Settings for the built-in transcript editor.
@@ -1474,6 +1484,211 @@ impl Default for HotkeyInPlace {
     }
 }
 
+// ── Playbook ────────────────────────────────────────────────────────────────
+// The Playbook is the unified, reusable library of LLM/hook "moves" (entries)
+// and ordered chains of them (recipes) that power BOTH the default recording
+// pipeline and Custom Hotkey chains. Phase 1 lands the schema + curated seeds
+// only — additive (`#[serde(default)]`), so existing configs load unchanged and
+// nothing reads these yet; the pipeline still runs off the legacy
+// llm_post_process / summary / title / auto_tag config. Later phases migrate the
+// runtime onto recipes, add the Settings UI, and rewire hotkeys.
+
+/// What a [`PlaybookEntry`] does. A flat discriminant (not a data-carrying enum)
+/// so it round-trips cleanly through TOML and stays forward-compatible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybookKind {
+    /// LLM step that REWRITES the running transcript text and feeds the next step
+    /// (e.g. cleanup, "reshape into a prompt").
+    #[default]
+    Transform,
+    /// LLM step that writes its result to a named field (see [`PlaybookEntry::target`])
+    /// instead of changing the running text (title / summary / tags / custom).
+    Enrichment,
+    /// A shell command or webhook fired with the recording JSON (like an Integration).
+    Hook,
+}
+
+/// The LLM half of a Playbook entry (used when `kind` is `Transform`/`Enrichment`).
+/// A leaner sibling of [`LlmPostProcessConfig`]: the API key is resolved from the
+/// matching provider section at run time, so it is never stored per entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaybookLlm {
+    /// Provider id (`ollama` / `openai` / `groq` / `anthropic` / …). Empty means
+    /// "inherit the default post-processing provider" when the entry runs.
+    #[serde(default)]
+    pub provider: String,
+    /// Model id; empty inherits the provider's configured default.
+    #[serde(default)]
+    pub model: String,
+    /// The system/instruction prompt for this step.
+    #[serde(default)]
+    pub prompt: String,
+    /// Override base URL; empty uses the provider default.
+    #[serde(default)]
+    pub api_url: String,
+    /// Max seconds to wait before falling back (idle-based, like the other LLM steps).
+    #[serde(default = "default_llm_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for PlaybookLlm {
+    fn default() -> Self {
+        Self {
+            provider: String::new(),
+            model: String::new(),
+            prompt: String::new(),
+            api_url: String::new(),
+            timeout_secs: default_llm_timeout_secs(),
+        }
+    }
+}
+
+fn default_playbook_hook_timeout() -> u64 {
+    60
+}
+
+/// The hook half of a Playbook entry (used when `kind` is `Hook`). One command/
+/// script OR a webhook URL — mirrors a single Integration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaybookHook {
+    /// Shell command or script path to run (receives the recording JSON on stdin).
+    #[serde(default)]
+    pub command: String,
+    /// Webhook URL to POST the recording payload to (governed by `[webhook]` policy).
+    #[serde(default)]
+    pub webhook_url: String,
+    /// Max execution time before the hook is killed.
+    #[serde(default = "default_playbook_hook_timeout")]
+    pub timeout_secs: u64,
+}
+
+impl Default for PlaybookHook {
+    fn default() -> Self {
+        Self {
+            command: String::new(),
+            webhook_url: String::new(),
+            timeout_secs: default_playbook_hook_timeout(),
+        }
+    }
+}
+
+/// A reusable "move" in the Playbook. A flat struct with a `kind` discriminant +
+/// per-kind sub-objects (TOML-friendly): `llm` drives `Transform`/`Enrichment`,
+/// `hook` drives `Hook`, and `target` names the field an `Enrichment` writes —
+/// built-in `title` / `summary` / `tags`, or `custom:<key>` for user-defined
+/// metadata. Curated entries are `builtin` (editable; "reset to default" restores
+/// the seed); user entries are not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaybookEntry {
+    /// Stable unique id — the key recipes and hotkeys reference.
+    pub id: String,
+    /// User-facing name shown in the Playbook manager.
+    #[serde(default)]
+    pub name: String,
+    /// One-line "what this does" description.
+    #[serde(default)]
+    pub description: String,
+    /// Seeded by Phoneme (vs. user-created).
+    #[serde(default)]
+    pub builtin: bool,
+    /// What this entry does.
+    #[serde(default)]
+    pub kind: PlaybookKind,
+    /// LLM config (used for `Transform`/`Enrichment`).
+    #[serde(default)]
+    pub llm: PlaybookLlm,
+    /// For `Enrichment`: the field to write — `title` | `summary` | `tags` |
+    /// `custom:<key>`. Ignored for other kinds.
+    #[serde(default)]
+    pub target: String,
+    /// Hook config (used for `Hook`).
+    #[serde(default)]
+    pub hook: PlaybookHook,
+}
+
+/// A named, ordered chain of [`PlaybookEntry`] ids — what the default recording
+/// pipeline and Custom Hotkeys actually run. Curated recipes are `builtin`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaybookRecipe {
+    /// Stable unique id (e.g. the default pipeline recipe is `"default"`).
+    pub id: String,
+    /// User-facing name.
+    #[serde(default)]
+    pub name: String,
+    /// One-line description.
+    #[serde(default)]
+    pub description: String,
+    /// Seeded by Phoneme (vs. user-created).
+    #[serde(default)]
+    pub builtin: bool,
+    /// Ordered [`PlaybookEntry`] ids to run.
+    #[serde(default)]
+    pub steps: Vec<String>,
+}
+
+/// Curated starter entries seeded into a fresh config. These mirror the legacy
+/// default cleanup / title / summary / auto-tag prompts so the migrated default
+/// recipe behaves exactly like today's pipeline. (A runtime migration reconciles
+/// an EXISTING user's customized prompts onto these in a later Phase-1 step.)
+pub fn default_playbook() -> Vec<PlaybookEntry> {
+    let llm = |prompt: &str| PlaybookLlm { prompt: prompt.into(), ..PlaybookLlm::default() };
+    vec![
+        PlaybookEntry {
+            id: "cleanup".into(),
+            name: "Cleanup".into(),
+            description: "Tidy stutters, repetitions, and phonetic slips while keeping the original tone.".into(),
+            builtin: true,
+            kind: PlaybookKind::Transform,
+            llm: llm("Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone."),
+            target: String::new(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "title".into(),
+            name: "Title".into(),
+            description: "Generate a short title for the recording.".into(),
+            builtin: true,
+            kind: PlaybookKind::Enrichment,
+            llm: llm("You title voice-note transcripts. Reply with ONLY a short title for the transcript: at most 8 words, plain text, no quotes, no trailing punctuation, no preamble."),
+            target: "title".into(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "summary".into(),
+            name: "Summary".into(),
+            description: "Summarize the transcript into a few clear bullet points.".into(),
+            builtin: true,
+            kind: PlaybookKind::Enrichment,
+            llm: llm("Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble."),
+            target: "summary".into(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "auto_tag".into(),
+            name: "Auto-tag".into(),
+            description: "Suggest tags for the recording (you approve before they apply).".into(),
+            builtin: true,
+            kind: PlaybookKind::Enrichment,
+            llm: llm("Suggest a few short topical tags for this transcript. Reply with ONLY a comma-separated list of lowercase tags, no preamble."),
+            target: "tags".into(),
+            hook: PlaybookHook::default(),
+        },
+    ]
+}
+
+/// Curated starter recipes. `default` is the normal-recording pipeline —
+/// cleanup → title → summary → auto-tag — matching today's behaviour.
+pub fn default_recipes() -> Vec<PlaybookRecipe> {
+    vec![PlaybookRecipe {
+        id: "default".into(),
+        name: "Default pipeline".into(),
+        description: "What every normal recording runs: cleanup, then title, summary, and tag suggestions.".into(),
+        builtin: true,
+        steps: vec!["cleanup".into(), "title".into(), "summary".into(), "auto_tag".into()],
+    }]
+}
+
 /// A user-defined custom keybind, beyond the three built-ins (record / in-place /
 /// meeting). Configured in Settings → Keybinds and stored in [`Config::hotkeys`];
 /// each binds a key combo to an action + mode, and carries its OWN pipeline and
@@ -2069,6 +2284,8 @@ impl Default for Config {
             in_place: InPlaceConfig::default(),
             meeting_hotkey: default_meeting_hotkey(),
             hotkeys: Vec::new(),
+            playbook: default_playbook(),
+            recipes: default_recipes(),
             tray: TrayConfig {
                 show_on_startup: true,
                 minimize_to_tray: true,
