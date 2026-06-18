@@ -2847,8 +2847,9 @@ impl Config {
 /// Expand `~` and `%VAR%` path tokens in a file-path string, then resolve
 /// any remaining `$VAR`-style OS environment variable references via
 /// shellexpand. Use this for path-only fields like `audio_dir` and
-/// `model_path`.
-fn expand_path(s: &str) -> Result<String> {
+/// `model_path`. `pub(crate)` so `Embedder::new` can resolve `model_dir` the
+/// same way (keeping the runtime load and the Doctor's probe on one path).
+pub(crate) fn expand_path(s: &str) -> Result<String> {
     if s.is_empty() {
         return Ok(s.into());
     }

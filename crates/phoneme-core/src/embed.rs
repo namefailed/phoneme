@@ -111,7 +111,14 @@ impl Embedder {
     /// `model.onnx` and `tokenizer.json`) and capture the per-model embedding
     /// knobs from `cfg`.
     pub fn new(cfg: &SemanticSearchConfig) -> Result<Self> {
-        let model_dir = &cfg.model_dir;
+        // Resolve `~`, `%APPDATA%`, `$VAR` tokens so a user-entered model path
+        // loads from the same place every other model path does — and the same
+        // place the Doctor probes (it reads the expanded config). Falls back to
+        // the raw path if expansion ever fails, so this is never worse than
+        // before. Absolute/relative paths pass through unchanged (no tokens).
+        let model_dir = crate::config::expand_path(&cfg.model_dir.to_string_lossy())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| cfg.model_dir.clone());
         let tokenizer_path = model_dir.join("tokenizer.json");
         let model_path = model_dir.join("model.onnx");
 
