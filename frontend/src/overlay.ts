@@ -478,9 +478,17 @@ void listen<any>("daemon-event", async (e) => {
       // Re-read the feel/perf knobs so a Settings change (reveal speed, waveform,
       // idle window, meeting layout) takes effect on the very next recording — no
       // app restart. Cheap local IPC; falls back to the last-known values.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let startCfg: any = null;
       try {
-        applyPreviewTuning(await invoke<any>("read_config"));
+        startCfg = await invoke<any>("read_config");
+        applyPreviewTuning(startCfg);
       } catch { /* keep last-known tuning */ }
+      // Off-switch authoritative at show time: even if this window still exists
+      // (created earlier, then the setting was turned off before its destroy
+      // landed), never auto-show for a recording when `interface.preview_overlay`
+      // is off. The manual Settings "Preview" path (overlay-preview) is separate.
+      if (startCfg && !startCfg.interface?.preview_overlay) break;
       if (p.meeting_id && typeof p.track === "string") {
         isMeeting = true;
         meetingTracks.set(p.id, p.track);

@@ -111,6 +111,13 @@ void listen<any>("daemon-event", async (e) => {
   const p = e.payload;
   switch (p?.event) {
     case "recording_started": {
+      // Off-switch authoritative at show time: never auto-show when
+      // `interface.recording_indicator` is off, even if this window still exists
+      // (created earlier, then disabled before its destroy landed).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let cfg: any = null;
+      try { cfg = await invoke<any>("read_config"); } catch { /* assume enabled */ }
+      if (cfg && !cfg.interface?.recording_indicator) break;
       if (p.meeting_id && typeof p.track === "string") {
         meetingTracks.set(p.id, p.track);
       } else {

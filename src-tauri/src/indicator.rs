@@ -47,14 +47,22 @@ use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 /// this) and the `windows` allowlist in `src-tauri/capabilities/default.json`.
 pub const INDICATOR_LABEL: &str = "recording-indicator";
 
-/// Indicator width (logical px). A small fixed pill holding just the centered
-/// audio waveform (WhisperFlow-style) — no dot, no timer. Fixed size (the height
-/// is pinned too) — this is a tiny status cue, not a resizable panel.
-const INDICATOR_W: f64 = 150.0;
-/// Indicator height (logical px). Sized to the waveform pill.
-const INDICATOR_H: f64 = 36.0;
+/// Indicator width (logical px). Sized snugly to the centered audio waveform
+/// (13 bars × 3px + 3px gaps ≈ 75px) plus the card's 16px side padding — so the
+/// pill hugs the bars instead of leaving dead space around them. Fixed (the
+/// height is pinned too): a tiny status cue, not a resizable panel. Kept in sync
+/// with `indicator.css` (`.ri-card` padding + `.ri-wave` bar count/width).
+const INDICATOR_W: f64 = 112.0;
+/// Indicator height (logical px). Snug around the 22px waveform with a little
+/// vertical breathing room inside the rounded pill.
+const INDICATOR_H: f64 = 32.0;
 /// Inset from the bottom of the work area for the first-run placement.
 const BOTTOM_MARGIN: f64 = 96.0;
+/// Off-screen sentinel start position (mirrors [`crate::overlay`]): a never-saved
+/// window starts off every monitor so first-run placement is detectable as "not
+/// on any monitor", instead of guessing from coordinate signs (which mis-flagged
+/// monitors arranged left of / above the primary).
+const OFFSCREEN_SENTINEL: f64 = -32000.0;
 
 /// Whether the indicator window currently exists.
 pub fn exists(app: &AppHandle) -> bool {
@@ -83,6 +91,10 @@ pub fn ensure(app: &AppHandle) {
     let builder = WebviewWindowBuilder::new(app, INDICATOR_LABEL, url)
         .title("Phoneme Recording Indicator")
         .inner_size(INDICATOR_W, INDICATOR_H)
+        // Start off every monitor (hidden) so first-run placement is detectable
+        // as "not on any monitor"; the window-state plugin overrides this with a
+        // remembered position when one exists. See `place_default_if_unpositioned`.
+        .position(OFFSCREEN_SENTINEL, OFFSCREEN_SENTINEL)
         // Fixed small pill: pin BOTH axes by making min == max == the inner size,
         // so the user can't resize it into something odd. Position is still
         // remembered by tauri-plugin-window-state.
@@ -108,9 +120,15 @@ pub fn ensure(app: &AppHandle) {
         }
     };
 
-    // First-run placement: if `tauri-plugin-window-state` had a saved position it
-    // has already been applied; only nudge to bottom-center when the window is
-    // still at the origin (0,0) — a freshly-built, never-saved window.
+    // Force the correct fixed size even if `tauri-plugin-window-state` restored a
+    // stale geometry from an older build (the programmatic restore bypasses the
+    // min/max above). Without this, a pre-existing 150×36 saved size would leave
+    // dead space around the snug 112×32 pill. Best-effort.
+    let _ = window.set_size(tauri::LogicalSize::new(INDICATOR_W, INDICATOR_H));
+
+    // First-run placement: the window-state plugin overwrites the off-screen
+    // sentinel only when it restored a saved position, so "is it on a connected
+    // monitor?" tells us whether to nudge to bottom-center.
     place_default_if_unpositioned(&window);
 
     tracing::info!("recording-indicator window created (hidden)");
@@ -138,15 +156,14 @@ pub fn sync(app: &AppHandle, enabled: bool) {
 }
 
 /// Place the indicator at the bottom-center of its monitor's work area, but only
-/// if it's still sitting at the origin (i.e. no saved position was restored).
-/// Best-effort: any failure just leaves the window where the OS put it.
+/// when there's no remembered position to honor — detected by the window not
+/// sitting on any currently-connected monitor (the off-screen builder sentinel on
+/// first run, or a saved position whose monitor was unplugged). A restored
+/// position on ANY monitor (including ones arranged left of / above the primary,
+/// at negative coordinates) is respected. Best-effort.
 fn place_default_if_unpositioned(window: &tauri::WebviewWindow) {
-    let at_origin = window
-        .outer_position()
-        .map(|p| p.x <= 0 && p.y <= 0)
-        .unwrap_or(true);
-    if !at_origin {
-        return; // a remembered position was restored — respect it
+    if position_is_on_a_monitor(window) {
+        return; // a remembered, on-screen position was restored — respect it
     }
 
     let Ok(Some(monitor)) = window.current_monitor() else {
@@ -159,4 +176,25 @@ fn place_default_if_unpositioned(window: &tauri::WebviewWindow) {
     let x = pos.x + (size.width - INDICATOR_W) / 2.0;
     let y = pos.y + size.height - INDICATOR_H - BOTTOM_MARGIN;
     let _ = window.set_position(tauri::LogicalPosition::new(x.max(pos.x), y.max(pos.y)));
+}
+
+/// Whether the window's top-left corner falls within any connected monitor's
+/// bounds. Distinguishes a restored on-screen position from the off-screen
+/// first-run sentinel (or a now-disconnected monitor). On any error reading the
+/// position or enumerating monitors, returns `false` so the caller places the
+/// window rather than leaving it off-screen.
+fn position_is_on_a_monitor(window: &tauri::WebviewWindow) -> bool {
+    let Ok(p) = window.outer_position() else {
+        return false;
+    };
+    let Ok(monitors) = window.available_monitors() else {
+        return false;
+    };
+    monitors.iter().any(|m| {
+        let mp = m.position();
+        let ms = m.size();
+        let right = mp.x + ms.width as i32;
+        let bottom = mp.y + ms.height as i32;
+        p.x >= mp.x && p.x < right && p.y >= mp.y && p.y < bottom
+    })
 }
