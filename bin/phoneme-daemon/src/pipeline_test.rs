@@ -62,8 +62,11 @@ async fn seed_recording(
 }
 
 async fn test_state(tmp: &std::path::Path, cfg: Config) -> AppState {
-    std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
-    AppState::new(cfg).await.expect("build test AppState")
+    // Explicit data-local (no global `set_var`) so parallel tests don't race on
+    // the shared `PHONEME_DATA_LOCAL` env var — see `AppState::new_in`.
+    AppState::new_in(cfg, Some(tmp.join("data")))
+        .await
+        .expect("build test AppState")
 }
 
 /// Put a recording's inbox file into `processing/` exactly the way the queue

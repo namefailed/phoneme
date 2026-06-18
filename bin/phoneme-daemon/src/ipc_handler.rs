@@ -2239,8 +2239,11 @@ mod tests {
     use phoneme_core::RecordingId;
 
     async fn override_test_state(tmp: &std::path::Path, cfg: Config) -> AppState {
-        std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
-        AppState::new(cfg).await.expect("build test AppState")
+        // Explicit data-local (no global `set_var`) so parallel tests don't race —
+        // see `AppState::new_in`.
+        AppState::new_in(cfg, Some(tmp.join("data")))
+            .await
+            .expect("build test AppState")
     }
 
     /// `daemon_status` surfaces the bundled-server ports: the configured

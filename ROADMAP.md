@@ -749,7 +749,18 @@ alongside the feature releases above.*
 - [ ] **Pipeline integration tests** — the full transcribe → LLM → hooks → webhook → catalog/inbox path is the biggest untested critical path (`pipeline.rs`).
 - [x] **Webhook + embedding tests** — `webhook.rs` timeout/error contracts; embedding upsert/search round-trip + corrupt-BLOB handling. *(shipped in PR #68)*
 - [ ] **Meeting capture E2E** (synthetic backend, incl. a paused-video internal gap) and **retention daemon** + **export-zip** integrity tests.
-- [ ] Split CI: parallel `--lib`, serial `--test '*'` (today everything runs `--test-threads=1`); cache the `tauri-cli` binary.
+- [~] Split CI: parallel `--lib`, serial `--test '*'` (today everything runs `--test-threads=1`); cache the `tauri-cli` binary.
+  - [x] **Daemon catalog/data-local race fixed** — the in-process daemon unit tests
+    used to `std::env::set_var("PHONEME_DATA_LOCAL")` (process-global), so parallel
+    tests clobbered each other's catalog.db. Now `AppState::new_in` /
+    `ResolvedPaths::from_config_in` take an explicit data-local dir and the 5 test
+    helpers pass their own tempdir — no global mutation. Verified: `cargo test -p
+    phoneme-daemon` runs fully parallel, 95 bin tests green across 3 consecutive runs.
+  - [ ] **Other crates still hold `--test-threads=1` back** — `config.rs` /
+    `config_cmd.rs` (`PHONEME_CONFIG`), `doctor.rs` (`PHONEME_DATA_LOCAL`, `HF_HOME`),
+    `recorder.rs` (`PHONEME_AUDIO_BACKEND`), and `auto_spawn.rs` (`PATH`) still mutate
+    process-global env in tests. Deserialize those (explicit params or a shared
+    `serial_test`-style lock) before dropping `--test-threads=1` workspace-wide in CI.
 
 **Quick correctness wins** *(small, mostly isolated)*
 - [x] `embed.rs` mutex-poison `unwrap()` → `map_err` (no daemon panic on a poisoned lock). *(audit A-C2)*

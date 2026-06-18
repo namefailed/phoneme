@@ -46,10 +46,23 @@ pub struct ResolvedPaths {
 
 impl ResolvedPaths {
     pub fn from_config(cfg: &Config) -> anyhow::Result<Self> {
-        // PHONEME_DATA_LOCAL lets integration tests redirect inbox/catalog/log
-        // away from the real per-user `AppData\Local\phoneme` so concurrent
-        // test daemons don't stomp on each other (or on a real install).
-        let data_local: PathBuf = if let Ok(p) = std::env::var("PHONEME_DATA_LOCAL") {
+        Self::from_config_in(cfg, None)
+    }
+
+    /// Like [`from_config`], but with an optional explicit data-local directory
+    /// that takes precedence over the `PHONEME_DATA_LOCAL` env var. In-process
+    /// unit tests pass `Some(their_tempdir)` so they never touch the global env
+    /// var — the old `set_var` race that made the daemon suite unsafe to run
+    /// with more than one thread (forcing `--test-threads=1`). `None` keeps the
+    /// production behavior: env var if set, else the per-user data dir.
+    pub fn from_config_in(cfg: &Config, data_local_override: Option<PathBuf>) -> anyhow::Result<Self> {
+        // PHONEME_DATA_LOCAL lets the spawned-daemon integration tests redirect
+        // inbox/catalog/log away from the real per-user `AppData\Local\phoneme`
+        // (set per child process via `.env(...)`, so those don't race). In-process
+        // tests use the explicit override instead.
+        let data_local: PathBuf = if let Some(p) = data_local_override {
+            p
+        } else if let Ok(p) = std::env::var("PHONEME_DATA_LOCAL") {
             p.into()
         } else {
             let dirs = directories::ProjectDirs::from("", "", "phoneme")
@@ -408,9 +421,22 @@ static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl AppState {
     pub async fn new(config: Config) -> anyhow::Result<Self> {
-        let paths = {
+        Self::new_in(config, None).await
+    }
+
+    /// Like [`new`], but with an explicit data-local directory that bypasses the
+    /// process-global `PHONEME_DATA_LOCAL` env var. In-process unit tests pass
+    /// their own temp dir so parallel tests don't clobber each other's data path
+    /// (the race that previously required `--test-threads=1`). Production calls
+    /// `new` (override `None`).
+    pub async fn new_in(config: Config, data_local: Option<PathBuf>) -> anyhow::Result<Self> {
+        let paths = if data_local.is_some() {
+            // Explicit path: no env read, so no INIT_LOCK needed — fully parallel.
+            ResolvedPaths::from_config_in(&config, data_local)?
+        } else {
+            // Env/dirs path: serialize the read against any other env-based build.
             let _guard = INIT_LOCK.lock().unwrap();
-            ResolvedPaths::from_config(&config)?
+            ResolvedPaths::from_config_in(&config, None)?
         };
         tokio::fs::create_dir_all(&paths.audio_dir).await?;
         tokio::fs::create_dir_all(&paths.inbox_dir).await?;

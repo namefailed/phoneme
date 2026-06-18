@@ -11,9 +11,12 @@ use phoneme_ipc::DaemonEvent;
 use std::time::Duration;
 
 async fn test_state(tmp: &std::path::Path) -> AppState {
-    std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
+    // Explicit data-local (no global `set_var`) so parallel tests don't race —
+    // see `AppState::new_in`.
     let cfg = Config::default();
-    AppState::new(cfg).await.expect("build test AppState")
+    AppState::new_in(cfg, Some(tmp.join("data")))
+        .await
+        .expect("build test AppState")
 }
 
 #[tokio::test]

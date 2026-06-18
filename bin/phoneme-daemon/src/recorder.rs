@@ -2201,8 +2201,6 @@ mod tests {
     /// Build an `AppState` whose catalog/inbox/audio all live under a temp dir,
     /// so meeting orchestration can be tested without touching the real install.
     async fn test_state(tmp: &std::path::Path) -> AppState {
-        // Redirect inbox/catalog/logs away from the real per-user AppData.
-        std::env::set_var("PHONEME_DATA_LOCAL", tmp.join("data"));
         let mut cfg = Config::default();
         cfg.recording.audio_dir = tmp.join("audio").to_string_lossy().into_owned();
         // Disable idle pre-roll: it opens a real microphone via cpal, which
@@ -2210,7 +2208,11 @@ mod tests {
         // device — the long-standing CI failure. Tests use synthetic sources and
         // must never touch real capture hardware.
         cfg.recording.pre_roll_ms = 0;
-        AppState::new(cfg).await.expect("build test AppState")
+        // Explicit data-local (no global `set_var`) so parallel tests don't race
+        // on the shared `PHONEME_DATA_LOCAL` env var — see `AppState::new_in`.
+        AppState::new_in(cfg, Some(tmp.join("data")))
+            .await
+            .expect("build test AppState")
     }
 
     #[tokio::test]
