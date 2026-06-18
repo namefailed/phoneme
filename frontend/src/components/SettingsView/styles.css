@@ -1142,3 +1142,124 @@ select[data-key="daemon.log_level"] {
   font-size: 0.8571rem;
   min-width: 0;
 }
+
+/* ── Playbook (entries + recipes) ──────────────────────────────────────────
+   Each entry/recipe is a card with an inline-editable name + description that
+   read as a title/subtitle list item at rest and reveal their editable chrome
+   on hover/focus, plus controls (built-in pill, expand, delete) on the right. */
+.pb-group + .pb-group {
+  margin-top: 4px;
+}
+.pb-group-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.6786rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-faded);
+  margin: 0 0 8px;
+}
+.pb-group-label::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.pb-card,
+.pb-recipe,
+.hk-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.pb-card:hover,
+.pb-recipe:hover,
+.hk-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
+}
+/* Collapsed header row: [ name / description stack ] [pill] [expand] [delete] */
+.pb-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 10px;
+  align-items: center;
+}
+.pb-idcol {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+/* Inline-editable title/subtitle: transparent at rest, subtle on hover, a
+   clear accent frame on focus — so they read as text but invite editing. */
+.pb-idcol input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-family: inherit;
+  text-overflow: ellipsis;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.pb-idcol .pb-name,
+.pb-idcol .pb-r-name {
+  font-size: 0.9286rem;
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.pb-idcol .pb-desc,
+.pb-idcol .pb-r-desc {
+  font-size: 0.8214rem;
+  color: var(--fg-muted);
+}
+.pb-idcol input:hover {
+  border-color: var(--border-subtle);
+}
+.pb-idcol input::placeholder {
+  color: var(--fg-faded);
+}
+.pb-idcol input:focus {
+  outline: none;
+  background: var(--bg-deep);
+  border-color: var(--accent);
+  color: var(--fg-default);
+}
+.pb-card .pb-badge,
+.pb-recipe .pb-badge {
+  align-self: center;
+  font-size: 0.6786rem;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+/* Recipe step chips: numbered pills with reorder/remove controls. */
+.pb-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+.pb-step .pb-step-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8571rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pb-step .pb-step-num {
+  color: var(--fg-faded);
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}

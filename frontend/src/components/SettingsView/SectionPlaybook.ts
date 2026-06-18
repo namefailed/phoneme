@@ -201,7 +201,7 @@ export class SectionPlaybook {
         : `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No ${k.label.toLowerCase()} entries yet.</span>`;
       return `
         <div class="pb-group">
-          <div style="font-size: 0.7857rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); margin-bottom: 6px;" title="${escapeAttr(k.blurb)}">${k.label}s</div>
+          <div class="pb-group-label" title="${escapeAttr(k.blurb)}">${k.label}s</div>
           <div style="display: flex; flex-direction: column; gap: 10px;">${cards}</div>
         </div>`;
     }).join("");
@@ -212,12 +212,14 @@ export class SectionPlaybook {
   private entryCard(e: PlaybookEntry): string {
     const open = this.expanded.has(e.id);
     return `
-      <div class="pb-card" data-id="${e.id}" style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; background: var(--bg-surface);">
-        <div style="display: grid; grid-template-columns: minmax(120px, 1.4fr) 1fr auto auto auto; gap: 8px; align-items: center;">
-          <input type="text" class="pb-name" value="${escapeAttr(e.name)}" placeholder="Name" />
-          <input type="text" class="pb-desc" value="${escapeAttr(e.description)}" placeholder="What this does (shown as a hint)" />
-          ${e.builtin ? `<span class="pb-badge" title="A built-in example — editable; Reset restores the original." style="font-size: 0.6786rem; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 999px; padding: 1px 7px;">built-in</span>` : `<span></span>`}
-          <button class="inline-button pb-expand" type="button">${open ? "▾" : "▸"} Edit</button>
+      <div class="pb-card" data-id="${e.id}">
+        <div class="pb-row">
+          <div class="pb-idcol">
+            <input type="text" class="pb-name" value="${escapeAttr(e.name)}" placeholder="Name" aria-label="Entry name" />
+            <input type="text" class="pb-desc" value="${escapeAttr(e.description)}" placeholder="What this does (shown as a hint)" aria-label="Entry description" />
+          </div>
+          ${e.builtin ? `<span class="pb-badge" title="A built-in example — editable; Reset restores the original.">built-in</span>` : `<span></span>`}
+          <button class="inline-button pb-expand" type="button" aria-expanded="${open}">${open ? "▾" : "▸"} Edit</button>
           <button class="inline-button pb-del" type="button" title="Delete entry" aria-label="Delete entry">✕</button>
         </div>
         <div class="pb-detail" style="display: ${open ? "block" : "none"}; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">
@@ -427,20 +429,22 @@ export class SectionPlaybook {
       const open = this.expanded.has(r.id);
       const stepRows = r.steps.length
         ? r.steps.map((s, i) => `
-            <div class="pb-step" data-i="${i}" style="display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: var(--bg-deep); border-radius: 6px;">
-              <span style="flex: 1 1 auto; font-size: 0.8571rem;">${i + 1}. ${escapeHtml(this.entryName(s))}</span>
+            <div class="pb-step" data-i="${i}">
+              <span class="pb-step-label"><span class="pb-step-num">${i + 1}.</span>${escapeHtml(this.entryName(s))}</span>
               <button class="inline-button pb-step-up" data-i="${i}" type="button" title="Move up" ${i === 0 ? "disabled" : ""}>↑</button>
               <button class="inline-button pb-step-down" data-i="${i}" type="button" title="Move down" ${i === r.steps.length - 1 ? "disabled" : ""}>↓</button>
               <button class="inline-button pb-step-del" data-i="${i}" type="button" title="Remove step" aria-label="Remove step">✕</button>
             </div>`).join("")
         : `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No steps yet — add entries below.</span>`;
       return `
-        <div class="pb-recipe" data-id="${r.id}" style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; background: var(--bg-surface);">
-          <div style="display: grid; grid-template-columns: minmax(120px, 1.3fr) 1.4fr ${r.builtin ? "auto" : ""} auto auto; gap: 8px; align-items: center;">
-            <input type="text" class="pb-r-name" value="${escapeAttr(r.name)}" placeholder="Recipe name" />
-            <input type="text" class="pb-r-desc" value="${escapeAttr(r.description)}" placeholder="What this chain does" />
-            ${r.builtin ? `<span class="pb-badge" style="font-size: 0.6786rem; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 999px; padding: 1px 7px;">built-in</span>` : ""}
-            <button class="inline-button pb-r-expand" type="button">${open ? "▾" : "▸"} Steps</button>
+        <div class="pb-recipe" data-id="${r.id}">
+          <div class="pb-row">
+            <div class="pb-idcol">
+              <input type="text" class="pb-r-name" value="${escapeAttr(r.name)}" placeholder="Recipe name" aria-label="Recipe name" />
+              <input type="text" class="pb-r-desc" value="${escapeAttr(r.description)}" placeholder="What this chain does" aria-label="Recipe description" />
+            </div>
+            ${r.builtin ? `<span class="pb-badge">built-in</span>` : `<span></span>`}
+            <button class="inline-button pb-r-expand" type="button" aria-expanded="${open}">${open ? "▾" : "▸"} Steps</button>
             <button class="inline-button pb-r-del" type="button" title="Delete recipe" aria-label="Delete recipe">✕</button>
           </div>
           <div class="pb-r-detail" style="display: ${open ? "block" : "none"}; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle);">

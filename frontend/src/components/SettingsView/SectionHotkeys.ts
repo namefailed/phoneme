@@ -184,7 +184,7 @@ export class SectionHotkeys {
       .map((b) => {
         const open = this.expanded.has(b.id);
         return `
-        <div class="hk-card" data-id="${b.id}" style="border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; background: var(--bg-surface);">
+        <div class="hk-card" data-id="${b.id}">
           <div class="hk-head" style="display: grid; grid-template-columns: minmax(110px, 1.3fr) minmax(110px, 1fr) minmax(110px, 1fr) minmax(78px, 0.7fr) auto auto auto; gap: 8px; align-items: center;">
             <input type="text" class="hk-label" value="${escapeAttr(b.label)}" placeholder="Hotkey name" />
             <input type="text" class="hk-combo" value="${escapeAttr(b.combo)}" />

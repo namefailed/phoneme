@@ -1,7 +1,3 @@
-import { escapeHtml } from "../../utils/format";
-import { mountModelField } from "./modelField";
-import { mountConnectionField } from "./connectionField";
-
 /**
  * Auto-tagging settings (Post-Processing tab). The LLM proposes tags for each
  * transcript — preferring tags you already use — and the proposals wait as
@@ -10,10 +6,13 @@ import { mountConnectionField } from "./connectionField";
  * tag you ALREADY use is attached immediately — only brand-new names wait for
  * approval.
  *
- * Connection fields mirror the Summary section: blank provider/key/URL/model
- * inherit the `[llm_post_process]` (cleanup) connection, so the common case is
- * just flipping the toggle on. The provider/key/endpoint UI is the shared
- * connection block with a leading "Same as Post-Processing" anchor.
+ * The tag PROMPT, provider and model now live in the Playbook's "Auto-tag"
+ * entry (the daemon resolves the tag step — automatic and on-demand — from that
+ * entry), so this section keeps only the tag-specific BEHAVIOUR that isn't part
+ * of an LLM entry: whether tagging runs automatically, whether existing-tag
+ * matches auto-apply, how many suggestions to ask for, and the library-wide
+ * "clear pending suggestions" sweep. A link jumps to the Playbook entry for the
+ * wording/model.
  */
 export class SectionAutoTag {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,17 +38,28 @@ export class SectionAutoTag {
     this.container.innerHTML = `
       <div class="settings-section">
         <h3>Auto-Tagging</h3>
-        <p style="font-size: 0.8571rem; color:var(--fg-muted); margin:0 0 4px;">
+        <p style="font-size: 0.8571rem; color:var(--fg-muted); margin:0 0 12px; line-height:1.45;">
           Let the AI propose tags for each new transcript (it prefers tags you already use).
           Proposals appear as dashed ✨ chips on the recording — <b>you approve or dismiss
-          each one</b>. With "auto-accept existing tags" on, matches of tags you already
-          use attach immediately; only brand-new names wait for approval. The ✨ Suggest button on a recording
-          runs this on demand even when the automatic step is off.
+          each one</b>. The ✨ Suggest button on a recording runs this on demand even when the
+          automatic step is off.
         </p>
+
+        <div style="background-color: var(--bg-deep); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 16px; font-size: 0.8571rem; color: var(--fg-muted); line-height: 1.5;">
+          🎭 <strong style="color: var(--fg-default);">Wording &amp; model live in the Playbook.</strong>
+          The prompt, provider and model for tag suggestions are the Playbook's
+          <strong>Auto-tag</strong> entry — edit them there and both the automatic step and the
+          ✨ Suggest button follow.
+          <a href="#" id="at-open-playbook" style="color: var(--accent); text-decoration: none; white-space: nowrap;">Open the Playbook →</a>
+        </div>
 
         <div class="settings-field">
           <label>Suggest tags automatically</label>
           <div><input type="checkbox" class="toggle-switch" id="at-auto" data-key="auto_tag.auto" ${t.auto ? "checked" : ""} /></div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); grid-column: 2;">
+            Run tag suggestions on every new recording. Off leaves tagging to the ✨ Suggest
+            button (and to any Custom Hotkey recipe that includes the Auto-tag step).
+          </span>
         </div>
 
         <div class="settings-field">
@@ -59,28 +69,9 @@ export class SectionAutoTag {
           <div><input type="checkbox" class="toggle-switch" id="at-accept" data-key="auto_tag.auto_accept_existing" ${t.auto_accept_existing ? "checked" : ""} /></div>
         </div>
 
-        <div class="settings-field conn-field">
-          <label>Auto-tag provider</label>
-          <div id="at-conn-host"></div>
-        </div>
-
-        <div class="settings-field">
-          <label>Auto-tag model</label>
-          <div id="at-model-host"></div>
-        </div>
-
         <div class="settings-field">
           <label>Max tag suggestions</label>
           <div><input type="number" id="at-max" data-key="auto_tag.max_tags" min="1" max="12" value="${Number(t.max_tags) || 5}" style="width:80px;" /></div>
-        </div>
-
-        <div class="settings-field ai-prompt-field">
-          <label>Auto-tag instructions</label>
-          <div class="ai-prompt-controls">
-            <textarea id="at-prompt" data-key="auto_tag.prompt" rows="8" style="resize:vertical; min-height:140px; font-size:0.9286rem; padding:8px; font-family:inherit;"
-              placeholder="How the AI should pick tags (your tag list and the transcript are appended automatically)">${escapeHtml(t.prompt ?? "")}</textarea>
-            <span class="settings-help-text">How the AI should pick tags (your tag list and the transcript are appended automatically).</span>
-          </div>
         </div>
 
         <div class="settings-field">
@@ -97,54 +88,17 @@ export class SectionAutoTag {
       </div>
     `;
 
-    // Model — the shared model field, fed the EFFECTIVE connection: auto-tag's
-    // own provider/key/URL when set, else the inherited cleanup connection
-    // (blank auto_tag fields fall back to [llm_post_process] in the daemon, so
-    // the dropdown must list models for whatever will actually run). The field
-    // owns the host's DOM and writes the model straight into the config.
-    const eff = (which: "provider" | "api_url" | "api_key") => {
-      const own = (t[which] ?? "").toString().trim();
-      return own || (this.config.llm_post_process?.[which] ?? "").toString();
-    };
-    const modelHost = this.container.querySelector<HTMLElement>("#at-model-host");
-    let modelMountKey: string | null = null;
-    const mountAtModel = () => {
-      if (!modelHost) return;
-      const key = `${eff("provider")}|${eff("api_url")}|${eff("api_key")}`;
-      if (key === modelMountKey) return;
-      modelMountKey = key;
-      mountModelField(modelHost, {
-        mode: "llm",
-        blankLabel: "Same as cleanup model",
-        getProvider: () => eff("provider"),
-        getApiUrl: () => eff("api_url"),
-        getApiKey: () => eff("api_key"),
-        getModel: () => t.model || "",
-        setModel: (m) => { t.model = m; },
+    // Jump to the Playbook tab (its Auto-tag entry) where the prompt/model are
+    // authored — the same in-app navigation Post-Processing uses, so the
+    // unsaved-edits guard stays in play.
+    this.container
+      .querySelector<HTMLAnchorElement>("#at-open-playbook")
+      ?.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("phoneme:navigate", {
+          detail: { view: "settings", section: "managers/playbook" },
+        }));
       });
-    };
-
-    // Provider/key/endpoint — the shared connection block. The leading "Same
-    // as Post-Processing" option blanks provider/url/key (the daemon's
-    // inherit-when-blank contract, same as the Summary section).
-    const connHost = this.container.querySelector<HTMLElement>("#at-conn-host");
-    if (connHost) {
-      mountConnectionField(connHost, {
-        catalog: "llm",
-        inheritLabel: "Same as Post-Processing",
-        getKind: () => (t.provider ?? "").toString(),
-        setKind: (k) => { t.provider = k; },
-        getApiUrl: () => (t.api_url ?? "").toString(),
-        setApiUrl: (u) => { t.api_url = u; },
-        getApiKey: () => (t.api_key ?? "").toString(),
-        setApiKey: (k) => { t.api_key = k; },
-        onProviderChanged: () => mountAtModel(),
-      });
-      // Key/url keystrokes don't fire onProviderChanged; the model list still
-      // follows them (the mount-key guard drops the no-ops).
-      connHost.addEventListener("input", () => mountAtModel());
-    }
-    mountAtModel();
 
     this.container.querySelector<HTMLButtonElement>("#at-clear-all")?.addEventListener("click", async () => {
       const { confirmDialog } = await import("../confirmDialog");
@@ -182,9 +136,5 @@ export class SectionAutoTag {
       const n = Number((e.target as HTMLInputElement).value);
       t.max_tags = Number.isFinite(n) ? Math.max(1, Math.min(12, Math.round(n))) : 5;
     });
-    this.container.querySelector<HTMLTextAreaElement>("#at-prompt")?.addEventListener("input", (e) => {
-      t.prompt = (e.target as HTMLTextAreaElement).value;
-    });
   }
 }
-
