@@ -346,6 +346,15 @@ mod tests {
         stt.set_api_key("SECRET-dictation");
         cfg.in_place.stt = Some(stt);
         cfg.webhook.set_hmac_secret("SECRET-hmac");
+        // A built-in Playbook entry carries its own per-entry LLM key. Locate the
+        // `cleanup` entry by id (not index) so the test stays correct if the seed
+        // order ever changes, and record its array position for the assertions.
+        let cleanup_idx = cfg
+            .playbook
+            .iter()
+            .position(|e| e.id == "cleanup")
+            .expect("the default config seeds a `cleanup` playbook entry");
+        cfg.playbook[cleanup_idx].llm.set_api_key("SECRET-playbook");
 
         let mut json = serde_json::to_value(&cfg).unwrap();
         mask_config_secrets(&mut json);
@@ -359,6 +368,7 @@ mod tests {
         assert_eq!(json["preview_whisper"]["api_key"], MASKED_SECRET);
         assert_eq!(json["in_place"]["stt"]["api_key"], MASKED_SECRET);
         assert_eq!(json["webhook"]["hmac_secret"], MASKED_SECRET);
+        assert_eq!(json["playbook"][cleanup_idx]["llm"]["api_key"], MASKED_SECRET);
 
         // (b) no plaintext sentinel survives anywhere — catches a future field
         // that is serialized in the clear but forgotten by mask_config_secrets.
@@ -390,6 +400,16 @@ mod tests {
             "SECRET-dictation"
         );
         assert_eq!(incoming.webhook.hmac_secret_str(), "SECRET-hmac");
+        assert_eq!(
+            incoming
+                .playbook
+                .iter()
+                .find(|e| e.id == "cleanup")
+                .expect("cleanup entry survives the round-trip")
+                .llm
+                .api_key_str(),
+            "SECRET-playbook"
+        );
     }
 
     // ── parse_id ──────────────────────────────────────────────────────────

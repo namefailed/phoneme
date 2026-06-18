@@ -219,12 +219,16 @@ pub fn run() {
                         // against each enabled binding and dispatch its action +
                         // mode, carrying the binding's recipe + whisper-model so the
                         // daemon resolves THAT recipe / model for the recording it
-                        // creates. Checked after the three built-ins so a custom
-                        // binding can't shadow them, and before the main-record
-                        // fallthrough below. `Meeting` bindings toggle a meeting
-                        // (its recipe/model apply per-track via the daemon's normal
-                        // meeting path, not the single-recording ledger — scoped out
-                        // here, same as the built-in meeting hotkey).
+                        // creates. Checked after the TWO built-ins handled above
+                        // (meeting + in-place) — so a custom binding can't shadow
+                        // those — but BEFORE the main-record fallthrough below.
+                        // The main-record hotkey is that fallthrough, so a custom
+                        // binding sharing the main-record combo wins over it
+                        // (this loop `return`s before the fallthrough is reached).
+                        // `Meeting` bindings toggle a meeting (its recipe/model
+                        // apply per-track via the daemon's normal meeting path, not
+                        // the single-recording ledger — scoped out here, same as the
+                        // built-in meeting hotkey).
                         use phoneme_core::config::{HotkeyAction, HotkeyMode};
                         for binding in &current_config.hotkeys {
                             if !binding.enabled {
@@ -251,6 +255,24 @@ pub fn run() {
                             let bridge = bridge.clone();
                             match action {
                                 HotkeyAction::Meeting => {
+                                    // A meeting binding ignores recipe_id /
+                                    // whisper_model: a meeting toggles via the
+                                    // daemon's normal multi-track path, which
+                                    // applies recipe/model per-track itself rather
+                                    // than through the single-recording ledger.
+                                    // Warn so a user who set them on a meeting
+                                    // binding isn't silently surprised they had no
+                                    // effect (the field docs note this too).
+                                    if !binding.recipe_id.trim().is_empty()
+                                        || !binding.whisper_model.trim().is_empty()
+                                    {
+                                        tracing::warn!(
+                                            binding = %binding.id,
+                                            recipe_id = %binding.recipe_id,
+                                            whisper_model = %binding.whisper_model,
+                                            "meeting hotkey binding ignores recipe_id / whisper_model (meetings resolve these per-track via the daemon, not the single-recording ledger)"
+                                        );
+                                    }
                                     // Meetings are always toggle (Hold makes no sense).
                                     if event.state() == ShortcutState::Pressed {
                                         tauri::async_runtime::spawn(async move {

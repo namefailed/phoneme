@@ -1778,6 +1778,9 @@ pub struct HotkeyBinding {
     /// has been deleted the daemon falls back to the `default` recipe (never a
     /// panic, never the wrong chain). This SUPERSEDES the legacy [`pipeline`] flags
     /// below — once a recipe drives the chain, those bools are no longer read.
+    /// IGNORED when [`action`](Self::action) is [`HotkeyAction::Meeting`]: a
+    /// meeting resolves its recipe per-track via the daemon's multi-track path,
+    /// not the single-recording ledger.
     #[serde(default)]
     pub recipe_id: String,
     /// Per-keybind transcription (Whisper / STT) model override. Empty (the
@@ -1785,7 +1788,10 @@ pub struct HotkeyBinding {
     /// this keybind's recordings with that model instead (e.g. a bigger model for
     /// an important dictation, or a tiny one for a quick note). For the local
     /// bundled backend this is a model-file path; for cloud backends a model id —
-    /// the same shape the per-job retranscribe override carries.
+    /// the same shape the per-job retranscribe override carries. IGNORED when
+    /// [`action`](Self::action) is [`HotkeyAction::Meeting`]: a meeting resolves
+    /// its transcription model per-track via the daemon's multi-track path, not
+    /// the single-recording ledger.
     #[serde(default)]
     pub whisper_model: String,
     /// Which AI steps run for this keybind's recordings (its own pipeline).

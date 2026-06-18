@@ -351,6 +351,30 @@ trust boundary. Verified against current code.*
 
 ### Playbook & Custom Hotkeys
 
+- [x] **The Playbook is now the source of truth for the LLM-over-transcript
+  pipeline** — every recording's cleanup, title, summary, and tag suggestions are
+  driven by the built-in Playbook entries and the `default` recipe, not the old
+  scattered `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` toggles.
+  Edit an entry once in Settings → Playbook and the change flows everywhere it
+  runs — the auto-pipeline and the on-demand re-runs (Re-run Cleanup, Re-run
+  Summary, Suggest Tags) all read the same entry, so they can never drift apart.
+  Behavior is byte-for-byte unchanged for an existing setup; the entries simply
+  became the one place the pipeline reads from.
+- [x] **One-time config migration into the Playbook** — on first launch after the
+  upgrade, your live cleanup / title / summary / auto-tag provider, model, prompt,
+  and endpoint are copied into the matching built-in Playbook entries, and the
+  `default` recipe is rebuilt from your existing enable flags (a step that was off
+  stays off). The reconcile runs once, persists, and sets a `playbook_migrated`
+  latch so it never touches your config again; it self-heals on any later config
+  reload if that first save ever failed. Your customised prompts and per-step
+  providers carry over verbatim — API keys stay where they were, encrypted at rest.
+- [x] **New Settings → Playbook section; slimmer Post-Processing & Auto-tag** — a
+  dedicated **Playbook** manager lets you edit, add, duplicate, reset, and chain
+  the reusable AI "moves" (Transforms, Enrichments, Hooks) and the recipes that
+  order them. With the Playbook owning the per-step prompts and connections, the
+  Post-Processing and Auto-tag sections are pared back to the few global knobs that
+  still belong there, so there's one obvious place to tune each step instead of two.
+
 - [x] **Custom Hotkeys run a Playbook recipe + their own Whisper model** — the
   Settings → Capture → Hotkeys manager (renamed **Custom Hotkeys**) replaces each
   binding's fixed cleanup/title/summary/auto-tag toggles with a **recipe picker**

@@ -1418,9 +1418,11 @@ const MAX_SEARCH_RESULTS: usize = 1000;
 /// the pipeline claim drops the override and the job runs the default recipe +
 /// configured model (the documented `pending_overrides` contract). A leftover
 /// entry can't leak onto another recording (each `RecordingId` is unique), and the
-/// pipeline removes both entries EARLY — alongside the model/all-overrides
-/// removals, before transcription — so a permanently-failed or canceled recording
-/// never leaves a stale entry keyed by a dead id.
+/// entries are claimed-and-removed on EVERY terminal path: `pipeline::run` removes
+/// both EARLY — alongside the model/all-overrides removals, before transcription —
+/// so a permanently-failed recording leaves nothing, and `DaemonRecorder::cancel`
+/// removes both in its single-recording arm so a recording canceled mid-capture
+/// (which never reaches `pipeline::run`) leaves nothing either.
 fn stash_hotkey_overrides(
     state: &AppState,
     id: &phoneme_core::RecordingId,
@@ -1572,10 +1574,14 @@ async fn rerun_cleanup(
         });
     }
 
-    // Build a cleanup config with the optional one-time overrides applied.
-    // Cloning the live config and swapping only the supplied fields keeps every
-    // other setting intact and — crucially — never persists the override the way
-    // RetranscribeRecording does (this config is local to the spawned task).
+    // Resolve the BASE (llm_cfg, prompt) from the migrated `cleanup` Playbook
+    // ENTRY so editing it in the Playbook changes what an on-demand Re-run
+    // Cleanup does — the Playbook is the source of truth, exactly like the
+    // summary/tags re-runs read their migrated entries. `cleanup_entry_config`
+    // falls back to the legacy `[llm_post_process]` config + prompt when the
+    // entry is gone (a user deleted it), so behavior is never worse than today.
+    // The Re-run modal's one-time overrides then layer ON TOP and still win;
+    // none of this is persisted (the config is local to the spawned task).
     let CleanupOverrides {
         model,
         provider,
@@ -1583,28 +1589,27 @@ async fn rerun_cleanup(
         api_url,
         api_key,
     } = overrides;
-    let mut llm_cfg = state.config.load().llm_post_process.clone();
-    // Override the provider for this run, but do NOT force the step on: if
-    // post-processing is disabled in config, cleanup stays unavailable ("off
-    // means off"). The validation below reports that clearly, and the GUI
-    // disables the Cleanup option entirely when cleanup is off.
+    let (base_llm, base_prompt) = crate::pipeline::cleanup_entry_config(&state.config.load());
+    // Layer the one-shot model + prompt overrides via the SHARED helper that
+    // `rerun_summary` (and the tests) use, so the layering rule lives in exactly
+    // one place. A non-empty override wins; a blank/whitespace one is ignored —
+    // a blank prompt would strip the cleanup instructions.
+    let (mut llm_cfg, resolved_prompt) = crate::pipeline::apply_oneshot_overrides(
+        base_llm,
+        base_prompt,
+        model.as_deref(),
+        prompt.as_deref(),
+    );
+    llm_cfg.prompt = resolved_prompt;
+    // Provider / endpoint / key overrides are cleanup-only (the summary re-run
+    // has no such fields) so they apply directly around the shared base. Note
+    // `cleanup_entry_config` already forced the step enabled — the GUI disables
+    // the Re-run Cleanup option when cleanup is off, and the provider check
+    // below still blocks a `none`/blank provider.
     if let Some(p) = provider {
         let p = p.trim();
         if !p.is_empty() {
             llm_cfg.provider = p.to_string();
-        }
-    }
-    if let Some(m) = model {
-        let m = m.trim();
-        if !m.is_empty() {
-            llm_cfg.model = m.to_string();
-        }
-    }
-    // A blank prompt would strip the cleanup instructions, so keep the
-    // configured prompt unless a non-empty override is given.
-    if let Some(pr) = prompt {
-        if !pr.trim().is_empty() {
-            llm_cfg.prompt = pr;
         }
     }
     // An explicit empty URL is meaningful (= "use the provider default"), so
@@ -1793,13 +1798,16 @@ async fn rerun_summary(
     }
 
     let resolution = match crate::pipeline::entry_config_for_target(&cfg, "summary") {
-        Some((mut llm_cfg, mut entry_prompt)) => {
-            if let Some(m) = &model {
-                llm_cfg.model = m.clone();
-            }
-            if let Some(p) = &prompt {
-                entry_prompt = p.clone();
-            }
+        Some((base_llm, base_prompt)) => {
+            // Layer the one-shot model + prompt overrides via the SHARED helper
+            // that `rerun_cleanup` (and the tests) use — the single source of
+            // truth for "non-empty override wins, blank is ignored".
+            let (llm_cfg, entry_prompt) = crate::pipeline::apply_oneshot_overrides(
+                base_llm,
+                base_prompt,
+                model.as_deref(),
+                prompt.as_deref(),
+            );
             // Name the endpoint in any real-error message (a stale per-step URL
             // is the classic cause and invisible in a generic message).
             let endpoint_hint = {

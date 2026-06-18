@@ -104,7 +104,15 @@ describe("SettingsView", () => {
     expect(headingsInSystem).toContain("Storage & backup");
     expect(headingsInSystem).toContain("Startup & tray");
     expect(headingsInSystem).toContain("Diagnostics");
-    
+
+    // Switch to the Playbook manager — SectionPlaybook seeds its built-in
+    // entries/recipes from the (otherwise bare) config and mounts its headings.
+    element.switchTab("managers/playbook");
+    await element.updateComplete;
+    const headingsInPlaybook = Array.from(element.querySelectorAll("h3")).map((h: any) => h.textContent);
+    expect(headingsInPlaybook).toContain("Playbook entries");
+    expect(headingsInPlaybook).toContain("Recipes");
+
     container.remove();
   });
 });

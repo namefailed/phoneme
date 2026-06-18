@@ -164,7 +164,15 @@ export class SectionPlaybook {
     if (!src) return;
     const name = `${src.name} copy`;
     const newId = this.mintId(name);
-    this.entries.push({ ...structuredClone(src), id: newId, name, builtin: false });
+    const clone = { ...structuredClone(src), id: newId, name, builtin: false };
+    // Blank the clone's API key. The on-disk source key is masked before it ever
+    // reaches the WebView, so a key-bearing source carries only the mask here —
+    // saving the clone with that mask would unmask-by-NEW-id, find no match, and
+    // silently drop the key. Blanking makes the clone explicitly INHERIT the
+    // default Post-Processing connection rather than appearing to keep a key it
+    // can't actually use.
+    clone.llm = { ...clone.llm, api_key: "" };
+    this.entries.push(clone);
     this.expanded.add(newId);
     this.renderEntries();
     this.notifyChanged();

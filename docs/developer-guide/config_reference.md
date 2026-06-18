@@ -271,6 +271,63 @@ Settings → Capture → Dictation, including the `stt` picker (Automatic ↔ Cu
 | `stt` | *(unset)* | Optional dedicated STT provider table shaped like `[whisper]`. Unset: dictation follows the Live Preview's provider when the preview is enabled, else `[whisper]`. For a local model you can point it at an already-running server (the daemon reuses it), **or** set `stt.use_own_bundled_server = true` to have the daemon supervise a **dedicated third whisper-server** just for dictation — its own process and model on its own port, so dictation is never starved by a main-server restart or model override. Default off (the weak-box default reuses the main/preview server); opt in via Settings → Capture → Dictation → "Dedicated dictation server". This is a power-user / multi-server option: a third local model means materially more RAM. Note: dictation still waits on the shared whisper permit, so the dedicated server buys reliability/isolation, not parallelism with final transcription. |
 
 
+## `[[playbook]]`
+
+Reusable AI "moves" — the building blocks the recording pipeline and Custom Hotkeys run. An array-of-tables: each `[[playbook]]` block is one entry. Curated `builtin` entries (`cleanup`, `title`, `summary`, `auto_tag`) are seeded into a fresh config and are editable; users add their own. The Playbook is the **source of truth** for the LLM-over-transcript pipeline — the built-in entries drive each step, replacing the legacy `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` sections at run time (a one-time migration, below, copies a user's existing values across). Edited in Settings → Playbook.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `id` | *(required)* | Stable unique id — what recipes and hotkeys reference (e.g. `cleanup`). Minted once; not user-editable. |
+| `name` | `""` | User-facing name shown in the Playbook manager |
+| `description` | `""` | One-line "what this does" hint |
+| `builtin` | `false` | Seeded by Phoneme (editable; "Reset to default" restores the seed) vs. user-created |
+| `kind` | `transform` | `transform` (LLM step that **rewrites** the running transcript text, feeding the next step), `enrichment` (LLM step that writes a named field — see `target`), or `hook` (a shell command / webhook) |
+| `target` | `""` | For `enrichment` only: the field to write — `title` \| `summary` \| `tags` \| `custom:<key>`. Ignored for other kinds. |
+| `llm.provider` | `""` | For `transform` / `enrichment`: provider id (`ollama` / `openai` / `groq` / `anthropic`); empty inherits the default `[llm_post_process]` connection |
+| `llm.model` | `""` | Empty inherits the provider's configured default |
+| `llm.prompt` | `""` | The step's system/instruction prompt |
+| `llm.api_url` | `""` | Override base URL; empty uses the provider default |
+| `llm.api_key` | `""` | Per-entry key, **DPAPI-encrypted at rest** and inherited at run time when blank. Like every other key field it is **never exported to the WebView** — it is masked (replaced with a sentinel) in any config the UI sees, and restored from disk on save. |
+| `llm.timeout_secs` | `30` | Idle-based LLM HTTP timeout for this step |
+| `hook.command` | `""` | For `hook` only: shell command / script (receives the recording JSON on stdin) |
+| `hook.webhook_url` | `""` | For `hook` only: webhook URL to POST the recording payload to (governed by `[webhook]` policy) |
+| `hook.timeout_secs` | `60` | For `hook` only: max execution time before the hook is killed |
+
+---
+
+## `[[recipes]]`
+
+Named, ordered chains of `[[playbook]]` entry ids — what the default recording pipeline and Custom Hotkeys actually run. An array-of-tables. The `default` recipe is the normal-recording pipeline (cleanup → title → summary → auto-tag); a Custom Hotkey can point at any other recipe.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `id` | *(required)* | Stable unique id (the normal-recording pipeline is `default`) |
+| `name` | `""` | User-facing name |
+| `description` | `""` | One-line description |
+| `builtin` | `false` | Seeded by Phoneme vs. user-created |
+| `steps` | `[]` | Ordered list of `[[playbook]]` entry ids to run. A dangling id (entry deleted) or a `hook` entry is skipped with a warning; an empty list is a bare transcribe-only run. |
+
+---
+
+## `playbook_migrated`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `playbook_migrated` | `false` | One-time migration latch (top-level bool). On first load Phoneme copies a user's LIVE `[llm_post_process]` / `[title]` / `[summary]` / `[auto_tag]` values into the matching built-in `[[playbook]]` entries and rebuilds the `default` recipe from the legacy enable flags, then sets this to `true` so the reconcile never runs again. Idempotent — leave it alone. |
+
+---
+
+## `[[hotkeys]]`
+
+Custom keybinds beyond the three built-ins (`[hotkey]` / `[in_place_hotkey]` / `[meeting_hotkey]`). An array-of-tables; each binds a combo to an action and carries its own pipeline. Only the Playbook-era additions are shown here.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `recipe_id` | `""` | The `[[recipes]]` id this binding's recordings run. Empty = the global `default` recipe (today's normal pipeline), so a pre-Playbook binding is unchanged. A deleted recipe falls back to `default`. **Ignored when `action = "meeting"`** — a meeting resolves its recipe per-track via the daemon's multi-track path, not the single-recording ledger. Supersedes the legacy `pipeline` flags. |
+| `whisper_model` | `""` | Per-keybind transcription (STT) model override. Empty uses the globally configured model; a non-empty value transcribes this binding's recordings with that model (a local model-file path, or a cloud model id — same shape as the per-job retranscribe override). **Ignored when `action = "meeting"`** for the same reason as `recipe_id`. |
+
+---
+
 ## `[semantic_search]`
 
 | Key | Default | Description |

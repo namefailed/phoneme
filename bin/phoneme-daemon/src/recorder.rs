@@ -1348,6 +1348,22 @@ impl DaemonRecorder {
                     }
                 }
                 state.catalog.delete(&active.id).await?;
+                // A custom-hotkey recording canceled mid-capture never reaches
+                // `pipeline::run` — the sole place the per-recording ledgers are
+                // otherwise claimed — so its `pending_recipe` / `pending_overrides`
+                // entry would leak (bounded, never misroutes thanks to unique ids,
+                // but still a leak). Drop both here keyed by the (now-dead) id,
+                // recovering from a poisoned lock like the stash path does.
+                state
+                    .pending_overrides
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&active.id);
+                state
+                    .pending_recipe
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&active.id);
                 state.events.emit(DaemonEvent::RecordingCancelled {
                     id: active.id.clone(),
                 });
@@ -2897,6 +2913,52 @@ mod tests {
         assert!(
             state.pending_recipe.lock().unwrap().get(&id).is_none(),
             "a fast-lane in-place recording must not leave a pending recipe entry"
+        );
+        std::env::remove_var("PHONEME_AUDIO_BACKEND");
+    }
+
+    /// LEDGER LEAK (custom-hotkey FIX, cancel path): a custom-hotkey recording
+    /// canceled mid-capture never reaches `pipeline::run` — the sole place the
+    /// per-recording ledgers are otherwise claimed — so `cancel()` itself must
+    /// drop them. After a cancel, NO `pending_overrides` / `pending_recipe` entry
+    /// keyed by the (now-deleted) id may survive. Mirrors
+    /// `fast_lane_in_place_leaves_no_pending_ledger_entry` for the cancel arm.
+    #[tokio::test]
+    async fn cancel_leaves_no_pending_ledger_entry() {
+        std::env::set_var("PHONEME_AUDIO_BACKEND", "synthetic");
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(tmp.path()).await;
+
+        // Start a normal synthetic recording, then stash the per-recording
+        // ledgers a custom-hotkey start would have set (recipe + Whisper model).
+        let id = state
+            .recorder
+            .start(&state, RecordMode::Hold, false)
+            .await
+            .expect("start synthetic recording");
+        state
+            .pending_overrides
+            .lock()
+            .unwrap()
+            .insert(id.clone(), "hotkey-stt".into());
+        state
+            .pending_recipe
+            .lock()
+            .unwrap()
+            .insert(id.clone(), "hotkey-recipe".into());
+
+        // Cancel mid-capture — this path never enters pipeline::run.
+        let cancelled = state.recorder.cancel(&state).await;
+        assert!(cancelled.is_ok(), "cancel must succeed: {cancelled:?}");
+
+        // cancel() claimed-and-removed both ledgers for the dead id.
+        assert!(
+            state.pending_overrides.lock().unwrap().get(&id).is_none(),
+            "a canceled recording must not leave a pending model override"
+        );
+        assert!(
+            state.pending_recipe.lock().unwrap().get(&id).is_none(),
+            "a canceled recording must not leave a pending recipe entry"
         );
         std::env::remove_var("PHONEME_AUDIO_BACKEND");
     }

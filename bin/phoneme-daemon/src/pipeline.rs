@@ -1359,6 +1359,60 @@ pub(crate) fn entry_config_for_target(
         .map(|e| (entry_llm_config(cfg, &e.llm), e.llm.prompt.clone()))
 }
 
+/// Resolve the BASE `(LlmPostProcessConfig, prompt)` for an on-demand Re-run
+/// Cleanup from the migrated `cleanup` Playbook ENTRY — so editing the Cleanup
+/// entry in the Playbook changes what a Re-run Cleanup does, exactly like
+/// `entry_config_for_target` does for the summary/tags re-runs. Cleanup is a
+/// `Transform` (it rewrites the running text), so it has no Enrichment target and
+/// `entry_config_for_target` can't find it; this resolver matches by `id ==
+/// "cleanup"` AND `kind == Transform` instead.
+///
+/// Falls back to the legacy `[llm_post_process]` config + prompt when no such
+/// entry exists (a user deleted it), so behavior is never worse than today. The
+/// one-shot Re-run overrides layer ON TOP of whichever base this returns.
+pub(crate) fn cleanup_entry_config(cfg: &Config) -> (LlmPostProcessConfig, String) {
+    use phoneme_core::config::PlaybookKind;
+    cfg.playbook
+        .iter()
+        .find(|e| e.id == "cleanup" && e.kind == PlaybookKind::Transform)
+        .map(|e| (entry_llm_config(cfg, &e.llm), e.llm.prompt.clone()))
+        .unwrap_or_else(|| {
+            let llm = cfg.llm_post_process.clone();
+            let prompt = llm.prompt.clone();
+            (llm, prompt)
+        })
+}
+
+/// Layer a Re-run modal's one-shot `model` / `prompt` overrides on top of a base
+/// `(LlmPostProcessConfig, prompt)`. A non-empty (after trimming) override
+/// replaces the corresponding base value; `None` or a whitespace-only override is
+/// ignored so the modal's empty fields never clobber the entry's configured
+/// model/prompt. The single source of truth for this layering, shared by
+/// `rerun_summary`, `rerun_cleanup`, and their tests so no test re-implements the
+/// production rule. Only model+prompt layer here; provider/api_url/api_key
+/// overrides (cleanup-only) are applied by the caller around this base.
+pub(crate) fn apply_oneshot_overrides(
+    base_llm: LlmPostProcessConfig,
+    base_prompt: String,
+    model: Option<&str>,
+    prompt: Option<&str>,
+) -> (LlmPostProcessConfig, String) {
+    let mut llm = base_llm;
+    let mut resolved_prompt = base_prompt;
+    if let Some(m) = model {
+        let m = m.trim();
+        if !m.is_empty() {
+            llm.model = m.to_string();
+        }
+    }
+    if let Some(p) = prompt {
+        if !p.trim().is_empty() {
+            resolved_prompt = p.to_string();
+        }
+    }
+    (llm, resolved_prompt)
+}
+
 /// Resolve `recipe_id` into an ordered list of dispatchable steps.
 ///
 /// `recipe_id` is `default` for every normal recording and the firing custom

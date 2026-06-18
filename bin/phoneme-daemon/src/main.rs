@@ -70,20 +70,14 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let mut cfg = load_config()?;
-    // One-time Playbook reconcile (Strategy B): copy the user's LIVE cleanup /
-    // title / summary / auto-tag values into the built-in Playbook entries and
-    // rebuild the `default` recipe from the legacy enable flags, so the executor
-    // can drive the pipeline off the Playbook with zero behavior change. Persist
-    // exactly once, BEFORE building AppState (so the in-memory config the daemon
-    // runs on is the migrated one) and BEFORE any unrelated write could freeze
-    // the un-migrated seeds. A persist failure is non-fatal — the in-memory
-    // migration still applies for this run and the next startup retries.
-    if cfg.migrate_playbook() {
-        if let Err(e) = cfg.write_resolved() {
-            tracing::warn!(error = %e, "failed to persist Playbook migration; will retry next startup");
-        }
-    }
+    // One-time Playbook reconcile (Strategy B): `load_config()` now folds the
+    // migrate-then-persist in for EVERY load path (startup here + the
+    // `ReloadConfig` IPC + the queue worker's post-run reload), so the in-memory
+    // config the daemon runs on is always the migrated one and the on-disk seeds
+    // are frozen in their migrated form before any unrelated write. A persist
+    // failure is non-fatal — the in-memory migration still applies and the next
+    // load retries.
+    let cfg = load_config()?;
     let state = AppState::new(cfg).await?;
     let _guard = logging::init(&state.config.load(), &state.paths.log_dir, args.foreground)?;
 
@@ -322,6 +316,25 @@ async fn main() -> Result<()> {
 /// per-user default path, else built-in defaults. Also called by the
 /// `ReloadConfig` IPC handler and the queue worker's post-run mtime check, so
 /// every config-(re)read in the process resolves the same file.
+///
+/// Self-healing Playbook migration: after loading, run the one-time
+/// `migrate_playbook()` reconcile and, if it actually migrated, persist the
+/// result so the on-disk config is frozen in its migrated form. Folding this
+/// into the shared loader (not just the startup caller) means EVERY reload path
+/// — `ReloadConfig` and the queue worker's post-run reload — self-heals: if the
+/// startup persist ever failed (and the on-disk config is still the un-migrated
+/// seed), the next reload retries instead of reverting the in-memory entries to
+/// the seed prompts. `migrate_playbook()` is idempotent (a no-op once
+/// `playbook_migrated` is set), so the already-migrated steady state does zero
+/// work and the startup caller's behaviour is unchanged. A persist failure is
+/// non-fatal: the in-memory migration still applies for this load and the next
+/// reload retries (mirrors the startup block).
 pub fn load_config() -> anyhow::Result<phoneme_core::Config> {
-    Ok(phoneme_core::Config::load_resolved()?)
+    let mut cfg = phoneme_core::Config::load_resolved()?;
+    if cfg.migrate_playbook() {
+        if let Err(e) = cfg.write_resolved() {
+            tracing::warn!(error = %e, "failed to persist Playbook migration; will retry next reload");
+        }
+    }
+    Ok(cfg)
 }

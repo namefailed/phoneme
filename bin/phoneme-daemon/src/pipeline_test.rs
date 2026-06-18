@@ -2171,8 +2171,9 @@ fn entry_config_for_target_resolves_summary_and_tags_entries() {
 
 /// The rerun_summary RESOLUTION seam: the BASE (model, prompt) comes from the
 /// migrated `summary` ENTRY, and the Re-run modal's one-shot model/prompt
-/// overrides layer ON TOP and still win. This mirrors `rerun_summary`'s logic
-/// (entry as base + non-empty overrides replace) without a live LLM call.
+/// overrides layer ON TOP and still win. Exercises the REAL production layering
+/// (`apply_oneshot_overrides`) rather than re-implementing it inline, so the test
+/// can't drift from what `rerun_summary` actually does.
 #[test]
 fn rerun_summary_base_is_entry_and_oneshot_override_wins() {
     let mut cfg = Config::default();
@@ -2183,29 +2184,94 @@ fn rerun_summary_base_is_entry_and_oneshot_override_wins() {
     cfg.migrate_playbook();
 
     // The base, exactly as rerun_summary resolves it.
-    let (mut llm_cfg, mut prompt) =
+    let (base_llm, base_prompt) =
         super::entry_config_for_target(&cfg, "summary").expect("a summary entry exists");
-    assert_eq!(llm_cfg.model, "entry-summary-model", "base model is the entry's");
-    assert_eq!(prompt, "ENTRY SUMMARY PROMPT", "base prompt is the entry's");
+    assert_eq!(base_llm.model, "entry-summary-model", "base model is the entry's");
+    assert_eq!(base_prompt, "ENTRY SUMMARY PROMPT", "base prompt is the entry's");
 
-    // A blank/None override is a no-op (the modal's empty fields don't clobber).
-    let blank_model: Option<String> = Some("   ".into());
-    let blank_model = blank_model.filter(|m| !m.trim().is_empty());
-    assert!(blank_model.is_none(), "a whitespace override is dropped");
+    // A whitespace override is ignored by the shared helper (the modal's empty
+    // fields never clobber the entry's configured model/prompt).
+    let (kept, kept_prompt) = super::apply_oneshot_overrides(
+        base_llm.clone(),
+        base_prompt.clone(),
+        Some("   "),
+        Some("  "),
+    );
+    assert_eq!(kept.model, "entry-summary-model", "a whitespace model override is dropped");
+    assert_eq!(kept_prompt, "ENTRY SUMMARY PROMPT", "a whitespace prompt override is dropped");
 
     // Non-empty one-shot overrides replace the base — the Re-run modal still wins.
-    let model_override: Option<String> =
-        Some("oneshot-model".to_string()).filter(|m| !m.trim().is_empty());
-    let prompt_override: Option<String> =
-        Some("ONESHOT PROMPT".to_string()).filter(|p| !p.trim().is_empty());
-    if let Some(m) = &model_override {
-        llm_cfg.model = m.clone();
-    }
-    if let Some(p) = &prompt_override {
-        prompt = p.clone();
-    }
-    assert_eq!(llm_cfg.model, "oneshot-model", "a one-shot model override wins over the entry");
+    let (resolved, prompt) = super::apply_oneshot_overrides(
+        base_llm,
+        base_prompt,
+        Some("oneshot-model"),
+        Some("ONESHOT PROMPT"),
+    );
+    assert_eq!(resolved.model, "oneshot-model", "a one-shot model override wins over the entry");
     assert_eq!(prompt, "ONESHOT PROMPT", "a one-shot prompt override wins over the entry");
     // The provider still comes from the entry/base — the override is model+prompt only.
-    assert_eq!(llm_cfg.provider, "openai");
+    assert_eq!(resolved.provider, "openai");
+}
+
+/// The rerun_cleanup RESOLUTION seam (MED-B): the BASE (model, prompt) comes from
+/// the migrated `cleanup` ENTRY — NOT the legacy `[llm_post_process]` section
+/// directly — so editing the Cleanup entry changes what an on-demand Re-run
+/// Cleanup does. A non-empty one-shot model/prompt override still wins; a
+/// whitespace override is ignored; and when the `cleanup` entry is gone the
+/// resolver falls back to the legacy config so behavior is never worse than
+/// today. Exercises the REAL production helpers (`cleanup_entry_config` +
+/// `apply_oneshot_overrides`) without a live LLM call.
+#[test]
+fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
+    let mut cfg = Config::default();
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.model = "base-model".into();
+    // A customised Cleanup prompt/model carried by the user's settings; the
+    // migration copies these into the `cleanup` Transform entry.
+    cfg.llm_post_process.prompt = "ENTRY CLEANUP PROMPT".into();
+    cfg.migrate_playbook();
+    // Prove the base comes from the ENTRY, not the legacy section, by editing
+    // ONLY the entry after migration (the legacy section keeps base-model).
+    let entry = cfg
+        .playbook
+        .iter_mut()
+        .find(|e| e.id == "cleanup")
+        .expect("a cleanup entry exists");
+    entry.llm.model = "entry-cleanup-model".into();
+    entry.llm.prompt = "EDITED CLEANUP PROMPT".into();
+
+    // The base, exactly as rerun_cleanup resolves it.
+    let (base_llm, base_prompt) = super::cleanup_entry_config(&cfg);
+    assert_eq!(base_llm.model, "entry-cleanup-model", "base model is the cleanup entry's");
+    assert_eq!(base_prompt, "EDITED CLEANUP PROMPT", "base prompt is the cleanup entry's");
+    assert!(base_llm.enabled, "entry_llm_config forces enabled");
+    assert_eq!(base_llm.provider, "openai", "entry inherits the base connection");
+
+    // A whitespace override is ignored (the modal's empty fields don't clobber).
+    let (kept, kept_prompt) = super::apply_oneshot_overrides(
+        base_llm.clone(),
+        base_prompt.clone(),
+        Some("   "),
+        Some("\t"),
+    );
+    assert_eq!(kept.model, "entry-cleanup-model", "a whitespace model override is dropped");
+    assert_eq!(kept_prompt, "EDITED CLEANUP PROMPT", "a whitespace prompt override is dropped");
+
+    // Non-empty one-shot overrides replace the base — the Re-run modal still wins.
+    let (resolved, prompt) = super::apply_oneshot_overrides(
+        base_llm,
+        base_prompt,
+        Some("oneshot-model"),
+        Some("ONESHOT PROMPT"),
+    );
+    assert_eq!(resolved.model, "oneshot-model", "a one-shot model override wins over the entry");
+    assert_eq!(prompt, "ONESHOT PROMPT", "a one-shot prompt override wins over the entry");
+
+    // Legacy fallback: with the `cleanup` entry deleted the resolver returns the
+    // legacy [llm_post_process] config + prompt instead of panicking or running
+    // nothing — behavior is never worse than before the Playbook.
+    cfg.playbook.retain(|e| e.id != "cleanup");
+    let (legacy_llm, legacy_prompt) = super::cleanup_entry_config(&cfg);
+    assert_eq!(legacy_llm.model, "base-model", "fallback model is the legacy section's");
+    assert_eq!(legacy_prompt, "ENTRY CLEANUP PROMPT", "fallback prompt is the legacy section's");
 }
