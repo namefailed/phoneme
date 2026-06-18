@@ -177,10 +177,17 @@ fn apply_rerun_overrides(
     if let Some(rh) = rerun.run_hooks {
         cfg.hook.run_on_transcribe = rh;
     }
-    // Post-processing opt-out: a disabled cleanup makes `llm_provider_for_run`
-    // return None, so the run yields the raw machine transcript.
+    // Post-processing opt-out: under the Playbook executor a step runs iff it's
+    // a member of the resolved recipe, so disabling the legacy flag is no longer
+    // enough — drop the `cleanup` Transform step from the per-job clone's
+    // `default` recipe so NO Transform runs and the run yields the raw machine
+    // transcript. (Disabling the flag too keeps any non-recipe code path honest;
+    // both are confined to the clone — the persisted recipe is never touched.)
     if rerun.post_process == Some(false) {
         cfg.llm_post_process.enabled = false;
+        if let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == DEFAULT_RECIPE_ID) {
+            recipe.steps.retain(|s| s != "cleanup");
+        }
     }
     // Re-run → "All": force the whole pipeline on and layer in the per-step
     // values (applied after the opt-out so cleanup stays on for an "All" run).
@@ -198,13 +205,13 @@ fn apply_rerun_overrides(
         if let Some(u) = ov.cleanup_api_url {
             cfg.llm_post_process.api_url = u;
         }
-        // The recipe executor reads the cleanup step's prompt/model/provider/url
-        // from the `cleanup` Playbook ENTRY (Strategy B), so mirror the one-shot
-        // cleanup overrides into that entry on this per-job CLONE. Without this a
-        // Re-run → "All" with a custom cleanup model/prompt would be silently
-        // ignored for the Transform step. The clone is discarded after the run,
-        // so the persisted Playbook is never touched; the api_key is never set
-        // here (it inherits the cleanup section, as always).
+        // The recipe executor reads each step's prompt/model/provider/url from
+        // its Playbook ENTRY (Strategy B), so mirror the one-shot overrides into
+        // the matching entries on this per-job CLONE. Without this a Re-run →
+        // "All" with a custom cleanup/summary/title model or prompt would be
+        // silently ignored. The clone is discarded after the run, so the
+        // persisted Playbook is never touched; the api_key is never set here (it
+        // inherits each section, as always).
         let (cp, cm, cpr, cu) = (
             cfg.llm_post_process.provider.clone(),
             cfg.llm_post_process.model.clone(),
@@ -231,8 +238,130 @@ fn apply_rerun_overrides(
             cfg.title.use_llm = true;
             cfg.title.model = m;
         }
+        // Mirror the (possibly forced/overridden) `[summary]` + `[title]`
+        // sections onto their Playbook ENTRIES so the Enrichment steps run with
+        // the "All" values. We copy the RAW section fields (blank stays blank):
+        // the executor re-applies the SAME inherit-on-blank overlay against
+        // `[llm_post_process]` via `entry_llm_config` at resolve time, so the
+        // resolved connection matches what `summary_llm_config` / `title_llm_config`
+        // would have produced. Precompute against immutable borrows, THEN mutate
+        // the entries (avoids aliasing `cfg`).
+        let summary_entry = section_to_entry_llm(&cfg.summary);
+        let title_entry = section_to_entry_llm(&cfg.title);
+        if let Some(entry) = cfg.playbook.iter_mut().find(|e| e.id == "summary") {
+            entry.llm = summary_entry;
+        }
+        if let Some(entry) = cfg.playbook.iter_mut().find(|e| e.id == "title") {
+            entry.llm = title_entry;
+        }
+        // The executor gates each step on recipe MEMBERSHIP, so forcing the
+        // legacy flags on is not enough — ensure cleanup/title/summary are
+        // members of the per-job clone's `default` recipe (in canonical order).
+        // Tags membership is left as-is: legacy "All" never forced auto-tagging
+        // on (it only set `summary.auto`/`title.enabled`/cleanup), so tags still
+        // run only if they were already a member. Confined to the clone.
+        ensure_default_recipe_steps(&mut cfg, &["cleanup", "title", "summary"]);
     }
     cfg
+}
+
+/// The canonical order of the built-in `default` recipe's steps — used to slot a
+/// forced-on Re-run "All" step back into its rightful position.
+const CANONICAL_DEFAULT_STEPS: [&str; 4] = ["cleanup", "title", "summary", "auto_tag"];
+
+/// Copy a per-step section (`[summary]` / `[title]`) into a `PlaybookLlm` ENTRY
+/// half, RAW (blank stays blank) — the executor re-applies the inherit-on-blank
+/// overlay against `[llm_post_process]` at resolve time, so the resolved
+/// connection matches what the legacy `*_llm_config` builder would have produced.
+/// The prompt is the section prompt; the key is the section key (downstream
+/// inheritance fills a blank). `timeout_secs` is irrelevant (the entry overlay
+/// doesn't read it). Used only by the Re-run "All" mirror, on the config CLONE.
+fn section_to_entry_llm<S: PerStepLlmSection>(section: &S) -> phoneme_core::config::PlaybookLlm {
+    let mut e = phoneme_core::config::PlaybookLlm {
+        provider: section.provider().to_string(),
+        model: section.model().to_string(),
+        prompt: section.prompt().to_string(),
+        api_url: section.api_url().to_string(),
+        ..Default::default()
+    };
+    let key = section.api_key();
+    if !key.trim().is_empty() {
+        e.set_api_key(key.to_string());
+    }
+    e
+}
+
+/// The fields `section_to_entry_llm` reads off a per-step LLM section.
+trait PerStepLlmSection {
+    fn provider(&self) -> &str;
+    fn model(&self) -> &str;
+    fn prompt(&self) -> &str;
+    fn api_url(&self) -> &str;
+    fn api_key(&self) -> &str;
+}
+
+impl PerStepLlmSection for phoneme_core::config::SummaryConfig {
+    fn provider(&self) -> &str {
+        &self.provider
+    }
+    fn model(&self) -> &str {
+        &self.model
+    }
+    fn prompt(&self) -> &str {
+        &self.prompt
+    }
+    fn api_url(&self) -> &str {
+        &self.api_url
+    }
+    fn api_key(&self) -> &str {
+        self.api_key_str()
+    }
+}
+
+impl PerStepLlmSection for phoneme_core::config::TitleConfig {
+    fn provider(&self) -> &str {
+        &self.provider
+    }
+    fn model(&self) -> &str {
+        &self.model
+    }
+    fn prompt(&self) -> &str {
+        &self.prompt
+    }
+    fn api_url(&self) -> &str {
+        &self.api_url
+    }
+    fn api_key(&self) -> &str {
+        self.api_key_str()
+    }
+}
+
+/// Ensure each id in `want` is a member of the per-job clone's `default` recipe,
+/// inserting any missing one at its canonical position (cleanup → title →
+/// summary → auto_tag). A no-op for ids already present; never reorders or
+/// duplicates. Used only by the Re-run "All" path, on the config CLONE.
+fn ensure_default_recipe_steps(cfg: &mut phoneme_core::Config, want: &[&str]) {
+    let Some(recipe) = cfg.recipes.iter_mut().find(|r| r.id == DEFAULT_RECIPE_ID) else {
+        return;
+    };
+    for id in want {
+        if recipe.steps.iter().any(|s| s == id) {
+            continue;
+        }
+        // Insert at the position implied by the canonical order: before the
+        // first existing step whose canonical rank is higher than this id's.
+        let rank = |s: &str| CANONICAL_DEFAULT_STEPS.iter().position(|c| c == &s);
+        let my_rank = rank(id);
+        let at = recipe
+            .steps
+            .iter()
+            .position(|s| match (rank(s), my_rank) {
+                (Some(sr), Some(mr)) => sr > mr,
+                _ => false,
+            })
+            .unwrap_or(recipe.steps.len());
+        recipe.steps.insert(at, (*id).to_string());
+    }
 }
 
 /// Best-effort wait until the bundled whisper-server answers `GET {base}/health`
@@ -498,10 +627,40 @@ pub async fn generate_summary(
     // alias that the rest of this module uses — the Err side is a plain
     // user-facing string, not a phoneme error.
 ) -> std::result::Result<(String, String), String> {
+    // The legacy/IPC path: provider+prompt+endpoint-hint come from the
+    // `[summary]`/`[llm_post_process]` sections. The recipe executor calls
+    // `generate_summary_with` instead, passing the resolved Playbook ENTRY.
+    let endpoint_hint = cfg.summary.api_url.trim();
+    let endpoint_hint = (!endpoint_hint.is_empty()).then(|| endpoint_hint.to_string());
+    generate_summary_with(
+        state,
+        id,
+        transcript,
+        summary_llm_config(cfg),
+        &cfg.summary.prompt,
+        endpoint_hint.as_deref(),
+    )
+    .await
+}
+
+/// The summary generator's core, parameterized by an already-resolved LLM
+/// config + prompt so BOTH the legacy/IPC path ([`generate_summary`], which
+/// reads `[summary]`) and the recipe executor (which reads the migrated
+/// `summary` Playbook entry) share one identical implementation — same events,
+/// same skip/empty/error classification, same recorded model. `endpoint_hint`,
+/// when `Some`, names an overridden endpoint in a real-error message (the
+/// classic stale-URL cause); a skip and "not configured" never carry it.
+pub(crate) async fn generate_summary_with(
+    state: &AppState,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
+    endpoint_hint: Option<&str>,
+) -> std::result::Result<(String, String), String> {
     if transcript.trim().is_empty() {
         return Err("the transcript is empty — nothing to summarize".into());
     }
-    let llm_cfg = summary_llm_config(cfg);
     let model = llm_cfg.model.clone();
     let llm = match llm_provider_for_run(state, &llm_cfg).await {
         Some(llm) => llm,
@@ -521,7 +680,7 @@ pub async fn generate_summary(
         id,
         PipelineStage::Summarizing,
         &*llm,
-        &cfg.summary.prompt,
+        prompt,
         transcript,
     )
     .await
@@ -543,30 +702,12 @@ pub async fn generate_summary(
             // Name the endpoint when one is overridden — a stale per-step URL
             // (e.g. left over from trying a different provider) is the classic
             // cause and invisible in a generic message.
-            if cfg.summary.api_url.trim().is_empty() {
-                Err(e.to_string())
-            } else {
-                Err(format!(
-                    "{e} (summary endpoint override: {})",
-                    cfg.summary.api_url
-                ))
+            match endpoint_hint {
+                Some(url) => Err(format!("{e} (summary endpoint override: {url})")),
+                None => Err(e.to_string()),
             }
         }
     }
-}
-
-/// Generate a summary (if `summary.auto`) and persist it. Runs as the final
-/// pipeline step, after post-processing/cleanup, so it summarizes the text the
-/// user will actually see.
-/// Whether the auto-summary step will run — drives the `Summarizing` status,
-/// which is only set when true so disabled steps never flash in the UI.
-fn summary_enabled(cfg: &Config) -> bool {
-    cfg.summary.auto
-}
-
-/// Whether the auto-tag step will run (same contract as [`summary_enabled`]).
-fn auto_tag_enabled(cfg: &Config) -> bool {
-    cfg.auto_tag.auto
 }
 
 /// Whether this pipeline run should type the transcript at the cursor.
@@ -581,23 +722,38 @@ fn pipeline_should_type(in_place: &InPlaceConfig, rec_in_place: bool, transcript
     rec_in_place && !transcript.is_empty() && !(in_place.full_pipeline && in_place.type_first)
 }
 
+/// Run the summary enrichment step for a recording that the recipe says should
+/// summarize (recipe MEMBERSHIP is the gate — the legacy `summary.auto` flag was
+/// already folded into membership by the migration, so this is NOT re-checked
+/// here). The provider/prompt/model come from the resolved `summary` Playbook
+/// ENTRY (`llm_cfg` + `prompt`), so editing that entry in the UI changes what
+/// the summary step does. Same events / persistence / classification as before.
+///
 /// Returns `Some(error)` only when the summary step REALLY failed (a user-skip
 /// and "not configured" are non-failures) — the caller folds that into the
 /// terminal status and persists the message. `None` means no failure.
-async fn maybe_auto_summarize(
+async fn run_summary_step(
     state: &AppState,
-    cfg: &Config,
     id: &RecordingId,
     transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
 ) -> Option<String> {
-    if !cfg.summary.auto {
-        return None;
-    }
     state.events.emit(DaemonEvent::PipelineStageChanged {
         id: id.clone(),
         stage: PipelineStage::Summarizing,
     });
-    match generate_summary(state, cfg, id, transcript).await {
+    // The endpoint hint names an overridden URL in a real-error message — only
+    // when the entry actually overrode the URL (a non-blank entry api_url that
+    // differs from the inherited cleanup connection would be the stale-URL
+    // culprit). Mirror the legacy behavior: hint with the resolved URL when set.
+    let endpoint_hint = {
+        let u = llm_cfg.api_url.trim();
+        (!u.is_empty()).then(|| u.to_string())
+    };
+    match generate_summary_with(state, id, transcript, llm_cfg, prompt, endpoint_hint.as_deref())
+        .await
+    {
         Ok((summary, model)) => {
             if let Err(e) = state
                 .catalog
@@ -733,10 +889,39 @@ pub async fn suggest_tags(
     id: &RecordingId,
     transcript: &str,
 ) -> Option<String> {
+    // The legacy/IPC path: the LLM config + base prompt come from the
+    // `[auto_tag]` section. The recipe executor calls `suggest_tags_with`
+    // instead, passing the resolved `auto_tag` Playbook ENTRY. The `max_tags` /
+    // `auto_accept_existing` behavior knobs stay in `[auto_tag]` either way.
+    suggest_tags_with(
+        state,
+        cfg,
+        id,
+        transcript,
+        auto_tag_llm_config(cfg),
+        &cfg.auto_tag.prompt,
+    )
+    .await
+}
+
+/// The tag-suggester's core, parameterized by an already-resolved LLM config +
+/// base prompt so the legacy/IPC path (reads `[auto_tag]`) and the recipe
+/// executor (reads the migrated `auto_tag` entry) share one implementation —
+/// same EXISTING-TAGS guidance, canonicalization, auto-accept, events, and
+/// `set_tag_model` write. `base_prompt` is the user's instruction; the runtime
+/// EXISTING-TAGS mix guidance is appended here. `max_tags` / `auto_accept_existing`
+/// remain `[auto_tag]` behavior knobs (not part of the LLM entry).
+pub(crate) async fn suggest_tags_with(
+    state: &AppState,
+    cfg: &Config,
+    id: &RecordingId,
+    transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    base_prompt: &str,
+) -> Option<String> {
     if transcript.trim().is_empty() {
         return None;
     }
-    let llm_cfg = auto_tag_llm_config(cfg);
     let llm = match llm_provider_for_run(state, &llm_cfg).await {
         Some(llm) => llm,
         None => {
@@ -758,7 +943,7 @@ pub async fn suggest_tags(
     // for configs that saved an older prompt that over-favored existing tags.
     let prompt = format!(
         "{}\n\nEXISTING TAGS: {}\nSuggest at most {} tags. Reuse existing tags that fit, and add NEW tags for topics the existing ones don't cover.",
-        cfg.auto_tag.prompt,
+        base_prompt,
         if existing.is_empty() {
             "(none yet)".to_string()
         } else {
@@ -874,30 +1059,6 @@ pub async fn suggest_tags(
     }
 }
 
-/// Build the effective LLM config for titles, mirroring `summary_llm_config`:
-/// start from `[llm_post_process]` and overlay any title-specific provider /
-/// URL / key / model. Always `enabled` — the title step has its own gates
-/// (`title.enabled` + `title.use_llm`).
-pub fn title_llm_config(cfg: &Config) -> LlmPostProcessConfig {
-    let mut llm = cfg.llm_post_process.clone();
-    llm.enabled = true;
-    let t = &cfg.title;
-    if !t.provider.trim().is_empty() {
-        llm.provider = t.provider.clone();
-    }
-    if !t.api_url.trim().is_empty() {
-        llm.api_url = t.api_url.clone();
-    }
-    let key = t.api_key_str();
-    if !key.trim().is_empty() {
-        llm.set_api_key(key.to_string());
-    }
-    if !t.model.trim().is_empty() {
-        llm.model = t.model.clone();
-    }
-    llm
-}
-
 /// Tame an LLM's title reply into something displayable: first non-empty
 /// line, wrapping quotes/markdown and a "Title:" prefix stripped, capped at
 /// 8 words, no trailing punctuation. `None` when nothing usable remains —
@@ -930,11 +1091,17 @@ fn sanitize_llm_title(raw: &str) -> Option<String> {
     }
 }
 
-/// Generate and store the recording's auto title. The heuristic (first
-/// meaningful sentence) is computed from the clean transcript, falling back
-/// to the raw one; when `[title].use_llm` is on AND a provider resolves, the
-/// LLM's title replaces it — and the heuristic remains the fallback on ANY
-/// LLM problem (no provider, call error, unusable reply).
+/// Generate and store the recording's auto title. Runs only when the recipe
+/// contains a `title` step (recipe MEMBERSHIP is the gate — the legacy
+/// `title.enabled` flag was folded into membership by the migration, so it is
+/// NOT re-checked here). The heuristic (first meaningful sentence) is computed
+/// from the clean transcript, falling back to the raw one; when `[title].use_llm`
+/// is on AND a provider resolves, the LLM's title replaces it — and the
+/// heuristic remains the fallback on ANY LLM problem (no provider, call error,
+/// unusable reply). The LLM provider/model/prompt come from the resolved `title`
+/// Playbook ENTRY (`llm_cfg` + `prompt`), so editing that entry changes the
+/// title step. `use_llm` stays a `[title]` behavior knob (it is NOT part of the
+/// LLM entry, and the migration kept it in `[title]`).
 ///
 /// The write goes through `Catalog::set_title`'s auto-guard, so a title the
 /// user typed is never overwritten — a retranscribe refreshes auto titles
@@ -945,16 +1112,15 @@ fn sanitize_llm_title(raw: &str) -> Option<String> {
 /// error) — the caller folds that into the recording's terminal status and
 /// persists the message. A heuristic title, "nothing usable" (heuristic kept),
 /// or a user-owned title are all non-failures (`None`).
-async fn maybe_auto_title(
+async fn run_title_step(
     state: &AppState,
     cfg: &Config,
     id: &RecordingId,
     transcript: &str,
     raw_transcript: &str,
+    title_cfg: LlmPostProcessConfig,
+    prompt: &str,
 ) -> Option<String> {
-    if !cfg.title.enabled {
-        return None;
-    }
     let heuristic = phoneme_core::title::heuristic_title(transcript)
         .or_else(|| phoneme_core::title::heuristic_title(raw_transcript));
     let mut title = heuristic;
@@ -963,9 +1129,8 @@ async fn maybe_auto_title(
     let mut title_model: Option<String> = None;
     let mut failure: Option<String> = None;
     if cfg.title.use_llm && !transcript.trim().is_empty() {
-        let title_cfg = title_llm_config(cfg);
         if let Some(llm) = llm_provider_for_run(state, &title_cfg).await {
-            match llm.process(&cfg.title.prompt, transcript).await {
+            match llm.process(prompt, transcript).await {
                 Ok(reply) => match sanitize_llm_title(&reply) {
                     Some(t) => {
                         title = Some(t);
@@ -1010,20 +1175,19 @@ async fn maybe_auto_title(
 /// Run the auto-tag step when enabled (`auto_tag.auto`). Best-effort and
 /// quiet: the transcript is already saved; only the optional suggestions step
 /// is affected by a failure.
-async fn maybe_auto_tag(
+async fn run_tags_step(
     state: &AppState,
     cfg: &Config,
     id: &RecordingId,
     transcript: &str,
+    llm_cfg: LlmPostProcessConfig,
+    prompt: &str,
 ) -> Option<String> {
-    if !cfg.auto_tag.auto {
-        return None;
-    }
     state.events.emit(DaemonEvent::PipelineStageChanged {
         id: id.clone(),
         stage: PipelineStage::Tagging,
     });
-    suggest_tags(state, cfg, id, transcript).await
+    suggest_tags_with(state, cfg, id, transcript, llm_cfg, prompt).await
 }
 
 /// Write a recording's terminal status at the end of the pipeline: `Done` on a
@@ -1090,10 +1254,13 @@ async fn finalize_canceled(state: &AppState, id: &RecordingId) {
 // ── Recipe executor ──────────────────────────────────────────────────────────
 // The pipeline's cleanup → title → summary → tags interior is driven by a
 // resolved Playbook recipe instead of a hardcoded sequence. The executor is a
-// thin DISPATCHER over the proven helpers (`run_llm_stage`, `maybe_auto_title`,
-// `maybe_auto_summarize`, `maybe_auto_tag`) — it never reimplements their
-// event/persistence logic, so parity (and IPC-re-run identicality) is automatic.
-// Hooks stay OUTSIDE the recipe loop (`cfg.hook`), exactly as before.
+// thin DISPATCHER over the proven streaming/persistence primitives
+// (`run_llm_stage`, `generate_summary_with`, `suggest_tags_with`, the title +
+// tag persistence) — it never reimplements their event/persistence logic, so
+// parity (and IPC-re-run identicality) is automatic. Each built-in step reads
+// its MIGRATED Playbook ENTRY (Strategy B): membership gates whether it runs,
+// the entry's `PlaybookLlm` (overlaid on `[llm_post_process]`) gives its
+// provider/model/prompt. Hooks stay OUTSIDE the recipe loop (`cfg.hook`).
 
 /// The recipe id the normal recording pipeline runs.
 const DEFAULT_RECIPE_ID: &str = "default";
@@ -1108,12 +1275,25 @@ enum ResolvedStep {
         llm_cfg: LlmPostProcessConfig,
         prompt: String,
     },
-    /// Enrichment writing the recording title (dispatches to `maybe_auto_title`).
-    Title,
-    /// Enrichment writing the summary (dispatches to `maybe_auto_summarize`).
-    Summary,
-    /// Enrichment writing tag suggestions (dispatches to `maybe_auto_tag`).
-    Tags,
+    /// Enrichment writing the recording title. Carries the entry-resolved LLM
+    /// config + prompt so the title step reads the migrated `title` Playbook
+    /// entry (Strategy B), not the legacy `[title]` section.
+    Title {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
+    /// Enrichment writing the summary. Carries the entry-resolved LLM config +
+    /// prompt (the migrated `summary` Playbook entry).
+    Summary {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
+    /// Enrichment writing tag suggestions. Carries the entry-resolved LLM
+    /// config + prompt (the migrated `auto_tag` Playbook entry).
+    Tags {
+        llm_cfg: LlmPostProcessConfig,
+        prompt: String,
+    },
     /// An enrichment whose target has no backing store yet (`custom:<key>` or an
     /// unrecognized target). No-op + warn; never fails the recording.
     UnsupportedEnrichment { target: String },
@@ -1180,9 +1360,18 @@ fn resolve_recipe(cfg: &Config) -> Vec<ResolvedStep> {
             PlaybookKind::Enrichment => {
                 let target = entry.target.trim();
                 match target {
-                    "title" => steps.push(ResolvedStep::Title),
-                    "summary" => steps.push(ResolvedStep::Summary),
-                    "tags" => steps.push(ResolvedStep::Tags),
+                    "title" => steps.push(ResolvedStep::Title {
+                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        prompt: entry.llm.prompt.clone(),
+                    }),
+                    "summary" => steps.push(ResolvedStep::Summary {
+                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        prompt: entry.llm.prompt.clone(),
+                    }),
+                    "tags" => steps.push(ResolvedStep::Tags {
+                        llm_cfg: entry_llm_config(cfg, &entry.llm),
+                        prompt: entry.llm.prompt.clone(),
+                    }),
                     other => steps.push(ResolvedStep::UnsupportedEnrichment {
                         target: other.to_string(),
                     }),
@@ -1284,11 +1473,12 @@ async fn run_transform_steps(
 /// `run` (the cancel has already been finalized via `finalize_canceled`).
 struct Canceled;
 
-/// Run the recipe's Enrichment steps that write the title (the only enrichment
-/// that lands BEFORE the transcript-commit's downstream events — same position
-/// as the legacy `maybe_auto_title` call). Title self-gates on `cfg.title.enabled`
-/// and emits no status/PipelineStageChanged. Returns nothing; folds a real
-/// failure into `step_failure`.
+/// Run the recipe's title enrichment (the only enrichment that lands BEFORE the
+/// transcript-commit's downstream events — same position as the legacy title
+/// call). Membership is the gate (a `title` step present == the old
+/// `title.enabled`), so this is NOT re-gated here; the title step emits no
+/// status / PipelineStageChanged. The LLM provider/model/prompt come from the
+/// resolved `title` Playbook ENTRY. Folds a real failure into `step_failure`.
 async fn run_title_steps(
     state: &AppState,
     cfg: &Config,
@@ -1299,21 +1489,34 @@ async fn run_title_steps(
     step_failure: &mut Option<(RecordingStatus, String)>,
 ) {
     for step in steps {
-        if !matches!(step, ResolvedStep::Title) {
+        let ResolvedStep::Title { llm_cfg, prompt } = step else {
             continue;
-        }
-        if let Some(msg) = maybe_auto_title(state, cfg, id, transcript, raw_transcript).await {
+        };
+        if let Some(msg) = run_title_step(
+            state,
+            cfg,
+            id,
+            transcript,
+            raw_transcript,
+            llm_cfg.clone(),
+            prompt,
+        )
+        .await
+        {
             step_failure.get_or_insert((RecordingStatus::TitleFailed, msg));
         }
     }
 }
 
 /// Run the recipe's summary + tags enrichments (the AFTER-commit, after-hooks
-/// enrichments), in recipe order. Summary/tags each self-gate on their legacy
-/// flag inside the helper and emit their own `PipelineStageChanged`; the
-/// `Summarizing`/`Tagging` status is written ONLY when that step will actually
-/// run, so a disabled step never flashes in the UI. Unsupported `custom:` targets
-/// are a no-op + warn. Folds real failures into `step_failure`.
+/// enrichments), in recipe order. Membership IS the gate — a `summary`/`tags`
+/// step is present iff the migration found the legacy flag on, so the executor
+/// does NOT re-check `summary.auto` / `auto_tag.auto`. Because membership ==
+/// "this step runs", the `Summarizing`/`Tagging` status is written exactly when
+/// the step runs (so a disabled step — i.e. one absent from the recipe — never
+/// flashes in the UI, identical to before). The LLM provider/model/prompt for
+/// each step come from its resolved Playbook ENTRY. Unsupported `custom:`
+/// targets are a no-op + warn. Folds real failures into `step_failure`.
 async fn run_enrichment_steps(
     state: &AppState,
     cfg: &Config,
@@ -1324,25 +1527,25 @@ async fn run_enrichment_steps(
 ) {
     for step in steps {
         match step {
-            ResolvedStep::Summary => {
-                if summary_enabled(cfg) {
-                    let _ = state
-                        .catalog
-                        .update_status(id, RecordingStatus::Summarizing)
-                        .await;
-                }
-                if let Some(msg) = maybe_auto_summarize(state, cfg, id, transcript).await {
+            ResolvedStep::Summary { llm_cfg, prompt } => {
+                let _ = state
+                    .catalog
+                    .update_status(id, RecordingStatus::Summarizing)
+                    .await;
+                if let Some(msg) =
+                    run_summary_step(state, id, transcript, llm_cfg.clone(), prompt).await
+                {
                     step_failure.get_or_insert((RecordingStatus::SummarizeFailed, msg));
                 }
             }
-            ResolvedStep::Tags => {
-                if auto_tag_enabled(cfg) {
-                    let _ = state
-                        .catalog
-                        .update_status(id, RecordingStatus::Tagging)
-                        .await;
-                }
-                if let Some(msg) = maybe_auto_tag(state, cfg, id, transcript).await {
+            ResolvedStep::Tags { llm_cfg, prompt } => {
+                let _ = state
+                    .catalog
+                    .update_status(id, RecordingStatus::Tagging)
+                    .await;
+                if let Some(msg) =
+                    run_tags_step(state, cfg, id, transcript, llm_cfg.clone(), prompt).await
+                {
                     step_failure.get_or_insert((RecordingStatus::TagFailed, msg));
                 }
             }
@@ -1354,7 +1557,7 @@ async fn run_enrichment_steps(
             }
             // Transform + Title are handled in their own phases (before the
             // commit); ignore them here.
-            ResolvedStep::Transform { .. } | ResolvedStep::Title => {}
+            ResolvedStep::Transform { .. } | ResolvedStep::Title { .. } => {}
         }
     }
 }
@@ -1767,8 +1970,9 @@ pub async fn run(
     // included) and before TranscriptionDone fires, so the refreshed list shows
     // the title together with the new text. A retranscribe re-runs this and
     // refreshes auto titles; user-set titles are protected inside. Runs only
-    // when the recipe contains a `title` step (membership gate); `maybe_auto_title`
-    // additionally self-gates on `cfg.title.enabled`.
+    // when the recipe contains a `title` step (membership IS the gate — the
+    // migration folded `cfg.title.enabled` into membership); the title step
+    // reads its migrated Playbook entry for provider/model/prompt.
     run_title_steps(
         state,
         cfg,

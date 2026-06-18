@@ -703,7 +703,20 @@ fn rerun_overrides_apply_to_a_clone_only() {
     assert_eq!(same.llm_post_process.enabled, base.llm_post_process.enabled);
     assert_eq!(same.summary.auto, base.summary.auto);
 
-    // Post-process opt-out disables cleanup for this run only.
+    // Post-process opt-out disables cleanup for this run only — AND, under the
+    // recipe executor, drops the `cleanup` Transform step from the per-job
+    // clone's `default` recipe so no Transform runs (#38: "skip post-processing"
+    // must yield the raw transcript). The base recipe still has cleanup.
+    assert!(
+        base.recipes
+            .iter()
+            .find(|r| r.id == "default")
+            .unwrap()
+            .steps
+            .iter()
+            .any(|s| s == "cleanup"),
+        "the default recipe ships with a cleanup step"
+    );
     let raw = super::apply_rerun_overrides(
         base.clone(),
         PendingRerun {
@@ -712,6 +725,27 @@ fn rerun_overrides_apply_to_a_clone_only() {
         },
     );
     assert!(!raw.llm_post_process.enabled);
+    assert!(
+        !raw.recipes
+            .iter()
+            .find(|r| r.id == "default")
+            .unwrap()
+            .steps
+            .iter()
+            .any(|s| s == "cleanup"),
+        "the post-process opt-out must drop the cleanup step from the per-job clone's recipe"
+    );
+    // The opt-out is confined to the clone — the base recipe still has cleanup.
+    assert!(
+        base.recipes
+            .iter()
+            .find(|r| r.id == "default")
+            .unwrap()
+            .steps
+            .iter()
+            .any(|s| s == "cleanup"),
+        "the base config's recipe is untouched by the per-job opt-out"
+    );
 
     // Re-run "All" forces the pipeline on and layers in the per-step values.
     let all = super::apply_rerun_overrides(
@@ -733,11 +767,21 @@ fn rerun_overrides_apply_to_a_clone_only() {
     assert!(all.title.enabled && all.title.use_llm);
     assert_eq!(all.title.model, "qwen2.5:0.5b");
 
-    // The recipe executor reads the cleanup step from the Playbook ENTRY, so the
-    // one-shot cleanup override must be mirrored onto the `cleanup` entry of the
-    // clone — otherwise a Re-run → "All" custom cleanup model would be ignored.
+    // The recipe executor reads each step from its Playbook ENTRY, so the
+    // one-shot overrides must be mirrored onto the matching entries of the clone
+    // — otherwise a Re-run → "All" custom model would be ignored.
     let cleanup_entry = all.playbook.iter().find(|e| e.id == "cleanup").unwrap();
     assert_eq!(cleanup_entry.llm.model, "llama3.2:3b");
+    let summary_entry = all.playbook.iter().find(|e| e.id == "summary").unwrap();
+    assert_eq!(
+        summary_entry.llm.model, "phi3:mini",
+        "the summary override must reach the summary ENTRY (entries drive enrichment)"
+    );
+    let title_entry = all.playbook.iter().find(|e| e.id == "title").unwrap();
+    assert_eq!(
+        title_entry.llm.model, "qwen2.5:0.5b",
+        "the title override must reach the title ENTRY"
+    );
 
     // The base config is untouched — overrides went onto the clone.
     assert_eq!(base.summary.auto, Config::default().summary.auto);
@@ -755,6 +799,60 @@ fn rerun_overrides_apply_to_a_clone_only() {
             .unwrap()
             .llm
             .model
+    );
+}
+
+/// Re-run "All" must re-fire the whole pipeline even for a (migrated) user who
+/// had summary/title OFF — so those steps are ABSENT from the persisted recipe.
+/// Under the membership-gated executor, forcing the legacy flags on is not
+/// enough; "All" must also slot cleanup/title/summary back into the per-job
+/// clone's recipe (canonical order), while leaving auto-tag membership alone
+/// (legacy "All" never force-enabled auto-tagging). Confined to the clone.
+#[test]
+fn rerun_all_restores_missing_steps_into_the_recipe_clone() {
+    use crate::app_state::PendingRerun;
+    use phoneme_ipc::RerunAllOverrides;
+
+    // A user who only kept cleanup on: summary/title/tags were migrated OFF, so
+    // the persisted default recipe is just `["cleanup"]`.
+    let mut base = Config::default();
+    if let Some(recipe) = base.recipes.iter_mut().find(|r| r.id == "default") {
+        recipe.steps = vec!["cleanup".into()];
+    }
+
+    let all = super::apply_rerun_overrides(
+        base.clone(),
+        PendingRerun {
+            all_overrides: Some(RerunAllOverrides {
+                summary_model: Some("phi3:mini".into()),
+                title_model: Some("qwen2.5:0.5b".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+
+    let steps: &[String] = &all
+        .recipes
+        .iter()
+        .find(|r| r.id == "default")
+        .unwrap()
+        .steps;
+    // cleanup → title → summary, in canonical order; auto-tag is NOT forced on.
+    assert_eq!(
+        steps,
+        &["cleanup".to_string(), "title".to_string(), "summary".to_string()],
+        "Re-run All slots cleanup/title/summary back in canonical order, leaving tags off"
+    );
+
+    // The base recipe is untouched — the restore is confined to the clone.
+    assert_eq!(
+        base.recipes
+            .iter()
+            .find(|r| r.id == "default")
+            .unwrap()
+            .steps,
+        vec!["cleanup".to_string()],
     );
 }
 
@@ -1410,6 +1508,104 @@ async fn full_pipeline_path_transcribe_llm_hook_webhook_catalog() {
     assert!(
         audio_path.starts_with(&audio_dir),
         "the recording's audio lives under the configured audio dir"
+    );
+}
+
+/// Strategy B: the summary ENRICHMENT step reads its migrated Playbook ENTRY,
+/// not the legacy `[summary]` section. We migrate the config, then EDIT only the
+/// `summary` entry's prompt (as the Playbook UI would) to a sentinel, and leave
+/// the legacy `[summary].prompt` set to a DIFFERENT sentinel. The mock LLM only
+/// answers a summary request whose body carries the ENTRY's sentinel — so the
+/// summary landing at all proves the step used the edited entry prompt, and a
+/// run that instead sent the legacy prompt would 404 and persist no summary.
+#[tokio::test]
+async fn summary_step_uses_the_edited_playbook_entry_prompt() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "raw words from whisper"
+        })))
+        .mount(&server)
+        .await;
+    // Cleanup answers anything on the chat endpoint (its own prompt is the
+    // migrated cleanup entry; not under test here).
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("ENTRY_SUMMARY_SENTINEL"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "SUMMARY FROM ENTRY PROMPT" } }]
+        })))
+        .mount(&server)
+        .await;
+    // Cleanup uses a different prompt; give it its own (broad) match so the
+    // cleanup stage still succeeds and the run reaches the summary step.
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_string_contains("CLEANUP_SENTINEL"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "cleaned text" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = Config::default();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "test-stt".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.hook.run_on_transcribe = false;
+
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "test-llm".into();
+    cfg.llm_post_process.prompt = "CLEANUP_SENTINEL rewrite".into();
+
+    cfg.summary.auto = true;
+    cfg.summary.model = "summary-llm".into();
+    // The LEGACY section prompt is the WRONG one — if the step read this, no
+    // mock would match and the summary would be empty/failed.
+    cfg.summary.prompt = "LEGACY_SUMMARY_PROMPT_DO_NOT_USE".into();
+
+    // Migrate (copies the legacy prompt into the entry), THEN edit the entry
+    // prompt to the sentinel the way the Playbook UI would. `migrate_playbook`
+    // already set `playbook_migrated`, so `test_state`'s re-migration is a no-op
+    // and this edit survives.
+    cfg.migrate_playbook();
+    let summary_entry = cfg
+        .playbook
+        .iter_mut()
+        .find(|e| e.id == "summary")
+        .expect("migrated config has a summary entry");
+    summary_entry.llm.prompt = "ENTRY_SUMMARY_SENTINEL summarize this".into();
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("pipeline run should succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(
+        rec.summary.as_deref(),
+        Some("SUMMARY FROM ENTRY PROMPT"),
+        "the summary step must use the EDITED Playbook entry prompt, not the legacy [summary] prompt"
+    );
+    assert_eq!(
+        rec.summary_model.as_deref(),
+        Some("summary-llm"),
+        "the summary model is the migrated entry's model"
     );
 }
 

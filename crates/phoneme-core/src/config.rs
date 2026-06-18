@@ -2275,13 +2275,16 @@ impl Config {
         }
 
         // Rebuild the `default` recipe's step list from the legacy ENABLE flags
-        // so a step that was OFF doesn't silently start running: cleanup iff a
-        // post-processing provider is set (provider != none/blank — the runtime
-        // gate is `llm_provider_for_run` resolving a provider), title iff
-        // `title.enabled`, summary iff `summary.auto`, tags iff `auto_tag.auto`.
+        // so a step that was OFF doesn't silently start running: cleanup iff
+        // post-processing is enabled AND a provider is set (provider !=
+        // none/blank), title iff `title.enabled`, summary iff `summary.auto`,
+        // tags iff `auto_tag.auto`. The runtime gate is `llm_provider_for_run`
+        // → `LlmPostProcessor::provider`, which returns `None` the moment
+        // `!enabled` (llm.rs) — so a user who turned post-processing OFF but
+        // left a provider id behind must NOT get cleanup in the default recipe.
         let cleanup_on = {
             let p = self.llm_post_process.provider.trim();
-            !p.is_empty() && p != "none"
+            self.llm_post_process.enabled && !p.is_empty() && p != "none"
         };
         let mut steps: Vec<String> = Vec::new();
         if cleanup_on {
@@ -3009,6 +3012,36 @@ mod tests {
         assert!(cfg.migrate_playbook());
         let recipe = cfg.recipes.iter().find(|r| r.id == "default").unwrap();
         assert_eq!(recipe.steps, ["title"], "only the enabled step is a member");
+    }
+
+    #[test]
+    fn migrate_playbook_recipe_omits_cleanup_when_post_processing_disabled() {
+        // A user who turned post-processing OFF but left a provider id behind:
+        // the legacy gate is `LlmPostProcessor::provider`, which returns `None`
+        // the moment `!enabled` (regardless of the provider). So cleanup must
+        // NOT be a member of the migrated default recipe — otherwise a disabled
+        // step would silently start running.
+        let mut cfg = Config::default();
+        cfg.llm_post_process.enabled = false;
+        cfg.llm_post_process.provider = "openai".into();
+        cfg.llm_post_process.model = "gpt-4o-mini".into();
+        cfg.summary.auto = false;
+        cfg.auto_tag.auto = false;
+        cfg.title.enabled = false;
+
+        assert!(cfg.migrate_playbook());
+        let recipe = cfg.recipes.iter().find(|r| r.id == "default").unwrap();
+        assert!(
+            !recipe.steps.iter().any(|s| s == "cleanup"),
+            "cleanup must NOT be a default-recipe step when post-processing is disabled, \
+             even with a provider set (got {:?})",
+            recipe.steps
+        );
+        assert!(
+            recipe.steps.is_empty(),
+            "every step is disabled here, so the recipe is empty (got {:?})",
+            recipe.steps
+        );
     }
 
     #[test]
