@@ -713,13 +713,29 @@ pub(crate) async fn generate_summary_with(
 /// Whether this pipeline run should type the transcript at the cursor.
 ///
 /// Only in-place dictations type, and only when the text hasn't already
-/// landed: with `[in_place].full_pipeline` + `[in_place].type_first` the
-/// recorder spawned a type-only pass that typed the quick transcription the
-/// moment it was ready, so this run owns everything else (cleanup, summary,
-/// tags, hooks, the library copy) but must NOT type again — the text would
-/// land twice. Pure so the decision is testable without an input simulator.
-fn pipeline_should_type(in_place: &InPlaceConfig, rec_in_place: bool, transcript: &str) -> bool {
-    rec_in_place && !transcript.is_empty() && !(in_place.full_pipeline && in_place.type_first)
+/// landed. The single subtlety is the recorder's "type-first" pass: with
+/// `[in_place].full_pipeline` + `[in_place].type_first` the recorder typed the
+/// quick transcription the moment it was ready, so this run owns everything
+/// else (cleanup, summary, tags, hooks, the library copy) but must NOT type
+/// again — the text would land twice.
+///
+/// `recipe_routed` is true when a custom-hotkey in-place binding named a recipe
+/// (the recording was routed to the full pipeline so the recipe could run). For
+/// it the recorder SKIPS the type-first pass — the recipe reshapes the text, so
+/// the quick raw transcription is the wrong thing to type — and this run is the
+/// one and only insertion of the recipe's RESULT. So the suppression mirrors the
+/// recorder exactly: a type-first pass ran iff `full_pipeline && type_first &&
+/// !recipe_routed`, and this run types iff one did NOT. Pure so the decision is
+/// testable without an input simulator.
+fn pipeline_should_type(
+    in_place: &InPlaceConfig,
+    rec_in_place: bool,
+    recipe_routed: bool,
+    transcript: &str,
+) -> bool {
+    rec_in_place
+        && !transcript.is_empty()
+        && !(in_place.full_pipeline && in_place.type_first && !recipe_routed)
 }
 
 /// Run the summary enrichment step for a recording that the recipe says should
@@ -1664,6 +1680,13 @@ pub async fn run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
+    // A non-empty bound recipe means this recording was routed off the dictation
+    // fast lane into the full pipeline *because* of its recipe (see the recorder's
+    // `wants_fast_lane`). It governs the end-of-run typing decision: such an
+    // in-place recording gets its single insertion HERE, never a type-first pass.
+    let recipe_routed = requested_recipe_id
+        .as_deref()
+        .is_some_and(|r| !r.trim().is_empty());
     let (whisper_cfg, override_guard) =
         apply_model_override(state, &cfg.whisper, requested_override).await;
     // Dial the port the bundled server is ACTUALLY listening on: the
@@ -2021,13 +2044,17 @@ pub async fn run(
 
     let recording = state.catalog.get(&id).await?;
     if let Some(rec) = recording {
-        if pipeline_should_type(&cfg.in_place, rec.in_place, &transcript) {
+        if pipeline_should_type(&cfg.in_place, rec.in_place, recipe_routed, &transcript) {
             tracing::info!(id = %id.as_str(), "in-place dictation: typing transcript at cursor");
-            // This is the FULL-PIPELINE dictation path ([in_place].full_pipeline
-            // = true) without `type_first`: the text lands only after every
-            // configured step. (With `type_first` the recorder's type-only
-            // pass already typed it, so `pipeline_should_type` keeps this run
-            // from landing the text twice.) The insertion itself (typing vs
+            // This is the FULL-PIPELINE dictation path: either [in_place].
+            // full_pipeline = true without `type_first`, or a recipe-bearing
+            // in-place binding (always full-pipeline). The text lands only after
+            // every configured step — for a recipe binding that is the recipe's
+            // RESULT, the single insertion. (With plain `type_first` the
+            // recorder's type-only pass already typed it, so
+            // `pipeline_should_type` keeps this run from landing it twice; for a
+            // recipe binding the recorder skips type-first, so this run owns the
+            // sole insertion.) The insertion itself (typing vs
             // clipboard-paste, input-simulator failure modes) lives in
             // `in_place::type_at_cursor`, shared with the fast lane.
             // Best-effort — a failure is logged loudly but never fails the

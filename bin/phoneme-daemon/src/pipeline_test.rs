@@ -1694,17 +1694,17 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
     let base = InPlaceConfig::default();
 
     // Not an in-place recording: the pipeline never types, whatever the config.
-    assert!(!pipeline_should_type(&base, false, "words"));
+    assert!(!pipeline_should_type(&base, false, false, "words"));
 
     // An in-place recording that reached the pipeline types at the end — both
     // on the default config (e.g. a retranscribed dictation) and with
     // full_pipeline on but type_first off (the classic type-at-the-end mode).
-    assert!(pipeline_should_type(&base, true, "words"));
+    assert!(pipeline_should_type(&base, true, false, "words"));
     let full = InPlaceConfig {
         full_pipeline: true,
         ..base.clone()
     };
-    assert!(pipeline_should_type(&full, true, "words"));
+    assert!(pipeline_should_type(&full, true, false, "words"));
 
     // full_pipeline + type_first: the recorder's type-only pass already typed
     // the text the moment transcription finished — the pipeline run must NOT
@@ -1714,7 +1714,7 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
         type_first: true,
         ..base.clone()
     };
-    assert!(!pipeline_should_type(&type_first, true, "words"));
+    assert!(!pipeline_should_type(&type_first, true, false, "words"));
 
     // type_first without full_pipeline is inert (the flag is only meaningful
     // under full_pipeline): pipeline typing is unaffected.
@@ -1722,10 +1722,44 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
         type_first: true,
         ..base.clone()
     };
-    assert!(pipeline_should_type(&dangling, true, "words"));
+    assert!(pipeline_should_type(&dangling, true, false, "words"));
 
     // Nothing to type, nothing typed.
-    assert!(!pipeline_should_type(&full, true, ""));
+    assert!(!pipeline_should_type(&full, true, false, ""));
+
+    // Recipe-routed in-place: the recorder ALWAYS skips its type-first pass for
+    // a recipe binding (the recipe reshapes the text, so the quick raw text is
+    // the wrong thing to type), so the pipeline owns the SINGLE insertion of the
+    // recipe's result — regardless of full_pipeline / type_first. These are the
+    // two states that double-typed (or typed the wrong text) before the gate was
+    // tied to the recorder's actual condition.
+    //
+    // full_pipeline = false, type_first = true: the fast lane no longer fires
+    // (recipe forces the full pipeline), and the recorder skips type-first, so
+    // this run must type — exactly once. (Pre-fix: the recorder type-first AND
+    // this run both typed → the text landed twice.)
+    let recipe_tf_no_full = InPlaceConfig {
+        full_pipeline: false,
+        type_first: true,
+        ..base.clone()
+    };
+    assert!(pipeline_should_type(&recipe_tf_no_full, true, true, "words"));
+
+    // full_pipeline = true, type_first = true: still recipe-routed, so the
+    // recorder skipped type-first; this run types the recipe's result. (Pre-fix:
+    // this run suppressed itself AND the recorder type-first typed the RAW text →
+    // the user got the un-transformed text instead of the recipe output.)
+    let recipe_tf_full = InPlaceConfig {
+        full_pipeline: true,
+        type_first: true,
+        ..base.clone()
+    };
+    assert!(pipeline_should_type(&recipe_tf_full, true, true, "words"));
+
+    // Recipe-routed with type_first off behaves like any end-of-pipeline type.
+    assert!(pipeline_should_type(&full, true, true, "words"));
+    // Recipe-routed but nothing transcribed: still nothing to type.
+    assert!(!pipeline_should_type(&recipe_tf_full, true, true, ""));
 }
 
 /// `parse_tag_names` must find the first VALID JSON string-array even when the

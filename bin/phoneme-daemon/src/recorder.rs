@@ -413,6 +413,21 @@ fn wants_fast_lane(in_place: bool, full_pipeline: bool, has_recipe: bool) -> boo
     in_place && !full_pipeline && !has_recipe
 }
 
+/// Whether the recorder should fire a "type-first" pass — typing the quick
+/// transcription the instant it is ready, ahead of the queued full pipeline.
+///
+/// Only in-place dictations with `[in_place].type_first` qualify, and only when
+/// they have NO recipe. A recipe reshapes the text (summarize, polish, …), so
+/// the quick raw transcription is the wrong thing to type; a recipe-bearing
+/// in-place recording instead gets its single insertion at the END of the
+/// pipeline (the recipe's result — see `pipeline::pipeline_should_type`). This
+/// gate is the exact inverse condition `pipeline_should_type` suppresses on, so
+/// the text lands exactly once on every in-place path. Pure, so the decision is
+/// unit-testable without a live recorder.
+fn wants_type_first(in_place: bool, type_first: bool, has_recipe: bool) -> bool {
+    in_place && type_first && !has_recipe
+}
+
 impl DaemonRecorder {
     pub async fn current(&self) -> Option<ActiveRecording> {
         self.active.lock().await.clone()
@@ -1221,7 +1236,14 @@ impl DaemonRecorder {
             // transcription NOW, alongside the normal enqueue below — the
             // pipeline still runs every step for the library copy, but skips
             // its own end-of-run typing so the text lands exactly once.
-            if active.in_place && in_place_cfg.type_first {
+            //
+            // A RECIPE-bearing in-place binding is excluded: its recipe reshapes
+            // the text (summarize, polish, …), so the quick raw transcription is
+            // the WRONG thing to type. For it the pipeline owns the single
+            // insertion of the recipe's RESULT at the end (see
+            // `pipeline_should_type`) — type-first here would either land the
+            // raw text twice or land the raw text instead of the recipe output.
+            if wants_type_first(active.in_place, in_place_cfg.type_first, has_recipe) {
                 crate::in_place::spawn_type_first(
                     state.clone(),
                     active.id.clone(),
@@ -2808,6 +2830,29 @@ mod tests {
         // A normal (non-in-place) recording is never fast-laned.
         assert!(!wants_fast_lane(false, false, false));
         assert!(!wants_fast_lane(false, false, true));
+    }
+
+    /// The type-first gate (double-type fix): a "type the quick text now" pass
+    /// fires ONLY for an in-place dictation with `type_first` set AND no recipe.
+    /// A recipe-bearing in-place recording is excluded — it gets its single
+    /// insertion (the recipe's RESULT) at the end of the pipeline instead, so a
+    /// type-first pass here would land the text twice (or land the raw text
+    /// instead of the recipe output). This is the exact inverse of the condition
+    /// `pipeline::pipeline_should_type` suppresses on, so the text lands once on
+    /// every in-place path.
+    #[test]
+    fn wants_type_first_excludes_recipe_bearing_in_place() {
+        // Plain in-place dictation with type_first, no recipe → type-first fires.
+        assert!(wants_type_first(true, true, false));
+        // Recipe-bearing in-place: NO type-first regardless of the flag — the
+        // pipeline owns the sole insertion of the recipe's result. (These are the
+        // two states that double-typed / typed the raw text before the fix.)
+        assert!(!wants_type_first(true, true, true));
+        // type_first off → never a type-first pass.
+        assert!(!wants_type_first(true, false, false));
+        assert!(!wants_type_first(true, false, true));
+        // A normal (non-in-place) recording never type-firsts.
+        assert!(!wants_type_first(false, true, false));
     }
 
     /// LEDGER LEAK (custom-hotkey FIX 2): a genuine fast-lane in-place recording
