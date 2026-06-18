@@ -114,8 +114,18 @@ export type HotkeyBinding = {
   combo: string;
   mode: "hold" | "toggle";
   action: "record" | "in_place" | "meeting";
-  /** This keybind's own pipeline — which AI steps run for its recordings, so one
-   *  keybind can clean up + title without summary/tags while another runs all. */
+  /** The Playbook recipe this keybind's recordings run, by {@link PlaybookRecipe.id}.
+   *  Empty = the global `default` recipe (today's normal-recording pipeline), so
+   *  existing bindings are unchanged; a non-empty id points the daemon at that
+   *  recipe instead. Supersedes the legacy `pipeline` flags below. */
+  recipe_id: string;
+  /** Per-keybind transcription (Whisper/STT) model override. Empty = the globally
+   *  configured model; a non-empty value transcribes this keybind's recordings
+   *  with that model (a model-file path for the local backend, a model id for
+   *  cloud backends). */
+  whisper_model: string;
+  /** LEGACY: this keybind's own pipeline flags. Predates {@link recipe_id} and no
+   *  longer drives behaviour (the recipe does); kept so older configs round-trip. */
   pipeline: { cleanup: boolean; title: boolean; summary: boolean; auto_tag: boolean };
   /** Hook commands (shell / webhook) fired after this keybind's recording,
    *  independent of the global hooks — each gets the recording JSON on stdin. */

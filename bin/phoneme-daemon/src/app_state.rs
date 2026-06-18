@@ -175,6 +175,18 @@ pub struct AppState {
     /// with the configured pipeline.
     pub pending_all_overrides:
         Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, PendingRerun>>>,
+    /// Per-recording Playbook RECIPE override, keyed by recording id. Written when
+    /// a recording is created via a custom hotkey whose binding names a non-empty
+    /// `recipe_id`; consumed-and-removed by `pipeline::run`, which passes it to
+    /// `resolve_recipe` instead of the hardcoded `default`. The recipe-id sibling
+    /// of `pending_overrides` (the whisper-model override) and `pending_all_overrides`
+    /// (the LLM/hook overrides): same per-id, in-memory, ephemeral contract — a
+    /// daemon restart drops it and the job falls back to the `default` recipe.
+    /// `pipeline::run` removes the entry EARLY (next to the model/all-overrides
+    /// removals, before transcription) so a permanently-failed/canceled recording
+    /// can't leave a stale entry keyed by a dead id.
+    pub pending_recipe:
+        Arc<std::sync::Mutex<std::collections::HashMap<phoneme_core::RecordingId, String>>>,
     /// The ports the bundled whisper-servers are ACTUALLY listening on,
     /// published by the supervisors on every (re)spawn. The configured
     /// `bundled_server_port`s are preferences: when a foreign process already
@@ -499,6 +511,7 @@ impl AppState {
             pending_all_overrides: Arc::new(
                 std::sync::Mutex::new(std::collections::HashMap::new()),
             ),
+            pending_recipe: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             whisper_ports: Arc::new(WhisperEffectivePorts::default()),
             whisper_restart: Arc::new(tokio::sync::Notify::new()),
             skip_stage: Arc::new(tokio::sync::Notify::new()),

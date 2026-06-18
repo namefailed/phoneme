@@ -349,6 +349,29 @@ trust boundary. Verified against current code.*
   hazards and a recommended design are written up in
   `archive_internal/plans/dictation-streaming-type-spike.md`.
 
+### Playbook & Custom Hotkeys
+
+- [x] **Custom Hotkeys run a Playbook recipe + their own Whisper model** — the
+  Settings → Capture → Hotkeys manager (renamed **Custom Hotkeys**) replaces each
+  binding's fixed cleanup/title/summary/auto-tag toggles with a **recipe picker**
+  (the Playbook chain its recordings run) and a per-hotkey **Whisper model** picker.
+  A binding's `recipe_id` (empty = the global `default` recipe, so every existing
+  binding is unchanged) is now actually honored end-to-end: the Tauri shell
+  registers every enabled custom binding's combo, matches a fired combo back to its
+  binding, and sends the binding's recipe + model on the record/toggle request
+  (`RecordStart`/`RecordToggle` gained `recipe_id` + `whisper_model`, both
+  `#[serde(default)]` so older clients/CLI are unaffected). The daemon stashes them
+  in per-recording ledgers (the recipe in a new `pending_recipe`, the model reusing
+  the existing `pending_overrides`), and `pipeline::run` resolves THAT recipe and
+  applies THAT STT model for just that recording — the same per-job, restore-on-exit
+  mechanism a model-override retranscribe uses, so normal recordings and the three
+  built-in hotkeys keep the default recipe + configured model with no regression. A
+  binding pointing at a deleted recipe falls back to `default` (never a panic, never
+  the wrong chain), and the ledger entries are claimed early (before transcription)
+  so a failed/canceled recording can't leak a stale entry. (Meeting custom hotkeys
+  toggle a meeting like the built-in meeting hotkey; the per-binding recipe/model
+  overrides apply to Record / In-place hotkeys.)
+
 ### Integration
 
 - [x] **In-app log viewer** — Settings → Destination & Integrations now has

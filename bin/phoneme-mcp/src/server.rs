@@ -290,7 +290,9 @@ mod tests {
             seen.as_slice(),
             &[Request::RecordStart {
                 mode: phoneme_core::RecordMode::Hold,
-                in_place: false
+                in_place: false,
+                recipe_id: None,
+                whisper_model: None
             }]
         );
     }

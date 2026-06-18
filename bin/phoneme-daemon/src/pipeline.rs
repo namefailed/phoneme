@@ -1324,25 +1324,44 @@ fn entry_llm_config(cfg: &Config, entry: &phoneme_core::config::PlaybookLlm) -> 
     llm
 }
 
-/// Resolve the recording's recipe into an ordered list of dispatchable steps.
+/// Resolve `recipe_id` into an ordered list of dispatchable steps.
 ///
-/// Picks the `default` recipe from `cfg.recipes` (falling back to the seeded
-/// `default_recipes()` if a user deleted it / an empty config), then maps each
-/// step id to its `PlaybookEntry`. A dangling id (entry deleted) or a `Hook`
-/// entry (hooks run outside the loop in v1) is skipped with a warning — never a
-/// panic and never an abort. An empty recipe yields an empty list: a bare
+/// `recipe_id` is `default` for every normal recording and the firing custom
+/// hotkey's `recipe_id` otherwise. Picks that recipe from `cfg.recipes`; if it's
+/// missing (a user deleted a custom recipe a binding still points at, or the
+/// requested id was `default` on an empty config) it falls back to the `default`
+/// recipe — first from `cfg.recipes`, then the seeded `default_recipes()` — so a
+/// stale binding degrades to today's pipeline rather than panicking or silently
+/// running nothing. Each step id then maps to its `PlaybookEntry`; a dangling id
+/// (entry deleted) or a `Hook` entry (hooks run outside the loop in v1) is
+/// skipped with a warning. An empty recipe yields an empty list: a bare
 /// transcribe-only run.
-fn resolve_recipe(cfg: &Config) -> Vec<ResolvedStep> {
+fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
     use phoneme_core::config::PlaybookKind;
 
     let seeded = phoneme_core::config::default_recipes();
-    let recipe = cfg
-        .recipes
-        .iter()
-        .find(|r| r.id == DEFAULT_RECIPE_ID)
-        .or_else(|| seeded.iter().find(|r| r.id == DEFAULT_RECIPE_ID));
+    // The requested recipe, falling back to the `default` recipe (config then
+    // seed) when it's missing — a deleted custom recipe a binding still names
+    // must never run nothing or panic.
+    let find_in = |id: &str| {
+        cfg.recipes
+            .iter()
+            .find(|r| r.id == id)
+            .or_else(|| seeded.iter().find(|r| r.id == id))
+    };
+    let recipe = find_in(recipe_id).or_else(|| {
+        if recipe_id != DEFAULT_RECIPE_ID {
+            tracing::warn!(
+                recipe = %recipe_id,
+                "custom-hotkey recipe not found; falling back to the `default` recipe"
+            );
+            find_in(DEFAULT_RECIPE_ID)
+        } else {
+            None
+        }
+    });
     let Some(recipe) = recipe else {
-        tracing::warn!("no `default` recipe found; running transcribe-only");
+        tracing::warn!(recipe = %recipe_id, "no matching recipe found; running transcribe-only");
         return Vec::new();
     };
 
@@ -1635,6 +1654,16 @@ pub async fn run(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&id);
+    // Claim this recording's custom-hotkey RECIPE override (if any) at the SAME
+    // early point as the model/all-overrides removals — BEFORE transcription —
+    // so a transcribe failure / cancel can't leave a stale entry keyed by a dead
+    // id (the `resolve_recipe` call is much later, past the failure paths). Empty
+    // / a deleted id degrades to the `default` recipe inside `resolve_recipe`.
+    let requested_recipe_id = state
+        .pending_recipe
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     let (whisper_cfg, override_guard) =
         apply_model_override(state, &cfg.whisper, requested_override).await;
     // Dial the port the bundled server is ACTUALLY listening on: the
@@ -1834,7 +1863,13 @@ pub async fn run(
     // legacy flag still self-gates inside each enrichment helper) are preserved
     // by the dispatchers below. A dangling step id / empty recipe degrades to a
     // bare transcribe-only run, never a panic.
-    let recipe = resolve_recipe(cfg);
+    // Resolve against the recording's recipe id: a custom-hotkey recording carries
+    // its binding's `recipe_id` here; every normal recording carries `None` and
+    // resolves the `default` recipe — unchanged behaviour. A deleted/missing id
+    // falls back to `default` inside `resolve_recipe` (never a panic, never the
+    // wrong chain).
+    let recipe_id = requested_recipe_id.as_deref().unwrap_or(DEFAULT_RECIPE_ID);
+    let recipe = resolve_recipe(cfg, recipe_id);
 
     // The earliest optional step (cleanup → title → summary → tag) that REALLY
     // failed (a user-skip doesn't count) becomes the recording's terminal status

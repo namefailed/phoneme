@@ -39,10 +39,14 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
             RecordAction::Start { in_place } => Request::RecordStart {
                 mode: RecordMode::Hold,
                 in_place: *in_place,
+                recipe_id: None,
+                whisper_model: None,
             },
             RecordAction::Stop => Request::RecordStop,
             RecordAction::Toggle { in_place } => Request::RecordToggle {
                 in_place: *in_place,
+                recipe_id: None,
+                whisper_model: None,
             },
             RecordAction::Cancel => Request::RecordCancel,
             RecordAction::Pause => Request::RecordPause,
@@ -81,6 +85,8 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
         .send(Request::RecordStart {
             mode,
             in_place: args.in_place,
+            recipe_id: None,
+            whisper_model: None,
         })
         .await
     {
@@ -348,6 +354,8 @@ mod tests {
             Request::RecordStart {
                 mode: RecordMode::Hold,
                 in_place: false,
+                recipe_id: None,
+                whisper_model: None,
             },
         )
         .await;
@@ -361,6 +369,8 @@ mod tests {
             Request::RecordStart {
                 mode: RecordMode::Hold,
                 in_place: true,
+                recipe_id: None,
+                whisper_model: None,
             },
         )
         .await;
@@ -376,7 +386,11 @@ mod tests {
         assert_action_sends(
             "toggle",
             RecordAction::Toggle { in_place: false },
-            Request::RecordToggle { in_place: false },
+            Request::RecordToggle {
+                in_place: false,
+                recipe_id: None,
+                whisper_model: None,
+            },
         )
         .await;
     }

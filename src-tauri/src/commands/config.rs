@@ -115,14 +115,16 @@ pub async fn write_config(
     Ok(())
 }
 
-/// Register the (enabled) global hotkeys for `config` — record, meeting, and
-/// in-place. Shared by app startup and `apply_config` so every code path that
-/// (re-)registers hotkeys applies ALL three together; previously the logic was
-/// duplicated, risking a path that registered only the main hotkey on a profile
-/// switch. Does not unregister first — callers re-applying must `unregister_all`.
+/// Register the (enabled) global hotkeys for `config` — the three built-ins
+/// (record, meeting, in-place) AND every enabled custom binding in
+/// `config.hotkeys`. Shared by app startup and `apply_config` so every code path
+/// that (re-)registers hotkeys applies them ALL together; previously the logic
+/// was duplicated, risking a path that registered only the main hotkey on a
+/// profile switch. Custom bindings are registered here so their combos reach the
+/// OS; the lib.rs global-shortcut handler matches a fired combo back to its
+/// binding and dispatches it. Does not unregister first — callers re-applying
+/// must `unregister_all`.
 pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
-    use std::str::FromStr;
-    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
     let entries = [
         ("record", config.hotkey.enabled, &config.hotkey.combo),
         (
@@ -136,10 +138,38 @@ pub fn register_hotkeys(app: &tauri::AppHandle, config: &Config) {
             &config.in_place_hotkey.combo,
         ),
     ];
+    // The three built-ins, then every enabled custom binding (`config.hotkeys`).
+    // Custom bindings are owned to satisfy the borrow; the built-in tuples borrow
+    // their combos. Iterating them here (not just the three built-ins) is what
+    // makes a custom keybind's combo actually reach the OS — the lib.rs handler
+    // then matches the fired combo back to its binding and dispatches it.
+    let custom: Vec<(String, &str)> = config
+        .hotkeys
+        .iter()
+        .filter(|b| b.enabled && !b.combo.trim().is_empty())
+        .map(|b| {
+            let label = if b.label.trim().is_empty() {
+                format!("custom {}", b.id)
+            } else {
+                format!("custom {:?}", b.label)
+            };
+            (label, b.combo.as_str())
+        })
+        .collect();
     for (label, enabled, combo) in entries {
         if !enabled {
             continue;
         }
+        register_one(app, label, combo);
+    }
+    for (label, combo) in &custom {
+        register_one(app, label, combo);
+    }
+
+    /// Register one combo, warning (never panicking) on a parse or register error.
+    fn register_one(app: &tauri::AppHandle, label: &str, combo: &str) {
+        use std::str::FromStr;
+        use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
         match Shortcut::from_str(combo) {
             Ok(shortcut) => {
                 if let Err(e) = app.global_shortcut().register(shortcut) {

@@ -15,14 +15,32 @@ fn record_start_request_roundtrips() {
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Hold,
         in_place: false,
+        recipe_id: None,
+        whisper_model: None,
     });
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Oneshot,
         in_place: false,
+        recipe_id: None,
+        whisper_model: None,
     });
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Duration { secs: 30 },
         in_place: false,
+        recipe_id: None,
+        whisper_model: None,
+    });
+    // Custom-hotkey overrides on the wire (recipe + STT model).
+    roundtrip(&Request::RecordStart {
+        mode: RecordMode::Hold,
+        in_place: true,
+        recipe_id: Some("prompt_capture".into()),
+        whisper_model: Some("ggml-large-v3.bin".into()),
+    });
+    roundtrip(&Request::RecordToggle {
+        in_place: false,
+        recipe_id: Some("prompt_capture".into()),
+        whisper_model: None,
     });
 }
 

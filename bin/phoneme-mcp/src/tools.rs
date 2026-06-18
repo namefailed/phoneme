@@ -380,6 +380,8 @@ pub fn build_request(name: &str, arguments: &Value) -> Result<Request, ToolError
             Ok(Request::RecordStart {
                 mode,
                 in_place: false,
+                recipe_id: None,
+                whisper_model: None,
             })
         }
         "stop_recording" => Ok(Request::RecordStop),
@@ -764,7 +766,9 @@ mod tests {
             req,
             Request::RecordStart {
                 mode: RecordMode::Oneshot,
-                in_place: false
+                in_place: false,
+                recipe_id: None,
+                whisper_model: None
             }
         );
     }
@@ -776,7 +780,9 @@ mod tests {
             req,
             Request::RecordStart {
                 mode: RecordMode::Hold,
-                in_place: false
+                in_place: false,
+                recipe_id: None,
+                whisper_model: None
             }
         );
     }

@@ -1791,3 +1791,238 @@ async fn finalize_step_status_clean_run_is_done() {
     let rec = state.catalog.get(&id).await.unwrap().unwrap();
     assert_eq!(rec.status, RecordingStatus::Done);
 }
+
+// ── Custom-hotkey recipe resolution (P2) ──────────────────────────────────────
+
+/// Short label for a resolved step, so tests can assert the resolved chain
+/// without `ResolvedStep` needing Debug/PartialEq.
+fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
+    use crate::pipeline::ResolvedStep::*;
+    match step {
+        Transform { .. } => "transform",
+        Title { .. } => "title",
+        Summary { .. } => "summary",
+        Tags { .. } => "tags",
+        UnsupportedEnrichment { .. } => "unsupported",
+    }
+}
+
+/// A config carrying the seeded default recipe/playbook PLUS a custom
+/// "transform-only" recipe (`hotkey_recipe` → just the `cleanup` transform), so
+/// the recipe-resolution tests can tell the two chains apart by their steps.
+fn config_with_custom_recipe() -> Config {
+    use phoneme_core::config::{default_playbook, default_recipes, PlaybookRecipe};
+    let mut cfg = Config::default();
+    cfg.playbook = default_playbook();
+    cfg.recipes = default_recipes();
+    cfg.recipes.push(PlaybookRecipe {
+        id: "hotkey_recipe".into(),
+        name: "Hotkey recipe".into(),
+        description: "Cleanup only.".into(),
+        builtin: false,
+        steps: vec!["cleanup".into()],
+    });
+    cfg
+}
+
+/// A binding's `recipe_id` resolves THAT recipe (its steps), not the default.
+#[test]
+fn resolve_recipe_uses_the_named_recipe() {
+    let cfg = config_with_custom_recipe();
+    let steps = crate::pipeline::resolve_recipe(&cfg, "hotkey_recipe");
+    let labels: Vec<_> = steps.iter().map(step_label).collect();
+    assert_eq!(
+        labels,
+        vec!["transform"],
+        "the custom recipe is just the cleanup transform"
+    );
+}
+
+/// An empty/`default` recipe id resolves the default chain (today's pipeline) —
+/// the no-regression path for existing bindings.
+#[test]
+fn resolve_recipe_empty_falls_back_to_default() {
+    let cfg = config_with_custom_recipe();
+    let steps = crate::pipeline::resolve_recipe(&cfg, "default");
+    let labels: Vec<_> = steps.iter().map(step_label).collect();
+    assert_eq!(
+        labels,
+        vec!["transform", "title", "summary", "tags"],
+        "the default recipe runs cleanup → title → summary → tags"
+    );
+}
+
+/// A binding pointing at a DELETED recipe degrades to the default chain (never a
+/// panic, never an empty/transcribe-only run).
+#[test]
+fn resolve_recipe_missing_id_falls_back_to_default() {
+    let cfg = config_with_custom_recipe();
+    let steps = crate::pipeline::resolve_recipe(&cfg, "no_such_recipe");
+    let labels: Vec<_> = steps.iter().map(step_label).collect();
+    assert_eq!(
+        labels,
+        vec!["transform", "title", "summary", "tags"],
+        "a stale binding recipe id runs the default recipe"
+    );
+}
+
+/// END-TO-END: a custom-hotkey recording with a per-binding RECIPE + WHISPER
+/// MODEL stashed in the ledgers (exactly as `stash_hotkey_overrides` does) runs
+/// THAT recipe and transcribes with THAT model. Here the binding's recipe is
+/// cleanup-only (no summary/tags), so the recording ends with a cleaned
+/// transcript but NO summary — distinguishing it from the default pipeline. The
+/// per-binding STT model is asserted via the recorded `model` on the row.
+#[tokio::test]
+async fn custom_hotkey_recording_runs_its_recipe_and_model() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "raw words from whisper",
+            "segments": [{"start": 0.0, "end": 1.0, "text": " raw words"}]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "CLEANED" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = config_with_custom_recipe();
+    // Cloud STT backend so the per-job model override is a plain request param
+    // (no bundled whisper-server to spin up in the test).
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "configured-stt".into();
+    // Cleanup is enabled so the custom recipe's `cleanup` transform actually runs.
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "test-llm".into();
+    // Default pipeline WOULD summarize; the custom recipe must NOT.
+    cfg.summary.auto = true;
+    cfg.summary.provider = "openai".into();
+    cfg.summary.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.summary.model = "test-llm".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+
+    // Stash the binding's overrides against this id — mirrors
+    // `ipc_handler::stash_hotkey_overrides` for a custom-hotkey record.
+    state
+        .pending_recipe
+        .lock()
+        .unwrap()
+        .insert(id.clone(), "hotkey_recipe".into());
+    state
+        .pending_overrides
+        .lock()
+        .unwrap()
+        .insert(id.clone(), "hotkey-stt".into());
+
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("custom-hotkey pipeline run should succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::Done);
+    // The cleanup transform from the custom recipe ran (live transcript cleaned).
+    assert_eq!(rec.transcript.as_deref(), Some("CLEANED"));
+    // The custom recipe has NO summary step, so no summary despite summary.auto.
+    assert_eq!(
+        rec.summary, None,
+        "the cleanup-only recipe must not run the summary step"
+    );
+    // The per-binding STT model override was applied (cloud backend → request param).
+    assert_eq!(
+        rec.model.as_deref(),
+        Some("hotkey-stt"),
+        "the recording transcribes with the hotkey's whisper model, not the configured one"
+    );
+    // The ledgers were consumed (no stale entry left for a dead id).
+    assert!(state.pending_recipe.lock().unwrap().is_empty());
+    assert!(state.pending_overrides.lock().unwrap().is_empty());
+}
+
+/// NO-REGRESSION: a normal recording (no ledger entries) runs the DEFAULT recipe
+/// with the CONFIGURED model — summary present, configured STT model recorded.
+#[tokio::test]
+async fn normal_recording_runs_default_recipe_and_configured_model() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "raw words from whisper",
+            "segments": [{"start": 0.0, "end": 1.0, "text": " raw words"}]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": "CLEANED" } }]
+        })))
+        .mount(&server)
+        .await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = config_with_custom_recipe();
+    cfg.whisper.provider = TranscriptionBackend::Custom;
+    cfg.whisper.api_url = server.uri();
+    cfg.whisper.model = "configured-stt".into();
+    cfg.llm_post_process.enabled = true;
+    cfg.llm_post_process.provider = "openai".into();
+    cfg.llm_post_process.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.llm_post_process.model = "test-llm".into();
+    cfg.summary.auto = true;
+    cfg.summary.provider = "openai".into();
+    cfg.summary.api_url = format!("{}/v1/chat/completions", server.uri());
+    cfg.summary.model = "test-llm".into();
+    cfg.diarization.provider = DiarizationBackend::None;
+    cfg.hook.run_on_transcribe = false;
+
+    let state = test_state(tmp.path(), cfg).await;
+    let (id, audio_path) = seed_recording(&state, tmp.path()).await;
+
+    // No ledger entries → the default record path.
+    let payload = HookPayload {
+        id: id.clone(),
+        timestamp: chrono::Local::now(),
+        transcript: String::new(),
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        duration_ms: 1000,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    crate::pipeline::run(&state, payload, CancellationToken::new())
+        .await
+        .expect("normal pipeline run should succeed");
+
+    let rec = state.catalog.get(&id).await.unwrap().unwrap();
+    assert_eq!(rec.status, RecordingStatus::Done);
+    assert_eq!(rec.transcript.as_deref(), Some("CLEANED"));
+    // The default recipe DOES summarize.
+    assert_eq!(
+        rec.summary.as_deref(),
+        Some("CLEANED"),
+        "the default recipe runs the summary step"
+    );
+    // The configured STT model is recorded (no override).
+    assert_eq!(rec.model.as_deref(), Some("configured-stt"));
+}

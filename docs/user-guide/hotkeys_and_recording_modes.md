@@ -21,6 +21,23 @@ Configure under **Settings → Capture → Hotkeys**. All hotkeys are **disabled
 
 Meeting Mode uses **toggle only** — a meeting can run for many minutes.
 
+## Custom Hotkeys
+
+Beyond the three built-ins, **Settings → Capture → Hotkeys → Custom Hotkeys** lets you bind any number of extra global shortcuts, each with its own behaviour. Like the built-ins, custom hotkeys fire app-wide — even while the window is hidden.
+
+Each custom hotkey has:
+
+- **Name** and **combo** (click the combo field, then press the key combination).
+- **Action** — Record (voice note), In-place dictation, or Meeting recording.
+- **Hold / Toggle** — same meaning as the built-ins.
+- **Recipe** — the Playbook chain its recordings run. **Default pipeline** = whatever normal recordings run (cleanup → title → summary → tags); pick a named recipe to run a different chain instead (e.g. a "Dictate → prompt" recipe that reshapes a dictation into a polished LLM prompt). Build and edit chains in the **Playbook** settings section.
+- **Whisper model** — optionally transcribe *this* hotkey's recordings with a different speech-to-text model than the configured one — a bigger model for an important dictation, or a tiny one for a throwaway note. Leave it on **Use the configured model** to inherit the global Whisper model.
+- **In-place options** (when the action is In-place) — fast lane (type the quick transcription immediately) vs. run the recipe first, and how to insert the text (type / paste / off).
+
+The recipe and Whisper-model overrides apply only to recordings created by that hotkey; normal recordings and the three built-ins are unchanged. If a hotkey points at a recipe you later delete, its recordings fall back to the default pipeline.
+
+> Meeting custom hotkeys start a meeting like the built-in Meeting hotkey; the per-hotkey recipe / model overrides apply to single-recording (Record / In-place) hotkeys.
+
 ### External hotkey tools
 
 You do not have to use Phoneme's built-in listener. Many users bind **AutoHotkey**, **Kanata**, or **PowerToys** to shell commands:

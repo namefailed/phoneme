@@ -255,6 +255,8 @@ impl Tool for StartRecording {
         Ok(Request::RecordStart {
             mode,
             in_place: false,
+            recipe_id: None,
+            whisper_model: None,
         })
     }
 }
@@ -620,7 +622,9 @@ mod tests {
             r.to_request("start_recording", &json!({})).unwrap(),
             Request::RecordStart {
                 mode: RecordMode::Oneshot,
-                in_place: false
+                in_place: false,
+                recipe_id: None,
+                whisper_model: None
             }
         );
         assert_eq!(
@@ -628,7 +632,9 @@ mod tests {
                 .unwrap(),
             Request::RecordStart {
                 mode: RecordMode::Hold,
-                in_place: false
+                in_place: false,
+                recipe_id: None,
+                whisper_model: None
             }
         );
         assert!(matches!(

@@ -97,6 +97,8 @@ pub fn record_start() -> Request {
     Request::RecordStart {
         mode: RecordMode::Hold,
         in_place: false,
+        recipe_id: None,
+        whisper_model: None,
     }
 }
 
@@ -204,7 +206,7 @@ mod tests {
     #[test]
     fn record_start_is_hold_mode_not_in_place() {
         match record_start() {
-            Request::RecordStart { mode, in_place } => {
+            Request::RecordStart { mode, in_place, .. } => {
                 assert_eq!(mode, RecordMode::Hold);
                 assert!(!in_place);
             }

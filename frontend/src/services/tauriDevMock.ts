@@ -357,23 +357,28 @@ let config: Record<string, unknown> = {
   in_place_hotkey: { enabled: true, combo: "Shift+Alt+V", mode: "hold" },
   meeting_hotkey: { enabled: true, combo: "Ctrl+Alt+V", mode: "hold" },
   hotkeys: [
-    // Cleans up + titles, no summary/tags, and posts to a journal script.
+    // Default recipe + configured model: a plain quick voice note (no override).
     { id: "demo-1", label: "Journal note", enabled: true, combo: "Ctrl+Alt+N", mode: "hold", action: "record",
+      recipe_id: "", whisper_model: "",
       pipeline: { cleanup: true, title: true, summary: false, auto_tag: false },
       hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Add-Content $HOME\\\\journal.md $d.transcript"'],
       in_place: { full_pipeline: false, type_mode: "type" } },
-    // The whole pipeline, plus a webhook.
-    { id: "demo-2", label: "Meeting + webhook", enabled: true, combo: "Ctrl+Alt+M", mode: "toggle", action: "meeting",
+    // Meeting on the default recipe, but transcribed with a bigger Whisper model
+    // (showcases the per-hotkey model override).
+    { id: "demo-2", label: "Important meeting", enabled: true, combo: "Ctrl+Alt+M", mode: "toggle", action: "meeting",
+      recipe_id: "", whisper_model: "ggml-large-v3.bin",
       pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
-      hooks: ['powershell -Command "$d=($input|Out-String|ConvertFrom-Json); Invoke-RestMethod -Uri \'https://example.com/webhook\' -Method Post -Body (@{text=$d.transcript}|ConvertTo-Json) -ContentType \'application/json\'"'],
+      hooks: [],
       in_place: { full_pipeline: false, type_mode: "type" } },
-    // Fast in-place: type the quick transcription straight to the cursor, no pipeline.
+    // Fast in-place: type the quick transcription straight to the cursor, no recipe.
     { id: "demo-3", label: "Fast dictate", enabled: true, combo: "Ctrl+Alt+D", mode: "hold", action: "in_place",
+      recipe_id: "", whisper_model: "",
       pipeline: { cleanup: false, title: false, summary: false, auto_tag: false },
       hooks: [], in_place: { full_pipeline: false, type_mode: "type" } },
-    // Slow in-place: run the pipeline (LLM cleanup) to reshape the transcript into
-    // a prompt, then paste it.
+    // Slow in-place: run the "Dictate → prompt" recipe to reshape the transcript
+    // into a polished prompt, then paste it (showcases a per-hotkey RECIPE).
     { id: "demo-4", label: "Dictate → LLM prompt", enabled: true, combo: "Ctrl+Alt+P", mode: "hold", action: "in_place",
+      recipe_id: "prompt_capture", whisper_model: "",
       pipeline: { cleanup: true, title: false, summary: false, auto_tag: false },
       hooks: [], in_place: { full_pipeline: true, type_mode: "paste" } },
   ],

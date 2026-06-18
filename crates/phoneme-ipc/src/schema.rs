@@ -82,6 +82,19 @@ pub enum Request {
         /// queue unless `[in_place].full_pipeline` opts back in).
         #[serde(default)]
         in_place: bool,
+        /// Custom-hotkey recipe override: the Playbook recipe id this recording's
+        /// pipeline should run, from the firing `HotkeyBinding`. `None`/empty =
+        /// the global `default` recipe (every normal record path). Carried per-job
+        /// into the daemon's recipe ledger and consumed by `pipeline::run`, exactly
+        /// like the retranscribe model override — never written to global config.
+        #[serde(default)]
+        recipe_id: Option<String>,
+        /// Custom-hotkey transcription-model override: the Whisper/STT model this
+        /// recording transcribes with, from the firing `HotkeyBinding`.
+        /// `None`/empty = the configured model. Reuses the existing per-recording
+        /// model-override mechanism (`pending_overrides` → `apply_model_override`).
+        #[serde(default)]
+        whisper_model: Option<String>,
     },
     /// Stop and finalize the active recording: the WAV is written, the
     /// catalog row flips to `transcribing`, and the item is enqueued in the
@@ -98,6 +111,15 @@ pub enum Request {
         /// Forwarded to [`Request::RecordStart`] when the toggle starts.
         #[serde(default)]
         in_place: bool,
+        /// Custom-hotkey recipe override, applied ONLY when this toggle STARTS a
+        /// recording (a toggle that stops the active one has no new recording to
+        /// attach it to). See [`Request::RecordStart::recipe_id`].
+        #[serde(default)]
+        recipe_id: Option<String>,
+        /// Custom-hotkey transcription-model override, applied ONLY on the start
+        /// half of the toggle. See [`Request::RecordStart::whisper_model`].
+        #[serde(default)]
+        whisper_model: Option<String>,
     },
     /// Pause capture of the active recording (or every track of the active
     /// meeting). Ok `{"id":"<recording id>"}` (the mic track's id for a

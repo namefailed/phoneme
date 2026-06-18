@@ -72,6 +72,8 @@ async fn client_receives_err_response() {
         .request(Request::RecordStart {
             mode: phoneme_core::RecordMode::Hold,
             in_place: false,
+            recipe_id: None,
+            whisper_model: None,
         })
         .await
         .expect("request");

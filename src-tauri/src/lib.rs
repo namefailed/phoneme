@@ -171,6 +171,8 @@ pub fn run() {
                                             if let Err(e) = bridge
                                                 .request(phoneme_ipc::Request::RecordToggle {
                                                     in_place: true,
+                                                    recipe_id: None,
+                                                    whisper_model: None,
                                                 })
                                                 .await
                                             {
@@ -183,6 +185,8 @@ pub fn run() {
                                                 .request(phoneme_ipc::Request::RecordStart {
                                                     mode: RecordMode::Hold,
                                                     in_place: true,
+                                                    recipe_id: None,
+                                                    whisper_model: None,
                                                 })
                                                 .await
                                             {
@@ -211,6 +215,104 @@ pub fn run() {
                             return;
                         }
 
+                        // Custom keybinds (`config.hotkeys`): match the fired combo
+                        // against each enabled binding and dispatch its action +
+                        // mode, carrying the binding's recipe + whisper-model so the
+                        // daemon resolves THAT recipe / model for the recording it
+                        // creates. Checked after the three built-ins so a custom
+                        // binding can't shadow them, and before the main-record
+                        // fallthrough below. `Meeting` bindings toggle a meeting
+                        // (its recipe/model apply per-track via the daemon's normal
+                        // meeting path, not the single-recording ledger — scoped out
+                        // here, same as the built-in meeting hotkey).
+                        use phoneme_core::config::{HotkeyAction, HotkeyMode};
+                        for binding in &current_config.hotkeys {
+                            if !binding.enabled {
+                                continue;
+                            }
+                            let combo = match binding.combo.parse::<Shortcut>() {
+                                Ok(c) => c,
+                                Err(_) => continue,
+                            };
+                            if &combo != shortcut {
+                                continue;
+                            }
+                            let recipe_id = {
+                                let r = binding.recipe_id.trim();
+                                (!r.is_empty()).then(|| r.to_string())
+                            };
+                            let whisper_model = {
+                                let m = binding.whisper_model.trim();
+                                (!m.is_empty()).then(|| m.to_string())
+                            };
+                            let action = binding.action;
+                            let mode = binding.mode;
+                            let in_place = action == HotkeyAction::InPlace;
+                            let bridge = bridge.clone();
+                            match action {
+                                HotkeyAction::Meeting => {
+                                    // Meetings are always toggle (Hold makes no sense).
+                                    if event.state() == ShortcutState::Pressed {
+                                        tauri::async_runtime::spawn(async move {
+                                            if let Err(e) = bridge
+                                                .request(phoneme_ipc::Request::MeetingToggle)
+                                                .await
+                                            {
+                                                tracing::error!(
+                                                    "failed to toggle meeting from custom keybind: {e}"
+                                                );
+                                            }
+                                        });
+                                    }
+                                }
+                                HotkeyAction::Record | HotkeyAction::InPlace => {
+                                    match event.state() {
+                                        ShortcutState::Pressed => {
+                                            tauri::async_runtime::spawn(async move {
+                                                let req = if mode == HotkeyMode::Toggle {
+                                                    phoneme_ipc::Request::RecordToggle {
+                                                        in_place,
+                                                        recipe_id,
+                                                        whisper_model,
+                                                    }
+                                                } else {
+                                                    phoneme_ipc::Request::RecordStart {
+                                                        mode: RecordMode::Hold,
+                                                        in_place,
+                                                        recipe_id,
+                                                        whisper_model,
+                                                    }
+                                                };
+                                                if let Err(e) = bridge.request(req).await {
+                                                    tracing::error!(
+                                                        "failed to start/toggle from custom keybind: {e}"
+                                                    );
+                                                }
+                                            });
+                                        }
+                                        ShortcutState::Released => {
+                                            // Hold bindings stop on release; the stop
+                                            // carries no overrides (they were attached
+                                            // on the start half).
+                                            if mode == HotkeyMode::Hold {
+                                                tauri::async_runtime::spawn(async move {
+                                                    if let Err(e) = bridge
+                                                        .request(phoneme_ipc::Request::RecordStop)
+                                                        .await
+                                                    {
+                                                        tracing::error!(
+                                                            "failed to stop from custom keybind: {e}"
+                                                        );
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            return;
+                        }
+
                         let mode = current_config.hotkey.mode;
 
                         match event.state() {
@@ -220,6 +322,8 @@ pub fn run() {
                                         if let Err(e) = bridge
                                             .request(phoneme_ipc::Request::RecordToggle {
                                                 in_place: false,
+                                                recipe_id: None,
+                                                whisper_model: None,
                                             })
                                             .await
                                         {
@@ -232,6 +336,8 @@ pub fn run() {
                                             .request(phoneme_ipc::Request::RecordStart {
                                                 mode: RecordMode::Hold,
                                                 in_place: false,
+                                                recipe_id: None,
+                                                whisper_model: None,
                                             })
                                             .await
                                         {

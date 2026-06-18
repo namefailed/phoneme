@@ -168,9 +168,24 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 "paused": paused,
             }))
         }
-        Request::RecordStart { mode, in_place } => {
+        Request::RecordStart {
+            mode,
+            in_place,
+            recipe_id,
+            whisper_model,
+        } => {
             match state.recorder.start(state, mode, in_place).await {
-                Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+                Ok(id) => {
+                    // Custom-hotkey overrides: a binding that named a recipe / STT
+                    // model stashes them against THIS recording's id, mirroring how
+                    // `RetranscribeRecording` populates the per-job ledgers. The
+                    // pipeline consumes (and removes) them in `run`. Empty/None =
+                    // the normal record path (global default recipe + configured
+                    // model), so non-custom recordings are untouched. See
+                    // `stash_hotkey_overrides`.
+                    stash_hotkey_overrides(state, &id, recipe_id, whisper_model);
+                    Response::Ok(serde_json::json!({ "id": id.to_string() }))
+                }
                 Err(e) => err_response(&e),
             }
         }
@@ -195,8 +210,15 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
             Err(e) => err_response(&e),
         },
-        Request::RecordToggle { in_place } => {
+        Request::RecordToggle {
+            in_place,
+            recipe_id,
+            whisper_model,
+        } => {
             if state.recorder.current().await.is_some() {
+                // Stop half of the toggle: there is no NEW recording to attach the
+                // binding's overrides to (the active one was started with its own,
+                // if any), so the recipe/model fields are intentionally ignored here.
                 match state.recorder.stop(state).await {
                     Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
                     Err(e) => err_response(&e),
@@ -207,7 +229,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                     .start(state, phoneme_core::RecordMode::Hold, in_place)
                     .await
                 {
-                    Ok(id) => Response::Ok(serde_json::json!({ "id": id.to_string() })),
+                    Ok(id) => {
+                        // Start half: stash the binding's recipe/model overrides
+                        // against the new recording id (see `RecordStart`).
+                        stash_hotkey_overrides(state, &id, recipe_id, whisper_model);
+                        Response::Ok(serde_json::json!({ "id": id.to_string() }))
+                    }
                     Err(e) => err_response(&e),
                 }
             }
@@ -1358,6 +1385,54 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
 /// JSON serialized back over the pipe — a huge `limit` can't force an unbounded
 /// allocation. Far above any real UI/CLI page size.
 const MAX_SEARCH_RESULTS: usize = 1000;
+
+/// Stash a custom-hotkey recording's per-job overrides against its freshly minted
+/// recording id, so `pipeline::run` resolves the binding's recipe + transcribes
+/// with its model. Two ledgers, both already proven by `RetranscribeRecording`:
+///
+///  • `whisper_model` → `pending_overrides` (the existing per-job model override
+///    map): the pipeline applies it via `apply_model_override` for one job, then
+///    restores — the same #49-safe path a model-override retranscribe uses.
+///  • `recipe_id` → `pending_recipe` (the parallel recipe ledger): the pipeline
+///    passes it to `resolve_recipe`, falling back to the `default` recipe when the
+///    id is empty or names a deleted recipe.
+///
+/// Both are written ONLY when non-empty, so a normal (non-custom-hotkey) record —
+/// which sends `None` — leaves the recording on the global default recipe +
+/// configured model. The maps are ephemeral: a daemon restart between stash and
+/// the pipeline claim drops the override and the job runs the default recipe +
+/// configured model (the documented `pending_overrides` contract). A leftover
+/// entry can't leak onto another recording (each `RecordingId` is unique), and the
+/// pipeline removes both entries EARLY — alongside the model/all-overrides
+/// removals, before transcription — so a permanently-failed or canceled recording
+/// never leaves a stale entry keyed by a dead id.
+fn stash_hotkey_overrides(
+    state: &AppState,
+    id: &phoneme_core::RecordingId,
+    recipe_id: Option<String>,
+    whisper_model: Option<String>,
+) {
+    if let Some(model) = whisper_model {
+        let model = model.trim();
+        if !model.is_empty() {
+            state
+                .pending_overrides
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id.clone(), model.to_string());
+        }
+    }
+    if let Some(recipe) = recipe_id {
+        let recipe = recipe.trim();
+        if !recipe.is_empty() {
+            state
+                .pending_recipe
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id.clone(), recipe.to_string());
+        }
+    }
+}
 
 /// Hard cap on the on-disk size of an importable file. The Tauri file dialog is
 /// the intended sole producer, but `ImportRecording` accepts an arbitrary client

@@ -53,9 +53,13 @@ payload, the success-`value` shape, the `DaemonEvent`s it emits, and which surfa
 here, because those drift; the field names below are just enough to orient you.
 
 **Recording control** (`record_start` requires a `mode`: `"hold"`, `"oneshot"`, or
-`{ "duration": secs }`, and an optional `in_place` bool):
+`{ "duration": secs }`, and an optional `in_place` bool). `record_start` and
+`record_toggle` also take optional `recipe_id` (run a named Playbook recipe instead
+of the default for this recording) and `whisper_model` (transcribe it with a
+specific STT model) — both omitted = the global default recipe + configured model;
+these are how Custom Hotkeys carry their per-binding recipe/model:
 - `record_start`, `record_stop`, `record_cancel`, `record_pause`, `record_resume`
-- `record_toggle` (`in_place` optional), `record_status`
+- `record_toggle` (`in_place`, `recipe_id`, `whisper_model` optional), `record_status`
 
 **Meeting control:**
 - `start_meeting`, `stop_meeting`, `meeting_toggle`

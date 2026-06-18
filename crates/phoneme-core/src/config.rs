@@ -1770,7 +1770,30 @@ pub struct HotkeyBinding {
     /// What pressing the combo does.
     #[serde(default)]
     pub action: HotkeyAction,
+    /// The Playbook recipe this keybind's recordings run, by [`PlaybookRecipe::id`].
+    /// Empty (the default, and what every pre-P2 binding migrates to) means "run
+    /// the global `default` recipe" — i.e. today's normal-recording pipeline, so
+    /// existing bindings keep their behaviour. A non-empty id points the daemon at
+    /// that recipe instead (e.g. a "dictate → prompt" chain). When the named recipe
+    /// has been deleted the daemon falls back to the `default` recipe (never a
+    /// panic, never the wrong chain). This SUPERSEDES the legacy [`pipeline`] flags
+    /// below — once a recipe drives the chain, those bools are no longer read.
+    #[serde(default)]
+    pub recipe_id: String,
+    /// Per-keybind transcription (Whisper / STT) model override. Empty (the
+    /// default) uses the globally configured model; a non-empty value transcribes
+    /// this keybind's recordings with that model instead (e.g. a bigger model for
+    /// an important dictation, or a tiny one for a quick note). For the local
+    /// bundled backend this is a model-file path; for cloud backends a model id —
+    /// the same shape the per-job retranscribe override carries.
+    #[serde(default)]
+    pub whisper_model: String,
     /// Which AI steps run for this keybind's recordings (its own pipeline).
+    ///
+    /// LEGACY: predates [`recipe_id`]. Kept for back-compat so an older
+    /// `config.toml` loads unchanged, but no longer drives behaviour — the daemon
+    /// resolves the chain from `recipe_id` (empty → the `default` recipe). Left in
+    /// place rather than removed so a downgrade doesn't lose the field.
     #[serde(default)]
     pub pipeline: HotkeyPipeline,
     /// Hook commands (shell scripts / webhook calls) fired after this keybind's

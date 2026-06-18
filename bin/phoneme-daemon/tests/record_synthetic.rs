@@ -29,6 +29,8 @@ async fn record_start_stop_creates_row_and_transcribes() {
         .request(Request::RecordStart {
             mode: phoneme_core::RecordMode::Hold,
             in_place: false,
+            recipe_id: None,
+            whisper_model: None,
         })
         .await
         .unwrap();

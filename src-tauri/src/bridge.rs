@@ -435,6 +435,8 @@ mod tests {
         assert!(!is_retry_safe(&Request::RecordStart {
             mode: phoneme_core::RecordMode::Hold,
             in_place: false,
+            recipe_id: None,
+            whisper_model: None,
         }));
         assert!(!is_retry_safe(&Request::ReloadConfig));
         assert!(!is_retry_safe(&Request::DeleteRecording {
