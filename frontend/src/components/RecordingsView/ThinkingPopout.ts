@@ -47,6 +47,10 @@ export class ThinkingPopoutElement extends LitElement {
   @state() private fabPos: { x: number; y: number } | null = null;
   /** Bumped on every activity event to force a re-render (data lives in arrays). */
   @state() private rev = 0;
+  /** True while the FAB is mid-crossfade after a sidebar toggle moved its default
+   *  anchor — the button fades out at the old spot, snaps to the new one while
+   *  hidden, then fades back in (instead of jumping across the layout). */
+  @state() private fabMoving = false;
 
   /** Complete, ordered log of every AI-activity session since launch. */
   private log: ActivityEntry[] = [];
@@ -54,9 +58,29 @@ export class ThinkingPopoutElement extends LitElement {
   private current = new Map<string, ActivityEntry>();
   private seq = 0;
   private unsub: (() => void) | null = null;
-  /** Recompute the anchored default when the sidebar toggles/resizes or the
-   *  window resizes (only matters while no custom position is set). */
+  /** Recompute the anchored default on window resize (only matters while no custom
+   *  position is set). Instant — resize drags shouldn't strobe the button. */
   private onLayoutChange = () => { if (!this.fabPos) this.requestUpdate(); };
+  private fabMoveTimer: number | null = null;
+  /** The sidebar toggled, which moves the default FAB anchor. Crossfade rather
+   *  than jump: fade the button out now, then once the sidebar has settled snap it
+   *  to the new anchor (a render with the fresh `fabXY`) and fade it back in.
+   *  No-op when the user has dragged the FAB to a fixed position. */
+  private onSidebarChange = () => {
+    if (this.fabPos) return;
+    this.fabMoving = true; // fade out at the current spot
+    // The sidebar dispatches this twice (immediately + after its ~300ms slide).
+    // Arm ONE timer on the first and let it ride (don't reset) so the fade-in
+    // fires once, ~400ms later — past both events, by which point the sidebar has
+    // settled and the re-render below reads its final edge. (Resetting per-event,
+    // or a shorter delay, fires a premature fade-in between the two events.)
+    if (this.fabMoveTimer === null) {
+      this.fabMoveTimer = window.setTimeout(() => {
+        this.fabMoveTimer = null;
+        this.fabMoving = false; // re-render at the new anchor + fade back in
+      }, 400);
+    }
+  };
 
   /** User-set panel geometry from edge/corner resizing; null = auto-anchored to
    *  the FAB at the default size. Once the user resizes, this takes over. */
@@ -86,7 +110,7 @@ export class ThinkingPopoutElement extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
-    window.addEventListener("phoneme:sidebar-changed", this.onLayoutChange);
+    window.addEventListener("phoneme:sidebar-changed", this.onSidebarChange);
     window.addEventListener("resize", this.onLayoutChange);
     window.addEventListener("phoneme:toggle-ai-activity", this.onToggleActivity);
     try {
@@ -179,9 +203,10 @@ export class ThinkingPopoutElement extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener("phoneme:sidebar-changed", this.onLayoutChange);
+    window.removeEventListener("phoneme:sidebar-changed", this.onSidebarChange);
     window.removeEventListener("resize", this.onLayoutChange);
     window.removeEventListener("phoneme:toggle-ai-activity", this.onToggleActivity);
+    if (this.fabMoveTimer !== null) clearTimeout(this.fabMoveTimer);
     if (this.unsub) this.unsub();
   }
 
@@ -464,7 +489,7 @@ export class ThinkingPopoutElement extends LitElement {
     // Newest first.
     const entries = [...this.log].reverse();
     return html`
-      <button class="thinking-fab ${live ? "live" : ""}" title="AI activity — drag to move, click to open"
+      <button class="thinking-fab ${live ? "live" : ""} ${this.fabMoving ? "thinking-fab--moving" : ""}" title="AI activity — drag to move, click to open"
         style="position:fixed; left:${fabX}px; top:${fabY}px; right:auto; bottom:auto;"
         @mousedown=${(e: MouseEvent) => this.startFabPress(e)}>
         🧠${live ? html`<span class="thinking-dot"></span>` : ""}

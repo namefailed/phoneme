@@ -714,6 +714,11 @@ mark.search-hit {
 }
 .thinking-fab:hover { transform: translateY(-1px); border-color: var(--accent); }
 .thinking-fab.live { border-color: var(--accent); }
+/* Crossfade when the sidebar toggle moves the button's default anchor: it fades
+   out at the old spot, snaps to the new one while hidden, then fades back in —
+   instead of jumping across the layout. */
+.thinking-fab { transition: opacity 150ms ease; }
+.thinking-fab--moving { opacity: 0; pointer-events: none; }
 .thinking-dot {
   position: absolute;
   top: 6px;
