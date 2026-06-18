@@ -273,18 +273,19 @@ export class ThinkingPopoutElement extends LitElement {
     const cx = x + r;
     const cy = y + r;
 
-    // Unfold the panel DIAGONALLY out of the FAB: its near corner sits just past
-    // the button's centre along the diagonal, so the button pokes out of that
-    // corner at an angle (rather than the panel sitting squarely on top of it).
-    // Grows toward whichever side has room — default button (bottom-left of the
-    // list area) → panel grows up-and-right with the FAB at its bottom-left corner.
-    // Re-derived from the live FAB position, so closing the sidebar (which slides
-    // the default button) re-anchors the open panel.
+    // Unfold the panel DIAGONALLY off the FAB with a gap — never overlapping it.
+    // Its near corner sits just BEYOND the button's edge along the diagonal, so the
+    // panel floats off the button at an angle (the button stays fully visible at
+    // the origin). Grows toward whichever side has room — default button
+    // (bottom-left of the list area) → panel up-and-right. Re-derived from the live
+    // FAB position, so closing the sidebar (which slides the default button)
+    // re-anchors the open panel.
     const openLeft = cx > vw / 2; // button on the right half → grow leftward
     const openUp = cy > vh / 2; // button on the bottom half → grow upward
-    const poke = 8; // how far the panel's corner sits past the button centre
-    const cornerX = openLeft ? cx - poke : cx + poke;
-    const cornerY = openUp ? cy - poke : cy + poke;
+    const gap = 10; // clear space between the button's edge and the panel's corner
+    const off = r + gap; // distance from the button CENTRE to the panel's corner
+    const cornerX = openLeft ? cx - off : cx + off;
+    const cornerY = openUp ? cy - off : cy + off;
     let left = openLeft ? cornerX - w : cornerX;
     let top = openUp ? cornerY - h : cornerY;
 
