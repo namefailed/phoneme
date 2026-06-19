@@ -1896,6 +1896,7 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
         Summary { .. } => "summary",
         Tags { .. } => "tags",
         UnsupportedEnrichment { .. } => "unsupported",
+        Hook { .. } => "hook",
     }
 }
 
@@ -1943,6 +1944,42 @@ fn resolve_recipe_empty_falls_back_to_default() {
         labels,
         vec!["transform", "title", "summary", "tags"],
         "the default recipe runs cleanup → title → summary → tags"
+    );
+}
+
+/// A recipe that includes a Hook entry (the seeded `journal` hook) resolves a
+/// `hook` step — Playbook hooks are real recipe steps now (H1). An entry with no
+/// command or webhook is skipped so it never adds an empty step.
+#[test]
+fn resolve_recipe_includes_hook_steps_and_skips_empty_ones() {
+    use phoneme_core::config::{PlaybookEntry, PlaybookHook, PlaybookKind, PlaybookRecipe};
+    let mut cfg = config_with_custom_recipe();
+    // An empty Hook entry (no command, no webhook) — must be skipped.
+    cfg.playbook.push(PlaybookEntry {
+        id: "empty_hook".into(),
+        name: "Empty".into(),
+        description: String::new(),
+        builtin: false,
+        kind: PlaybookKind::Hook,
+        llm: Default::default(),
+        target: String::new(),
+        hook: PlaybookHook::default(),
+    });
+    cfg.recipes.push(PlaybookRecipe {
+        id: "with_hooks".into(),
+        name: "With hooks".into(),
+        description: "Cleanup, the journal hook, and an empty (skipped) hook.".into(),
+        builtin: false,
+        steps: vec!["cleanup".into(), "journal".into(), "empty_hook".into()],
+    });
+    let labels: Vec<_> = crate::pipeline::resolve_recipe(&cfg, "with_hooks")
+        .iter()
+        .map(step_label)
+        .collect();
+    assert_eq!(
+        labels,
+        vec!["transform", "hook"],
+        "the journal Hook entry resolves a hook step; the empty hook is skipped"
     );
 }
 

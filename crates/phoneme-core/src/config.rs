@@ -4173,6 +4173,32 @@ mod tests {
     }
 
     #[test]
+    fn playbook_hook_should_run_trigger() {
+        // Empty keyword ⇒ ALWAYS run (unlike KeywordRule, where empty = never).
+        let always = PlaybookHook::default();
+        assert!(always.should_run("anything"));
+        assert!(always.should_run(""));
+
+        // Keyword set ⇒ run only when the transcript contains it (case-insensitive).
+        let kw = PlaybookHook {
+            keyword: "Action Item:".into(),
+            ..Default::default()
+        };
+        assert!(kw.should_run("notes... Action Item: ship it"));
+        assert!(kw.should_run("notes... action item: lower"));
+        assert!(!kw.should_run("no marker here"));
+
+        // Case-sensitive matching.
+        let cs = PlaybookHook {
+            keyword: "TODO".into(),
+            case_sensitive: true,
+            ..Default::default()
+        };
+        assert!(cs.should_run("a TODO here"));
+        assert!(!cs.should_run("a todo here"));
+    }
+
+    #[test]
     fn keyword_rules_round_trip() {
         let mut cfg = Config::default();
         cfg.hook.keyword_rules = vec![KeywordRule {

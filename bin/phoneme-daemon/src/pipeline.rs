@@ -1320,6 +1320,12 @@ enum ResolvedStep {
     /// An enrichment whose target has no backing store yet (`custom:<key>` or an
     /// unrecognized target). No-op + warn; never fails the recording.
     UnsupportedEnrichment { target: String },
+    /// A side-effect step (Playbook entry of `kind: Hook`): run a shell command
+    /// and/or POST a webhook, gated by the entry's keyword trigger. Honors the
+    /// entry's `required` flag (fail the recording vs. surface-and-continue).
+    Hook {
+        hook: phoneme_core::config::PlaybookHook,
+    },
 }
 
 /// Overlay a Playbook entry's LLM half onto a clone of `[llm_post_process]`,
@@ -1496,13 +1502,19 @@ fn resolve_recipe(cfg: &Config, recipe_id: &str) -> Vec<ResolvedStep> {
                 }
             }
             PlaybookKind::Hook => {
-                // Hooks are driven by `cfg.hook` (run_on_transcribe / commands /
-                // keyword_rules / webhook) OUTSIDE the recipe loop in v1; a Hook
-                // entry inside a recipe has no executor semantics yet.
-                tracing::warn!(
-                    step = %step_id,
-                    "Hook entries are not recipe steps yet; hooks run via [hook] config"
-                );
+                // A Hook entry runs as a real recipe step (shell command and/or
+                // webhook POST), gated by its keyword trigger — see
+                // `run_hook_steps`. An entry with neither a command nor a URL is
+                // a no-op, so skip it rather than push an empty step.
+                if entry.hook.command.trim().is_empty()
+                    && entry.hook.webhook_url.trim().is_empty()
+                {
+                    tracing::warn!(step = %step_id, "Hook entry has no command or webhook; skipping");
+                } else {
+                    steps.push(ResolvedStep::Hook {
+                        hook: entry.hook.clone(),
+                    });
+                }
             }
         }
     }
@@ -1674,10 +1686,77 @@ async fn run_enrichment_steps(
                 );
             }
             // Transform + Title are handled in their own phases (before the
-            // commit); ignore them here.
-            ResolvedStep::Transform { .. } | ResolvedStep::Title { .. } => {}
+            // commit), and Hook steps in run_hook_steps; ignore them here.
+            ResolvedStep::Transform { .. } | ResolvedStep::Title { .. } | ResolvedStep::Hook { .. } => {}
         }
     }
+}
+
+/// Run the recipe's Hook steps (Playbook entries of `kind: Hook`): for each, gate
+/// on its keyword trigger, then run its shell command (`HookRunner`) and/or POST
+/// its webhook (`WebhookClient`, under the global `[webhook]` policy). Non-fatal by
+/// default — a failure is logged and folded into `step_failure` (surfaced like a
+/// failed cleanup/tag step, leaving the transcript intact). A hook marked
+/// `required` short-circuits with `Err`, which the caller turns into a failed
+/// recording (mirroring the legacy always-on command path).
+async fn run_hook_steps(
+    state: &AppState,
+    cfg: &Config,
+    steps: &[ResolvedStep],
+    payload: &HookPayload,
+    step_failure: &mut Option<(RecordingStatus, String)>,
+) -> Result<()> {
+    for step in steps {
+        let ResolvedStep::Hook { hook } = step else {
+            continue;
+        };
+        if !hook.should_run(&payload.transcript) {
+            continue;
+        }
+        let timeout = Duration::from_secs(hook.timeout_secs);
+
+        // Shell command half.
+        let cmd = hook.command.trim();
+        if !cmd.is_empty() {
+            let runner = HookRunner::new(cmd.to_string(), timeout);
+            match runner.run(payload).await {
+                Ok(result) if result.exit_code != 0 => {
+                    if hook.required {
+                        return Err(phoneme_core::error::Error::HookFailed {
+                            code: result.exit_code,
+                            stderr_tail: String::new(),
+                        });
+                    }
+                    tracing::warn!(command = %cmd, exit_code = result.exit_code, "playbook hook exited non-zero");
+                    step_failure.get_or_insert((
+                        RecordingStatus::HookFailed,
+                        format!("hook exited {}", result.exit_code),
+                    ));
+                }
+                Ok(_) => tracing::info!(command = %cmd, "playbook hook ran"),
+                Err(e) => {
+                    if hook.required {
+                        return Err(e);
+                    }
+                    tracing::warn!(command = %cmd, error = %e, "playbook hook failed to run");
+                    step_failure.get_or_insert((RecordingStatus::HookFailed, e.to_string()));
+                }
+            }
+        }
+
+        // Webhook half — same payload; the global [webhook] policy / SSRF guard.
+        let url = hook.webhook_url.trim();
+        if !url.is_empty() {
+            if let Err(e) = state.webhook.post(url, timeout, payload, &cfg.webhook).await {
+                if hook.required {
+                    return Err(e);
+                }
+                tracing::warn!(url = %url, error = %e, "playbook webhook failed");
+                step_failure.get_or_insert((RecordingStatus::HookFailed, e.to_string()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Process a single claimed payload through the full pipeline.
@@ -2309,6 +2388,33 @@ pub async fn run(
                 tracing::warn!(pattern = %rule.pattern, error = %e, "keyword hook failed to run");
             }
         }
+    }
+
+    // PHASE 2a (recipe) — Playbook Hook steps: shell/webhook side-effects that
+    // live in the recipe. Additive alongside the legacy [hook] config above (the
+    // H3 migration folds [hook] into Hook entries and removes the legacy path). A
+    // `required` hook failing quarantines the recording like a failed command.
+    if let Err(e) = run_hook_steps(state, cfg, &recipe, &payload, &mut step_failure).await {
+        state
+            .catalog
+            .update_status(&id, RecordingStatus::HookFailed)
+            .await?;
+        if let Err(err) = state
+            .catalog
+            .update_error(&id, "hook_failed", &e.to_string())
+            .await
+        {
+            tracing::warn!(error = %err, "failed to persist hook error reason");
+        }
+        state
+            .inbox
+            .finish_failed(&id, "hook_failed", &e.to_string())
+            .await?;
+        state.events.emit(DaemonEvent::HookFailed {
+            id: id.clone(),
+            error: e.to_string(),
+        });
+        return Err(e);
     }
 
     // PHASE 2b (hooks-ON) — summary + tags enrichments, after post-processing
