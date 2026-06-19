@@ -74,6 +74,7 @@ async fn client_receives_err_response() {
             in_place: false,
             recipe_id: None,
             whisper_model: None,
+            source: None,
         })
         .await
         .expect("request");

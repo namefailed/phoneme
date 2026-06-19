@@ -1,3 +1,4 @@
+use phoneme_core::config::CaptureSource;
 use phoneme_core::{ListFilter, ListKind, RecordMode, RecordingId, RecordingStatus};
 use phoneme_ipc::schema::{DaemonEvent, IpcError, IpcErrorKind, Request, Response};
 
@@ -17,30 +18,35 @@ fn record_start_request_roundtrips() {
         in_place: false,
         recipe_id: None,
         whisper_model: None,
+        source: None,
     });
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Oneshot,
         in_place: false,
         recipe_id: None,
         whisper_model: None,
+        source: None,
     });
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Duration { secs: 30 },
         in_place: false,
         recipe_id: None,
         whisper_model: None,
+        source: None,
     });
-    // Custom-hotkey overrides on the wire (recipe + STT model).
+    // Custom-hotkey overrides on the wire (recipe + STT model + capture source).
     roundtrip(&Request::RecordStart {
         mode: RecordMode::Hold,
         in_place: true,
         recipe_id: Some("prompt_capture".into()),
         whisper_model: Some("ggml-large-v3.bin".into()),
+        source: Some(CaptureSource::SystemAudio),
     });
     roundtrip(&Request::RecordToggle {
         in_place: false,
         recipe_id: Some("prompt_capture".into()),
         whisper_model: None,
+        source: None,
     });
 }
 
