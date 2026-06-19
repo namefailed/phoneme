@@ -1,4 +1,5 @@
 import { errText } from "../../utils/error";
+import { closeModalOverlay } from "../../utils/modalAnim";
 import {
   getRecording,
   updateTranscript,
@@ -833,8 +834,8 @@ export class RecordingDetail {
       </div>`;
     document.body.appendChild(overlay);
     const close = () => {
-      overlay.remove();
       document.removeEventListener("keydown", onKey);
+      closeModalOverlay(overlay, () => overlay.remove());
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
@@ -918,8 +919,8 @@ export class RecordingDetail {
     document.body.appendChild(overlay);
 
     const close = () => {
-      overlay.remove();
       document.removeEventListener("keydown", onKey);
+      closeModalOverlay(overlay, () => overlay.remove());
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();

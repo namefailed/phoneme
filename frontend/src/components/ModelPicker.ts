@@ -5,6 +5,7 @@ import { customElement, property, state, query } from 'lit/decorators.js';
 
 import { invoke } from '@tauri-apps/api/core';
 import { showToast } from '../utils/toast';
+import { closeModalHost } from '../utils/modalAnim';
 import { curatedSttModels } from '../services/sttProviders';
 import { mountModelField, type ModelFieldOpts } from './SettingsView/modelField';
 import { mountConnectionField, type ConnectionFieldOpts } from './SettingsView/connectionField';
@@ -779,8 +780,10 @@ export async function openModelPicker(
 
     el.addEventListener('resolved', (e: Event) => {
       const customEvent = e as CustomEvent<boolean>;
-      el.remove();
-      resolve(customEvent.detail);
+      closeModalHost(el, () => {
+        el.remove();
+        resolve(customEvent.detail);
+      });
     });
 
     document.body.appendChild(el);

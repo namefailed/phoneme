@@ -44,6 +44,19 @@ export function closeModalOverlay(overlay: HTMLElement, done: () => void): void 
   window.setTimeout(finish, ms + 120);
 }
 
+/**
+ * Convenience for the house "self-removing modal host element" idiom (a Lit
+ * element that renders a `.modal-overlay` inside and is closed by removing the
+ * host): animates the host's inner overlay out, then runs `done` — typically
+ * `() => { host.remove(); resolve(...); }`. Falls back to running `done`
+ * immediately if no overlay is found.
+ */
+export function closeModalHost(host: HTMLElement, done: () => void): void {
+  const overlay = host.querySelector<HTMLElement>(".modal-overlay");
+  if (overlay) closeModalOverlay(overlay, done);
+  else done();
+}
+
 /** Effective UI-motion duration in ms (0 = motion off / reduced → close instantly). */
 function motionMs(): number {
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return 0;

@@ -68,6 +68,16 @@
   to   { transform: translateY(-6px) scale(0.97); opacity: 0; }
 }
 
+/* The detail pane's bespoke overlays (compare-diff, speaker-rename) reuse the
+   shared exit via closeModalOverlay — fading the overlay fades its dialog with
+   it. Extra class specificity so the fade-out wins over each overlay's own
+   entrance animation (defined in RecordingsView/styles.css). */
+.tdiff-modal-overlay.modal-overlay--closing,
+.speakers-modal-overlay.modal-overlay--closing {
+  animation: modal-fade-out var(--ui-motion) ease-in forwards;
+  pointer-events: none;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

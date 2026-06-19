@@ -1,5 +1,6 @@
 import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
+import { closeModalHost } from "../../utils/modalAnim";
 import {
   listRecordings,
   retranscribeRecording,
@@ -411,8 +412,10 @@ export async function openFailedPanel(): Promise<void> {
     document.querySelector("ph-failed-panel")?.remove();
     const el = document.createElement("ph-failed-panel") as FailedPanelElement;
     el.addEventListener("resolved", () => {
-      el.remove();
-      resolve();
+      closeModalHost(el, () => {
+        el.remove();
+        resolve();
+      });
     });
     document.body.appendChild(el);
   });
