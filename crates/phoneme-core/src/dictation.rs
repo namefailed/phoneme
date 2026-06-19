@@ -299,9 +299,54 @@ fn finish_sentence(text: &str) -> String {
     out
 }
 
+/// The minimal end-edit to turn already-typed `streamed` text into `final_text`:
+/// `(backspaces, insert)` — delete that many trailing characters, then type
+/// `insert`. Shares the longest common prefix, so only the divergent tail is
+/// rewritten.
+///
+/// This is streaming-type's stop reconciliation: words were typed live from the
+/// rolling preview, and the final batch transcript is more accurate, so this
+/// patches the typed text to the final one with the fewest visible keystrokes.
+/// Counts in `char`s (one backspace per character), so it's Unicode-correct, not
+/// byte-based.
+pub fn reconcile_edit(streamed: &str, final_text: &str) -> (usize, String) {
+    let s: Vec<char> = streamed.chars().collect();
+    let f: Vec<char> = final_text.chars().collect();
+    let common = s.iter().zip(f.iter()).take_while(|(a, b)| a == b).count();
+    let backspaces = s.len() - common;
+    let insert: String = f[common..].iter().collect();
+    (backspaces, insert)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconcile_noop_when_identical() {
+        assert_eq!(reconcile_edit("hello world", "hello world"), (0, String::new()));
+    }
+
+    #[test]
+    fn reconcile_patches_only_the_divergent_tail() {
+        // "wrld" → "world": common prefix "hello w", delete "rld" (3), type "orld".
+        assert_eq!(reconcile_edit("hello wrld", "hello world"), (3, "orld".into()));
+    }
+
+    #[test]
+    fn reconcile_handles_empty_sides() {
+        assert_eq!(reconcile_edit("", "typed in"), (0, "typed in".into()));
+        assert_eq!(reconcile_edit("backspace all", ""), (13, String::new()));
+    }
+
+    #[test]
+    fn reconcile_appends_when_final_extends_streamed() {
+        // The common case: the final transcript just has more/finished words.
+        assert_eq!(
+            reconcile_edit("the meeting went", "the meeting went well."),
+            (0, " well.".into())
+        );
+    }
 
     #[test]
     fn polishes_a_typical_dictation() {

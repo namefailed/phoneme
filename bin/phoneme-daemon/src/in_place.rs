@@ -382,6 +382,24 @@ async fn transcribe_polish_type(
             id = %id.as_str(),
             "in-place dictation: per-app override is \"off\" for the focused app; not typing"
         );
+    } else if cfg.in_place.stream_type && type_mode == "type" {
+        // Streaming-type: the preview loop already typed the rolling-preview text
+        // live as it finalized. Reconcile that to the accurate final `polished`
+        // with the smallest end-edit (backspace the divergent tail, retype it —
+        // for clean dictation usually just appending the last words + terminal
+        // punctuation). Reading clears the rolling state for the next dictation.
+        // An empty streamed string (preview never ticked, e.g. a very short clip)
+        // degrades to typing the whole `polished` (`backspaces == 0`).
+        let streamed = std::mem::take(&mut *state.stream_typed.lock().await);
+        let (backspaces, insert) =
+            phoneme_core::dictation::reconcile_edit(&streamed, &polished);
+        if let Err(e) = reconcile_at_cursor(backspaces, &insert).await {
+            tracing::error!(id = %id.as_str(), error = %e, "in-place dictation: failed to reconcile streamed text");
+            state.events.emit(DaemonEvent::TranscriptionFailed {
+                id: id.clone(),
+                error: format!("dictation transcribed but couldn't reconcile the streamed text: {e}"),
+            });
+        }
     } else if let Err(e) = type_at_cursor(&polished, type_mode).await {
         // Typing failing must not lose the words — the transcript still
         // persists (fast lane) or rides the queued pipeline into the library
@@ -419,6 +437,38 @@ fn type_blocking(text: &str) -> Result<(), String> {
     let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
         .map_err(|e| format!("input simulator init failed: {e}"))?;
     enigo.text(text).map_err(|e| format!("typing failed: {e}"))
+}
+
+/// Patch already-typed text toward a target: press Backspace `backspaces` times,
+/// then type `insert`. Streaming-type's reconciliation (`stream_type`) — applied
+/// once at stop to fix the live-typed rolling-preview text up to the accurate
+/// final transcript (see [`phoneme_core::dictation::reconcile_edit`]). Always
+/// simulated keystrokes (never the clipboard), since it edits at the live cursor.
+pub(crate) async fn reconcile_at_cursor(backspaces: usize, insert: &str) -> Result<(), String> {
+    if backspaces == 0 && insert.is_empty() {
+        return Ok(());
+    }
+    let insert = insert.to_string();
+    tokio::task::spawn_blocking(move || reconcile_blocking(backspaces, &insert))
+        .await
+        .map_err(|e| format!("input task panicked: {e}"))?
+}
+
+fn reconcile_blocking(backspaces: usize, insert: &str) -> Result<(), String> {
+    use enigo::{Direction, Key, Keyboard};
+    let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
+        .map_err(|e| format!("input simulator init failed: {e}"))?;
+    for _ in 0..backspaces {
+        enigo
+            .key(Key::Backspace, Direction::Click)
+            .map_err(|e| format!("backspace failed: {e}"))?;
+    }
+    if !insert.is_empty() {
+        enigo
+            .text(insert)
+            .map_err(|e| format!("typing failed: {e}"))?;
+    }
+    Ok(())
 }
 
 fn paste_blocking(text: &str) -> Result<(), String> {

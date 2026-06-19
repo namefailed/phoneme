@@ -235,6 +235,13 @@ pub struct AppState {
     /// shutdown path calls `shutdown()` to stop an Owned (daemon-launched)
     /// Ollama while leaving a user-started one untouched.
     pub ollama: Arc<crate::ollama_launcher::OllamaLauncher>,
+    /// Streaming-type (`[in_place].stream_type`) rolling state: the text the live
+    /// preview loop has typed so far for the current in-place dictation. The
+    /// preview loop appends clean extensions to it as words finalize; the stop
+    /// path (`transcribe_polish_type`) reads it to reconcile the typed text up to
+    /// the accurate final transcript, then clears it. Empty when no streaming-type
+    /// dictation is in flight.
+    pub stream_typed: Arc<tokio::sync::Mutex<String>>,
 }
 
 /// Coordination cell between a model-override re-transcription (in the pipeline)
@@ -513,6 +520,7 @@ impl AppState {
             inbox,
             events: EventBus::new(),
             recorder: DaemonRecorder::default(),
+            stream_typed: Arc::new(tokio::sync::Mutex::new(String::new())),
             shutdown: Arc::new(ShutdownCoordinator::new()),
             transcription,
             llm,

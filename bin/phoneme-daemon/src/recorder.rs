@@ -146,6 +146,25 @@ fn rms_level_01(samples: &[i16]) -> f32 {
 /// words *into* the window (`MAX_LEADING_SKIP`) so a revised/inserted leading
 /// word doesn't defeat the match. Each tick's tail is therefore sourced once,
 /// from the newest transcription, so a word run can never duplicate.
+/// Uppercase the first alphabetic character of `s`, leaving the rest untouched.
+/// Streaming-type only: the first word is stable once committed, so this keeps the
+/// live-typed text aligned with the polished final's capitalized start — making the
+/// stop reconcile a minimal tail patch instead of a full rewrite. No-op when the
+/// first letter is already uppercase or there is no letter.
+fn capitalize_first(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut done = false;
+    for c in s.chars() {
+        if !done && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            done = true;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn stitch_preview(committed: &str, window: &str) -> String {
     let window = window.trim();
     if window.is_empty() {
@@ -601,8 +620,11 @@ impl DaemonRecorder {
         id: RecordingId,
         snapshot: phoneme_audio::recorder::SnapshotHandle,
         secondary: bool,
+        stream_type: bool,
     ) {
-        if !state.config.load().recording.streaming_preview {
+        // Streaming-type forces the loop on even when the visible preview caption
+        // is off — it needs the loop's committed words as its live-typing source.
+        if !state.config.load().recording.streaming_preview && !stream_type {
             return;
         }
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
@@ -665,6 +687,9 @@ impl DaemonRecorder {
             // the whole take (authoritative), so we replace this wholesale; once
             // the window slides we stitch the new tail onto it (see stitch_preview).
             let mut committed = String::new();
+            // Streaming-type only: what we've typed at the cursor so far (clean
+            // extensions of the committed caption, first letter capitalized).
+            let mut typed = String::new();
             let audio_cfg = phoneme_audio::format::AudioConfig::phoneme_default();
 
             loop {
@@ -747,6 +772,28 @@ impl DaemonRecorder {
                                 id: id.clone(),
                                 text: committed.clone(),
                             });
+                            // Streaming-type (`[in_place].stream_type`): type the
+                            // newly-finalized words live. Only CLEAN forward
+                            // extensions (`backspaces == 0`) are typed mid-stream
+                            // — never a backspace — so the cursor doesn't churn as
+                            // the caption revises; the stop reconcile fixes the
+                            // rest against the accurate final transcript. The first
+                            // letter is capitalized so that stop patch is a small
+                            // tail edit, not a full rewrite vs the polished final.
+                            if stream_type {
+                                let target = capitalize_first(&committed);
+                                let (backspaces, insert) =
+                                    phoneme_core::dictation::reconcile_edit(&typed, &target);
+                                if backspaces == 0
+                                    && !insert.is_empty()
+                                    && crate::in_place::type_at_cursor(&insert, "type")
+                                        .await
+                                        .is_ok()
+                                {
+                                    typed = target;
+                                    *state.stream_typed.lock().await = typed.clone();
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -907,7 +954,7 @@ impl DaemonRecorder {
         // The source toggle always feeds the primary preview server (secondary =
         // false): the 2nd server only exists to run BOTH tracks at once, never
         // for a one-track toggle.
-        self.start_preview(state, id, snapshot, false).await;
+        self.start_preview(state, id, snapshot, false, false).await;
         state
             .events
             .emit(DaemonEvent::PreviewSourceChanged { track });
@@ -967,6 +1014,18 @@ impl DaemonRecorder {
             (exe, title.map(|a| a.window_title))
         } else {
             (None, None)
+        };
+
+        // Whether this dictation streams its text live (`[in_place].stream_type`):
+        // in-place, the flag on, and the focused app resolves to typed (not paste/
+        // off) delivery. Computed here, before `focused_app` moves into the active
+        // slot below; the stop reconcile re-checks the same conditions so both
+        // agree on whether streaming happened.
+        let stream_type = {
+            let c = state.config.load();
+            in_place
+                && c.in_place.stream_type
+                && c.in_place.resolve_type_mode(focused_app.as_deref()) == "type"
         };
 
         // Reserve the active slot immediately so concurrent starts fail.
@@ -1133,7 +1192,14 @@ impl DaemonRecorder {
         // an in-flight tick simply skips. The dictation stop path tears this
         // preview down WITHOUT awaiting (see `stop`), so a preview tick can
         // never delay the paste ("constantly listening, never pastes").
-        self.start_preview(state, id.clone(), preview_snapshot, false)
+        // Streaming-type (`stream_type`, computed above before `focused_app`
+        // moved into the active slot): force the preview loop on and reset the
+        // rolling typed state for this dictation. The loop then types committed
+        // words live; the stop reconcile patches them to the final transcript.
+        if stream_type {
+            *state.stream_typed.lock().await = String::new();
+        }
+        self.start_preview(state, id.clone(), preview_snapshot, false, stream_type)
             .await;
         // The live audio-level waveform runs for every capture (including
         // in-place dictation), gated only on `recording.preview_waveform`. It's
@@ -1846,7 +1912,7 @@ impl DaemonRecorder {
             );
             for (idx, (id, _, snapshot)) in sources.into_iter().enumerate() {
                 let secondary = dual && idx > 0;
-                self.start_preview(state, id, snapshot, secondary).await;
+                self.start_preview(state, id, snapshot, secondary, false).await;
             }
         } else {
             // "toggle": start on the mic (the dense local voice the user is
@@ -1858,7 +1924,7 @@ impl DaemonRecorder {
                 .or_else(|| sources.first())
                 .cloned();
             if let Some((id, track, snapshot)) = start {
-                self.start_preview(state, id, snapshot, false).await;
+                self.start_preview(state, id, snapshot, false, false).await;
                 state
                     .events
                     .emit(DaemonEvent::PreviewSourceChanged { track });
