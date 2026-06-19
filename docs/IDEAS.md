@@ -49,10 +49,12 @@ Shared names/terms (custom vocabulary) across machines/teammates.
 
 ---
 
-## 🛑 Deferred with prejudice — likely "no," kept for the record
+## 🛑 Deferred — a high bar to revisit
 
-These were considered and pushed off the roadmap. They're a hair short of
-"Explicitly Not Doing" — listed here so we don't re-litigate them every quarter.
+These were considered and pushed off the roadmap. They're **not banned** — like
+everything in Phoneme, a real case can resurrect any of them (Favorites was a "no"
+once) — but the bar is high, so they're parked with their reasoning rather than
+re-litigated every quarter.
 
 ### Meeting-app awareness (auto-detect Zoom/Teams/Meet)
 Detect a meeting app in the foreground → prompt "Start meeting capture?"
@@ -81,5 +83,6 @@ Branch/restore across many edits and re-transcriptions, not just original-vs-cur
 
 ---
 
-*See also: [`ROADMAP.md`](../ROADMAP.md) → "Explicitly Not Doing" for ideas we've
-firmly rejected (favorites, duration filter, backup ZIP, Azure/AWS STT, etc.).*
+*See also: [`ROADMAP.md`](../ROADMAP.md) → "Not convinced yet" for ideas we've
+pushed back on for now (duration filter, backup ZIP, Azure/AWS STT, etc.) — none of
+it permanent. (Favorites was once on that list; a real case appeared and it shipped.)*

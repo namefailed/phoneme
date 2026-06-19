@@ -4,7 +4,7 @@ Where Phoneme is **going**. This page is forward-looking only.
 
 - **Shipped history** lives in [`CHANGELOG.md`](CHANGELOG.md) — the canonical record of what's done.
 - **Speculative / unvetted** ideas wait in the [Idea Parking Lot](docs/IDEAS.md) until they earn a place here.
-- **Firmly rejected** ideas are in [Explicitly Not Doing](#-explicitly-not-doing) at the bottom, so we don't re-litigate them.
+- **Ideas we've pushed back on** (with reasons — but nothing's permanent) are in [Not convinced yet](#-not-convinced-yet) at the bottom.
 
 **Confidence tags** — every item carries one:
 
@@ -13,6 +13,11 @@ Where Phoneme is **going**. This page is forward-looking only.
 - 🔬 **Exploratory** — a bet we'd love to make; needs a prototype or a real user ask before it's promoted.
 
 A ⚠️ marks an item that **depends on shared substrate** built by another item (build the substrate once).
+
+> **This is a living document, not a contract.** Tags are a current read, not a
+> promise, and even the *Not convinced yet* list isn't a wall — Favorites lived
+> there once, a real case appeared, and we shipped it. If something genuinely
+> makes sense, we do it; if a "planned" item stops earning its place, it goes.
 
 ---
 
@@ -161,12 +166,17 @@ Where Phoneme wins. Mostly net-new capability on top of the substrate that now e
 
 ---
 
-## ❌ Explicitly Not Doing
+## 🤔 Not convinced yet
 
-Considered and rejected — so we don't revisit them. (Speculative ideas that *might*
-graduate someday live in the [Idea Parking Lot](docs/IDEAS.md) instead.)
+We weighed these and weren't sold — the *why* is kept below so we don't re-litigate
+them on a whim. But **nothing here is permanent.** Favorites sat in this list once;
+a real case showed up and we shipped it. The bar is the same as everything else
+(Guiding principle #1) — if a real user actually hits the friction, or a cheap path
+appears, any of these can graduate to a horizon above. Read it as *current
+skepticism with reasons*, not a ban. (Earlier-stage speculative ideas live in the
+[Idea Parking Lot](docs/IDEAS.md).)
 
-| Idea | Reason |
+| Idea | Why we've pushed back (for now) |
 |------|--------|
 | Duration filter | Niche; nobody asked; search + tags already narrow the list |
 | Backup/restore ZIP | Manual export covers it; the SQLite DB is a single copyable file |
