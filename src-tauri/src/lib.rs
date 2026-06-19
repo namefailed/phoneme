@@ -97,9 +97,17 @@ pub fn run() {
         // made it pop open on every app start.)
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                // Track everything EXCEPT visibility and decorations. VISIBLE made
+                // the overlay pop open on every start. DECORATIONS would persist a
+                // "strip system titlebar" → recreate the window frameless on the
+                // next launch, and Windows can't re-add a native frame at runtime,
+                // so the title bar never came back even after turning the setting
+                // off. Decorations are owned by tauri.conf (`decorations: true`)
+                // plus the live `setDecorations` strip in App.ts instead.
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
-                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE
+                        & !tauri_plugin_window_state::StateFlags::DECORATIONS,
                 )
                 .build(),
         )

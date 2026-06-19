@@ -10,10 +10,15 @@ use super::*;
 #[tauri::command]
 pub fn save_window_state(app: tauri::AppHandle) -> Result<(), CommandError> {
     use tauri_plugin_window_state::{AppHandleExt, StateFlags};
-    // Everything EXCEPT visibility — saving "visible" while the overlay was up
-    // (preview/drag) made it restore visible and pop open on every app start.
-    app.save_window_state(StateFlags::all() & !StateFlags::VISIBLE)
-        .map_err(|e| CommandError::new("internal", e.to_string()))
+    // Everything EXCEPT visibility and decorations. Saving "visible" while the
+    // overlay was up made it restore visible and pop open on every start; saving
+    // DECORATIONS would persist a stripped titlebar and recreate the window
+    // frameless next launch (Windows can't re-add the native frame at runtime).
+    // Must mirror the plugin's flags in lib.rs.
+    app.save_window_state(
+        StateFlags::all() & !StateFlags::VISIBLE & !StateFlags::DECORATIONS,
+    )
+    .map_err(|e| CommandError::new("internal", e.to_string()))
 }
 
 /// Read the config for the WebView with all API keys masked, so secrets never
