@@ -13,6 +13,11 @@ body.phoneme-hide-header-instant #hdr {
    var(--ui-motion), so one knob scales — or stops — all of them. */
 :root {
   --ui-motion: 200ms;
+  /* Snappier derived token for micro-interactions (hover/focus/checked/chevrons)
+     so they feel quick while panels/modals use the full duration. Derived from
+     the master, so one knob still scales everything and it zeroes under
+     reduced-motion / Animation-speed Off via the same calc. */
+  --ui-motion-fast: calc(var(--ui-motion) * 0.6);
 }
 /* Respect the OS "reduce motion" preference globally: zero the master duration so
    every var(--ui-motion)-driven transition/animation becomes instant, no matter
@@ -277,7 +282,7 @@ body.phoneme-hide-header-instant #hdr {
    buttons. Add `.open` to flip it 180° while its menu is open. */
 .ph-caret-ico {
   vertical-align: middle;
-  transition: transform 0.15s ease;
+  transition: transform var(--ui-motion-fast) ease;
 }
 .ph-caret-ico.open {
   transform: rotate(180deg);

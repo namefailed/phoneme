@@ -12,7 +12,7 @@
   align-items: center;
   justify-content: center;
   backdrop-filter: blur(2px);
-  animation: modal-fade-in 0.12s ease-out;
+  animation: modal-fade-in var(--ui-motion) ease-out;
 }
 
 @keyframes modal-fade-in {
@@ -28,7 +28,7 @@
   padding: 24px 28px;
   width: 340px;
   max-width: calc(100vw - 48px);
-  animation: modal-slide-in 0.14s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: modal-slide-in var(--ui-motion) cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 /* The dialog / overlay container is focused programmatically (tabindex=-1) purely
    to route keys to the roving cursor when a modal is opened by keyboard — it's not

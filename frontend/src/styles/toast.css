@@ -28,7 +28,7 @@
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  animation: toast-in 0.22s cubic-bezier(0.34, 1.26, 0.64, 1) both;
+  animation: toast-in var(--ui-motion) cubic-bezier(0.34, 1.26, 0.64, 1) both;
   max-width: 360px;
 }
 /* Hovering pauses auto-dismiss (the JS timer stops too) — the frozen bar IS
@@ -93,7 +93,7 @@
   padding: 4px 12px;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .toast-action:hover {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -130,7 +130,7 @@
 
 /* Slide out to the right while collapsing height so stacked toasts close up */
 .toast-out {
-  animation: toast-out 0.2s ease-in both;
+  animation: toast-out var(--ui-motion) ease-in both;
   pointer-events: none;
   overflow: hidden;
 }

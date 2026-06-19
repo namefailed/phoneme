@@ -96,7 +96,7 @@
 }
 /* Each step fades/slides in so transitions feel intentional, not abrupt. */
 .wizard-body {
-  animation: wizardStepIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: wizardStepIn var(--ui-motion) cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes wizardStepIn {
   from { opacity: 0; transform: translateY(8px); }
