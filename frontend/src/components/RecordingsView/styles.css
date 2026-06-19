@@ -1240,10 +1240,50 @@ mark.search-hit {
 .rv-shell {
   height: 100%;
   display: grid;
+  /* Anchor for the floating zen indicator (absolute child). */
+  position: relative;
   /* A single full-height row so every column (incl. the sidebar) stretches to
      the bottom — without this the implicit `auto` row can collapse to content,
      leaving the sidebar (and its pinned queue panel) short of the bottom. */
   grid-template-rows: minmax(0, 1fr);
+}
+
+/* ── Zen indicator ─────────────────────────────────────────────────────────
+   A cute, non-obtrusive marker in the bottom-right that fades in while a zen /
+   focus mode is on (list zen or recording focus). Concentric "ripple" glyph +
+   a soft breathing pulse; click-through and faint so it never gets in the way. */
+.zen-indicator {
+  position: absolute;
+  bottom: 14px;
+  right: 16px;
+  z-index: 30;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  color: var(--fg-faded);
+  font-size: 0.7143rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  opacity: 0.82;
+  /* Shown/hidden via `display` (toggled with the .visible class) rather than an
+     opacity transition — binary visibility that nothing in the cascade can fight. */
+  display: none;
+}
+.zen-indicator svg { display: block; color: var(--accent); }
+.zen-indicator.visible { display: inline-flex; }
+@keyframes zen-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+.zen-indicator.visible svg { animation: zen-breathe 4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .zen-indicator.visible svg { animation: none; }
 }
 /* Smooth pane show/hide (sidebar · detail pane · focus mode). The class is
    added only for the duration of a TOGGLE — never while dragging the splitter

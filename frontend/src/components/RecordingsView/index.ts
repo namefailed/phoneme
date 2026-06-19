@@ -283,6 +283,12 @@ export class RecordingsView {
         <div class="rv-detail" id="rv-detail2">
           <div id="rv-single-detail2" style="height: 100%;"></div>
         </div>
+        <!-- Cute, non-obtrusive marker that a zen/focus mode is on (list zen or
+             recording focus). Fades in via the shell's .rv-zen class. -->
+        <div class="zen-indicator" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5" opacity="0.55"/></svg>
+          <span>zen</span>
+        </div>
       </div>
       <!-- Bulk bar lives OUTSIDE the shell/list so the list↔detail splitter
            (a grid item with its own stacking context) can't paint over it. -->
@@ -1776,6 +1782,11 @@ export class RecordingsView {
     // reserved scrollbar gutter, which keeps the two panes a true 50/50) applies
     // without touching the single-pane layout.
     shell.classList.toggle("rv-split", !!this.splitId);
+    // Show the cute zen marker whenever a zen/focus mode is active (toggle the
+    // class on the indicator itself, mirroring the back-to-top button).
+    this.container
+      .querySelector(".zen-indicator")
+      ?.classList.toggle("visible", this.listZen || this.focusMode);
 
     // Keep the sidebar clipped at all times so the grid-column width animation
     // reads as a smooth slide/collapse. Don't toggle `visibility` — that would
