@@ -343,21 +343,30 @@ function fakeWavUrl(): string {
 let config: Record<string, unknown> = {
   whisper: {
     mode: "bundled_download", external_url: "http://127.0.0.1:5809", model_path: "",
-    bundled_server_port: 5809, bundled_server_args: [], timeout_secs: 60,
-    initial_prompt: "", provider: "local", api_key: "", model: "", api_url: "",
+    bundled_server_port: 5809, bundled_server_args: [], timeout_secs: 3600,
+    initial_prompt: "Voice memo. Common markers: Action Item:, Task:, To-do:, Follow up:, Decision:, Idea:, Question:, Reminder:.", provider: "local", api_key: "", model: "", api_url: "",
     use_own_bundled_server: false,
   },
   in_place: {
     cleanup: "fast", full_pipeline: false, type_first: false, save_to_library: true,
     type_mode: "type", app_overrides: {}, app_context: false, app_context_denylist: [], stream_type: false,
   },
-  recording: { audio_dir: "~/Documents/phoneme/audio", sample_rate: 16000, channels: 1, silence_threshold_dbfs: -45.0, silence_window_ms: 3000, max_duration_secs: 300, input_device: "default", source: "microphone", pre_roll_ms: 1500, streaming_preview: false, auto_stop_on_silence: false, meeting_preview: "toggle", meeting_preview_own_server: false, normalize: false, normalize_target_dbfs: -1.0, preview_adaptive: true, preview_reveal_words_per_sec: 12.0, preview_idle_ms: 2500, preview_waveform: true },
-  hook: { commands: ["powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1"], timeout_secs: 30, webhook_url: null, run_on_transcribe: true, keyword_rules: [] },
+  recording: { audio_dir: "~/Documents/phoneme/audio", sample_rate: 16000, channels: 1, silence_threshold_dbfs: -45.0, silence_window_ms: 3000, max_duration_secs: 10800, input_device: "default", source: "microphone", pre_roll_ms: 1500, streaming_preview: false, auto_stop_on_silence: false, meeting_preview: "toggle", meeting_preview_own_server: false, normalize: false, normalize_target_dbfs: -1.0, preview_adaptive: true, preview_reveal_words_per_sec: 12.0, preview_idle_ms: 2500, preview_waveform: true },
+  hook: { commands: ["powershell -NoProfile -ExecutionPolicy Bypass -File %APPDATA%/phoneme/hooks/to-stdout.ps1"], timeout_secs: 30, webhook_url: null, run_on_transcribe: true, keyword_rules: [
+    { pattern: "Action Item:", command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\phoneme-tasks.md') -Value ('- '+$d.transcript)\"", case_sensitive: false },
+    { pattern: "Idea:", command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\phoneme-ideas.md') -Value ('- '+$d.transcript)\"", case_sensitive: false },
+  ] },
   webhook: { allow_private_network: false, allow_http: false, hmac_secret: "", custom_headers: {} },
   hotkey: { enabled: false, combo: "Ctrl+Alt+Space", mode: "hold" },
   in_place_hotkey: { enabled: false, combo: "Ctrl+Alt+I", mode: "hold" },
   meeting_hotkey: { enabled: false, combo: "Ctrl+Alt+M", mode: "toggle" },
-  hotkeys: [],
+  hotkeys: [
+    // Disabled example so a fresh install shows what a custom hotkey looks like.
+    { id: "example-journal", label: "Example: journal note", enabled: false, combo: "Ctrl+Alt+J", mode: "hold", action: "record",
+      recipe_id: "", whisper_model: "", pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
+      hooks: ["powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\phoneme-journal.md') -Value $d.transcript\""],
+      in_place: { full_pipeline: false, type_mode: "type" } },
+  ],
   playbook: [
     { id: "cleanup", name: "Cleanup", description: "Tidy stutters, repetitions, and phonetic slips while keeping the original tone.", builtin: true, kind: "transform", target: "",
       llm: { provider: "", model: "", prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.", api_url: "", api_key: "", timeout_secs: 300 }, hook: { command: "", webhook_url: "", timeout_secs: 60 } },
@@ -367,9 +376,16 @@ let config: Record<string, unknown> = {
       llm: { provider: "", model: "", prompt: "Summarize the following transcript concisely as a few clear bullet points capturing the key topics, decisions, and any action items. Output only the summary, with no preamble.", api_url: "", api_key: "", timeout_secs: 300 }, hook: { command: "", webhook_url: "", timeout_secs: 60 } },
     { id: "auto_tag", name: "Auto-tag", description: "Suggest tags for the recording (you approve before they apply).", builtin: true, kind: "enrichment", target: "tags",
       llm: { provider: "", model: "", prompt: "Suggest a few short topical tags for this transcript. Reply with ONLY a comma-separated list of lowercase tags, no preamble.", api_url: "", api_key: "", timeout_secs: 300 }, hook: { command: "", webhook_url: "", timeout_secs: 60 } },
+    { id: "prompt_polish", name: "Prompt polish", description: "Reshape a rough dictation into a clean, well-structured LLM prompt.", builtin: false, kind: "transform", target: "",
+      llm: { provider: "", model: "", prompt: "Rewrite the following dictation into a single clear, well-structured prompt for an AI assistant. Keep the intent; fix grammar; output only the prompt.", api_url: "", api_key: "", timeout_secs: 300 }, hook: { command: "", webhook_url: "", timeout_secs: 60 } },
+    { id: "action_items", name: "Action items", description: "Pull any action items out of the transcript into a custom field.", builtin: false, kind: "enrichment", target: "custom:action_items",
+      llm: { provider: "", model: "", prompt: "List any action items from this transcript as a short bulleted list. If there are none, reply 'None'.", api_url: "", api_key: "", timeout_secs: 300 }, hook: { command: "", webhook_url: "", timeout_secs: 60 } },
+    { id: "journal", name: "Append to journal", description: "A Hook step (no AI): append the transcript to a daily journal file.", builtin: false, kind: "hook", target: "",
+      llm: { provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 300 }, hook: { command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\phoneme-journal.md') -Value $d.transcript\"", webhook_url: "", timeout_secs: 60 } },
   ],
   recipes: [
     { id: "default", name: "Default pipeline", description: "What every normal recording runs: cleanup, then title, summary, and tag suggestions.", builtin: true, steps: ["cleanup", "title", "summary", "auto_tag"] },
+    { id: "prompt_capture", name: "Dictate → prompt", description: "Clean up the dictation, then reshape it into a polished LLM prompt.", builtin: false, steps: ["cleanup", "prompt_polish"] },
   ],
   playbook_migrated: false,
   tray: { show_on_startup: true, minimize_to_tray: true, start_at_login: false },

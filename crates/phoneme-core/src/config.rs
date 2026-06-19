@@ -753,6 +753,14 @@ fn default_true() -> bool {
     true
 }
 
+/// A light, broadly-useful Whisper `initial_prompt` for fresh installs. It only
+/// primes the model with the structured note markers the default keyword hooks
+/// key off (so dictating "Action Item:" transcribes verbatim and the hook
+/// fires) — deliberately short and neutral so it doesn't bias unrelated speech.
+fn default_initial_prompt() -> String {
+    "Voice memo. Common markers: Action Item:, Task:, To-do:, Follow up:, Decision:, Idea:, Question:, Reminder:.".into()
+}
+
 /// Defines the execution strategy for the Whisper transcription model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1699,6 +1707,31 @@ pub struct PlaybookRecipe {
 /// default cleanup / title / summary / auto-tag prompts so the migrated default
 /// recipe behaves exactly like today's pipeline. (A runtime migration reconciles
 /// an EXISTING user's customized prompts onto these in a later Phase-1 step.)
+/// Example keyword-triggered hooks for a fresh install. Each fires ONLY when the
+/// post-processed transcript contains the exact marker (so ordinary speech never
+/// triggers them), appending the note to a Markdown file under the user's
+/// Documents. Self-contained PowerShell — needs no bundled script. Showcase the
+/// power of keyword hooks; users edit or delete them in Settings → Integrations.
+fn default_keyword_rules() -> Vec<KeywordRule> {
+    let append = |file: &str| -> String {
+        format!(
+            "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\{file}') -Value ('- '+$d.transcript)\""
+        )
+    };
+    vec![
+        KeywordRule {
+            pattern: "Action Item:".into(),
+            command: append("phoneme-tasks.md"),
+            case_sensitive: false,
+        },
+        KeywordRule {
+            pattern: "Idea:".into(),
+            command: append("phoneme-ideas.md"),
+            case_sensitive: false,
+        },
+    ]
+}
+
 pub fn default_playbook() -> Vec<PlaybookEntry> {
     let llm = |prompt: &str| PlaybookLlm {
         prompt: prompt.into(),
@@ -1745,26 +1778,75 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             target: "tags".into(),
             hook: PlaybookHook::default(),
         },
+        // Example entries (NOT in the `default` recipe, so they don't auto-run) —
+        // they show off what the Playbook can do. Edit them, add them to a recipe
+        // or a custom hotkey, or delete them.
+        PlaybookEntry {
+            id: "prompt_polish".into(),
+            name: "Prompt polish".into(),
+            description: "Reshape a rough dictation into a clean, well-structured LLM prompt.".into(),
+            builtin: false,
+            kind: PlaybookKind::Transform,
+            llm: llm("Rewrite the following dictation into a single clear, well-structured prompt for an AI assistant. Keep the intent; fix grammar; output only the prompt."),
+            target: String::new(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "action_items".into(),
+            name: "Action items".into(),
+            description: "Pull any action items out of the transcript into a custom field.".into(),
+            builtin: false,
+            kind: PlaybookKind::Enrichment,
+            llm: llm("List any action items from this transcript as a short bulleted list. If there are none, reply 'None'."),
+            target: "custom:action_items".into(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "journal".into(),
+            name: "Append to journal".into(),
+            description: "A Hook step (no AI): append the transcript to a daily journal file.".into(),
+            builtin: false,
+            kind: PlaybookKind::Hook,
+            llm: PlaybookLlm::default(),
+            target: String::new(),
+            hook: PlaybookHook {
+                command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\phoneme-journal.md') -Value $d.transcript\"".into(),
+                webhook_url: String::new(),
+                timeout_secs: default_playbook_hook_timeout(),
+            },
+        },
     ]
 }
 
 /// Curated starter recipes. `default` is the normal-recording pipeline —
 /// cleanup → title → summary → auto-tag — matching today's behaviour.
 pub fn default_recipes() -> Vec<PlaybookRecipe> {
-    vec![PlaybookRecipe {
-        id: "default".into(),
-        name: "Default pipeline".into(),
-        description:
-            "What every normal recording runs: cleanup, then title, summary, and tag suggestions."
+    vec![
+        PlaybookRecipe {
+            id: "default".into(),
+            name: "Default pipeline".into(),
+            description:
+                "What every normal recording runs: cleanup, then title, summary, and tag suggestions."
+                    .into(),
+            builtin: true,
+            steps: vec![
+                "cleanup".into(),
+                "title".into(),
+                "summary".into(),
+                "auto_tag".into(),
+            ],
+        },
+        // Example recipe (not the default) — wire it to a custom in-place hotkey to
+        // dictate a rough idea and get back a polished AI prompt.
+        PlaybookRecipe {
+            id: "prompt_capture".into(),
+            name: "Dictate → prompt".into(),
+            description: "Clean up the dictation, then reshape it into a polished LLM prompt."
                 .into(),
-        builtin: true,
-        steps: vec![
-            "cleanup".into(),
-            "title".into(),
-            "summary".into(),
-            "auto_tag".into(),
-        ],
-    }]
+            builtin: false,
+            steps: vec!["cleanup".into(), "prompt_polish".into()],
+        },
+    ]
 }
 
 /// A user-defined custom keybind, beyond the three built-ins (record / in-place /
@@ -2531,9 +2613,14 @@ impl Default for Config {
                 model_path: String::new(),
                 bundled_server_port: 5809,
                 bundled_server_args: vec![],
-                timeout_secs: 60,
+                // Generous flat cap: long recordings (and slow local models)
+                // can take many minutes; 60s timed out real 10-minute notes.
+                timeout_secs: 3600,
                 language: None,
-                initial_prompt: String::new(),
+                // A light Whisper context hint that nudges it to render the
+                // structured note markers the default keyword hooks key off — so
+                // "Action Item:" etc. transcribe verbatim and those hooks fire.
+                initial_prompt: default_initial_prompt(),
                 provider: TranscriptionBackend::Local,
                 api_key: SecretString::from(String::new()),
                 model: String::new(),
@@ -2549,7 +2636,7 @@ impl Default for Config {
                 channels: 1,
                 silence_threshold_dbfs: -45.0,
                 silence_window_ms: 3000,
-                max_duration_secs: 300,
+                max_duration_secs: 10800,
                 input_device: "default".into(),
                 source: CaptureSource::Microphone,
                 pre_roll_ms: 1500,
@@ -2575,7 +2662,11 @@ impl Default for Config {
                 timeout_secs: 30,
                 webhook_url: None,
                 run_on_transcribe: true,
-                keyword_rules: Vec::new(),
+                // Example keyword hooks (fire only when the transcript contains
+                // the exact marker, so normal speech never triggers them): say
+                // "Action Item: …" and it's appended to a tasks file; "Idea: …"
+                // to an ideas file. Self-contained PowerShell — no extra scripts.
+                keyword_rules: default_keyword_rules(),
             },
             webhook: WebhookConfig::default(),
             hotkey: HotkeyConfig {
@@ -2586,7 +2677,22 @@ impl Default for Config {
             in_place_hotkey: default_in_place_hotkey(),
             in_place: InPlaceConfig::default(),
             meeting_hotkey: default_meeting_hotkey(),
-            hotkeys: Vec::new(),
+            // One disabled example so a fresh install shows what a custom hotkey
+            // looks like (its own combo + recipe + per-binding hook). Off by
+            // default — the user enables/edits/deletes it in Settings → Hotkeys.
+            hotkeys: vec![HotkeyBinding {
+                id: "example-journal".into(),
+                label: "Example: journal note".into(),
+                enabled: false,
+                combo: "Ctrl+Alt+J".into(),
+                mode: HotkeyMode::Hold,
+                action: HotkeyAction::Record,
+                recipe_id: String::new(),
+                whisper_model: String::new(),
+                pipeline: HotkeyPipeline::default(),
+                hooks: vec!["powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\phoneme-journal.md') -Value $d.transcript\"".into()],
+                in_place: HotkeyInPlace::default(),
+            }],
             playbook: default_playbook(),
             recipes: default_recipes(),
             // A fresh config's seeds already mirror the legacy defaults, so a
