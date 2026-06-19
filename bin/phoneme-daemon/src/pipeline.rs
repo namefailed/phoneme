@@ -1699,13 +1699,29 @@ async fn run_enrichment_steps(
 /// failed cleanup/tag step, leaving the transcript intact). A hook marked
 /// `required` short-circuits with `Err`, which the caller turns into a failed
 /// recording (mirroring the legacy always-on command path).
+/// What the recipe's Hook steps did, folded into the recording's hook provenance
+/// (`hook_exit_code` etc., read by the detail-pane Pipeline popover) so it shows
+/// Playbook hooks instead of the retired `[hook]` commands.
+#[derive(Default)]
+struct HookOutcome {
+    /// Whether at least one Hook step actually ran (a command or a webhook).
+    ran: bool,
+    /// A label for the last hook that ran (its command, or `webhook: <url>`).
+    last_label: String,
+    /// The worst non-zero exit code among command hooks (0 when all succeeded).
+    exit_code: i32,
+    /// Summed wall-clock of the command hooks.
+    total_ms: i64,
+}
+
 async fn run_hook_steps(
     state: &AppState,
     cfg: &Config,
     steps: &[ResolvedStep],
     payload: &HookPayload,
     step_failure: &mut Option<(RecordingStatus, String)>,
-) -> Result<()> {
+) -> Result<HookOutcome> {
+    let mut out = HookOutcome::default();
     for step in steps {
         let ResolvedStep::Hook { hook } = step else {
             continue;
@@ -1722,20 +1738,27 @@ async fn run_hook_steps(
             let runner =
                 HookRunner::new(phoneme_core::config::expand_cmd(cmd), timeout);
             match runner.run(payload).await {
-                Ok(result) if result.exit_code != 0 => {
-                    if hook.required {
-                        return Err(phoneme_core::error::Error::HookFailed {
-                            code: result.exit_code,
-                            stderr_tail: String::new(),
-                        });
+                Ok(result) => {
+                    out.ran = true;
+                    out.last_label = cmd.to_string();
+                    out.total_ms += result.duration_ms;
+                    if result.exit_code != 0 {
+                        if hook.required {
+                            return Err(phoneme_core::error::Error::HookFailed {
+                                code: result.exit_code,
+                                stderr_tail: String::new(),
+                            });
+                        }
+                        out.exit_code = result.exit_code;
+                        tracing::warn!(command = %cmd, exit_code = result.exit_code, "playbook hook exited non-zero");
+                        step_failure.get_or_insert((
+                            RecordingStatus::HookFailed,
+                            format!("hook exited {}", result.exit_code),
+                        ));
+                    } else {
+                        tracing::info!(command = %cmd, "playbook hook ran");
                     }
-                    tracing::warn!(command = %cmd, exit_code = result.exit_code, "playbook hook exited non-zero");
-                    step_failure.get_or_insert((
-                        RecordingStatus::HookFailed,
-                        format!("hook exited {}", result.exit_code),
-                    ));
                 }
-                Ok(_) => tracing::info!(command = %cmd, "playbook hook ran"),
                 Err(e) => {
                     if hook.required {
                         return Err(e);
@@ -1749,16 +1772,22 @@ async fn run_hook_steps(
         // Webhook half — same payload; the global [webhook] policy / SSRF guard.
         let url = hook.webhook_url.trim();
         if !url.is_empty() {
-            if let Err(e) = state.webhook.post(url, timeout, payload, &cfg.webhook).await {
-                if hook.required {
-                    return Err(e);
+            match state.webhook.post(url, timeout, payload, &cfg.webhook).await {
+                Ok(()) => {
+                    out.ran = true;
+                    out.last_label = format!("webhook: {url}");
                 }
-                tracing::warn!(url = %url, error = %e, "playbook webhook failed");
-                step_failure.get_or_insert((RecordingStatus::HookFailed, e.to_string()));
+                Err(e) => {
+                    if hook.required {
+                        return Err(e);
+                    }
+                    tracing::warn!(url = %url, error = %e, "playbook webhook failed");
+                    step_failure.get_or_insert((RecordingStatus::HookFailed, e.to_string()));
+                }
             }
         }
     }
-    Ok(())
+    Ok(out)
 }
 
 /// Process a single claimed payload through the full pipeline.
@@ -2396,27 +2425,43 @@ pub async fn run(
     // live in the recipe. Additive alongside the legacy [hook] config above (the
     // H3 migration folds [hook] into Hook entries and removes the legacy path). A
     // `required` hook failing quarantines the recording like a failed command.
-    if let Err(e) = run_hook_steps(state, cfg, &recipe, &payload, &mut step_failure).await {
-        state
-            .catalog
-            .update_status(&id, RecordingStatus::HookFailed)
-            .await?;
-        if let Err(err) = state
-            .catalog
-            .update_error(&id, "hook_failed", &e.to_string())
-            .await
-        {
-            tracing::warn!(error = %err, "failed to persist hook error reason");
+    let hook_outcome = match run_hook_steps(state, cfg, &recipe, &payload, &mut step_failure).await
+    {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            state
+                .catalog
+                .update_status(&id, RecordingStatus::HookFailed)
+                .await?;
+            if let Err(err) = state
+                .catalog
+                .update_error(&id, "hook_failed", &e.to_string())
+                .await
+            {
+                tracing::warn!(error = %err, "failed to persist hook error reason");
+            }
+            state
+                .inbox
+                .finish_failed(&id, "hook_failed", &e.to_string())
+                .await?;
+            state.events.emit(DaemonEvent::HookFailed {
+                id: id.clone(),
+                error: e.to_string(),
+            });
+            return Err(e);
         }
-        state
-            .inbox
-            .finish_failed(&id, "hook_failed", &e.to_string())
-            .await?;
-        state.events.emit(DaemonEvent::HookFailed {
-            id: id.clone(),
-            error: e.to_string(),
-        });
-        return Err(e);
+    };
+    // Fold the recipe Hook steps into the per-recording hook provenance the
+    // Pipeline popover reads (hook_exit_code) — the legacy command/keyword vars
+    // above are empty post-migration, so this is what populates it now.
+    if hook_outcome.ran {
+        if last_cmd.is_empty() {
+            last_cmd = hook_outcome.last_label;
+        }
+        if final_exit_code == 0 {
+            final_exit_code = hook_outcome.exit_code;
+        }
+        total_duration += hook_outcome.total_ms;
     }
 
     // PHASE 2b (hooks-ON) — summary + tags enrichments, after post-processing
@@ -2433,10 +2478,15 @@ pub async fn run(
     )
     .await;
 
-    state
-        .catalog
-        .update_hook_result(&id, &last_cmd, final_exit_code, total_duration)
-        .await?;
+    // Record hook provenance ONLY when a hook actually ran (a legacy command or a
+    // recipe Hook step) — otherwise leave hook_exit_code null so the Pipeline
+    // popover doesn't show a phantom "Hook ✓" on recordings with no Hook steps.
+    if !last_cmd.is_empty() {
+        state
+            .catalog
+            .update_hook_result(&id, &last_cmd, final_exit_code, total_duration)
+            .await?;
+    }
     // A failed optional step becomes the terminal status (filterable, reason
     // persisted), like hook_failed; otherwise Done.
     finalize_step_status(state, &id, step_failure).await?;
