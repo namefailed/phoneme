@@ -564,6 +564,17 @@ export class RecordingsView {
     }
     this.animateLayout();
     this.applyLayout();
+    // Entering focus/fullscreen mode drops the keyboard cursor straight into the
+    // detail pane (the list is hidden, so there's nowhere else for it to be) —
+    // landing on the first cell unless you were already navigating the detail.
+    if (this.focusMode && (this.vimNav || this.arrowNav)) {
+      requestAnimationFrame(() => {
+        const keepCursor = this.focusedPane === "detail" && this.detailRow >= 0;
+        this.focusPane("detail");
+        if (!keepCursor) { this.detailRow = 0; this.detailCol = 0; this.detailDesiredX = null; }
+        this.highlightDetail();
+      });
+    }
   }
 
   /** Full-window recordings list: hide the sidebar + top bar (snapshotted),
@@ -1315,13 +1326,17 @@ export class RecordingsView {
   private moveDetailCol(delta: number) {
     const rows = this.detailGrid();
     const row = rows[this.detailRow];
-    if (!row) { this.focusPane("list"); return; }
+    // In focus/fullscreen mode the list is hidden, so h never escapes to it.
+    if (!row) { if (!this.focusMode) this.focusPane("list"); return; }
     const next = this.detailCol + delta;
     if (next < 0) {
       // Left edge. In split mode h steps to the pane on the left (the left pane
       // itself just stays — nothing's further left). Outside split, h at the
       // start drops back to the list; remember the cell so l / g d returns here.
+      // But in focus/fullscreen mode the list is hidden — h at the edge stays put
+      // rather than jumping to a pane you can't see.
       if (this.splitId) { this.movePaneFocus("left"); return; }
+      if (this.focusMode) return;
       this.lastDetailPos = { row: this.detailRow, col: this.detailCol, id: this.state.get().selectedId };
       this.focusPane("list");
       return;
