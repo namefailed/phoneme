@@ -32,7 +32,7 @@ const KINDS: { value: PlaybookKind; label: string; blurb: string }[] = [
 /** Built-in enrichment targets (plus `custom:<key>` entered free-form). */
 const BUILTIN_TARGETS = ["title", "summary", "tags"] as const;
 
-const DEFAULT_LLM = () => ({ provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 30 });
+const DEFAULT_LLM = () => ({ provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 300 });
 const DEFAULT_HOOK = () => ({ command: "", webhook_url: "", timeout_secs: 60 });
 
 /** The app's chevron (matches the select chevron). `currentColor` so it tracks

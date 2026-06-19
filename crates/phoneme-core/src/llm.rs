@@ -367,7 +367,7 @@ impl LlmProvider for OpenAiChatProvider {
             "messages": [{ "role": "user", "content": combine(prompt, text) }],
             "temperature": 0.3,
         });
-        let mut req = self.http.post(&self.url).timeout(self.timeout).json(&body);
+        let mut req = self.http.post(&self.url).timeout(self.timeout.max(Duration::from_secs(120))).json(&body);
         if !self.api_key.is_empty() {
             req = req.bearer_auth(&self.api_key);
         }
@@ -439,7 +439,7 @@ impl LlmProvider for AnthropicProvider {
         let req = self
             .http
             .post(&self.url)
-            .timeout(self.timeout)
+            .timeout(self.timeout.max(Duration::from_secs(120)))
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
             .json(&body);

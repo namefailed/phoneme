@@ -439,7 +439,7 @@ fn default_llm_post_process() -> LlmPostProcessConfig {
         api_url: "".into(),
         model: "llama3.2:3b".into(),
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.".into(),
-        timeout_secs: 30,
+        timeout_secs: 300,
         autostart_ollama: true,
     }
 }
@@ -740,7 +740,11 @@ fn default_title_prompt() -> String {
 }
 
 fn default_llm_timeout_secs() -> u64 {
-    30
+    // Generous by default: an LLM post-processing a long transcript (a meeting or
+    // an hour-long recording is tens of thousands of tokens) can legitimately
+    // take minutes. Streaming providers additionally bound the IDLE time, not the
+    // total, so a slow-but-progressing local model never trips this.
+    300
 }
 
 /// Serde default for boolean fields that should default to `true` when absent
@@ -3728,7 +3732,7 @@ mod tests {
         let cfg_text = toml::to_string(&toml_val).unwrap();
         let path = write_config(&dir, &cfg_text);
         let parsed = Config::load(&path).expect("loads config without llm timeout_secs");
-        assert_eq!(parsed.llm_post_process.timeout_secs, 30);
+        assert_eq!(parsed.llm_post_process.timeout_secs, 300);
     }
 
     #[test]

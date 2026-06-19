@@ -408,11 +408,11 @@ export class SectionWhisper {
         </div>
         <div class="settings-field">
           <label>Custom vocabulary</label>
-          <div style="width: 100%;">
+          <div style="display: block; width: 100%; min-width: 0;">
             <textarea data-key="whisper.initial_prompt" id="vocab-input" maxlength="900" rows="6"
-              style="resize: vertical; min-height: 120px; font-size: 0.9286rem; padding: 8px; width: 100%;"
+              style="resize: vertical; min-height: 130px; font-size: 0.9286rem; padding: 8px; width: 100%; box-sizing: border-box; display: block;"
               placeholder="Names, jargon, acronyms…">${escapeHtml(this.config.whisper.initial_prompt ?? "")}</textarea>
-            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 4px;">
               <span style="${HELP}">
                 Names, jargon, and acronyms the transcriber keeps mis-hearing — list them here and Whisper will lean toward them
                 (e.g. <code>Phoneme, pyannote, WebView2</code>). Sent as the prompt to <b>Whisper-based</b> providers (the local

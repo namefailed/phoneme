@@ -1153,13 +1153,23 @@ select[data-key="daemon.log_level"] {
 .pb-group-label {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 0.6786rem;
+  gap: 10px;
+  font-size: 0.8214rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-faded);
-  margin: 0 0 8px;
+  letter-spacing: 0.09em;
+  color: var(--fg-default);
+  margin: 2px 0 10px;
+}
+/* A short accent tick before the label, then a hairline rule trailing off — so
+   the group reads as a real subheader, not help text. */
+.pb-group-label::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--accent);
 }
 .pb-group-label::after {
   content: "";

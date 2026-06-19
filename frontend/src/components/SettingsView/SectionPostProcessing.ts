@@ -50,7 +50,7 @@ export class SectionPostProcessing {
         api_url: "",
         model: "llama3.2:3b",
         prompt: "Clean up any stuttering, repetitions, or phonetic inaccuracies from the transcript. Maintain original tone.",
-        timeout_secs: 30,
+        timeout_secs: 300,
         autostart_ollama: true,
       };
     }
