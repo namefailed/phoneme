@@ -1444,9 +1444,10 @@ body.phoneme-hide-header ph-header-bar {
   flex-wrap: wrap;
 }
 .tag-chip--suggested {
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent) !important;
-  /* Filled behind the chip (was a near-transparent 8% wash) so suggestions read
-     as solid pills like the applied tags, just tinted + italic to mark "pending". */
+  /* Dashed border marks these as "pending/suggested" (vs the solid applied tags);
+     the fill stays so they read as real pills, not a faint wash. Goes solid on
+     hover / keyboard-cursor below. */
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent) !important;
   background: color-mix(in srgb, var(--accent) 16%, var(--bg-elevated)) !important;
   color: var(--fg-default) !important;
   font-style: italic;
@@ -1479,7 +1480,8 @@ body.phoneme-hide-header ph-header-bar {
    exist) and are styled as chips matching the suggestion pills — ✓ All is
    success-tinted, ✕ Clear is danger-tinted. */
 .tag-suggest-all {
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  /* Dashed to match the suggestion chips they act on. */
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent);
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated));
   color: var(--fg-default);
   border-radius: 12px;

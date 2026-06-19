@@ -302,6 +302,14 @@ export class TranscriptEditorElement extends LitElement {
         ph-transcript-editor #cm-editor-root .cm-editor {
           flex: 1;
         }
+        /* Relative wrapper so the Copy button can overlay the text top-right. */
+        ph-transcript-editor .editor-wrap {
+          position: relative;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
         ph-transcript-editor .header {
           display: flex;
           justify-content: flex-start;
@@ -310,8 +318,7 @@ export class TranscriptEditorElement extends LitElement {
           margin-bottom: 8px;
           flex: 0 0 auto;
         }
-        /* Spacer pushes the Edited/Save actions to the right while Copy stays
-           anchored beside the title on the left. */
+        /* Spacer pushes the Edited/Save actions to the right of the title. */
         ph-transcript-editor .header-spacer { flex: 1; }
         ph-transcript-editor .title {
           font-size: 0.7857rem;
@@ -342,34 +349,50 @@ export class TranscriptEditorElement extends LitElement {
           cursor: pointer;
           font-weight: bold;
         }
-        /* Copy lives in this row (a sibling of Save / Edited), not an overlay,
-           so it never collides with them. Subtle until hovered. */
+        /* Copy is an overlay at the top-right of the transcript text, web-page
+           style: hidden until you hover the text (or it's focused / under the
+           keyboard cursor), so it never competes with the text or the Save/Edited
+           actions. Stays available while editing. */
         ph-transcript-editor .btn-copy {
+          position: absolute;
+          top: 8px;
+          right: 12px;
+          z-index: 5;
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 26px;
-          height: 24px;
+          width: 28px;
+          height: 26px;
           padding: 0;
           font-size: 0.9286rem;
           line-height: 1;
-          /* Faded by default — only the glyph, no chrome — and lights up to a
-             full bordered button on hover. */
-          border: 1px solid transparent;
-          border-radius: 4px;
-          background: transparent;
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          background: var(--bg-elevated);
           color: var(--fg-muted);
-          opacity: 0.45;
           cursor: pointer;
+          opacity: 0;
+          pointer-events: none;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
           transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+        }
+        /* Reveal on hover/focus of the text area, the button's own focus, or when
+           the keyboard cursor lands on it. */
+        ph-transcript-editor .editor-wrap:hover .btn-copy,
+        ph-transcript-editor .editor-wrap:focus-within .btn-copy,
+        ph-transcript-editor .btn-copy:focus-visible,
+        ph-transcript-editor .btn-copy.kbd-cursor {
+          opacity: 0.9;
+          pointer-events: auto;
         }
         ph-transcript-editor .btn-copy:hover {
           opacity: 1;
           color: var(--accent);
           border-color: var(--accent);
-          background: var(--bg-elevated);
         }
         ph-transcript-editor .btn-copy.copied {
+          opacity: 1;
+          pointer-events: auto;
           color: var(--ok);
           border-color: var(--ok);
         }
@@ -389,21 +412,21 @@ export class TranscriptEditorElement extends LitElement {
         <span class="title">
           Transcript ${this.vimMode ? html`<span class="vim-badge">${this.vimCurrentMode}</span>` : ""}
         </span>
-        ${this.isDirty()
-          ? ""
-          : html`<button
-              class="btn-copy ${this.copied ? "copied" : ""}"
-              title="Copy the transcript to the clipboard"
-              aria-label="Copy transcript"
-              @click=${this.requestCopy}
-            >${this.copied ? "✅" : "📋"}</button>`}
         <span class="header-spacer"></span>
         <div class="header-actions">
           ${this.userEdited ? html`<span class="edited-badge" title="This transcript has been manually edited">✓ Edited</span>` : ""}
           <button class="btn-save" style="display: ${this.isDirty() ? 'inline-flex' : 'none'};" @click=${this.save}>Save Changes</button>
         </div>
       </div>
-      <div id="cm-editor-root" @keydown=${this.handleKeydown}></div>
+      <div class="editor-wrap">
+        <button
+          class="btn-copy ${this.copied ? "copied" : ""}"
+          title="Copy the transcript to the clipboard"
+          aria-label="Copy transcript"
+          @click=${this.requestCopy}
+        >${this.copied ? "✅" : "📋"}</button>
+        <div id="cm-editor-root" @keydown=${this.handleKeydown}></div>
+      </div>
     `;
   }
 }
