@@ -194,7 +194,12 @@ mark.settings-hit {
   }
 }
 .settings-section.sv-flash {
-  animation: sv-flash-pulse var(--ui-motion) ease-out;
+  /* A lingering "you-landed-here" cue after a search-result jump, so it must
+     outlast the smooth-scroll settle (and stay aligned with the 1200ms class
+     removal in SettingsView/index.ts). Scale the master knob up rather than use
+     it bare — 6x = ~1.2s at normal, still 0 (instant) when motion is off /
+     reduced, unlike the micro-interactions this is deliberately NOT one of. */
+  animation: sv-flash-pulse calc(var(--ui-motion) * 6) ease-out;
 }
 .sv-tab {
   padding: 10px 20px;

@@ -749,14 +749,14 @@ export class HeaderBarElement extends LitElement {
               style="padding:6px 8px; border-top-left-radius:0; border-bottom-left-radius:0; border-left:1px solid rgba(0,0,0,0.25);"
               @click=${this.toggleModeMenu}><svg class="ph-caret-ico ${this.modeMenuOpen ? "open" : ""}" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             <style>
-              .hb-mode-menu { animation: hbMenuIn 0.12s ease-out; }
+              .hb-mode-menu { animation: hbMenuIn var(--ui-motion) ease-out; }
               @keyframes hbMenuIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
               .hb-mode-menu .hb-mode-cap { font-size: 0.7143rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faded); padding: 4px 12px 3px; }
               .hb-mode-item {
                 display: flex; align-items: center; gap: 10px;
                 width: 100%; text-align: left; background: none; border: none;
                 color: var(--fg-default); padding: 9px 12px; border-radius: 8px;
-                cursor: pointer; font-size: 0.9286rem; transition: background 0.12s ease, color 0.12s ease;
+                cursor: pointer; font-size: 0.9286rem; transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
               }
               .hb-mode-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
               .hb-mode-item.selected { color: var(--accent); }
@@ -840,11 +840,11 @@ export class HeaderBarElement extends LitElement {
         </div>
         <div class="hb-settings-group" style="position: relative; display: inline-flex;">
           <style>
-            .hb-settings-menu { animation: hbMenuIn 0.12s ease-out; }
+            .hb-settings-menu { animation: hbMenuIn var(--ui-motion) ease-out; }
             .hb-menu-item {
               display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
               background: none; border: none; color: var(--fg-default); padding: 8px 12px;
-              border-radius: 7px; cursor: pointer; font-size: 0.9286rem; transition: background 0.12s ease, color 0.12s ease;
+              border-radius: 7px; cursor: pointer; font-size: 0.9286rem; transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
             }
             .hb-menu-item:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
             /* Fixed-width icon column so every label starts at the same x — emoji

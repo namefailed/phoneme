@@ -35,6 +35,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { setHeaderHidden } from "./headerBar";
 import { setStepNotifications } from "./notifications";
+import { closeModalOverlay } from "../utils/modalAnim";
 
 type HelpItem = { combo: string; label: string };
 type HelpGroup = { title: string; items: HelpItem[] };
@@ -178,6 +179,7 @@ function helpGroups(): HelpGroup[] {
 }
 
 let helpOpen = false;
+let helpOverlay: HTMLElement | null = null;
 let pendingG = false;
 let pendingGTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingD = false;
@@ -489,11 +491,22 @@ function openHelp() {
   });
   overlay.querySelector(".kbd-help-close")?.addEventListener("click", closeHelp);
   document.body.appendChild(overlay);
+  helpOverlay = overlay;
 }
 
 function closeHelp() {
-  helpOpen = false;
-  document.querySelector(".kbd-help-overlay")?.remove();
+  // Animate the cheat-sheet out to match its entrance (modal.css), like every
+  // other dialog. Null helpOverlay first so a second close during the exit is a
+  // no-op; keep helpOpen true until the exit finishes so the keyboard gate stays
+  // coherent (keys can't leak to the layer behind mid-close). closeModalOverlay
+  // runs the callback synchronously when motion is off / reduced.
+  const overlay = helpOverlay;
+  if (!overlay) return;
+  helpOverlay = null;
+  closeModalOverlay(overlay, () => {
+    overlay.remove();
+    helpOpen = false;
+  });
 }
 
 /// Handle a `g`-prefix chord (gl/gs/gd/gD/gA/gT/gP/gS/g1/g2/g//gb/gg). These are
@@ -1444,7 +1457,12 @@ export function initKeyboard() {
   // zero (or restore) immediately, no reload needed.
   window
     .matchMedia?.("(prefers-reduced-motion: reduce)")
-    ?.addEventListener?.("change", () => apply(lastAnimCfg ?? {}));
+    // Only re-derive once a real config has loaded — calling apply({}) before the
+    // first read_config would momentarily reset unrelated state (font/nav/notify)
+    // to defaults. read_config is about to apply everything correctly anyway.
+    ?.addEventListener?.("change", () => {
+      if (lastAnimCfg != null) apply(lastAnimCfg);
+    });
   // The list dispatches this when k is pressed at the top — highlight the search
   // box (don't focus it) so h/l can roam the header without typing.
   window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav({ restore: true }));
