@@ -251,6 +251,9 @@ mark.settings-hit {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* Never wrap the "← Go Back" label to a second line, even when pinned to the
+     header ⚙ button's captured width. */
+  white-space: nowrap;
   background: var(--bg-deep);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
   /* Keep the right border (the header toggle has one) — without it this split

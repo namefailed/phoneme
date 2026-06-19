@@ -903,6 +903,7 @@ export class RecordingsListElement extends LitElement {
             .indeterminate=${someSelected}
             title=${allSelected ? "Deselect all" : "Select all"}
             aria-label=${allSelected ? "Deselect all" : "Select all"}
+            @mousedown=${(e: MouseEvent) => e.preventDefault()}
             @change=${(e: Event) => {
               if ((e.target as HTMLInputElement).checked) {
                 this.selectAll();
@@ -1057,6 +1058,7 @@ export class RecordingsListElement extends LitElement {
             class="row-cb"
             .checked=${multiChecked}
             aria-label="Select recording from ${new Date(r.started_at).toLocaleString()}"
+            @mousedown=${(e: MouseEvent) => e.preventDefault()}
           />
         </span>
         ${cells}
@@ -1101,6 +1103,7 @@ export class RecordingsListElement extends LitElement {
             .checked=${allChecked}
             .indeterminate=${someChecked}
             aria-label="Select all tracks in this meeting"
+            @mousedown=${(e: MouseEvent) => e.preventDefault()}
             @change=${(e: Event) => this.handleGroupCheckbox(e, meetingId)}
           />
         </span>
@@ -1108,7 +1111,7 @@ export class RecordingsListElement extends LitElement {
           <span class="rec-group-chevron ${expanded ? "expanded" : ""}" aria-hidden="true">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>
           </span>
-          <span class="rec-group-meta" style="margin-right: 8px;">${day}<span class="rec-group-sep">·</span>${time}</span>
+          <span class="rec-group-meta" style="margin-right: 8px;">${day}<span class="rec-group-sep">|</span>${time}</span>
           ${isEditing ? html`
             <span class="rec-rename" @click=${(e: Event) => e.stopPropagation()}>
               <button

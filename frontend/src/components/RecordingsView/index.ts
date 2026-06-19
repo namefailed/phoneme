@@ -70,10 +70,11 @@ function readStoredSplitRatio(): number {
 const SIDEBAR_MIN = 160;
 const SIDEBAR_MAX = 480;
 
-/** Persisted list/detail split %, clamped to a sane range (default 61). */
+/** Persisted list/detail split % (left/list pane). Default 67 → the detail pane
+ *  opens at ~33% of the window. Clamped to a sane range. */
 function readStoredSplit(): number {
   const n = Number(localStorage.getItem(LS_SPLIT));
-  return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 61;
+  return Number.isFinite(n) && n >= 20 && n <= 80 ? n : 67;
 }
 
 /** Persisted sidebar width in px, clamped (default 200). */
