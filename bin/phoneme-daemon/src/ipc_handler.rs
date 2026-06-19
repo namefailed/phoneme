@@ -273,6 +273,28 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             Ok(rows) => serialize_response(rows),
             Err(e) => err_response(&e),
         },
+        Request::ListSavedSearches => match state.catalog.list_saved_searches().await {
+            Ok(rows) => serialize_response(rows),
+            Err(e) => err_response(&e),
+        },
+        Request::UpsertSavedSearch {
+            id,
+            name,
+            filter_json,
+        } => match state
+            .catalog
+            .upsert_saved_search(&id, &name, &filter_json)
+            .await
+        {
+            Ok(()) => Response::Ok(serde_json::json!({})),
+            Err(e) => err_response(&e),
+        },
+        Request::DeleteSavedSearch { id } => {
+            match state.catalog.delete_saved_search(&id).await {
+                Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
+                Err(e) => err_response(&e),
+            }
+        }
         Request::ListMeeting { meeting_id } => {
             match state.catalog.list_by_meeting(&meeting_id).await {
                 Ok(rows) => serialize_response(rows),

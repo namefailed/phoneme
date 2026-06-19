@@ -27,8 +27,8 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    AiActivityEntry, ListFilter, Recording, RecordingStatus, SpeakerName, TranscriptSegment,
-    TranscriptWord,
+    AiActivityEntry, ListFilter, Recording, RecordingStatus, SavedSearch, SpeakerName,
+    TranscriptSegment, TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -403,6 +403,61 @@ impl Catalog {
             });
         }
         Ok(out)
+    }
+
+    /// All saved searches, most-recently-updated first. The `filter_json` is
+    /// returned verbatim for the frontend to deserialize.
+    pub async fn list_saved_searches(&self) -> Result<Vec<SavedSearch>> {
+        let rows = sqlx::query(
+            "SELECT id, name, filter_json FROM saved_searches \
+             ORDER BY updated_at DESC, name COLLATE NOCASE ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            out.push(SavedSearch {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                filter_json: row.try_get("filter_json")?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Insert or update a saved search by id. The frontend owns the by-name
+    /// upsert and rename-conflict rules (it picks the id to write), so this is a
+    /// plain by-id upsert — `created_at` is set once, `updated_at` on every write.
+    pub async fn upsert_saved_search(
+        &self,
+        id: &str,
+        name: &str,
+        filter_json: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO saved_searches (id, name, filter_json, created_at, updated_at) \
+             VALUES (?, ?, ?, datetime('now'), datetime('now')) \
+             ON CONFLICT(id) DO UPDATE SET \
+                 name = excluded.name, \
+                 filter_json = excluded.filter_json, \
+                 updated_at = datetime('now')",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(filter_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a saved search by id (unknown ids are a no-op). Returns whether a
+    /// row was actually removed.
+    pub async fn delete_saved_search(&self, id: &str) -> Result<bool> {
+        let res = sqlx::query("DELETE FROM saved_searches WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected() > 0)
     }
 
     /// Insert a new recording row. The pipeline calls this once, when capture

@@ -595,6 +595,30 @@ export async function dismissFailed(id: string): Promise<boolean> {
   return r.removed;
 }
 
+/** Wire shape of a saved search as the catalog stores it — `filter_json` is the
+ *  opaque serialized `UiFilter` (the state module parses/serializes it). */
+export type SavedSearchRow = { id: string; name: string; filter_json: string };
+
+/** All saved searches (catalog-backed), most-recently-updated first. */
+export async function listSavedSearches(): Promise<SavedSearchRow[]> {
+  return await tauriInvoke<SavedSearchRow[]>("list_saved_searches");
+}
+
+/** Insert or update a saved search by id; `filterJson` is a serialized `UiFilter`. */
+export async function upsertSavedSearch(
+  id: string,
+  name: string,
+  filterJson: string,
+): Promise<void> {
+  await tauriInvoke("upsert_saved_search", { id, name, filterJson });
+}
+
+/** Delete a saved search by id; resolves to whether a row was removed. */
+export async function deleteSavedSearch(id: string): Promise<boolean> {
+  const r = await tauriInvoke<{ removed: boolean }>("delete_saved_search", { id });
+  return r.removed;
+}
+
 /** Tail the last `maxLines` of a daemon log (`hook.log` / `daemon.log` /
  *  `ollama.log`) for the in-app log viewer. Returns "" when the log doesn't
  *  exist yet. The basename is allowlisted on the backend. */

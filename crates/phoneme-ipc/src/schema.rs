@@ -199,6 +199,27 @@ pub enum Request {
         /// Max rows to return (clamped server-side to a bounded window).
         limit: u32,
     },
+    /// All saved searches (user-named library-filter snapshots), most-recently-
+    /// updated first. Ok = JSON array of `SavedSearch`. GUI saved-searches menu,
+    /// migrated from webview `localStorage` into the catalog.
+    ListSavedSearches,
+    /// Insert or update a saved search by id. The frontend owns the by-name
+    /// upsert and rename-conflict rules and picks the id to write, so this is a
+    /// plain by-id upsert. Ok = `{}`. GUI save / rename / update-filter.
+    UpsertSavedSearch {
+        /// Stable id; the upsert key.
+        id: String,
+        /// User-chosen name.
+        name: String,
+        /// The library filter snapshot as opaque JSON (a serialized `UiFilter`).
+        filter_json: String,
+    },
+    /// Delete a saved search by id (unknown ids are a no-op). Ok =
+    /// `{"removed":bool}`. GUI saved-searches delete.
+    DeleteSavedSearch {
+        /// The saved-search id to remove.
+        id: String,
+    },
     /// Fetch all recordings belonging to a single meeting session (the two
     /// tracks linked by a shared `meeting_id`), ordered by track then time.
     /// Additive to `ListRecordings` — grouping is a presentation concern, so

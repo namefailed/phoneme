@@ -184,6 +184,22 @@ pub struct AiActivityEntry {
     pub created_at: String,
 }
 
+/// One persisted saved search — a user-named snapshot of the full library
+/// filter, moved out of the webview's `localStorage` into the catalog so it
+/// survives a reinstall and can ride catalog sync later. `filter_json` is opaque
+/// JSON the frontend serializes (a `UiFilter`); the daemon only stores and
+/// returns it, never interpreting the filter shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedSearch {
+    /// Stable id (frontend-generated); the upsert key.
+    pub id: String,
+    /// User-chosen name. Uniqueness (case-insensitive) is enforced by the
+    /// frontend's upsert-by-name, not a DB constraint.
+    pub name: String,
+    /// The library filter snapshot as opaque JSON (a serialized `UiFilter`).
+    pub filter_json: String,
+}
+
 /// The canonical Recording row as exposed by `Catalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recording {

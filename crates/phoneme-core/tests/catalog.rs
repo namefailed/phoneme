@@ -1055,3 +1055,41 @@ async fn semantic_search_thresholds_dim_checks_and_dedupes_meetings() {
         "results must be sorted descending"
     );
 }
+
+#[tokio::test]
+async fn saved_searches_upsert_list_and_delete() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // Empty to start.
+    assert!(catalog.list_saved_searches().await.unwrap().is_empty());
+
+    // Insert two; both come back.
+    catalog
+        .upsert_saved_search("ss_a", "Meetings", r#"{"kind":"meeting"}"#)
+        .await
+        .unwrap();
+    catalog
+        .upsert_saved_search("ss_b", "Failed", r#"{"status":"failed"}"#)
+        .await
+        .unwrap();
+    let list = catalog.list_saved_searches().await.unwrap();
+    assert_eq!(list.len(), 2);
+
+    // Upsert by the same id updates in place (no duplicate row).
+    catalog
+        .upsert_saved_search("ss_a", "Meetings (renamed)", r#"{"kind":"meeting","sort_desc":false}"#)
+        .await
+        .unwrap();
+    let list = catalog.list_saved_searches().await.unwrap();
+    assert_eq!(list.len(), 2, "upsert by id must not create a duplicate");
+    let a = list.iter().find(|s| s.id == "ss_a").expect("ss_a present");
+    assert_eq!(a.name, "Meetings (renamed)");
+    assert_eq!(a.filter_json, r#"{"kind":"meeting","sort_desc":false}"#);
+
+    // Delete one; the other remains, and a second delete of the same id is a no-op.
+    assert!(catalog.delete_saved_search("ss_a").await.unwrap());
+    assert!(!catalog.delete_saved_search("ss_a").await.unwrap());
+    let list = catalog.list_saved_searches().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, "ss_b");
+}

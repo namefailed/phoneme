@@ -359,6 +359,38 @@ pub async fn dismiss_failed(bridge: Br<'_>, id: String) -> Result<Value, Command
     forward(&bridge, Request::DismissFailed { id }).await
 }
 
+/// All saved searches (user-named library-filter snapshots), newest first.
+#[tauri::command]
+pub async fn list_saved_searches(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListSavedSearches).await
+}
+
+/// Insert or update a saved search by id (the frontend picks the id, owning the
+/// by-name upsert / rename-conflict rules).
+#[tauri::command]
+pub async fn upsert_saved_search(
+    bridge: Br<'_>,
+    id: String,
+    name: String,
+    filter_json: String,
+) -> Result<Value, CommandError> {
+    forward(
+        &bridge,
+        Request::UpsertSavedSearch {
+            id,
+            name,
+            filter_json,
+        },
+    )
+    .await
+}
+
+/// Delete a saved search by id (unknown ids are a no-op).
+#[tauri::command]
+pub async fn delete_saved_search(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    forward(&bridge, Request::DeleteSavedSearch { id }).await
+}
+
 /// Remove ALL still-pending items from the queue ("clear queue").
 #[tauri::command]
 pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {

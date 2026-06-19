@@ -155,6 +155,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | ListRecordings { .. }
         | GetRecording { .. }
         | ListAiActivity { .. }
+        | ListSavedSearches
         | ListMeeting { .. }
         | GetSegments { .. }
         | GetWords { .. }
@@ -223,6 +224,8 @@ fn is_retry_safe(req: &Request) -> bool {
         | SetQueuePaused { .. }
         | ClearFailed
         | DismissFailed { .. }
+        | UpsertSavedSearch { .. }
+        | DeleteSavedSearch { .. }
         | CancelAllQueued
         | CancelProcessing { .. }
         // Daemon lifecycle & config.
