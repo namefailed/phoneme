@@ -9,6 +9,30 @@ import { curatedTranscriptionModels } from "../../data/curatedModels";
 const HELP =
   "font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;";
 
+/** Whisper's prompt budget: the text decoder context is 448 tokens for every
+ *  model size and the prompt is limited to `n_text_ctx/2 - 1 = 223`; OpenAI's
+ *  API rounds this to 224. We cap the custom-vocabulary box at this many tokens
+ *  (counted with Whisper's own GPT-2 / r50k BPE) rather than guessing from
+ *  character count — dense jargon tokenizes at ~2.7 chars/token, far from the
+ *  ~4 the old 900-char cap assumed. */
+const VOCAB_MAX_TOKENS = 224;
+/** Coarse character ceiling applied before tokenizing, purely so a pathological
+ *  paste can't hand the encoder a megabyte of text. The token cap above is the
+ *  real limit and always bites first for any realistic vocab. */
+const VOCAB_CHAR_BACKSTOP = 8000;
+
+type VocabTokenizer = { encode: (text: string) => number[]; decode: (tokens: number[]) => string };
+let _vocabTokenizer: Promise<VocabTokenizer> | null = null;
+/** Lazily load Whisper's BPE tokenizer (r50k_base == the GPT-2 byte-level BPE
+ *  Whisper is built on) the first time the vocab box is shown, so its ~1 MB of
+ *  rank data never lands in the main bundle. */
+function loadVocabTokenizer(): Promise<VocabTokenizer> {
+  if (!_vocabTokenizer) {
+    _vocabTokenizer = import("gpt-tokenizer/encoding/r50k_base") as unknown as Promise<VocabTokenizer>;
+  }
+  return _vocabTokenizer;
+}
+
 /** The port fields a `DaemonStatus` reply carries for the bundled whisper
  *  servers. The `preferred` ports are the configured `bundled_server_port`
  *  values; the `effective` ports are what the supervisors ACTUALLY bound —
@@ -409,15 +433,15 @@ export class SectionWhisper {
         <div class="settings-field">
           <label>Custom vocabulary</label>
           <div style="display: block; width: 100%; min-width: 0;">
-            <textarea data-key="whisper.initial_prompt" id="vocab-input" maxlength="900" rows="6"
+            <textarea data-key="whisper.initial_prompt" id="vocab-input" maxlength="8000" rows="6"
               style="resize: vertical; min-height: 130px; font-size: 0.9286rem; padding: 8px; width: 100%; box-sizing: border-box; display: block;"
               placeholder="Names, jargon, acronyms…">${escapeHtml(this.config.whisper.initial_prompt ?? "")}</textarea>
             <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 4px;">
               <span style="${HELP}">
                 Names, jargon, and acronyms the transcriber keeps mis-hearing — list them here and Whisper will lean toward them
                 (e.g. <code>Phoneme, pyannote, WebView2</code>). Sent as the prompt to <b>Whisper-based</b> providers (the local
-                <code>whisper.cpp</code> server, OpenAI, Groq, and Custom endpoints); only the last <b>~224 tokens (≈900 characters)</b>
-                are used. Deepgram, AssemblyAI, and ElevenLabs ignore it for now.
+                <code>whisper.cpp</code> server, OpenAI, Groq, and Custom endpoints); capped at Whisper's <b>~224-token</b> prompt
+                limit, counted live below. Deepgram, AssemblyAI, and ElevenLabs ignore it for now.
               </span>
               <span id="vocab-count" style="font-size: 0.7143rem; color: var(--fg-faded); white-space: nowrap; flex-shrink: 0;"></span>
             </div>
@@ -427,26 +451,41 @@ export class SectionWhisper {
     `;
     bindFieldEvents(container, this.config);
 
-    // Live character counter for the custom-vocabulary box. Whisper only uses
-    // the last ~224 tokens of the prompt, so the textarea is capped (maxlength)
-    // and the counter warns as it fills — the user sees when it's "too long".
-    const VOCAB_MAX = 900;
+    // Live TOKEN counter for the custom-vocabulary box, counted with Whisper's
+    // own BPE so the limit matches reality (dense jargon tokenizes much denser
+    // than the old 900-char proxy assumed). Hard-capped at VOCAB_MAX_TOKENS: any
+    // edit/paste over the limit is trimmed back to the first 224 tokens.
     const vocabInput = container.querySelector<HTMLTextAreaElement>("#vocab-input");
     const vocabCount = container.querySelector<HTMLElement>("#vocab-count");
+    let vocabTok: VocabTokenizer | null = null;
     const updateVocabCount = () => {
       if (!vocabInput || !vocabCount) return;
-      // Hard cap in JS too (not just the maxlength attr) so paste / IME / any
-      // path can't exceed it — Whisper only uses ~the last 224 tokens anyway.
-      if (vocabInput.value.length > VOCAB_MAX) {
-        vocabInput.value = vocabInput.value.slice(0, VOCAB_MAX);
+      // Coarse char backstop runs even before the tokenizer loads.
+      if (vocabInput.value.length > VOCAB_CHAR_BACKSTOP) {
+        vocabInput.value = vocabInput.value.slice(0, VOCAB_CHAR_BACKSTOP);
         this.config.whisper.initial_prompt = vocabInput.value;
       }
-      const n = vocabInput.value.length;
-      vocabCount.textContent = `${n} / ${VOCAB_MAX}`;
-      vocabCount.style.color = n >= VOCAB_MAX ? "var(--err)" : n > VOCAB_MAX - 100 ? "var(--warn)" : "var(--fg-faded)";
+      if (!vocabTok) {
+        // Tokenizer still loading — show a neutral placeholder, no token cap yet.
+        vocabCount.textContent = "… tokens";
+        vocabCount.style.color = "var(--fg-faded)";
+        return;
+      }
+      let tokens = vocabTok.encode(vocabInput.value);
+      if (tokens.length > VOCAB_MAX_TOKENS) {
+        // Hard cap: keep the first 224 tokens, decode back to text.
+        vocabInput.value = vocabTok.decode(tokens.slice(0, VOCAB_MAX_TOKENS));
+        this.config.whisper.initial_prompt = vocabInput.value;
+        tokens = vocabTok.encode(vocabInput.value);
+      }
+      const n = tokens.length;
+      vocabCount.textContent = `${n} / ${VOCAB_MAX_TOKENS} tokens`;
+      vocabCount.style.color =
+        n >= VOCAB_MAX_TOKENS ? "var(--err)" : n > VOCAB_MAX_TOKENS - 25 ? "var(--warn)" : "var(--fg-faded)";
     };
     vocabInput?.addEventListener("input", updateVocabCount);
     updateVocabCount();
+    void loadVocabTokenizer().then((m) => { vocabTok = m; updateVocabCount(); });
 
     // Curated STT model dropdown (+ "Other…" free-text) for cloud providers,
     // re-mounted whenever the provider changes so the list matches it.
