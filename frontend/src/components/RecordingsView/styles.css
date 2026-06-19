@@ -1317,6 +1317,16 @@ mark.search-hit {
   transform: translate(-50%, 0);
   pointer-events: auto;
 }
+/* Detail/transcript panes float it at the TOP-center instead of the bottom; it
+   still only appears after scrolling past the threshold. Hidden state sinks UP. */
+.back-to-top--top {
+  top: 16px;
+  bottom: auto;
+  transform: translate(-50%, -8px);
+}
+.back-to-top--top.visible {
+  transform: translate(-50%, 0);
+}
 .back-to-top:hover {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);

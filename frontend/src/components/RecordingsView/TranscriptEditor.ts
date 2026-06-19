@@ -80,6 +80,26 @@ export class TranscriptEditorElement extends LitElement {
     document.removeEventListener(VIM_SAVE_EVENT, this.vimSaveHandler);
   }
 
+  firstUpdated() {
+    // Forward wheel events from the overlaid Copy button to the transcript's own
+    // scroller. The button is position:absolute OUTSIDE `.cm-scroller`, so its
+    // native scroll target is the outer pane — meaning a wheel over the button at
+    // the editor's top corner would scroll the wrong thing (or nothing when only
+    // the transcript itself scrolls), a dead zone the user hit. Forwarding makes
+    // hovering the button behave like hovering the text.
+    this.querySelector<HTMLElement>(".btn-copy")
+      ?.addEventListener("wheel", this.forwardCopyWheel, { passive: false });
+  }
+
+  private forwardCopyWheel = (e: WheelEvent) => {
+    const sc = this.querySelector<HTMLElement>(".cm-scroller");
+    if (sc && sc.scrollHeight > sc.clientHeight + 1) {
+      sc.scrollTop += e.deltaY;
+      e.preventDefault();
+    }
+    // else: let the event bubble so the outer pane scrolls naturally.
+  };
+
   updated(changedProperties: PropertyValues) {
     if (changedProperties.has('initialText') && this.initialText !== changedProperties.get('initialText')) {
       if (!this.isDirty()) {

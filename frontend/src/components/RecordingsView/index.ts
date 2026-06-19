@@ -1912,7 +1912,9 @@ export class RecordingsView {
       if (!host) continue;
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "back-to-top";
+      // The detail/transcript panes show it at the TOP-center (the list keeps the
+      // familiar bottom-center placement).
+      btn.className = hostId === "rv-list" ? "back-to-top" : "back-to-top back-to-top--top";
       btn.title = "Back to top";
       btn.setAttribute("aria-label", "Back to top");
       btn.innerHTML =
