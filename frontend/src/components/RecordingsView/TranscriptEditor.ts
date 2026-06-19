@@ -81,23 +81,31 @@ export class TranscriptEditorElement extends LitElement {
   }
 
   firstUpdated() {
-    // Forward wheel events from the overlaid Copy button to the transcript's own
-    // scroller. The button is position:absolute OUTSIDE `.cm-scroller`, so its
-    // native scroll target is the outer pane — meaning a wheel over the button at
-    // the editor's top corner would scroll the wrong thing (or nothing when only
-    // the transcript itself scrolls), a dead zone the user hit. Forwarding makes
-    // hovering the button behave like hovering the text.
-    this.querySelector<HTMLElement>(".btn-copy")
-      ?.addEventListener("wheel", this.forwardCopyWheel, { passive: false });
+    // CodeMirror traps the wheel — especially when it's focused in keyboard mode:
+    // if its own content fits (or you're at its scroll boundary), the detail pane
+    // wouldn't scroll and you'd be stuck having to move the caret with vim keys.
+    // Forward the wheel to the detail pane in exactly those cases, so scrolling
+    // over the editor always works; let CodeMirror scroll its own content natively
+    // whenever it actually can. Covers the overlaid Copy button too (it lives in
+    // the wrap, outside `.cm-scroller`).
+    this.querySelector<HTMLElement>(".editor-wrap")
+      ?.addEventListener("wheel", this.onEditorWheel, { passive: false });
   }
 
-  private forwardCopyWheel = (e: WheelEvent) => {
+  private onEditorWheel = (e: WheelEvent) => {
+    const detail = this.closest<HTMLElement>(".detail");
+    if (!detail || detail.scrollHeight <= detail.clientHeight + 1) return;
     const sc = this.querySelector<HTMLElement>(".cm-scroller");
-    if (sc && sc.scrollHeight > sc.clientHeight + 1) {
-      sc.scrollTop += e.deltaY;
-      e.preventDefault();
+    // Over the transcript's own scroller AND it can still scroll that way →
+    // let CodeMirror handle it (native, smooth).
+    if (sc && sc.scrollHeight > sc.clientHeight + 1 && sc.contains(e.target as Node)) {
+      const atTop = sc.scrollTop <= 0;
+      const atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1;
+      if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) return;
     }
-    // else: let the event bubble so the outer pane scrolls naturally.
+    // Otherwise the editor would trap the wheel — scroll the detail pane instead.
+    detail.scrollTop += e.deltaY;
+    e.preventDefault();
   };
 
   updated(changedProperties: PropertyValues) {
