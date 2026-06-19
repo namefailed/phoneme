@@ -104,8 +104,13 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
   // Cap the control width to match the .cf connection blocks (580px) that sit
   // directly above each model field, so model pickers line up with their
   // provider/key rows instead of stretching the full 1fr column (A).
+  // background-COLOR (not the `background` shorthand) so the global `select`
+  // chevron survives — the shorthand resets background-image to none, leaving the
+  // dropdown with no arrow. The select needs extra right padding so its text never
+  // runs under that chevron.
   const inputStyle =
-    "flex:1; min-width:0; max-width:580px; border-radius:6px; padding:8px 10px; font-size: 0.9286rem; background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);";
+    "flex:1; min-width:0; max-width:580px; border-radius:6px; padding:8px 10px; font-size: 0.9286rem; background-color:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--fg-default);";
+  const selectStyle = `${inputStyle} padding-right:30px;`;
 
   const render = () => {
     if (mountTokens.get(host) !== token) return; // superseded by a newer mount
@@ -184,7 +189,7 @@ export function mountModelField(host: HTMLElement, opts: ModelFieldOpts): void {
 
     host.innerHTML = `
       <div style="display:flex; gap:8px; align-items:center;">
-        <select class="mf-select" aria-label="Model" style="${inputStyle}">${options}</select>
+        <select class="mf-select" aria-label="Model" style="${selectStyle}">${options}</select>
         ${opts.mode === "llm" ? `<button type="button" class="inline-button mf-refresh" style="padding:6px 10px;" ${loading ? "disabled" : ""} title="Fetch available models">↻ Refresh</button>` : ""}
       </div>
       ${status ? `<div style="margin-top:4px;">${status}</div>` : ""}`;

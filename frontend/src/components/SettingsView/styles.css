@@ -505,7 +505,10 @@ mark.settings-hit {
 .settings-field input,
 .settings-field select,
 .settings-field textarea {
-  background: var(--bg-surface);
+  /* background-COLOR, not the `background` shorthand — the shorthand resets
+     background-image to none, which strips the global `select` chevron from every
+     dropdown in Settings. */
+  background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 6px 10px;
@@ -518,6 +521,8 @@ mark.settings-hit {
 }
 .settings-field select {
   max-width: 400px;
+  /* Clear the chevron so option text never runs under it. */
+  padding-right: 30px;
 }
 .settings-field input[type="text"],
 .settings-field input[type="password"] {
@@ -1108,12 +1113,17 @@ select[data-key="daemon.log_level"] {
   flex: 1;
   min-width: 0;
   max-width: none;
-  background: var(--bg-surface);
+  /* background-COLOR, not the shorthand, so the global `select` chevron survives. */
+  background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 7px 10px;
   font-size: 0.9286rem;
   color: var(--fg-default);
+}
+/* Extra right padding on the provider select so its text clears the chevron. */
+.cf select {
+  padding-right: 30px;
 }
 .cf select:focus,
 .cf input:focus {
@@ -1311,6 +1321,39 @@ select[data-key="daemon.log_level"] {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
+  color: var(--fg-default);
+}
+/* The shared model picker + connection block style their fields lighter
+   (--bg-surface) to match the Transcription/Dictation/Post-Processing layouts.
+   Inside a Playbook entry the surrounding text fields are deep, so pull every
+   field in the entry editor — provider/key/endpoint and the model dropdown +
+   its free-text input — down to the same deep surface with a visible border, so
+   the whole editor reads as one family. !important beats the picker's inline
+   style; the .cf overrides win on specificity alone. */
+.pb-model-host .mf-select,
+.pb-model-host .mf-text {
+  background-color: var(--bg-deep) !important;
+  border-color: var(--border) !important;
+}
+.pb-conn-host .cf select,
+.pb-conn-host .cf input[type="text"],
+.pb-conn-host .cf input[type="password"] {
+  background-color: var(--bg-deep);
+  border-color: var(--border);
+}
+/* Duplicate / Reset-to-default ride on the deep field surface like every other
+   Settings inline button, not the lighter elevated default from RecordingsView —
+   keeps the whole entry editor one consistent family. */
+.pb-dup,
+.pb-reset {
+  background: var(--bg-deep);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.pb-dup:hover,
+.pb-reset:hover {
+  background: var(--border-subtle);
+  border-color: var(--accent);
   color: var(--fg-default);
 }
 .pb-prompt:focus,
