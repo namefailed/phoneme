@@ -458,8 +458,10 @@ mark.search-hit {
   background: var(--bg-elevated);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 6px;
-  padding: 5px 12px;
-  font-size: 0.8571rem;
+  /* A touch smaller than the primary action buttons — these are secondary,
+     "internal" view/version switches. */
+  padding: 4px 10px;
+  font-size: 0.8214rem;
   font-weight: 500;
   color: var(--fg-default);
   cursor: pointer;
@@ -506,8 +508,8 @@ mark.search-hit {
 .notes-editor-wrap { position: relative; }
 .notes-copy-overlay {
   position: absolute;
-  top: 8px;
-  right: 12px;
+  top: 4px;
+  right: 6px;
   z-index: 5;
   display: inline-flex;
   align-items: center;
@@ -523,15 +525,18 @@ mark.search-hit {
   color: var(--fg-muted);
   cursor: pointer;
   opacity: 0.2;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+/* Hidden while editing (focused); hovering the text reveals it fully lit. */
+.notes-editor-wrap:focus-within .notes-copy-overlay { opacity: 0; }
+.notes-editor-wrap:hover .notes-copy-overlay,
+.notes-editor-wrap .notes-copy-overlay:hover,
+.notes-editor-wrap .notes-copy-overlay:focus-visible,
+.notes-editor-wrap .notes-copy-overlay.copied {
+  opacity: 1;
 }
 .notes-editor-wrap:hover .notes-copy-overlay,
-.notes-editor-wrap:focus-within .notes-copy-overlay,
-.notes-copy-overlay:focus-visible {
-  opacity: 0.6;
-}
-.notes-copy-overlay:hover { opacity: 1; }
-.notes-copy-overlay.copied { opacity: 1; }
+.notes-editor-wrap .notes-copy-overlay:hover { color: var(--accent); }
 /* Speakers panel — one renamable row per diarized [Speaker N] label. Matches
    the transcript/notes boxes so it reads as part of the same stack. */
 .speakers-block {

@@ -349,14 +349,14 @@ export class TranscriptEditorElement extends LitElement {
           cursor: pointer;
           font-weight: bold;
         }
-        /* Copy is a bare icon overlaid at the text's top-right, web-page style.
-           Always present but very faded; lifts to a moderate opacity when the
-           text is hovered/focused (or under the keyboard cursor), and full on a
-           direct hover. No button chrome — just the glyph. */
+        /* Copy is a bare icon tucked into the text's top corner, web-page style.
+           Very faded at rest; HIDDEN while the box is focused (actually editing)
+           so it never sits over the text you're typing — but hovering the text
+           always reveals it, fully lit, even mid-edit. No button chrome. */
         ph-transcript-editor .btn-copy {
           position: absolute;
-          top: 8px;
-          right: 12px;
+          top: 4px;
+          right: 6px;
           z-index: 5;
           display: inline-flex;
           align-items: center;
@@ -372,16 +372,18 @@ export class TranscriptEditorElement extends LitElement {
           color: var(--fg-muted);
           cursor: pointer;
           opacity: 0.2;
-          transition: opacity 0.15s ease;
+          transition: opacity 0.15s ease, color 0.15s ease;
+        }
+        ph-transcript-editor .editor-wrap:focus-within .btn-copy { opacity: 0; }
+        ph-transcript-editor .editor-wrap:hover .btn-copy,
+        ph-transcript-editor .editor-wrap .btn-copy:hover,
+        ph-transcript-editor .editor-wrap .btn-copy:focus-visible,
+        ph-transcript-editor .editor-wrap .btn-copy.kbd-cursor,
+        ph-transcript-editor .editor-wrap .btn-copy.copied {
+          opacity: 1;
         }
         ph-transcript-editor .editor-wrap:hover .btn-copy,
-        ph-transcript-editor .editor-wrap:focus-within .btn-copy,
-        ph-transcript-editor .btn-copy:focus-visible,
-        ph-transcript-editor .btn-copy.kbd-cursor {
-          opacity: 0.6;
-        }
-        ph-transcript-editor .btn-copy:hover { opacity: 1; }
-        ph-transcript-editor .btn-copy.copied { opacity: 1; }
+        ph-transcript-editor .editor-wrap .btn-copy:hover { color: var(--accent); }
         /* "Edited" status badge — same footprint as Save, but a non-interactive
            accent-tinted pill so it reads as a marker, not an action. */
         ph-transcript-editor .edited-badge {
