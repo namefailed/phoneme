@@ -105,3 +105,45 @@ describe("SectionPlaybook — per-entry API key round-trips into config", () => 
     expect((config.playbook as Array<{ llm: { api_key: string } }>)[0].llm.api_key).toBe("edited-key");
   });
 });
+
+describe("SectionPlaybook — Hook entry trigger + required round-trip", () => {
+  it("writes keyword / case_sensitive / required back to the entry's hook", () => {
+    const config: Record<string, unknown> = {
+      playbook: [
+        {
+          id: "my_hook",
+          name: "My hook",
+          description: "",
+          builtin: false,
+          kind: "hook",
+          target: "",
+          llm: { provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 300 },
+          hook: { command: "echo hi", webhook_url: "", timeout_secs: 60, keyword: "", case_sensitive: false, required: false },
+        },
+      ],
+      recipes: [{ id: "default", name: "Default pipeline", description: "", builtin: true, steps: [] }],
+    };
+    const host = mount(config);
+    // Expand the entry so its Hook editor (and its field listeners) mount.
+    host.querySelector<HTMLButtonElement>(".pb-card .pb-expand")!.click();
+
+    const kw = host.querySelector<HTMLInputElement>(".pb-card .pb-hook-keyword");
+    const cs = host.querySelector<HTMLInputElement>(".pb-card .pb-hook-case");
+    const rq = host.querySelector<HTMLInputElement>(".pb-card .pb-hook-required");
+    expect(kw, "the Hook editor shows a keyword trigger input").not.toBeNull();
+    expect(cs, "the Hook editor shows a Match-case toggle").not.toBeNull();
+    expect(rq, "the Hook editor shows a Required toggle").not.toBeNull();
+
+    kw!.value = "Todo:";
+    kw!.dispatchEvent(new Event("input"));
+    cs!.checked = true;
+    cs!.dispatchEvent(new Event("change"));
+    rq!.checked = true;
+    rq!.dispatchEvent(new Event("change"));
+
+    const hook = (config.playbook as Array<{ hook: { keyword: string; case_sensitive: boolean; required: boolean } }>)[0].hook;
+    expect(hook.keyword).toBe("Todo:");
+    expect(hook.case_sensitive).toBe(true);
+    expect(hook.required).toBe(true);
+  });
+});

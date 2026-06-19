@@ -2536,3 +2536,64 @@ fn resolved_off_app_suppresses_pipeline_typing() {
         "an undetectable app falls back to the global type_mode"
     );
 }
+
+/// `run_hook_steps` (the recipe Hook executor) honors the keyword trigger and the
+/// `required` flag and reports an outcome. Exercised via the webhook half so it
+/// stays cross-platform (a loopback wiremock, no OS-specific shell command).
+#[tokio::test]
+async fn run_hook_steps_honors_trigger_and_required() {
+    use crate::pipeline::{run_hook_steps, ResolvedStep};
+    use phoneme_core::config::PlaybookHook;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mock = MockServer::start().await;
+    // Every POST 500s, so the webhook "fails".
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&mock)
+        .await;
+    let cfg = Config::default();
+    let state = test_state(tmp.path(), cfg.clone()).await;
+    let payload = HookPayload {
+        id: RecordingId::new(),
+        timestamp: chrono::Local::now(),
+        transcript: "hello world".into(),
+        audio_path: String::new(),
+        duration_ms: 0,
+        model: String::new(),
+        metadata: HookMetadata::current(),
+    };
+    let hook_step = |keyword: &str, required: bool| ResolvedStep::Hook {
+        hook: PlaybookHook {
+            webhook_url: mock.uri(),
+            keyword: keyword.to_string(),
+            required,
+            ..PlaybookHook::default()
+        },
+    };
+
+    // A keyword trigger that doesn't match the transcript → the hook is skipped
+    // (webhook never hit, nothing recorded).
+    let mut sf = None;
+    let out = run_hook_steps(&state, &cfg, &[hook_step("ABSENT", false)], &payload, &mut sf)
+        .await
+        .expect("a skipped hook is not an error");
+    assert!(!out.ran, "keyword miss is skipped");
+    assert!(sf.is_none(), "a skipped hook records no failure");
+
+    // Webhook fails, required = false → Ok; surfaced as a non-fatal step_failure.
+    let mut sf = None;
+    let out = run_hook_steps(&state, &cfg, &[hook_step("", false)], &payload, &mut sf)
+        .await
+        .expect("a non-required failure does not fail the recording");
+    assert!(out.ran, "the webhook hook was attempted");
+    assert!(
+        matches!(sf, Some((RecordingStatus::HookFailed, _))),
+        "a non-required webhook failure surfaces a HookFailed step_failure"
+    );
+
+    // Webhook fails, required = true → Err: the hook quarantines the recording.
+    let mut sf = None;
+    let res = run_hook_steps(&state, &cfg, &[hook_step("", true)], &payload, &mut sf).await;
+    assert!(res.is_err(), "a required webhook failure fails the recording");
+}

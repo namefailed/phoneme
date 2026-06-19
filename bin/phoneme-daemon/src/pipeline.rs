@@ -1735,12 +1735,12 @@ async fn run_hook_steps(
         // same way the legacy [hook] path did via cfg.expanded().
         let cmd = hook.command.trim();
         if !cmd.is_empty() {
+            out.ran = true;
+            out.last_label = cmd.to_string();
             let runner =
                 HookRunner::new(phoneme_core::config::expand_cmd(cmd), timeout);
             match runner.run(payload).await {
                 Ok(result) => {
-                    out.ran = true;
-                    out.last_label = cmd.to_string();
                     out.total_ms += result.duration_ms;
                     if result.exit_code != 0 {
                         if hook.required {
@@ -1763,6 +1763,9 @@ async fn run_hook_steps(
                     if hook.required {
                         return Err(e);
                     }
+                    if out.exit_code == 0 {
+                        out.exit_code = 1;
+                    }
                     tracing::warn!(command = %cmd, error = %e, "playbook hook failed to run");
                     step_failure.get_or_insert((RecordingStatus::HookFailed, e.to_string()));
                 }
@@ -1772,18 +1775,17 @@ async fn run_hook_steps(
         // Webhook half — same payload; the global [webhook] policy / SSRF guard.
         let url = hook.webhook_url.trim();
         if !url.is_empty() {
-            match state.webhook.post(url, timeout, payload, &cfg.webhook).await {
-                Ok(()) => {
-                    out.ran = true;
-                    out.last_label = format!("webhook: {url}");
+            out.ran = true;
+            out.last_label = format!("webhook: {url}");
+            if let Err(e) = state.webhook.post(url, timeout, payload, &cfg.webhook).await {
+                if hook.required {
+                    return Err(e);
                 }
-                Err(e) => {
-                    if hook.required {
-                        return Err(e);
-                    }
-                    tracing::warn!(url = %url, error = %e, "playbook webhook failed");
-                    step_failure.get_or_insert((RecordingStatus::HookFailed, e.to_string()));
+                if out.exit_code == 0 {
+                    out.exit_code = 1;
                 }
+                tracing::warn!(url = %url, error = %e, "playbook webhook failed");
+                step_failure.get_or_insert((RecordingStatus::HookFailed, e.to_string()));
             }
         }
     }
