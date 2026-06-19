@@ -119,7 +119,7 @@ followed.
 | `strip_titlebar` | `false` | Custom window chrome (no OS title bar). Turning it **on** applies live; turning it back **off** needs an app restart on Windows — the chrome mode is set once at Tauri init. |
 | `format_24h` | `false` | 24-hour timestamps |
 | `date_day_first` | `false` | Day column shows `DD/MM` instead of `MM/DD` |
-| `theme` | `catppuccin-mocha` | CSS theme id |
+| `theme` | `catppuccin-mocha` | CSS theme id. Dark: `catppuccin-mocha`, `catppuccin-macchiato`, `catppuccin-frappe`, `dracula`, `everforest`, `gruvbox`, `kanagawa`, `nord`, `one-dark`, `rose-pine`, `tokyo-night`. Light: `catppuccin-latte`, `gruvbox-light`, `rose-pine-dawn`, `solarized-light`, `tokyo-night-day`. (Defined in `frontend/src/styles/theme.css`.) |
 | `visible_columns` | day, time, duration, status, transcript | List columns |
 | `column_widths` | px/fr strings | Resizable column layout |
 | `preview_overlay` | `false` | Float the live preview in a system-wide, always-on-top overlay window (requires `recording.streaming_preview`) |

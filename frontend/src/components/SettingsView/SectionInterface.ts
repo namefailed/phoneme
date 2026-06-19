@@ -4,6 +4,38 @@ import { invoke } from "@tauri-apps/api/core";
 /** Default visible columns, used by the reset action. */
 const DEFAULT_VISIBLE_COLUMNS = ["day", "time", "duration", "status", "source", "transcript"];
 
+/** Theme picker catalog, grouped Dark / Light. Slugs match the
+ *  html[data-theme="…"] blocks in styles/theme.css; each is a faithful port of
+ *  an established palette. */
+const THEME_CATALOG: { group: string; themes: { value: string; label: string }[] }[] = [
+  {
+    group: "Dark",
+    themes: [
+      { value: "catppuccin-mocha", label: "Catppuccin Mocha" },
+      { value: "catppuccin-macchiato", label: "Catppuccin Macchiato" },
+      { value: "catppuccin-frappe", label: "Catppuccin Frappé" },
+      { value: "dracula", label: "Dracula" },
+      { value: "everforest", label: "Everforest" },
+      { value: "gruvbox", label: "Gruvbox" },
+      { value: "kanagawa", label: "Kanagawa" },
+      { value: "nord", label: "Nord" },
+      { value: "one-dark", label: "One Dark" },
+      { value: "rose-pine", label: "Rosé Pine" },
+      { value: "tokyo-night", label: "Tokyo Night" },
+    ],
+  },
+  {
+    group: "Light",
+    themes: [
+      { value: "catppuccin-latte", label: "Catppuccin Latte" },
+      { value: "gruvbox-light", label: "Gruvbox Light" },
+      { value: "rose-pine-dawn", label: "Rosé Pine Dawn" },
+      { value: "solarized-light", label: "Solarized Light" },
+      { value: "tokyo-night-day", label: "Tokyo Night Day" },
+    ],
+  },
+];
+
 /** Curated UI font choices. Empty value = the bundled default (Inter). The rest
  *  are families that ship with Windows (the primary target) plus common
  *  cross-platform picks, so a selection renders without installing anything. */
@@ -202,27 +234,16 @@ export class SectionInterface {
         <div class="settings-field">
           <label>Theme</label>
           <div>
-            ${renderField(
-              {
-                key: "interface.theme",
-                label: "Theme",
-                kind: "select",
-                options: [
-                  { value: "catppuccin-mocha",    label: "Catppuccin Mocha" },
-                  { value: "catppuccin-macchiato", label: "Catppuccin Macchiato" },
-                  { value: "dracula",              label: "Dracula" },
-                  { value: "everforest",           label: "Everforest" },
-                  { value: "gruvbox",              label: "Gruvbox" },
-                  { value: "nord",                 label: "Nord" },
-                  { value: "one-dark",             label: "One Dark" },
-                  { value: "rose-pine",            label: "Rosé Pine" },
-                  { value: "tokyo-night",          label: "Tokyo Night" },
-                  { value: "catppuccin-latte",     label: "Catppuccin Latte (Light)" },
-                  { value: "solarized-light",      label: "Solarized Light" },
-                ],
-              },
-              config.interface.theme,
-            )}
+            <select data-key="interface.theme">
+              ${THEME_CATALOG.map(
+                (g) => `<optgroup label="${g.group}">${g.themes
+                  .map(
+                    (t) =>
+                      `<option value="${t.value}" ${config.interface.theme === t.value ? "selected" : ""}>${t.label}</option>`,
+                  )
+                  .join("")}</optgroup>`,
+              ).join("")}
+            </select>
           </div>
         </div>
       </div>

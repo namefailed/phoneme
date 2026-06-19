@@ -1,3 +1,28 @@
+/*
+ * Theme palettes. Each theme sets the full token contract on
+ * html[data-theme="<slug>"]; the base block doubles as :root so the app has a
+ * sane default before a theme attribute is applied.
+ *
+ * Token roles (dark themes — light themes invert the depth ordering):
+ *   --bg-deep      deepest recessed inset / text-field background (darkest)
+ *   --bg-surface   mid layer / card background
+ *   --bg-elevated  main raised panel background (lightest of the three)
+ *   --border       clearly visible divider   --border-subtle  faint hairline
+ *   --fg-default   primary text  --fg-muted  secondary  --fg-faded  faint hints
+ *   --accent       signature accent   --accent-fg  legible text ON the accent
+ *   --ok/--warn/--err/--info  green / amber / red / blue-cyan status colors
+ *   --peach        the palette's ORANGE (Queued pill) — distinct from --warn
+ *   --kbd-cursor   keyboard-cursor glow: a palette-native hue COMPLEMENTARY to
+ *                  --accent (the roving glow lands on accent-colored controls,
+ *                  so it must stay distinct from the accent). Every theme sets
+ *                  its own.
+ *
+ * Every hex is a genuine value from the named palette's official spec; a few
+ * --fg-muted/--fg-faded tones are deliberately derived for readability where a
+ * palette ships no third text tier (noted inline).
+ */
+
+/* ── Dark: Catppuccin Mocha (the base/default) ──────────────────────────── */
 :root, html[data-theme="catppuccin-mocha"] {
   --bg-deep: #11111b;
   --bg-elevated: #1e1e2e;
@@ -13,23 +38,14 @@
   --warn: #f9e2af;
   --err: #f38ba8;
   --info: #89b4fa;
-  /* Orange — distinct from the amber `--warn`; used by the Queued status pill.
-     Defined on :root so every dark theme inherits a readable orange; the light
-     themes override it below for contrast. */
   --peach: #fab387;
-  /* Keyboard-cursor highlight color — DELIBERATELY NOT `--accent` (the roving
-     glow + rings land on accent-colored controls like the Play button, where an
-     accent-colored cursor vanishes). Each theme picks a palette-native hue that
-     is COMPLEMENTARY to its own accent — pretty and harmonious, but distinct
-     enough that you can always tell what's selected. EVERY theme block below
-     sets its own; this Mocha value (sapphire, vs the mauve accent) is the base. */
-  --kbd-cursor: #74c7ec;
-  /* Shared border for popups/dropdowns/modals — matches the subtle accent-tinted
-     border the buttons use. Defined once on :root; resolves var(--accent) per
-     theme at use time, so it stays correct across all themes. */
+  --kbd-cursor: #74c7ec; /* Sapphire — vs the Mauve accent */
+  /* Shared border for popups/dropdowns/modals; resolves var(--accent) per theme
+     at use time, so it stays correct across all themes. */
   --popup-border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
+/* ── Dark: Catppuccin Macchiato ─────────────────────────────────────────── */
 html[data-theme="catppuccin-macchiato"] {
   --bg-deep: #181926;
   --bg-elevated: #24273a;
@@ -45,63 +61,71 @@ html[data-theme="catppuccin-macchiato"] {
   --warn: #eed49f;
   --err: #ed8796;
   --info: #8aadf4;
-  --kbd-cursor: #7dc4e4; /* sapphire — vs the mauve accent */
+  --peach: #f5a97f;
+  --kbd-cursor: #7dc4e4; /* Sapphire — vs the Mauve accent */
 }
 
-html[data-theme="tokyo-night"] {
-  --bg-deep: #1a1b26;
-  --bg-elevated: #24283b;
-  --bg-surface: #1f2335;
-  --border: #3b4261;
-  --border-subtle: #2f354f;
-  --fg-default: #a9b1d6;
-  --fg-muted: #787c99;
-  --fg-faded: #565f89;
-  --accent: #7aa2f7;
-  --accent-fg: #1a1b26;
-  --ok: #9ece6a;
-  --warn: #e0af68;
-  --err: #f7768e;
-  --info: #7bc5e4;
-  --kbd-cursor: #bb9af7; /* magenta — vs the blue accent */
+/* ── Dark: Catppuccin Frappé ────────────────────────────────────────────── */
+html[data-theme="catppuccin-frappe"] {
+  --bg-deep: #232634;
+  --bg-elevated: #303446;
+  --bg-surface: #292c3c;
+  --border: #626880;
+  --border-subtle: #51576d;
+  --fg-default: #c6d0f5;
+  --fg-muted: #a5adce;
+  --fg-faded: #737994;
+  --accent: #ca9ee6;
+  --accent-fg: #232634;
+  --ok: #a6d189;
+  --warn: #e5c890;
+  --err: #e78284;
+  --info: #8caaee;
+  --peach: #ef9f76;
+  --kbd-cursor: #85c1dc; /* Sapphire — vs the Mauve accent */
 }
 
-html[data-theme="one-dark"] {
-  --bg-deep: #1e222b;
-  --bg-elevated: #282c34;
-  --bg-surface: #21252b;
-  --border: #3f4451;
-  --border-subtle: #2c313c;
-  --fg-default: #abb2bf;
-  --fg-muted: #828997;
-  --fg-faded: #5c6370;
-  --accent: #61afef;
-  --accent-fg: #1e222b;
-  --ok: #98c379;
-  --warn: #d19a66;
-  --err: #e06c75;
-  --info: #56b6c2;
-  --kbd-cursor: #c678dd; /* purple — vs the blue accent */
+/* ── Dark: Dracula ──────────────────────────────────────────────────────── */
+html[data-theme="dracula"] {
+  --bg-deep: #282a36;
+  --bg-elevated: #44475a;
+  --bg-surface: #282a36; /* Dracula ships only two dark tones (Background, Current Line) */
+  --border: #6272a4;
+  --border-subtle: #44475a;
+  --fg-default: #f8f8f2;
+  --fg-muted: #a8b2cc;  /* derived: Dracula has no secondary-text tone */
+  --fg-faded: #8b98b9;  /* derived: keeps faint text readable on the panels */
+  --accent: #ff79c6;
+  --accent-fg: #282a36;
+  --ok: #50fa7b;
+  --warn: #f1fa8c;
+  --err: #ff5555;
+  --info: #8be9fd;
+  --peach: #ffb86c;
+  --kbd-cursor: #8be9fd; /* Cyan — vs the Pink accent */
 }
 
-html[data-theme="nord"] {
-  --bg-deep: #2e3440;
-  --bg-elevated: #3b4252;
-  --bg-surface: #434c5e;
-  --border: #4c566a;
-  --border-subtle: #3b4252;
-  --fg-default: #eceff4;
-  --fg-muted: #d8dee9;
-  --fg-faded: #7b88a1;
-  --accent: #88c0d0;
-  --accent-fg: #2e3440;
-  --ok: #a3be8c;
-  --warn: #ebcb8b;
-  --err: #bf616a;
-  --info: #81a1c1;
-  --kbd-cursor: #b48ead; /* aurora purple — vs the frost-cyan accent */
+/* ── Dark: Everforest (Dark Medium) ─────────────────────────────────────── */
+html[data-theme="everforest"] {
+  --bg-deep: #232a2e;
+  --bg-elevated: #2d353b;
+  --bg-surface: #343f44;
+  --border: #475258;
+  --border-subtle: #3d484d;
+  --fg-default: #d3c6aa;
+  --fg-muted: #9da9a0;
+  --fg-faded: #7a8478;
+  --accent: #a7c080;
+  --accent-fg: #232a2e;
+  --ok: #a7c080;
+  --warn: #dbbc7f;
+  --err: #e67e80;
+  --info: #7fbbb3;
+  --peach: #e69875;
+  --kbd-cursor: #d699b6; /* Purple — vs the green accent */
 }
 
+/* ── Dark: Gruvbox (Dark Medium) ────────────────────────────────────────── */
 html[data-theme="gruvbox"] {
   --bg-deep: #282828;
   --bg-elevated: #3c3836;
@@ -117,63 +141,108 @@ html[data-theme="gruvbox"] {
   --warn: #fabd2f;
   --err: #fb4934;
   --info: #83a598;
-  --kbd-cursor: #8ec07c; /* aqua — vs the pink accent */
+  --peach: #fe8019;
+  --kbd-cursor: #8ec07c; /* Aqua — vs the pink accent */
 }
 
-html[data-theme="dracula"] {
-  --bg-deep: #282a36;
-  --bg-elevated: #44475a;
-  --bg-surface: #282a36;
-  --border: #6272a4;
-  --border-subtle: #44475a;
-  --fg-default: #f8f8f2;
-  --fg-muted: #a8b2cc;
-  --fg-faded: #8b98b9;
-  --accent: #ff79c6;
-  --accent-fg: #282a36;
-  --ok: #50fa7b;
-  --warn: #f1fa8c;
-  --err: #ff5555;
-  --info: #8be9fd;
-  --kbd-cursor: #8be9fd; /* cyan — vs the pink accent */
+/* ── Dark: Kanagawa (Wave) ──────────────────────────────────────────────── */
+html[data-theme="kanagawa"] {
+  --bg-deep: #1f1f28;
+  --bg-elevated: #363646;
+  --bg-surface: #2a2a37;
+  --border: #54546d;
+  --border-subtle: #2a2a37;
+  --fg-default: #dcd7ba;
+  --fg-muted: #c8c093;
+  --fg-faded: #727169;
+  --accent: #957fb8;
+  --accent-fg: #1f1f28;
+  --ok: #98bb6c;
+  --warn: #e6c384;
+  --err: #ff5d62;
+  --info: #7e9cd8;
+  --peach: #ffa066;
+  --kbd-cursor: #7aa89f; /* waveAqua — vs the oniViolet accent */
 }
 
-/* ── Dark: Everforest ───────────────────────────────────────────────────── */
-html[data-theme="everforest"] {
-  --bg-deep: #272e33;
-  --bg-elevated: #2d353b;
-  --bg-surface: #343f44;
-  --border: #475258;
-  --border-subtle: #3a464c;
-  --fg-default: #d3c6aa;
-  --fg-muted: #9da9a0;
-  --fg-faded: #7a8478;
-  --accent: #a7c080;
-  --accent-fg: #272e33;
-  --ok: #a7c080;
-  --warn: #dbbc7f;
-  --err: #e67e80;
-  --info: #7fbbb3;
-  --kbd-cursor: #d699b6; /* purple — vs the green accent */
+/* ── Dark: Nord ─────────────────────────────────────────────────────────── */
+html[data-theme="nord"] {
+  --bg-deep: #2e3440;
+  --bg-elevated: #3b4252;
+  --bg-surface: #434c5e;
+  --border: #4c566a;
+  --border-subtle: #3b4252;
+  --fg-default: #eceff4;
+  --fg-muted: #d8dee9;
+  --fg-faded: #7b88a1;  /* derived: Nord has no third dim-grey text tone */
+  --accent: #88c0d0;
+  --accent-fg: #2e3440;
+  --ok: #a3be8c;
+  --warn: #ebcb8b;
+  --err: #bf616a;
+  --info: #81a1c1;
+  --peach: #d08770;
+  --kbd-cursor: #b48ead; /* Aurora purple — vs the Frost-cyan accent */
+}
+
+/* ── Dark: One Dark ─────────────────────────────────────────────────────── */
+html[data-theme="one-dark"] {
+  --bg-deep: #1e222b;
+  --bg-elevated: #282c34;
+  --bg-surface: #21252b;
+  --border: #3f4451;
+  --border-subtle: #2c313c;
+  --fg-default: #abb2bf;
+  --fg-muted: #828997;
+  --fg-faded: #5c6370;
+  --accent: #61afef;
+  --accent-fg: #1e222b;
+  --ok: #98c379;
+  --warn: #e5c07b;  /* light-orange (amber) — distinct from the --peach orange */
+  --err: #e06c75;
+  --info: #56b6c2;
+  --peach: #d19a66;
+  --kbd-cursor: #c678dd; /* Purple — vs the blue accent */
 }
 
 /* ── Dark: Rosé Pine ────────────────────────────────────────────────────── */
 html[data-theme="rose-pine"] {
   --bg-deep: #191724;
-  --bg-elevated: #1f1d2e;
-  --bg-surface: #26233a;
-  --border: #44415a;
-  --border-subtle: #393552;
+  --bg-elevated: #26233a;
+  --bg-surface: #1f1d2e;
+  --border: #524f67;
+  --border-subtle: #403d52;
   --fg-default: #e0def4;
   --fg-muted: #908caa;
   --fg-faded: #6e6a86;
   --accent: #c4a7e7;
   --accent-fg: #191724;
-  --ok: #9ccfd8;
+  --ok: #9ccfd8;  /* Foam — Rosé Pine has no green; cyan is the success stand-in */
   --warn: #f6c177;
   --err: #eb6f92;
   --info: #31748f;
-  --kbd-cursor: #9ccfd8; /* foam — vs the iris accent */
+  --peach: #ebbcba;
+  --kbd-cursor: #9ccfd8; /* Foam — vs the Iris accent */
+}
+
+/* ── Dark: Tokyo Night ──────────────────────────────────────────────────── */
+html[data-theme="tokyo-night"] {
+  --bg-deep: #1a1b26;
+  --bg-elevated: #24283b;
+  --bg-surface: #1f2335;
+  --border: #3b4261;
+  --border-subtle: #292e42;
+  --fg-default: #a9b1d6;
+  --fg-muted: #737aa2;
+  --fg-faded: #565f89;
+  --accent: #7aa2f7;
+  --accent-fg: #1a1b26;
+  --ok: #9ece6a;
+  --warn: #e0af68;
+  --err: #f7768e;
+  --info: #7dcfff;
+  --peach: #ff9e64;
+  --kbd-cursor: #bb9af7; /* Magenta — vs the blue accent */
 }
 
 /* ── Light: Catppuccin Latte ────────────────────────────────────────────── */
@@ -193,7 +262,47 @@ html[data-theme="catppuccin-latte"] {
   --err: #d20f39;
   --info: #1e66f5;
   --peach: #fe640b;
-  --kbd-cursor: #209fb5; /* sapphire — vs the purple accent (light theme) */
+  --kbd-cursor: #209fb5; /* Sapphire — vs the Mauve accent (light) */
+}
+
+/* ── Light: Gruvbox Light (Medium) ──────────────────────────────────────── */
+html[data-theme="gruvbox-light"] {
+  --bg-deep: #d5c4a1;
+  --bg-elevated: #fbf1c7;
+  --bg-surface: #ebdbb2;
+  --border: #a89984;
+  --border-subtle: #bdae93;
+  --fg-default: #3c3836;
+  --fg-muted: #7c6f64;
+  --fg-faded: #928374;
+  --accent: #b16286;
+  --accent-fg: #fbf1c7;
+  --ok: #79740e;
+  --warn: #b57614;
+  --err: #9d0006;
+  --info: #076678;
+  --peach: #af3a03;
+  --kbd-cursor: #427b58; /* faded aqua — vs the purple accent (light) */
+}
+
+/* ── Light: Rosé Pine Dawn ──────────────────────────────────────────────── */
+html[data-theme="rose-pine-dawn"] {
+  --bg-deep: #f2e9e1;
+  --bg-elevated: #fffaf3;
+  --bg-surface: #faf4ed;
+  --border: #cecacd;
+  --border-subtle: #dfdad9;
+  --fg-default: #575279;
+  --fg-muted: #797593;
+  --fg-faded: #9893a5;
+  --accent: #907aa9;
+  --accent-fg: #faf4ed;
+  --ok: #56949f;  /* Foam — Dawn has no green; teal is the success stand-in */
+  --warn: #ea9d34;
+  --err: #b4637a;
+  --info: #286983;
+  --peach: #d7827e;
+  --kbd-cursor: #56949f; /* Foam — vs the Iris accent (light) */
 }
 
 /* ── Light: Solarized Light ─────────────────────────────────────────────── */
@@ -202,7 +311,7 @@ html[data-theme="solarized-light"] {
   --bg-elevated: #fdf6e3;
   --bg-surface: #eee8d5;
   --border: #93a1a1;
-  --border-subtle: #dfd6c3;
+  --border-subtle: #dfd6c3;  /* derived: Solarized has no tone between base2 and base3 */
   --fg-default: #657b83;
   --fg-muted: #839496;
   --fg-faded: #93a1a1;
@@ -213,6 +322,25 @@ html[data-theme="solarized-light"] {
   --err: #dc322f;
   --info: #2aa198;
   --peach: #cb4b16;
-  --kbd-cursor: #d33682; /* magenta — vs the blue accent (light theme) */
+  --kbd-cursor: #d33682; /* Magenta — vs the blue accent (light) */
 }
 
+/* ── Light: Tokyo Night Day ─────────────────────────────────────────────── */
+html[data-theme="tokyo-night-day"] {
+  --bg-deep: #c4c8da;
+  --bg-elevated: #e1e2e7;
+  --bg-surface: #d0d5e3;
+  --border: #a8aecb;
+  --border-subtle: #b7c1e3;
+  --fg-default: #3760bf;
+  --fg-muted: #848cb5;
+  --fg-faded: #a8aecb;
+  --accent: #2e7de9;
+  --accent-fg: #e1e2e7;
+  --ok: #587539;
+  --warn: #8c6c3e;
+  --err: #f52a65;
+  --info: #007197;
+  --peach: #b15c00;
+  --kbd-cursor: #9854f1; /* Magenta — vs the blue accent (light) */
+}

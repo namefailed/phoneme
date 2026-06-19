@@ -253,7 +253,7 @@ Provider *catalogs* live in [`services/llmProviders.ts`](../../frontend/src/serv
 
 ### 3.4 Theming
 
-Themes are pure CSS variables: [`styles/theme.css`](../../frontend/src/styles/theme.css) defines `:root` (Catppuccin Mocha, the default) plus one `html[data-theme="…"]` block per theme, each setting the same ~15 variables (`--bg-deep`, `--bg-surface`, `--bg-elevated`, `--fg-default`, `--fg-muted`, `--fg-faded`, `--accent`, `--border-subtle`, `--popup-border`, status colors…). App sets `data-theme` from `interface.theme` at startup and on every `config:saved`; the overlay window applies it independently.
+Themes are pure CSS variables: [`styles/theme.css`](../../frontend/src/styles/theme.css) defines `:root` (Catppuccin Mocha, the default) plus one `html[data-theme="…"]` block per theme (16 in all — 11 dark, 5 light), each setting the same 16-token contract: three background layers darkest→lightest (`--bg-deep` field / `--bg-surface` card / `--bg-elevated` panel), `--border` / `--border-subtle`, `--fg-default` / `--fg-muted` / `--fg-faded`, `--accent` / `--accent-fg`, status colors `--ok` / `--warn` / `--err` / `--info`, `--peach` (orange Queued pill, distinct from `--warn`), and `--kbd-cursor` (a palette-native hue complementary to `--accent`). `--popup-border` is defined once on `:root` and resolves `var(--accent)` per theme. Every hex is a genuine value from the named palette's official spec; a few `--fg-muted`/`--fg-faded` tones are deliberately derived where a palette ships no third text tier. To add a theme, append a `data-theme` block and an entry to `THEME_CATALOG` in `SectionInterface.ts`. App sets `data-theme` from `interface.theme` at startup and on every `config:saved`; the overlay window applies it independently.
 
 House idioms:
 

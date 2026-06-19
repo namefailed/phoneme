@@ -66,7 +66,9 @@ Enable and configure global combos for record, transcribe-in-place, and meeting 
 
 ![Interface settings](../screenshots/settings-interface.png)
 
-Theme (Catppuccin Mocha default), 24-hour time, visible list columns (reorderable / toggleable), column widths, title-bar stripping, vim navigation, and **animation speed** for pane show/hide (Off / Fast / Normal / Slow — Off makes the sidebar, detail-pane, and focus-mode toggles instant).
+Theme, 24-hour time, visible list columns (reorderable / toggleable), column widths, title-bar stripping, vim navigation, and **animation speed** for pane show/hide (Off / Fast / Normal / Slow — Off makes the sidebar, detail-pane, and focus-mode toggles instant).
+
+- **Theme** — pick from a grouped list of faithful ports of established palettes. **Dark:** Catppuccin Mocha (default), Catppuccin Macchiato, Catppuccin Frappé, Dracula, Everforest, Gruvbox, Kanagawa, Nord, One Dark, Rosé Pine, Tokyo Night. **Light:** Catppuccin Latte, Gruvbox Light, Rosé Pine Dawn, Solarized Light, Tokyo Night Day.
 
 - **UI font** (`interface.ui_font`) — a CSS font-family name (e.g. `Segoe UI`, `JetBrains Mono`); leave it empty to use the bundled default. An uninstalled choice falls back cleanly to the default stack.
 - **UI font size** (`interface.ui_font_size`) — the interface text size in px (10–24, default 14). The whole UI scales from this real root font-size — it's not a zoom, so spacing and boxes stay crisp.

@@ -396,6 +396,22 @@ trust boundary. Verified against current code.*
   toggle a meeting like the built-in meeting hotkey; the per-binding recipe/model
   overrides apply to Record / In-place hotkeys.)
 
+### Appearance & themes
+
+- [x] **Full theme palette pass + 5 new themes** — every built-in theme was audited
+  token-by-token against its palette's official spec and corrected where it had
+  drifted (Tokyo Night's non-canonical cyan, One Dark's amber/orange collision,
+  Everforest mixing hard+medium variants, Rosé Pine's two invented border greys and
+  an inverted depth order, and every dark theme that was silently inheriting
+  Catppuccin's orange for the Queued pill now uses its own palette's orange). Added
+  **Catppuccin Frappé** and **Kanagawa** (dark) and **Gruvbox Light**, **Rosé Pine
+  Dawn**, and **Tokyo Night Day** (light) — established palettes ported faithfully —
+  bringing the picker to 16 themes (11 dark, 5 light), now grouped Dark / Light.
+- [x] **Log viewer moved to System → Diagnostics** — the `hook.log` / `daemon.log`
+  viewer now lives next to the daemon log level instead of in the Integrations tab;
+  Integrations keeps a one-click "View logs in System →" cross-link for hook
+  debugging.
+
 ### Integration
 
 - [x] **In-app log viewer** — Settings → Destination & Integrations now has
