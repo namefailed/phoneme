@@ -264,6 +264,13 @@ allow_http = false
 # Empty (default) = signing off.
 hmac_secret = ""
 
+# How many times to RETRY a failed webhook POST (after the first attempt), with
+# exponential backoff (~250ms, 500ms, 1s, capped at 2s). Retries only TRANSIENT
+# failures — a timeout, connection error, HTTP 429, or 5xx; a 4xx (the receiver
+# refusing) and an SSRF-policy block fail immediately. Default 2 (up to 3
+# attempts); 0 disables retries.
+max_retries = 2
+
 # Extra HTTP headers attached to every outbound webhook POST (name = "value").
 # Use for receiver-specific auth/routing (e.g. Authorization, X-Api-Key). A
 # header colliding with one Phoneme controls (Content-Type, the signature

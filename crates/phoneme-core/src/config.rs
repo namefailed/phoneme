@@ -1305,6 +1305,10 @@ pub struct HookConfig {
     pub keyword_rules: Vec<KeywordRule>,
 }
 
+fn default_webhook_max_retries() -> u32 {
+    2
+}
+
 /// Network policy for the outbound webhook POST (`[webhook]` in config.toml).
 ///
 /// Phoneme is local-first: a webhook into THIS machine (n8n, Home Assistant, a
@@ -1351,6 +1355,14 @@ pub struct WebhookConfig {
     /// forge the signature.
     #[serde(default)]
     pub custom_headers: std::collections::BTreeMap<String, String>,
+    /// How many times to RETRY a failed webhook POST (after the first attempt),
+    /// with exponential backoff (~250 ms, 500 ms, 1 s, capped at 2 s). Retries
+    /// only a TRANSIENT failure — a timeout, a connection error, an HTTP 429, or
+    /// a 5xx; a 4xx (the receiver rejecting the request) and an SSRF-policy block
+    /// fail immediately, since retrying can't help. Default 2 (up to 3 attempts);
+    /// 0 disables retries.
+    #[serde(default = "default_webhook_max_retries")]
+    pub max_retries: u32,
 }
 
 impl std::fmt::Debug for WebhookConfig {
@@ -1365,6 +1377,7 @@ impl std::fmt::Debug for WebhookConfig {
                 "custom_headers",
                 &self.custom_headers.keys().collect::<Vec<_>>(),
             )
+            .field("max_retries", &self.max_retries)
             .finish()
     }
 }
@@ -1375,6 +1388,7 @@ impl PartialEq for WebhookConfig {
             && self.allow_http == other.allow_http
             && self.hmac_secret.expose_secret() == other.hmac_secret.expose_secret()
             && self.custom_headers == other.custom_headers
+            && self.max_retries == other.max_retries
     }
 }
 
@@ -1385,6 +1399,7 @@ impl Default for WebhookConfig {
             allow_http: false,
             hmac_secret: SecretString::from(String::new()),
             custom_headers: std::collections::BTreeMap::new(),
+            max_retries: default_webhook_max_retries(),
         }
     }
 }

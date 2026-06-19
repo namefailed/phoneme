@@ -95,6 +95,7 @@ followed.
 | `allow_http` | bool | `false` | Allow plain `http://` for **public** targets; otherwise public targets must be `https://` |
 | `hmac_secret` | string (secret) | `""` | Shared secret for HMAC-SHA256 signing of the POST body. Non-empty adds an `X-Phoneme-Signature: sha256=<hex>` header (HMAC over the exact body bytes) so the receiver can verify authenticity. Encrypted at rest (DPAPI), masked in the UI; empty = signing off. |
 | `custom_headers` | table | `{}` | Extra `name = "value"` headers on every webhook POST (e.g. `Authorization`). Entries colliding with a header Phoneme controls (`Content-Type`, the signature header) are ignored. |
+| `max_retries` | int | `2` | Retries (after the first attempt) for a failed webhook POST, with exponential backoff (~250 ms → 2 s cap). Retries only **transient** failures — a timeout, connection error, HTTP 429, or 5xx; a 4xx (the receiver refusing) and an SSRF-policy block fail immediately. `0` disables retries. |
 
 ---
 
