@@ -974,8 +974,10 @@ export class RecordingDetail {
           chip.className = "speaker-suggest";
           chip.style.cssText =
             "flex-basis:100%;display:flex;gap:6px;align-items:center;margin-top:4px;font-size:0.8214rem;color:var(--fg-muted);";
+          const pct = Math.round((s.score ?? 0) * 100);
           chip.innerHTML = `
-            <span>Sounds like <b style="color:var(--fg-default);">${escapeHtml(s.name)}</b>?</span>
+            <span>Sounds like <b style="color:var(--fg-default);">${escapeHtml(s.name)}</b>?
+              <span style="opacity:0.65;">· ${pct}% match</span></span>
             <button class="inline-button sp-suggest-yes" title="Use this name">✓ Yes</button>
             <button class="inline-button sp-suggest-no" title="Not them — don't suggest again">✗</button>`;
           rowEl.appendChild(chip);
