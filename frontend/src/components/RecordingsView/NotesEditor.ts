@@ -115,11 +115,13 @@ export class NotesEditor {
             ? `<span id="notes-vim-badge" style="color: var(--accent); font-size: 0.6429rem; border: 1px solid var(--accent); padding: 1px 4px; border-radius: 4px;">NORMAL</span>`
             : ""
         }
-        <button id="notes-copy-btn" title="Copy the notes to the clipboard" aria-label="Copy notes" style="display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; font-size: 0.9286rem; line-height: 1; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--fg-muted); opacity: 0.45; cursor: pointer; transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;">📋</button>
         <span style="flex: 1;"></span>
         <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.7857rem; cursor: pointer; font-weight: bold;">Save Changes</button>
       </div>
-      <div id="notes-cm-root" class="notes-cm-root"></div>
+      <div class="notes-editor-wrap">
+        <button id="notes-copy-btn" class="notes-copy-overlay" title="Copy the notes to the clipboard" aria-label="Copy notes">📋</button>
+        <div id="notes-cm-root" class="notes-cm-root"></div>
+      </div>
     `;
 
     const root = this.container.querySelector<HTMLElement>("#notes-cm-root");

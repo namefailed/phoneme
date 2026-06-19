@@ -62,6 +62,11 @@ export class SectionAdvanced {
           <div><button class="inline-button" id="rerun-wizard">Rerun First Run Wizard</button></div>
           <span>Walk through the guided setup again — transcription engine, AI cleanup, auto-summary, and live preview. Re-downloads the whisper-server and any missing models.</span>
         </div>
+        <div class="settings-field">
+          <label>Support Phoneme</label>
+          <div><button class="inline-button" id="open-kofi">☕ Support on Ko-fi</button></div>
+          <span>Phoneme is free and built by one person. If it's useful to you, a tip on Ko-fi helps keep it going — entirely optional, and thank you. ❤️</span>
+        </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
@@ -81,6 +86,15 @@ export class SectionAdvanced {
     container.querySelector("#rerun-wizard")?.addEventListener("click", async () => {
       if (this.onNavigateToWizard) {
         this.onNavigateToWizard();
+      }
+    });
+
+    container.querySelector("#open-kofi")?.addEventListener("click", async () => {
+      try {
+        const { open } = await import("@tauri-apps/plugin-shell");
+        await open("https://ko-fi.com/Q0X520YFU1");
+      } catch (e) {
+        console.error("Failed to open Ko-fi link:", e);
       }
     });
   }

@@ -453,12 +453,15 @@ mark.search-hit {
 .view-btn {
   flex: 0 0 auto;
   white-space: nowrap;
+  /* Match the standard inline buttons (accent-40% border, readable text,
+     weight 500) instead of the old muted, thinner-bordered variant. */
   background: var(--bg-elevated);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 6px;
-  padding: 4px 9px;
-  font-size: 0.7857rem;
-  color: var(--fg-muted);
+  padding: 5px 12px;
+  font-size: 0.8571rem;
+  font-weight: 500;
+  color: var(--fg-default);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -498,6 +501,37 @@ mark.search-hit {
 .notes-block:focus-within {
   border-color: var(--kbd-cursor);
 }
+/* Notes Copy — same web-page-style icon overlay as the transcript box: a bare,
+   very-faded glyph at the text's top-right that lifts on hover/focus. */
+.notes-editor-wrap { position: relative; }
+.notes-copy-overlay {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0.2;
+  transition: opacity 0.15s ease;
+}
+.notes-editor-wrap:hover .notes-copy-overlay,
+.notes-editor-wrap:focus-within .notes-copy-overlay,
+.notes-copy-overlay:focus-visible {
+  opacity: 0.6;
+}
+.notes-copy-overlay:hover { opacity: 1; }
+.notes-copy-overlay.copied { opacity: 1; }
 /* Speakers panel — one renamable row per diarized [Speaker N] label. Matches
    the transcript/notes boxes so it reads as part of the same stack. */
 .speakers-block {
@@ -926,9 +960,9 @@ mark.search-hit {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  /* Hug the items — no stray right/bottom deadspace. */
+  /* Hug the items — width = widest option, no stray right-edge deadspace. */
   width: max-content;
-  min-width: 132px;
+  min-width: 0;
   padding: 4px;
   background: var(--bg-elevated);
   border: var(--popup-border, 1px solid var(--border-subtle));

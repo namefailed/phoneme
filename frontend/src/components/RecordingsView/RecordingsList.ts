@@ -799,23 +799,27 @@ export class RecordingsListElement extends LitElement {
     }
     let activeWidths = this.currentWidths;
     if (!activeWidths || activeWidths.length !== visibleCols.length) {
+      // Sensible per-column defaults sized to what each typically holds: a star,
+      // a date/time, a short duration, a status pill (up to "Hook Running"), a
+      // title, a couple of tag chips, model names (e.g. whisper-large-v3-turbo),
+      // boolean badges, a source label. Transcript takes the rest (1fr).
       const defaults: Record<string, string> = {
         favorite: "40px",
-        day: "85px",
-        time: "94px",
-        duration: "84px",
-        status: "89px",
-        title: "180px",
-        tags: "100px",
-        model: "120px",
-        cleanup_model: "120px",
-        summary_model: "120px",
-        title_model: "120px",
-        tag_model: "120px",
-        diarization_model: "120px",
-        diarized: "60px",
-        user_edited: "60px",
-        source: "70px",
+        day: "96px",
+        time: "96px",
+        duration: "88px",
+        status: "128px",
+        title: "220px",
+        tags: "140px",
+        model: "150px",
+        cleanup_model: "150px",
+        summary_model: "150px",
+        title_model: "150px",
+        tag_model: "150px",
+        diarization_model: "150px",
+        diarized: "64px",
+        user_edited: "72px",
+        source: "84px",
         transcript: "1fr",
       };
       // Widths are keyed by column NAME (localStorage), so each column keeps its

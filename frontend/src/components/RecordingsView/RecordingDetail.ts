@@ -291,7 +291,7 @@ export class RecordingDetail {
             <div class="th-group th-right">
               <span class="th-dropdown">
                 <button class="view-btn th-trigger" id="views-trigger" aria-haspopup="menu" aria-expanded="false" title="Alternate views of this recording — summary, timeline, synced words">Views ${CHEVRON_SVG}</button>
-                <div class="th-menu" id="views-menu" role="menu" hidden>
+                <div class="th-menu th-menu--right" id="views-menu" role="menu" hidden>
                   <button class="view-btn th-menu-item" id="view-summary" title="AI summary of this recording">📝 Summary</button>
                   <button class="view-btn th-menu-item" id="view-timeline" title="The transcript as a clickable timeline — click a line to jump playback there">🕒 Timeline</button>
                   <button class="view-btn th-menu-item" id="view-synced" title="The machine transcript as clickable words — click any word to jump playback there; the word under the playhead stays highlighted (read-only)">🔤 Synced</button>
@@ -299,7 +299,7 @@ export class RecordingDetail {
               </span>
               <span class="th-dropdown">
                 <button class="view-btn th-trigger" id="versions-trigger" aria-haspopup="menu" aria-expanded="false" title="Other versions of this transcript — compare, raw machine, pre-edit">Versions ${CHEVRON_SVG}</button>
-                <div class="th-menu" id="versions-menu" role="menu" hidden>
+                <div class="th-menu th-menu--right" id="versions-menu" role="menu" hidden>
                   <button class="view-btn th-menu-item" id="view-compare" title="Compare any two transcript versions side by side">🆚 Compare</button>
                   <button class="view-btn th-menu-item" id="view-original" title="The raw machine transcript, before AI cleanup">📃 Original</button>
                   <button class="view-btn th-menu-item" id="view-unedited" title="The transcript as transcribed + cleaned, before you edited it">📄 Unedited</button>
