@@ -147,7 +147,9 @@ export class SettingsViewElement extends LitElement {
 
   // Public so an opener (e.g. the Re-run "Enable cleanup in Settings" shortcut)
   // can deep-link to a tab; also mutated internally by switchTab.
-  @property({ type: String }) activeTab: string = "transcription";
+  // Opens to the first rail tab (Appearance) by default; an opener can still
+  // deep-link to any tab via the `phoneme:navigate` section field / switchTab.
+  @property({ type: String }) activeTab: string = "appearance";
   @state() private config: any = null;
   @state() private searchQuery: string = "";
   /** In-panel ⚙ Settings split-button dropdown (mirrors the header's) (L). */
@@ -389,20 +391,22 @@ export class SettingsViewElement extends LitElement {
       { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
       { tab: "managers/playbook", label: "Playbook", mount: (h) => { new SectionPlaybook(h, c); } },
+      // Search tab: saved searches first, then the semantic-search engine settings.
+      { tab: "search", label: "Search", mount: (h) => { new SectionSavedSearches(h, c); } },
       { tab: "search", label: "Search", mount: (h) => { new SectionSemantic(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionInterface(h, c); } },
       { tab: "appearance", label: "Appearance", mount: (h) => { new SectionEditor(h, c); } },
       // Managers (each its own rail entry under the "Managers" group).
       { tab: "managers/tags", label: "Tags", mount: (h) => { new SectionTags(h, c); } },
       { tab: "managers/profiles", label: "Profiles", mount: (h) => { new SectionProfiles(h, c); } },
-      { tab: "search", label: "Search", mount: (h) => { new SectionSavedSearches(h, c); } },
       // Integrations tab — inbound automation (REST + MCP) shown FIRST, then the
       // outbound hooks/webhooks below it.
       { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionIntegrations(h, c); } },
       { tab: "managers/hooks", label: "Integrations", mount: (h) => { new SectionHook(h, c); } },
       { tab: "managers/keybinds", label: "Hotkeys", mount: (h) => { new SectionHotkeys(h, c); } },
-      { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
+      // System tab: Startup & tray first, then storage, then diagnostics/advanced.
       { tab: "system", label: "System", mount: (h) => { new SectionTray(h, c); } },
+      { tab: "system", label: "System", mount: (h) => { new SectionStorage(h, c); } },
       { tab: "system", label: "System", mount: (h) => { new SectionAdvanced(h, c, this.onNavigateToWizard); } },
     ];
   }
