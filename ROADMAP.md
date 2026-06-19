@@ -55,19 +55,16 @@ The committed work that's in flight or immediately next. This is the active work
 ### Diarization quality
 *The prerequisite for trustworthy Meetings — don't build naming UX on wrong labels.*
 
-- 🔨 **Expose `PipelineConfig` tunables** — surface speakrs `merge_gap` / `speaker_keep_threshold` in Settings via `run_with_config` (the pipeline uses `default_config` today). Cache invalidates on change. *(Not a Cpu/CpuFast toggle — that mode doesn't exist on Windows/CPU.)*
-- 🔨 **Selectable local diarization models** — a `diarization.models_dir` override (`PipelineBuilder::from_dir`) with a Settings field + Doctor check; later, curated alternative bundles in the wizard (pinned SHA-256, after verifying ONNX shapes match speakrs).
-- 🔨 **Automatic named-speaker recognition** ⚠️ *(builds on the embeddings substrate)* — aggregate per-cluster voiceprint centroids, persist per name, cosine-match on later recordings. Manual rename already ships; this makes it stick across recordings.
-- 🔨 **DER eval harness** — an RTTM fixture set + a dev-only harness behind speakrs's `_metrics` feature, wired as an optional nightly job (not a release gate).
+- 🔨 **Automatic named-speaker recognition** ⚠️ *(builds on the embeddings substrate)* — aggregate per-cluster voiceprint centroids, persist per name, cosine-match on later recordings. Manual rename already ships; this makes it stick across recordings. *(Needs real multi-speaker recordings to tune the match threshold — implementation, then a native test pass.)*
+- 🔨 **DER eval harness** — an RTTM fixture set + a dev-only harness behind speakrs's `_metrics` feature (or a reimplemented collar-0 DER), wired as an optional nightly job (not a release gate).
+- 🔬 **Curated diarization model bundles** — selectable alternative speakrs bundles in the setup wizard (pinned SHA-256, after verifying ONNX shapes match). *(The `diarization.models_dir` override that loads a custom bundle already ships; this is the curated-catalog half.)*
 
 ### Dictation
-- 🔨 **Streaming-type spike** — type words as they finalize instead of all-at-end (corrections vs. cursor-churn trade-off). A reserved `in_place.stream_type` no-op flag already exists; this is the experiment that decides whether it ships. *(All other in-place phase-2 work — voice commands, per-app delivery, app-aware context, the waveform overlay — has shipped.)*
+- 🔨 **Streaming-type spike** — type words as they finalize instead of all-at-end (corrections vs. cursor-churn trade-off). A reserved `in_place.stream_type` no-op flag already exists; this is the experiment that decides whether it ships. Inherently needs native typing-into-real-apps testing — the *feel* is the deliverable. *(All other in-place phase-2 work — voice commands, per-app delivery, app-aware context, the waveform overlay — has shipped.)*
 
 ### Foundation & tech-debt
-- 🔨 **Integration + E2E test coverage** — the biggest untested critical path: a synthetic-audio E2E for the single-recording path (incl. track-from-source), the full transcribe → LLM → hooks → webhook → catalog pipeline, and meeting capture.
-- 🔨 **Webhook resilience** — retry/backoff + rate limiting / circuit breakers for external services (OpenAI, Ollama, webhooks).
 - 🔨 **Replace remaining `unwrap()`** in production paths (recorder source opens, remaining hot paths); the model-override readiness race (audit A2-M7).
-- 🔨 **Small decisions & wiring** — Quick-Switcher "Save as default" recipe-awareness · Doctor: skip/downgrade local-whisper checks when a cloud STT provider is configured · configurable webhook trigger point (before/after/independent) · per-item failed-quarantine dismiss · persist saved searches in the catalog (webview today).
+- 🔬 **Quick-Switcher recipe-awareness** — let the header "Save as default" quick switcher surface (and switch) the active recipe, not just the model. *(Needs a small design pass — normal recordings always run the fixed `default` recipe today, so it isn't yet clear what this would set.)*
 
 ---
 
