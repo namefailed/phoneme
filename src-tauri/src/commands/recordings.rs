@@ -211,6 +211,7 @@ pub async fn retranscribe_recording(
     run_hooks: Option<bool>,
     post_process: Option<bool>,
     all_overrides: Option<phoneme_ipc::RerunAllOverrides>,
+    recipe_id: Option<String>,
 ) -> Result<Value, CommandError> {
     let id = parse_id(&id)?;
     forward(
@@ -221,6 +222,7 @@ pub async fn retranscribe_recording(
             run_hooks,
             post_process,
             all_overrides,
+            recipe_id,
         },
     )
     .await

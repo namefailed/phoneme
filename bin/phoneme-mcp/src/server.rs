@@ -342,6 +342,7 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
+                recipe_id: None,
             }]
         );
     }

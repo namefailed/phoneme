@@ -257,6 +257,7 @@ impl Tool for StartRecording {
             in_place: false,
             recipe_id: None,
             whisper_model: None,
+            source: None,
         })
     }
 }
@@ -434,6 +435,7 @@ impl Tool for Retranscribe {
             run_hooks: None,
             post_process: None,
             all_overrides: None,
+            recipe_id: None,
         })
     }
 }
@@ -624,7 +626,8 @@ mod tests {
                 mode: RecordMode::Oneshot,
                 in_place: false,
                 recipe_id: None,
-                whisper_model: None
+                whisper_model: None,
+                source: None,
             }
         );
         assert_eq!(
@@ -634,7 +637,8 @@ mod tests {
                 mode: RecordMode::Hold,
                 in_place: false,
                 recipe_id: None,
-                whisper_model: None
+                whisper_model: None,
+                source: None,
             }
         );
         assert!(matches!(
@@ -767,6 +771,7 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
+                recipe_id: None,
             }
         );
         // A model → Some override.
@@ -782,6 +787,7 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
+                recipe_id: None,
             }
         );
     }

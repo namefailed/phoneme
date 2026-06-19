@@ -338,6 +338,13 @@ pub enum Request {
         /// config. `None` = a plain re-transcription (existing behavior).
         #[serde(default)]
         all_overrides: Option<RerunAllOverrides>,
+        /// One-time Playbook recipe override for this re-run: the recipe id whose
+        /// chain the re-transcribed recording runs (its post-processing pipeline).
+        /// `None`/empty = the global `default` recipe. Recorded in `pending_recipe`
+        /// for this job only — never persisted — exactly like a custom hotkey's
+        /// recipe override (see [`Request::RecordStart::recipe_id`]).
+        #[serde(default)]
+        recipe_id: Option<String>,
     },
     /// Re-run the configured hook(s) — or one specific `command` — against a
     /// recording's already-stored transcript, without re-transcribing (a

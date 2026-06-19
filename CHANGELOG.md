@@ -356,6 +356,13 @@ trust boundary. Verified against current code.*
 
 ### Playbook & Custom Hotkeys
 
+- [x] **Re-run through a recipe** — the Re-run / Quick-Model-Switcher modal now
+  has a **Recipe to run** picker in Re-run mode: re-run a recording through any
+  Playbook recipe (the chain that owns cleanup / title / summary / tags / hooks),
+  not just the default. The per-step model tabs still layer one-time overrides on
+  top of whichever recipe you pick. Plumbed via a new `recipe_id` on the
+  `RetranscribeRecording` IPC, recorded per-job in the recipe ledger and never
+  persisted — the same mechanism a custom hotkey's recipe uses.
 - [x] **Per-keybind audio source** — a custom hotkey can now pick its capture
   source (microphone or system audio) independently of the global
   `[recording].source`, so you can keep one hotkey for a quick mic note and another

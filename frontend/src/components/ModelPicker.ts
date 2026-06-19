@@ -88,6 +88,11 @@ export class ModelPickerElement extends LitElement {
   }
 
   @state() private activeTab: MpTab = "transcription";
+  /** Playbook recipes available to a "Run once" re-run (id + display name). */
+  @state() private recipes: { id: string; name: string }[] = [];
+  /** Recipe chosen for this Re-run; "" = the global default pipeline. Only used
+   *  in "oneshot" mode (a Re-run); the Quick Switcher's defaults mode ignores it. */
+  @state() private recipeId = "";
   @state() private downloadedModels: string[] = [];
   @state() private sttRealProvider = "local";
   @state() private sttUrl = "";
@@ -356,6 +361,9 @@ export class ModelPickerElement extends LitElement {
 
   private initFromConfig() {
     if (!this.config) return;
+    this.recipes = Array.isArray(this.config.recipes)
+      ? (this.config.recipes as { id: string; name: string }[])
+      : [];
     const w = this.config.whisper || {};
     const l = this.config.llm_post_process || {};
 
@@ -524,6 +532,7 @@ export class ModelPickerElement extends LitElement {
     const payload: RerunPayload = {
       step: "all",
       model: transcriptionModel || null,
+      recipeId: this.recipeId.trim() || null,
       overrides: llmOn
         ? {
             cleanupProvider: this.llmRealProvider || null,
@@ -587,6 +596,21 @@ export class ModelPickerElement extends LitElement {
                 : "Quick model switch"
             }</h3>
           </div>
+
+          ${this.activeMode === "oneshot"
+            ? html`
+              <div class="mp-recipe-bar" style="padding: 4px 4px 10px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 8px;">
+                <label class="mp-label" for="mp-recipe">Recipe to run</label>
+                <select id="mp-recipe" class="mp-input" .value=${this.recipeId}
+                  @change=${(e: Event) => this.recipeId = (e.target as HTMLSelectElement).value}>
+                  <option value="" ?selected=${this.recipeId === ""}>Default pipeline</option>
+                  ${this.recipes
+                    .filter((r) => r.id !== "default")
+                    .map((r) => html`<option value=${r.id} ?selected=${r.id === this.recipeId}>${r.name || r.id}</option>`)}
+                </select>
+                <p class="mp-hint">The Playbook chain this re-run applies (cleanup, title, summary, tags, hooks). <b>Default pipeline</b> = whatever normal recordings run. The model tabs below layer one-time overrides on top of whichever recipe you pick. Build chains in <b>Settings → Playbook</b>.</p>
+              </div>`
+            : ""}
 
           <div class="mp-tabs" role="tablist">
             <button class="mp-tab ${this.activeTab === 'transcription' ? 'active' : ''}" @click=${() => this.activeTab = 'transcription'} role="tab">Transcription</button>

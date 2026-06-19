@@ -459,6 +459,8 @@ pub fn build_request(name: &str, arguments: &Value) -> Result<Request, ToolError
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
+
+                recipe_id: None,
             })
         }
         "more_like_this" => {
@@ -1042,6 +1044,8 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
+
+                recipe_id: None,
             }
         );
         // A model → Some override.
@@ -1057,6 +1061,8 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
+
+                recipe_id: None,
             }
         );
     }

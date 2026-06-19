@@ -797,6 +797,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             run_hooks,
             post_process,
             all_overrides,
+            recipe_id,
         } => match state.catalog.get(&id).await {
             Ok(Some(r)) => {
                 // A per-recording model override is NO LONGER written into the
@@ -825,6 +826,22 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .insert(id.clone(), m.to_string());
+                    }
+                }
+                // One-time recipe override (Re-run → "Run with recipe"): record the
+                // chosen Playbook recipe against this id; `pipeline::run` claims it
+                // from `pending_recipe` and resolves that chain instead of the
+                // global `default`. Empty clears any stale request, like the model.
+                if let Some(rid) = recipe_id {
+                    let rid = rid.trim();
+                    let mut map = state
+                        .pending_recipe
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if rid.is_empty() {
+                        map.remove(&id);
+                    } else {
+                        map.insert(id.clone(), rid.to_string());
                     }
                 }
                 // The one-time LLM/hook overrides (hooks toggle, post-processing
@@ -893,6 +910,11 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                             .remove(&id);
                         state
                             .pending_all_overrides
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&id);
+                        state
+                            .pending_recipe
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .remove(&id);
@@ -2569,6 +2591,7 @@ mod tests {
                 run_hooks: None,
                 post_process: None,
                 all_overrides: None,
+                recipe_id: None,
             },
             &state,
         )
@@ -2650,6 +2673,7 @@ mod tests {
                 run_hooks: Some(false),
                 post_process: Some(false),
                 all_overrides: None,
+                recipe_id: None,
             },
             &state,
         )

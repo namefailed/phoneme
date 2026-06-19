@@ -24,7 +24,7 @@ export type RerunPayload =
   | { step: "transcribe"; model: string | null; runHooks: boolean; postProcess: boolean }
   | { step: "cleanup"; model: string | null; provider: string | null; prompt: string | null; apiUrl: string | null; apiKey: string | null }
   | { step: "summarize"; model: string | null; prompt: string | null }
-  | { step: "all"; model: string | null; overrides: RerunAllParams | null }
+  | { step: "all"; model: string | null; overrides: RerunAllParams | null; recipeId?: string | null }
   | { step: "hook"; command: string | null };
 
 /** Apply a Re-run payload to a single recording id. */
@@ -40,9 +40,10 @@ export async function applyRerun(id: string, p: RerunPayload): Promise<void> {
       await rerunSummary(id, p.model, p.prompt);
       break;
     case "all":
-      // Re-fire the whole pipeline: re-transcribe, then cleanup, auto-summary,
-      // and hooks (all forced on). `overrides` carries one-time cleanup/summary
-      // settings; null = use the configured pipeline.
+      // Re-fire the whole pipeline: re-transcribe, then run the chosen Playbook
+      // recipe (or the default), forcing cleanup/summary/hooks on. `overrides`
+      // carries one-time cleanup/summary settings layered on top; `recipeId`
+      // picks the recipe to run (null/empty = the global default recipe).
       await retranscribeRecording(id, p.model, true, true, p.overrides ? {
         cleanup_provider: p.overrides.cleanupProvider,
         cleanup_model: p.overrides.cleanupModel,
@@ -51,7 +52,7 @@ export async function applyRerun(id: string, p: RerunPayload): Promise<void> {
         summary_model: p.overrides.summaryModel,
         summary_prompt: p.overrides.summaryPrompt,
         title_model: p.overrides.titleModel,
-      } : null);
+      } : null, p.recipeId ?? null);
       break;
     case "hook":
       await refireHook(id, p.command);

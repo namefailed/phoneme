@@ -455,8 +455,9 @@ export async function retranscribeRecording(
   runHooks: boolean | null = null,
   postProcess: boolean | null = null,
   allOverrides: RerunAllOverrides | null = null,
+  recipeId: string | null = null,
 ): Promise<void> {
-  await tauriInvoke("retranscribe_recording", { id, model, runHooks, postProcess, allOverrides });
+  await tauriInvoke("retranscribe_recording", { id, model, runHooks, postProcess, allOverrides, recipeId });
 }
 
 /**

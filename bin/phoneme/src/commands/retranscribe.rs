@@ -51,6 +51,7 @@ pub async fn run(args: RetranscribeArgs, cfg: &Config) -> ExitCode {
             run_hooks,
             post_process,
             all_overrides: None,
+            recipe_id: None,
         })
         .await
     {
