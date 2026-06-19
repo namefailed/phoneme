@@ -363,14 +363,11 @@ let config: Record<string, unknown> = {
   hotkeys: [
     // Disabled-by-default examples showing recipe-bearing custom hotkeys.
     { id: "example-journal", label: "Example: journal note", enabled: false, combo: "Ctrl+Alt+J", mode: "hold", action: "record",
-      recipe_id: "journal_note", whisper_model: "", pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
-      hooks: [], in_place: { full_pipeline: false, type_mode: "type" } },
+      recipe_id: "journal_note", whisper_model: "", in_place: { full_pipeline: false, type_mode: "type" } },
     { id: "example-prompt", label: "Example: dictate → prompt", enabled: false, combo: "Ctrl+Alt+P", mode: "hold", action: "in_place",
-      recipe_id: "prompt_capture", whisper_model: "", pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
-      hooks: [], in_place: { full_pipeline: true, type_mode: "type" } },
+      recipe_id: "prompt_capture", whisper_model: "", in_place: { full_pipeline: true, type_mode: "type" } },
     { id: "example-meeting-notes", label: "Example: meeting notes", enabled: false, combo: "Ctrl+Alt+M", mode: "hold", action: "record",
-      recipe_id: "meeting_notes", whisper_model: "", pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
-      hooks: [], in_place: { full_pipeline: false, type_mode: "type" } },
+      recipe_id: "meeting_notes", whisper_model: "", in_place: { full_pipeline: false, type_mode: "type" } },
   ],
   playbook: [
     { id: "cleanup", name: "Cleanup", description: "Tidy stutters, repetitions, and phonetic slips while keeping the original tone.", builtin: true, kind: "transform", target: "",

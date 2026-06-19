@@ -1459,37 +1459,6 @@ pub enum HotkeyAction {
     Meeting,
 }
 
-/// Which AI pipeline steps run for a recording captured with a custom keybind
-/// ([`HotkeyBinding`]). Lets one keybind clean up + title without a summary or
-/// tags, while another runs everything. Defaults to the full pipeline.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct HotkeyPipeline {
-    /// Run LLM post-processing / cleanup.
-    #[serde(default = "default_true")]
-    pub cleanup: bool,
-    /// Generate a title.
-    #[serde(default = "default_true")]
-    pub title: bool,
-    /// Generate a summary.
-    #[serde(default = "default_true")]
-    pub summary: bool,
-    /// Run auto-tagging.
-    #[serde(default = "default_true")]
-    pub auto_tag: bool,
-}
-
-impl Default for HotkeyPipeline {
-    /// A keybind with no explicit pipeline runs the whole thing.
-    fn default() -> Self {
-        Self {
-            cleanup: true,
-            title: true,
-            summary: true,
-            auto_tag: true,
-        }
-    }
-}
-
 fn default_type_mode() -> String {
     "type".into()
 }
@@ -2004,8 +1973,8 @@ pub struct HotkeyBinding {
     /// existing bindings keep their behaviour. A non-empty id points the daemon at
     /// that recipe instead (e.g. a "dictate → prompt" chain). When the named recipe
     /// has been deleted the daemon falls back to the `default` recipe (never a
-    /// panic, never the wrong chain). This SUPERSEDES the legacy [`pipeline`](Self::pipeline)
-    /// flags below — once a recipe drives the chain, those bools are no longer read.
+    /// panic, never the wrong chain). This is the sole driver of a keybind's
+    /// chain — the legacy per-step `pipeline` flags were removed.
     /// IGNORED when [`action`](Self::action) is [`HotkeyAction::Meeting`]: a
     /// meeting resolves its recipe per-track via the daemon's multi-track path,
     /// not the single-recording ledger.
@@ -2022,19 +1991,6 @@ pub struct HotkeyBinding {
     /// the single-recording ledger.
     #[serde(default)]
     pub whisper_model: String,
-    /// Which AI steps run for this keybind's recordings (its own pipeline).
-    ///
-    /// LEGACY: predates [`recipe_id`](Self::recipe_id). Kept for back-compat so an older
-    /// `config.toml` loads unchanged, but no longer drives behaviour — the daemon
-    /// resolves the chain from `recipe_id` (empty → the `default` recipe). Left in
-    /// place rather than removed so a downgrade doesn't lose the field.
-    #[serde(default)]
-    pub pipeline: HotkeyPipeline,
-    /// Hook commands (shell scripts / webhook calls) fired after this keybind's
-    /// recording, independent of the global hooks. Each runs like an Integration
-    /// Script — it receives the recording JSON on stdin.
-    #[serde(default)]
-    pub hooks: Vec<String>,
     /// In-place-dictation options — only meaningful when `action` is `InPlace`
     /// (fast type-only vs. run the pipeline first; how to insert the text).
     #[serde(default)]
@@ -2936,8 +2892,6 @@ impl Default for Config {
                     action: HotkeyAction::Record,
                     recipe_id: "journal_note".into(),
                     whisper_model: String::new(),
-                    pipeline: HotkeyPipeline::default(),
-                    hooks: Vec::new(),
                     in_place: HotkeyInPlace::default(),
                 },
                 HotkeyBinding {
@@ -2949,8 +2903,6 @@ impl Default for Config {
                     action: HotkeyAction::InPlace,
                     recipe_id: "prompt_capture".into(),
                     whisper_model: String::new(),
-                    pipeline: HotkeyPipeline::default(),
-                    hooks: Vec::new(),
                     in_place: HotkeyInPlace {
                         full_pipeline: true,
                         ..HotkeyInPlace::default()
@@ -2965,8 +2917,6 @@ impl Default for Config {
                     action: HotkeyAction::Record,
                     recipe_id: "meeting_notes".into(),
                     whisper_model: String::new(),
-                    pipeline: HotkeyPipeline::default(),
-                    hooks: Vec::new(),
                     in_place: HotkeyInPlace::default(),
                 },
             ],

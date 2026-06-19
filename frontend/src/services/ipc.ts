@@ -124,12 +124,6 @@ export type HotkeyBinding = {
    *  with that model (a model-file path for the local backend, a model id for
    *  cloud backends). */
   whisper_model: string;
-  /** LEGACY: this keybind's own pipeline flags. Predates {@link recipe_id} and no
-   *  longer drives behaviour (the recipe does); kept so older configs round-trip. */
-  pipeline: { cleanup: boolean; title: boolean; summary: boolean; auto_tag: boolean };
-  /** Hook commands (shell / webhook) fired after this keybind's recording,
-   *  independent of the global hooks — each gets the recording JSON on stdin. */
-  hooks: string[];
   /** In-place-dictation options (only used when action === "in_place"):
    *  fast type-only vs. run the pipeline first, and how to insert the text. */
   in_place: { full_pipeline: boolean; type_mode: "type" | "paste" | "off" };

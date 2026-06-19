@@ -55,13 +55,11 @@ export class SectionHotkeys {
     if (!Array.isArray(config.hotkeys)) config.hotkeys = [];
     // Normalize: older/partial bindings may lack newer fields. Default a missing
     // recipe to "" (the global default pipeline) and a missing model to "" (the
-    // configured model); the legacy `pipeline`/`hooks`/`in_place` are kept so the
-    // shape round-trips even though `recipe_id` now drives the chain.
+    // configured model); `recipe_id` drives the chain, `in_place` covers
+    // dictation. (The dead per-binding `pipeline`/`hooks` fields were removed.)
     (config.hotkeys as Array<Record<string, unknown>>).forEach((b) => {
       if (typeof b.recipe_id !== "string") b.recipe_id = "";
       if (typeof b.whisper_model !== "string") b.whisper_model = "";
-      if (!b.pipeline) b.pipeline = { cleanup: true, title: true, summary: true, auto_tag: true };
-      if (!Array.isArray(b.hooks)) b.hooks = [];
       if (!b.in_place) b.in_place = { full_pipeline: false, type_mode: "type" };
     });
     this.bindings = config.hotkeys as HotkeyBinding[];
@@ -118,8 +116,6 @@ export class SectionHotkeys {
       action: "record",
       recipe_id: "",
       whisper_model: "",
-      pipeline: { cleanup: true, title: true, summary: true, auto_tag: true },
-      hooks: [],
       in_place: { full_pipeline: false, type_mode: "type" },
     });
     this.expanded.add(id); // open the new card so its recipe/options are visible
