@@ -1172,8 +1172,8 @@ select[data-key="daemon.log_level"] {
 .hk-card {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  padding: 10px 12px;
-  background: var(--bg-surface);
+  padding: 14px 16px;
+  background: var(--bg-elevated);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .pb-card:hover,
@@ -1191,7 +1191,7 @@ select[data-key="daemon.log_level"] {
 .pb-idcol {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
   min-width: 0;
 }
 /* Inline-editable title/subtitle: transparent at rest, subtle on hover, a
@@ -1226,7 +1226,7 @@ select[data-key="daemon.log_level"] {
 }
 .pb-idcol input:focus {
   outline: none;
-  background: var(--bg-deep);
+  background: var(--bg-surface);
   border-color: var(--accent);
   color: var(--fg-default);
 }
@@ -1245,8 +1245,8 @@ select[data-key="daemon.log_level"] {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px 4px 10px;
-  background: var(--bg-deep);
+  padding: 6px 8px 6px 10px;
+  background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
 }
@@ -1268,24 +1268,22 @@ select[data-key="daemon.log_level"] {
    bordered so a text box / dropdown never blends into the surface-colored card.
    (The shared model + connection pickers style themselves; the inline
    title/subtitle inputs opt out via .pb-idcol above.) */
+/* Text inputs + textareas only — they take the standard input surface. SELECTS
+   are deliberately NOT listed: they inherit the global `select` rule (shared
+   styles.css) which supplies the app's chevron + appearance:none. Overriding
+   `background` here would wipe that chevron and revert to the native arrow. */
 .pb-prompt,
 .pb-timeout,
-.pb-kind,
-.pb-target,
 .pb-target-custom,
 .pb-hook-cmd,
 .pb-hook-url,
 .pb-hook-timeout,
-.pb-add-step,
 .hk-label,
-.hk-combo,
-.hk-action,
-.hk-mode,
-.hk-recipe,
-.hk-ip-type {
-  background: var(--bg-deep);
-  border: 1px solid var(--border);
+.hk-combo {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
+  padding: 6px 10px;
   color: var(--fg-default);
 }
 .pb-prompt:focus,
@@ -1319,8 +1317,8 @@ select[data-key="daemon.log_level"] {
   grid-template-columns: auto 1fr auto;
   gap: 10px 12px;
   align-items: start;
-  padding: 10px 12px;
-  background: var(--bg-deep);
+  padding: 12px 14px;
+  background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
 }
@@ -1369,7 +1367,8 @@ select[data-key="daemon.log_level"] {
 }
 .pp-step .pp-step-knobs input[type="number"] {
   width: 64px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
+  padding: 4px 8px;
 }

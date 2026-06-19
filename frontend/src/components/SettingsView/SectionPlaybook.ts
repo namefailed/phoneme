@@ -213,7 +213,7 @@ export class SectionPlaybook {
       return `
         <div class="pb-group">
           <div class="pb-group-label" title="${escapeAttr(k.blurb)}">${k.label}s</div>
-          <div style="display: flex; flex-direction: column; gap: 10px;">${cards}</div>
+          <div style="display: flex; flex-direction: column; gap: 12px;">${cards}</div>
         </div>`;
     }).join("");
 
