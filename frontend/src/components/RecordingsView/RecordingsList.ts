@@ -1040,9 +1040,9 @@ export class RecordingsListElement extends LitElement {
       // it here too would duplicate it. Untitled rows render exactly as before.
       transcript: html`<span class="rec-preview">${
         r.title && !visibleCols.includes("title")
-          ? html`<span class="rec-title" style="display:block; font-weight:600; color:var(--fg-default); overflow:hidden; text-overflow:ellipsis;">${r.title}</span>`
+          ? html`<span class="rec-preview-title">${r.title}</span><span class="rec-preview-sep" aria-hidden="true">·</span>`
           : nothing
-      }${relevanceChip}${trackBadge}<span .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
+      }${relevanceChip}${trackBadge}<span class="rec-preview-text" .innerHTML=${highlightMatch(preview, searchTerm)}></span></span>`,
     };
 
     const cells = visibleCols.map((c) => cellMap[c] || nothing);

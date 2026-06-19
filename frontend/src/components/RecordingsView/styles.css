@@ -220,6 +220,18 @@
 .rec-row:hover .rec-preview {
   color: var(--fg-default);
 }
+/* Title/source fallback shown inline in the transcript column when their own
+   columns are hidden: a bold title, a faded "·" separator, then the snippet —
+   so they read as distinct parts instead of butting together ("memoEggs") on
+   the single clamped line. */
+.rec-preview-title {
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.rec-preview-sep {
+  color: var(--fg-faded);
+  margin: 0 6px;
+}
 mark.search-hit {
   background: color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--fg-default);
