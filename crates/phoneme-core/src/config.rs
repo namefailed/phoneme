@@ -1637,6 +1637,20 @@ pub struct PlaybookHook {
     /// Max execution time before the hook is killed.
     #[serde(default = "default_playbook_hook_timeout")]
     pub timeout_secs: u64,
+    /// Trigger: when non-empty, this hook only runs if the (post-processed)
+    /// transcript contains this substring — the Playbook-native form of the
+    /// legacy keyword rule. Empty (the default) means "always run".
+    #[serde(default)]
+    pub keyword: String,
+    /// Case-sensitive `keyword` matching. When `false` (default), matching is
+    /// case-insensitive. Ignored when `keyword` is empty.
+    #[serde(default)]
+    pub case_sensitive: bool,
+    /// When `true`, a failure of this hook (non-zero exit / webhook error) fails
+    /// the whole recording. Default `false`: failures are surfaced but non-fatal,
+    /// so a flaky side-effect can't trash an otherwise-good transcript.
+    #[serde(default)]
+    pub required: bool,
 }
 
 impl Default for PlaybookHook {
@@ -1645,6 +1659,28 @@ impl Default for PlaybookHook {
             command: String::new(),
             webhook_url: String::new(),
             timeout_secs: default_playbook_hook_timeout(),
+            keyword: String::new(),
+            case_sensitive: false,
+            required: false,
+        }
+    }
+}
+
+impl PlaybookHook {
+    /// Whether this hook should run for `transcript`: always when `keyword` is
+    /// blank, otherwise only when the transcript contains it (respecting
+    /// `case_sensitive`). Mirrors [`KeywordRule::matches`] except a blank trigger
+    /// means "always" (not "never").
+    pub fn should_run(&self, transcript: &str) -> bool {
+        if self.keyword.is_empty() {
+            return true;
+        }
+        if self.case_sensitive {
+            transcript.contains(&self.keyword)
+        } else {
+            transcript
+                .to_lowercase()
+                .contains(&self.keyword.to_lowercase())
         }
     }
 }
@@ -1732,6 +1768,10 @@ fn default_keyword_rules() -> Vec<KeywordRule> {
     ]
 }
 
+/// Curated starter Playbook entries — the built-in "moves" recipes reference.
+/// The four migrated LLM steps (cleanup → title → summary → auto-tag) plus a few
+/// example entries (prompt polish, action items, the journal Hook) that showcase
+/// what the Playbook can do.
 pub fn default_playbook() -> Vec<PlaybookEntry> {
     let llm = |prompt: &str| PlaybookLlm {
         prompt: prompt.into(),
@@ -1811,8 +1851,7 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
             target: String::new(),
             hook: PlaybookHook {
                 command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\phoneme-journal.md') -Value $d.transcript\"".into(),
-                webhook_url: String::new(),
-                timeout_secs: default_playbook_hook_timeout(),
+                ..Default::default()
             },
         },
     ]

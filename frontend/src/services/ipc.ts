@@ -159,6 +159,13 @@ export type PlaybookHook = {
   command: string;
   webhook_url: string;
   timeout_secs: number;
+  /** Trigger: when non-empty, only run if the transcript contains this substring
+   *  (the Playbook-native keyword rule). Empty/absent = always run. */
+  keyword?: string;
+  case_sensitive?: boolean;
+  /** When true, a failure of this hook fails the whole recording (default false:
+   *  surfaced but non-fatal). */
+  required?: boolean;
 };
 
 /** One reusable "move" in the Playbook (`config.playbook`) — a curated or custom
