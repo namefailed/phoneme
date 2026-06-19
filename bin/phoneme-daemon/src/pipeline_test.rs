@@ -890,7 +890,11 @@ fn rerun_all_restores_missing_steps_into_the_recipe_clone() {
     // cleanup → title → summary, in canonical order; auto-tag is NOT forced on.
     assert_eq!(
         steps,
-        &["cleanup".to_string(), "title".to_string(), "summary".to_string()],
+        &[
+            "cleanup".to_string(),
+            "title".to_string(),
+            "summary".to_string()
+        ],
         "Re-run All slots cleanup/title/summary back in canonical order, leaving tags off"
     );
 
@@ -1743,7 +1747,12 @@ fn pipeline_types_only_when_the_fast_pass_did_not() {
         type_first: true,
         ..base.clone()
     };
-    assert!(pipeline_should_type(&recipe_tf_no_full, true, true, "words"));
+    assert!(pipeline_should_type(
+        &recipe_tf_no_full,
+        true,
+        true,
+        "words"
+    ));
 
     // full_pipeline = true, type_first = true: still recipe-routed, so the
     // recorder skipped type-first; this run types the recipe's result. (Pre-fix:
@@ -1895,9 +1904,11 @@ fn step_label(step: &crate::pipeline::ResolvedStep) -> &'static str {
 /// the recipe-resolution tests can tell the two chains apart by their steps.
 fn config_with_custom_recipe() -> Config {
     use phoneme_core::config::{default_playbook, default_recipes, PlaybookRecipe};
-    let mut cfg = Config::default();
-    cfg.playbook = default_playbook();
-    cfg.recipes = default_recipes();
+    let mut cfg = Config {
+        playbook: default_playbook(),
+        recipes: default_recipes(),
+        ..Default::default()
+    };
     cfg.recipes.push(PlaybookRecipe {
         id: "hotkey_recipe".into(),
         name: "Hotkey recipe".into(),
@@ -2140,7 +2151,10 @@ fn entry_config_for_target_resolves_summary_and_tags_entries() {
 
     let (summary_cfg, summary_prompt) =
         super::entry_config_for_target(&cfg, "summary").expect("a summary entry exists");
-    assert_eq!(summary_prompt, "SUMMARIZE THIS", "prompt comes from the summary entry");
+    assert_eq!(
+        summary_prompt, "SUMMARIZE THIS",
+        "prompt comes from the summary entry"
+    );
     assert_eq!(
         summary_cfg.model, "base-model",
         "blank entry model inherits the base connection"
@@ -2150,7 +2164,10 @@ fn entry_config_for_target_resolves_summary_and_tags_entries() {
 
     let (tags_cfg, tags_prompt) =
         super::entry_config_for_target(&cfg, "tags").expect("a tags entry exists");
-    assert_eq!(tags_prompt, "TAG THIS", "prompt comes from the auto_tag entry (target=tags)");
+    assert_eq!(
+        tags_prompt, "TAG THIS",
+        "prompt comes from the auto_tag entry (target=tags)"
+    );
     assert_eq!(tags_cfg.provider, "openai");
 
     // A target with no Enrichment entry → None (callers fall back to legacy).
@@ -2186,8 +2203,14 @@ fn rerun_summary_base_is_entry_and_oneshot_override_wins() {
     // The base, exactly as rerun_summary resolves it.
     let (base_llm, base_prompt) =
         super::entry_config_for_target(&cfg, "summary").expect("a summary entry exists");
-    assert_eq!(base_llm.model, "entry-summary-model", "base model is the entry's");
-    assert_eq!(base_prompt, "ENTRY SUMMARY PROMPT", "base prompt is the entry's");
+    assert_eq!(
+        base_llm.model, "entry-summary-model",
+        "base model is the entry's"
+    );
+    assert_eq!(
+        base_prompt, "ENTRY SUMMARY PROMPT",
+        "base prompt is the entry's"
+    );
 
     // A whitespace override is ignored by the shared helper (the modal's empty
     // fields never clobber the entry's configured model/prompt).
@@ -2197,8 +2220,14 @@ fn rerun_summary_base_is_entry_and_oneshot_override_wins() {
         Some("   "),
         Some("  "),
     );
-    assert_eq!(kept.model, "entry-summary-model", "a whitespace model override is dropped");
-    assert_eq!(kept_prompt, "ENTRY SUMMARY PROMPT", "a whitespace prompt override is dropped");
+    assert_eq!(
+        kept.model, "entry-summary-model",
+        "a whitespace model override is dropped"
+    );
+    assert_eq!(
+        kept_prompt, "ENTRY SUMMARY PROMPT",
+        "a whitespace prompt override is dropped"
+    );
 
     // Non-empty one-shot overrides replace the base — the Re-run modal still wins.
     let (resolved, prompt) = super::apply_oneshot_overrides(
@@ -2207,8 +2236,14 @@ fn rerun_summary_base_is_entry_and_oneshot_override_wins() {
         Some("oneshot-model"),
         Some("ONESHOT PROMPT"),
     );
-    assert_eq!(resolved.model, "oneshot-model", "a one-shot model override wins over the entry");
-    assert_eq!(prompt, "ONESHOT PROMPT", "a one-shot prompt override wins over the entry");
+    assert_eq!(
+        resolved.model, "oneshot-model",
+        "a one-shot model override wins over the entry"
+    );
+    assert_eq!(
+        prompt, "ONESHOT PROMPT",
+        "a one-shot prompt override wins over the entry"
+    );
     // The provider still comes from the entry/base — the override is model+prompt only.
     assert_eq!(resolved.provider, "openai");
 }
@@ -2242,10 +2277,19 @@ fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
 
     // The base, exactly as rerun_cleanup resolves it.
     let (base_llm, base_prompt) = super::cleanup_entry_config(&cfg);
-    assert_eq!(base_llm.model, "entry-cleanup-model", "base model is the cleanup entry's");
-    assert_eq!(base_prompt, "EDITED CLEANUP PROMPT", "base prompt is the cleanup entry's");
+    assert_eq!(
+        base_llm.model, "entry-cleanup-model",
+        "base model is the cleanup entry's"
+    );
+    assert_eq!(
+        base_prompt, "EDITED CLEANUP PROMPT",
+        "base prompt is the cleanup entry's"
+    );
     assert!(base_llm.enabled, "entry_llm_config forces enabled");
-    assert_eq!(base_llm.provider, "openai", "entry inherits the base connection");
+    assert_eq!(
+        base_llm.provider, "openai",
+        "entry inherits the base connection"
+    );
 
     // A whitespace override is ignored (the modal's empty fields don't clobber).
     let (kept, kept_prompt) = super::apply_oneshot_overrides(
@@ -2254,8 +2298,14 @@ fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
         Some("   "),
         Some("\t"),
     );
-    assert_eq!(kept.model, "entry-cleanup-model", "a whitespace model override is dropped");
-    assert_eq!(kept_prompt, "EDITED CLEANUP PROMPT", "a whitespace prompt override is dropped");
+    assert_eq!(
+        kept.model, "entry-cleanup-model",
+        "a whitespace model override is dropped"
+    );
+    assert_eq!(
+        kept_prompt, "EDITED CLEANUP PROMPT",
+        "a whitespace prompt override is dropped"
+    );
 
     // Non-empty one-shot overrides replace the base — the Re-run modal still wins.
     let (resolved, prompt) = super::apply_oneshot_overrides(
@@ -2264,16 +2314,28 @@ fn rerun_cleanup_base_is_entry_and_oneshot_override_wins() {
         Some("oneshot-model"),
         Some("ONESHOT PROMPT"),
     );
-    assert_eq!(resolved.model, "oneshot-model", "a one-shot model override wins over the entry");
-    assert_eq!(prompt, "ONESHOT PROMPT", "a one-shot prompt override wins over the entry");
+    assert_eq!(
+        resolved.model, "oneshot-model",
+        "a one-shot model override wins over the entry"
+    );
+    assert_eq!(
+        prompt, "ONESHOT PROMPT",
+        "a one-shot prompt override wins over the entry"
+    );
 
     // Legacy fallback: with the `cleanup` entry deleted the resolver returns the
     // legacy [llm_post_process] config + prompt instead of panicking or running
     // nothing — behavior is never worse than before the Playbook.
     cfg.playbook.retain(|e| e.id != "cleanup");
     let (legacy_llm, legacy_prompt) = super::cleanup_entry_config(&cfg);
-    assert_eq!(legacy_llm.model, "base-model", "fallback model is the legacy section's");
-    assert_eq!(legacy_prompt, "ENTRY CLEANUP PROMPT", "fallback prompt is the legacy section's");
+    assert_eq!(
+        legacy_llm.model, "base-model",
+        "fallback model is the legacy section's"
+    );
+    assert_eq!(
+        legacy_prompt, "ENTRY CLEANUP PROMPT",
+        "fallback prompt is the legacy section's"
+    );
 }
 
 /// FIX 1: the per-recording `pending_focused_app` side-channel is CLAIMED
@@ -2410,7 +2472,12 @@ fn resolved_off_app_suppresses_pipeline_typing() {
     // The outer gate (mirrors the recorder's type-first split) still permits this
     // run to be the one insertion — so without the per-app layer the text types.
     assert!(
-        super::pipeline_should_type(&cfg.in_place, /*rec_in_place*/ true, /*recipe_routed*/ false, "hello"),
+        super::pipeline_should_type(
+            &cfg.in_place,
+            /*rec_in_place*/ true,
+            /*recipe_routed*/ false,
+            "hello"
+        ),
         "the full-pipeline path is the insertion point — pipeline_should_type is true"
     );
 

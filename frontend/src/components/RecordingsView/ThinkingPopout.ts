@@ -506,7 +506,7 @@ export class ThinkingPopoutElement extends LitElement {
       ${this.open
         ? html`
             <div class="thinking-popout ${this.panelMoving ? "thinking-popout--moving" : ""}">
-              <div class="thinking-head" title="Drag to move · Ctrl+Shift+click to reset size & position" @mousedown=${(e: MouseEvent) => this.startHeadDrag(e)}>
+              <div class="thinking-head" title="Drag to move · Ctrl+Shift+click to reset size &amp; position" @mousedown=${(e: MouseEvent) => this.startHeadDrag(e)}>
                 <span class="thinking-title">
                   <span class="thinking-title-icon" aria-hidden="true">🧠</span>
                   <span class="thinking-title-text">AI Activity</span>

@@ -767,8 +767,15 @@ async fn run_summary_step(
         let u = llm_cfg.api_url.trim();
         (!u.is_empty()).then(|| u.to_string())
     };
-    match generate_summary_with(state, id, transcript, llm_cfg, prompt, endpoint_hint.as_deref())
-        .await
+    match generate_summary_with(
+        state,
+        id,
+        transcript,
+        llm_cfg,
+        prompt,
+        endpoint_hint.as_deref(),
+    )
+    .await
     {
         Ok((summary, model)) => {
             if let Err(e) = state
@@ -1321,7 +1328,10 @@ enum ResolvedStep {
 /// and the API key inherited from the cleanup section unless the entry carries
 /// its own non-blank key. Built-in migrated entries carry no key, so they
 /// inherit exactly as the legacy pipeline did.
-fn entry_llm_config(cfg: &Config, entry: &phoneme_core::config::PlaybookLlm) -> LlmPostProcessConfig {
+fn entry_llm_config(
+    cfg: &Config,
+    entry: &phoneme_core::config::PlaybookLlm,
+) -> LlmPostProcessConfig {
     let mut llm = cfg.llm_post_process.clone();
     llm.enabled = true;
     if !entry.provider.trim().is_empty() {

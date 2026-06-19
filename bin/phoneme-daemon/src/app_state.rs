@@ -45,17 +45,17 @@ pub struct ResolvedPaths {
 }
 
 impl ResolvedPaths {
-    pub fn from_config(cfg: &Config) -> anyhow::Result<Self> {
-        Self::from_config_in(cfg, None)
-    }
-
-    /// Like [`from_config`], but with an optional explicit data-local directory
-    /// that takes precedence over the `PHONEME_DATA_LOCAL` env var. In-process
+    /// Resolve all per-user paths from config, with an optional explicit
+    /// data-local directory that takes precedence over the `PHONEME_DATA_LOCAL`
+    /// env var. In-process
     /// unit tests pass `Some(their_tempdir)` so they never touch the global env
     /// var — the old `set_var` race that made the daemon suite unsafe to run
     /// with more than one thread (forcing `--test-threads=1`). `None` keeps the
     /// production behavior: env var if set, else the per-user data dir.
-    pub fn from_config_in(cfg: &Config, data_local_override: Option<PathBuf>) -> anyhow::Result<Self> {
+    pub fn from_config_in(
+        cfg: &Config,
+        data_local_override: Option<PathBuf>,
+    ) -> anyhow::Result<Self> {
         // PHONEME_DATA_LOCAL lets the spawned-daemon integration tests redirect
         // inbox/catalog/log away from the real per-user `AppData\Local\phoneme`
         // (set per child process via `.env(...)`, so those don't race). In-process
@@ -451,7 +451,7 @@ impl AppState {
         Self::new_in(config, None).await
     }
 
-    /// Like [`new`], but with an explicit data-local directory that bypasses the
+    /// Like [`Self::new`], but with an explicit data-local directory that bypasses the
     /// process-global `PHONEME_DATA_LOCAL` env var. In-process unit tests pass
     /// their own temp dir so parallel tests don't clobber each other's data path
     /// (the race that previously required `--test-threads=1`). Production calls

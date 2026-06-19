@@ -1466,7 +1466,12 @@ pub struct HotkeyPipeline {
 impl Default for HotkeyPipeline {
     /// A keybind with no explicit pipeline runs the whole thing.
     fn default() -> Self {
-        Self { cleanup: true, title: true, summary: true, auto_tag: true }
+        Self {
+            cleanup: true,
+            title: true,
+            summary: true,
+            auto_tag: true,
+        }
     }
 }
 
@@ -1492,7 +1497,10 @@ pub struct HotkeyInPlace {
 
 impl Default for HotkeyInPlace {
     fn default() -> Self {
-        Self { full_pipeline: false, type_mode: "type".into() }
+        Self {
+            full_pipeline: false,
+            type_mode: "type".into(),
+        }
     }
 }
 
@@ -1692,7 +1700,10 @@ pub struct PlaybookRecipe {
 /// recipe behaves exactly like today's pipeline. (A runtime migration reconciles
 /// an EXISTING user's customized prompts onto these in a later Phase-1 step.)
 pub fn default_playbook() -> Vec<PlaybookEntry> {
-    let llm = |prompt: &str| PlaybookLlm { prompt: prompt.into(), ..PlaybookLlm::default() };
+    let llm = |prompt: &str| PlaybookLlm {
+        prompt: prompt.into(),
+        ..PlaybookLlm::default()
+    };
     vec![
         PlaybookEntry {
             id: "cleanup".into(),
@@ -1743,9 +1754,16 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
     vec![PlaybookRecipe {
         id: "default".into(),
         name: "Default pipeline".into(),
-        description: "What every normal recording runs: cleanup, then title, summary, and tag suggestions.".into(),
+        description:
+            "What every normal recording runs: cleanup, then title, summary, and tag suggestions."
+                .into(),
         builtin: true,
-        steps: vec!["cleanup".into(), "title".into(), "summary".into(), "auto_tag".into()],
+        steps: vec![
+            "cleanup".into(),
+            "title".into(),
+            "summary".into(),
+            "auto_tag".into(),
+        ],
     }]
 }
 
@@ -1780,8 +1798,8 @@ pub struct HotkeyBinding {
     /// existing bindings keep their behaviour. A non-empty id points the daemon at
     /// that recipe instead (e.g. a "dictate → prompt" chain). When the named recipe
     /// has been deleted the daemon falls back to the `default` recipe (never a
-    /// panic, never the wrong chain). This SUPERSEDES the legacy [`pipeline`] flags
-    /// below — once a recipe drives the chain, those bools are no longer read.
+    /// panic, never the wrong chain). This SUPERSEDES the legacy [`pipeline`](Self::pipeline)
+    /// flags below — once a recipe drives the chain, those bools are no longer read.
     /// IGNORED when [`action`](Self::action) is [`HotkeyAction::Meeting`]: a
     /// meeting resolves its recipe per-track via the daemon's multi-track path,
     /// not the single-recording ledger.
@@ -1800,7 +1818,7 @@ pub struct HotkeyBinding {
     pub whisper_model: String,
     /// Which AI steps run for this keybind's recordings (its own pipeline).
     ///
-    /// LEGACY: predates [`recipe_id`]. Kept for back-compat so an older
+    /// LEGACY: predates [`recipe_id`](Self::recipe_id). Kept for back-compat so an older
     /// `config.toml` loads unchanged, but no longer drives behaviour — the daemon
     /// resolves the chain from `recipe_id` (empty → the `default` recipe). Left in
     /// place rather than removed so a downgrade doesn't lose the field.
@@ -2243,7 +2261,11 @@ impl Config {
             // A blank per-step timeout means "use the default 30s" rather than
             // literally 0; the step builders never override timeout, so the
             // cleanup timeout is the right inherited value here.
-            let timeout_secs = if timeout == 0 { base.timeout_secs } else { timeout };
+            let timeout_secs = if timeout == 0 {
+                base.timeout_secs
+            } else {
+                timeout
+            };
             PlaybookLlm {
                 provider,
                 model,
@@ -3006,7 +3028,10 @@ mod tests {
 
         // Auto-tag copies the LIVE prompt, NOT the seed.
         let auto_tag = entry("auto_tag");
-        assert_eq!(auto_tag.llm.prompt, "Custom auto-tag prompt — coin new tags.");
+        assert_eq!(
+            auto_tag.llm.prompt,
+            "Custom auto-tag prompt — coin new tags."
+        );
         assert_ne!(
             auto_tag.llm.prompt,
             default_playbook()
@@ -3694,7 +3719,10 @@ mod tests {
         cfg.semantic_search.model_dir = "~/models/embed".into();
         let expanded = cfg.expanded().unwrap();
         let dir = expanded.semantic_search.model_dir.to_string_lossy();
-        assert!(!dir.starts_with('~'), "tilde should be expanded, got: {dir}");
+        assert!(
+            !dir.starts_with('~'),
+            "tilde should be expanded, got: {dir}"
+        );
         assert!(
             dir.ends_with("/models/embed") || dir.ends_with("\\models\\embed"),
             "the path suffix should be preserved, got: {dir}"

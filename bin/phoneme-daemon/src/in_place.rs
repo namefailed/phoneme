@@ -301,9 +301,12 @@ async fn transcribe_polish_type(
     // readiness wait (serialized under the permit we just took), for a cloud
     // backend it swaps the request model id. The guard restores the configured
     // model when this function returns — so it is held across the transcription.
-    let (overridden_stt, _model_guard) =
-        crate::pipeline::apply_model_override(state, cfg.in_place_provider_config(), model_override)
-            .await;
+    let (overridden_stt, _model_guard) = crate::pipeline::apply_model_override(
+        state,
+        cfg.in_place_provider_config(),
+        model_override,
+    )
+    .await;
     let model_label = overridden_stt.model_label();
     let stt_cfg = state.whisper_ports.apply(&cfg, &overridden_stt);
     let provider = state

@@ -656,7 +656,12 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                         match crate::pipeline::entry_config_for_target(&cfg, "tags") {
                             Some((llm_cfg, prompt)) => {
                                 crate::pipeline::suggest_tags_with(
-                                    state, &cfg, &id, &transcript, llm_cfg, &prompt,
+                                    state,
+                                    &cfg,
+                                    &id,
+                                    &transcript,
+                                    llm_cfg,
+                                    &prompt,
                                 )
                                 .await;
                             }
@@ -775,7 +780,10 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             // and tags are lost (and re-derived by re-transcription).
             match state.catalog.clear_all_recordings().await {
                 Ok(removed) => {
-                    tracing::info!(removed, "catalog rebuild: cleared all rows; re-importing from disk");
+                    tracing::info!(
+                        removed,
+                        "catalog rebuild: cleared all rows; re-importing from disk"
+                    );
                     reimport_from_disk(state, false).await
                 }
                 Err(e) => err_response(&e),
@@ -1820,7 +1828,11 @@ async fn rerun_summary(
         },
         /// No `summary` entry — the legacy `[summary]` section drives this run
         /// via `generate_summary`, with the one-shot overrides baked into `cfg`.
-        Legacy { cfg: phoneme_core::config::Config },
+        /// Boxed: `Config` is large and this is the rare path (clippy
+        /// large_enum_variant — keep the common `Entry` arm cheap to move).
+        Legacy {
+            cfg: Box<phoneme_core::config::Config>,
+        },
     }
 
     let resolution = match crate::pipeline::entry_config_for_target(&cfg, "summary") {
@@ -1856,7 +1868,9 @@ async fn rerun_summary(
             if let Some(p) = &prompt {
                 cfg_legacy.summary.prompt = p.clone();
             }
-            Resolution::Legacy { cfg: cfg_legacy }
+            Resolution::Legacy {
+                cfg: Box::new(cfg_legacy),
+            }
         }
     };
 

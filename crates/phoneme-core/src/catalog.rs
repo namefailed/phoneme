@@ -1526,10 +1526,12 @@ impl Catalog {
         // over recording_tags — no bound params, injection-safe. Independent of
         // the `tag_id` (single-tag) JOIN above, so the two compose.
         match filter.tagged {
-            Some(true) => sql
-                .push_str(" AND recordings.id IN (SELECT recording_id FROM recording_tags)"),
-            Some(false) => sql
-                .push_str(" AND recordings.id NOT IN (SELECT recording_id FROM recording_tags)"),
+            Some(true) => {
+                sql.push_str(" AND recordings.id IN (SELECT recording_id FROM recording_tags)")
+            }
+            Some(false) => {
+                sql.push_str(" AND recordings.id NOT IN (SELECT recording_id FROM recording_tags)")
+            }
             None => {}
         }
         if filter.since.is_some() {
@@ -1634,7 +1636,7 @@ impl Catalog {
         Ok(())
     }
 
-    /// Delete EVERY recording row — and, via the same cascade as [`delete`], all
+    /// Delete EVERY recording row — and, via the same cascade as [`Self::delete`], all
     /// their tags, segments, words, speaker names, and embeddings. Used by the
     /// destructive catalog rebuild, which then re-imports the audio from disk.
     /// Returns the number of rows removed. The caller leaves the WAV files on

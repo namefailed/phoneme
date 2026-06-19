@@ -1241,11 +1241,7 @@ impl DaemonRecorder {
             // app; mirrors how `pending_recipe` is populated. (Don't populate for
             // the fast lane — it already has `focused_app` in hand.)
             if active.in_place {
-                if let Some(app) = active
-                    .focused_app
-                    .as_ref()
-                    .filter(|a| !a.trim().is_empty())
-                {
+                if let Some(app) = active.focused_app.as_ref().filter(|a| !a.trim().is_empty()) {
                     state
                         .pending_focused_app
                         .lock()
@@ -1434,8 +1430,11 @@ impl DaemonRecorder {
                 meeting.paused = true;
                 // Mark when (on the meeting's wall clock) this pause began, so
                 // stop_meeting can fold the paused span out of the timeline.
-                meeting.paused_at_ms =
-                    Some(Instant::now().duration_since(meeting.wall_started).as_millis() as i64);
+                meeting.paused_at_ms = Some(
+                    Instant::now()
+                        .duration_since(meeting.wall_started)
+                        .as_millis() as i64,
+                );
                 tracing::info!(session = %meeting.meeting_id, "meeting paused");
                 return Ok(meeting.tracks[0].id.clone());
             }
@@ -1492,8 +1491,9 @@ impl DaemonRecorder {
                 meeting.paused = false;
                 // Close the open pause span on the meeting's wall clock.
                 if let Some(start_ms) = meeting.paused_at_ms.take() {
-                    let end_ms =
-                        Instant::now().duration_since(meeting.wall_started).as_millis() as i64;
+                    let end_ms = Instant::now()
+                        .duration_since(meeting.wall_started)
+                        .as_millis() as i64;
                     meeting.pause_spans_ms.push((start_ms, end_ms));
                 }
                 tracing::info!(session = %meeting.meeting_id, "meeting resumed");

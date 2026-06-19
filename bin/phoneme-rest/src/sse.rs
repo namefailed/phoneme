@@ -156,7 +156,11 @@ mod tests {
     async fn sse_cap_rejects_extra_streams_with_503() {
         let mut held = Vec::new();
         for _ in 0..MAX_SSE_CLIENTS {
-            held.push(SSE_SLOTS.try_acquire().expect("a slot should be free at start"));
+            held.push(
+                SSE_SLOTS
+                    .try_acquire()
+                    .expect("a slot should be free at start"),
+            );
         }
         let resp = events(State(AppState {
             pipe_name: "phoneme-rest-test-sse-cap-unused".into(),

@@ -368,7 +368,10 @@ mod tests {
         assert_eq!(json["preview_whisper"]["api_key"], MASKED_SECRET);
         assert_eq!(json["in_place"]["stt"]["api_key"], MASKED_SECRET);
         assert_eq!(json["webhook"]["hmac_secret"], MASKED_SECRET);
-        assert_eq!(json["playbook"][cleanup_idx]["llm"]["api_key"], MASKED_SECRET);
+        assert_eq!(
+            json["playbook"][cleanup_idx]["llm"]["api_key"],
+            MASKED_SECRET
+        );
 
         // (b) no plaintext sentinel survives anywhere — catches a future field
         // that is serialized in the clear but forgotten by mask_config_secrets.

@@ -23,7 +23,6 @@ export interface HealthSnapshot {
 
 let snapshot: HealthSnapshot = { level: "unknown", issues: [] };
 const subscribers = new Set<(s: HealthSnapshot) => void>();
-let timer: number | null = null;
 let dueWhileHidden = false;
 let started = false;
 
@@ -67,7 +66,7 @@ export function startHealthPolling(): void {
   if (started) return;
   started = true;
   void refreshHealth();
-  timer = window.setInterval(() => {
+  window.setInterval(() => {
     if (document.visibilityState === "hidden") {
       dueWhileHidden = true;
       return;

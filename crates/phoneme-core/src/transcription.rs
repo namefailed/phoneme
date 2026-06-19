@@ -233,28 +233,34 @@ impl Transcriber {
                     .with_prompt(prompt),
                 )
             }
-            TranscriptionBackend::Openai => Box::new(OpenAiCompatProvider::new(
-                self.http.clone(),
-                cloud_base_url(&whisper.api_url, crate::endpoints::OPENAI_STT_BASE),
-                non_empty(whisper.api_key.expose_secret()),
-                Some(model_or(&whisper.model, "whisper-1")),
-                timeout,
-                // whisper-1 returns segments with verbose_json; enables local
-                // diarization on OpenAI transcripts. Segment capture rides on
-                // the same flag — gpt-4o-transcribe rejects verbose_json, so
-                // it is never requested unconditionally here.
-                local_diar,
-                false,
-            ).with_prompt(prompt)),
-            TranscriptionBackend::Groq => Box::new(OpenAiCompatProvider::new(
-                self.http.clone(),
-                cloud_base_url(&whisper.api_url, crate::endpoints::GROQ_STT_BASE),
-                non_empty(whisper.api_key.expose_secret()),
-                Some(model_or(&whisper.model, "whisper-large-v3")),
-                timeout,
-                local_diar,
-                false,
-            ).with_prompt(prompt)),
+            TranscriptionBackend::Openai => Box::new(
+                OpenAiCompatProvider::new(
+                    self.http.clone(),
+                    cloud_base_url(&whisper.api_url, crate::endpoints::OPENAI_STT_BASE),
+                    non_empty(whisper.api_key.expose_secret()),
+                    Some(model_or(&whisper.model, "whisper-1")),
+                    timeout,
+                    // whisper-1 returns segments with verbose_json; enables local
+                    // diarization on OpenAI transcripts. Segment capture rides on
+                    // the same flag — gpt-4o-transcribe rejects verbose_json, so
+                    // it is never requested unconditionally here.
+                    local_diar,
+                    false,
+                )
+                .with_prompt(prompt),
+            ),
+            TranscriptionBackend::Groq => Box::new(
+                OpenAiCompatProvider::new(
+                    self.http.clone(),
+                    cloud_base_url(&whisper.api_url, crate::endpoints::GROQ_STT_BASE),
+                    non_empty(whisper.api_key.expose_secret()),
+                    Some(model_or(&whisper.model, "whisper-large-v3")),
+                    timeout,
+                    local_diar,
+                    false,
+                )
+                .with_prompt(prompt),
+            ),
 
             TranscriptionBackend::Assemblyai => Box::new(AssemblyAiProvider::new(
                 self.http.clone(),
@@ -281,20 +287,23 @@ impl Transcriber {
             )),
             // Any OpenAI-compatible endpoint the user points at via `api_url`
             // (key/model optional — many self-hosted servers need neither).
-            TranscriptionBackend::Custom => Box::new(OpenAiCompatProvider::new(
-                self.http.clone(),
-                whisper.api_url.trim().to_string(),
-                non_empty(whisper.api_key.expose_secret()),
-                non_empty(&whisper.model),
-                timeout,
-                // Custom OpenAI-compatible endpoints that return verbose_json
-                // segments get local diarization too; ones that don't simply
-                // fall back to the plain transcript (no hard failure). Like
-                // OpenAI/Groq, verbose_json is only requested when diarization
-                // asks for it — an arbitrary endpoint may not accept it.
-                local_diar,
-                false,
-            ).with_prompt(prompt)),
+            TranscriptionBackend::Custom => Box::new(
+                OpenAiCompatProvider::new(
+                    self.http.clone(),
+                    whisper.api_url.trim().to_string(),
+                    non_empty(whisper.api_key.expose_secret()),
+                    non_empty(&whisper.model),
+                    timeout,
+                    // Custom OpenAI-compatible endpoints that return verbose_json
+                    // segments get local diarization too; ones that don't simply
+                    // fall back to the plain transcript (no hard failure). Like
+                    // OpenAI/Groq, verbose_json is only requested when diarization
+                    // asks for it — an arbitrary endpoint may not accept it.
+                    local_diar,
+                    false,
+                )
+                .with_prompt(prompt),
+            ),
         }
     }
 }

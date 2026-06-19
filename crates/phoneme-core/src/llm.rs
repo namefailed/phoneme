@@ -367,16 +367,19 @@ impl LlmProvider for OpenAiChatProvider {
             "messages": [{ "role": "user", "content": combine(prompt, text) }],
             "temperature": 0.3,
         });
-        let mut req = self.http.post(&self.url).timeout(self.timeout.max(Duration::from_secs(120))).json(&body);
+        let mut req = self
+            .http
+            .post(&self.url)
+            .timeout(self.timeout.max(Duration::from_secs(120)))
+            .json(&body);
         if !self.api_key.is_empty() {
             req = req.bearer_auth(&self.api_key);
         }
         let parsed: OpenAiChatResponse = send_json(req, "OpenAI-compatible").await?;
-        let choice = parsed
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::Internal("OpenAI-compatible response had no choices".into()))?;
+        let choice =
+            parsed.choices.into_iter().next().ok_or_else(|| {
+                Error::Internal("OpenAI-compatible response had no choices".into())
+            })?;
         // Don't return content the model truncated at its output-token cap — fail
         // so the (non-fatal) post-processing step falls back to the raw transcript
         // rather than silently overwriting it with a cut-off result.

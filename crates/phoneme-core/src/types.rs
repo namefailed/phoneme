@@ -465,7 +465,7 @@ pub struct ListFilter {
     pub tagged: Option<bool>,
 }
 
-/// Per-Library-kind recording counts, returned by [`Request::KindCounts`] and
+/// Per-Library-kind recording counts, returned by `Request::KindCounts` and
 /// rendered as the sidebar's Library count badges. Each is a full-corpus count
 /// (no pagination), computed in one SQL pass.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
