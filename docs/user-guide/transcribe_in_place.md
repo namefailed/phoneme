@@ -79,3 +79,104 @@ lane. If you want dictations to behave exactly like normal recordings, enable
   cleanup. Slow (the dictation waits in the queue behind anything already
   processing), but what lands at the cursor is exactly what lands in the
   library.
+
+## 🎯 Per-app delivery overrides
+
+By default every app gets the same delivery — either typed keystrokes or a
+clipboard paste, whichever you picked under **"Insert text by"**. But some apps
+are picky: terminals, remote-desktop sessions, secure prompts, and certain
+games reject synthetic keystrokes, while a few don't take a programmatic paste
+cleanly either. **Per-app overrides** let dictation behave differently
+depending on *which app is focused when you stop speaking*.
+
+The focused app is detected from its executable name (lowercased file stem —
+`Code.exe` → `code`, `chrome.exe` → `chrome`). When that app has an override,
+it wins; every other app falls back to your global setting.
+
+| Override | What it does |
+|----------|--------------|
+| `type` | Force simulated keystrokes for this app (works where paste doesn't). |
+| `paste` | Force a clipboard paste for this app (for apps that drop fast keystrokes). |
+| `off` | **Don't auto-deliver at all** — transcribe and save, but never touch the cursor. |
+
+The `off` mode is the escape hatch for apps that flatly reject injected input
+(or where you simply never want dictation to land automatically). The words are
+*not* lost: the dictation still records, transcribes, and — depending on your
+"Keep dictations in the library" setting — saves, so you can copy it out of
+Phoneme afterward. It just stays off the cursor.
+
+Overrides apply on **both** delivery paths: the fast lane *and* the full
+queued pipeline (when **Run the full pipeline** is on), so an app set to `off`
+or `paste` behaves the same no matter which lane a dictation takes.
+
+Configure overrides under `[in_place].app_overrides` in your config file —
+a map of executable stem to mode:
+
+```toml
+[in_place]
+type_mode = "type"            # global default
+
+[in_place.app_overrides]
+code        = "paste"         # VS Code: paste long snippets instantly
+"keepassxc" = "off"           # password manager: never auto-type
+chrome      = "type"          # browser: force keystrokes
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `app_overrides` | map (stem → `"type"` \| `"paste"` \| `"off"`) | `{}` (empty) | Per-app delivery override, keyed by the lowercased executable stem of the app focused when you stop speaking. An unlisted (or undetectable) app uses `type_mode`. |
+
+> [!NOTE]
+> Foreground-app detection is **Windows-only**. On other platforms the focused
+> app can't be read, so every dictation falls back to the global `type_mode`
+> and overrides have no effect.
+
+> [!TIP]
+> With `app_overrides` empty (the default), behavior is byte-for-byte unchanged
+> — every app uses your global delivery mode exactly as before.
+
+## 🧠 App-aware AI cleanup (opt-in)
+
+When **AI cleanup** is your dictation cleanup mode, Phoneme can optionally tell
+the cleanup model *what kind of window you're dictating into*, so it adapts its
+polish: leaning code-ish in an editor, prose in a document, terse in a chat. It
+does this by prepending the **focused window's title** to the cleanup prompt —
+nothing more.
+
+This is **off by default** and privacy-first by design. A window title can be
+sensitive (a document name, an email subject, an account in a banking app), so
+the feature is strictly opt-in and tightly scoped:
+
+- **It only runs with AI cleanup.** The title is consulted *only* when the
+  dictation cleanup mode is the full LLM pass. The Fast and Off cleanup modes
+  never read it.
+- **The title is read only when you turn it on.** With `app_context` off, the
+  title is **never even read** — not captured, not sent, not stored.
+- **It goes exactly one place: that single cleanup prompt.** The title is never
+  logged, never written to disk, and never saved with the recording. It rides
+  along in the one LLM request and is gone.
+- **It's sent to your configured cleanup LLM.** If your post-processing
+  provider is a cloud API, the title travels there with the prompt. Prefer a
+  **local cleanup model** (e.g. Ollama) if titles must never leave your machine.
+- **You can exclude specific apps even when it's on** via a denylist — so a
+  password manager or banking app never contributes its title, regardless.
+
+```toml
+[in_place]
+cleanup     = "llm"           # app context only applies to AI cleanup
+app_context = true            # opt in
+
+# Apps whose titles are NEVER read, even with app_context on:
+app_context_denylist = ["keepassxc", "1password", "mybank"]
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `app_context` | bool | `false` | When on (and the focused app isn't denylisted), prepend the focused window's title to the AI cleanup prompt so the model adapts to what you're working in. Only consulted when `cleanup = "llm"`. |
+| `app_context_denylist` | list of strings | `[]` (empty) | Executable stems (lowercased) whose window titles are never read for context, even when `app_context` is on. |
+
+> [!IMPORTANT]
+> The window title is treated as potentially sensitive. It is used **solely**
+> to flavor one AI cleanup prompt — it is never logged, never persisted, and
+> never sent anywhere but to the cleanup model you've configured. Turn
+> `app_context` off (the default) and the title is never touched at all.

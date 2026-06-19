@@ -4,7 +4,9 @@ This page is the companion to [architecture.md](architecture.md). The
 architecture page is the canonical end-to-end journey (hotkey → typed text,
 recording → searchable archive); this page goes one level deeper on the
 subsystems that journey touches. If you want the *story*, start there; if you
-want the *mechanics* of a particular piece, you're in the right place.
+want the *mechanics* of a particular piece, you're in the right place. For the
+*hard problems* — the bugs, races, and constraints behind the non-obvious code —
+see [Technical Challenges & Engineering Decisions](technical_challenges.md).
 
 Every subsystem here is owned by a Rust module whose `//!` doc comment is the
 authoritative description — the links below land on it.

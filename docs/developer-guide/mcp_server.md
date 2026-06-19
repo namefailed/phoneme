@@ -41,7 +41,7 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 
 ## 🧰 The tools
 
-**Record, search & read** (the original read-only core):
+**Record, search & read** (capture + the core reads):
 
 | Tool | Arguments | Maps to | Returns |
 |------|-----------|---------|---------|
@@ -64,6 +64,8 @@ Any other method returns a JSON-RPC `-32601` (method not found).
 | `retranscribe` | `id` (required), `model?` | `RetranscribeRecording` | Confirmation — **heavy**: re-runs the whole pipeline |
 | `more_like_this` | `id` (required), `limit?` (default 10) | `MoreLikeThis` | Ranked similar recordings: id, title, score, snippet |
 | `get_words` | `id` (required) | `GetWords` | A count of word-level timings (start/end offsets, e.g. for caption/SRT export) |
+| `delete_recording` | `id` (required), `keep_audio?` (default `false`) | `DeleteRecording` | Confirmation — **irreversible**; deletes the audio too unless `keep_audio` |
+| `delete_tag` | `id` (required, integer) | `DeleteTag` | Confirmation — **irreversible**; detaches the tag from every recording |
 
 `start_recording`'s `oneshot` mode auto-stops on silence; `hold` records until
 an explicit `stop_recording`. The `id`-taking tools take the recording id
@@ -164,6 +166,60 @@ printf '%s\n%s\n' \
 You should see two JSON-RPC response lines: the `initialize` result (with
 `serverInfo.name = "phoneme-mcp"`) and the tools with their input schemas.
 
+## 🪞 The other direction: `phoneme-agent-core`
+
+`phoneme-mcp` lets an **external** agent reach into Phoneme. Its mirror image —
+`crates/phoneme-agent-core` — is the in-tree **tool seam** for a future
+**embedded** agent (an in-app chat panel calling *out* to the same daemon).
+Same tool registry, opposite direction.
+
+It is a small, dependency-light crate (`phoneme-core`, `phoneme-ipc`,
+`serde_json`, `thiserror` — no async, no transport, no LLM) that holds exactly
+the compiler-enforced "tool layer" over the daemon's `phoneme_ipc::Request`
+enum:
+
+| Type | Role |
+|------|------|
+| `ToolSpec` | What a tool advertises: `name`, one-line `description`, and a JSON-Schema `input_schema` object. |
+| `Tool` (trait) | `spec()` + `to_request(args) -> Result<Request, ToolError>` — **pure**, synchronous, no I/O. |
+| `ToolRegistry` | The set of tools; `specs()` is the `tools/list` surface, `to_request(name, args)` maps a named call to a `Request`. |
+| `ToolError` | `Unknown(name)` or `BadArgs { tool, reason }` for the host to surface. |
+
+`ToolRegistry::with_phoneme_tools()` (also `Default`) registers the **canonical
+Phoneme toolset in the same order** `phoneme-mcp` exposes it: the read-only core
+(`list_recent`, `search_recordings`, `get_transcript`, `start_recording`,
+`stop_recording`), the "act on it" tools (`set_title`, `set_favorite`,
+`suggest_tags`, `list_tags`, `summarize`, `rerun_cleanup`, `retranscribe`,
+`more_like_this`, `get_words`), and the destructive prune tools
+(`delete_recording`, `delete_tag`). A test asserts that exact name list, so the
+two surfaces can't silently drift.
+
+```rust
+use phoneme_agent_core::ToolRegistry;
+use serde_json::json;
+
+let reg = ToolRegistry::with_phoneme_tools();
+for spec in reg.specs() {
+    println!("{}: {}", spec.name, spec.description); // the tools/list surface
+}
+// Validate + map a call to a typed Request — then hand it to your Transport.
+let req = reg.to_request("search_recordings", &json!({ "query": "standup" }))?;
+```
+
+The key boundary is the same one `phoneme-mcp` honors: **the crate builds the
+`Request` but never executes it.** Sending it over a `phoneme_ipc::Transport`
+and rendering the `Response` is the caller's job. That keeps the layer pure and
+trivially unit-testable, and — because every tool maps to a real `Request`
+variant — a renamed or removed variant breaks the build *here*, not at runtime.
+
+> **Status — bones, not wired yet.** As of this writing the crate ships the
+> registry, the tool set, and its tests, but **no binary depends on it** (only
+> `phoneme-mcp`'s source comments reference it, for the lockstep contract). The
+> agent loop and the in-app chat panel that would drive it are still on the
+> roadmap. The harness decision — opencode for the standalone agent, a separate
+> embedded harness for the panel, both reaching the same tool surface — lives in
+> [`../design/phoneme-agent-harness.md`](../design/phoneme-agent-harness.md).
+
 ## 🗺️ Relationship to the rest of Phoneme
 
 The MCP tool surface is intentionally a small, stable subset of the full IPC
@@ -172,4 +228,6 @@ queue, tag, and config operation) drive the daemon directly over its named pipe
 or use the `phoneme` CLI — see [`ipc_integration.md`](ipc_integration.md) and
 [`cli_reference.md`](cli_reference.md). The roadmap's in-app **Phoneme Agent**
 shares the same typed-wrapper idea, pointed the opposite direction (an in-app
-agent calling out, rather than external agents calling in).
+agent calling out, rather than external agents calling in) — see
+[`phoneme-agent-core`](#-the-other-direction-phoneme-agent-core) above and the
+[harness decision record](../design/phoneme-agent-harness.md).

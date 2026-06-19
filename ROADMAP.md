@@ -457,26 +457,33 @@ explicit roadmap line here saying why not).
   levels, not transcription.
 
 - [ ] **In-place dictation, phase 2** — the fast lane shipped; now the feel.
-  **(a) ✅ shipped** — voice commands in the polish pass: "new line",
-  "new paragraph", "scratch that"/"delete that" handled rule-based in
-  `dictation::apply_voice_commands` (the last step of `fast_polish`, so the
-  inserted breaks survive the whitespace-collapsing steps; sentence/segment
-  anchored so "a new line of code" mid-sentence stays literal; "scratch that"
-  drops the prior sentence; leading "and/then" still matches; re-capitalizes
-  sentence starts after edits). Applied in **all** cleanup modes — `fast`,
-  `off` (rule pass is a no-op without commands), and `llm` (directives
-  prepended to the prompt; `fast_polish` fallback applies the same rules on LLM
-  failure). 12 unit tests. Remaining: **(b)** per-app overrides — type vs paste
-  vs off per process
-  name (some apps reject synthetic keystrokes; the fast lane should know);
-  **(c)** app-aware context, tier 1 — opt-in (OFF by default), the focused
-  window's title feeds the polish prompt so jargon resolves correctly, with a
-  process denylist; fully open source, toggleable — our answer to Wispr Flow's
-  screenshots without the trust problem (tier 2, screenshot→vision-LLM, stays
-  a separate later opt-in); **(d)** streaming-type experiment — type words as
-  they finalize instead of all-at-end (spike: corrections vs cursor churn;
-  may not survive contact with reality); **(e)** the waveform capture overlay
-  above doubles as the dictation "it hears me" signal — build them together.
+  Almost entirely done — only the streaming-type spike **(d)** remains.
+  - **(a) ✅ shipped** — voice commands in the polish pass: "new line",
+    "new paragraph", "scratch that"/"delete that" handled rule-based in
+    `dictation::apply_voice_commands` (the last step of `fast_polish`, so the
+    inserted breaks survive the whitespace-collapsing steps; sentence/segment
+    anchored so "a new line of code" mid-sentence stays literal; "scratch that"
+    drops the prior sentence; leading "and/then" still matches; re-capitalizes
+    sentence starts after edits). Applied in **all** cleanup modes — `fast`,
+    `off` (rule pass is a no-op without commands), and `llm` (directives
+    prepended to the prompt; `fast_polish` fallback applies the same rules on LLM
+    failure). 12 unit tests.
+  - **(b) ✅ shipped** — per-app delivery overrides: `in_place.app_overrides`
+    maps a foreground process name to type / paste / off (`resolve_type_mode`,
+    used by the fast lane and the queued pipeline), so apps that reject synthetic
+    keystrokes get paste-or-off automatically. Documented in
+    [Transcribe in Place](../user-guide/transcribe_in_place.md).
+  - **(c) ✅ shipped** — app-aware context tier 1: opt-in (`in_place.app_context`,
+    OFF by default), the focused window's title is prepended to the polish prompt
+    (`in_place.rs`), gated by a process denylist (`app_context_denylist`) and
+    `may_read_window_title`; the title is never logged and goes nowhere but that
+    one prompt. The vision-LLM tier 2 stays a separate later opt-in.
+  - **(d)** streaming-type experiment — type words as they finalize instead of
+    all-at-end (spike: corrections vs cursor churn; may not survive contact with
+    reality). A reserved `in_place.stream_type` flag exists as an off-by-default
+    no-op stub; design write-up in `archive_internal/plans/`.
+  - **(e) ✅ shipped** — the waveform capture overlay doubles as the dictation
+    "it hears me" signal.
 
 ### ✨ Small wins
 

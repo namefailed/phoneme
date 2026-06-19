@@ -68,7 +68,8 @@ phoneme record stop
 phoneme record toggle
 
 # In-Place Mode: the transcript is typed out as simulated keystrokes into the
-# currently focused application window.
+# currently focused application window. `-i` is the short form of `--in-place`
+# (valid on bare `record`, `record start`, and `record toggle`).
 phoneme record start --in-place
 
 # Discard the active recording without saving.
@@ -121,6 +122,10 @@ phoneme meeting tracks 20260519T143500823
 
 # Rename a meeting
 phoneme meeting rename 20260519T143500823 "Q3 Planning Sync"
+
+# Clear a meeting's name (omit NAME and pass --clear) — reverts to the
+# auto-generated label.
+phoneme meeting rename 20260519T143500823 --clear
 ```
 
 ### 📥 `phoneme import <FILE>`
@@ -463,7 +468,7 @@ phoneme export backup.zip
 |------|-------------|
 | `--captions <RECORDING_ID>` | Export captions for this recording instead of zipping the library. |
 | `--format <srt\|vtt>` | Caption format: `srt` (default) or `vtt`. |
-| `-o <FILE>` | Write captions to FILE. Use `-` for stdout. Defaults to `<recording-id>.srt` / `<recording-id>.vtt` in the current directory. |
+| `-o`, `--out <FILE>` | Write captions to FILE. Use `-` for stdout. Defaults to `<recording-id>.srt` / `<recording-id>.vtt` in the current directory. |
 
 **Examples**
 

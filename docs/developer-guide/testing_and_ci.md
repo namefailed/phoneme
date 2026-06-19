@@ -27,6 +27,14 @@ public item in those crates must carry a doc comment, or the `docs` job goes red
 Run `cargo doc --workspace --no-deps` locally with the same flag before pushing if
 you touched a public API.
 
+Beyond the lint-enforced crates, **every crate and binary in the workspace** carries
+a crate-level `//!` module doc that explains its role (and, for the daemon and tray,
+its boot/flow model), so the codebase reads top-down. The cross-cutting engineering
+decisions — the bugs, races, and constraints behind the non-obvious code — are
+written up in
+[Technical Challenges & Engineering Decisions](technical_challenges.md), and the
+subsystem-level deep dives in [Internals](internals.md).
+
 ## Local pre-PR checklist
 
 ```powershell

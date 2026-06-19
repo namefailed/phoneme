@@ -11,6 +11,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 | Dictate into any app | [Transcribe-in-Place](user-guide/transcribe_in_place.md) |
 | Fix something broken | [Troubleshooting](user-guide/troubleshooting.md) |
 | Automate with scripts | [CLI Reference](developer-guide/cli_reference.md) or [IPC Guide](developer-guide/ipc_integration.md) |
+| Understand the hard engineering | [Technical Challenges & Engineering Decisions](developer-guide/technical_challenges.md) |
 | Contribute code | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | See what's planned | [ROADMAP.md](../ROADMAP.md) |
 
@@ -52,6 +53,7 @@ Complete documentation for **users** and **developers**. Phoneme is a local-firs
 ### Architecture
 - [Architecture Overview](developer-guide/architecture.md) — The end-to-end journey: three-process model, lifecycle & ownership, a recording's life, dictation fast lane, meeting mode, the recall path
 - [Internals](developer-guide/internals.md) — Subsystem deep dives: async topology, audio path, catalog & search internals, hybrid-search fusion math, meeting alignment
+- [Technical Challenges & Engineering Decisions](developer-guide/technical_challenges.md) — The hard problems and how they were solved: real-time audio & live preview, whisper-server supervision, dual-track meeting alignment, diarization, the Playbook pipeline, dictation, hybrid search, security, IPC, and lifecycle
 - [Developer Onboarding](developer-guide/onboarding.md) — Coding conventions, Light/Shadow DOM, and styling guidelines
 - [How to Extend Phoneme](developer-guide/how_to_extend.md) — Step-by-step guide for custom providers, IPC commands, and hotkeys
 - [Frontend Development](developer-guide/frontend_guide.md) — Custom state store, Lit templates, and Vim pane layout

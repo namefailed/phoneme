@@ -28,13 +28,27 @@ The raw output is always saved as `original_transcript`; the cleaned text become
 
 Want to see exactly what each AI step asked for and got back? Toggle the
 **AI-activity panel** — the floating brain button (the FAB at the edge of the
-window) — with **`g A`**. It logs every processing step as it runs (cleanup,
-summary, title, auto-tag, diarization), recording both the **prompt** sent and
-the **response** received, so you can see precisely how a transcript was
-shaped.
+window) — with **`g A`**. It logs each AI step as it runs — transcription (shown
+live), then the LLM steps: cleanup, summary, and auto-tag — recording both the
+**prompt** sent and the **response** received (streamed live, token by token),
+so you can see precisely how a transcript was shaped.
 
-The log **persists across restarts**, so you can reopen Phoneme later and still
-review what each step did on earlier recordings.
+Each entry shows its stage, the recording it belongs to (a dot marks the one
+you're viewing), and a timestamp; a pulsing 🧠 means a step is running right
+now. The button is **drag-to-move** and the panel **resizes** — both remember
+where you left them (**Ctrl+Shift+click** the button or the title bar to reset).
+Re-runs are kept as **separate** entries rather than overwriting the original,
+so you can compare attempts.
+
+The log **persists across restarts** — recent sessions are reloaded when the
+panel opens, so you can quit Phoneme and still review what each step did on
+earlier recordings. The store keeps a generous rolling window of the most
+recent sessions and prunes older ones automatically, so it never grows without
+bound.
+
+> [!TIP]
+> The panel isn't a modal — close it with **`g A`** again, the ✕ button, or
+> **Esc** while it's focused.
 
 ## ☁️ Provider Options
 

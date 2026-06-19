@@ -35,6 +35,33 @@ manager lets you:
 Each profile shows when it was last saved (e.g. "saved 3h ago"), and the
 profile you last switched to is flagged as **Active**.
 
+## 🎬 One-click switching from the Record button
+
+You don't have to open Settings to flip profiles. The **Record** split-button has
+a small caret next to it — open that dropdown and you'll find a **Capture
+profile** section listing every saved profile with a 👤 icon.
+
+Click one and Phoneme swaps the **whole config** to that profile *before your next
+capture*, so the recording you're about to start uses that intent's settings.
+Think of it as picking the mode for the next take:
+
+- **Standup** — a fast local model, terse Smart Cleanup, auto-tag `#standup`.
+- **Interview** — a high-accuracy model with diarization and a summary hook.
+
+Switching here is the **same hot reload** as everywhere else: the click writes the
+profile into your live `config.toml` and reloads the daemon on the spot. A small
+toast confirms the change (e.g. *"Capture profile: Standup"*), and the rest of the
+app re-reads the now-current config immediately — no restart, no extra steps.
+
+> [!NOTE]
+> The caret is only available while you're idle. You can't change profile mid-take
+> — the menu is disabled once a recording or meeting is running.
+
+**Haven't saved any profiles yet?** The dropdown shows a **Set up profiles…**
+entry instead, which jumps straight to **Settings → Managers → Profiles** so you
+can create your first one. Once you have profiles, that section also offers a
+**Manage profiles…** shortcut to the same place.
+
 ## ⌨️ Managing Profiles from the CLI
 
 Everything above is also scriptable, which is what makes profiles useful for

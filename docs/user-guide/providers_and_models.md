@@ -115,6 +115,40 @@ Curated lists:
 | AssemblyAI | `best`, `nano`, `slam-1` |
 | ElevenLabs | `scribe_v1` |
 
+### Custom vocabulary (bias the transcriber toward your jargon)
+
+Set in **Settings → Transcription → Custom vocabulary**. Stored in
+`whisper.initial_prompt`.
+
+Whisper-family models accept a short *prompt* that primes the decoder before it
+hears your audio. Phoneme exposes it as a plain free-text box: list the names,
+acronyms, and domain jargon the transcriber keeps mis-hearing, and decoding
+leans toward them.
+
+```toml
+[whisper]
+initial_prompt = "Phoneme, pyannote, WebView2, Namef, whisper.cpp"
+```
+
+**What it does.** The text is sent verbatim as the model's prompt, so words it
+would otherwise spell phonetically ("pie annote", "web view two") come back
+correct. It's a *bias*, not a dictionary — it nudges, it doesn't force.
+
+| Detail | Behavior |
+|--------|----------|
+| **Where it's sent** | The OpenAI `prompt` field on the whisper-family HTTP path — the local `whisper.cpp` server, **OpenAI**, **Groq**, and **Custom** OpenAI-compatible endpoints. The native build sends it as Whisper's `initial_prompt`. |
+| **Who ignores it** | **Deepgram**, **AssemblyAI**, and **ElevenLabs** — they have their own keyword mechanisms and ignore this field for now. |
+| **Budget** | Whisper only conditions on the **last ~224 prompt tokens** (the decoder's 448-token context, halved). The box counts tokens live with Whisper's own BPE tokenizer and hard-caps at 224 — anything longer is trimmed to the first 224 tokens. |
+| **Empty** | An empty box is omitted from the request entirely, so the wire format is unchanged for anyone who doesn't set one. |
+
+> [!TIP]
+> Keep it short and high-value. A dense list of the dozen terms you actually
+> use beats a paragraph of prose — every token you spend on filler is a token
+> Whisper can't spend on your jargon. Fresh installs ship a tiny default that
+> primes structured-note markers (`Action Item:`, `Decision:`, `Idea:`…) so
+> keyword hooks fire on a clean transcript; replace it with your own vocabulary
+> when you have one.
+
 ---
 
 ## LLM providers (cleanup & summary)

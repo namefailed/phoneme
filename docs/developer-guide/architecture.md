@@ -10,6 +10,8 @@ deserves a deeper treatment, this page points at it rather than repeating it:
 - [backend_guide.md](backend_guide.md) — the Rust workspace map (which crate
   owns what) and the actor/supervision patterns.
 - [frontend_guide.md](frontend_guide.md) — the Lit/Store frontend deep dive.
+- [technical_challenges.md](technical_challenges.md) — the hard problems behind
+  the non-obvious code (the bug, race, or constraint each design decision answers).
 
 Every Rust module also carries its own `//!` doc comment that explains its role
 and invariants; the file links below land on those. The crate-level system maps

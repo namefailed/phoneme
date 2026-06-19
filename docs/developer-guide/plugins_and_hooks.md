@@ -180,6 +180,150 @@ Now saying *"…action item: send Sarah the contract"* runs the Todoist Hook,
 while ordinary notes are ignored. (The seeded **Capture to-dos** example shows
 this with a `Todo:` trigger.)
 
+### How the trigger is evaluated
+
+The trigger is a plain **substring** test against the **post-processed**
+transcript — the same text the Hook would receive on stdin, *after* Smart
+Cleanup / Transform steps have run. There is no regex or word-boundary matching:
+the phrase just has to appear somewhere in the transcript.
+
+| `keyword` | `case_sensitive` | Runs when… |
+|---|---|---|
+| *(blank)* | — | **always** — the trigger is off |
+| `Action Item:` | `false` (default) | the transcript contains `action item:` in any casing |
+| `TODO` | `true` | the transcript contains `TODO` exactly (not `todo`) |
+
+This is decided by `PlaybookHook::should_run(transcript)` in
+`crates/phoneme-core/src/config.rs`: a blank `keyword` short-circuits to `true`
+(**always run**), otherwise it compares with `contains` — lower-casing both sides
+unless `case_sensitive` is set.
+
+> **Blank means *always*, not *never*.** This is the one place the Playbook
+> trigger differs from the legacy `KeywordRule` it replaced: an empty pattern on
+> a migrated keyword rule used to mean "never match", but a Hook entry with a
+> blank trigger runs on every recording. Leave the trigger blank for an
+> unconditional Hook; set a phrase only when you want it gated.
+
+The gate is checked **per Hook entry**, just before that entry runs. If it
+doesn't match, the entry is skipped silently — it isn't counted as run and never
+appears in the recording's hook provenance. In a recipe with several Hooks, each
+one is gated independently, so you can mix always-on Hooks (clipboard, file
+append) with keyword-gated ones (Todoist on `Action Item:`) in the same chain.
+
+## 🚦 Required vs. non-fatal hooks
+
+By default a Hook is a **side-effect**, not a gate: if it fails, the failure is
+recorded but the **transcript stays intact and usable**. A flaky webhook or a
+clipboard tool that returns non-zero can't trash an otherwise-good recording.
+Tick **"Fail the recording if this hook errors"** (the `required` flag on the
+Hook entry) only when the side-effect is load-bearing — then a failure
+quarantines the whole recording.
+
+What counts as a failure, and what each mode does:
+
+| `required` | A command exits non-zero / fails to spawn, or a webhook errors |
+|---|---|
+| `false` (default) | Logged (`tracing::warn!`), folded into the recording's step-failure, and the recording is marked **HookFailed** — but the transcript is preserved and the rest of the recipe still runs. |
+| `true` | The recipe **short-circuits** with an error; the caller fails the recording the same way the legacy always-on `[hook]` command path did. |
+
+This is implemented in `run_hook_steps` in
+`bin/phoneme-daemon/src/pipeline.rs`. For each Hook step that passes its trigger,
+both halves (shell command and/or webhook) are run; on failure the function
+either `return Err(…)` (when `required`) or records the failure via
+`step_failure.get_or_insert(…)` and continues. The last non-zero command exit
+code and the summed wall-clock are folded into the recording's **hook provenance**
+(`hook_exit_code`, `hook_ms`, the last hook's label), which the detail-pane
+**Pipeline** popover reads — so a non-fatal failure is still visible after the
+fact even though the transcript survived.
+
+A few details worth knowing:
+
+- **A skipped (untriggered) Hook is never a failure.** The trigger gate runs
+  *before* the command/webhook, so a Hook whose keyword didn't match is simply
+  not run — `required` has nothing to act on.
+- **One entry can do both** a command *and* a webhook; if either half fails and
+  the entry is `required`, the recording fails.
+- **Both knobs default to "safe":** `required = false` and a blank trigger means
+  "run on every recording, but never let it break the recording".
+
+> A `required` Hook is the right tool when the recording is meaningless without
+> the side-effect — e.g. a capture that *must* reach your task manager. For
+> anything best-effort (notifications, mirrors, nice-to-have syncs), leave it off
+> so a transient outage doesn't quarantine good transcripts.
+
+## 🛡️ Webhook hooks & the outbound network policy
+
+A Hook entry can POST the recording payload to a URL instead of (or alongside)
+running a script: set the entry's **Webhook URL**. Every outbound webhook —
+whether from a Hook entry or migrated from a legacy `[hook] webhook_url` — is
+governed by one **global `[webhook]` policy** in `config.toml`, enforced by
+`crates/phoneme-core/src/webhook.rs` *before any byte leaves the machine*. The
+body is the exact same [JSON payload](#-the-json-payload) a local hook receives.
+
+### Signing the request (HMAC-SHA256)
+
+Set `[webhook] hmac_secret` to a shared secret and every POST carries an
+**`X-Phoneme-Signature: sha256=<lowercase-hex>`** header. The value is
+`HMAC-SHA256(secret, body)` computed over the **exact body bytes** that go on the
+wire (Phoneme serializes the JSON once and signs *that*, so the receiver can
+recompute it verbatim). The `sha256=` prefix is the de-facto-standard shape used
+by GitHub and Stripe, so receivers verify with off-the-shelf logic. An **empty**
+secret (the default) turns signing off — no header is added. The secret is
+encrypted at rest and redacted in logs/`Debug`.
+
+A minimal receiver-side check (Python):
+
+```python
+import hashlib, hmac
+expected = "sha256=" + hmac.new(SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+assert hmac.compare_digest(expected, request.headers["X-Phoneme-Signature"])
+```
+
+### Custom headers
+
+`[webhook] custom_headers` is a `name = "value"` table attached to **every**
+outbound POST — use it for receiver-specific auth or routing
+(`Authorization = "Bearer …"`, an `X-Api-Key`, an `X-Webhook-Source` tag). Two
+rules:
+
+- Headers Phoneme owns — **`Content-Type`** (always `application/json`) and the
+  **signature header** — are *reserved*. A `custom_headers` entry that collides
+  (compared case-insensitively) is **skipped with a warning**, and Phoneme's own
+  value wins, so a custom header can't break the content type or forge the
+  signature.
+- Header *values* can be secrets, so `Debug` on the config prints only the header
+  **names**, never the values.
+
+### The SSRF guard (loopback / private / public)
+
+Because Phoneme is local-first, the network policy is **three-tiered** rather than
+a blanket private-range block. Every target is validated up front — a DNS name is
+resolved and **every** address it yields is classified (most-restrictive wins) —
+and the webhook client **never follows redirects**, so a mistyped or hostile URL
+(or a 3xx bounce) can't smuggle your transcripts to an internal service.
+
+| Tier | What it covers | Policy |
+|---|---|---|
+| **Loopback** | `127.0.0.0/8`, `::1`, the literal `localhost` | **Always allowed**, any scheme — no knob can break it (local n8n / Home Assistant / script servers). |
+| **Private** | RFC1918 (`10/8`, `172.16/12`, `192.168/16`), link-local `169.254/16`, CGNAT `100.64/10`, IPv6 ULA `fc00::/7`, IPv6 link-local `fe80::/10`, the unspecified addresses | **Blocked** unless `[webhook] allow_private_network = true`. |
+| **Public** | everything else | Must be **`https://`** unless `[webhook] allow_http = true`. |
+
+Hardening details the guard handles for you: IPv4-mapped (`::ffff:a.b.c.d`) and
+NAT64 (`64:ff9b::/96`) addresses are classified by the v4 host they reach (no
+bypass); decimal/octal IPv4 literals are canonicalized before classification; and
+a DNS name that resolves to a private address is treated as private. The
+validated addresses are **pinned** for the actual send, closing the
+re-resolution (DNS-rebinding) TOCTOU window. A blocked target fails with
+`Error::InvalidConfig` *naming the exact knob to flip*; the POST is never
+attempted.
+
+When a webhook is rejected by policy or errors, it behaves like any other Hook
+failure — non-fatal unless the Hook entry is **`required`** (see above).
+
+See the [Threat model → Mitigations in place](threat_model.md#mitigations-in-place)
+(item **S-H1**) for the full rationale and the `[webhook]` keys in the
+[Config reference](config_reference.md#webhook).
+
 ## ⌨️ Writing Your Own Plugin
 
 Writing a plugin is trivial. Because Phoneme handles the audio capture, transcription, and LLM cleanup, your plugin only has to parse a JSON string from stdin.

@@ -101,6 +101,78 @@ meeting conversation — so one rename relabels them all.
 > and the label reverts to `Speaker N` — and you can re-rename a speaker as often
 > as you like.
 
+## 📜 Transcript views in the detail pane
+
+Open a recording and the right pane shows the editable transcript by default.
+The **Views** menu swaps in two read-only, time-coded readings of the same
+recording — both are clickable, and both follow playback.
+
+### 🔤 Synced view
+
+The **🔤 Synced** view renders the **machine transcript** as a flow of
+individual, clickable word chips — the per-word timings captured at
+transcription time, so every word maps to an exact moment in the audio.
+
+- **Click any word** to seek the waveform straight to that word's start.
+- **Playhead-follow**: as the audio plays, the word under the playhead is
+  highlighted and scrolled into view, so the reading tracks the sound.
+- It groups into paragraphs at **speaker turns** and honours your
+  [renamed speakers](#-named-speakers) — `Speaker 2` reads as **Sarah**.
+
+> [!NOTE]
+> The Synced view is **machine truth** and entirely separate from the editable
+> transcript — it never edits anything. Recordings transcribed before per-word
+> capture existed (or cloud providers that emit no word timings) show a gentle
+> "no word timings" hint and a nudge to re-transcribe, which backfills them and
+> enables click-to-seek.
+
+#### ⚠️ Low-confidence highlighting
+
+When the transcription provider reports a per-word confidence score, words it
+scored **below 0.5** (50%) get a subtle squiggle, and hovering one shows its
+exact confidence in the tooltip (e.g. `… · 38% confidence`). That makes likely
+mistranscriptions easy to spot and check against the audio. Words with **no**
+reported confidence — the whisper family and most cloud STT — are left unmarked
+on purpose: an honest blank beats a misleading "low confidence".
+
+### 🕒 Timeline view
+
+The **🕒 Timeline** view reads the transcript as a clickable, chronological list
+of segments — click any line to jump playback there, with the same
+playhead-follow highlight as the Synced view.
+
+For a **meeting**, selecting the meeting's group header opens the merged
+conversation: every track interleaved into one chat-style reading. When all
+transcribed tracks carry segment timing, turns are **interleaved by their real
+timestamps** (the tracks share a wall clock at capture) — your mic ("You") on
+the left, the meeting on the right, each stamped with both the time of day and
+the offset from the start (`10:05:13 · 0:13`). Meetings transcribed before
+segment capture fall back to a coarse by-source reading instead. See
+[Meeting Mode](meeting_mode.md).
+
+### ✏️ Edited transcripts re-sync automatically
+
+When you edit and save the transcript, Phoneme **re-flows** the per-word and
+per-segment timing layers onto your new text, so the Synced and Timeline views
+(and click-to-seek) keep following the recording after an edit:
+
+- **Unchanged** words keep their exact original timing.
+- **Inserted** words are interpolated evenly into the surrounding gap.
+- **Deleted** words drop out.
+
+There is **no model run** — it reuses the audio's already-known word timings, so
+it is instant and works offline.
+
+| Config key | Default | Effect |
+|------------|---------|--------|
+| `editor.resync_views_on_edit` | `true` | Re-flow the timing layers onto edited text on save. |
+
+This is on by default. To leave the original machine timings untouched on every
+edit — a "forensic" preference, at the cost of the views drifting from your
+edited text — turn off **Settings → Editor → "Re-sync Synced & Timeline views
+when you edit"** (or search Settings for "resync", or set
+`editor.resync_views_on_edit = false`).
+
 ## 🔖 Saved searches
 
 A saved search snapshots **everything** the library is filtered by — search
