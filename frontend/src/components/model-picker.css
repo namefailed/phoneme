@@ -38,6 +38,11 @@
   from { transform: translateY(-6px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
 }
+/* Honor reduced motion — skip the dropdown's transform entrance, matching the
+   modal family's escape hatch. */
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay.mp-anchored .mp-dialog { animation: none; }
+}
 
 .mp-tabs {
   display: flex;

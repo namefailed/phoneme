@@ -500,3 +500,13 @@
   white-space: nowrap;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
 }
+
+/* Honor reduced motion: skip the modal entrance fade/slide transforms, matching
+   the escape-hatch idiom every other keyframe uses (cursor ghost, zen-breathe).
+   modal-slide-in is a translateY/scale transform that otherwise played
+   unconditionally; default users are unchanged. */
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  [class*="modal-overlay"] { animation: none; }
+  .modal-dialog { animation: none; }
+}

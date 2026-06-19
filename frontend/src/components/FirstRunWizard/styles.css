@@ -102,6 +102,11 @@
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }
 }
+/* Honor reduced motion — skip the per-step slide-in. (wizardRecordPulse is an
+   infinite live-state pulse, left running like the record button.) */
+@media (prefers-reduced-motion: reduce) {
+  .wizard-body { animation: none; }
+}
 .wizard-title {
   font-size: 1.8571rem;
   font-weight: 700;
