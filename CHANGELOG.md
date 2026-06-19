@@ -86,6 +86,13 @@ trust boundary. Verified against current code.*
   so the list's **Source** column and its hover icon are accurate instead of always
   showing Microphone for single recordings. Pairs with the per-keybind source
   override under Custom Hotkeys.
+- [x] **Streaming-type dictation (experimental)** — `[in_place].stream_type`, off
+  by default: with Typing delivery, dictated words appear live at your cursor as you
+  speak (the streaming preview's committed words, typed only on clean forward
+  extensions so the cursor never churns), then a minimal backspace + retype patches
+  them up to the accurate final transcript when you stop. The live-preview + final
+  batch transcription pipeline is unchanged — this only changes when/how the typed
+  fast lane delivers. Settings → Dictation toggle.
 - [x] **Live preview now works during in-place dictation** — dictation previously
   showed no overlay caption at all (the streaming-preview loop was hard-skipped for
   dictation to protect paste latency). It now drives the overlay like any recording,

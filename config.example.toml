@@ -181,6 +181,12 @@ cleanup = "fast"
 #             long text)
 type_mode = "type"
 
+# EXPERIMENTAL. Type dictated words live as they finalize (instead of all at once
+# when you stop), then quietly patch them up to the accurate final transcript on
+# stop. Only applies with type_mode = "type". It types the live preview's rolling
+# words, so it reads best with a fast preview model (see [preview_whisper]).
+stream_type = false
+
 # Keep the dictation in the library after typing (transcript, segments,
 # embeddings persist like any recording). false = ephemeral: the row and audio
 # are deleted once typed.
