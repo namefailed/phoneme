@@ -708,9 +708,12 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     // Named-speaker recognition (#9). Preview-only stubs so the suggestion chip +
     // Speaker Library render; real matching happens against voiceprints in the daemon.
     case "recognize_speakers":
-      return args.id === "r11"
-        ? [{ speaker_label: 2, name: "Alex Rivera", named_voice_id: "nv_demo", score: 0.82 }]
-        : [];
+      if (args.id === "r11")
+        return [{ speaker_label: 2, name: "Alex Rivera", named_voice_id: "nv_demo", score: 0.82 }];
+      // A meeting's system track, so the merged-view banner is visible in preview.
+      if (args.id === "m2b")
+        return [{ speaker_label: 3, name: "Jordan Lee", named_voice_id: "nv_demo2", score: 0.77 }];
+      return [];
     case "dismiss_speaker_suggestion":
     case "rename_named_voice":
       return undefined;

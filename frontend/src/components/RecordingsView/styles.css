@@ -2633,6 +2633,70 @@ ph-sidebar .queue-item-main.kbd-cursor {
   color: var(--fg-faded);
   font-style: italic;
 }
+
+/* Named-speaker recognition banner (#9): unnamed diarized speakers across the
+   meeting's tracks that matched a known voice. */
+.merged-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 16px 0;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+.merged-suggest-lead {
+  font-weight: 600;
+  color: var(--fg-default);
+}
+.merged-suggest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+.merged-suggest-chip b {
+  color: var(--fg-default);
+}
+.merged-suggest-pct {
+  opacity: 0.6;
+  font-size: 0.7857rem;
+}
+.merged-suggest-yes,
+.merged-suggest-no {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.7857rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.merged-suggest-yes {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+}
+.merged-suggest-yes:hover {
+  filter: brightness(1.1);
+}
+.merged-suggest-no {
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg-muted);
+}
+.merged-suggest-no:hover {
+  color: var(--fg-default);
+  border-color: var(--fg-muted);
+}
 .merged-body {
   padding: 10px 16px 28px;
   display: flex;

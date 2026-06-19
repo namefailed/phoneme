@@ -1,7 +1,7 @@
 import { errText } from "../../utils/error";
 import { LitElement, html, nothing, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { listSession, setSpeakerName, getSegments, saveTextExport, type Recording, type TranscriptSegment } from "../../services/ipc";
+import { listSession, setSpeakerName, getSegments, saveTextExport, recognizeSpeakers, dismissSpeakerSuggestion, type Recording, type TranscriptSegment, type SpeakerSuggestion } from "../../services/ipc";
 import { showToast } from "../../utils/toast";
 import { formatDuration, fmtClock } from "../../utils/format";
 import { invoke } from "@tauri-apps/api/core";
@@ -66,6 +66,11 @@ export class MergedConversationDetail extends LitElement {
   /** The speaker chip currently being renamed (which track + which 1-based
    *  label), or null when none. Click a chip to edit; commit on Enter/blur. */
   @state() private editing: { recordingId: string; label: number } | null = null;
+
+  /** Recognized-speaker suggestions across the meeting's tracks (#9): unnamed
+   *  diarized speakers whose voiceprints matched a known voice. Each carries the
+   *  track `recordingId` so accepting names the right track's speaker. */
+  @state() private suggestions: (SpeakerSuggestion & { recordingId: string })[] = [];
   /** App config, for the `interface.format_24h` time-of-day preference shown on
    *  chronological turns. Loaded once and refreshed on `config:saved` (same as
    *  the recordings list). */
@@ -120,6 +125,7 @@ export class MergedConversationDetail extends LitElement {
   private async loadSession() {
     this.loading = true;
     this.error = null;
+    this.suggestions = [];
     try {
       this.recordings = await listSession(this.meetingId);
       // Segment timelines make the merge chronological; a track without them
@@ -138,6 +144,50 @@ export class MergedConversationDetail extends LitElement {
       this.segmentsMap = new Map();
     } finally {
       this.loading = false;
+    }
+    // Recognition is a non-blocking convenience — let the reading render first,
+    // then fill the banner when the matches come back.
+    void this.loadSuggestions();
+  }
+
+  /** Recognize unnamed speakers across every track and collect the suggestions
+   *  (the daemon already skips named/dismissed labels, and returns nothing when
+   *  recognition is off or a track was cloud-diarized). */
+  private async loadSuggestions() {
+    const recs = this.recordings;
+    if (recs.length === 0) {
+      this.suggestions = [];
+      return;
+    }
+    try {
+      const perTrack = await Promise.all(
+        recs.map((r) =>
+          recognizeSpeakers(r.id)
+            .then((list) => list.map((s) => ({ ...s, recordingId: r.id })))
+            .catch(() => [] as (SpeakerSuggestion & { recordingId: string })[]),
+        ),
+      );
+      this.suggestions = perTrack.flat();
+    } catch {
+      this.suggestions = [];
+    }
+  }
+
+  /** Accept a suggestion: name that track's speaker (which enrolls + reinforces
+   *  the voice). `commitSpeakerName` reloads the session, refreshing the banner. */
+  private acceptSuggestion(s: SpeakerSuggestion & { recordingId: string }) {
+    void this.commitSpeakerName(s.recordingId, s.speaker_label, s.name);
+  }
+
+  /** Dismiss a suggestion so it isn't offered again for that track + speaker. */
+  private async dismissSuggestion(s: SpeakerSuggestion & { recordingId: string }) {
+    this.suggestions = this.suggestions.filter(
+      (x) => !(x.recordingId === s.recordingId && x.speaker_label === s.speaker_label),
+    );
+    try {
+      await dismissSpeakerSuggestion(s.recordingId, s.speaker_label);
+    } catch {
+      /* dismissal is best-effort */
     }
   }
 
@@ -326,6 +376,29 @@ export class MergedConversationDetail extends LitElement {
             <span class="merged-meta-ro">merged reading · read-only</span>
           </div>
         </div>
+
+        ${this.suggestions.length
+          ? html`<div class="merged-suggest">
+              <span class="merged-suggest-lead">🔎 Recognized voices:</span>
+              ${this.suggestions.map(
+                (s) => html`<span class="merged-suggest-chip">
+                  Speaker ${s.speaker_label} sounds like
+                  <b>${s.name}</b>
+                  <span class="merged-suggest-pct">${Math.round(s.score * 100)}%</span>
+                  <button
+                    class="merged-suggest-yes"
+                    title="Use this name"
+                    @click=${() => this.acceptSuggestion(s)}
+                  >Use</button>
+                  <button
+                    class="merged-suggest-no"
+                    title="Not them — don't suggest again"
+                    @click=${() => this.dismissSuggestion(s)}
+                  >✗</button>
+                </span>`,
+              )}
+            </div>`
+          : nothing}
 
         ${blocks.length === 0
           ? html`<div class="empty">No transcript yet for this meeting.</div>`
