@@ -64,9 +64,12 @@ const PREVIEW_INTERVAL: Duration = Duration::from_millis(2000);
 const STOP_TAIL_GRACE: Duration = Duration::from_millis(150);
 
 /// Minimum number of *new* samples (beyond the previous preview) before we spend
-/// a transcription on a fresh tick. At 16 kHz this is ~1.0 s — below that a
-/// re-transcription rarely changes the text enough to be worth the round trip.
-const PREVIEW_MIN_NEW_SAMPLES: usize = 16_000;
+/// a transcription on a fresh tick. At 16 kHz this is ~0.5 s, so the caption
+/// advances about twice as smoothly as the old ~1.0 s gate (the "chunky/laggy"
+/// complaint). A tick that can't get the whisper permit still skips and a heavy
+/// tick still backs off via the adaptive cadence, so weak boxes never thrash —
+/// this only lets capable machines update more often.
+const PREVIEW_MIN_NEW_SAMPLES: usize = 8_000;
 
 /// The streaming preview transcribes only the last `PREVIEW_WINDOW_SAMPLES` of
 /// captured audio each tick — a rolling "live caption" — so per-tick work stays
@@ -165,13 +168,20 @@ fn capitalize_first(s: &str) -> String {
     out
 }
 
-fn stitch_preview(committed: &str, window: &str) -> String {
+/// Returns the merged caption (committed's words kept verbatim — never rewritten
+/// — plus only the genuinely-new window tail), or `None` when no overlap and no
+/// containment was found. `None` is the caller's cue to pick a phase-aware
+/// fallback: while the take still fits the audio window the fresh transcription
+/// is authoritative (replace), once it has slid the window is a post-silence tail
+/// (append). Either way committed is never rewritten mid-caption, which is what
+/// keeps the live preview from visibly reshuffling words already shown.
+fn stitch_preview(committed: &str, window: &str) -> Option<String> {
     let window = window.trim();
     if window.is_empty() {
-        return committed.to_string();
+        return Some(committed.to_string());
     }
     if committed.is_empty() {
-        return window.to_string();
+        return Some(window.to_string());
     }
 
     let committed_words: Vec<&str> = committed.split_whitespace().collect();
@@ -194,7 +204,7 @@ fn stitch_preview(committed: &str, window: &str) -> String {
     if window_norm.len() <= committed_norm.len()
         && committed_norm[committed_norm.len() - window_norm.len()..] == window_norm[..]
     {
-        return committed.to_string();
+        return Some(committed.to_string());
     }
 
     // How many leading window words we'll allow to be skipped when anchoring: a
@@ -237,13 +247,14 @@ fn stitch_preview(committed: &str, window: &str) -> String {
         // they are dropped — no run is ever duplicated.
         let mut out: Vec<&str> = committed_words.clone();
         out.extend_from_slice(&window_words[skip + overlap..]);
-        return out.join(" ");
+        return Some(out.join(" "));
     }
 
-    // No overlap found (e.g. a long silence split the speech, or whisper produced
-    // a wholly different window). Append the window as a new segment so we never
-    // lose newly-spoken words; a leading separator keeps it readable.
-    format!("{committed} {window}")
+    // No overlap and no containment (a long silence split the speech, or whisper
+    // re-transcribed the window wholly differently). Ambiguous — the caller picks
+    // the phase-aware fallback rather than blindly appending (which would
+    // duplicate a re-transcribed tail).
+    None
 }
 
 /// Open a [`Source`] for the current recording: returns a real CPAL source in
@@ -755,19 +766,22 @@ impl DaemonRecorder {
                     Ok(text) => {
                         let text = text.trim();
                         if !text.is_empty() {
-                            // While the take still fits inside the audio window the
-                            // transcription covers everything from the start, so it
-                            // is the authoritative full caption — show it directly.
-                            // Once the window has begun sliding (longer take), the
-                            // transcription only covers the tail, so stitch it onto
-                            // the committed caption to keep the preview growing
-                            // forward instead of rewinding its start each tick.
+                            // Always stitch, so words already shown are never
+                            // rewritten mid-caption — the old early-phase wholesale
+                            // replace was exactly what made the preview visibly
+                            // reshuffle words as whisper revised the growing take.
+                            // On a no-overlap stitch, fall back by phase: while the
+                            // take still fits the window the fresh transcription is
+                            // the authoritative whole caption (replace); once it has
+                            // slid, the window is a post-silence tail (append).
                             let window_slid = total_len > PREVIEW_WINDOW_SAMPLES;
-                            committed = if window_slid {
-                                stitch_preview(&committed, text)
-                            } else {
-                                text.to_string()
-                            };
+                            committed = stitch_preview(&committed, text).unwrap_or_else(|| {
+                                if window_slid {
+                                    format!("{committed} {text}")
+                                } else {
+                                    text.to_string()
+                                }
+                            });
                             state.events.emit(DaemonEvent::TranscriptionPartial {
                                 id: id.clone(),
                                 text: committed.clone(),
@@ -2249,7 +2263,7 @@ mod tests {
         let window = "brown fox jumps over";
         assert_eq!(
             stitch_preview(committed, window),
-            "the quick brown fox jumps over"
+            Some("the quick brown fox jumps over".to_string())
         );
     }
 
@@ -2258,16 +2272,32 @@ mod tests {
         // The window is entirely a suffix of the committed text — nothing new.
         let committed = "hello world how are you";
         let window = "how are you";
-        assert_eq!(stitch_preview(committed, window), committed);
+        assert_eq!(stitch_preview(committed, window), Some(committed.to_string()));
     }
 
     #[test]
     fn stitch_preview_handles_empty_inputs() {
-        assert_eq!(stitch_preview("", "hello world"), "hello world");
-        assert_eq!(stitch_preview("already here", ""), "already here");
-        assert_eq!(stitch_preview("", ""), "");
+        assert_eq!(stitch_preview("", "hello world"), Some("hello world".to_string()));
+        assert_eq!(stitch_preview("already here", ""), Some("already here".to_string()));
+        assert_eq!(stitch_preview("", ""), Some(String::new()));
         // Whitespace-only window is treated as empty.
-        assert_eq!(stitch_preview("keep me", "   "), "keep me");
+        assert_eq!(stitch_preview("keep me", "   "), Some("keep me".to_string()));
+    }
+
+    #[test]
+    fn stitch_preview_freezes_committed_when_whisper_revises_an_early_word() {
+        // The #21 fix: the loop now ALWAYS stitches (no early-phase wholesale
+        // replace), so a word already shown is never rewritten even when the next
+        // full re-transcription revises it — here whisper changed "meeting" ->
+        // "meaning". Committed's "meeting" is kept (the preview doesn't reshuffle),
+        // and only the genuinely-new tail word is appended. The accurate final
+        // transcript corrects the word later.
+        let committed = "the meeting went";
+        let revised_full = "the meaning went well";
+        assert_eq!(
+            stitch_preview(committed, revised_full),
+            Some("the meeting went well".to_string())
+        );
     }
 
     // ── next_preview_interval (adaptive cadence — the record-time crash fix) ──
@@ -2318,15 +2348,14 @@ mod tests {
     }
 
     #[test]
-    fn stitch_preview_appends_disjoint_window_as_new_segment() {
-        // No overlap at all (e.g. a pause split the speech): never drop the new
-        // words — append them so the caption still advances.
+    fn stitch_preview_returns_none_on_disjoint_window() {
+        // No overlap and no containment (e.g. a pause split the speech): stitch
+        // can't safely merge, so it returns None and the loop picks the phase-aware
+        // fallback (append when the window has slid, replace while the take still
+        // fits it) — never a blind append that could duplicate a re-transcription.
         let committed = "first sentence done";
         let window = "completely different words";
-        assert_eq!(
-            stitch_preview(committed, window),
-            "first sentence done completely different words"
-        );
+        assert_eq!(stitch_preview(committed, window), None);
     }
 
     #[test]
@@ -2337,7 +2366,7 @@ mod tests {
         let window = "The cafe yesterday";
         assert_eq!(
             stitch_preview(committed, window),
-            "we met at the cafe yesterday"
+            Some("we met at the cafe yesterday".to_string())
         );
     }
 
@@ -2349,7 +2378,7 @@ mod tests {
         let window = "to be that is the question";
         assert_eq!(
             stitch_preview(committed, window),
-            "to be or not to be that is the question"
+            Some("to be or not to be that is the question".to_string())
         );
     }
 
@@ -2364,7 +2393,7 @@ mod tests {
         let committed = "hello there my friend how are you";
         // Same speech, leading words revised, plus two new words at the end.
         let window = "um How are you doing today";
-        let out = stitch_preview(committed, window);
+        let out = stitch_preview(committed, window).expect("overlap found");
         assert_eq!(out, "hello there my friend how are you doing today");
 
         // Hard guarantee against the actual symptom ("text comes up multiple
@@ -2390,13 +2419,13 @@ mod tests {
         let first_window = "the meeting will start at noon today";
         // First tick (take fits the window) replaces wholesale — modeled by
         // stitching onto an empty caption.
-        let committed = stitch_preview("", first_window);
+        let committed = stitch_preview("", first_window).expect("seeds from empty");
         assert_eq!(committed, first_window);
 
         // Second (sliding) tick: whisper re-cased "The" and dropped "the meeting",
         // re-stating from "will start" with two new trailing words.
         let second_window = "Will start at noon today in room five";
-        let out = stitch_preview(&committed, second_window);
+        let out = stitch_preview(&committed, second_window).expect("overlap found");
         assert_eq!(out, "the meeting will start at noon today in room five");
         assert_eq!(
             out.matches("at noon today").count(),

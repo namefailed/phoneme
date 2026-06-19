@@ -93,6 +93,14 @@ trust boundary. Verified against current code.*
   them up to the accurate final transcript when you stop. The live-preview + final
   batch transcription pipeline is unchanged — this only changes when/how the typed
   fast lane delivers. Settings → Dictation toggle.
+- [x] **Steadier live preview** — the live caption no longer reshuffles words you
+  already saw. It used to re-transcribe the whole take and replace the caption
+  wholesale for the first 15s (i.e. most dictations), so earlier words visibly
+  changed as you kept talking. Now it **always stitches** each tick onto the text
+  already shown — words once committed are frozen, only the genuinely-new tail is
+  appended — with a phase-aware fallback that never blindly re-appends a
+  re-transcribed tail (the old duplicated-runs bug). It also advances ~2× more
+  smoothly (0.5s min-new gate); weak machines still self-throttle.
 - [x] **Live preview now works during in-place dictation** — dictation previously
   showed no overlay caption at all (the streaming-preview loop was hard-skipped for
   dictation to protect paste latency). It now drives the overlay like any recording,
