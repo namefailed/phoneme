@@ -33,6 +33,36 @@ Feed a file in by path — great for scripts and bulk jobs:
 phoneme import C:\path\to\my_recording.mp3
 ```
 
+### From a URL (YouTube & more)
+
+Give `phoneme import` an `http(s)` URL instead of a file path and it downloads
+just the **audio track** with [yt-dlp](https://github.com/yt-dlp/yt-dlp), then
+imports it like any local file:
+
+```bash
+phoneme import "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+This is handy for **testing transcription quality**: pull a real-world clip
+(interview, podcast, lecture), import it once, then `phoneme retranscribe <id>`
+with different models/settings and compare the versions side by side.
+
+By default the audio is extracted to `.m4a` (small, and transparent enough for
+speech). For testing where you'd rather avoid any re-encode, pick a lossless
+container:
+
+```bash
+phoneme import --format flac "https://youtu.be/VIDEO_ID"
+# choices: m4a (default), mp3, flac, wav
+```
+
+> [!NOTE]
+> URL import requires **yt-dlp** and **ffmpeg** on your PATH. Install yt-dlp with
+> `python -m pip install -U yt-dlp` (ffmpeg via your package manager, e.g.
+> `winget install Gyan.FFmpeg`). The download goes to a temp folder and is
+> deleted after import — Phoneme keeps only its own decoded copy. Only download
+> content you have the right to use.
+
 ### What happens when you import?
 
 1. **Decoding**: Phoneme decodes the file and resamples it to its canonical 16 kHz format.

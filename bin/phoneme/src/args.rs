@@ -33,7 +33,8 @@ pub enum Command {
     Record(RecordArgs),
     /// Meeting Mode: record mic + system audio as two linked recordings.
     Meeting(MeetingArgs),
-    /// Import an existing audio file (wav/mp3/m4a/flac) and transcribe it.
+    /// Import a local audio file (wav/mp3/m4a/flac) — or an http(s) URL (e.g. a
+    /// YouTube link, downloaded via yt-dlp) — and transcribe it.
     Import(ImportArgs),
     /// List recordings.
     List(ListArgs),
@@ -362,10 +363,38 @@ pub struct SearchArgs {
     pub limit: usize,
 }
 
+/// Audio format yt-dlp extracts to when `phoneme import` is given a URL. All
+/// four are formats the daemon can decode. m4a/mp3 are lossy (transparent enough
+/// for transcription); flac/wav avoid any re-encode of the downloaded audio.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum AudioFormat {
+    M4a,
+    Mp3,
+    Flac,
+    Wav,
+}
+
+impl AudioFormat {
+    /// The yt-dlp `--audio-format` value / file extension.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AudioFormat::M4a => "m4a",
+            AudioFormat::Mp3 => "mp3",
+            AudioFormat::Flac => "flac",
+            AudioFormat::Wav => "wav",
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub struct ImportArgs {
-    /// Path to an audio file to import (wav/mp3/m4a/flac).
+    /// Path to a local audio file (wav/mp3/m4a/flac), OR an http(s) URL (e.g. a
+    /// YouTube link) — the audio track is downloaded via yt-dlp, then imported.
     pub file: String,
+    /// When FILE is a URL, the audio format yt-dlp extracts to (yt-dlp -x).
+    /// m4a/mp3 are lossy but transparent for speech; flac/wav avoid re-encoding.
+    #[arg(long, value_enum, default_value_t = AudioFormat::M4a)]
+    pub format: AudioFormat,
 }
 
 #[derive(Debug, clap::Args)]
