@@ -129,6 +129,13 @@ pub struct Config {
     /// so it never re-runs (and never clobbers later Playbook edits).
     #[serde(default)]
     pub playbook_migrated: bool,
+    /// Whether the one-time hooks migration has run (the H3 cutover). Defaults to
+    /// `false` so every pre-cutover config.toml is reconciled exactly once:
+    /// [`Config::migrate_hooks`] moves the legacy `[hook]` commands / keyword
+    /// rules / webhook into built-in Hook entries on the `default` recipe and
+    /// clears the legacy fields, then sets this `true` so it never re-runs.
+    #[serde(default)]
+    pub hooks_migrated: bool,
     /// Frontend OS-level tray behavior.
     pub tray: TrayConfig,
     /// Settings for the built-in transcript editor.
@@ -2494,6 +2501,124 @@ impl Config {
         true
     }
 
+    /// One-time migration of the legacy `[hook]` system into the Playbook (the H3
+    /// cutover): every `hook.commands` entry, every `keyword_rules` rule (its
+    /// pattern becomes the entry's `keyword` trigger), and a non-blank
+    /// `hook.webhook_url` becomes a built-in Hook [`PlaybookEntry`] appended to
+    /// the `default` recipe AFTER its LLM steps — so an existing user's hooks keep
+    /// firing, now as recipe steps. The legacy fields are then CLEARED so nothing
+    /// fires twice (the old in-pipeline loops iterate an empty list). `run_on_transcribe`
+    /// and the `[webhook]` SSRF/HMAC policy are deliberately left intact: the
+    /// former still gates whether the migrated hooks run on a given pass, the
+    /// latter still secures the migrated webhook.
+    ///
+    /// Idempotent: a no-op (returns `false`) once [`Self::hooks_migrated`] is set.
+    /// On the first run it returns `true` and the caller persists the config once
+    /// (same contract as [`Self::migrate_playbook`]).
+    pub fn migrate_hooks(&mut self) -> bool {
+        if self.hooks_migrated {
+            return false;
+        }
+        let timeout = self.hook.timeout_secs;
+        let mut entries: Vec<PlaybookEntry> = Vec::new();
+        let mut step_ids: Vec<String> = Vec::new();
+        let push = |hook: PlaybookHook, name: String, description: &str, entries: &mut Vec<PlaybookEntry>, step_ids: &mut Vec<String>| {
+            let id = format!("legacy_hook_{}", step_ids.len() + 1);
+            entries.push(PlaybookEntry {
+                id: id.clone(),
+                name,
+                description: description.to_string(),
+                builtin: false,
+                kind: PlaybookKind::Hook,
+                llm: PlaybookLlm::default(),
+                target: String::new(),
+                hook,
+            });
+            step_ids.push(id);
+        };
+
+        // Always-on commands.
+        for cmd in &self.hook.commands {
+            if cmd.trim().is_empty() {
+                continue;
+            }
+            push(
+                PlaybookHook {
+                    command: cmd.clone(),
+                    timeout_secs: timeout,
+                    ..PlaybookHook::default()
+                },
+                format!("Action {}", step_ids.len() + 1),
+                "Migrated from your [hook] commands — runs after every recording.",
+                &mut entries,
+                &mut step_ids,
+            );
+        }
+        // Keyword rules → a Hook entry with a keyword trigger.
+        for rule in &self.hook.keyword_rules {
+            if rule.command.trim().is_empty() || rule.pattern.trim().is_empty() {
+                continue;
+            }
+            push(
+                PlaybookHook {
+                    command: rule.command.clone(),
+                    keyword: rule.pattern.clone(),
+                    case_sensitive: rule.case_sensitive,
+                    timeout_secs: timeout,
+                    ..PlaybookHook::default()
+                },
+                format!("When transcript contains “{}”", rule.pattern),
+                "Migrated keyword rule — runs only when the transcript contains the trigger.",
+                &mut entries,
+                &mut step_ids,
+            );
+        }
+        // Outbound webhook URL.
+        if let Some(url) = self
+            .hook
+            .webhook_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
+            push(
+                PlaybookHook {
+                    webhook_url: url.to_string(),
+                    timeout_secs: timeout,
+                    ..PlaybookHook::default()
+                },
+                "Webhook".to_string(),
+                "Migrated from your [hook] webhook_url — POSTs the recording (governed by the [webhook] policy).",
+                &mut entries,
+                &mut step_ids,
+            );
+        }
+
+        if !step_ids.is_empty() {
+            self.playbook.extend(entries);
+            if let Some(recipe) = self.recipes.iter_mut().find(|r| r.id == "default") {
+                recipe.steps.extend(step_ids);
+            } else {
+                self.recipes.push(PlaybookRecipe {
+                    id: "default".into(),
+                    name: "Default pipeline".into(),
+                    description: "What every normal recording runs.".into(),
+                    builtin: true,
+                    steps: step_ids,
+                });
+            }
+        }
+
+        // Clear the legacy fields so the old in-pipeline firing becomes a no-op
+        // (it iterates these). run_on_transcribe + the [webhook] policy stay.
+        self.hook.commands.clear();
+        self.hook.keyword_rules.clear();
+        self.hook.webhook_url = None;
+
+        self.hooks_migrated = true;
+        true
+    }
+
     /// The transcription provider config the **live preview** should use:
     /// the dedicated [`preview_whisper`](Self::preview_whisper) when set,
     /// otherwise the main [`whisper`](Self::whisper) provider. The final
@@ -2740,6 +2865,7 @@ impl Default for Config {
             // default built from `Config::default()` then customised + saved
             // (e.g. the first-run wizard) still reconciles on next load.
             playbook_migrated: false,
+            hooks_migrated: false,
             tray: TrayConfig {
                 show_on_startup: true,
                 minimize_to_tray: true,
@@ -3206,6 +3332,71 @@ mod tests {
         let before = cfg.clone();
         assert!(!cfg.migrate_playbook(), "second migration is a no-op");
         assert_eq!(cfg, before, "config unchanged after a redundant migration");
+    }
+
+    #[test]
+    fn migrate_hooks_moves_legacy_hooks_into_the_default_recipe() {
+        let mut cfg = Config::default();
+        // Seed a legacy [hook] setup: one always-on command, one keyword rule,
+        // and a webhook URL (overwriting the default seeds).
+        cfg.hook.commands = vec!["echo hi".into()];
+        cfg.hook.keyword_rules = vec![KeywordRule {
+            pattern: "Action Item:".into(),
+            command: "append.ps1".into(),
+            case_sensitive: false,
+        }];
+        cfg.hook.webhook_url = Some("https://example.test/hook".into());
+        let before_steps = cfg
+            .recipes
+            .iter()
+            .find(|r| r.id == "default")
+            .unwrap()
+            .steps
+            .clone();
+
+        assert!(cfg.migrate_hooks(), "first migration runs");
+        assert!(cfg.hooks_migrated);
+
+        // Three Hook entries appended (command, keyword rule, webhook).
+        let hook_entries: Vec<_> = cfg
+            .playbook
+            .iter()
+            .filter(|e| e.id.starts_with("legacy_hook_"))
+            .collect();
+        assert_eq!(hook_entries.len(), 3);
+        assert!(hook_entries.iter().all(|e| e.kind == PlaybookKind::Hook));
+        // The keyword rule carried its pattern into the entry's trigger.
+        assert!(cfg
+            .playbook
+            .iter()
+            .any(|e| e.hook.keyword == "Action Item:" && e.hook.command == "append.ps1"));
+        // The webhook entry carries the URL.
+        assert!(cfg
+            .playbook
+            .iter()
+            .any(|e| e.hook.webhook_url == "https://example.test/hook"));
+
+        // Their ids were appended to the default recipe AFTER the existing steps.
+        let recipe = cfg.recipes.iter().find(|r| r.id == "default").unwrap();
+        assert_eq!(recipe.steps.len(), before_steps.len() + 3);
+        assert!(recipe.steps.starts_with(&before_steps));
+        assert!(recipe
+            .steps
+            .iter()
+            .rev()
+            .take(3)
+            .all(|s| s.starts_with("legacy_hook_")));
+
+        // Legacy fields cleared so nothing fires twice; run_on_transcribe stays.
+        assert!(cfg.hook.commands.is_empty());
+        assert!(cfg.hook.keyword_rules.is_empty());
+        assert_eq!(cfg.hook.webhook_url, None);
+        assert!(cfg.hook.run_on_transcribe);
+
+        // Idempotent.
+        let before = cfg.clone();
+        assert!(!cfg.migrate_hooks(), "second migration is a no-op");
+        assert_eq!(cfg, before);
     }
 
     #[test]
