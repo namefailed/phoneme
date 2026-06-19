@@ -47,6 +47,27 @@
   to   { transform: translateY(0)    scale(1);    opacity: 1; }
 }
 
+/* Exit — the mirror of the entrance, played when closeModalOverlay() (utils/
+   modalAnim.ts) adds .modal-overlay--closing just before removing the node. The
+   helper short-circuits to an instant remove when --ui-motion is 0 (motion off /
+   reduced), so this only runs when motion is on; `forwards` holds the faded-out
+   end state for the brief moment before the node is detached. */
+.modal-overlay--closing {
+  animation: modal-fade-out var(--ui-motion) ease-in forwards;
+  pointer-events: none;
+}
+.modal-overlay--closing .modal-dialog {
+  animation: modal-slide-out var(--ui-motion) cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+@keyframes modal-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes modal-slide-out {
+  from { transform: translateY(0)    scale(1);    opacity: 1; }
+  to   { transform: translateY(-6px) scale(0.97); opacity: 0; }
+}
+
 .modal-header {
   display: flex;
   align-items: center;
