@@ -1043,6 +1043,16 @@ impl DaemonRecorder {
         // audio to prepend; this also releases the microphone (or returns it) before we reopen
         // it for the recording. Empty when pre-roll is disabled (default path).
         let (prepend, preroll_source) = self.take_preroll_samples().await;
+        // Pre-roll is captured with the GLOBAL source (and only ever the
+        // microphone). If a per-keybind override switched THIS recording to a
+        // different source, that buffered audio is from the wrong device — drop it
+        // and open a fresh stream for the override source below, so the recording
+        // actually captures (and is labelled as) the source the binding asked for.
+        let (prepend, preroll_source) = if kind == app_cfg.recording.source {
+            (prepend, preroll_source)
+        } else {
+            (Vec::new(), None)
+        };
         let source = if let Some(s) = preroll_source {
             s
         } else {

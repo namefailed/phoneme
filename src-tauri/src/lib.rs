@@ -271,21 +271,24 @@ pub fn run() {
                             match action {
                                 HotkeyAction::Meeting => {
                                     // A meeting binding ignores recipe_id /
-                                    // whisper_model: a meeting toggles via the
-                                    // daemon's normal multi-track path, which
-                                    // applies recipe/model per-track itself rather
-                                    // than through the single-recording ledger.
-                                    // Warn so a user who set them on a meeting
-                                    // binding isn't silently surprised they had no
-                                    // effect (the field docs note this too).
+                                    // whisper_model / source: a meeting toggles via
+                                    // the daemon's normal multi-track path, which
+                                    // records both tracks and applies recipe/model
+                                    // per-track itself rather than through the
+                                    // single-recording ledger. Warn so a user who
+                                    // set them on a meeting binding isn't silently
+                                    // surprised they had no effect (the field docs
+                                    // note this too).
                                     if !binding.recipe_id.trim().is_empty()
                                         || !binding.whisper_model.trim().is_empty()
+                                        || binding.source.is_some()
                                     {
                                         tracing::warn!(
                                             binding = %binding.id,
                                             recipe_id = %binding.recipe_id,
                                             whisper_model = %binding.whisper_model,
-                                            "meeting hotkey binding ignores recipe_id / whisper_model (meetings resolve these per-track via the daemon, not the single-recording ledger)"
+                                            source = ?binding.source,
+                                            "meeting hotkey binding ignores recipe_id / whisper_model / source (meetings resolve these per-track via the daemon, not the single-recording ledger)"
                                         );
                                     }
                                     // Meetings are always toggle (Hold makes no sense).
