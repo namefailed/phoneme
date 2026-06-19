@@ -128,13 +128,30 @@ phoneme meeting rename 20260519T143500823 "Q3 Planning Sync"
 phoneme meeting rename 20260519T143500823 --clear
 ```
 
-### 📥 `phoneme import <FILE>`
+### 📥 `phoneme import <FILE-OR-URL>`
 
-Import an existing audio file (wav/mp3/m4a/flac) and transcribe it.
+Import an existing audio file (wav/mp3/m4a/flac) and transcribe it — or pass an
+`http(s)` URL (e.g. a YouTube link) to download its audio with **yt-dlp** and
+import that.
 
 ```bash
 phoneme import my_meeting.mp3
+
+# From a URL — downloads audio-only via yt-dlp, then imports it
+phoneme import "https://www.youtube.com/watch?v=VIDEO_ID"
+
+# Choose the extracted format for URL imports (default m4a)
+phoneme import --format flac "https://youtu.be/VIDEO_ID"
 ```
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--format <m4a\|mp3\|flac\|wav>` | `m4a` | Audio format yt-dlp extracts to (URL imports only). m4a/mp3 are lossy but transparent for speech; flac/wav avoid a re-encode. |
+
+URL import requires **yt-dlp** and **ffmpeg** on PATH (`python -m pip install -U
+yt-dlp`). The download lands in a temp folder and is removed after import —
+Phoneme keeps only its own decoded copy. Pair it with `retranscribe` to A/B
+transcription settings on real-world audio.
 
 ### 📋 `phoneme list`
 

@@ -66,6 +66,13 @@ trust boundary. Verified against current code.*
   decoding toward those terms. Empty by default (wire format unchanged); kept short
   since Whisper only conditions on ~the last 224 prompt tokens. Deepgram, AssemblyAI,
   and ElevenLabs ignore it for now (they expose different keyword mechanisms).
+- [x] **Import audio straight from a URL** — `phoneme import <http(s)-url>` (e.g. a
+  YouTube link) downloads just the audio track with **yt-dlp** into a temp folder,
+  then imports it through the normal pipeline; the temp file is removed afterward
+  (Phoneme keeps only its decoded copy). A `--format` flag (`m4a` default, or
+  `mp3`/`flac`/`wav`) picks the extracted format. Makes it easy to pull real-world
+  clips and A/B transcription settings via `retranscribe` + the compare-versions
+  view. Requires yt-dlp + ffmpeg on PATH.
 
 ### Recording
 

@@ -1,5 +1,6 @@
 ---
 source: bin/phoneme/tests/snapshots.rs
+assertion_line: 19
 expression: stdout
 ---
 Phoneme CLI
@@ -9,7 +10,7 @@ Usage: phoneme.exe [OPTIONS] <COMMAND>
 Commands:
   record        Push-to-talk: read stdin until EOF / Enter, then stop
   meeting       Meeting Mode: record mic + system audio as two linked recordings
-  import        Import an existing audio file (wav/mp3/m4a/flac) and transcribe it
+  import        Import a local audio file (wav/mp3/m4a/flac) — or an http(s) URL (e.g. a YouTube link, downloaded via yt-dlp) — and transcribe it
   list          List recordings
   show          Show one recording
   retranscribe  Re-transcribe a saved recording
