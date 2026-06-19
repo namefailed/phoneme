@@ -152,11 +152,11 @@ export class SidebarElement extends LitElement {
     filterStore.set({ ...this.filterState, tagState: active, tag_id: null });
   }
 
-  /** Set the Library type-filter. Independent of the tag filter (they combine).
-   *  Clears the tag-presence filter so its highlight doesn't linger after the
-   *  user has moved to a Library row. */
+  /** Set the Library type-filter. Independent of the tag filter — they COMBINE,
+   *  so picking a Library row KEEPS any active tag / Tagged-Untagged selection
+   *  (e.g. "Meetings" + "work"). The "All Recordings" row resets the kind. */
   private setKind(kind: RecordingKind) {
-    filterStore.set({ ...this.filterState, kind, tagState: null });
+    filterStore.set({ ...this.filterState, kind });
   }
 
   /** A Library type-filter row. Active when its kind matches (independent of tag).
