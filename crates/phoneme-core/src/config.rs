@@ -1861,6 +1861,60 @@ pub fn default_playbook() -> Vec<PlaybookEntry> {
                 ..Default::default()
             },
         },
+        PlaybookEntry {
+            id: "formalize".into(),
+            name: "Formalize".into(),
+            description: "Rewrite the transcript in a polished, professional tone.".into(),
+            builtin: false,
+            kind: PlaybookKind::Transform,
+            llm: llm("Rewrite the following transcript in a clear, professional tone. Keep all meaning; fix grammar and remove filler. Output only the rewritten text."),
+            target: String::new(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "bulletize".into(),
+            name: "Bulletize".into(),
+            description: "Condense the transcript into concise bullet points.".into(),
+            builtin: false,
+            kind: PlaybookKind::Transform,
+            llm: llm("Condense the following transcript into concise, well-organized bullet points capturing every key point. Output only the bullets."),
+            target: String::new(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "sentiment".into(),
+            name: "Sentiment".into(),
+            description: "Tag the overall sentiment of the transcript into a custom field.".into(),
+            builtin: false,
+            kind: PlaybookKind::Enrichment,
+            llm: llm("Classify the overall sentiment of this transcript as exactly one word: Positive, Neutral, or Negative. Reply with only that word."),
+            target: "custom:sentiment".into(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "keywords".into(),
+            name: "Keywords".into(),
+            description: "Extract the key topics from the transcript into a custom field.".into(),
+            builtin: false,
+            kind: PlaybookKind::Enrichment,
+            llm: llm("Extract the 3-7 most important topics or keywords from this transcript. Reply with only a comma-separated list, lowercase."),
+            target: "custom:keywords".into(),
+            hook: PlaybookHook::default(),
+        },
+        PlaybookEntry {
+            id: "todo_capture".into(),
+            name: "Capture to-dos".into(),
+            description: "A keyword-triggered Hook: when the transcript contains \"Todo:\", append it to a to-do file.".into(),
+            builtin: false,
+            kind: PlaybookKind::Hook,
+            llm: PlaybookLlm::default(),
+            target: String::new(),
+            hook: PlaybookHook {
+                command: "powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\phoneme-todos.md') -Value ('- '+$d.transcript)\"".into(),
+                keyword: "Todo:".into(),
+                ..Default::default()
+            },
+        },
     ]
 }
 
@@ -1891,6 +1945,30 @@ pub fn default_recipes() -> Vec<PlaybookRecipe> {
                 .into(),
             builtin: false,
             steps: vec!["cleanup".into(), "prompt_polish".into()],
+        },
+        // Example: a full meeting-notes pass — clean up, summarize, pull action
+        // items, then auto-tag. Wire it to a hotkey or pick it per recording.
+        PlaybookRecipe {
+            id: "meeting_notes".into(),
+            name: "Meeting notes".into(),
+            description: "Clean up, then summarize, pull action items, and tag — a full notes pass."
+                .into(),
+            builtin: false,
+            steps: vec![
+                "cleanup".into(),
+                "summary".into(),
+                "action_items".into(),
+                "auto_tag".into(),
+            ],
+        },
+        // Example: clean up the dictation, then append it to a daily journal file
+        // via the `journal` Hook entry — showcases a Hook step inside a recipe.
+        PlaybookRecipe {
+            id: "journal_note".into(),
+            name: "Journal note".into(),
+            description: "Clean up the dictation, then append it to your daily journal file.".into(),
+            builtin: false,
+            steps: vec!["cleanup".into(), "journal".into()],
         },
     ]
 }
@@ -2844,19 +2922,54 @@ impl Default for Config {
             // One disabled example so a fresh install shows what a custom hotkey
             // looks like (its own combo + recipe + per-binding hook). Off by
             // default — the user enables/edits/deletes it in Settings → Hotkeys.
-            hotkeys: vec![HotkeyBinding {
-                id: "example-journal".into(),
-                label: "Example: journal note".into(),
-                enabled: false,
-                combo: "Ctrl+Alt+J".into(),
-                mode: HotkeyMode::Hold,
-                action: HotkeyAction::Record,
-                recipe_id: String::new(),
-                whisper_model: String::new(),
-                pipeline: HotkeyPipeline::default(),
-                hooks: vec!["powershell -NoProfile -Command \"$d=($input|Out-String|ConvertFrom-Json); Add-Content -Path ([Environment]::GetFolderPath('MyDocuments')+'\\\\phoneme-journal.md') -Value $d.transcript\"".into()],
-                in_place: HotkeyInPlace::default(),
-            }],
+            hotkeys: vec![
+                // Disabled-by-default examples that showcase recipe-bearing custom
+                // keybinds — the user enables / edits / deletes them in Settings →
+                // Hotkeys. Each points at a seeded recipe (no dead per-binding
+                // `hooks`; the journal/webhook side-effects live in the recipe now).
+                HotkeyBinding {
+                    id: "example-journal".into(),
+                    label: "Example: journal note".into(),
+                    enabled: false,
+                    combo: "Ctrl+Alt+J".into(),
+                    mode: HotkeyMode::Hold,
+                    action: HotkeyAction::Record,
+                    recipe_id: "journal_note".into(),
+                    whisper_model: String::new(),
+                    pipeline: HotkeyPipeline::default(),
+                    hooks: Vec::new(),
+                    in_place: HotkeyInPlace::default(),
+                },
+                HotkeyBinding {
+                    id: "example-prompt".into(),
+                    label: "Example: dictate → prompt".into(),
+                    enabled: false,
+                    combo: "Ctrl+Alt+P".into(),
+                    mode: HotkeyMode::Hold,
+                    action: HotkeyAction::InPlace,
+                    recipe_id: "prompt_capture".into(),
+                    whisper_model: String::new(),
+                    pipeline: HotkeyPipeline::default(),
+                    hooks: Vec::new(),
+                    in_place: HotkeyInPlace {
+                        full_pipeline: true,
+                        ..HotkeyInPlace::default()
+                    },
+                },
+                HotkeyBinding {
+                    id: "example-meeting-notes".into(),
+                    label: "Example: meeting notes".into(),
+                    enabled: false,
+                    combo: "Ctrl+Alt+M".into(),
+                    mode: HotkeyMode::Hold,
+                    action: HotkeyAction::Record,
+                    recipe_id: "meeting_notes".into(),
+                    whisper_model: String::new(),
+                    pipeline: HotkeyPipeline::default(),
+                    hooks: Vec::new(),
+                    in_place: HotkeyInPlace::default(),
+                },
+            ],
             playbook: default_playbook(),
             recipes: default_recipes(),
             // A fresh config's seeds already mirror the legacy defaults, so a
