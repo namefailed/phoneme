@@ -1,12 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
+import { openLogViewer } from "./LogViewer";
 
 /**
- * Settings → Advanced: the daemon log level (`daemon.log_level`), an "open
- * config.toml" escape hatch for hand edits, and the "re-run the First Run
- * Wizard" button (`onNavigateToWizard`, threaded from App via SettingsView).
- * Plain section class (house pattern): renders into its container once and
- * binds inputs to the shared config object via form.ts.
+ * Settings → Advanced: the daemon log level (`daemon.log_level`), the log
+ * viewer (`hook.log` / `daemon.log` — the canonical home for all diagnostics;
+ * Integrations cross-links here), an "open config.toml" escape hatch for hand
+ * edits, and the "re-run the First Run Wizard" button (`onNavigateToWizard`,
+ * threaded from App via SettingsView). Plain section class (house pattern):
+ * renders into its container once and binds inputs to the shared config object
+ * via form.ts.
  */
 export class SectionAdvanced {
 
@@ -41,6 +44,16 @@ export class SectionAdvanced {
           )}</div>
         </div>
         <div class="settings-field">
+          <label>Logs</label>
+          <div>
+            <button class="inline-button" id="view-hook-log">View hook log</button>
+            <button class="inline-button" id="view-daemon-log">View daemon log</button>
+          </div>
+          <span style="grid-column: 2; font-size: 0.7857rem; color: var(--fg-faded);">
+            The last lines the daemon and your Integration Scripts wrote to <code>daemon.log</code> / <code>hook.log</code> — handy when something silently does nothing. Read-only; the full files live in <code>%LOCALAPPDATA%\\phoneme\\logs</code>.
+          </span>
+        </div>
+        <div class="settings-field">
           <label>Config file</label>
           <div><button class="inline-button" id="open-config">Open config.toml</button></div>
         </div>
@@ -52,6 +65,9 @@ export class SectionAdvanced {
       </div>
     `;
     bindFieldEvents(container, this.config);
+
+    container.querySelector("#view-hook-log")?.addEventListener("click", () => openLogViewer("hook.log"));
+    container.querySelector("#view-daemon-log")?.addEventListener("click", () => openLogViewer("daemon.log"));
 
     container.querySelector("#open-config")?.addEventListener("click", async () => {
       try {

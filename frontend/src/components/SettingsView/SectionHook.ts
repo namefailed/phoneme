@@ -2,7 +2,6 @@ import { errText } from "../../utils/error";
 import { invoke } from "@tauri-apps/api/core";
 import { renderField, bindFieldEvents } from "./form";
 import { escapeAttr } from "../../utils/format";
-import { openLogViewer } from "./LogViewer";
 
 /** One keyword routing rule (`hook.keyword_rules[i]`): when the transcript
  *  matches `pattern`, run `command` instead of the default hook commands. */
@@ -211,21 +210,19 @@ export class SectionHook {
         <div class="settings-field">
           <label>Logs</label>
           <div>
-            <button class="inline-button" id="hook-view-log">View hook log</button>
-            <button class="inline-button" id="hook-view-daemon-log">View daemon log</button>
+            <button class="inline-button" id="hook-goto-logs" type="button">View logs in System →</button>
           </div>
           <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
-            The last lines your Integration Scripts wrote to <code>hook.log</code> — handy when a hook silently does nothing — plus the daemon's own <code>daemon.log</code>. Read-only; the full files live in <code>%LOCALAPPDATA%\\phoneme\\logs</code>.
+            Debugging a hook that silently does nothing? The <code>hook.log</code> and <code>daemon.log</code> viewers now live under <b>System → Diagnostics</b>, alongside the daemon log level.
           </span>
         </div>
       </div>
     `;
     bindFieldEvents(container, this.config);
 
-    container.querySelector("#hook-view-log")?.addEventListener("click", () => openLogViewer("hook.log"));
-    container
-      .querySelector("#hook-view-daemon-log")
-      ?.addEventListener("click", () => openLogViewer("daemon.log"));
+    container.querySelector("#hook-goto-logs")?.addEventListener("click", () => {
+      window.dispatchEvent(new CustomEvent("phoneme:navigate", { detail: { view: "settings", section: "system" } }));
+    });
 
     this.renderCmds(container);
     container.querySelector("#hook-add-cmd")?.addEventListener("click", () => {
