@@ -18,22 +18,23 @@ import type { PlaybookEntry, PlaybookKind, PlaybookRecipe } from "../../services
  *     entry ids. `default` is the normal-recording pipeline.
  *
  * Same shared-config contract as SectionHotkeys: edits mutate the arrays in
- * place and bubble a `change` so SettingsView lights up Save. The daemon runs
- * these once the pipeline executor lands (a later Phase-1 step) — this section
- * is the authoring surface.
+ * place and bubble a `change` so SettingsView lights up Save. The daemon's
+ * recipe executor runs these for real — Transform/Enrichment as LLM steps and
+ * Hook as shell/webhook side-effects — so this section is the live authoring
+ * surface for the whole post-transcription pipeline.
  */
 
 const KINDS: { value: PlaybookKind; label: string; blurb: string }[] = [
   { value: "transform", label: "Transform", blurb: "Rewrites the running transcript text, then feeds the next step." },
   { value: "enrichment", label: "Enrichment", blurb: "Writes a field (title / summary / tags / custom) — leaves the text unchanged." },
-  { value: "hook", label: "Hook", blurb: "Runs a shell command or webhook with the recording JSON." },
+  { value: "hook", label: "Hook", blurb: "Runs a shell command or webhook with the recording JSON — always, or only when the transcript matches a trigger." },
 ];
 
 /** Built-in enrichment targets (plus `custom:<key>` entered free-form). */
 const BUILTIN_TARGETS = ["title", "summary", "tags"] as const;
 
 const DEFAULT_LLM = () => ({ provider: "", model: "", prompt: "", api_url: "", api_key: "", timeout_secs: 300 });
-const DEFAULT_HOOK = () => ({ command: "", webhook_url: "", timeout_secs: 60 });
+const DEFAULT_HOOK = () => ({ command: "", webhook_url: "", timeout_secs: 60, keyword: "", case_sensitive: false, required: false });
 
 /** The app's chevron (matches the select chevron). `currentColor` so it tracks
  *  the button text + theme; `.pb-chev` rotates it to point down when open. */
@@ -263,12 +264,23 @@ export class SectionPlaybook {
           <label style="font-size: 0.8571rem; display: flex; flex-direction: column; gap: 4px;">Command (receives the recording JSON on stdin)
             <textarea class="pb-hook-cmd" rows="2" style="resize: vertical; font-family: inherit; font-size: 0.8571rem; padding: 6px;" placeholder="e.g. a PowerShell command…">${escapeHtml(e.hook.command)}</textarea>
           </label>
-          <label style="font-size: 0.8571rem; display: flex; flex-direction: column; gap: 4px;">Webhook URL (optional — POSTs the recording payload)
+          <label style="font-size: 0.8571rem; display: flex; flex-direction: column; gap: 4px;">Webhook URL (optional — POSTs the recording payload, uses the global Webhook policy)
             <input type="text" class="pb-hook-url" value="${escapeAttr(e.hook.webhook_url)}" placeholder="https://…" />
           </label>
-          <label style="font-size: 0.8571rem; display: inline-flex; align-items: center; gap: 6px;">Timeout (s)
-            <input type="number" class="pb-hook-timeout" value="${e.hook.timeout_secs}" min="1" style="width: 80px;" />
+          <label style="font-size: 0.8571rem; display: flex; flex-direction: column; gap: 4px;">Trigger — only run when the transcript contains this (leave blank to always run)
+            <input type="text" class="pb-hook-keyword" value="${escapeAttr(e.hook.keyword ?? "")}" placeholder="e.g. Action Item:" />
           </label>
+          <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: center;">
+            <label style="font-size: 0.8571rem; display: inline-flex; align-items: center; gap: 6px;">
+              <input type="checkbox" class="pb-hook-case" ${e.hook.case_sensitive ? "checked" : ""} /> Match case
+            </label>
+            <label style="font-size: 0.8571rem; display: inline-flex; align-items: center; gap: 6px;">Timeout (s)
+              <input type="number" class="pb-hook-timeout" value="${e.hook.timeout_secs}" min="1" style="width: 80px;" />
+            </label>
+            <label style="font-size: 0.8571rem; display: inline-flex; align-items: center; gap: 6px;" title="By default a hook failure is surfaced but non-fatal.">
+              <input type="checkbox" class="pb-hook-required" ${e.hook.required ? "checked" : ""} /> Fail the recording if this hook errors
+            </label>
+          </div>
         </div>`;
     }
 
@@ -367,6 +379,9 @@ export class SectionPlaybook {
     card.querySelector<HTMLTextAreaElement>(".pb-hook-cmd")?.addEventListener("input", (ev) => { e.hook.command = (ev.target as HTMLTextAreaElement).value; this.notifyChanged(); });
     card.querySelector<HTMLInputElement>(".pb-hook-url")?.addEventListener("input", (ev) => { e.hook.webhook_url = (ev.target as HTMLInputElement).value; this.notifyChanged(); });
     card.querySelector<HTMLInputElement>(".pb-hook-timeout")?.addEventListener("input", (ev) => { e.hook.timeout_secs = Number((ev.target as HTMLInputElement).value) || 60; this.notifyChanged(); });
+    card.querySelector<HTMLInputElement>(".pb-hook-keyword")?.addEventListener("input", (ev) => { e.hook.keyword = (ev.target as HTMLInputElement).value; this.notifyChanged(); });
+    card.querySelector<HTMLInputElement>(".pb-hook-case")?.addEventListener("change", (ev) => { e.hook.case_sensitive = (ev.target as HTMLInputElement).checked; this.notifyChanged(); });
+    card.querySelector<HTMLInputElement>(".pb-hook-required")?.addEventListener("change", (ev) => { e.hook.required = (ev.target as HTMLInputElement).checked; this.notifyChanged(); });
   }
 
   /** Mount the SHARED connection + model pickers into an open LLM entry card —
