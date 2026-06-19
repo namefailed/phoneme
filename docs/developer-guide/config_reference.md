@@ -161,6 +161,8 @@ followed.
 | `models_dir` | `""` | Folder holding a custom speakrs diarization bundle (segmentation + embedding ONNX) to load **instead of** the pretrained models. Empty = auto-download/use the defaults. Changing it reloads the cached pipeline. |
 | `local_model_path` | `""` | **Deprecated / unused** — superseded by `models_dir`; it was never wired into the load path. Kept so older configs keep parsing. |
 | `solo_one_speaker` | `false` | Treat a single (non-meeting) recording as ONE speaker — skip diarization for it so it never splits into `[Speaker N]` turns. Off by default. For when the local diarizer hears two voices in a one-person note (a big tonal shift, or background audio). Meetings and genuinely multi-speaker files are unaffected. Local diarization path. |
+| `recognize_speakers` | `true` | Capture a voiceprint per diarized speaker and match it against the names you've assigned before, suggesting who they are when you open a recording. Naming a speaker enrolls their voice into a cross-recording library. Local diarization only. |
+| `voiceprint_match_threshold` | `0.5` | Cosine-similarity bar (0–1) a voiceprint must clear to be suggested as a known speaker. Higher = stricter (fewer false matches, more misses). Tune to your own recordings. |
 
 ---
 

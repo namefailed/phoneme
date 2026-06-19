@@ -46,6 +46,13 @@ trust boundary. Verified against current code.*
   same provider's transcription API, so the section shows a live warning when the chosen
   diarization provider can't run with the configured transcription backend (e.g. Deepgram
   diarization picked while Local transcribes) instead of silently doing nothing.
+- [x] **Named-speaker recognition** — the local diarizer now captures a voiceprint
+  (centroid embedding) per speaker; naming a speaker enrolls that voice into a
+  cross-recording library, and opening a later recording suggests known voices for
+  still-unnamed speakers ("Sounds like Alex? ✓ / ✗") in the Rename-speakers modal.
+  On-demand, so a voice named *after* a recording was transcribed is still suggested
+  on it. `[diarization].recognize_speakers` toggles it; `voiceprint_match_threshold`
+  tunes the cosine bar. Local diarization only.
 - [x] **Custom local diarization models** — `[diarization].models_dir` points the local
   diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
   loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;

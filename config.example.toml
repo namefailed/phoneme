@@ -381,6 +381,15 @@ models_dir = ""
 # Deprecated / unused — superseded by models_dir (it was never wired into the load
 # path). Kept so older configs keep parsing.
 local_model_path = ""
+# Recognize named speakers across recordings: capture a voiceprint per diarized
+# speaker and, once you've named a speaker, suggest that name on later recordings
+# where the voice matches. Naming enrolls the voice into a cross-recording library.
+# Local diarization only. On by default.
+recognize_speakers = true
+# Cosine-similarity bar (0–1) a voiceprint must clear to be suggested as a known
+# speaker. Higher = stricter (fewer false matches, more misses). Default 0.5 —
+# tune to your own recordings.
+voiceprint_match_threshold = 0.5
 
 
 # -----------------------------------------------------------------------------
