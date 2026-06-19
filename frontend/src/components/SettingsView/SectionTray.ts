@@ -68,7 +68,9 @@ export class SectionTray {
               this.config.interface.strip_titlebar,
             )}</div>
             <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block;">
-              Removes the default OS window decorations. The top header will become draggable. Stripping the bar applies live; turning it back ON needs an app restart (Windows can't re-add the native title bar to a running window).
+              Removes the default OS window decorations; the top header becomes draggable instead.
+              <b>Applies immediately when you save</b> — toggle it on or off and the native frame
+              disappears or comes back right away, no restart.
             </span>
           </div>
         </div>
