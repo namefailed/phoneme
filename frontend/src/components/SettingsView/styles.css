@@ -1214,8 +1214,10 @@ select[data-key="daemon.log_level"] {
   gap: 3px;
   min-width: 0;
 }
-/* Inline-editable title/subtitle: transparent at rest, subtle on hover, a
-   clear accent frame on focus — so they read as text but invite editing. */
+/* At rest the name/description read as plain title + subtitle TEXT (read-only) —
+   the inputs carry `readonly` and are transparent, so a collapsed entry doesn't
+   look editable. They only turn into real textboxes once the entry/recipe is
+   expanded for editing (the card gets `.pb-open` and `readonly` is dropped). */
 .pb-idcol input {
   width: 100%;
   min-width: 0;
@@ -1225,6 +1227,8 @@ select[data-key="daemon.log_level"] {
   padding: 3px 6px;
   font-family: inherit;
   text-overflow: ellipsis;
+  outline: none;
+  cursor: default;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .pb-idcol .pb-name,
@@ -1238,17 +1242,21 @@ select[data-key="daemon.log_level"] {
   font-size: 0.8214rem;
   color: var(--fg-muted);
 }
-.pb-idcol input:hover {
-  border-color: var(--border-subtle);
-}
 .pb-idcol input::placeholder {
   color: var(--fg-faded);
 }
-.pb-idcol input:focus {
-  outline: none;
+/* Expanded = in edit mode: the same deep field surface + visible border as the
+   rest of the entry editor, clearly editable. */
+.pb-open .pb-idcol input {
   background: var(--bg-deep);
+  border-color: var(--border);
+  cursor: text;
+}
+.pb-open .pb-idcol input:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.pb-open .pb-idcol input:focus {
   border-color: var(--accent);
-  color: var(--fg-default);
 }
 /* Edit / Steps disclosure buttons carry the app chevron, which rotates to point
    down when the card is open (collapsed = points right). */

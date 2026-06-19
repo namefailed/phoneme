@@ -228,11 +228,11 @@ export class SectionPlaybook {
   private entryCard(e: PlaybookEntry): string {
     const open = this.expanded.has(e.id);
     return `
-      <div class="pb-card" data-id="${escapeAttr(e.id)}">
+      <div class="pb-card${open ? " pb-open" : ""}" data-id="${escapeAttr(e.id)}">
         <div class="pb-row">
           <div class="pb-idcol">
-            <input type="text" class="pb-name" value="${escapeAttr(e.name)}" placeholder="Name" aria-label="Entry name" />
-            <input type="text" class="pb-desc" value="${escapeAttr(e.description)}" placeholder="What this does (shown as a hint)" aria-label="Entry description" />
+            <input type="text" class="pb-name" value="${escapeAttr(e.name)}" placeholder="Name" aria-label="Entry name" ${open ? "" : "readonly"} />
+            <input type="text" class="pb-desc" value="${escapeAttr(e.description)}" placeholder="What this does (shown as a hint)" aria-label="Entry description" ${open ? "" : "readonly"} />
           </div>
           ${e.builtin ? `<span class="pb-badge" title="A built-in example — editable; Reset restores the original.">built-in</span>` : `<span></span>`}
           <button class="inline-button pb-expand" type="button" aria-expanded="${open}">${CHEVRON} Edit</button>
@@ -453,11 +453,11 @@ export class SectionPlaybook {
             </div>`).join("")
         : `<span style="font-size: 0.7857rem; color: var(--fg-faded);">No steps yet — add entries below.</span>`;
       return `
-        <div class="pb-recipe" data-id="${escapeAttr(r.id)}">
+        <div class="pb-recipe${open ? " pb-open" : ""}" data-id="${escapeAttr(r.id)}">
           <div class="pb-row">
             <div class="pb-idcol">
-              <input type="text" class="pb-r-name" value="${escapeAttr(r.name)}" placeholder="Recipe name" aria-label="Recipe name" />
-              <input type="text" class="pb-r-desc" value="${escapeAttr(r.description)}" placeholder="What this chain does" aria-label="Recipe description" />
+              <input type="text" class="pb-r-name" value="${escapeAttr(r.name)}" placeholder="Recipe name" aria-label="Recipe name" ${open ? "" : "readonly"} />
+              <input type="text" class="pb-r-desc" value="${escapeAttr(r.description)}" placeholder="What this chain does" aria-label="Recipe description" ${open ? "" : "readonly"} />
             </div>
             ${r.builtin ? `<span class="pb-badge">built-in</span>` : `<span></span>`}
             <button class="inline-button pb-r-expand" type="button" aria-expanded="${open}">${CHEVRON} Steps</button>
