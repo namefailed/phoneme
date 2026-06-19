@@ -11,6 +11,7 @@ import { getSettingsAnchor } from "../shared/settingsAnchor";
 import { SectionWhisper } from "./SectionWhisper";
 import { SectionPreview } from "./SectionPreview";
 import { SectionDiarization } from "./SectionDiarization";
+import { SectionSpeakerLibrary } from "./SectionSpeakerLibrary";
 import { SectionRecording } from "./SectionRecording";
 import { SectionHotkeys } from "./SectionHotkeys";
 import { SectionHook } from "./SectionHook";
@@ -387,6 +388,7 @@ export class SettingsViewElement extends LitElement {
       { tab: "transcription", label: "Transcription", mount: (h) => { new SectionWhisper(h, c); } },
       { tab: "preview", label: "Live Preview", mount: (h) => { new SectionPreview(h, c); } },
       { tab: "diarization", label: "Diarization", mount: (h) => { new SectionDiarization(h, c); } },
+      { tab: "diarization", label: "Diarization", mount: (h) => { new SectionSpeakerLibrary(h, c); } },
       { tab: "capture", label: "Capture", mount: (h) => { new SectionRecording(h, c); } },
       { tab: "dictation", label: "Dictation", mount: (h) => { new SectionInPlace(h, c); } },
       { tab: "postprocessing", label: "Post-Processing", mount: (h) => { new SectionPostProcessing(h, c); } },
