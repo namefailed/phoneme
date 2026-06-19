@@ -981,6 +981,19 @@ impl DaemonRecorder {
         });
         drop(active);
 
+        // Record which capture source this recording actually used (microphone
+        // vs system-audio loopback) so the list's Source column reflects the real
+        // source instead of assuming "single == microphone". Loaded once here and
+        // reused for the capture stream below.
+        let app_cfg = state.config.load();
+        let track = Some(
+            match app_cfg.recording.source {
+                CaptureSource::SystemAudio => "system",
+                CaptureSource::Microphone => "mic",
+            }
+            .to_string(),
+        );
+
         // Insert the catalog row at status=recording.
         let row = Recording {
             id: id.clone(),
@@ -1001,7 +1014,7 @@ impl DaemonRecorder {
             // A normal single-track recording is not part of a meeting.
             meeting_id: None,
             meeting_name: None,
-            track: None,
+            track,
             in_place,
             cleanup_model: None,
             diarized: false,
@@ -1027,7 +1040,6 @@ impl DaemonRecorder {
         // audio to prepend; this also releases the microphone (or returns it) before we reopen
         // it for the recording. Empty when pre-roll is disabled (default path).
         let (prepend, preroll_source) = self.take_preroll_samples().await;
-        let app_cfg = state.config.load();
         let kind = app_cfg.recording.source;
         let source = if let Some(s) = preroll_source {
             s

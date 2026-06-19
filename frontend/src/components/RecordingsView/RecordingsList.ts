@@ -985,8 +985,9 @@ export class RecordingsListElement extends LitElement {
     const preview = r.transcript ?? truncatedError(r);
     const searchTerm = filterStore.get().search ?? "";
 
-    // Source: meeting tracks report "mic"/"system"; a single recording has no
-    // track and is, by definition, the microphone.
+    // Source: every recording reports its actual capture source in `track` —
+    // "system" (system-audio loopback) or "mic" (microphone); meeting tracks and
+    // single recordings alike. An older row with no track falls back to mic.
     const sourceIsSystem = track === "system";
     const sourceLabel = sourceIsSystem ? "System audio" : "Microphone";
     const sourceIcon = sourceIsSystem ? "🔊" : "🎤";
