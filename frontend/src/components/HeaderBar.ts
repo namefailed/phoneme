@@ -683,9 +683,11 @@ export class HeaderBarElement extends LitElement {
           }
           .headerbar .icon-btn, .headerbar .record-btn { display: inline-flex; align-items: center; justify-content: center; }
           .headerbar .hb-date-range, .headerbar .hb-status-cluster, .headerbar .hb-rec-group { align-items: center; }
-          /* Status filter hugs its widest option ("Transcription Failed") instead
-             of stretching with the bar. */
-          .headerbar .hb-status-select { flex: 0 0 auto; width: auto; min-width: 0; }
+          /* Status filter never stretches with the bar, and never shrinks below
+             its widest option ("Transcription Failed" ≈ 112px text + 12px left
+             pad + 28px arrow pad + border). Pinning min-width keeps a constant
+             box regardless of the selected (often shorter) option. */
+          .headerbar .hb-status-select { flex: 0 0 auto; width: auto; min-width: 162px; }
         </style>
         <button class="icon-btn" aria-label="Toggle Sidebar" title="Toggle Sidebar" @click=${() => this.callbacks?.onToggleSidebar?.()}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
