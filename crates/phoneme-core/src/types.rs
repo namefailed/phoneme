@@ -213,6 +213,22 @@ pub struct NamedVoice {
     pub samples: u32,
 }
 
+/// A recognized-speaker suggestion (#9): a still-unnamed diarized speaker in a
+/// recording whose voiceprint matched a known voice closely enough to suggest.
+/// The UI offers it as a confirmable ✓/✗ chip; ✓ names the speaker (which also
+/// reinforces the voiceprint), ✗ dismisses it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeakerSuggestion {
+    /// The 1-based speaker label this suggestion is for.
+    pub speaker_label: i64,
+    /// The suggested name (the matched known voice).
+    pub name: String,
+    /// The matched named-voice id.
+    pub named_voice_id: String,
+    /// Cosine similarity of the match, in [0, 1] — higher is more confident.
+    pub score: f32,
+}
+
 /// The canonical Recording row as exposed by `Catalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recording {

@@ -391,6 +391,61 @@ pub async fn delete_saved_search(bridge: Br<'_>, id: String) -> Result<Value, Co
     forward(&bridge, Request::DeleteSavedSearch { id }).await
 }
 
+/// On-demand named-speaker recognition for a recording (#9): the unnamed diarized
+/// speakers whose voiceprints match a known voice.
+#[tauri::command]
+pub async fn recognize_speakers(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::RecognizeSpeakers { id }).await
+}
+
+/// Dismiss a recognized-speaker suggestion so it isn't offered again.
+#[tauri::command]
+pub async fn dismiss_speaker_suggestion(
+    bridge: Br<'_>,
+    id: String,
+    speaker_label: i64,
+) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(
+        &bridge,
+        Request::DismissSpeakerSuggestion { id, speaker_label },
+    )
+    .await
+}
+
+/// The named-voice library (Speaker Library manager).
+#[tauri::command]
+pub async fn list_named_voices(bridge: Br<'_>) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ListNamedVoices).await
+}
+
+/// Rename a named voice.
+#[tauri::command]
+pub async fn rename_named_voice(
+    bridge: Br<'_>,
+    id: String,
+    name: String,
+) -> Result<Value, CommandError> {
+    forward(&bridge, Request::RenameNamedVoice { id, name }).await
+}
+
+/// Merge one named voice into another (re-points samples, deletes the source).
+#[tauri::command]
+pub async fn merge_named_voices(
+    bridge: Br<'_>,
+    from_id: String,
+    into_id: String,
+) -> Result<Value, CommandError> {
+    forward(&bridge, Request::MergeNamedVoices { from_id, into_id }).await
+}
+
+/// Forget a named voice (unlink its captures, delete the entry).
+#[tauri::command]
+pub async fn forget_named_voice(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    forward(&bridge, Request::ForgetNamedVoice { id }).await
+}
+
 /// Remove ALL still-pending items from the queue ("clear queue").
 #[tauri::command]
 pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {

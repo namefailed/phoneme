@@ -807,6 +807,52 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 Err(e) => err_response(&e),
             }
         }
+        Request::RecognizeSpeakers { id } => {
+            let cfg = state.config.load();
+            if cfg.diarization.recognize_speakers {
+                let threshold = cfg.diarization.voiceprint_match_threshold as f32;
+                match state
+                    .catalog
+                    .recognize_speakers_for(id.as_str(), threshold)
+                    .await
+                {
+                    Ok(suggestions) => serialize_response(suggestions),
+                    Err(e) => err_response(&e),
+                }
+            } else {
+                serialize_response(Vec::<phoneme_core::types::SpeakerSuggestion>::new())
+            }
+        }
+        Request::DismissSpeakerSuggestion { id, speaker_label } => {
+            match state
+                .catalog
+                .dismiss_speaker_suggestion(id.as_str(), speaker_label)
+                .await
+            {
+                Ok(()) => ok_null(),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::ListNamedVoices => match state.catalog.list_named_voices().await {
+            Ok(voices) => serialize_response(voices),
+            Err(e) => err_response(&e),
+        },
+        Request::RenameNamedVoice { id, name } => {
+            match state.catalog.rename_named_voice(&id, &name).await {
+                Ok(()) => ok_null(),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::MergeNamedVoices { from_id, into_id } => {
+            match state.catalog.merge_named_voices(&from_id, &into_id).await {
+                Ok(merged) => Response::Ok(serde_json::json!({ "merged": merged })),
+                Err(e) => err_response(&e),
+            }
+        }
+        Request::ForgetNamedVoice { id } => match state.catalog.forget_named_voice(&id).await {
+            Ok(removed) => Response::Ok(serde_json::json!({ "removed": removed })),
+            Err(e) => err_response(&e),
+        },
         Request::ImportRecording { path } => import_recording(state, path).await,
         Request::ReimportFromDisk { dry_run } => reimport_from_disk(state, dry_run).await,
         Request::RebuildCatalog => {

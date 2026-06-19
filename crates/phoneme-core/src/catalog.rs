@@ -28,7 +28,7 @@ use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
     AiActivityEntry, ListFilter, NamedVoice, Recording, RecordingStatus, SavedSearch, SpeakerName,
-    TranscriptSegment, TranscriptWord,
+    SpeakerSuggestion, TranscriptSegment, TranscriptWord,
 };
 use chrono::{DateTime, Local};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -2481,6 +2481,105 @@ impl Catalog {
             .execute(&self.pool)
             .await?;
         Ok(res.rows_affected() > 0)
+    }
+
+    /// All captured voiceprints for a recording, as `(speaker_label, centroid)`.
+    pub async fn speaker_voiceprints_for(
+        &self,
+        recording_id: &str,
+    ) -> Result<Vec<(i64, Vec<f32>)>> {
+        let rows = sqlx::query(
+            "SELECT speaker_label, centroid FROM speaker_voiceprints \
+             WHERE recording_id = ? ORDER BY speaker_label",
+        )
+        .bind(recording_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for r in rows {
+            let label: i64 = r.try_get("speaker_label")?;
+            let centroid =
+                serde_json::from_str::<Vec<f32>>(&r.try_get::<String, _>("centroid")?)?;
+            out.push((label, centroid));
+        }
+        Ok(out)
+    }
+
+    /// Mark a recognized-speaker suggestion dismissed so it isn't offered again.
+    pub async fn dismiss_speaker_suggestion(
+        &self,
+        recording_id: &str,
+        speaker_label: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO dismissed_speaker_suggestions (recording_id, speaker_label) \
+             VALUES (?, ?)",
+        )
+        .bind(recording_id)
+        .bind(speaker_label)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// One column of i64s from a recording-scoped table, as a set.
+    async fn label_set(
+        &self,
+        query: &str,
+        recording_id: &str,
+    ) -> Result<std::collections::HashSet<i64>> {
+        let rows = sqlx::query(query)
+            .bind(recording_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut set = std::collections::HashSet::with_capacity(rows.len());
+        for r in rows {
+            set.insert(r.try_get::<i64, _>("speaker_label")?);
+        }
+        Ok(set)
+    }
+
+    /// On-demand named-speaker recognition for a recording (#9): for each captured
+    /// speaker that has NO name yet and hasn't been dismissed, match its voiceprint
+    /// against the named-voice library and return the suggestions clearing
+    /// `threshold`. Reflects the live library, so a voice named *after* this
+    /// recording was transcribed is still suggested here.
+    pub async fn recognize_speakers_for(
+        &self,
+        recording_id: &str,
+        threshold: f32,
+    ) -> Result<Vec<SpeakerSuggestion>> {
+        let captured = self.speaker_voiceprints_for(recording_id).await?;
+        if captured.is_empty() {
+            return Ok(Vec::new());
+        }
+        let named = self
+            .label_set(
+                "SELECT speaker_label FROM speaker_names WHERE recording_id = ?",
+                recording_id,
+            )
+            .await?;
+        let dismissed = self
+            .label_set(
+                "SELECT speaker_label FROM dismissed_speaker_suggestions WHERE recording_id = ?",
+                recording_id,
+            )
+            .await?;
+        let mut out = Vec::new();
+        for (label, centroid) in captured {
+            if named.contains(&label) || dismissed.contains(&label) {
+                continue;
+            }
+            if let Some((voice, score)) = self.recognize_voice(&centroid, threshold).await? {
+                out.push(SpeakerSuggestion {
+                    speaker_label: label,
+                    name: voice.name,
+                    named_voice_id: voice.id,
+                    score,
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// Replace a recording's machine transcript segments with a fresh set.

@@ -244,8 +244,26 @@ pub struct DiarizationConfig {
     /// `none`/cloud providers.
     #[serde(default)]
     pub preload_at_startup: bool,
+    /// Recognize named speakers across recordings (#9): match each diarized
+    /// speaker's voiceprint against the names you've assigned before and suggest
+    /// who they are. On by default; only does anything on the local-diarization
+    /// path (cloud providers don't expose embeddings). Turn off to stop capturing
+    /// and matching voiceprints entirely.
+    #[serde(default = "default_recognize_speakers")]
+    pub recognize_speakers: bool,
+    /// Cosine-similarity bar a voiceprint must clear to be suggested as a known
+    /// speaker, in [0, 1]. Higher = stricter (fewer false matches, more misses);
+    /// lower = looser. Default 0.5 — tune against your own recordings.
+    #[serde(default = "default_voiceprint_threshold")]
+    pub voiceprint_match_threshold: f64,
 }
 
+fn default_recognize_speakers() -> bool {
+    true
+}
+fn default_voiceprint_threshold() -> f64 {
+    0.5
+}
 fn default_merge_gap_secs() -> f64 {
     0.25
 }
@@ -271,6 +289,8 @@ impl Default for DiarizationConfig {
             reconstruct_method: default_reconstruct_method(),
             reconstruct_method_epsilon: default_reconstruct_epsilon(),
             preload_at_startup: false,
+            recognize_speakers: default_recognize_speakers(),
+            voiceprint_match_threshold: default_voiceprint_threshold(),
         }
     }
 }

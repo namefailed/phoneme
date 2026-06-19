@@ -701,6 +701,26 @@ function handle(cmd: string, args: Record<string, unknown>): unknown {
     case "plugin:event|unlisten":
     case "plugin:event|emit":
     case "plugin:event|emit_to": return undefined;
+    // Saved searches (catalog-backed). Preview starts with none.
+    case "list_saved_searches": return [];
+    case "upsert_saved_search": return undefined;
+    case "delete_saved_search": return { removed: true };
+    // Named-speaker recognition (#9). Preview-only stubs so the suggestion chip +
+    // Speaker Library render; real matching happens against voiceprints in the daemon.
+    case "recognize_speakers":
+      return args.id === "r11"
+        ? [{ speaker_label: 2, name: "Alex Rivera", named_voice_id: "nv_demo", score: 0.82 }]
+        : [];
+    case "dismiss_speaker_suggestion":
+    case "rename_named_voice":
+      return undefined;
+    case "list_named_voices":
+      return [
+        { id: "nv_demo", name: "Alex Rivera", samples: 3 },
+        { id: "nv_demo2", name: "Sam Chen", samples: 1 },
+      ];
+    case "merge_named_voices": return { merged: true };
+    case "forget_named_voice": return { removed: true };
     default: return null;
   }
 }

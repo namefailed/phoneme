@@ -1177,3 +1177,57 @@ async fn voiceprints_enroll_recognize_merge_and_forget() {
         .unwrap()
         .is_some());
 }
+
+#[tokio::test]
+async fn recognize_speakers_for_skips_named_and_dismissed() {
+    let (_dir, catalog) = fresh_catalog().await;
+    let r1 = RecordingId::new();
+    let r2 = RecordingId::new();
+    // r2 must exist as a recording row — set_speaker_name has an FK to recordings.
+    catalog.insert(&sample_recording(r2.clone())).await.unwrap();
+
+    // Enroll Alice from one recording.
+    catalog
+        .save_speaker_voiceprint(r1.as_str(), 1, &[1.0, 0.0, 0.0])
+        .await
+        .unwrap();
+    catalog.enroll_speaker(r1.as_str(), 1, "Alice").await.unwrap();
+
+    // A new recording: speaker 1 sounds like Alice, speaker 2 is someone else.
+    catalog
+        .save_speaker_voiceprint(r2.as_str(), 1, &[0.97, 0.03, 0.0])
+        .await
+        .unwrap();
+    catalog
+        .save_speaker_voiceprint(r2.as_str(), 2, &[0.0, 0.0, 1.0])
+        .await
+        .unwrap();
+    let sugg = catalog.recognize_speakers_for(r2.as_str(), 0.5).await.unwrap();
+    assert_eq!(sugg.len(), 1, "only speaker 1 matches Alice");
+    assert_eq!(sugg[0].speaker_label, 1);
+    assert_eq!(sugg[0].name, "Alice");
+    assert!(sugg[0].score > 0.9);
+
+    // Naming speaker 1 stops suggesting over it.
+    catalog.set_speaker_name(&r2, 1, "Alice").await.unwrap();
+    assert!(catalog
+        .recognize_speakers_for(r2.as_str(), 0.5)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // A third speaker also matching Alice IS suggested — until dismissed.
+    catalog
+        .save_speaker_voiceprint(r2.as_str(), 3, &[0.96, 0.04, 0.0])
+        .await
+        .unwrap();
+    let sugg = catalog.recognize_speakers_for(r2.as_str(), 0.5).await.unwrap();
+    assert_eq!(sugg.len(), 1);
+    assert_eq!(sugg[0].speaker_label, 3);
+    catalog.dismiss_speaker_suggestion(r2.as_str(), 3).await.unwrap();
+    assert!(catalog
+        .recognize_speakers_for(r2.as_str(), 0.5)
+        .await
+        .unwrap()
+        .is_empty());
+}

@@ -791,6 +791,56 @@ export async function setSpeakerName(
   await tauriInvoke("set_speaker_name", { id, speakerLabel, name });
 }
 
+// ── Named-speaker recognition (#9) ─────────────────────────────────────────────
+
+/** A recognized-speaker suggestion: an unnamed diarized speaker whose voiceprint
+ *  matched a known voice. */
+export type SpeakerSuggestion = {
+  speaker_label: number;
+  name: string;
+  named_voice_id: string;
+  score: number;
+};
+
+/** A named voice in the cross-recording library. */
+export type NamedVoice = { id: string; name: string; samples: number };
+
+/** On-demand recognition for a recording: unnamed speakers matching a known
+ *  voice. Empty when recognition is off or nothing matches. */
+export async function recognizeSpeakers(id: string): Promise<SpeakerSuggestion[]> {
+  return await tauriInvoke<SpeakerSuggestion[]>("recognize_speakers", { id });
+}
+
+/** Dismiss a recognized-speaker suggestion so it isn't offered again. */
+export async function dismissSpeakerSuggestion(
+  id: string,
+  speakerLabel: number,
+): Promise<void> {
+  await tauriInvoke("dismiss_speaker_suggestion", { id, speakerLabel });
+}
+
+/** The named-voice library (Speaker Library manager). */
+export async function listNamedVoices(): Promise<NamedVoice[]> {
+  return await tauriInvoke<NamedVoice[]>("list_named_voices");
+}
+
+/** Rename a named voice. */
+export async function renameNamedVoice(id: string, name: string): Promise<void> {
+  await tauriInvoke("rename_named_voice", { id, name });
+}
+
+/** Merge one named voice into another; resolves to whether a merge happened. */
+export async function mergeNamedVoices(fromId: string, intoId: string): Promise<boolean> {
+  const r = await tauriInvoke<{ merged: boolean }>("merge_named_voices", { fromId, intoId });
+  return r.merged;
+}
+
+/** Forget a named voice; resolves to whether an entry was removed. */
+export async function forgetNamedVoice(id: string): Promise<boolean> {
+  const r = await tauriInvoke<{ removed: boolean }>("forget_named_voice", { id });
+  return r.removed;
+}
+
 /** Whether the daemon process is running, and its pid. Answered by the TRAY
  *  (it owns the daemon process), so it works even when the daemon is down —
  *  the Doctor surfaces use it as the "is anything alive" check. */

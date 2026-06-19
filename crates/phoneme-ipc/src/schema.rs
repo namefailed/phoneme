@@ -592,6 +592,50 @@ pub enum Request {
         name: String,
     },
 
+    // ── Named-speaker recognition (#9) ───────────────────────────────────
+    /// On-demand named-speaker recognition for a recording: the still-unnamed
+    /// diarized speakers whose voiceprints match a known voice. Ok = JSON array
+    /// of `SpeakerSuggestion` (empty when recognition is off or nothing
+    /// matches). GUI detail pane.
+    RecognizeSpeakers {
+        /// The recording to recognize speakers in.
+        id: RecordingId,
+    },
+    /// Dismiss a recognized-speaker suggestion so it isn't offered again for that
+    /// recording + speaker. Ok = `{}`. GUI detail-pane ✗ on a suggestion chip.
+    DismissSpeakerSuggestion {
+        /// The recording.
+        id: RecordingId,
+        /// The 1-based speaker label whose suggestion to dismiss.
+        speaker_label: i64,
+    },
+    /// The named-voice library — id, name, and sample count per enrolled voice.
+    /// Ok = JSON array of `NamedVoice`. GUI Speaker Library manager.
+    ListNamedVoices,
+    /// Rename a named voice. Ok = `{}`. GUI Speaker Library manager.
+    RenameNamedVoice {
+        /// The named-voice id.
+        id: String,
+        /// The new display name.
+        name: String,
+    },
+    /// Merge one named voice into another — re-points the source's samples onto
+    /// the target and deletes the source. Ok = `{"merged":bool}`. GUI Speaker
+    /// Library manager.
+    MergeNamedVoices {
+        /// The voice to merge FROM (removed on success).
+        from_id: String,
+        /// The voice to merge INTO (kept).
+        into_id: String,
+    },
+    /// Forget a named voice — unlink its captures (the raw voiceprints stay) and
+    /// delete the library entry. Ok = `{"removed":bool}`. GUI Speaker Library
+    /// manager.
+    ForgetNamedVoice {
+        /// The named-voice id to forget.
+        id: String,
+    },
+
     // ── Queue (inbox) operations ─────────────────────────────────────────
     // Inspect and manage the durable inbox the queue worker drains. GUI
     // queue panel, `phoneme queue …`.
