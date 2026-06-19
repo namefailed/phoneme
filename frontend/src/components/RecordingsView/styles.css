@@ -518,37 +518,49 @@ mark.search-hit {
 /* Notes Copy — same web-page-style icon overlay as the transcript box: a bare,
    very-faded glyph at the text's top-right that lifts on hover/focus. */
 .notes-editor-wrap { position: relative; }
+/* Clean SVG icon button (matches the transcript Copy button): hidden until the
+   notes box is hovered, a subtle accent pill on direct hover, green check on
+   copy. Hidden while editing unless hovered. */
 .notes-copy-overlay {
   position: absolute;
-  top: 4px;
+  top: 6px;
   right: 6px;
   z-index: 5;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  font-size: 1rem;
-  line-height: 1;
-  border: none;
+  border-radius: 6px;
+  border: 1px solid transparent;
   background: transparent;
-  box-shadow: none;
-  color: var(--fg-muted);
+  color: var(--fg-faded);
   cursor: pointer;
-  opacity: 0.2;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease;
 }
-/* Hidden while editing (focused); hovering the text reveals it fully lit. */
-.notes-editor-wrap:focus-within .notes-copy-overlay { opacity: 0; }
-.notes-editor-wrap:hover .notes-copy-overlay,
-.notes-editor-wrap .notes-copy-overlay:hover,
-.notes-editor-wrap .notes-copy-overlay:focus-visible,
-.notes-editor-wrap .notes-copy-overlay.copied {
+.notes-copy-overlay svg { display: block; }
+.notes-editor-wrap:hover .notes-copy-overlay { opacity: 1; }
+.notes-editor-wrap:focus-within:not(:hover) .notes-copy-overlay { opacity: 0; }
+.notes-editor-wrap .notes-copy-overlay:hover {
   opacity: 1;
+  background: var(--bg-elevated);
+  border-color: var(--border);
+  color: var(--accent);
 }
-.notes-editor-wrap:hover .notes-copy-overlay,
-.notes-editor-wrap .notes-copy-overlay:hover { color: var(--accent); }
+.notes-editor-wrap .notes-copy-overlay:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.notes-copy-overlay.copied {
+  opacity: 1;
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 12%, var(--bg-elevated));
+}
 /* Speakers panel — one renamable row per diarized [Speaker N] label. Matches
    the transcript/notes boxes so it reads as part of the same stack. */
 .speakers-block {

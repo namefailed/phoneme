@@ -8,6 +8,14 @@ import { standardKeymap } from "@codemirror/commands";
 import { vim, Vim, getCM } from "@replit/codemirror-vim";
 import { invoke } from "@tauri-apps/api/core";
 
+/** Monochrome copy / check glyphs (currentColor) — shared shape with the
+ *  transcript editor's Copy button. Inline SVG, never the tofu-prone clipboard
+ *  emoji. */
+const COPY_SVG =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const CHECK_SVG =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+
 /**
  * A CodeMirror-backed editor for the per-recording Notes field.
  *
@@ -65,14 +73,12 @@ export class NotesEditor {
     try {
       await navigator.clipboard.writeText(this.current);
       if (this.copyBtn) {
-        this.copyBtn.textContent = "✅";
-        this.copyBtn.style.color = "var(--ok)";
-        this.copyBtn.style.borderColor = "var(--ok)";
+        this.copyBtn.classList.add("copied");
+        this.copyBtn.innerHTML = CHECK_SVG;
         window.setTimeout(() => {
           if (!this.copyBtn) return;
-          this.copyBtn.textContent = "📋";
-          this.copyBtn.style.color = "var(--fg-muted)";
-          this.copyBtn.style.borderColor = "var(--border-subtle)";
+          this.copyBtn.classList.remove("copied");
+          this.copyBtn.innerHTML = COPY_SVG;
         }, 1500);
       }
     } catch (e) {
@@ -119,7 +125,7 @@ export class NotesEditor {
         <button id="notes-save-btn" style="display: none; background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.7857rem; cursor: pointer; font-weight: bold;">Save Changes</button>
       </div>
       <div class="notes-editor-wrap">
-        <button id="notes-copy-btn" class="notes-copy-overlay" title="Copy the notes to the clipboard" aria-label="Copy notes">📋</button>
+        <button id="notes-copy-btn" class="notes-copy-overlay" title="Copy the notes to the clipboard" aria-label="Copy notes">${COPY_SVG}</button>
         <div id="notes-cm-root" class="notes-cm-root"></div>
       </div>
     `;
