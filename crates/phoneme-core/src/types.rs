@@ -200,6 +200,19 @@ pub struct SavedSearch {
     pub filter_json: String,
 }
 
+/// A named voice in the cross-recording voiceprint library (#9): the identity a
+/// recognized speaker is matched against. The centroid embedding stays internal
+/// to the catalog; this DTO carries only what the Speaker Library UI shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NamedVoice {
+    /// Stable id — the enrollment / merge target.
+    pub id: String,
+    /// Display name (the person).
+    pub name: String,
+    /// How many captured per-recording voiceprints are enrolled under this voice.
+    pub samples: u32,
+}
+
 /// The canonical Recording row as exposed by `Catalog`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recording {

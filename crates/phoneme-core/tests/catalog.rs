@@ -1093,3 +1093,87 @@ async fn saved_searches_upsert_list_and_delete() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, "ss_b");
 }
+
+#[tokio::test]
+async fn voiceprints_enroll_recognize_merge_and_forget() {
+    let (_dir, catalog) = fresh_catalog().await;
+
+    // Empty library + an un-enrolled capture recognizes nothing.
+    assert!(catalog.list_named_voices().await.unwrap().is_empty());
+    catalog
+        .save_speaker_voiceprint("r1", 1, &[1.0, 0.0, 0.0])
+        .await
+        .unwrap();
+    assert!(catalog
+        .recognize_voice(&[1.0, 0.0, 0.0], 0.8)
+        .await
+        .unwrap()
+        .is_none());
+
+    // Enrolling that capture under a name makes a future close centroid match it.
+    let id = catalog
+        .enroll_speaker("r1", 1, "Alice")
+        .await
+        .unwrap()
+        .expect("enrolled");
+    let (voice, score) = catalog
+        .recognize_voice(&[0.98, 0.02, 0.0], 0.8)
+        .await
+        .unwrap()
+        .expect("recognized");
+    assert_eq!(voice.name, "Alice");
+    assert_eq!(voice.id, id);
+    assert!(score > 0.9);
+    // An orthogonal voice is not Alice.
+    assert!(catalog
+        .recognize_voice(&[0.0, 0.0, 1.0], 0.8)
+        .await
+        .unwrap()
+        .is_none());
+
+    // A second sample for Alice (different recording) updates the running mean
+    // and sample count; naming by the same name reuses the entry.
+    catalog
+        .save_speaker_voiceprint("r2", 1, &[0.0, 1.0, 0.0])
+        .await
+        .unwrap();
+    let id2 = catalog
+        .enroll_speaker("r2", 1, "alice") // case-insensitive → same voice
+        .await
+        .unwrap()
+        .expect("enrolled");
+    assert_eq!(id2, id);
+    let voices = catalog.list_named_voices().await.unwrap();
+    assert_eq!(voices.len(), 1);
+    assert_eq!(voices[0].samples, 2);
+
+    // A separate voice, then merge it into Alice: captures re-point, entry drops.
+    catalog
+        .save_speaker_voiceprint("r3", 1, &[0.0, 0.0, 1.0])
+        .await
+        .unwrap();
+    let other = catalog
+        .enroll_speaker("r3", 1, "Bob")
+        .await
+        .unwrap()
+        .expect("enrolled");
+    assert_eq!(catalog.list_named_voices().await.unwrap().len(), 2);
+    assert!(catalog.merge_named_voices(&other, &id).await.unwrap());
+    let voices = catalog.list_named_voices().await.unwrap();
+    assert_eq!(voices.len(), 1);
+    assert_eq!(voices[0].samples, 3);
+
+    // Forgetting Alice empties the library but keeps the raw captures.
+    assert!(catalog.forget_named_voice(&id).await.unwrap());
+    assert!(catalog.list_named_voices().await.unwrap().is_empty());
+    assert!(catalog
+        .recognize_voice(&[0.98, 0.02, 0.0], 0.8)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(catalog
+        .speaker_voiceprint("r1", 1)
+        .await
+        .unwrap()
+        .is_some());
+}

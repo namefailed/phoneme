@@ -27,7 +27,7 @@ use crate::error::Result;
 use crate::id::RecordingId;
 use crate::tags::Tag;
 use crate::types::{
-    AiActivityEntry, ListFilter, Recording, RecordingStatus, SavedSearch, SpeakerName,
+    AiActivityEntry, ListFilter, NamedVoice, Recording, RecordingStatus, SavedSearch, SpeakerName,
     TranscriptSegment, TranscriptWord,
 };
 use chrono::{DateTime, Local};
@@ -2195,6 +2195,292 @@ impl Catalog {
                 })
             })
             .collect()
+    }
+
+    // ---- Speaker voiceprints — cross-recording named-speaker recognition (#9) ----
+
+    /// Store (or refresh) the captured centroid for one speaker in a recording.
+    /// The pipeline calls this for each labelled speaker after local diarization.
+    /// An existing `named_voice_id` link is preserved (a re-transcribe refreshes
+    /// the sample without un-enrolling), and the linked named voice is recomputed
+    /// so its cached centroid tracks the new sample.
+    pub async fn save_speaker_voiceprint(
+        &self,
+        recording_id: &str,
+        speaker_label: i64,
+        centroid: &[f32],
+    ) -> Result<()> {
+        let json = serde_json::to_string(centroid)?;
+        sqlx::query(
+            "INSERT INTO speaker_voiceprints (recording_id, speaker_label, centroid) \
+             VALUES (?, ?, ?) \
+             ON CONFLICT(recording_id, speaker_label) DO UPDATE SET centroid = excluded.centroid",
+        )
+        .bind(recording_id)
+        .bind(speaker_label)
+        .bind(&json)
+        .execute(&self.pool)
+        .await?;
+        if let Some(nid) = self.named_voice_for(recording_id, speaker_label).await? {
+            self.recompute_named_centroid(&nid).await?;
+        }
+        Ok(())
+    }
+
+    /// The captured centroid for one speaker in a recording, if one exists.
+    pub async fn speaker_voiceprint(
+        &self,
+        recording_id: &str,
+        speaker_label: i64,
+    ) -> Result<Option<Vec<f32>>> {
+        let row = sqlx::query(
+            "SELECT centroid FROM speaker_voiceprints \
+             WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(recording_id)
+        .bind(speaker_label)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(r) => Ok(Some(serde_json::from_str::<Vec<f32>>(
+                &r.try_get::<String, _>("centroid")?,
+            )?)),
+            None => Ok(None),
+        }
+    }
+
+    /// The named-voice id a recording's speaker is enrolled under, if any.
+    async fn named_voice_for(
+        &self,
+        recording_id: &str,
+        speaker_label: i64,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query(
+            "SELECT named_voice_id FROM speaker_voiceprints \
+             WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(recording_id)
+        .bind(speaker_label)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(r) => Ok(r.try_get::<Option<String>, _>("named_voice_id")?),
+            None => Ok(None),
+        }
+    }
+
+    /// Enroll a recording's speaker into the named-voice library under `name` —
+    /// the implicit-enrollment path, called whenever a speaker is named. Finds or
+    /// creates the named voice by case-insensitive name, links the capture to it,
+    /// and recomputes the library entry's cached centroid. Returns the named-voice
+    /// id, or `None` when there's no captured voiceprint to enroll (e.g. a
+    /// cloud-diarized recording) or the name is blank.
+    pub async fn enroll_speaker(
+        &self,
+        recording_id: &str,
+        speaker_label: i64,
+        name: &str,
+    ) -> Result<Option<String>> {
+        let name = name.trim();
+        if name.is_empty()
+            || self
+                .speaker_voiceprint(recording_id, speaker_label)
+                .await?
+                .is_none()
+        {
+            return Ok(None);
+        }
+        let id = self.find_or_create_named_voice(name).await?;
+        sqlx::query(
+            "UPDATE speaker_voiceprints SET named_voice_id = ? \
+             WHERE recording_id = ? AND speaker_label = ?",
+        )
+        .bind(&id)
+        .bind(recording_id)
+        .bind(speaker_label)
+        .execute(&self.pool)
+        .await?;
+        self.recompute_named_centroid(&id).await?;
+        Ok(Some(id))
+    }
+
+    /// Un-enroll a recording's speaker from its named voice (keeps the raw
+    /// capture; recomputes the formerly-linked voice). No-op when not enrolled.
+    pub async fn unenroll_speaker(&self, recording_id: &str, speaker_label: i64) -> Result<()> {
+        if let Some(nid) = self.named_voice_for(recording_id, speaker_label).await? {
+            sqlx::query(
+                "UPDATE speaker_voiceprints SET named_voice_id = NULL \
+                 WHERE recording_id = ? AND speaker_label = ?",
+            )
+            .bind(recording_id)
+            .bind(speaker_label)
+            .execute(&self.pool)
+            .await?;
+            self.recompute_named_centroid(&nid).await?;
+        }
+        Ok(())
+    }
+
+    /// Find a named voice by case-insensitive name, creating an empty one (no
+    /// samples yet) if none matches. Returns its id.
+    async fn find_or_create_named_voice(&self, name: &str) -> Result<String> {
+        let existing: Option<String> =
+            sqlx::query("SELECT id FROM named_voiceprints WHERE name = ? COLLATE NOCASE LIMIT 1")
+                .bind(name)
+                .fetch_optional(&self.pool)
+                .await?
+                .map(|r| r.try_get::<String, _>("id"))
+                .transpose()?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+        let id = format!("nv_{}", RecordingId::new().as_str());
+        sqlx::query(
+            "INSERT INTO named_voiceprints (id, name, centroid, samples) VALUES (?, ?, '[]', 0)",
+        )
+        .bind(&id)
+        .bind(name)
+        .execute(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    /// Recompute a named voice's cached centroid + sample count from its linked
+    /// captures (the L2-normalized mean). A voice with no remaining captures gets
+    /// an empty centroid and zero samples (it never matches, but the entry stays
+    /// until explicitly forgotten).
+    async fn recompute_named_centroid(&self, named_voice_id: &str) -> Result<()> {
+        let rows = sqlx::query("SELECT centroid FROM speaker_voiceprints WHERE named_voice_id = ?")
+            .bind(named_voice_id)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut samples: Vec<Vec<f32>> = Vec::with_capacity(rows.len());
+        for r in rows {
+            samples.push(serde_json::from_str::<Vec<f32>>(
+                &r.try_get::<String, _>("centroid")?,
+            )?);
+        }
+        let mean = crate::voiceprint::mean_centroid(&samples).unwrap_or_default();
+        let json = serde_json::to_string(&mean)?;
+        sqlx::query(
+            "UPDATE named_voiceprints SET centroid = ?, samples = ?, updated_at = datetime('now') \
+             WHERE id = ?",
+        )
+        .bind(&json)
+        .bind(samples.len() as i64)
+        .bind(named_voice_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The named-voice library (id, name, sample count), most-recently-updated
+    /// first — for the Speaker Library manager.
+    pub async fn list_named_voices(&self) -> Result<Vec<NamedVoice>> {
+        let rows = sqlx::query(
+            "SELECT id, name, samples FROM named_voiceprints \
+             ORDER BY updated_at DESC, name COLLATE NOCASE ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(NamedVoice {
+                    id: r.try_get("id")?,
+                    name: r.try_get("name")?,
+                    samples: r.try_get::<i64, _>("samples")? as u32,
+                })
+            })
+            .collect()
+    }
+
+    /// Match a probe centroid against the named-voice library, returning the best
+    /// `(NamedVoice, score)` at or above `threshold`. Voices with no samples
+    /// (empty centroid) never match. Used by recognition to suggest a name.
+    pub async fn recognize_voice(
+        &self,
+        probe: &[f32],
+        threshold: f32,
+    ) -> Result<Option<(NamedVoice, f32)>> {
+        let rows = sqlx::query("SELECT id, name, samples, centroid FROM named_voiceprints")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut voices: Vec<NamedVoice> = Vec::with_capacity(rows.len());
+        let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(rows.len());
+        for r in rows {
+            let samples: i64 = r.try_get("samples")?;
+            if samples <= 0 {
+                continue;
+            }
+            voices.push(NamedVoice {
+                id: r.try_get("id")?,
+                name: r.try_get("name")?,
+                samples: samples as u32,
+            });
+            centroids.push(serde_json::from_str::<Vec<f32>>(
+                &r.try_get::<String, _>("centroid")?,
+            )?);
+        }
+        Ok(crate::voiceprint::best_match(probe, &centroids, threshold)
+            .map(|(i, score)| (voices[i].clone(), score)))
+    }
+
+    /// Rename a named voice (no-op on a blank name or unknown id).
+    pub async fn rename_named_voice(&self, id: &str, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(());
+        }
+        sqlx::query("UPDATE named_voiceprints SET name = ?, updated_at = datetime('now') WHERE id = ?")
+            .bind(name)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Merge `from_id` into `into_id`: re-point all of `from`'s captures onto
+    /// `into`, recompute `into`'s centroid, and delete `from`. Returns whether a
+    /// merge happened (both ids exist and differ).
+    pub async fn merge_named_voices(&self, from_id: &str, into_id: &str) -> Result<bool> {
+        if from_id == into_id {
+            return Ok(false);
+        }
+        let both: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM named_voiceprints WHERE id IN (?, ?)")
+                .bind(from_id)
+                .bind(into_id)
+                .fetch_one(&self.pool)
+                .await?;
+        if both < 2 {
+            return Ok(false);
+        }
+        sqlx::query("UPDATE speaker_voiceprints SET named_voice_id = ? WHERE named_voice_id = ?")
+            .bind(into_id)
+            .bind(from_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM named_voiceprints WHERE id = ?")
+            .bind(from_id)
+            .execute(&self.pool)
+            .await?;
+        self.recompute_named_centroid(into_id).await?;
+        Ok(true)
+    }
+
+    /// Forget a named voice: unlink its captures (the raw per-recording
+    /// voiceprints stay) and delete the library entry. Returns whether a row was
+    /// removed.
+    pub async fn forget_named_voice(&self, id: &str) -> Result<bool> {
+        sqlx::query("UPDATE speaker_voiceprints SET named_voice_id = NULL WHERE named_voice_id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        let res = sqlx::query("DELETE FROM named_voiceprints WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected() > 0)
     }
 
     /// Replace a recording's machine transcript segments with a fresh set.
