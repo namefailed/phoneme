@@ -548,7 +548,6 @@ pub fn run() {
             commands::doctor_backend_checks,
             commands::start_daemon,
             commands::wizard_test_whisper,
-            commands::wizard_test_hook,
             commands::list_input_devices,
             commands::list_tags,
             commands::list_all_tags,
