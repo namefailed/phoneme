@@ -285,8 +285,8 @@ export class SectionPlaybook {
           </label>
         </div>
         <div class="pb-conn-host"></div>
-        <div class="pb-model-field settings-field" style="display: none;">
-          <label class="settings-label">Model</label>
+        <div class="pb-model-field" style="display: none;">
+          <label class="pb-model-label">Model</label>
           <div class="pb-model-host"></div>
         </div>
         ${targetRow}
@@ -383,7 +383,7 @@ export class SectionPlaybook {
     const updateVisibility = () => {
       // Empty provider = "Same as default" → the model inherits, so hide it.
       const off = !e.llm.provider || e.llm.provider === "none";
-      if (modelField) modelField.style.display = off ? "none" : "grid";
+      if (modelField) modelField.style.display = off ? "none" : "flex";
     };
 
     let modelKey = "";

@@ -1330,6 +1330,17 @@ select[data-key="daemon.log_level"] {
    its free-text input — down to the same deep surface with a visible border, so
    the whole editor reads as one family. !important beats the picker's inline
    style; the .cf overrides win on specificity alone. */
+/* Stack the Model label over its control like every other field in the entry
+   editor (Prompt, etc.) — the old `.settings-field` grid gave it a 240px label
+   column that pushed the dropdown right and out of line with the Provider row. */
+.pb-model-field {
+  flex-direction: column;
+  gap: 4px;
+}
+.pb-model-label {
+  font-size: 0.8571rem;
+  color: var(--fg-default);
+}
 .pb-model-host .mf-select,
 .pb-model-host .mf-text {
   background-color: var(--bg-deep) !important;
