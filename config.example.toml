@@ -374,7 +374,12 @@ vimrc_path = ""
 # Backend that assigns speakers:
 #   "none" (default) | "local" (Pyannote ONNX) | "deepgram" | "assemblyai"
 provider = "none"
-# Absolute path to the local Pyannote ONNX model file (used when provider="local").
+# Optional folder holding a CUSTOM speakrs diarization bundle (segmentation +
+# embedding ONNX) to load instead of the pretrained models (used when
+# provider="local"). Empty = auto-download/use the defaults (Hugging Face cache).
+models_dir = ""
+# Deprecated / unused — superseded by models_dir (it was never wired into the load
+# path). Kept so older configs keep parsing.
 local_model_path = ""
 
 

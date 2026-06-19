@@ -46,6 +46,11 @@ trust boundary. Verified against current code.*
   same provider's transcription API, so the section shows a live warning when the chosen
   diarization provider can't run with the configured transcription backend (e.g. Deepgram
   diarization picked while Local transcribes) instead of silently doing nothing.
+- [x] **Custom local diarization models** — `[diarization].models_dir` points the local
+  diarizer at a folder holding your own speakrs bundle (segmentation + embedding ONNX),
+  loaded via `OwnedDiarizationPipeline::from_dir` instead of the pretrained download;
+  empty keeps the defaults. Settings field under Diarization; the cache reloads on
+  change. (The dead `local_model_path` key it replaces was never wired in.)
 - [x] **Track-aware Meeting Mode** — a meeting's **mic track** is now labelled as one
   speaker, **You**, without running the diarizer at all; only the system/loopback track
   is diarized. The mic track is a single voice (yours), so diarizing it only burned time

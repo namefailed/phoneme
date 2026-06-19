@@ -945,7 +945,16 @@ impl QueuedDiarizer {
 
         tracing::info!("loading local diarization pipeline (segmentation + embedding models)");
         let started = std::time::Instant::now();
-        let pipeline = OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?;
+        // A custom `[diarization].models_dir` loads a user-supplied bundle
+        // (segmentation + embedding ONNX); empty (the default) downloads/uses the
+        // pretrained models. The diarizer cache is keyed on the whole config, so
+        // changing the dir reloads the pipeline.
+        let dir = cfg.models_dir.trim();
+        let pipeline = if dir.is_empty() {
+            OwnedDiarizationPipeline::from_pretrained(ExecutionMode::Cpu)?
+        } else {
+            OwnedDiarizationPipeline::from_dir(dir, ExecutionMode::Cpu)?
+        };
 
         // Map the user-facing knobs onto speakrs' PipelineConfig. The diarizer
         // cache is keyed on the whole DiarizationConfig, so changing any of these

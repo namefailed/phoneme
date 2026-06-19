@@ -102,13 +102,13 @@ export class SectionDiarization {
             </div>
           </div>
           <div class="settings-field long-input">
-            <label>Model Path</label>
+            <label>Models folder</label>
             <div>${renderField(
-              { key: "diarization.local_model_path", label: "", kind: "text", placeholder: "Managed automatically by Hugging Face cache" },
-              this.config.diarization?.local_model_path ?? "",
+              { key: "diarization.models_dir", label: "", kind: "text", placeholder: "Leave blank to use the bundled/pretrained models" },
+              this.config.diarization?.models_dir ?? "",
             )}</div>
             <span style="${HELP}">
-              Optional. Leave blank to use the default speakrs models automatically downloaded to the Hugging Face cache (located at %USERPROFILE%\\.cache\\huggingface\\hub).
+              Optional. Point this at a folder holding a custom speakrs diarization bundle (segmentation + embedding ONNX models) to load it instead of the defaults. Leave blank to use the pretrained models, auto-downloaded to the Hugging Face cache (%USERPROFILE%\\.cache\\huggingface\\hub).
             </span>
           </div>
 
