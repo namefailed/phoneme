@@ -31,12 +31,18 @@ impl MockDaemon {
     where
         F: Fn(&Request) -> Response + Send + Sync + 'static,
     {
+        // A process-wide counter guarantees a unique pipe name even when two
+        // tests spawn within the same timer tick under the parallel runner —
+        // pid + nanos alone collided (the timer resolution is coarse on Windows),
+        // which made `bind` below panic with "bind mock daemon pipe".
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let pid = std::process::id();
         let ns = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let pipe_name = format!("phoneme-cli-test-{label}-{pid}-{ns}");
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let pipe_name = format!("phoneme-cli-test-{label}-{pid}-{ns}-{seq}");
 
         let mut listener = NamedPipeListener::bind(&pipe_name).expect("bind mock daemon pipe");
         let received = Arc::new(Mutex::new(Vec::new()));

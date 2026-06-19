@@ -160,18 +160,26 @@ fn set_value(cfg: &Config, key: &str, value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Serializes every `PHONEME_CONFIG` mutation. `set_var` is process-global,
+    /// so under the parallel test runner two tests pointing the env at their own
+    /// temp file clobbered each other (a test then wrote/read the wrong path).
+    /// Holding this lock for the override's whole lifetime makes the env mutation
+    /// effectively single-threaded regardless of `--test-threads`.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Point `PHONEME_CONFIG` at a temp file for the duration of one test,
-    /// restoring the previous value on drop so tests can't leak into each
-    /// other (the suite runs with --test-threads=1).
+    /// restoring the previous value on drop so tests can't leak into each other.
     struct ConfigEnvOverride {
         prev: Option<String>,
+        _guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl ConfigEnvOverride {
         fn set(path: &std::path::Path) -> Self {
+            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let prev = std::env::var("PHONEME_CONFIG").ok();
             std::env::set_var("PHONEME_CONFIG", path);
-            Self { prev }
+            Self { prev, _guard: guard }
         }
     }
 
