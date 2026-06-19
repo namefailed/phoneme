@@ -1395,7 +1395,10 @@ export class RecordingsView {
         cell.el.querySelector<HTMLElement>(".cm-content") ??
         cell.el.querySelector<HTMLElement>("textarea") ??
         cell.el.querySelector<HTMLElement>('[contenteditable="true"]');
-      ed?.focus();
+      // preventScroll: focusing the editor shouldn't re-center the transcript in
+      // the pane (that abrupt jump was the "jarring" part); the grid cursor is
+      // already here, and the editor stays scrollable.
+      ed?.focus({ preventScroll: true });
     }
   }
 
@@ -1585,13 +1588,16 @@ export class RecordingsView {
     return this.container.querySelector(`${this.detailRootSel()} ph-waveform-player`);
   }
 
-  /** Drop into the transcript editor (CodeMirror's editable) in the detail pane. */
+  /** Drop into the transcript editor (CodeMirror's editable) in the detail pane.
+   *  `preventScroll` so focusing doesn't yank the transcript to the middle of the
+   *  pane — the keyboard cursor already lives on the editor cell, and the abrupt
+   *  re-center on focus was jarring. The user keeps the focus; just not the jump. */
   private focusEditor() {
     const ed =
       this.container.querySelector<HTMLElement>(`${this.detailRootSel()} .cm-content`) ??
       this.container.querySelector<HTMLElement>(`${this.detailRootSel()} textarea`) ??
       this.container.querySelector<HTMLElement>(`${this.detailRootSel()} [contenteditable="true"]`);
-    ed?.focus();
+    ed?.focus({ preventScroll: true });
   }
 
   /** `dd`: delete the current selection via the undoable flow. With a

@@ -506,6 +506,11 @@ trust boundary. Verified against current code.*
 
 ### Reliability & polish
 
+- [x] **Transcript editor scrolling & focus** — the mouse wheel over the
+  transcript editor now scrolls the detail pane when the editor itself has nothing
+  more to scroll (CodeMirror used to trap the wheel and freeze the page), and
+  keyboard-focusing the editor no longer yanks the transcript to the middle of the
+  pane — the focus you rely on stays, the jarring re-center is gone.
 - [x] **Transcript / notes editors render reliably** — pinned a single
   `@codemirror/state` instance (Vite `resolve.dedupe` + `optimizeDeps`) so the
   editors never hit "Unrecognized extension value" and fail to mount.
