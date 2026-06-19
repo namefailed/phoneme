@@ -1991,6 +1991,14 @@ pub struct HotkeyBinding {
     /// the single-recording ledger.
     #[serde(default)]
     pub whisper_model: String,
+    /// Capture-source override for a Record / in-place keybind — `microphone` or
+    /// `system_audio`. `None` (the default) uses the global `[recording].source`,
+    /// so existing bindings are unchanged. IGNORED when [`action`](Self::action)
+    /// is [`HotkeyAction::Meeting`] (a meeting always records both tracks).
+    /// Carried on `RecordStart` and applied at recorder start, like the
+    /// recipe / model overrides.
+    #[serde(default)]
+    pub source: Option<CaptureSource>,
     /// In-place-dictation options — only meaningful when `action` is `InPlace`
     /// (fast type-only vs. run the pipeline first; how to insert the text).
     #[serde(default)]
@@ -2892,6 +2900,7 @@ impl Default for Config {
                     action: HotkeyAction::Record,
                     recipe_id: "journal_note".into(),
                     whisper_model: String::new(),
+                    source: None,
                     in_place: HotkeyInPlace::default(),
                 },
                 HotkeyBinding {
@@ -2903,6 +2912,7 @@ impl Default for Config {
                     action: HotkeyAction::InPlace,
                     recipe_id: "prompt_capture".into(),
                     whisper_model: String::new(),
+                    source: None,
                     in_place: HotkeyInPlace {
                         full_pipeline: true,
                         ..HotkeyInPlace::default()
@@ -2917,6 +2927,7 @@ impl Default for Config {
                     action: HotkeyAction::Record,
                     recipe_id: "meeting_notes".into(),
                     whisper_model: String::new(),
+                    source: None,
                     in_place: HotkeyInPlace::default(),
                 },
             ],

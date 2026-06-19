@@ -31,6 +31,7 @@ async fn record_start_stop_creates_row_and_transcribes() {
             in_place: false,
             recipe_id: None,
             whisper_model: None,
+            source: None,
         })
         .await
         .unwrap();

@@ -292,7 +292,8 @@ mod tests {
                 mode: phoneme_core::RecordMode::Hold,
                 in_place: false,
                 recipe_id: None,
-                whisper_model: None
+                whisper_model: None,
+                source: None,
             }]
         );
     }

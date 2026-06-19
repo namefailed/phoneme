@@ -95,6 +95,12 @@ pub enum Request {
         /// model-override mechanism (`pending_overrides` → `apply_model_override`).
         #[serde(default)]
         whisper_model: Option<String>,
+        /// Custom-hotkey capture-source override (microphone vs system-audio
+        /// loopback) for this single recording, from the firing `HotkeyBinding`.
+        /// `None` = the global `[recording].source`. Applied at recorder start;
+        /// the recording's `track` then records which source it actually used.
+        #[serde(default)]
+        source: Option<phoneme_core::config::CaptureSource>,
     },
     /// Stop and finalize the active recording: the WAV is written, the
     /// catalog row flips to `transcribing`, and the item is enqueued in the
@@ -120,6 +126,10 @@ pub enum Request {
         /// half of the toggle. See [`Request::RecordStart::whisper_model`].
         #[serde(default)]
         whisper_model: Option<String>,
+        /// Custom-hotkey capture-source override, applied ONLY on the start half of
+        /// the toggle. See [`Request::RecordStart::source`].
+        #[serde(default)]
+        source: Option<phoneme_core::config::CaptureSource>,
     },
     /// Pause capture of the active recording (or every track of the active
     /// meeting). Ok `{"id":"<recording id>"}` (the mic track's id for a

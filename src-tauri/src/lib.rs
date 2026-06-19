@@ -181,6 +181,8 @@ pub fn run() {
                                                     in_place: true,
                                                     recipe_id: None,
                                                     whisper_model: None,
+
+                                                    source: None,
                                                 })
                                                 .await
                                             {
@@ -195,6 +197,8 @@ pub fn run() {
                                                     in_place: true,
                                                     recipe_id: None,
                                                     whisper_model: None,
+
+                                                    source: None,
                                                 })
                                                 .await
                                             {
@@ -257,6 +261,9 @@ pub fn run() {
                                 let m = binding.whisper_model.trim();
                                 (!m.is_empty()).then(|| m.to_string())
                             };
+                            // Per-binding capture source (None = the global
+                            // [recording].source). Meeting bindings ignore it.
+                            let source = binding.source;
                             let action = binding.action;
                             let mode = binding.mode;
                             let in_place = action == HotkeyAction::InPlace;
@@ -304,6 +311,7 @@ pub fn run() {
                                                         in_place,
                                                         recipe_id,
                                                         whisper_model,
+                                                        source,
                                                     }
                                                 } else {
                                                     phoneme_ipc::Request::RecordStart {
@@ -311,6 +319,7 @@ pub fn run() {
                                                         in_place,
                                                         recipe_id,
                                                         whisper_model,
+                                                        source,
                                                     }
                                                 };
                                                 if let Err(e) = bridge.request(req).await {
@@ -354,6 +363,8 @@ pub fn run() {
                                                 in_place: false,
                                                 recipe_id: None,
                                                 whisper_model: None,
+
+                                                source: None,
                                             })
                                             .await
                                         {
@@ -368,6 +379,8 @@ pub fn run() {
                                                 in_place: false,
                                                 recipe_id: None,
                                                 whisper_model: None,
+
+                                                source: None,
                                             })
                                             .await
                                         {

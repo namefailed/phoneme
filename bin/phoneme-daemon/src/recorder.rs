@@ -920,6 +920,7 @@ impl DaemonRecorder {
         state: &AppState,
         mode: RecordMode,
         in_place: bool,
+        source_override: Option<CaptureSource>,
     ) -> Result<RecordingId> {
         // A meeting owns both the microphone and the system-audio device. Refuse
         // to start a single-track recording while one is running — otherwise we
@@ -981,13 +982,15 @@ impl DaemonRecorder {
         });
         drop(active);
 
-        // Record which capture source this recording actually used (microphone
-        // vs system-audio loopback) so the list's Source column reflects the real
-        // source instead of assuming "single == microphone". Loaded once here and
-        // reused for the capture stream below.
+        // Resolve the capture source: a custom hotkey can override the global
+        // `[recording].source` per-binding (`source_override`). Record which it was
+        // on the row's `track` so the list's Source column reflects the REAL source
+        // instead of assuming "single == microphone". Loaded once here and reused
+        // for the capture stream below.
         let app_cfg = state.config.load();
+        let kind = source_override.unwrap_or(app_cfg.recording.source);
         let track = Some(
-            match app_cfg.recording.source {
+            match kind {
                 CaptureSource::SystemAudio => "system",
                 CaptureSource::Microphone => "mic",
             }
@@ -1040,7 +1043,6 @@ impl DaemonRecorder {
         // audio to prepend; this also releases the microphone (or returns it) before we reopen
         // it for the recording. Empty when pre-roll is disabled (default path).
         let (prepend, preroll_source) = self.take_preroll_samples().await;
-        let kind = app_cfg.recording.source;
         let source = if let Some(s) = preroll_source {
             s
         } else {
@@ -2512,7 +2514,7 @@ mod tests {
         // this is safe to assert without real hardware.
         let err = state
             .recorder
-            .start(&state, RecordMode::Hold, false)
+            .start(&state, RecordMode::Hold, false, None)
             .await
             .expect_err("recording must be rejected during a meeting");
         assert!(matches!(err, Error::AlreadyRecording { .. }));
@@ -2836,7 +2838,7 @@ mod tests {
 
         state
             .recorder
-            .start(&state, RecordMode::Hold, false)
+            .start(&state, RecordMode::Hold, false, None)
             .await
             .expect("start synthetic recording");
 
@@ -2932,7 +2934,7 @@ mod tests {
         // = false`, no recipe → the fast lane).
         let id = state
             .recorder
-            .start(&state, RecordMode::Hold, true)
+            .start(&state, RecordMode::Hold, true, None)
             .await
             .expect("start synthetic in-place recording");
 
@@ -2976,7 +2978,7 @@ mod tests {
         // ledgers a custom-hotkey start would have set (recipe + Whisper model).
         let id = state
             .recorder
-            .start(&state, RecordMode::Hold, false)
+            .start(&state, RecordMode::Hold, false, None)
             .await
             .expect("start synthetic recording");
         state

@@ -437,6 +437,7 @@ mod tests {
             in_place: false,
             recipe_id: None,
             whisper_model: None,
+            source: None,
         }));
         assert!(!is_retry_safe(&Request::ReloadConfig));
         assert!(!is_retry_safe(&Request::DeleteRecording {

@@ -124,6 +124,11 @@ export type HotkeyBinding = {
    *  with that model (a model-file path for the local backend, a model id for
    *  cloud backends). */
   whisper_model: string;
+  /** Per-keybind capture-source override. `null`/absent = follow the global
+   *  `[recording].source`; otherwise this keybind's recordings capture the
+   *  microphone or system audio regardless of the global setting. Ignored for
+   *  `meeting` bindings (a meeting always records both tracks). */
+  source?: "microphone" | "system_audio" | null;
   /** In-place-dictation options (only used when action === "in_place"):
    *  fast type-only vs. run the pipeline first, and how to insert the text. */
   in_place: { full_pipeline: boolean; type_mode: "type" | "paste" | "off" };

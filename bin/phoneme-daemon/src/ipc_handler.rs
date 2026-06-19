@@ -173,8 +173,9 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             in_place,
             recipe_id,
             whisper_model,
+            source,
         } => {
-            match state.recorder.start(state, mode, in_place).await {
+            match state.recorder.start(state, mode, in_place, source).await {
                 Ok(id) => {
                     // Custom-hotkey overrides: a binding that named a recipe / STT
                     // model stashes them against THIS recording's id, mirroring how
@@ -214,6 +215,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             in_place,
             recipe_id,
             whisper_model,
+            source,
         } => {
             if state.recorder.current().await.is_some() {
                 // Stop half of the toggle: there is no NEW recording to attach the
@@ -226,7 +228,7 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             } else {
                 match state
                     .recorder
-                    .start(state, phoneme_core::RecordMode::Hold, in_place)
+                    .start(state, phoneme_core::RecordMode::Hold, in_place, source)
                     .await
                 {
                     Ok(id) => {

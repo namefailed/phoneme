@@ -234,6 +234,22 @@ export class SectionHotkeys {
                      The Playbook chain this hotkey's recordings run. <b>Default pipeline</b> = whatever normal
                      recordings run. Build or edit chains in the <b>Playbook</b> settings section.
                    </span>
+                   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 8px;">
+                     <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 0.8571rem;">
+                       <span style="color: var(--fg-faded);">Audio source</span>
+                       <select class="hk-source" style="min-width: 200px;">
+                         <option value="" ${!b.source ? "selected" : ""}>Default (Recording settings)</option>
+                         <option value="microphone" ${b.source === "microphone" ? "selected" : ""}>Microphone</option>
+                         <option value="system_audio" ${b.source === "system_audio" ? "selected" : ""}>System audio (loopback) — Windows</option>
+                       </select>
+                     </label>
+                   </div>
+                   <span style="font-size: 0.7857rem; color: var(--fg-faded); display: block; margin-bottom: 12px;">
+                     Which audio this hotkey captures. <b>Default</b> follows the global source in
+                     <b>Recording</b> settings — set this to give one hotkey the microphone and another
+                     system audio. The captured source is recorded on each recording and shown in the
+                     list's Source column.
+                   </span>
                    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px;">
                      <span style="font-size: 0.8571rem; color: var(--fg-faded);">Whisper model (this hotkey)</span>
                      <div class="hk-model-host"></div>
@@ -298,6 +314,13 @@ export class SectionHotkeys {
       // Per-binding recipe picker.
       card.querySelector<HTMLSelectElement>(".hk-recipe")?.addEventListener("change", (e) => {
         binding.recipe_id = (e.target as HTMLSelectElement).value;
+        this.notifyChanged();
+      });
+
+      // Per-binding capture-source override ("" = follow the global setting).
+      card.querySelector<HTMLSelectElement>(".hk-source")?.addEventListener("change", (e) => {
+        const v = (e.target as HTMLSelectElement).value;
+        binding.source = v === "" ? null : (v as NonNullable<HotkeyBinding["source"]>);
         this.notifyChanged();
       });
 

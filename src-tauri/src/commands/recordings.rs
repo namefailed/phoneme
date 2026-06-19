@@ -158,6 +158,7 @@ pub async fn record_start(bridge: Br<'_>, mode: String) -> Result<Value, Command
             in_place: false,
             recipe_id: None,
             whisper_model: None,
+            source: None,
         },
     )
     .await

@@ -69,6 +69,11 @@ trust boundary. Verified against current code.*
 
 ### Recording
 
+- [x] **Source column reflects the real capture source** — every recording now
+  stores which source it actually used (microphone vs system audio) on its `track`,
+  so the list's **Source** column and its hover icon are accurate instead of always
+  showing Microphone for single recordings. Pairs with the per-keybind source
+  override under Custom Hotkeys.
 - [x] **Live preview now works during in-place dictation** — dictation previously
   showed no overlay caption at all (the streaming-preview loop was hard-skipped for
   dictation to protect paste latency). It now drives the overlay like any recording,
@@ -351,6 +356,13 @@ trust boundary. Verified against current code.*
 
 ### Playbook & Custom Hotkeys
 
+- [x] **Per-keybind audio source** — a custom hotkey can now pick its capture
+  source (microphone or system audio) independently of the global
+  `[recording].source`, so you can keep one hotkey for a quick mic note and another
+  that records system audio with its own options. Set under a hotkey's **Recipe &
+  options**; meeting hotkeys ignore it (a meeting always records both tracks). The
+  source actually used is stored on the recording and surfaced in the list's
+  **Source** column.
 - [x] **The Playbook now owns hooks too — the cutover** — post-transcription
   side-effects (shell commands + webhooks) are **Hook entries** on a recipe, run
   by the recipe executor alongside the LLM steps, not the old top-level `[hook]`

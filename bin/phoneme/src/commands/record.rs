@@ -41,12 +41,14 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
                 in_place: *in_place,
                 recipe_id: None,
                 whisper_model: None,
+                source: None,
             },
             RecordAction::Stop => Request::RecordStop,
             RecordAction::Toggle { in_place } => Request::RecordToggle {
                 in_place: *in_place,
                 recipe_id: None,
                 whisper_model: None,
+                source: None,
             },
             RecordAction::Cancel => Request::RecordCancel,
             RecordAction::Pause => Request::RecordPause,
@@ -87,6 +89,7 @@ pub async fn run(args: RecordArgs, cfg: &Config, json: bool) -> ExitCode {
             in_place: args.in_place,
             recipe_id: None,
             whisper_model: None,
+            source: None,
         })
         .await
     {
@@ -356,6 +359,7 @@ mod tests {
                 in_place: false,
                 recipe_id: None,
                 whisper_model: None,
+                source: None,
             },
         )
         .await;
@@ -371,6 +375,7 @@ mod tests {
                 in_place: true,
                 recipe_id: None,
                 whisper_model: None,
+                source: None,
             },
         )
         .await;
@@ -390,6 +395,7 @@ mod tests {
                 in_place: false,
                 recipe_id: None,
                 whisper_model: None,
+                source: None,
             },
         )
         .await;

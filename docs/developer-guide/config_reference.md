@@ -335,6 +335,7 @@ Custom keybinds beyond the three built-ins (`[hotkey]` / `[in_place_hotkey]` / `
 |-----|---------|-------------|
 | `recipe_id` | `""` | The `[[recipes]]` id this binding's recordings run. Empty = the global `default` recipe (today's normal pipeline), so a pre-Playbook binding is unchanged. A deleted recipe falls back to `default`. **Ignored when `action = "meeting"`** — a meeting resolves its recipe per-track via the daemon's multi-track path, not the single-recording ledger. Supersedes the legacy `pipeline` flags. |
 | `whisper_model` | `""` | Per-keybind transcription (STT) model override. Empty uses the globally configured model; a non-empty value transcribes this binding's recordings with that model (a local model-file path, or a cloud model id — same shape as the per-job retranscribe override). **Ignored when `action = "meeting"`** for the same reason as `recipe_id`. |
+| `source` | _(unset)_ | Per-keybind capture-source override: `"microphone"` or `"system_audio"`. Unset (the default) follows the global `[recording].source`, so existing bindings are unchanged. Lets one hotkey record the mic and another record system audio. The source actually used is stored on each recording's `track` and shown in the list's **Source** column. **Ignored when `action = "meeting"`** — a meeting always records both tracks. |
 
 ---
 
