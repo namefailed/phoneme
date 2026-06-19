@@ -33,7 +33,7 @@ export class SectionIntegrations {
   private render(container: HTMLElement) {
     container.innerHTML = `
       <div class="settings-section">
-        <h3>Integrations (REST &amp; MCP)</h3>
+        <h3>Inbound (REST &amp; MCP)</h3>
         <p style="font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 12px; line-height: 1.4;">
           Two opt-in ways to drive Phoneme from outside the app. Both talk to the
           same local daemon; both are off until you turn them on.

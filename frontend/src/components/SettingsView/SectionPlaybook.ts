@@ -128,6 +128,15 @@ export class SectionPlaybook {
         <div style="margin-top: 12px;">
           <button class="inline-button" id="pb-add-recipe" type="button">+ Add recipe</button>
         </div>
+        <div class="settings-field" style="margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+          <label>Run hooks after transcription</label>
+          <div>
+            <input type="checkbox" class="toggle-switch" id="pb-run-on-transcribe" ${(this.config.hook?.run_on_transcribe ?? true) ? "checked" : ""} />
+          </div>
+          <span style="font-size: 0.7857rem; color: var(--fg-faded); margin-top: 4px; display: block;">
+            When on (default), a recipe's <b>Hook</b> steps fire automatically after every transcription — including re-transcriptions. Turn it off to run hooks only on demand via <b>⚡ Re-fire hook</b>, so re-transcribing fixes the text without re-triggering side-effects (e.g. re-appending to a note).
+          </span>
+        </div>
       </div>
     `;
 
@@ -135,6 +144,11 @@ export class SectionPlaybook {
       btn.addEventListener("click", () => this.addEntry(btn.dataset.add as PlaybookKind));
     });
     this.container.querySelector<HTMLButtonElement>("#pb-add-recipe")?.addEventListener("click", () => this.addRecipe());
+    const runOnToggle = this.container.querySelector<HTMLInputElement>("#pb-run-on-transcribe");
+    runOnToggle?.addEventListener("change", () => {
+      (this.config.hook ?? (this.config.hook = {})).run_on_transcribe = runOnToggle.checked;
+      this.notifyChanged();
+    });
 
     this.renderEntries();
     this.renderRecipes();
