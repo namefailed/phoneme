@@ -491,6 +491,20 @@ impl InboxQueue {
         Ok(removed)
     }
 
+    /// Remove ONE quarantined payload from `failed/` by id — the per-item
+    /// counterpart to [`clear_failed`](Self::clear_failed), so a user can dismiss
+    /// a single acknowledged failure without wiping the whole quarantine. The
+    /// catalog row (with its failed status) is untouched; only the inbox file is
+    /// removed. Returns whether a file was actually removed.
+    pub async fn dismiss_failed(&self, id: &RecordingId) -> Result<bool> {
+        let path = self.root.join("failed").join(format!("{id}.json"));
+        if fs::try_exists(&path).await.unwrap_or(false) {
+            fs::remove_file(&path).await?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Count files in each inbox subdirectory.
     pub async fn counts(&self) -> Result<InboxCounts> {
         Ok(InboxCounts {

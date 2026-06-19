@@ -509,6 +509,7 @@ pub fn run() {
             commands::queue_paused,
             commands::queue_counts,
             commands::clear_failed,
+            commands::dismiss_failed,
             commands::cancel_all_queued,
             commands::cancel_processing,
             commands::run_doctor,

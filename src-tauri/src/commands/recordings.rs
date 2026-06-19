@@ -351,6 +351,14 @@ pub async fn clear_failed(bridge: Br<'_>) -> Result<Value, CommandError> {
     forward(&bridge, Request::ClearFailed).await
 }
 
+/// Dismiss ONE item from the inbox `failed/` quarantine by id. Returns
+/// `{"removed":bool}`.
+#[tauri::command]
+pub async fn dismiss_failed(bridge: Br<'_>, id: String) -> Result<Value, CommandError> {
+    let id = parse_id(&id)?;
+    forward(&bridge, Request::DismissFailed { id }).await
+}
+
 /// Remove ALL still-pending items from the queue ("clear queue").
 #[tauri::command]
 pub async fn cancel_all_queued(bridge: Br<'_>) -> Result<Value, CommandError> {

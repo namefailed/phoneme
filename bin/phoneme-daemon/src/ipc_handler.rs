@@ -1224,6 +1224,16 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
             }
             Err(e) => err_response(&e),
         },
+        Request::DismissFailed { id } => match state.inbox.dismiss_failed(&id).await {
+            Ok(removed) => {
+                // Refresh the depth so the failed badge reflects the new count.
+                if removed {
+                    crate::queue_worker::emit_queue_depth(state).await;
+                }
+                Response::Ok(serde_json::json!({ "removed": removed }))
+            }
+            Err(e) => err_response(&e),
+        },
         Request::CancelProcessing { id } => {
             // Signal the in-flight cancellation token only if `id` is the item
             // currently processing; the worker + pipeline finalize the rest.

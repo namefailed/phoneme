@@ -481,6 +481,11 @@ pub enum QueueAction {
     CancelAll,
     /// Empty the inbox `failed/` quarantine ("dismiss failed").
     ClearFailed,
+    /// Dismiss ONE item from the inbox `failed/` quarantine by id.
+    DismissFailed {
+        /// The recording id whose failed-quarantine file to remove.
+        id: String,
+    },
 }
 
 #[derive(Debug, clap::Args)]

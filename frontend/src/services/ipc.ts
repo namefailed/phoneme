@@ -587,6 +587,14 @@ export async function clearFailed(): Promise<number> {
   return r.removed;
 }
 
+/** Dismiss ONE item from the inbox `failed/` quarantine by id (the per-item
+ *  counterpart to {@link clearFailed}). Returns whether a file was removed.
+ *  The catalog row keeps its failed status — only the inbox file is removed. */
+export async function dismissFailed(id: string): Promise<boolean> {
+  const r = await tauriInvoke<{ removed: boolean }>("dismiss_failed", { id });
+  return r.removed;
+}
+
 /** Tail the last `maxLines` of a daemon log (`hook.log` / `daemon.log` /
  *  `ollama.log`) for the in-app log viewer. Returns "" when the log doesn't
  *  exist yet. The basename is allowlisted on the backend. */

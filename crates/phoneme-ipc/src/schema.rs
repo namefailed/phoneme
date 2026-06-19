@@ -623,6 +623,15 @@ pub enum Request {
     /// so the failed badge clears. GUI failure panel, `phoneme queue
     /// clear-failed`.
     ClearFailed,
+    /// Remove ONE quarantined payload from the inbox `failed/` folder by id — the
+    /// per-item counterpart to [`ClearFailed`], so a single acknowledged failure
+    /// can be dismissed without wiping the whole quarantine. The catalog row is
+    /// untouched. Ok `{"removed":bool}`; emits `QueueDepthChanged` when something
+    /// was removed. GUI per-item dismiss, `phoneme queue dismiss-failed <id>`.
+    DismissFailed {
+        /// The recording id whose `failed/<id>.json` quarantine file to remove.
+        id: RecordingId,
+    },
     /// Remove ALL still-pending items from the queue at once ("clear queue").
     /// The currently-processing item is left untouched. Each removed
     /// recording is marked `cancelled`. Ok `{"removed":n}`; emits

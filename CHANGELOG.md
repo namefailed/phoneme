@@ -707,6 +707,10 @@ trust boundary. Verified against current code.*
   instead of leaving it stuck in `processing/` until the next daemon restart.
   The hot-path `pending_overrides` mutex also recovers from poisoning instead of
   panicking the daemon.
+- [x] **Dismiss one failed item** — the failed-recordings panel now has a per-item
+  **Dismiss** (clears that recording's `failed/` quarantine marker and hides the
+  row; the recording stays in the library), the counterpart to **Clear failed**.
+  New `DismissFailed` IPC + `phoneme queue dismiss-failed <id>`.
 - [x] **Audit hardening (verified findings)** — a whole-app audit pass; the
   confirmed-real items fixed: a Deepgram speaker turn now advances its segment end
   time even when a word lacks an `end` timestamp (falls back to the word's start,

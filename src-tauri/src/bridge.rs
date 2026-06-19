@@ -222,6 +222,7 @@ fn is_retry_safe(req: &Request) -> bool {
         | ReorderQueue { .. }
         | SetQueuePaused { .. }
         | ClearFailed
+        | DismissFailed { .. }
         | CancelAllQueued
         | CancelProcessing { .. }
         // Daemon lifecycle & config.
