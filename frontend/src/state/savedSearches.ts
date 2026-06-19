@@ -93,7 +93,10 @@ export function initSavedSearches(): Promise<void> {
   if (loading) return loading;
   loading = (async () => {
     try {
-      let rows = await ipcList();
+      // Defensive: a backend/mock that returns null (or a non-array) must not
+      // crash the whole UI here — degrade to an empty list.
+      let rows = (await ipcList()) ?? [];
+      if (!Array.isArray(rows)) rows = [];
       if (rows.length === 0) {
         const legacy = readLegacy();
         if (legacy.length) {
@@ -109,15 +112,18 @@ export function initSavedSearches(): Promise<void> {
           } catch {
             /* ignore — migration is best-effort */
           }
-          rows = await ipcList();
+          const reread = await ipcList();
+          rows = Array.isArray(reread) ? reread : [];
         }
       }
       cache = rows.map(parseRow).filter((s): s is SavedSearch => s !== null);
-      loaded = true;
     } catch (e) {
-      // Leave `loaded` false so the next read retries the load.
       console.error("Failed to load saved searches:", e);
+      cache = [];
     } finally {
+      // Mark loaded even on failure so a render-time read doesn't re-trigger the
+      // load on every frame (which would flood on a persistent error).
+      loaded = true;
       loading = null;
     }
     notify();
