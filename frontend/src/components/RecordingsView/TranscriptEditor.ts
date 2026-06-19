@@ -398,8 +398,8 @@ export class TranscriptEditorElement extends LitElement {
           color: var(--fg-faded);
           cursor: pointer;
           opacity: 0;
-          transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease,
-            border-color 0.15s ease;
+          transition: opacity var(--ui-motion-fast) ease, background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease,
+            border-color var(--ui-motion-fast) ease;
         }
         ph-transcript-editor .btn-copy svg { display: block; }
         ph-transcript-editor .editor-wrap:hover .btn-copy { opacity: 1; }

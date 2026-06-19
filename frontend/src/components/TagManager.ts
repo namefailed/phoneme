@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit';
 import { customElement } from 'lit/decorators.js';
+import { closeModalHost } from '../utils/modalAnim';
 
 
 
@@ -71,8 +72,10 @@ export function openTagManager(): Promise<void> {
   return new Promise((resolve) => {
     const el = document.createElement('ph-tag-manager') as TagManagerElement;
     el.addEventListener('resolved', () => {
-      el.remove();
-      resolve();
+      closeModalHost(el, () => {
+        el.remove();
+        resolve();
+      });
     });
     document.body.appendChild(el);
   });

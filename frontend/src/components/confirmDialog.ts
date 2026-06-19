@@ -7,6 +7,8 @@
  * jarring native `confirm()` (which a Tauri webview may also suppress entirely).
  * Use it for "are you sure?" gates such as discarding unsaved settings.
  */
+import { closeModalOverlay } from "../utils/modalAnim";
+
 export function confirmDialog(opts: {
   title: string;
   body: string;
@@ -32,8 +34,10 @@ export function confirmDialog(opts: {
 
     const settle = (v: boolean) => {
       document.removeEventListener("keydown", onKey, true);
-      overlay.remove();
-      resolve(v);
+      closeModalOverlay(overlay, () => {
+        overlay.remove();
+        resolve(v);
+      });
     };
     // Capture phase + stopPropagation so Esc/Enter resolve THIS dialog and never
     // leak to the app-level handlers (which might also act on Escape).

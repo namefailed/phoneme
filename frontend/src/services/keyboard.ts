@@ -35,6 +35,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { setHeaderHidden } from "./headerBar";
 import { setStepNotifications } from "./notifications";
+import { closeModalOverlay } from "../utils/modalAnim";
 
 type HelpItem = { combo: string; label: string };
 type HelpGroup = { title: string; items: HelpItem[] };
@@ -178,6 +179,7 @@ function helpGroups(): HelpGroup[] {
 }
 
 let helpOpen = false;
+let helpOverlay: HTMLElement | null = null;
 let pendingG = false;
 let pendingGTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingD = false;
@@ -489,11 +491,22 @@ function openHelp() {
   });
   overlay.querySelector(".kbd-help-close")?.addEventListener("click", closeHelp);
   document.body.appendChild(overlay);
+  helpOverlay = overlay;
 }
 
 function closeHelp() {
-  helpOpen = false;
-  document.querySelector(".kbd-help-overlay")?.remove();
+  // Animate the cheat-sheet out to match its entrance (modal.css), like every
+  // other dialog. Null helpOverlay first so a second close during the exit is a
+  // no-op; keep helpOpen true until the exit finishes so the keyboard gate stays
+  // coherent (keys can't leak to the layer behind mid-close). closeModalOverlay
+  // runs the callback synchronously when motion is off / reduced.
+  const overlay = helpOverlay;
+  if (!overlay) return;
+  helpOverlay = null;
+  closeModalOverlay(overlay, () => {
+    overlay.remove();
+    helpOpen = false;
+  });
 }
 
 /// Handle a `g`-prefix chord (gl/gs/gd/gD/gA/gT/gP/gS/g1/g2/g//gb/gg). These are
@@ -1398,21 +1411,28 @@ export function initKeyboard() {
   } catch { /* private mode */ }
   // Load the vim-nav preference and keep it in sync with Settings saves so the
   // layer turns on/off the moment the toggle is saved (no reload needed).
+  const prefersReducedMotion = () =>
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  // Remembered so an OS reduced-motion flip can re-derive the motion vars.
+  let lastAnimCfg: unknown = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const apply = (cfg: any) => {
+    lastAnimCfg = cfg;
     vimNav = !!cfg?.interface?.vim_nav;
     arrowNav = !!cfg?.interface?.arrow_nav;
-    // Pane show/hide animation speed (sidebar / detail / focus toggles): the
-    // setting becomes a CSS duration var the layout transition reads. "off"
-    // (0ms) short-circuits the animation entirely.
+    // Pane show/hide animation speed (sidebar / detail / focus toggles) AND the
+    // app-wide micro-animations (list/tag/queue enter-leave, state cross-fades,
+    // modal/dropdown enter+exit — the animation overhaul) share one knob: the
+    // setting becomes a CSS duration var the transitions/keyframes read. "off"
+    // (0ms) short-circuits them all. OS reduced-motion forces 0ms regardless of
+    // the setting — and it must be applied to the inline var here, because an
+    // inline var on <html> would otherwise beat the @media (prefers-reduced-
+    // motion) rule in shared/styles.css and silently defeat it.
     const speeds: Record<string, string> = { off: "0ms", fast: "110ms", normal: "200ms", slow: "320ms" };
     const dur = speeds[String(cfg?.interface?.animation_speed ?? "normal")] ?? "200ms";
-    document.documentElement.style.setProperty("--pane-anim", dur);
-    // Master UI-motion duration for the app-wide micro-animations (list/tag/queue
-    // enter-leave, state cross-fades, delight touches — the animation overhaul).
-    // Same knob as the pane slide, so "off" makes every one of them instant; a
-    // global prefers-reduced-motion rule (shared/styles.css) zeroes it regardless.
-    document.documentElement.style.setProperty("--ui-motion", dur);
+    const motionDur = prefersReducedMotion() ? "0ms" : dur;
+    document.documentElement.style.setProperty("--pane-anim", motionDur);
+    document.documentElement.style.setProperty("--ui-motion", motionDur);
     // Global UI font + size (Appearance). A chosen family is prepended to the
     // bundled stack so an uninstalled font still falls back cleanly; an empty
     // choice clears the var entirely, letting the CSS fallback (Inter) apply.
@@ -1433,6 +1453,16 @@ export function initKeyboard() {
   };
   invoke("read_config").then(apply).catch(() => {});
   window.addEventListener("config:saved", (e: Event) => apply((e as CustomEvent).detail));
+  // OS "reduce motion" can flip at runtime — re-derive the motion vars so they
+  // zero (or restore) immediately, no reload needed.
+  window
+    .matchMedia?.("(prefers-reduced-motion: reduce)")
+    // Only re-derive once a real config has loaded — calling apply({}) before the
+    // first read_config would momentarily reset unrelated state (font/nav/notify)
+    // to defaults. read_config is about to apply everything correctly anyway.
+    ?.addEventListener?.("change", () => {
+      if (lastAnimCfg != null) apply(lastAnimCfg);
+    });
   // The list dispatches this when k is pressed at the top — highlight the search
   // box (don't focus it) so h/l can roam the header without typing.
   window.addEventListener("phoneme:enter-header-nav", () => enterHeaderNav({ restore: true }));

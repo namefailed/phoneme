@@ -34,7 +34,7 @@
   padding: 5px 12px;
   font-size: 0.8571rem;
   color: var(--fg-default);
-  transition: all 0.15s ease-out;
+  transition: all var(--ui-motion-fast) ease-out;
 }
 .doctor-strip-actions button:hover:not(:disabled) {
   background: var(--border-subtle);
@@ -152,7 +152,7 @@
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
-.doctor-passing-chev { flex-shrink: 0; color: var(--fg-faded); transition: transform 0.18s ease; }
+.doctor-passing-chev { flex-shrink: 0; color: var(--fg-faded); transition: transform var(--ui-motion) ease; }
 .doctor-passing[open] > summary .doctor-passing-chev { transform: rotate(90deg); }
 .doctor-passing > summary:hover .doctor-passing-chev { color: var(--accent); }
 .doctor-passing-mark { color: var(--ok); font-weight: 700; }

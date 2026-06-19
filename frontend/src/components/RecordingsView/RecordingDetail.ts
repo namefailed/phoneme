@@ -1,4 +1,5 @@
 import { errText } from "../../utils/error";
+import { closeModalOverlay } from "../../utils/modalAnim";
 import {
   getRecording,
   updateTranscript,
@@ -833,8 +834,8 @@ export class RecordingDetail {
       </div>`;
     document.body.appendChild(overlay);
     const close = () => {
-      overlay.remove();
       document.removeEventListener("keydown", onKey);
+      closeModalOverlay(overlay, () => overlay.remove());
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
@@ -849,8 +850,16 @@ export class RecordingDetail {
       getOriginalTranscript(r.id).catch(() => null),
       getCleanTranscript(r.id).catch(() => null),
     ]);
-    // Bail if the modal was closed or the selection changed while loading.
-    if (!overlay.isConnected || this.recording?.id !== r.id) return;
+    // Bail if the modal was closed or the selection changed while loading. The
+    // closing-class check matters now that close() animates out: the overlay
+    // stays connected for the exit window, so isConnected alone would let late
+    // content paint into a modal that's fading away.
+    if (
+      !overlay.isConnected ||
+      overlay.classList.contains("modal-overlay--closing") ||
+      this.recording?.id !== r.id
+    )
+      return;
     const body = overlay.querySelector<HTMLElement>("#tdiff-modal-body");
     if (body) {
       body.innerHTML = "";
@@ -918,8 +927,8 @@ export class RecordingDetail {
     document.body.appendChild(overlay);
 
     const close = () => {
-      overlay.remove();
       document.removeEventListener("keydown", onKey);
+      closeModalOverlay(overlay, () => overlay.remove());
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();

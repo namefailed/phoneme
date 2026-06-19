@@ -1,5 +1,6 @@
 import { tailLog } from "../../services/ipc";
 import { errText } from "../../utils/error";
+import { closeModalOverlay } from "../../utils/modalAnim";
 import "../modal.css";
 
 /** Logs the viewer can show — kept in sync with the backend `tail_log` allowlist. */
@@ -54,8 +55,10 @@ export function openLogViewer(initial: string = "hook.log"): void {
 
   const close = () => {
     document.removeEventListener("keydown", onKey);
-    overlay.remove();
-    if (activeClose === close) activeClose = null;
+    closeModalOverlay(overlay, () => {
+      overlay.remove();
+      if (activeClose === close) activeClose = null;
+    });
   };
   activeClose = close;
   const onKey = (e: KeyboardEvent) => {

@@ -22,7 +22,7 @@ ph-health-pill {
   border-radius: 999px;
   padding: 5px 8px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background var(--ui-motion-fast) ease, border-color var(--ui-motion-fast) ease;
 }
 .hb-health:hover {
   background: rgba(255, 255, 255, 0.05);

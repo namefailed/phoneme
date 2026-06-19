@@ -10,6 +10,7 @@ import {
   type DoctorCheckInfo,
 } from "./doctorChecks";
 import { showToast } from "../utils/toast";
+import { closeModalHost } from "../utils/modalAnim";
 import { errText } from "../utils/error";
 import "./modal.css";
 
@@ -266,8 +267,10 @@ export async function openDoctor(): Promise<void> {
     document.querySelector("ph-doctor-modal")?.remove();
     const el = document.createElement("ph-doctor-modal") as DoctorModalElement;
     el.addEventListener("resolved", () => {
-      el.remove();
-      resolve();
+      closeModalHost(el, () => {
+        el.remove();
+        resolve();
+      });
     });
     document.body.appendChild(el);
   });

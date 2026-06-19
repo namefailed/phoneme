@@ -214,14 +214,14 @@ export class SectionInterface {
         #col-list { max-width: 320px; }
         #col-list .col-row {
           display: flex; align-items: center; justify-content: space-between; gap: 10px;
-          padding: 3px 6px; border-radius: 6px; transition: background 0.12s ease;
+          padding: 3px 6px; border-radius: 6px; transition: background var(--ui-motion-fast) ease;
         }
         #col-list .col-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
         #col-list .col-move { display: inline-flex; flex-direction: column; gap: 1px; }
         #col-list .col-move button {
           background: transparent; border: none; color: var(--fg-faded);
           width: 22px; height: 14px; line-height: 1; font-size: 0.6429rem; padding: 0;
-          border-radius: 4px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+          border-radius: 4px; cursor: pointer; transition: background var(--ui-motion-fast) ease, color var(--ui-motion-fast) ease;
         }
         #col-list .col-move button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
         #col-list .col-move button:disabled { opacity: 0.25; cursor: default; }

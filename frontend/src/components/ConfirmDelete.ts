@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
+import { closeModalOverlay } from '../utils/modalAnim';
 
 
 /** How a confirmed recording delete treats the audio file on disk.
@@ -167,8 +168,10 @@ export function confirmDelete(opts?: ConfirmDeleteOpts): Promise<boolean> {
 
     el.addEventListener('resolved', (e: Event) => {
       const customEvent = e as CustomEvent<ResolvedDetail>;
-      el.remove();
-      resolve(customEvent.detail.confirmed);
+      const overlay = el.querySelector<HTMLElement>('.modal-overlay');
+      const done = () => { el.remove(); resolve(customEvent.detail.confirmed); };
+      if (overlay) closeModalOverlay(overlay, done);
+      else done();
     });
 
     document.body.appendChild(el);
@@ -207,8 +210,10 @@ export function confirmRecordingDelete(count = 1): Promise<DeleteMode | null> {
 
     el.addEventListener('resolved', (e: Event) => {
       const detail = (e as CustomEvent<ResolvedDetail>).detail;
-      el.remove();
-      resolve(detail.confirmed ? detail.mode : null);
+      const overlay = el.querySelector<HTMLElement>('.modal-overlay');
+      const done = () => { el.remove(); resolve(detail.confirmed ? detail.mode : null); };
+      if (overlay) closeModalOverlay(overlay, done);
+      else done();
     });
 
     document.body.appendChild(el);
