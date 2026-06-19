@@ -427,7 +427,7 @@ export class BulkActionBarElement extends LitElement {
           ${n === 2 ? html`<button class="bulk-btn" title="View the two selected recordings side by side (\\)" .disabled=${this.busy} @click=${this.openSideBySide}>◫ Side by side</button>` : null}
 
           <span class="bulk-menu-wrap">
-            <button class="bulk-btn" title="Add a tag to selected" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("tag", e)}>🏷 Tag <svg class="ph-caret-ico ${this.openMenu === "tag" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+            <button class="bulk-btn" title="Add a tag to selected" .disabled=${this.busy} @click=${(e: Event) => this.toggleMenu("tag", e)}>🏷️ Tag <svg class="ph-caret-ico ${this.openMenu === "tag" ? "open" : ""}" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
             ${this.openMenu === "tag" ? html`
               <div class="bulk-menu" @click=${(e: Event) => e.stopPropagation()}>
                 ${this.allTags.length === 0

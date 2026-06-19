@@ -286,7 +286,7 @@ export class RecordingDetail {
           <div id="synced-peek" style="display: none; flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 12px;"></div>
           <div class="transcript-history">
             <div class="th-group th-left">
-              <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷 Speakers</button>
+              <button class="view-btn" id="rename-speakers" style="display: none;" title="Rename the diarized speakers (Speaker 1 → a name)">🏷️ Speakers</button>
             </div>
             <div class="th-group th-right">
               <span class="th-dropdown">
@@ -1128,8 +1128,8 @@ function modelsSteps(r: Recording): PipelineStep[] {
 
   // 7. Auto-tagging — names the model once persisted; until then infer the step
   //    from pending suggestions (the only per-recording signal the tagger ran).
-  if (r.tag_model) steps.push({ icon: "🏷", label: "Tagged", value: escapeHtml(r.tag_model) });
-  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push({ icon: "🏷", label: "Tagged", value: "Suggestions pending" });
+  if (r.tag_model) steps.push({ icon: "🏷️", label: "Tagged", value: escapeHtml(r.tag_model) });
+  else if (r.tag_suggestions && r.tag_suggestions.length) steps.push({ icon: "🏷️", label: "Tagged", value: "Suggestions pending" });
 
   return steps;
 }

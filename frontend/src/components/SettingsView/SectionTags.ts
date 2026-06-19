@@ -341,7 +341,7 @@ export class SectionTagsElement extends LitElement {
         ${total === 0
           ? html`
             <div class="tag-mgr-empty">
-              <div class="tag-mgr-empty-icon">🏷</div>
+              <div class="tag-mgr-empty-icon">🏷️</div>
               <p>No tags yet.</p>
               <p class="tag-mgr-empty-hint">Create one below, then attach it to recordings from the detail panel.</p>
             </div>

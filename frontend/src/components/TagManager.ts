@@ -51,7 +51,7 @@ export class TagManagerElement extends LitElement {
       <div class="modal-overlay" @click=${this.handleOverlayClick}>
         <div class="modal-dialog tag-mgr-dialog" role="dialog" aria-modal="true" aria-labelledby="tm-title">
           <div class="modal-header">
-            <h3 class="modal-title" id="tm-title">🏷 Manage Tags</h3>
+            <h3 class="modal-title" id="tm-title">🏷️ Manage Tags</h3>
           </div>
           <div class="tm-body">
             <ph-section-tags ?bare=${true}></ph-section-tags>
