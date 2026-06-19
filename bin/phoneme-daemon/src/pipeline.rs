@@ -2049,6 +2049,9 @@ pub async fn run(
         // speaker-name write below so a cloud STT backend (which ignores the
         // hint) or a silent/segment-less mic track never gets an orphan row.
         fixed_speaker_applied,
+        // Per-speaker centroid voiceprints (local diarization only; empty for
+        // cloud/plain paths), persisted below for cross-recording recognition (#9).
+        speaker_voiceprints,
     } = transcription;
 
     // Finish the Transcribing activity entry with timing + size for the popout.
@@ -2176,6 +2179,21 @@ pub async fn run(
     // views (word seek, confidence highlighting), not the recording.
     if let Err(e) = state.catalog.replace_words(&id, &words).await {
         tracing::warn!(id = %id.as_str(), "failed to persist transcript words: {e}");
+    }
+
+    // Persist each speaker's centroid voiceprint (local diarization only; empty
+    // on cloud/plain paths) keyed by the same label as the transcript, so naming
+    // a speaker can enroll it into the cross-recording library and later
+    // recordings can be matched against it (#9). A re-transcribe refreshes the
+    // sample without un-enrolling. Best-effort: a failure costs only recognition.
+    for vp in &speaker_voiceprints {
+        if let Err(e) = state
+            .catalog
+            .save_speaker_voiceprint(id.as_str(), vp.label as i64, &vp.centroid)
+            .await
+        {
+            tracing::warn!(id = %id.as_str(), label = vp.label, "failed to persist voiceprint: {e}");
+        }
     }
 
     // Track-aware Meeting Mode: seed label 1 → "You" only when the mic track

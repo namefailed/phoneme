@@ -355,7 +355,7 @@ pub fn assign_words<'a>(
     frame_step: f64,
     frame_duration: f64,
     min_turn: f64,
-) -> (Vec<(&'a WordSpan, usize)>, usize) {
+) -> (Vec<(&'a WordSpan, usize)>, usize, Vec<usize>) {
     use std::collections::HashMap;
 
     // Non-empty words only, mirroring `label_segments` skipping empty segments.
@@ -402,7 +402,55 @@ pub fn assign_words<'a>(
         out.push((*word, idx));
     }
 
-    (out, next_idx - 1)
+    // Invert label_to_idx into idx → column, so callers can fetch each speaker's
+    // centroid voiceprint (see `speaker_voiceprints`). 1-based labels are dense,
+    // so `speaker_columns[idx - 1]` holds the discrete-diarization column for
+    // speaker label `idx`.
+    let num = next_idx - 1;
+    let mut speaker_columns = vec![0usize; num];
+    for (label, &idx) in &label_to_idx {
+        if (1..=num).contains(&idx) {
+            if let Some(col) = parse_speaker_column(label) {
+                speaker_columns[idx - 1] = col;
+            }
+        }
+    }
+
+    (out, num, speaker_columns)
+}
+
+/// One speaker's voiceprint from a completed local diarization: the integer
+/// `label` (matching the transcript's `[Speaker N]` and the `speaker_names`
+/// table) paired with its L2-normalized centroid embedding.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpeakerVoiceprint {
+    /// The 1-based speaker label, as assigned by [`assign_words`].
+    pub label: usize,
+    /// The L2-normalized centroid embedding for this speaker.
+    pub centroid: Vec<f32>,
+}
+
+/// Per-speaker centroid voiceprints for a completed diarization, keyed by the
+/// same labels [`assign_words`] assigns (and the transcript + `speaker_names`
+/// use). `speaker_columns` is the `assign_words` third return value (label → the
+/// discrete-diarization column). Speakers whose column has no finite centroid are
+/// skipped. Used to capture voiceprints for cross-recording recognition (#9).
+pub fn speaker_voiceprints(
+    diar: &LocalDiarization,
+    speaker_columns: &[usize],
+) -> Vec<SpeakerVoiceprint> {
+    let num_cols = diar.discrete_diarization.ncols();
+    let centroids = cluster_centroids(&diar.embeddings, &diar.hard_clusters, num_cols);
+    let mut out = Vec::new();
+    for (i, &col) in speaker_columns.iter().enumerate() {
+        if let Some(Some(centroid)) = centroids.get(col) {
+            out.push(SpeakerVoiceprint {
+                label: i + 1,
+                centroid: centroid.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// A per-word speaker turn shorter than this (seconds) is treated as a diarizer
@@ -1686,7 +1734,7 @@ mod tests {
             word(frame_mid(3), frame_mid(4), "gamma"), // frames 3..=4 → speaker 1
             word(frame_mid(5), frame_mid(5), "delta"), // frame 5      → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 2, "two distinct speakers used");
         let idxs: Vec<usize> = labeled.iter().map(|(_, i)| *i).collect();
         // First-appearance order: speaker 0 → index 1, speaker 1 → index 2.
@@ -1709,7 +1757,7 @@ mod tests {
             [0.0, 1.0], // 5
         ];
         let words = vec![word(frame_mid(1), frame_mid(5), "straddle")]; // frames 1..=5
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 1);
         // Only one word, so it's the first-appearing speaker → index 1, but it is
         // speaker column 1 (the dominant one), not column 0 where it started.
@@ -1730,7 +1778,7 @@ mod tests {
             word(frame_mid(1), frame_mid(1), "voiced"), // frame 1 → speaker 0
             word(frame_mid(2), frame_mid(2), "silent"), // frame 2 → all-zero → unattributed
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 1, "only the voiced word counts toward speaker count");
         assert_eq!(labeled[0].1, 1);
         assert_eq!(labeled[1].1, 0, "silent word is unattributed");
@@ -1744,7 +1792,7 @@ mod tests {
             word(frame_mid(0), frame_mid(0), "a"),  // frame 0 → speaker 0
             word(frame_mid(1), frame_mid(1), "b"),  // frame 1 → speaker 1
         ];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(labeled.len(), 2, "the whitespace word is dropped");
         assert_eq!(n, 2);
         assert_eq!(labeled[0].0.text, "a");
@@ -1772,7 +1820,7 @@ mod tests {
     fn empty_matrix_attributes_nothing() {
         let m: Array2<f32> = Array2::zeros((0, 0));
         let words = vec![word(frame_mid(0), frame_mid(1), "x")];
-        let (labeled, n) = assign_words(&words, &m, STEP, DUR, 0.0);
+        let (labeled, n, _) = assign_words(&words, &m, STEP, DUR, 0.0);
         assert_eq!(n, 0);
         assert_eq!(labeled[0].1, 0, "no columns → unattributed");
     }

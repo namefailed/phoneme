@@ -779,6 +779,28 @@ pub async fn handle_request(req: Request, state: &AppState) -> Response {
                 .await
             {
                 Ok(()) => {
+                    // Implicit enrollment (#9): naming a speaker folds its
+                    // captured voiceprint into the cross-recording library;
+                    // clearing the name un-enrolls it. Best-effort and a no-op
+                    // when no voiceprint was captured (cloud-diarized recordings)
+                    // — recognition is a convenience, never a reason to fail the
+                    // rename.
+                    let enrolled = if name.trim().is_empty() {
+                        state
+                            .catalog
+                            .unenroll_speaker(id.as_str(), speaker_label)
+                            .await
+                            .map(|_| ())
+                    } else {
+                        state
+                            .catalog
+                            .enroll_speaker(id.as_str(), speaker_label, &name)
+                            .await
+                            .map(|_| ())
+                    };
+                    if let Err(e) = enrolled {
+                        tracing::warn!(id = %id.as_str(), label = speaker_label, "voiceprint enroll failed: {e}");
+                    }
                     state.events.emit(DaemonEvent::SpeakerNameUpdated { id });
                     ok_null()
                 }
