@@ -79,7 +79,7 @@ Where the stores live:
 | `router.state` | [`router.ts`](../../frontend/src/router.ts) | The active view name. `App.mount()` subscribes. |
 | list state | created in `RecordingsView`, defined in [`RecordingsList.ts`](../../frontend/src/components/RecordingsView/RecordingsList.ts) | `{ recordings, selectedId, loading, error }`, shared by the view's panes. |
 
-Smaller cross-cutting state uses module singletons instead of stores when nothing needs to *react* to it: [`state/openRecording.ts`](../../frontend/src/state/openRecording.ts) (which recording the detail pane shows — read by the header's "Run once" and the `phoneme:action` keyboard bridge) and [`state/savedSearches.ts`](../../frontend/src/state/savedSearches.ts) (localStorage-backed saved-search CRUD).
+Smaller cross-cutting state uses module singletons instead of stores when nothing needs to *react* to it: [`state/openRecording.ts`](../../frontend/src/state/openRecording.ts) (which recording the detail pane shows — read by the header's "Run once" and the `phoneme:action` keyboard bridge) and [`state/savedSearches.ts`](../../frontend/src/state/savedSearches.ts) (catalog-backed saved-search CRUD — an in-memory cache lazy-loaded from the daemon, with write-through and a `phoneme:saved-searches-changed` event so open menus re-read).
 
 ### 1.4 File layout map
 
@@ -280,7 +280,7 @@ Per-device UI state lives in localStorage, **never** in config.toml (config is f
 | `phoneme.recordMode` | HeaderBar | Record button mode: `recording` \| `meeting` |
 | `phoneme.recordStopMode` / `phoneme.recordStopDurationSecs` | services/recordStopMode.ts | Stop behavior (`toggle`/`silence`/`duration`) + fixed length, seconds |
 | `phoneme.semanticSearch` | HeaderBar (+ saved-search apply) | ✨ semantic-search default for the search box |
-| `phoneme.savedSearches` | state/savedSearches.ts | The saved-search list (JSON array of filter snapshots) |
+| `phoneme.savedSearches` | state/savedSearches.ts | **Legacy** — the pre-catalog saved-search list; read once and cleared by the one-time migration into the catalog's `saved_searches` table. New saves go to the catalog, not here. |
 | `phoneme.expandedMeetings` | RecordingsList | Which meeting groups are expanded (JSON string array) |
 | `phoneme.meetingIcons` | RecordingsList | Per-meeting emoji, `{ meetingId: icon }` |
 | `phoneme.sidebar.libraryOpen` / `phoneme.sidebar.tagsOpen` | Sidebar | Section fold state |

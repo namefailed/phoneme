@@ -2,6 +2,7 @@ import { escapeHtml, escapeAttr } from "../../utils/format";
 import { filterStore } from "../../state/filter";
 import {
   loadSavedSearches,
+  initSavedSearches,
   addSavedSearch,
   removeSavedSearch,
   renameSavedSearch,
@@ -18,7 +19,7 @@ import { showToast } from "../../utils/toast";
  * date range, sort — so applying one restores everything exactly. This
  * section manages them: save the current filters, apply, rename, overwrite
  * with the current filters, delete. (The header 🔖 dropdown stays as the
- * quick popup; both read the same localStorage list.)
+ * quick popup; both read the same catalog-backed list.)
  */
 export class SectionSavedSearches {
   private items: SavedSearch[] = loadSavedSearches();
@@ -27,6 +28,12 @@ export class SectionSavedSearches {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private container: HTMLElement, _config: any) {
     this.render();
+    // The list is catalog-backed; the first read returns the (possibly empty)
+    // cache, so re-render once the async load lands.
+    void initSavedSearches().then(() => {
+      this.items = loadSavedSearches();
+      this.render();
+    });
   }
 
   private apply(s: SavedSearch) {

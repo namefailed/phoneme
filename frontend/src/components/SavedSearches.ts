@@ -6,14 +6,16 @@ import {
   addSavedSearch,
   removeSavedSearch,
   describeFilter,
+  SAVED_SEARCHES_CHANGED,
   type SavedSearch,
 } from "../state/savedSearches";
 
 /**
  * A 🔖 dropdown in the header that saves the current library filter under a
  * name and re-applies it later. Applying just re-sets the shared `filterStore`
- * (the recordings list already re-queries on filter changes), so this is a
- * pure-frontend, localStorage-backed feature with no daemon involvement.
+ * (the recordings list already re-queries on filter changes), so applying stays
+ * pure-frontend; the saved list itself is persisted in the catalog and arrives
+ * via `SAVED_SEARCHES_CHANGED`.
  */
 @customElement("ph-saved-searches")
 export class SavedSearchesElement extends LitElement {
@@ -47,16 +49,24 @@ export class SavedSearchesElement extends LitElement {
     this.open = false;
   };
 
+  /** Re-read the cache whenever the catalog-backed list changes (initial load,
+   *  or an edit from the Settings section). */
+  private onListChanged = () => {
+    this.items = loadSavedSearches();
+  };
+
   connectedCallback() {
     super.connectedCallback();
     document.addEventListener("click", this.docClick);
     document.addEventListener("keydown", this.escKey, true);
+    window.addEventListener(SAVED_SEARCHES_CHANGED, this.onListChanged);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("click", this.docClick);
     document.removeEventListener("keydown", this.escKey, true);
+    window.removeEventListener(SAVED_SEARCHES_CHANGED, this.onListChanged);
   }
 
   private toggle(e: Event) {

@@ -1,9 +1,21 @@
 // Saved searches / smart filters — user-named snapshots of the full library
-// filter (search text + semantic + date range + tag + status + sort + kind),
-// persisted in localStorage. Frontend-only: applying one just re-sets the
-// shared `filterStore`, which the recordings list already re-queries on.
+// filter (search text + semantic + date range + tag + status + sort + kind).
+//
+// Backed by the catalog (the daemon's SQLite) so they survive a reinstall and
+// can ride catalog sync later. An in-memory cache keeps the component API
+// synchronous: reads return the cache; mutations update the cache immediately
+// AND write through to the catalog. The cache is filled once by
+// `initSavedSearches()` (kicked off lazily on first read), and every change
+// dispatches `phoneme:saved-searches-changed` so open menus re-read. Applying a
+// saved search just re-sets the shared `filterStore`, which the recordings list
+// already re-queries on.
 
 import type { UiFilter } from "./filter";
+import {
+  listSavedSearches as ipcList,
+  upsertSavedSearch as ipcUpsert,
+  deleteSavedSearch as ipcDelete,
+} from "../services/ipc";
 
 /** One saved search: a user-chosen name over a filter snapshot. Names are
  *  unique case-insensitively (saving an existing name overwrites). */
@@ -14,38 +26,116 @@ export type SavedSearch = {
   filter: UiFilter;
 };
 
-/** localStorage key holding the saved-search list (a JSON array). */
-const KEY = "phoneme.savedSearches";
+/** Dispatched on `window` whenever the list changes (load, add, rename, delete,
+ *  update) so components can re-read `loadSavedSearches()`. */
+export const SAVED_SEARCHES_CHANGED = "phoneme:saved-searches-changed";
 
-/** Read the saved-search list from localStorage. Malformed storage (hand
- *  edits, stale shapes, private mode) degrades to `[]`, never a throw. */
-export function loadSavedSearches(): SavedSearch[] {
+/** Legacy localStorage key — read once to migrate old saves into the catalog. */
+const LEGACY_KEY = "phoneme.savedSearches";
+
+let cache: SavedSearch[] = [];
+let loaded = false;
+let loading: Promise<void> | null = null;
+
+function notify(): void {
   try {
-    const raw = localStorage.getItem(KEY);
+    window.dispatchEvent(new CustomEvent(SAVED_SEARCHES_CHANGED));
+  } catch {
+    /* non-DOM context (tests without a window) — nothing to notify */
+  }
+}
+
+function isSavedSearch(s: unknown): s is SavedSearch {
+  const v = s as SavedSearch;
+  return (
+    !!v &&
+    typeof v.id === "string" &&
+    typeof v.name === "string" &&
+    !!v.filter &&
+    typeof v.filter === "object"
+  );
+}
+
+/** Read legacy localStorage saves for the one-time migration. Malformed storage
+ *  (hand edits, stale shapes, private mode) degrades to `[]`. */
+function readLegacy(): SavedSearch[] {
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    // Keep only well-formed entries so a hand-edited or stale value can't break
-    // the menu.
-    return parsed.filter(
-      (s): s is SavedSearch =>
-        !!s &&
-        typeof s.id === "string" &&
-        typeof s.name === "string" &&
-        !!s.filter &&
-        typeof s.filter === "object",
-    );
+    return parsed.filter(isSavedSearch);
   } catch {
     return [];
   }
 }
 
-function persist(list: SavedSearch[]): void {
+/** Map a catalog wire row (opaque `filter_json`) to a `SavedSearch`, dropping
+ *  rows whose filter won't parse. */
+function parseRow(r: { id: string; name: string; filter_json: string }): SavedSearch | null {
   try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-  } catch (e) {
-    console.error("Failed to persist saved searches:", e);
+    const filter = JSON.parse(r.filter_json) as UiFilter;
+    if (!filter || typeof filter !== "object") return null;
+    return { id: r.id, name: r.name, filter };
+  } catch {
+    return null;
   }
+}
+
+/**
+ * Load the saved-search list from the catalog into the cache (idempotent;
+ * concurrent calls share one load). On the first load, if the catalog is empty
+ * but legacy localStorage saves exist, migrate them into the catalog and clear
+ * the old key. Reads trigger this lazily, so calling it at startup is optional.
+ */
+export function initSavedSearches(): Promise<void> {
+  if (loaded) return Promise.resolve();
+  if (loading) return loading;
+  loading = (async () => {
+    try {
+      let rows = await ipcList();
+      if (rows.length === 0) {
+        const legacy = readLegacy();
+        if (legacy.length) {
+          for (const s of legacy) {
+            try {
+              await ipcUpsert(s.id, s.name, JSON.stringify(s.filter));
+            } catch (e) {
+              console.error("Failed to migrate saved search:", e);
+            }
+          }
+          try {
+            localStorage.removeItem(LEGACY_KEY);
+          } catch {
+            /* ignore — migration is best-effort */
+          }
+          rows = await ipcList();
+        }
+      }
+      cache = rows.map(parseRow).filter((s): s is SavedSearch => s !== null);
+      loaded = true;
+    } catch (e) {
+      // Leave `loaded` false so the next read retries the load.
+      console.error("Failed to load saved searches:", e);
+    } finally {
+      loading = null;
+    }
+    notify();
+  })();
+  return loading;
+}
+
+/** The saved-search list (from the in-memory cache). The first call kicks off
+ *  the catalog load; the populated list arrives via `SAVED_SEARCHES_CHANGED`. */
+export function loadSavedSearches(): SavedSearch[] {
+  if (!loaded && !loading) void initSavedSearches();
+  return cache;
+}
+
+function persistUpsert(s: SavedSearch): void {
+  ipcUpsert(s.id, s.name, JSON.stringify(s.filter)).catch((e) =>
+    console.error("Failed to persist saved search:", e),
+  );
 }
 
 function newId(): string {
@@ -60,28 +150,33 @@ function newId(): string {
 /**
  * Add a saved search, or overwrite an existing one with the same (case-
  * insensitive) name so re-saving under a known name updates it in place.
- * Returns the new list.
+ * Updates the cache synchronously and writes through to the catalog. Returns
+ * the new list.
  */
 export function addSavedSearch(name: string, filter: UiFilter): SavedSearch[] {
   const trimmed = name.trim();
-  const list = loadSavedSearches();
-  if (!trimmed) return list;
-  const existing = list.find((s) => s.name.toLowerCase() === trimmed.toLowerCase());
+  if (!trimmed) return cache;
+  const existing = cache.find((s) => s.name.toLowerCase() === trimmed.toLowerCase());
+  let entry: SavedSearch;
   if (existing) {
     existing.filter = { ...filter };
     existing.name = trimmed;
+    entry = existing;
   } else {
-    list.push({ id: newId(), name: trimmed, filter: { ...filter } });
+    entry = { id: newId(), name: trimmed, filter: { ...filter } };
+    cache.push(entry);
   }
-  persist(list);
-  return list;
+  persistUpsert(entry);
+  notify();
+  return cache;
 }
 
 /** Delete a saved search by id (unknown ids are a no-op). Returns the new list. */
 export function removeSavedSearch(id: string): SavedSearch[] {
-  const list = loadSavedSearches().filter((s) => s.id !== id);
-  persist(list);
-  return list;
+  cache = cache.filter((s) => s.id !== id);
+  ipcDelete(id).catch((e) => console.error("Failed to delete saved search:", e));
+  notify();
+  return cache;
 }
 
 /** Outcome of a rename attempt: the (possibly unchanged) list, plus the entry
@@ -98,26 +193,26 @@ export type RenameResult = { list: SavedSearch[]; conflict: SavedSearch | null }
  */
 export function renameSavedSearch(id: string, name: string): RenameResult {
   const trimmed = name.trim();
-  const list = loadSavedSearches();
-  const s = list.find((x) => x.id === id);
-  if (!s || !trimmed) return { list, conflict: null };
+  const s = cache.find((x) => x.id === id);
+  if (!s || !trimmed) return { list: cache, conflict: null };
   const conflict =
-    list.find((x) => x.id !== id && x.name.toLowerCase() === trimmed.toLowerCase()) ?? null;
-  if (conflict) return { list, conflict };
+    cache.find((x) => x.id !== id && x.name.toLowerCase() === trimmed.toLowerCase()) ?? null;
+  if (conflict) return { list: cache, conflict };
   s.name = trimmed;
-  persist(list);
-  return { list, conflict: null };
+  persistUpsert(s);
+  notify();
+  return { list: cache, conflict: null };
 }
 
 /** Overwrite a saved search's filter snapshot (e.g. "update to current"). */
 export function updateSavedSearchFilter(id: string, filter: UiFilter): SavedSearch[] {
-  const list = loadSavedSearches();
-  const s = list.find((x) => x.id === id);
+  const s = cache.find((x) => x.id === id);
   if (s) {
     s.filter = { ...filter };
-    persist(list);
+    persistUpsert(s);
+    notify();
   }
-  return list;
+  return cache;
 }
 
 /** A short, human description of what a saved filter matches, for the menu. */
@@ -138,4 +233,11 @@ export function describeFilter(f: UiFilter): string {
   }
   if (f.sort_desc === false) parts.push("oldest first");
   return parts.length ? parts.join(" · ") : "all recordings";
+}
+
+/** Test-only: clear the in-memory cache + load state so each test starts fresh. */
+export function __resetSavedSearchesForTest(): void {
+  cache = [];
+  loaded = false;
+  loading = null;
 }

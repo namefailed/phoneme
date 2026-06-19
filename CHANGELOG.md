@@ -1208,6 +1208,12 @@ trust boundary. Verified against current code.*
   suggested tags across the library (`ClearAllTagSuggestions`).
 - [x] **FLAC import** — wav / mp3 / m4a / flac, end to end (decoder feature,
   CLI + GUI filters, docs).
+- [x] **Saved searches persist in the catalog** — saved searches moved out of
+  the webview's `localStorage` into the catalog's `saved_searches` table, so they
+  survive a reinstall and can ride catalog sync later (`ListSavedSearches` /
+  `UpsertSavedSearch` / `DeleteSavedSearch` IPC). The frontend keeps its sync API
+  via an in-memory cache that lazy-loads from the daemon and writes through;
+  existing `localStorage` saves migrate over once, then the old key is cleared.
 - [x] **Saved-search rename collision guard** — renaming a saved search to a
   name another one already uses is refused with a clear toast (the rename editor
   stays open) instead of silently leaving two same-named searches where the next
