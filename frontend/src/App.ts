@@ -246,5 +246,11 @@ export class App {
         this.current = new FirstRunWizard(this.mainEl, () => this.router.go("recordings"));
         break;
     }
+    // Cross-fade the freshly-mounted view in. Remove → reflow → re-add restarts
+    // the keyframe on every navigation. Gated by --ui-motion (shared/styles.css),
+    // so it's instant when motion is off / reduced.
+    this.mainEl.classList.remove("ph-view-enter");
+    void this.mainEl.offsetWidth;
+    this.mainEl.classList.add("ph-view-enter");
   }
 }

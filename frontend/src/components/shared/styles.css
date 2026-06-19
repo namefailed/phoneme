@@ -42,6 +42,18 @@ body.phoneme-hide-header-instant #hdr {
     stroke var(--ui-motion) ease !important;
 }
 
+/* Cross-fade the main view in when navigating between Library / Settings /
+   Doctor / Wizard (App.mount re-adds the class on every swap). Replaces the
+   hard cut the audit flagged. Gated by --ui-motion → instant when motion is
+   off / reduced. */
+#main.ph-view-enter {
+  animation: ph-view-enter var(--ui-motion) ease-out;
+}
+@keyframes ph-view-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* Applied tag chips pop in as they mount (animation overhaul · list/tags/queue).
    Reads the master --ui-motion, so motion "off" / reduced-motion → 0ms duration =
    instant (no visible animation). Only plays on a freshly-created chip node, so
